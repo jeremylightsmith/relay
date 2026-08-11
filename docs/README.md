@@ -10,7 +10,7 @@ map: where to look, and where to put something new.
 
 | Home | Who it's for | What belongs there | Lifecycle | Published |
 | --- | --- | --- | --- | --- |
-| [`relay.md`](../relay.md) | a driver agent in **another repo's** context | how to drive a card with `bin/relay` | current; tiny; shipped out by `bin/relay init` | in every consuming repo |
+| [`relay.md`](../relay.md) | a driver agent in **another repo's** context | how to drive a card with `bin/relay` | current; tiny; authored into a consuming repo by `/relay-onboard` | in every consuming repo |
 | `priv/docs/` | an integrator or operator **browsing a URL** | product + integration reference and onboarding | current | **public site** (`/docs`) |
 | [`docs/architecture/`](architecture/README.md) | a **contributor editing this repo** | how the system works **today** | current; freshness-gated | **public site** (symlinked) |
 | [`docs/adr/`](adr/README.md) | anyone weighing or reviewing a **structural change** | a decision and its rationale — the *why* | durable; immutable once Accepted | internal |

@@ -114,10 +114,15 @@ defmodule Relay.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build", "relay.build_scaffold"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test --warnings-as-errors"],
+      test: [
+        "ecto.create --quiet",
+        "ecto.migrate --quiet",
+        "relay.build_scaffold",
+        "test --warnings-as-errors"
+      ],
       # Browser journeys need a current JS/CSS bundle, so rebuild assets first —
       # otherwise the hooks under test run against a stale bundle.
       "test.browser": ["assets.build", "test --only playwright"],
@@ -148,7 +153,6 @@ defmodule Relay.MixProject do
         "relay.gen_state --check",
         "relay.gen_vocab --check",
         "relay.deps_graph --check",
-        "relay.publish_config --check --warn",
         "test",
         "cmd python3 bin/test_relay.py"
       ]

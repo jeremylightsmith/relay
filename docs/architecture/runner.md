@@ -93,10 +93,11 @@ than double-booking (YAGNI: no multi-board reservation yet).
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
-  in `Cards.health/1`. `latest_executor_version` (RE185) is the newest `bin/relay` the public
-  relay-config repo actually serves — `Relay.Runs.latest_executor_version/0`, read from the
-  committed `.relay/published.json` marker. It is a **target**, distinct from
-  `required_version`'s **floor**; an executor with `auto_update` on updates itself against it.
+  in `Cards.health/1`. `latest_executor_version` (RE185/RE304) is the `EXECUTOR_VERSION` of the
+  `bin/relay` the app itself serves — `Relay.Runs.latest_executor_version/0`, delegating to
+  `Relay.Scaffold.executor_version/0`, read from `priv/scaffold/bin/relay` at runtime. Truthful
+  by construction. It is a **target**, distinct from `required_version`'s **floor**; an executor
+  with `auto_update` on updates itself against it.
 - **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -158,21 +159,48 @@ never 403s):
   `bin/relay flow-push KEY FILE` / `bin/relay audit [KEY]`, documented in
   [`../../relay.md`](../../relay.md).
 
-## Bootstrap surface (RLY-208)
+## Bootstrap surface (RE304, ADR 0010)
 
-There is no scaffold-over-HTTP surface on the board server anymore. `bin/relay init`
-pulls its manifest and every file it installs from the external **`relay-config`**
-repo over plain HTTPS (`RELAY_CONFIG_URL/manifest.json`, then each item's `src` under
-the same base) — the board server is no longer in the scaffolding path. The board
-(`RELAY_URL`) is still needed at runtime, for the API key `relay execute` authenticates
-with, and is still named in `init`'s closing checklist.
+The board serves the scaffold again. Two routes on the **unauthenticated** `/api` pipeline,
+alongside `/api/version`:
 
-`mix relay.publish_config` also writes **`.relay/published.json`** in this repo, recording the
-`EXECUTOR_VERSION` it published. That marker is the only truthful answer to "what can an
-executor actually download", since `bin/relay` here routinely runs ahead of what a human has
-pushed to relay-config. `mix relay.publish_config --check` exits non-zero when the source is
-ahead of the marker; `--check --warn` prints the same comparison as a banner and always exits 0,
-and is what `mix precommit` runs so iterating on `bin/relay` is never blocked.
+- `GET /api/scaffold` (`RelayWeb.Api.ScaffoldController.manifest/2`) — the manifest:
+  `{"version": "<12 hex>", "items": [{"path", "sha256", "bytes"}, …]}`.
+- `GET /api/scaffold/*path` (`.show/2`) — the raw bytes of one manifest entry, 404 for anything
+  else. `Relay.Scaffold.fetch/1` checks a **static allowlist**, so this is not a general file
+  server and traversal is impossible by construction.
+
+Unauthenticated because `/relay-setup` downloads `bin/relay` before a project has minted a board
+key, and because these files were published openly regardless.
+
+**Exactly five files are Relay-owned** (`Relay.Scaffold.items/0`): `bin/relay` and the four
+`.claude/skills/relay-{setup,update,doctor,onboard}/SKILL.md`. They are never user-edited, which
+is what lets `bin/relay update` overwrite them unconditionally — no provenance ledger, no
+per-file diff prompt. Everything else in a project (`relay.md`, agents, other skills,
+`AGENTS.md`/`CLAUDE.md`, flow documents) is out of scope and is never written by this surface;
+wiring those is `/relay-onboard`'s job.
+
+**The version is derived, never maintained.** `Relay.Scaffold.version/1` is the first 12 hex
+characters of the sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when
+content changes and cannot be forgotten. The client only compares it for equality; "N versions
+behind" is deliberately unsupported.
+
+`mix relay.build_scaffold` writes `priv/scaffold/` (a gitignored build artifact) — from `mix
+setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and before
+`mix release`, because a release ships `priv/` but ships neither `bin/` nor `.claude/`.
+
+**Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
+projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
+
+**`bin/relay update`** is the one mechanism for getting those files onto disk. **The work list is
+the verdict:** every item is hashed against the manifest on every run, and "current" means
+nothing needs writing — never a version comparison. That is what makes a deleted *or edited*
+file come back, and what keeps the RE185 steady state honest, since auto-update rewrites
+`bin/relay` in place without touching `.relay/scaffold.json`, so the marker legitimately lags the
+bytes. Applying with an empty work list reconciles the marker; `--check` reports and writes
+nothing, ever; `--json` on either. The executor rewrites itself through RE185's verified
+installer (`verify_executor_source` + `install_executor`'s atomic `os.replace` and write ledger),
+and every body is additionally checked against the manifest's sha256 before it touches disk.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
@@ -210,9 +238,10 @@ that stays server-side.
   `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
   and wears an `OUTDATED` badge on the runners view until a human restarts it. **Auto-update
   (RE185).** The heartbeat reply also carries `latest_executor_version`, and an executor with
-  `auto_update` on downloads that version from relay-config and re-execs at a job boundary, so
-  being refused is normally self-healing. The fail-stop below is unchanged and remains the
-  floor: when auto-update is off, refused, or does not take, the executor still stops loudly.
+  `auto_update` on downloads that version from the board's `/api/scaffold` (RE304) and re-execs
+  at a job boundary, so being refused is normally self-healing. The fail-stop below is unchanged
+  and remains the floor: when auto-update is off, refused, or does not take, the executor still
+  stops loudly.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped) returns a three-way result: a `claimed` job runs
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome` on a bad
@@ -458,12 +487,8 @@ silently billed to the paid API.
   correct because a single identity can no longer be split across two live processes each
   beating a partial `running` list. Two executors on one host are therefore unsupported;
   multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
-- `bin/relay init [--config-url URL] [--url URL] [--no-self-update]` interactively
-  scaffolds a project from the `relay-config` repo (`RELAY_CONFIG_URL` /
-  `--config-url`), announcing each step, installing required items, and prompting
-  install/skip/more-info for each optional one. Requires a TTY. When the manifest
-  advertises a newer `EXECUTOR_VERSION` it re-downloads `bin/relay` in place
-  (upgrade-only) before installing anything.
+- `bin/relay update [--check] [--json]` — non-interactive, writes only the five
+  Relay-owned files, needs no TTY and no board key.
 - **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
   `isolation` onto worktrees under the `exec-*` namespace. `shared_clean` jobs share one
   reused `exec-clean` worktree (never reset per-job, only fast-forwarded to base when every
@@ -556,13 +581,13 @@ silently billed to the paid API.
   `auto_update_min_interval`, and never again after three *failed* updates in one process's
   life (a refused download or a failed install — a successful one never counts, so an executor
   that has been up for months and picked up ten releases is unaffected). It downloads
-  `bin/relay` from relay-config (`RELAY_CONFIG_URL`) through `download_executor`, the one
-  verified download path `relay init` also uses: HTTPS, UTF-8, a leading `#!`, an
-  `EXECUTOR_VERSION` parsed **from the downloaded bytes** (authoritative — a board ahead of
-  relay-config is then harmless, not a chase), a `compile()` syntax check, and strictly newer.
-  Verification is deliberately HTTPS + parse only: no checksum, no signature. Any rejection logs
-  why and the running version keeps serving; a bad update can never leave a machine with a broken
-  executor.
+  `bin/relay` from the board's scaffold endpoint (`$RELAY_URL/api/scaffold/bin/relay`) through
+  `download_executor`, which shares `verify_executor_source` with `relay update` — HTTPS, UTF-8,
+  a leading `#!`, an `EXECUTOR_VERSION` parsed **from the downloaded bytes** (authoritative — a
+  board ahead of what it serves is then harmless, not a chase), a `compile()` syntax check, and
+  (for auto-update only) strictly newer. Verification is deliberately HTTPS + parse only: no
+  checksum, no signature. Any rejection logs why and the running version keeps serving; a bad
+  update can never leave a machine with a broken executor.
 
   The install writes the **tracked** `bin/relay` in place (`os.replace`, so a concurrent
   `bin/relay card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
@@ -845,8 +870,14 @@ implementer is instructed to treat as outranking `plan.md` for that task), "waiv
 Approve with the waiver and follow-up recorded.
 
 The contract lives inline in each of the four `.claude/agents/*.md` files rather than in a shared
-reference file, because those files ship to other projects through the RLY-181 scaffold manifest
-as single files with no `references/` siblings.
+reference file, because an agent definition IS its system prompt: the file is loaded whole at
+invocation and has no mechanism for pulling in a sibling, so a shared `references/` file would
+simply never reach the model. (This rationale used to rest on those files shipping to other
+projects through the RLY-181 scaffold manifest. RE304 deleted that manifest, and
+`Relay.Scaffold.items/0` ships no agents at all — every agent is now the repo's own, per ADR
+0010 — but the single-file constraint is a property of how agents load, so it is unchanged. The
+same constraint does still apply for the shipping reason to the four `relay-*` skills, which is
+why `relay-onboard/SKILL.md` restates it there.)
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract.
 
@@ -884,4 +915,5 @@ locally will disagree with the server.
 `lib/relay_web/controllers/api/executor_controller.ex`,
 `lib/relay_web/controllers/api/flow_metrics_controller.ex`,
 `lib/relay_web/controllers/api/flow_controller.ex`,
-`lib/relay_web/controllers/api/talk_controller.ex`, `lib/relay/talk.ex`.*
+`lib/relay_web/controllers/api/talk_controller.ex`, `lib/relay/talk.ex`,
+`lib/relay/scaffold.ex`, `lib/relay_web/controllers/api/scaffold_controller.ex`.*

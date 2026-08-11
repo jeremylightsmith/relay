@@ -7,7 +7,7 @@ defmodule Relay.OnboardSkillTest do
     {:ok, doc: File.read!(@skill)}
   end
 
-  test "the skill directory holds exactly SKILL.md — the publish task copies nothing else" do
+  test "the skill directory holds exactly SKILL.md — the scaffold build copies nothing else" do
     assert File.ls!(Path.dirname(@skill)) == ["SKILL.md"]
   end
 
@@ -53,8 +53,13 @@ defmodule Relay.OnboardSkillTest do
     end
   end
 
-  test "hands a missing step to writing-skills or drops the node", %{doc: doc} do
-    assert doc =~ "`writing-skills`"
+  # RE304: the scaffold no longer ships `writing-skills`, so pointing at it from a skill that
+  # DOES ship would dangle in every scaffolded project. The authoring guidance is inlined
+  # instead — assert on that, and assert the dead pointer stays gone.
+  test "inlines how to author a missing step, or drops the node", %{doc: doc} do
+    refute doc =~ "writing-skills"
+    assert doc =~ ".claude/agents/<name>.md"
+    assert doc =~ ".claude/skills/<name>/SKILL.md"
     assert doc =~ "drop the node"
   end
 
@@ -71,6 +76,44 @@ defmodule Relay.OnboardSkillTest do
     assert doc =~ "flow-push"
     assert doc =~ "one confirmation per flow"
     assert doc =~ "Never offer to enable a flow that still has errors"
+  end
+
+  test "Phase 3's plan actually authors relay.md and .relay/executor.json when missing", %{
+    doc: doc
+  } do
+    [_, phase3_and_later] = String.split(doc, "## Phase 3", parts: 2)
+    [phase3, _] = String.split(phase3_and_later, "## Phase 4", parts: 2)
+
+    assert phase3 =~ "relay.md"
+    assert phase3 =~ ".relay/executor.json"
+    assert phase3 =~ "author it for this repo"
+  end
+
+  test "the floor check preamble does not claim the scaffold floor is never a mutation", %{
+    doc: doc
+  } do
+    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
+    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
+
+    refute phase0 =~ "neither is something a skill can fix"
+    assert phase0 =~ "a skill cannot mint a key"
+    assert phase0 =~ "self-heals via `bin/relay update`"
+  end
+
+  # The missing `relay-*` skill may *be* `relay-update`, and the Skill tool cannot resolve a
+  # name that is not installed — so the floor must repair itself with the command.
+  test "the scaffold floor repairs missing skills with the command, not the Skill tool", %{doc: doc} do
+    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
+    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
+
+    assert phase0 =~ "bin/relay update --json"
+    refute String.replace(phase0, ~r/\s+/, " ") =~ "run `/relay-update` (via the `Skill` tool)"
+  end
+
+  test "the sibling-file mistake names the current scaffold mechanism, not the retired publish task",
+       %{doc: doc} do
+    refute doc =~ "the publish task"
+    assert doc =~ "Scaffold.items"
   end
 
   describe "discoverability" do

@@ -10,6 +10,7 @@ Run: python3 bin/test_relay.py
 import argparse
 import contextlib
 import copy
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -279,7 +280,7 @@ class ReverseContractTest(unittest.TestCase):
 
     def test_the_heartbeat_response_carries_the_latest_fetchable_version(self):
         """RE185: the executor auto-updates against `latest_executor_version` (what
-        relay-config actually serves), which is a DIFFERENT number from `required_version`
+        the board actually serves), which is a DIFFERENT number from `required_version`
         (the floor below which work is refused)."""
         self.assertIn("latest_executor_version", CONTRACT["heartbeat"]["response"])
 
@@ -2460,8 +2461,8 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         self.assertIn("EXECUTOR_VERSION", source)
 
     def test_the_downloaded_files_own_version_wins_over_any_announcement(self):
-        """A board ahead of relay-config must be harmless, not a chase: the version is read
-        from the bytes we actually got."""
+        """A board that announces a version ahead of what it actually serves must be harmless,
+        not a chase: the version is read from the bytes we actually got."""
         self.body = VALID_STUB.format(relay.EXECUTOR_VERSION + 5).encode()
         _source, version = relay.download_executor("http://config.test")
         self.assertEqual(version, relay.EXECUTOR_VERSION + 5)
@@ -2485,9 +2486,10 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         self.assertTrue(any("does not compile" in m for m in self.logs))
 
     def test_an_equal_or_older_version_is_a_benign_noop_not_a_failure(self):
-        # relay-config serving <= the running version is the EXPECTED publish-window state (a board
-        # ahead of relay-config), not a refusal — so it returns NOTHING_NEWER, distinct from the
-        # None that a genuine failure returns, so it never burns the anti-thrash budget (RE185).
+        # The board serving <= the running version is the EXPECTED publish-window state (a
+        # deploy committed but not yet live), not a refusal — so it returns NOTHING_NEWER,
+        # distinct from the None that a genuine failure returns, so it never burns the
+        # anti-thrash budget (RE185).
         for v in (relay.EXECUTOR_VERSION, relay.EXECUTOR_VERSION - 1):
             self.body = VALID_STUB.format(v).encode()
             self.assertIs(relay.download_executor("http://config.test"), relay.NOTHING_NEWER)
@@ -2708,9 +2710,10 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         self.assertFalse(self.state["disabled"])
 
     def test_a_benign_nothing_newer_does_not_count_toward_the_cap(self):
-        # RE185 round-3: relay-config serving nothing newer is the expected window while a publish
-        # is committed but not yet pushed — every heartbeat hits it, so counting it would cap out
-        # and PERMANENTLY disable self-update over a non-problem. Only genuine failures (None) count.
+        # RE185 round-3: the board serving nothing newer is the expected window while a publish
+        # is committed but not yet deployed — every heartbeat hits it, so counting it would cap
+        # out and PERMANENTLY disable self-update over a non-problem. Only genuine failures
+        # (None) count.
         relay.download_executor = lambda url: relay.NOTHING_NEWER
         self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
         self.assertFalse(self._run(self.new))
@@ -4373,245 +4376,361 @@ class _FakeStdin:
         return self._tty
 
 
-class InitTest(unittest.TestCase):
-    """`relay init` against a stubbed relay-config, in a throwaway project root.
+class UpdateTest(unittest.TestCase):
+    """`relay update` against a stubbed /api/scaffold, in a throwaway project root (RE304).
 
-    ROOT and HERE are repointed at a temp dir so a test never scaffolds into the real
-    checkout. A fake TTY + a queued-answer `relay.input` drive the interactive prompts."""
+    ROOT and HERE are repointed at a temp dir so a test never scaffolds into the real checkout.
+    The stub derives the manifest from the files it serves, exactly as the app does, so a test
+    that mutates a served file automatically moves the version."""
 
-    CONFIG = "http://config.test"
+    BOARD = "http://board.test"
 
-    ITEMS = [
-        {"id": "relay.md", "kind": "doc", "title": "Relay guide",
-         "description": "how your agent drives Relay", "src": "relay.md",
-         "dest": "relay.md", "required": True},
-        {"id": "AGENTS.md", "kind": "starter", "title": "conventions",
-         "description": "project conventions", "src": "AGENTS.md",
-         "dest": "AGENTS.md", "required": True},
-        {"id": "CLAUDE.md", "kind": "starter", "title": "claude entry",
-         "description": "CLAUDE.md entry point", "src": "CLAUDE.md",
-         "dest": "CLAUDE.md", "required": True},
-        {"id": "skill:brainstorm", "kind": "skill", "title": "brainstorm",
-         "description": "Turn an idea into a design.", "details": "The long blurb.",
-         "src": ".claude/skills/brainstorm/SKILL.md",
-         "dest": ".claude/skills/brainstorm/SKILL.md", "required": False},
-    ]
-
-    DEFAULT_CONTENTS = {
-        "relay.md": b"# relay.md\n",
-        "AGENTS.md": b"# conventions\n@relay.md\n",
-        "CLAUDE.md": b"@AGENTS.md\n@relay.md\n",
-        ".claude/skills/brainstorm/SKILL.md": b"brainstorm skill\n",
-    }
+    SKILLS = ("relay-setup", "relay-update", "relay-doctor", "relay-onboard")
 
     def setUp(self):
         isolate_relay_state(self)
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-
         self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
         relay.ROOT = self.tmp
-
         self.here = os.path.join(self.tmp, "bin", "relay")
-        os.makedirs(os.path.dirname(self.here))
-        with open(self.here, "w") as f:
-            f.write("#!/usr/bin/env python3\nEXECUTOR_VERSION = 1\n")
         self.addCleanup(setattr, relay, "HERE", relay.HERE)
         relay.HERE = self.here
 
         self.addCleanup(setattr, relay.urllib.request, "urlopen", relay.urllib.request.urlopen)
-        self.addCleanup(setattr, relay.sys, "stdin", relay.sys.stdin)
-        self.addCleanup(lambda: relay.__dict__.pop("input", None))
+        prev = os.environ.get("RELAY_URL")
+        os.environ["RELAY_URL"] = self.BOARD
+        self.addCleanup(lambda: os.environ.__setitem__("RELAY_URL", prev)
+                        if prev is not None else os.environ.pop("RELAY_URL", None))
+
+        self.served = {relay.EXECUTOR_REL: VALID_STUB.format(relay.EXECUTOR_VERSION)}
+        for skill in self.SKILLS:
+            self.served[f".claude/skills/{skill}/SKILL.md"] = f"{skill} skill\n"
         self.fetched = []
-        os.environ.pop("RELAY_URL", None)
-        os.environ.pop("RELAY_API_KEY", None)
+        self.stub()
 
-    def stub(self, items=None, executor_version=None, contents=None):
-        items = self.ITEMS if items is None else items
-        ev = relay.EXECUTOR_VERSION if executor_version is None else executor_version
-        manifest = json.dumps({
-            "manifest_version": 1,
-            "executor": {"path": "bin/relay", "version": ev},
-            "items": items,
-        }).encode()
-        files = dict(self.DEFAULT_CONTENTS)
-        # RE185: `init`'s self-update now goes through download_executor, which verifies the
-        # bytes — so the stub CLI must be a real script declaring the manifest's version.
-        files["bin/relay"] = VALID_STUB.format(ev).encode()
-        if contents:
-            files.update(contents)
+    # ---- the stub board ----
 
+    def manifest(self):
+        items = [{"path": p,
+                  "sha256": hashlib.sha256(c.encode()).hexdigest(),
+                  "bytes": len(c.encode())}
+                 for p, c in sorted(self.served.items())]
+        digest = hashlib.sha256(
+            "\n".join(sorted(f"{i['path']}:{i['sha256']}" for i in items)).encode()
+        ).hexdigest()[:12]
+        return {"version": digest, "items": items}
+
+    def stub(self):
         def fake(req, *a, **k):
-            self.fetched.append(req.full_url)
-            if req.full_url.endswith("/manifest.json"):
-                return _FakeResp(manifest)
-            rel = req.full_url.split(self.CONFIG + "/", 1)[1]
-            return _FakeResp(files.get(rel, b"CONTENT " + rel.encode()))
+            url = req.full_url
+            self.fetched.append(url)
+            if url == self.BOARD + relay.SCAFFOLD_PATH:
+                return _FakeResp(json.dumps(self.manifest()).encode())
+            rel = url.split(self.BOARD + relay.SCAFFOLD_PATH + "/", 1)[1]
+            return _FakeResp(self.served[rel].encode())
 
         relay.urllib.request.urlopen = fake
 
-    def args(self, **over):
-        base = dict(config_url=self.CONFIG, url="http://board.test", no_self_update=False)
-        base.update(over)
-        return argparse.Namespace(**base)
+    # ---- helpers ----
 
-    def run_init(self, answers=(), **over):
-        """Interactive run: fake TTY, queued answers, captured stdout."""
-        relay.sys.stdin = _FakeStdin(True)
-        queue = list(answers)
-        relay.input = lambda prompt="": queue.pop(0)
-        return capture(relay.cmd_init, self.args(**over))
+    def args(self, check=False, force=False):
+        return argparse.Namespace(check=check, force=force, json=False, field=None)
 
-    def read(self, rel):
-        with open(os.path.join(self.tmp, rel), encoding="utf-8") as f:
-            return f.read()
+    def path(self, rel):
+        return os.path.join(self.tmp, rel)
 
-    # ---- non-TTY ----
+    def write_local(self, rel, content):
+        os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
+        with open(self.path(rel), "w") as f:
+            f.write(content)
 
-    def test_non_tty_writes_nothing_and_guides(self):
-        self.stub()
+    def make_current(self):
+        for rel, content in self.served.items():
+            self.write_local(rel, content)
+        self.write_local(".relay/scaffold.json",
+                         json.dumps({"version": self.manifest()["version"]}))
+
+    # ---- apply ----
+
+    def test_update_installs_all_five_files_and_records_the_version(self):
+        report = capture_ret(relay.cmd_update, self.args())
+
+        for rel in self.served:
+            self.assertTrue(os.path.exists(self.path(rel)), rel)
+        self.assertEqual(sorted(report["written"]), sorted(self.served))
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], self.manifest()["version"])
+
+    def test_the_five_are_the_executor_and_the_four_relay_skills(self):
+        report = capture_ret(relay.cmd_update, self.args())
+        installed = sorted(report["written"])
+
+        self.assertEqual(len(installed), 5)
+        self.assertIn(relay.EXECUTOR_REL, installed)
+        for rel in installed:
+            self.assertTrue(rel == relay.EXECUTOR_REL
+                            or rel.startswith(".claude/skills/relay-"), rel)
+
+    def test_nothing_outside_the_manifest_is_written(self):
+        capture_ret(relay.cmd_update, self.args())
+        found = set()
+        for base, _dirs, files in os.walk(self.tmp):
+            for f in files:
+                found.add(os.path.relpath(os.path.join(base, f), self.tmp))
+        self.assertEqual(found, set(self.served) | {".relay/scaffold.json"})
+
+    def test_a_second_run_reports_current_and_writes_nothing(self):
+        capture_ret(relay.cmd_update, self.args())
+        before = os.path.getmtime(self.path(relay.EXECUTOR_REL))
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertTrue(report["current"])
+        self.assertEqual(report["written"], [])
+        self.assertEqual(os.path.getmtime(self.path(relay.EXECUTOR_REL)), before)
+
+    def test_a_deleted_skill_is_restored_even_when_the_version_matches(self):
+        self.make_current()
+        os.remove(self.path(".claude/skills/relay-doctor/SKILL.md"))
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(report["current"])
+        self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
+        self.assertTrue(os.path.exists(self.path(".claude/skills/relay-doctor/SKILL.md")))
+
+    # RE304 review finding 1, symptom A: RE185's auto-update rewrites bin/relay in place and
+    # never touches .relay/scaffold.json, so the marker legitimately lags the bytes. A
+    # version-gated verdict called that "not current" with an EMPTY change list, and
+    # /relay-update then asked a human where to commit zero files. The work list is the verdict.
+    def test_a_lagging_marker_with_matching_bytes_reports_current(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertTrue(report["current"])
+        self.assertEqual(report["changed"], [])
+
+    def test_applying_with_nothing_to_write_reconciles_the_marker(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        capture_ret(relay.cmd_update, self.args())
+
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], self.manifest()["version"])
+
+    def test_check_never_writes_the_marker(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", json.dumps({"version": "0" * 12}))
+
+        capture_ret(relay.cmd_update, self.args(check=True))
+
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], "0" * 12)
+
+    # RE304 review finding 1, symptom B: these files are Relay-owned and never user-edited, so
+    # a drifted one is damage to repair, not a customisation to preserve. A version-gated
+    # verdict left it corrupted while reporting the project current.
+    def test_a_corrupted_file_is_repaired_even_when_the_version_matches(self):
+        self.make_current()
+        self.write_local(".claude/skills/relay-doctor/SKILL.md", "CORRUPTED\n")
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(report["current"])
+        self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
+        with open(self.path(".claude/skills/relay-doctor/SKILL.md")) as f:
+            self.assertEqual(f.read(), self.served[".claude/skills/relay-doctor/SKILL.md"])
+
+    # RE304 review finding 5: .relay/scaffold.json is the one file `relay update` exists to
+    # heal, so a garbled one must refetch, not raise AttributeError out of the CLI.
+    def test_a_non_object_scaffold_state_is_treated_as_no_version(self):
+        self.make_current()
+        self.write_local(".relay/scaffold.json", "[]")
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertIsNone(report["local_version"])
+        self.assertTrue(report["current"])
+
+    def test_a_non_object_manifest_is_refused(self):
+        def fake(req, *a, **k):
+            return _FakeResp(json.dumps(["not", "a", "manifest"]).encode())
+
+        relay.urllib.request.urlopen = fake
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args(check=True))
+
+    # RE304 review pass 3, finding A: ROOT is the repo containing the script, so `update` run in
+    # the Relay app repo would overwrite the five SOURCES with whatever the board last deployed —
+    # skills first, bin/relay last — silently reverting in-progress work. RE185's auto-update
+    # already refuses to clobber this same file; this path shares its installer and must not
+    # answer differently.
+    def _make_app_repo(self):
+        os.makedirs(os.path.join(self.tmp, "lib", "relay"), exist_ok=True)
+        with open(os.path.join(self.tmp, "lib", "relay", "scaffold.ex"), "w") as f:
+            f.write("defmodule Relay.Scaffold do\nend\n")
+
+    def test_apply_refuses_in_the_relay_app_repo(self):
+        self._make_app_repo()
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_force_overrides_the_app_repo_refusal(self):
+        self._make_app_repo()
+
+        report = capture_ret(relay.cmd_update, self.args(force=True))
+
+        self.assertEqual(sorted(report["written"]), sorted(self.served))
+
+    def test_check_is_allowed_in_the_relay_app_repo(self):
+        self._make_app_repo()
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertFalse(report["current"])
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_a_consuming_project_is_not_mistaken_for_the_app_repo(self):
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(sorted(report["written"]), sorted(self.served))
+
+    def test_a_moved_version_refetches_only_what_actually_changed(self):
+        self.make_current()
+        self.served[".claude/skills/relay-onboard/SKILL.md"] = "onboard skill v2\n"
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(report["written"], [".claude/skills/relay-onboard/SKILL.md"])
+        with open(self.path(".claude/skills/relay-onboard/SKILL.md")) as f:
+            self.assertEqual(f.read(), "onboard skill v2\n")
+
+    # ---- --check ----
+
+    def test_check_names_the_files_that_would_change_and_writes_nothing(self):
+        self.make_current()
+        os.remove(self.path(".claude/skills/relay-doctor/SKILL.md"))
+
+        out = capture(relay.cmd_update, self.args(check=True))
+
+        self.assertIn("relay-doctor", out)
+        self.assertIn("nothing written", out)
+        self.assertFalse(os.path.exists(self.path(".claude/skills/relay-doctor/SKILL.md")))
+
+    def test_check_on_a_current_tree_reports_current(self):
+        self.make_current()
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertTrue(report["current"])
+        self.assertEqual(report["changed"], [])
+
+    def test_check_needs_no_tty(self):
+        self.addCleanup(setattr, relay.sys, "stdin", relay.sys.stdin)
         relay.sys.stdin = _FakeStdin(False)
-        out = capture(relay.cmd_init, self.args())
 
-        self.assertIn("needs a terminal", out)
-        self.assertEqual(self.fetched, [])                       # nothing even fetched
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "relay.md")))
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "AGENTS.md")))
+        self.assertIsNotNone(capture_ret(relay.cmd_update, self.args(check=True)))
 
-    # ---- announce + one-at-a-time + fetch source ----
+    # ---- the executor goes through RE185's verified installer ----
 
-    def test_announces_the_plan_and_fetches_from_config_url(self):
-        self.stub()
-        out = self.run_init(answers=["y"])
+    def test_the_executor_is_installed_through_install_executor(self):
+        calls = []
+        real = relay.install_executor
+        self.addCleanup(setattr, relay, "install_executor", real)
+        relay.install_executor = lambda src, ver, path=None: calls.append((ver, path)) or real(src, ver, path)
 
-        plan_idx = out.index("Here's the plan")
-        install_idx = out.index("Installing the required pieces")
-        self.assertLess(plan_idx, install_idx)                   # announced before acting
-        self.assertEqual(self.fetched[0], "http://config.test/manifest.json")
-        self.assertFalse(any("/api/scaffold" in u for u in self.fetched))
+        capture_ret(relay.cmd_update, self.args())
 
-    def test_required_item_installs_without_a_prompt(self):
-        self.stub()
-        self.run_init(answers=["s"])                             # skip the one optional item
-        self.assertEqual(self.read("relay.md"), "# relay.md\n")
+        self.assertEqual(calls, [(relay.EXECUTOR_VERSION, self.path(relay.EXECUTOR_REL))])
 
-    def test_optional_item_is_offered_one_at_a_time_and_installs_on_yes(self):
-        self.stub()
-        out = self.run_init(answers=["y"])
-        self.assertIn("brainstorm — Turn an idea into a design.", out)
-        self.assertEqual(self.read(".claude/skills/brainstorm/SKILL.md"), "brainstorm skill\n")
+    def test_an_executor_that_does_not_compile_is_refused(self):
+        self.served[relay.EXECUTOR_REL] = "#!/usr/bin/env python3\nEXECUTOR_VERSION = 9\ndef (\n"
 
-    def test_optional_skip_warns_and_writes_nothing_for_it(self):
-        self.stub()
-        out = self.run_init(answers=["s"])
-        self.assertIn("edit your board's flow", out)
-        self.assertFalse(os.path.exists(
-            os.path.join(self.tmp, ".claude/skills/brainstorm/SKILL.md")))
-
-    def test_more_info_then_install(self):
-        self.stub()
-        out = self.run_init(answers=["m", "y"])
-        self.assertIn("The long blurb.", out)
-        self.assertTrue(os.path.exists(
-            os.path.join(self.tmp, ".claude/skills/brainstorm/SKILL.md")))
-
-    # ---- relay.md wiring ----
-
-    def test_include_is_wired_into_fresh_starters(self):
-        self.stub()
-        self.run_init(answers=["s"])
-        self.assertIn("@relay.md", self.read("AGENTS.md"))
-        self.assertIn("@relay.md", self.read("CLAUDE.md"))
-
-    def test_include_is_appended_preserving_existing_content(self):
-        self.stub()
-        with open(os.path.join(self.tmp, "AGENTS.md"), "w") as f:
-            f.write("# my project\nkeep me\n")
-        self.run_init(answers=["s"])
-        agents = self.read("AGENTS.md")
-        self.assertIn("keep me", agents)                         # preserved
-        self.assertIn("@relay.md", agents)                       # appended
-
-    def test_rerun_does_not_duplicate_the_include(self):
-        self.stub()
-        self.run_init(answers=["s"])
-        self.run_init(answers=["s"])
-        self.assertEqual(self.read("AGENTS.md").count("@relay.md"), 1)
-
-    # ---- self-update ----
-
-    def test_self_update_fires_on_a_newer_manifest_version(self):
-        self.stub(executor_version=relay.EXECUTOR_VERSION + 1)
-        out = self.run_init(answers=["s"])
-        with open(self.here) as f:
-            self.assertIn(f"EXECUTOR_VERSION = {relay.EXECUTOR_VERSION + 1}", f.read())
-        self.assertIn(f"{relay.EXECUTOR_VERSION} → {relay.EXECUTOR_VERSION + 1}", out)
-        self.assertTrue(os.access(self.here, os.X_OK))
-
-    def test_self_update_runs_before_installing_items(self):
-        self.stub(executor_version=relay.EXECUTOR_VERSION + 1)
-        out = self.run_init(answers=["s"])
-        self.assertLess(out.index("bin/relay updated"), out.index("Installing the required pieces"))
-
-    def test_self_update_never_downgrades(self):
-        self.stub(executor_version=relay.EXECUTOR_VERSION - 1)
-        self.run_init(answers=["s"])
-        with open(self.here) as f:
-            self.assertIn("EXECUTOR_VERSION = 1", f.read())
-        self.assertFalse(any(u.endswith("/bin/relay") for u in self.fetched))
-
-    def test_no_self_update_suppresses_it(self):
-        self.stub(executor_version=relay.EXECUTOR_VERSION + 1)
-        self.run_init(answers=["s"], no_self_update=True)
-        with open(self.here) as f:
-            self.assertIn("EXECUTOR_VERSION = 1", f.read())
-
-    # ---- failures / safety ----
-
-    def test_manifest_fetch_failure_exits_non_zero_and_leaves_nothing(self):
-        relay.sys.stdin = _FakeStdin(True)
-
-        def boom(req, *a, **k):
-            raise urllib.error.URLError("connection refused")
-
-        relay.urllib.request.urlopen = boom
         with self.assertRaises(SystemExit):
-            capture_ret(relay.cmd_init, self.args())
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "relay.md")))
+            capture_ret(relay.cmd_update, self.args())
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
 
-    def test_a_path_escaping_the_project_root_is_refused(self):
-        evil = [{"id": "x", "kind": "doc", "title": "x", "description": "x",
-                 "src": "x", "dest": "../evil.md", "required": True}]
-        self.stub(items=evil)
-        relay.sys.stdin = _FakeStdin(True)
-        relay.input = lambda prompt="": "y"
+    def test_a_body_that_disagrees_with_the_manifest_sha_is_refused(self):
+        good = self.manifest()
+
+        def fake(req, *a, **k):
+            url = req.full_url
+            if url == self.BOARD + relay.SCAFFOLD_PATH:
+                return _FakeResp(json.dumps(good).encode())
+            return _FakeResp(b"tampered\n")
+
+        relay.urllib.request.urlopen = fake
+
         with self.assertRaises(SystemExit):
-            capture_ret(relay.cmd_init, self.args())
+            capture_ret(relay.cmd_update, self.args())
 
-    def test_differing_file_is_left_alone_when_overwrite_declined(self):
-        self.stub()
-        os.makedirs(os.path.join(self.tmp, ".claude/skills/brainstorm"))
-        with open(os.path.join(self.tmp, ".claude/skills/brainstorm/SKILL.md"), "w") as f:
-            f.write("MY LOCAL EDIT\n")
-        out = self.run_init(answers=["y", "n"])            # install optional, decline overwrite
-        self.assertIn("MY LOCAL EDIT", self.read(".claude/skills/brainstorm/SKILL.md"))
-        self.assertIn("left as-is", out)
+    def test_a_manifest_with_no_items_is_refused_before_anything_is_written(self):
+        def fake(req, *a, **k):
+            return _FakeResp(json.dumps({"version": "abc", "items": []}).encode())
 
-    def test_checklist_names_the_outstanding_human_steps(self):
-        self.stub()
-        out = self.run_init(answers=["s"])
-        self.assertIn("Still needed", out)
-        self.assertIn("Settings", out)
-        self.assertIn("RELAY_API_KEY", out)
-        self.assertIn("Flows", out)
+        relay.urllib.request.urlopen = fake
 
-    def test_init_is_registered_with_its_flags(self):
-        args = relay.build_parser().parse_args(
-            ["init", "--config-url", "http://x", "--url", "http://y", "--no-self-update"])
-        self.assertIs(args.func, relay.cmd_init)
-        self.assertEqual(args.config_url, "http://x")
-        self.assertEqual(args.url, "http://y")
-        self.assertTrue(args.no_self_update)
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args())
+        self.assertFalse(os.path.exists(self.path(relay.EXECUTOR_REL)))
+
+    def test_a_manifest_path_escaping_the_project_root_is_refused(self):
+        self.served["../evil.md"] = "evil\n"
+
+        with self.assertRaises(SystemExit):
+            capture_ret(relay.cmd_update, self.args())
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.tmp), "evil.md")))
+
+    # ---- CLI surface ----
+
+    def test_update_is_registered_with_its_flags(self):
+        args = relay.build_parser().parse_args(["update", "--check", "--json"])
+        self.assertIs(args.func, relay.cmd_update)
+        self.assertTrue(args.check)
+        self.assertTrue(args.json)
+
+    def test_init_is_retired(self):
+        self.assertFalse(hasattr(relay, "cmd_init"))
+        self.assertNotIn("relay init", relay.__doc__)
+        with self.assertRaises(SystemExit):
+            relay.build_parser().parse_args(["init"])
+
+
+class ScaffoldContractTest(unittest.TestCase):
+    """RE304: /api/scaffold is app↔executor wire, so the fixture pins it (RLY-176/AGENTS.md)."""
+
+    def setUp(self):
+        self.scaffold = CONTRACT["scaffold"]
+
+    def test_the_manifest_route_is_the_one_update_calls(self):
+        self.assertEqual(relay.SCAFFOLD_PATH, self.scaffold["manifest_path"])
+        self.assertEqual(relay.scaffold_base("http://board.test/"),
+                         "http://board.test" + self.scaffold["manifest_path"])
+
+    def test_item_keys_are_what_scaffold_status_reads(self):
+        for item in self.scaffold["manifest"]["items"]:
+            self.assertEqual(set(item), {"path", "sha256", "bytes"})
+
+    def test_the_manifest_carries_a_version_string(self):
+        self.assertIn("version", self.scaffold["manifest"])
+
+    def test_the_executor_path_update_special_cases_is_a_manifest_item(self):
+        paths = [i["path"] for i in self.scaffold["manifest"]["items"]]
+        self.assertEqual(len(paths), 5)
+        self.assertIn(relay.EXECUTOR_REL, paths)
+        for path in paths:
+            self.assertTrue(path == relay.EXECUTOR_REL
+                            or path.startswith(".claude/skills/relay-"), path)
+
+    def test_the_raw_file_route_is_the_base_plus_the_item_path(self):
+        self.assertEqual(relay.scaffold_base("http://x") + "/" + relay.EXECUTOR_REL,
+                         "http://x" + self.scaffold["file_path_example"])
 
 
 class RunsAndExecutorsRenderingTest(unittest.TestCase):
@@ -5217,7 +5336,8 @@ class AuditReportTest(unittest.TestCase):
 
 class DiscoverabilityTest(unittest.TestCase):
     def test_the_module_docstring_lists_every_new_verb(self):
-        for verb in ("relay why", "relay runs", "relay executors", "relay version", "--field"):
+        for verb in ("relay why", "relay runs", "relay executors", "relay version",
+                     "relay update", "--field"):
             self.assertIn(verb, relay.__doc__, f"the module docstring (relay --help) should list {verb}")
 
     def test_relay_md_documents_every_new_verb(self):
@@ -5225,7 +5345,8 @@ class DiscoverabilityTest(unittest.TestCase):
                             "relay.md")
         with open(path, encoding="utf-8") as f:
             doc = f.read()
-        for verb in ("bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"):
+        for verb in ("bin/relay why", "bin/relay runs", "bin/relay executors",
+                     "bin/relay version", "bin/relay update", "--field"):
             self.assertIn(verb, doc, f"relay.md should document {verb}")
 
 

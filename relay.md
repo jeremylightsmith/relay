@@ -24,8 +24,9 @@ runner config file. `bin/relay` knows the REST API and nothing about any board's
    ```
 3. **Confirm:** `./bin/relay board` should print your board.
 4. **Wire the repo to a flow:** in Claude Code, run `/relay-onboard`. It reconciles this repo's
-   `.claude/` factory against the board's flows — seeding the defaults, adopting what you already
-   have, or both — until `/relay-doctor` reports zero errors, then offers to enable the flows.
+   `.claude/` factory against the board's flows — authoring what the flow names and you don't
+   have yet, adopting what you already have, or both — until `/relay-doctor` reports zero errors,
+   then offers to enable the flows.
    (Already wired and one node broke? Reach for `/relay-doctor` directly.)
 
 Full reference for any of the below: `$RELAY_URL/docs` (CLI, API, auth, statuses).
@@ -76,6 +77,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay flow` · `bin/relay flow code` | The board's flows, or one flow's definition; `--json` **is the pull** |
 | `bin/relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 | `bin/relay version` | The git SHA the deployed app was built from |
+| `bin/relay update [--check]` | Install or refresh the five Relay-owned files (`bin/relay` + the four `relay-*` skills) from the board's `/api/scaffold`. `--check` reports and writes nothing. Prefer `/relay-update`, which wraps it. |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |

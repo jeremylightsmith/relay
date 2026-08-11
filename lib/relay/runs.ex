@@ -17,7 +17,16 @@ defmodule Relay.Runs do
   """
 
   use Boundary,
-    deps: [Relay.Activity, Relay.Boards, Relay.Cards, Relay.Events, Relay.Flows, Relay.Repo, Schemas],
+    deps: [
+      Relay.Activity,
+      Relay.Boards,
+      Relay.Cards,
+      Relay.Events,
+      Relay.Flows,
+      Relay.Repo,
+      Relay.Scaffold,
+      Schemas
+    ],
     exports: [Supervisor, Capacity, RunDetail, SchedulerSupervisor]
 
   import Ecto.Query
@@ -33,7 +42,6 @@ defmodule Relay.Runs do
   alias Relay.Runs.PlanTasks
   alias Relay.Runs.Policy
   alias Relay.Runs.Preflight
-  alias Relay.Runs.PublishMarker
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
@@ -980,23 +988,20 @@ defmodule Relay.Runs do
 
   def talk_capable?(%Executor{}), do: false
 
-  # RE185: the version an executor can actually FETCH — what relay-config last published, as
-  # recorded in `.relay/published.json` by `mix relay.publish_config`. Deliberately NOT this
-  # repo's `EXECUTOR_VERSION` (source runs ahead of published) and NOT min_executor_version/0
-  # (a floor, not a target). Read at COMPILE time, because a Mix release ships no `bin/` and no
-  # `.relay/`; `@external_resource` makes a marker change recompile this module.
-  @published_marker_path PublishMarker.path(File.cwd!())
-  @external_resource @published_marker_path
-  @latest_executor_version PublishMarker.version(@published_marker_path)
+  # RE304: the version an executor can actually FETCH is the `EXECUTOR_VERSION` of the
+  # `bin/relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
+  # what the retired `.relay/published.json` marker existed to paper over. Deliberately NOT
+  # min_executor_version/0 (a floor, not a target). Read at RUNTIME, from `priv/scaffold/`,
+  # because a Mix release ships `priv/` but ships neither `bin/` nor `.claude/`.
 
   @doc """
   The newest `bin/relay` EXECUTOR_VERSION an executor can download, or `nil`.
 
-  `nil` when nothing has been published, which reads on the wire as "never auto-update" — the
-  correct answer when there is nothing to fetch.
+  `nil` when the scaffold has not been built, which reads on the wire as "never auto-update" —
+  the correct answer when there is nothing to fetch.
   """
   @spec latest_executor_version() :: integer() | nil
-  def latest_executor_version, do: @latest_executor_version
+  def latest_executor_version, do: Relay.Scaffold.executor_version()
 
   @doc """
   Whether this executor is running code older than the server requires.

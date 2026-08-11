@@ -309,6 +309,9 @@ sharing behavior.
   ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
   here in step 1: receipts, `awaiting` turns, the write lease, card-level executor pinning — a
   talk turn never moves the card's baton.
+- **Scaffold** — the five Relay-owned files (`bin/relay` + the four `relay-*` skills) the board
+  serves at `/api/scaffold`, built into `priv/scaffold/` by `mix relay.build_scaffold`
+  (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
 
 ## Core schemas

@@ -14,7 +14,9 @@ the doctor, repeat — until it reports **zero errors**. That is the whole metho
 
 Three legitimate paths, and the human picks one:
 
-- **Seed** — take the shipped default factory as-is; install what is missing; adjust the gates.
+- **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
+  names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `bin/relay`
+  and the four `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
 - **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
 - **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
 
@@ -38,7 +40,7 @@ missing, so an interrupted session continues instead of restarting. On an alread
 
 ## When to Use
 
-- Wiring Relay into a repo for the first time, right after `bin/relay init`.
+- Wiring Relay into a repo for the first time, right after `/relay-setup`.
 - A repo whose `.claude/` and whose flows have drifted so far apart that the answer is a *path*,
   not a patch.
 - Before enabling a board's flows for the first time.
@@ -47,18 +49,32 @@ Already wired and one node broke? That is `/relay-doctor`, not this.
 
 ## Phase 0 — Floor check
 
-Two independent floors. Each is a **stop**, not a mutation — neither is something a skill can fix.
+Two independent floors. The credential floor is always a **stop** — a skill cannot mint a key.
+The scaffold floor stops only when `bin/relay` itself is missing; a stale `relay-*` skill
+self-heals via `bin/relay update` instead.
 
-1. **Scaffold floor** — `bin/relay`, `relay.md`, and `.relay/executor.json` must exist. If any is
-   missing, stop and hand the human the bootstrap to run in a real terminal (`bin/relay init` needs
-   a TTY and writes nothing when piped):
+1. **Scaffold floor** — `bin/relay` and the four `relay-*` skills must be installed. If
+   `bin/relay` is missing, stop and hand the human the entry point:
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/jeremylightsmith/relay-config/main/install.sh | sh
-   bin/relay init
+   ```
+   /relay-setup
    ```
 
-   Resume from Phase 1 when they say go.
+   If `bin/relay` is present but any `relay-*` skill is missing or stale, refresh them with the
+   **command**, not the skill — the missing one may *be* `/relay-update`, and the `Skill` tool
+   cannot resolve a name that is not installed:
+
+   ```bash
+   bin/relay update --json
+   ```
+
+   Report the `written` list. A skill file written mid-session is not discoverable until Claude
+   Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
+   and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
+
+   `relay.md` and `.relay/executor.json` are **not** part of that floor — they are not
+   Relay-owned served files, and authoring them for this repo is part of onboarding's own work
+   below.
 
 2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./bin/relay board` must
    succeed. If not, stop with the checklist: mint a board key at
@@ -103,7 +119,9 @@ is a repo-side job plus a gate adjustment, not "author a flow from nothing".
 
 Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
 
-- files to create or modify, each with its diff;
+- files to create or modify, each with its diff — including: if `relay.md` or
+  `.relay/executor.json` is missing, author it for this repo as part of the shown plan (both are
+  already inside this skill's declared blast radius; nothing else installs them);
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 
@@ -120,7 +138,11 @@ candidate from the `.claude/` inventory *with the evidence for it*, show the who
 once, and iterate until the human is happy. A node with no candidate has exactly two exits, the
 human's choice:
 
-- **author one** — follow the `writing-skills` skill and write the agent or skill; or
+- **author one** — write the file the node names: an agent is `.claude/agents/<name>.md` with
+  YAML frontmatter (`name`, `description`, optional `tools`) and a body that IS its system
+  prompt; a skill is `.claude/skills/<name>/SKILL.md` with `name` + `description` frontmatter and
+  the procedure in the body. Keep it to one job, and write the `description` so a reader can tell
+  when it applies — that string is the whole basis for choosing it. Or
 - **drop the node** — remove it from the flow and re-point its edges.
 
 Never auto-map. The user is the authority on their own factory.
@@ -169,5 +191,5 @@ Close with a summary: what changed, what the doctor now reports, and the remaini
 - **Running this from a flow node** — it is interactive by design.
 - **Touching app code or git** — the blast radius is `.claude/`, `relay.md`,
   `.relay/executor.json`, and flow documents.
-- **Adding a sibling file to this skill's directory** — the publish task copies `SKILL.md` only,
-  so a reference file would silently vanish from every scaffolded repo.
+- **Adding a sibling file to this skill's directory** — `Relay.Scaffold.items/0` names `SKILL.md`
+  only, so a reference file would silently vanish from every scaffolded repo.

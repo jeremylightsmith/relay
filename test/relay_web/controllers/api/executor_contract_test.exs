@@ -111,8 +111,14 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       |> post(~p"/api/talk/turns/#{talk_turn.id}/outcome", Jason.encode!(talk_outcome_request))
       |> json_response(200)
 
+    # RE304: /api/scaffold is app↔executor wire now (`bin/relay update` reads it), so it is
+    # pinned here like every other transport — a renamed key breaks CI instead of breaking a
+    # project's bootstrap. Captured off the real route, unauthenticated like the executor's own
+    # first call.
+    scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
+
     document = %{
-      "version" => 3,
+      "version" => 4,
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -149,7 +155,12 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       },
       "talk_claim" => %{"first_turn" => normalize(talk_job)},
       "talk_events" => %{"request" => normalize(talk_events_request), "response" => normalize(talk_events_response)},
-      "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)}
+      "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)},
+      "scaffold" => %{
+        "manifest_path" => "/api/scaffold",
+        "file_path_example" => "/api/scaffold/bin/relay",
+        "manifest" => scaffold_placeholders(scaffold_manifest)
+      }
     }
 
     assert_matches_fixture!(document)
@@ -233,9 +244,9 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     "resume_session" => "<session-id>",
     "session_id" => "<session-id>",
     "turn_id" => "<talk-turn-id>",
-    # RE185: the VALUE moves on every publish, but the contract is the key and its presence —
-    # a literal would make this fixture churn (and fail) every time `.relay/published.json`
-    # moves, which is not a transport change.
+    # RE185: the VALUE moves on every deploy that changes `bin/relay`, but the contract is the
+    # key and its presence — a literal would make this fixture churn (and fail) every time the
+    # served scaffold's `EXECUTOR_VERSION` moves, which is not a transport change.
     "latest_executor_version" => "<latest-executor-version>"
   }
 
@@ -251,6 +262,19 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   defp normalize(list) when is_list(list), do: Enum.map(list, &normalize/1)
   defp normalize(other), do: other
+
+  # The manifest's VALUES move whenever any served file changes; the contract is the key set
+  # and the item paths. Placeholdered here rather than through @placeholders because `version`
+  # is also a key on the executor dict, where the real integer IS the contract.
+  defp scaffold_placeholders(manifest) do
+    %{
+      "version" => "<scaffold-version>",
+      "items" =>
+        Enum.map(manifest["items"], fn item ->
+          %{"path" => item["path"], "sha256" => "<sha256>", "bytes" => "<bytes>"}
+        end)
+    }
+  end
 
   defp assert_matches_fixture!(document) do
     if System.get_env("RELAY_WRITE_CONTRACT_FIXTURE") == "1" do
