@@ -2316,8 +2316,12 @@ defmodule RelayWeb.BoardLive do
     {:noreply, select_drawer_tab(socket, String.to_existing_atom(tab))}
   end
 
-  # RE268 — the `t` shortcut (guarded against typing by TypingKeyGuard on the tabs nav).
-  def handle_event("talk_shortcut", %{"key" => "t"}, socket) do
+  # RE268/RE306 — the `t` shortcut (guarded against typing by TypingKeyGuard on the tabs nav).
+  # Params are deliberately ignored. LiveView has already filtered on `phx-key` before it pushes,
+  # and it matches case-INSENSITIVELY, so a second key check here buys nothing and made Shift+T
+  # (`%{"key" => "T"}`) a FunctionClauseError that killed the whole board LiveView. It also keeps
+  # the literal "t" defined once, in the HEEx, next to the guard that shares it.
+  def handle_event("talk_shortcut", _params, socket) do
     {:noreply, select_drawer_tab(socket, :talk)}
   end
 

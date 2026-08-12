@@ -64,6 +64,31 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert has_element?(view, ~s(#card-drawer-tabs[phx-hook="TypingKeyGuard"][data-guard-keys="t"]))
   end
 
+  # RE306 — LiveView matches `phx-key` case-insensitively
+  # (`deps/phoenix_live_view/assets/js/phoenix_live_view/live_socket.js`:
+  # `matchKey.toLowerCase() !== e.key.toLowerCase()`), so Shift+T pushes `talk_shortcut` with
+  # `%{"key" => "T"}`. A clause matching only `%{"key" => "t"}` turned that into a
+  # FunctionClauseError, which took the whole board LiveView down and remounted it mid-sentence.
+  test "a capital T reaches the same handler instead of crashing the board", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    render_keydown(view, "talk_shortcut", %{"key" => "T"})
+
+    refute has_element?(view, "#card-drawer-tab-panel-talk.hidden")
+    assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+  end
+
+  # The narrow clause is not replaced with a wider *pattern* but with no pattern at all: LiveView
+  # has already filtered on `phx-key` before it pushes, so re-checking the key here buys nothing
+  # and costs a crashable clause. Any key that somehow reaches the handler must be survivable.
+  test "a stray key push cannot crash the board", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    render_keydown(view, "talk_shortcut", %{"key" => "Enter"})
+
+    assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+  end
+
   # RE268 whole-branch review — in the artboard the TALK block is a sibling of the tab nav and
   # spans the whole 1040px body; the 224px properties rail lives inside the Detail branch. Built
   # as a padded child of `-main` with the rail beside it, the terminal rendered ~520px wide.
