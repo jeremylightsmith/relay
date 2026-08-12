@@ -488,8 +488,9 @@ silently billed to the paid API.
   longer collide on identity) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
   locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
-  `sha256(RELAY_URL + "\0" + name)` (machine-wide and checkout-independent, so two clones on
-  one host still collide), and a *namespace* lock at `<ROOT>/.claude/worktrees/.<namespace>.lock`
+  `sha256(RELAY_URL + "\0" + name)` (since `name` embeds the checkout directory, two clones on
+  one host now hash to different lock paths — RE305), and a *namespace* lock at
+  `<ROOT>/.claude/worktrees/.<namespace>.lock`
   — held for the life of the process by keeping their fds open. A second process for a
   colliding identity or a shared worktree namespace refuses to start (`relay: already
   running: …`, naming the holder's pid) rather than registering as the same executor. Because
@@ -497,8 +498,10 @@ silently billed to the paid API.
   (this is why a flock and not a pidfile). This is what makes the RLY-170 orphan recovery above
   sound: that recovery requeues a job the executor no longer reports running, which is only
   correct because a single identity can no longer be split across two live processes each
-  beating a partial `running` list. Two executors on one host are therefore unsupported;
-  multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
+  beating a partial `running` list. Two executors on one host **are** supported when they are
+  different checkouts — a distinct name gives a distinct identity lock, and a distinct `ROOT`
+  gives a distinct namespace lock; what remains unsupported is two executors sharing one
+  checkout and name.
 - `bin/relay update [--check] [--json]` — non-interactive, writes only the six
   Relay-owned files, needs no TTY and no board key.
 - **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
