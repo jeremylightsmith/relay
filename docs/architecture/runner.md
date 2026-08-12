@@ -457,7 +457,9 @@ Agent steps run headless Claude, which uses whatever authentication the local Cl
 metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
 silently billed to the paid API.
 
-- **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
+- **Config.** `.relay/executor.json` holds `name` (defaults to
+  `<checkout-dir>@<short-host>`, e.g. `relay@Jeremys-MBP`; override per invocation with
+  `relay execute --name foo`), `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
@@ -481,7 +483,9 @@ silently billed to the paid API.
   > How you do that depends on your project's toolchain (the prepare hook below is where a
   > project wires per-worktree isolation).
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
-  name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
+  name}` (the pair the server keys an `Executor` on, `name` defaulting to
+  `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
+  longer collide on identity) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
   locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
   `sha256(RELAY_URL + "\0" + name)` (machine-wide and checkout-independent, so two clones on

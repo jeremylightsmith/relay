@@ -68,8 +68,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 48
-EXECUTOR_FINGERPRINT = "4552d75897b0f855b352fe45055e92cb8cc668b7b188071428f6f2889bb67c00"
+EXECUTOR_VERSION = 49
+EXECUTOR_FINGERPRINT = "7b10df56d8caa8b0fe3498bfff64f7a2cd8be2830e960620eb4a1a3394a5834c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1115,11 +1115,36 @@ def cmd_attach(args):
 DEFAULT_BASE = "origin/main"
 
 
+def _name_part(s):
+    """One segment of an executor name, safe for a DOM id, a filename and a log line."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", s or "").strip("-")
+
+
+def default_executor_name():
+    """`<checkout-dir>@<short-host>` (RE305).
+
+    This value is the executor's identity BOTH on the board — the server upserts on
+    `conflict_target: [:board_id, :name]` — and in the local singleton lock, which hashes
+    `RELAY_URL + "\\0" + name`. So it has to differ between two checkouts of one project on
+    one machine: a bare hostname did not, which made the two clobber each other's roster
+    row and got the second `relay execute` refused by its own lock. The checkout DIRECTORY
+    is what differs between two clones, so it, and not the git remote, is the project part.
+
+    The host part is trimmed to its first dot-segment (`box.local` -> `box`); the full FQDN
+    still rides in `executor_ident()["host"]`, which the Runners page and `relay executors`
+    already show separately, so nothing is lost. Both parts are sanitized and have a
+    fallback, so a directory with spaces or an empty `gethostname()` can never produce a
+    blank or shell-hostile name."""
+    project = _name_part(os.path.basename(ROOT.rstrip(os.sep))) or "project"
+    host = _name_part(socket.gethostname().split(".")[0]) or "host"
+    return f"{project}@{host}"
+
+
 def load_executor_config():
     """Executor-local config from .relay/executor.json. Missing file → sensible defaults;
     capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
     defaults = {
-        "name": socket.gethostname(),
+        "name": default_executor_name(),
         "namespace": "exec",
         "capacity": {"shared_clean": 1, "exclusive": 1},
         "base": DEFAULT_BASE,
@@ -3242,6 +3267,14 @@ def cmd_execute(args):
     global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_executor_config()
+    if args.name is not None:
+        # BEFORE acquire_executor_locks (below): that call hashes cfg["name"] into the
+        # identity lock path, so overriding any later would lock under one name and
+        # advertise another (RE305). Taken VERBATIM — an explicit human choice is
+        # respected; only blank is refused.
+        if not args.name.strip():
+            die("--name must not be blank")
+        cfg["name"] = args.name.strip()
     update_state = check_update_handshake(new_auto_update_state())
     config_url = scaffold_base()
     poll_timeout = args.interval or cfg["poll_timeout"]
@@ -3805,6 +3838,9 @@ def build_parser():
     ex.add_argument("--once", action="store_true")
     ex.add_argument("--dry-run", action="store_true")
     ex.add_argument("--interval", type=int)
+    ex.add_argument("--name",
+                    help="this executor's name on the board "
+                         "(default: <checkout-dir>@<short-host>)")
     up = add("update", cmd_update, json_flag=True)
     up.add_argument("--check", action="store_true",
                     help="report what would change and write nothing")

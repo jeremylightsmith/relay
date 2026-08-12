@@ -933,6 +933,47 @@ class ApiAuthTest(unittest.TestCase):
         self.assertIn('"sha": "abc123"', buf.getvalue())
 
 
+class ExecutorNameTest(unittest.TestCase):
+    """RE305: the default executor name is `<checkout-dir>@<short-host>`.
+
+    That name is the executor's identity BOTH on the board (the server upserts on
+    `(board_id, name)`) and in the local singleton flock, so a bare hostname made two
+    checkouts of one project on one machine into one executor row — and got the second
+    `relay execute` refused outright by its own identity lock. The checkout DIRECTORY is
+    what differs between two clones, which is why it, and not the git remote, is the
+    project part."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        self.addCleanup(setattr, relay.socket, "gethostname", relay.socket.gethostname)
+
+    def _given(self, root, hostname):
+        relay.ROOT = root
+        relay.socket.gethostname = lambda: hostname
+
+    def test_default_is_checkout_dir_at_short_host(self):
+        self._given("/Users/j/src/relay", "Jeremys-MBP.local")
+        self.assertEqual(relay.default_executor_name(), "relay@Jeremys-MBP")
+
+    def test_two_checkouts_of_one_project_get_different_names(self):
+        self._given("/Users/j/src/relay", "box")
+        first = relay.default_executor_name()
+        self._given("/Users/j/src/relay-clean", "box")
+        self.assertNotEqual(first, relay.default_executor_name())
+
+    def test_a_trailing_separator_does_not_blank_the_project_part(self):
+        self._given("/Users/j/src/relay/", "box")
+        self.assertEqual(relay.default_executor_name(), "relay@box")
+
+    def test_unsafe_characters_are_sanitized(self):
+        self._given("/Users/j/my project (2)", "weird host!")
+        self.assertEqual(relay.default_executor_name(), "my-project-2@weird-host")
+
+    def test_empty_parts_fall_back_instead_of_producing_a_blank(self):
+        self._given("/", "")
+        self.assertEqual(relay.default_executor_name(), "project@host")
+
+
 class ExecutorConfigTest(unittest.TestCase):
     def setUp(self):
         self._path = relay.EXECUTOR_CONFIG_PATH
@@ -953,7 +994,20 @@ class ExecutorConfigTest(unittest.TestCase):
         self.assertEqual(cfg["capacity"], {"shared_clean": 1, "exclusive": 1})
         self.assertEqual(cfg["poll_timeout"], 25)
         self.assertEqual(cfg["heartbeat_interval"], 15)
-        self.assertTrue(cfg["name"])  # defaults to hostname
+        self.assertTrue(cfg["name"])  # defaults to <checkout-dir>@<short-host>
+
+    def test_default_name_is_the_checkout_dir_at_the_short_host(self):
+        """Asserted against the function, never a hardcoded string: this suite runs in
+        whatever directory the executor gave it (an exec worktree included)."""
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        self.assertEqual(relay.load_executor_config()["name"],
+                         relay.default_executor_name())
+
+    def test_an_explicit_name_in_the_config_still_wins(self):
+        self._write({"name": "chosen"})
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["name"], "chosen")
+        self.assertNotEqual(cfg["name"], relay.default_executor_name())
 
     def test_partial_capacity_merges_over_defaults(self):
         self._write({"capacity": {"shared_clean": 3}})
@@ -3375,7 +3429,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
         self.assertEqual(self.reports[0][3], "sha")
@@ -3385,7 +3439,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: self.reports.append(a)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports, [])   # nothing ran, no error raised
 
@@ -3394,7 +3448,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: calls.append(a)
         relay.report_outcome = lambda *a: calls.append(a)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
 
         self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
 
@@ -3408,7 +3462,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-9", "failed"))
 
@@ -3423,7 +3477,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
 
@@ -3440,7 +3494,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
             talk_reports.append((tid, status, sid)) or status)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(node_reports, [])                       # never the node-job route
         self.assertEqual(talk_reports, [(77, "failed", None)])
@@ -3457,7 +3511,7 @@ class ExecuteLoopTest(unittest.TestCase):
             talk_reports.append((tid, status)) or status)
         relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(talk_reports, [(78, "failed")])
 
@@ -3474,7 +3528,7 @@ class ExecuteLoopTest(unittest.TestCase):
             talk_reports.append(detail) or status)
         relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertNotIn("None", talk_reports[0])
         self.assertIn("talk", talk_reports[0])
@@ -3488,7 +3542,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(calls, [])
 
@@ -3518,7 +3572,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.addCleanup(watchdog.cancel)
         watchdog.start()
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(len(calls), 1)
         cfg, hb, state, config_url = calls[0]
@@ -3526,6 +3580,27 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertIsNotNone(hb)
         self.assertIsInstance(state, dict)
         self.assertTrue(config_url)
+
+    def test_name_override_reaches_both_the_wire_and_the_identity_lock(self):
+        """RE305: `--name` has to be applied BEFORE acquire_executor_locks — that call
+        hashes cfg["name"] into the identity lock path, so a later override would lock
+        under one name and advertise another."""
+        seen = {}
+        relay.claim_node_job = lambda executor, cap, timeout, running: (
+            seen.update(executor=executor) or None)
+        relay.report_outcome = lambda *a: "done"
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name="foobar"))
+
+        self.assertEqual(seen["executor"]["name"], "foobar")
+        with open(relay.identity_lock_path({"name": "foobar"}), encoding="utf-8") as f:
+            self.assertEqual(json.loads(f.read())["name"], "foobar")
+
+    def test_a_blank_name_is_refused(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                                 name="   "))
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
@@ -3568,7 +3643,7 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
         relay.claim_node_job = lambda *a, **k: talk_job
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         # while the talk job ran, the node job's own entries must have been untouched
         self.assertEqual(seen, {"node_job_id": "real-node-job", "run_id": "real-run"})
@@ -3641,7 +3716,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         threading.Timer(0.2, gate.set).start()   # let the job finish partway through
         self._interrupt_after(0.4)               # then stop the otherwise-endless loop
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(violations, [])   # never offered the boundary while the job ran
         self.assertTrue(idle_calls)        # but was, both before the claim and after it finished
@@ -3654,6 +3729,11 @@ class ExecuteParserTest(unittest.TestCase):
         self.assertTrue(args.once)
         self.assertTrue(args.dry_run)
         self.assertEqual(args.func, relay.cmd_execute)
+
+    def test_name_defaults_to_none_and_is_overridable(self):
+        self.assertIsNone(relay.build_parser().parse_args(["execute"]).name)
+        args = relay.build_parser().parse_args(["execute", "--name", "foobar"])
+        self.assertEqual(args.name, "foobar")
 
 
 class LegacyDispatcherRetiredTest(unittest.TestCase):
@@ -4086,7 +4166,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
                                                 or relay.outdated_refusal(9))
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         # poll_timeout is 0.01s over ~0.3s of running: without the flag this would be dozens.
         self.assertEqual(len(calls), 1)
@@ -4095,7 +4175,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         hb = FakeHeartbeat.instances[0]
         self.assertEqual(hb.capacity, {"shared_clean": 0, "exclusive": 0})
@@ -4107,7 +4187,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
     def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
         relay.claim_node_job = lambda *a, **k: None   # no work: just start, beat, idle
         self._interrupt_after(0.2)
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
         hb = FakeHeartbeat.instances[-1]
         self.assertTrue(callable(hb.bound_fn))
         self.assertTrue(callable(hb.on_release_run))
@@ -4119,7 +4199,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         outdated = [m for m, kind in self.logs if "OUTDATED" in m]
         self.assertEqual(len(outdated), 1, self.logs)   # once, not every poll
@@ -4148,7 +4228,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         threading.Timer(0.3, gate.set).start()
         self._interrupt_after(0.5)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
 
@@ -4156,7 +4236,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
 
         with self.assertRaises(SystemExit) as caught:
-            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(caught.exception.code, 1)
 
@@ -4164,7 +4244,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: None      # 204 / long-poll timeout
         self._interrupt_after(0.2)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual([m for m, _k in self.logs if "OUTDATED" in m], [])
         self.assertEqual(FakeHeartbeat.instances[0].capacity,
