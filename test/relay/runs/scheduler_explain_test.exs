@@ -142,23 +142,27 @@ defmodule Relay.Runs.SchedulerExplainTest do
     assert %{verdict: :run_active, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
   end
 
-  test "a parked :executor_gone run is awaiting_capacity" do
+  test "a parked :executor_gone run the planner cannot place is :resume_refused" do
     s =
       base(
         cards: [card(10, 2)],
         flows: [flow("code", 1, 2)],
         runs: [run(5, 10, status: :parked, parked_reason: :executor_gone)],
-        # zero capacity, not slots(1, 0): with a free slot advertised the run would actually
-        # resume on plan/1's next pass, making explain/2 correctly answer :dispatchable instead
-        # (see "a flow that would pull but zero advertised capacity is awaiting_capacity" above
-        # for the same zero-capacity pattern).
+        # zero capacity: with a free slot advertised the run would actually resume on plan/1's
+        # next pass, making explain/2 correctly answer :dispatchable instead.
         capacity: %{}
       )
 
-    assert %{verdict: :awaiting_capacity, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ "refusing to resume it on every tick"
+    assert detail =~ "no executor has a free slot"
+    assert evidence.run_id == 5
+    assert evidence.resume_refused_reason == :no_free_slot
+    assert evidence.isolation == :shared_clean
+    assert evidence.pinned_executor_id == nil
   end
 
-  test "a parked :executor_gone run pinned to a machine names that machine" do
+  test "a refused exclusive run still names the machine holding its worktree" do
     s =
       base(
         cards: [card(10, 2, status: :working)],
@@ -168,16 +172,20 @@ defmodule Relay.Runs.SchedulerExplainTest do
             status: :parked,
             parked_reason: :executor_gone,
             isolation: :exclusive,
+            pinned_executor_id: 42,
             pinned_executor_name: "exec-a"
           )
         ],
         capacity: %{}
       )
 
-    assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
     assert detail =~ ~s(executor "exec-a")
     assert detail =~ "exclusive affinity"
     assert evidence.pinned_executor_name == "exec-a"
+    assert evidence.pinned_executor_id == 42
+    assert evidence.isolation == :exclusive
+    assert evidence.resume_refused_reason == :pinned_executor_absent
   end
 
   test "a parked :needs_input run (already answered) is awaiting_listener_resume, not awaiting_capacity" do

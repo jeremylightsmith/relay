@@ -36,6 +36,25 @@ defmodule Schemas.Flow do
   def isolation_classes, do: Ecto.Enum.values(__MODULE__, :isolation)
 
   @doc """
+  The node a run of this flow begins at: the `to` of its single `"start"` edge.
+
+  The `"start"` sentinel is spelled in this module (see `validate_start_edges/1`, which makes
+  "exactly one edge leaves start" an invariant), so every consumer asks this function rather
+  than re-finding that edge — `Relay.Runs.start_run/3` for a fresh run, and retry's re-adoption
+  of a replaced flow (`Relay.Runs.retry_run/2`, RE297).
+
+  Returns `"done"` for a flow whose start edge goes straight to the done sentinel (an empty
+  flow), and `nil` for a struct with no start edge at all — a shape the changeset rejects, so
+  callers may treat both as "there is no first node".
+  """
+  def start_node(%__MODULE__{edges: edges}) do
+    case Enum.find(edges || [], &(&1.from == "start")) do
+      nil -> nil
+      edge -> edge.to
+    end
+  end
+
+  @doc """
   Validates a flow definition. `board_id` must already be set on the struct.
   Trigger-stage-belongs-to-board is validated in `Relay.Flows` — it needs
   the database, which the Schemas boundary (`deps: []`) can't reach.

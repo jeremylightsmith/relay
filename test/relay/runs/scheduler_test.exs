@@ -485,4 +485,92 @@ defmodule Relay.Runs.SchedulerTest do
       assert %Plan{dispatches: [], to_queue: [], to_unqueue: [10]} = Scheduler.plan(s)
     end
   end
+
+  # RE297 fixture: a parked `:executor_gone` run sitting in flow "f"'s works-in lane (stage 2)
+  # on an agent-held, non-blocked card — so `Policy.resumable?/2` says yes and the ONLY thing
+  # that can stop the resume is `take_slot/3`. That is exactly the shape a refusal reports.
+  defp refusal_snap(run_opts, capacity, opts \\ []) do
+    snap(
+      stages: [stage(1), stage(2, position: 2)],
+      cards: [card(20, 2, status: :working, active_owner: opts[:card_owner])],
+      flows: [flow("f", 1, 2, isolation: Keyword.get(opts, :isolation, :shared_clean))],
+      runs: [run(99, 20, run_opts)],
+      capacity: capacity
+    )
+  end
+
+  describe "resume refusals (RE297)" do
+    test "a run whose flow row is gone (isolation nil) is refused :no_isolation" do
+      s = refusal_snap([isolation: nil], cap([{7, slots(3, 1)}]))
+
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, card_id: 20, reason: :no_isolation}]} =
+               Scheduler.plan(s)
+    end
+
+    test "an exclusive run with no executor pin is refused :pin_unresolved" do
+      s =
+        refusal_snap(
+          [isolation: :exclusive, pinned_executor_id: nil],
+          cap([{7, slots(0, 1)}]),
+          isolation: :exclusive
+        )
+
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :pin_unresolved}]} = Scheduler.plan(s)
+    end
+
+    test "an exclusive run pinned to an executor absent from the capacity map is :pinned_executor_absent" do
+      s =
+        refusal_snap(
+          [isolation: :exclusive, pinned_executor_id: 5],
+          cap([{7, slots(0, 1)}]),
+          isolation: :exclusive
+        )
+
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :pinned_executor_absent}]} =
+               Scheduler.plan(s)
+    end
+
+    test "an exclusive run whose pinned executor is present but full is :no_free_slot, not absent" do
+      s =
+        refusal_snap(
+          [isolation: :exclusive, pinned_executor_id: 7],
+          cap([{7, slots(3, 0)}]),
+          isolation: :exclusive
+        )
+
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :no_free_slot}]} = Scheduler.plan(s)
+    end
+
+    test "an unpinned run whose class is simply full is refused :no_free_slot" do
+      s = refusal_snap([isolation: :shared_clean], cap([{7, slots(0, 1)}]))
+
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :no_free_slot}]} = Scheduler.plan(s)
+    end
+
+    test "a run the resume gate excludes is not a refusal (it is correctly excluded)" do
+      s = refusal_snap([isolation: :shared_clean, parked_reason: :needs_input], cap([]))
+
+      assert %Plan{dispatches: [], refusals: []} = Scheduler.plan(s)
+    end
+
+    test "a human-owned card's parked run is not a refusal" do
+      s = refusal_snap([isolation: :shared_clean], cap([]), card_owner: :human)
+
+      assert %Plan{dispatches: [], refusals: []} = Scheduler.plan(s)
+    end
+
+    test "a run that actually resumes produces no refusal" do
+      s = refusal_snap([isolation: :shared_clean], cap([{7, slots(1, 0)}]))
+
+      assert %Plan{dispatches: [{:resume, 99, 7}], refusals: []} = Scheduler.plan(s)
+    end
+
+    # Pins the sentence vocabulary to the schema's closed set: a reason added to
+    # `Schemas.Run.resume_refusal_reasons/0` with no sentence fails here, not in production.
+    test "every refusal reason has a human sentence" do
+      for reason <- Schemas.Run.resume_refusal_reasons() do
+        assert is_binary(Scheduler.resume_refusal_sentence(reason))
+      end
+    end
+  end
 end

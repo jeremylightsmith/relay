@@ -65,6 +65,23 @@ defmodule Relay.Runs.RestartTest do
         refute Runs.restartable?(Runs.get_run!(run.id)), "expected #{status} not restartable"
       end
     end
+
+    # RE297: an `:executor_gone` park is still not restartable IN PLACE — but it is no longer a
+    # dead end, because `abandon_unresumable_runs/1` fails it once the refusal outlives the
+    # grace window, and a `:failed` run is restartable by the first clause.
+    test "an executor_gone park is not restartable, but the run it ages into is", %{stage: stage} do
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Gone"})
+      run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: nil)
+
+      refute Runs.restartable?(Runs.get_run!(run.id))
+
+      {:ok, aged} =
+        run
+        |> Ecto.Changeset.change(status: :failed, parked_reason: nil, failure_detail: "unresumable")
+        |> Relay.Repo.update()
+
+      assert Runs.restartable?(aged)
+    end
   end
 
   describe "park_kind/1 — the one place park provenance is decided (RE253)" do

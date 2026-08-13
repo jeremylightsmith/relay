@@ -618,24 +618,21 @@ defmodule Relay.Runs.RunServer do
   #
   # Unlike bin/relay's flag() (which wraps the detail in "[auto] stage failed: …
   # a human needs to look" framing), this posts the bare detail.
+  #
+  # `apply_decision({:fail, _})` already closed the run in this transaction and the caller
+  # broadcasts, so only the card half runs here — via `Runs.mark_card_failed/2`, the same
+  # definition `Runs.fail_run/3` and the reaper use, so the two failure routes cannot drift on
+  # the detail a human ends up reading (RE297).
   defp card_fail_effects(run, execution) do
-    card = Repo.get!(Card, run.card_id)
-    detail = first_present([execution && execution.detail, run.failure_detail]) || "The agent's run failed."
-    {:ok, _card} = Relay.Cards.mark_failed(card, detail, :agent)
-    :ok
+    Runs.mark_card_failed(run, execution && execution.detail)
   end
 
-  # First non-blank string in `candidates`, or nil. "" is truthy in Elixir, so a
-  # naive `||` chain would post a blank Comment body and crash request_input's
-  # hard match — this is what makes the blank-detail fallback actually reachable.
-  defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
-
-  # Terminal path shared with the no-flow branches: close the run, leave the
-  # failure on the card, mark the card :failed, broadcast.
+  # Terminal path shared with the no-flow branches. `Runs.fail_run/3` owns the close + card
+  # mark + broadcast (RE297, one definition used by the engine and the reaper alike); the node's
+  # own output is what the card should show, so it is passed as the card detail — `reason` needs
+  # no mention, since `fail_run/3` stores it as `failure_detail` and falls back to it.
   defp fail_effects(run, execution, reason) do
-    run = Runs.close_run!(run, :failed, reason)
-    card_fail_effects(run, execution)
-    Runs.broadcast_runs(Runs.board_id_of(run), {:run_finished, run})
+    Runs.fail_run(run, reason, execution && execution.detail)
     :ok
   end
 end

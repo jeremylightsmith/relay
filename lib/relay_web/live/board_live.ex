@@ -633,7 +633,7 @@ defmodule RelayWeb.BoardLive do
           </div>
           <ul id="stalled-list" class="mt-4 divide-y divide-base-200">
             <li
-              :for={%{card: card, reason: reason} <- @stalled_cards}
+              :for={%{card: card, run: run, reason: reason} <- @stalled_cards}
               id={"stalled-row-#{card.id}"}
               class="flex items-center gap-3 py-2.5"
             >
@@ -652,6 +652,17 @@ defmodule RelayWeb.BoardLive do
                 </div>
                 <div class="text-xs text-base-content/55">
                   {drawer_stage_name(card.stage, @board.stages)} · {reason}
+                </div>
+                <%!-- RE297: `stall_reason/1` stays the headline (RE247 owns that copy); the
+                engine's own `failure_detail` rides UNDER it, so a run the scheduler gave up on
+                names its cause here and not only in the drawer. nil for an escalation park, and
+                clamped because a reaper detail is a full sentence or three. --%>
+                <div
+                  :if={run.failure_detail}
+                  id={"stalled-detail-#{card.id}"}
+                  class="mt-0.5 line-clamp-2 text-xs text-base-content/45"
+                >
+                  {run.failure_detail}
                 </div>
               </button>
               <button

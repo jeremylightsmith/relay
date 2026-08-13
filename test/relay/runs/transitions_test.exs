@@ -95,4 +95,8 @@ defmodule Relay.Runs.TransitionsTest do
       end
     end
   end
+
+  test "parked -> failed is legal (the scheduler giving up on an unresumable run, RE297)" do
+    assert Transitions.legal?(:parked, :failed)
+  end
 end

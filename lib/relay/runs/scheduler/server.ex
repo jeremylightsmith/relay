@@ -4,8 +4,11 @@ defmodule Relay.Runs.Scheduler.Server do
   `Relay.Runs.Scheduler.Snapshot` from the DB + `Relay.Runs.Capacity`, calls the
   pure `Relay.Runs.Scheduler.plan/1`, delegates each dispatch to the injected
   `Relay.Runs.Scheduler.Engine`, and applies the `ready ↔ queued` marking via
-  `Relay.Cards` (the only card writes the scheduler owns — it never writes
-  `Run` rows or moves cards into works-in).
+  `Relay.Cards` (the only card writes the scheduler owns — it never writes a `Run`'s
+  **status** or moves cards into works-in). It also hands `plan/1`'s `refusals` to
+  `Relay.Runs.record_resume_refusals/3` (RE297), which stamps the refusal clock on the run
+  rows — a fact, not a status, and owned by `Relay.Runs` exactly as dispatch is owned by the
+  engine and marking by `Relay.Cards`.
 
   Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
   capacity-changed topic, debouncing a burst into one reconcile, with a slow
@@ -89,6 +92,7 @@ defmodule Relay.Runs.Scheduler.Server do
     {snapshot, cards_by_id} = build_snapshot(state)
     plan = Scheduler.plan(snapshot)
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))
+    Relay.Runs.record_resume_refusals(state.board_id, plan.refusals)
     apply_marking(plan, cards_by_id)
     state
   end

@@ -34,6 +34,7 @@ defmodule Relay.Runs do
   alias Ecto.Changeset
   alias Relay.Activity
   alias Relay.Cards
+  alias Relay.Flows
   alias Relay.Repo
   alias Relay.Runs.Audit
   alias Relay.Runs.Capacity
@@ -454,7 +455,7 @@ defmodule Relay.Runs do
   # flow this run points at (matched by key within the card's board, exactly as the board
   # function matches), or [] when that flow row is gone.
   defp happy_path_for(%Card{board_id: board_id}, %Run{flow_key: flow_key}) do
-    case Relay.Flows.get_flow(%Board{id: board_id}, flow_key) do
+    case Flows.get_flow(%Board{id: board_id}, flow_key) do
       nil -> []
       flow -> happy_path(flow)
     end
@@ -693,12 +694,14 @@ defmodule Relay.Runs do
   """
   def start_run(%Card{board_id: board_id} = card, %Flow{board_id: board_id} = flow, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
-    start_target = Enum.find(flow.edges, &(&1.from == "start")).to
+    start_target = Flow.start_node(flow)
 
     cond do
       not flow.enabled -> {:error, :flow_disabled}
       Enum.any?(flow.nodes, &(&1.type not in Flow.Node.runnable_types())) -> {:error, :unsupported_node_type}
-      start_target == "done" -> {:error, :empty_flow}
+      # nil (no start edge at all) is a shape the changeset rejects, but it means the same thing
+      # here as `"done"` — no first node — and refusing beats inserting a run pointed at nothing.
+      start_target in [nil, "done"] -> {:error, :empty_flow}
       true -> do_start_run(card, flow, start_target, context)
     end
   end
@@ -1511,6 +1514,150 @@ defmodule Relay.Runs do
     Repo.all(from e in Executor, where: e.board_id == ^board_id)
   end
 
+  ## Resume refusals (RE297)
+
+  @doc """
+  Records the scheduler's refused resumes for `board_id` as facts on the run rows.
+
+  `refusals` is `Relay.Runs.Scheduler.Plan`'s `refusals` list — every run whose resume
+  `Policy.resumable?/2` allowed and `Scheduler.take_slot/3` could not place on this tick.
+
+  `resume_refused_since` is stamped **only when it is currently nil**, so the column measures a
+  CONTINUOUS refusal rather than the latest tick; a reason that changes mid-refusal updates the
+  reason and keeps the original `since`. Every OTHER active run on the board has both columns
+  cleared, so a run that resumed — or that stopped being refused for any other reason — never
+  carries a stale clock into `abandon_unresumable_runs/1`.
+
+  Steady state is a single SELECT that returns nothing: the values are already at their target,
+  so a quiet board writes no rows per tick. `now` is injectable for tests.
+  """
+  def record_resume_refusals(board_id, refusals, now \\ nil) do
+    now = now || now()
+    Enum.each(refusals, &stamp_refusal(&1, now))
+    clear_stale_refusals(board_id, Enum.map(refusals, & &1.run_id))
+    :ok
+  end
+
+  # Two guarded UPDATEs by primary key, each a no-op once the row already says this. Splitting
+  # them is what lets `since` be write-once while `reason` tracks the current cause. They run in
+  # one transaction so the pair is never half-written: a row carrying `since` with no `reason`
+  # is a stamp nothing can name, and `abandon_unresumable_runs/1` has to skip it.
+  defp stamp_refusal(%{run_id: run_id, reason: reason}, now) do
+    {:ok, :ok} =
+      Repo.transaction(fn ->
+        Repo.update_all(
+          from(r in Run, where: r.id == ^run_id and is_nil(r.resume_refused_since)),
+          set: [resume_refused_since: now]
+        )
+
+        Repo.update_all(
+          from(r in Run,
+            where: r.id == ^run_id,
+            where: is_nil(r.resume_refused_reason) or r.resume_refused_reason != ^reason
+          ),
+          set: [resume_refused_reason: reason]
+        )
+
+        :ok
+      end)
+
+    :ok
+  end
+
+  # Board-scoped, and only over runs that actually carry a stamp — so the common case (nothing
+  # is being refused) is one indexed SELECT returning zero rows and no UPDATE at all.
+  defp clear_stale_refusals(board_id, refused_ids) do
+    stamped =
+      Repo.all(
+        from r in Run,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^board_id,
+          where: r.status in ^Run.active_statuses(),
+          where: not is_nil(r.resume_refused_since) or not is_nil(r.resume_refused_reason),
+          select: r.id
+      )
+
+    case stamped -- refused_ids do
+      [] ->
+        :ok
+
+      ids ->
+        Repo.update_all(from(r in Run, where: r.id in ^ids),
+          set: [resume_refused_since: nil, resume_refused_reason: nil]
+        )
+
+        :ok
+    end
+  end
+
+  # How long a run may be CONTINUOUSLY refused a resume before the scheduler gives up on it.
+  # Deliberately long and strongly biased against false alarms: a genuinely long executor
+  # outage must never be escalated spuriously — 30 minutes of ACTIVE refusal is not an outage,
+  # it is a dead end. Sibling of @stopped_work_after_s and @executor_stale_floor_s.
+  @unresumable_after_s 1800
+
+  @doc "Seconds of continuous refusal after which a parked run is failed. The single home of the 30-minute policy."
+  def unresumable_after_s, do: @unresumable_after_s
+
+  @doc """
+  Fails every parked run whose resume has been refused for longer than `unresumable_after_s/0`
+  (RE297) — the clock `ExecutorReaper` applies to the facts `record_resume_refusals/3` wrote.
+  DB-only; no snapshot needed. `now` is injectable, as its reaper siblings are.
+
+  Landing on `:failed` is what makes the stall visible with no new UI: a `:failed` card is
+  skipped by `Policy.pullable?/1` and `resumable?/2`, is counted by the board's stalled badge
+  (`restartable_runs/1`), appears in the restart dialog, and gives `relay why` the `:run_failed`
+  verdict carrying the detail.
+
+  The pin is cleared **only** when the refusal reason proves it unhonourable
+  (`Schemas.Run.pin_unhonourable_refusal_reasons/0`) — otherwise the machine is alive and the
+  run's worktree really is still on it, so a retry must land back there.
+  """
+  def abandon_unresumable_runs(now \\ nil) do
+    now = now || now()
+    cutoff = DateTime.add(now, -unresumable_after_s(), :second)
+
+    runs =
+      Repo.all(
+        from r in Run,
+          where: r.status == :parked,
+          where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff,
+          # A stamp with no classified reason has nothing to name in its failure detail, and
+          # `Scheduler.resume_refusal_sentence/1` has no nil clause — sweeping it would raise
+          # inside `ExecutorReaper`'s tick. `clear_stale_refusals/2` collects the row instead.
+          where: not is_nil(r.resume_refused_reason)
+      )
+
+    Enum.each(runs, &abandon_unresumable_run(&1, now))
+    :ok
+  end
+
+  defp abandon_unresumable_run(%Run{} = run, now) do
+    detail = unresumable_detail(run, now)
+    # Idempotent: a park may have left a job behind, and it must not stay :claimed under a
+    # machine that is never coming back for it.
+    revoke_active_jobs(run)
+    run |> clear_unhonourable_pin() |> fail_run(detail)
+    :ok
+  end
+
+  defp clear_unhonourable_pin(%Run{resume_refused_reason: reason} = run) do
+    if reason in Run.pin_unhonourable_refusal_reasons(),
+      do: run |> Changeset.change(pinned_executor_name: nil) |> Repo.update!(),
+      else: run
+  end
+
+  # Names the cause in the shape a human can act on, in the same words `relay why` prints
+  # (`Scheduler.resume_refusal_sentence/1` is the one definition of that phrasing).
+  defp unresumable_detail(%Run{resume_refused_since: since, resume_refused_reason: reason}, now) do
+    minutes = div(DateTime.diff(now, since, :second), 60)
+
+    "The scheduler could not resume this run for #{minutes}m: " <>
+      "#{Scheduler.resume_refusal_sentence(reason)} (resume_refused_reason=#{reason}). " <>
+      "Retry it, or move the card back to re-run it on the current flow."
+  end
+
   ## Diagnosis (RLY-177)
 
   # A job that has sat queued or claimed this long with nothing alive behind it is
@@ -1634,7 +1781,23 @@ defmodule Relay.Runs do
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
     |> layer_pin_freshness(board, now)
+    |> layer_resume_refusal(run, now)
     |> override_verdict(run, last, job, board, now, capacity)
+  end
+
+  # `resume_refused_since` is a run COLUMN, so the pure snapshot cannot carry it — layered here
+  # exactly as current_node is (RE297). The age is what turns "refused" into "refused long
+  # enough that the reaper is about to give up on it".
+  defp layer_resume_refusal(base, run, now) do
+    since = run && run.resume_refused_since
+    base = put_evidence(base, :resume_refused_since, since)
+
+    if base.verdict == :resume_refused and since do
+      minutes = div(DateTime.diff(now, since, :second), 60)
+      %{base | detail: base.detail <> " It has been refused for #{minutes}m."}
+    else
+      base
+    end
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
@@ -2025,7 +2188,9 @@ defmodule Relay.Runs do
 
   @doc false
   def resume_run(%Run{} = run, opts \\ []) do
-    case Transitions.transition(run, [:parked], :running, set: [parked_reason: nil]) do
+    case Transitions.transition(run, [:parked], :running,
+           set: [parked_reason: nil, resume_refused_since: nil, resume_refused_reason: nil]
+         ) do
       {:ok, updated} ->
         broadcast_runs(board_id_of(updated), {:run_resumed, updated})
         {:ok, _pid} = ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)})
@@ -2053,6 +2218,10 @@ defmodule Relay.Runs do
   node in the flow; `"start"`/`"done"` are edge sentinels, not nodes, so they
   are refused like any unknown key.
 
+  RE297: a run whose flow ROW was deleted (the FK nilifies `flow_id`) re-adopts the flow that
+  works the card's current stage and re-enters at THAT flow's start node — see
+  `retry_flow/1`.
+
   Every cap the engine consults is raised by `retries` (see
   `Relay.Runs.Engine`), so a retry buys exactly one more move — never a reset.
 
@@ -2064,11 +2233,59 @@ defmodule Relay.Runs do
   def retry_run(%Run{} = run, opts \\ []) do
     with :ok <- check_retryable(run),
          :ok <- check_no_active_run(run),
-         {:ok, flow} <- load_flow(run),
-         {:ok, node, mode} <- resolve_retry_target(run, flow, Keyword.get(opts, :at)),
-         :ok <- check_retry_executor(run, flow) do
-      revive_run(run, node, mode, Keyword.get(opts, :actor, :agent))
+         {:ok, flow, origin} <- retry_flow(run),
+         {:ok, node, mode} <- resolve_retry_target(run, flow, origin, Keyword.get(opts, :at)),
+         {:ok, run} <- settle_retry_pin(run, flow, origin) do
+      revive_run(run, flow, node, mode, Keyword.get(opts, :actor, :agent))
     end
+  end
+
+  # The executor pin, decided against the flow this retry actually runs. Returns the run to
+  # revive — the same struct, or one whose pin has been released.
+  #
+  # For the run's OWN flow the pin is a hard guard (`check_retry_executor/2`): re-entry lands on
+  # the node that died, whose half-finished work is on the pinned machine's worktree, so reviving
+  # it anywhere else is worse than refusing.
+  #
+  # RE297: a RE-ADOPTED flow re-enters at that flow's START node instead, so there is no
+  # mid-flight node whose worktree must be preserved — and the old row's pin is the last link of
+  # the dead end. Honouring a pin to a machine that is provably not coming back would revive the
+  # run straight back into `pinned_executor_absent`, refused every tick until the reaper fails it
+  # again. So a re-adopted retry RELEASES a dead pin and lets the scheduler re-pin on the next
+  # claim, exactly as it would for a fresh `start_run/3`. A pin whose machine is alive is kept:
+  # the worktree really is still there.
+  defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :own) do
+    with :ok <- check_retry_executor(run, flow), do: {:ok, run}
+  end
+
+  defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :readopted) do
+    case check_retry_executor(run, flow) do
+      :ok -> {:ok, run}
+      {:error, {:executor_unavailable, _name}} -> {:ok, %{run | pinned_executor_name: nil}}
+    end
+  end
+
+  # Which flow the retry runs, and whether it is the run's OWN row or a re-adopted replacement.
+  #
+  # RE297: replacing a flow (disable, delete, recreate on the same trigger stages) nilifies
+  # `runs.flow_id` on every run of the old row, and `abandon_unresumable_runs/1` now fails such
+  # a run outright — so retry is the hatch a human reaches for on exactly the shape that used
+  # to dead-end. Refusing it `:no_flow` while the board plainly shows a flow working the stage
+  # that card sits in was that dead end's last link, so retry re-adopts that flow
+  # (`Flows.working_flow/1` — the same lookup rejection re-entry uses).
+  #
+  # `:no_flow` survives for the genuinely unresolvable case: no ENABLED flow works in the
+  # card's stage, so there is nothing to re-enter and `retry_refusal_message(:no_flow)` is the
+  # honest answer.
+  defp retry_flow(%Run{flow_id: nil} = run) do
+    case Flows.working_flow(Repo.get!(Card, run.card_id)) do
+      nil -> {:error, :no_flow}
+      flow -> {:ok, flow, :readopted}
+    end
+  end
+
+  defp retry_flow(%Run{} = run) do
+    with {:ok, flow} <- load_flow(run), do: {:ok, flow, :own}
   end
 
   defp check_retryable(%Run{} = run) do
@@ -2108,8 +2325,11 @@ defmodule Relay.Runs do
   Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
   rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
   for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
-  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park (RLY-199
-  auto-resumes those), and `:running`/`:done`/`:cancelled`.
+  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park, and
+  `:running`/`:done`/`:cancelled`. An `:executor_gone` park is not restartable-in-place because
+  the scheduler resumes it when the machine returns — and when it never can,
+  `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
+  (RE297). The older "RLY-199 auto-resumes those" rationale was wrong: nothing bounded the wait.
 
   The board-scoped consumers — the bulk sweep (`restart_stalled/2`), the board's stalled badge
   (`restartable_count/1`), and the restart dialog (`stalled_cards/1`) — all read this same rule
@@ -2149,21 +2369,31 @@ defmodule Relay.Runs do
     if active?, do: {:error, :active_run_exists}, else: :ok
   end
 
-  defp resolve_retry_target(run, flow, nil) do
+  defp resolve_retry_target(_run, flow, _origin, at) when is_binary(at) do
+    validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
+  end
+
+  # A RE-ADOPTED flow (RE297) is a different graph: the node this run died on need not exist in
+  # it, and this run's per-visit history there is meaningless. So re-enter at the replacement's
+  # START node on a fresh visit — the one node every flow is guaranteed to name. An empty flow
+  # (start edge straight to `"done"`) and a struct with no start edge both fall through
+  # `validate_node_in_flow/3` as `{:unknown_node, key}` rather than reviving a run pointed at a
+  # sentinel.
+  defp resolve_retry_target(_run, flow, :readopted, nil) do
+    validate_node_in_flow(Flow.start_node(flow), flow, {:reenter_new_visit, nil})
+  end
+
+  defp resolve_retry_target(run, flow, :own, nil) do
     case last_executed_node(run) do
       nil -> {:error, {:unknown_node, "(none)"}}
       node -> validate_node_in_flow(node, flow, {:reenter, nil})
     end
   end
 
-  defp resolve_retry_target(_run, flow, at) when is_binary(at) do
-    validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
-  end
-
   # `at` arrives straight off a JSON body, so it can be any term. Anything that
   # is not a node key is refused with the same closed vocabulary the endpoint
   # documents — never a raise, which `action_fallback` cannot turn into a 422.
-  defp resolve_retry_target(_run, _flow, at), do: {:error, {:unknown_node, inspect(at)}}
+  defp resolve_retry_target(_run, _flow, _origin, at), do: {:error, {:unknown_node, inspect(at)}}
 
   # Flow definitions are mutable in place (`Relay.Flows.update_flow/2`,
   # `save_definition/2`), so a node key that existed when this run failed can
@@ -2184,18 +2414,20 @@ defmodule Relay.Runs do
     Repo.one(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [desc: e.id], limit: 1, select: e.node_key)
   end
 
-  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server
-  # CAN check is whether the machine holding this run's worktree is still there. An
-  # exclusive run pinned to an absent executor would queue a job nothing can claim.
-  defp check_retry_executor(%Run{} = run, %Flow{isolation: :exclusive} = _flow) do
-    case Repo.one(from j in NodeJob, where: j.run_id == ^run.id, order_by: [desc: j.id], limit: 1) do
-      %NodeJob{state: state, executor_name: name} when state != :revoked and is_binary(name) ->
-        check_executor_live(run, name)
+  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server CAN check
+  # is whether the machine holding this run's worktree is still there. An exclusive run pinned
+  # to an absent executor would queue a job nothing can claim.
+  #
+  # RE297: affinity is the run's OWN `pinned_executor_name` column — written on claim
+  # (`maybe_pin_run/2`), kept through an `:executor_gone` park, cleared by a human baton and by
+  # `abandon_unresumable_runs/1` when the reason proves it unhonourable. Reading the last
+  # NodeJob's `executor_name` instead was a SECOND copy of that fact: after the reaper
+  # deliberately clears the pin, the dead machine's name still sits on the last job, and retry
+  # would stay refused exactly when the hatch must open.
+  defp check_retry_executor(%Run{pinned_executor_name: nil}, %Flow{isolation: :exclusive}), do: :ok
 
-      _unpinned ->
-        :ok
-    end
-  end
+  defp check_retry_executor(%Run{pinned_executor_name: name} = run, %Flow{isolation: :exclusive}),
+    do: check_executor_live(run, name)
 
   defp check_retry_executor(_run, _flow), do: :ok
 
@@ -2208,7 +2440,7 @@ defmodule Relay.Runs do
     end
   end
 
-  defp revive_run(run, node, mode, actor) do
+  defp revive_run(run, flow, node, mode, actor) do
     result =
       try do
         # From-state is the run's OWN current status, not a hardcoded :failed: `restartable?/1`
@@ -2218,11 +2450,21 @@ defmodule Relay.Runs do
         # edges, so guarding on the run's actual status covers either origin exactly.
         Transitions.transition(run, [run.status], :running,
           set: [
+            # Written unconditionally: identical to what is already there for the run's OWN
+            # flow, and the whole point of a re-adoption (`retry_flow/1`) — a revived run whose
+            # `flow_id` stayed nil would boot a RunServer that immediately fails `:no_flow`.
+            flow_id: flow.id,
+            flow_key: flow.key,
+            # Likewise unconditional: nil only when `settle_retry_pin/3` released a dead pin on a
+            # re-adoption, and a rewrite of the column's own value in every other case.
+            pinned_executor_name: run.pinned_executor_name,
             parked_reason: nil,
             current_node: node,
             failure_detail: nil,
             finished_at: nil,
-            retries: run.retries + 1
+            retries: run.retries + 1,
+            resume_refused_since: nil,
+            resume_refused_reason: nil
           ]
         )
       rescue
@@ -2621,23 +2863,71 @@ defmodule Relay.Runs do
 
   @doc false
   def close_run!(%Run{} = run, status, failure_detail) do
-    case Transitions.transition(run, [:running], status,
-           set: [
-             parked_reason: nil,
-             current_node: nil,
-             failure_detail: failure_detail,
-             finished_at: now()
-           ]
-         ) do
-      {:ok, updated} ->
-        updated
+    set = [
+      parked_reason: nil,
+      current_node: nil,
+      failure_detail: failure_detail,
+      finished_at: now(),
+      resume_refused_since: nil,
+      resume_refused_reason: nil
+    ]
 
-      # Defensively impossible (every caller holds a provably-:running run); the guarded
-      # UPDATE already logged the no-op, so return the row's current truth.
-      {:error, :not_in_expected_state} ->
-        Repo.get!(Run, run.id)
+    # The from-state is the run's OWN status (as `revive_run/4` already does), not a hardcoded
+    # `[:running]`: RE297 closes a :parked run through this same function, and both
+    # {:running, :failed|:done|:cancelled} and {:parked, :failed} are declared edges.
+    if Transitions.legal?(run.status, status) do
+      case Transitions.transition(run, [run.status], status, set: set) do
+        {:ok, updated} ->
+          updated
+
+        # The guarded UPDATE already logged the no-op; return the row's current truth.
+        {:error, :not_in_expected_state} ->
+          Repo.get!(Run, run.id)
+      end
+    else
+      # A concurrent close raced this run out of a status with an edge to `status`. The reaper
+      # re-reads every row it sweeps, so this is a race, not a caller bug — and a raise here
+      # would take the reaper's whole sweep down with it.
+      Repo.get!(Run, run.id)
     end
   end
+
+  @doc """
+  Close a run terminally, mark its card `:failed` with the detail a human reads, and broadcast
+  `{:run_finished, run}` (RE297). Extracted from `RunServer.fail_effects/3` so the engine's
+  no-flow paths and `abandon_unresumable_runs/1` cannot drift.
+
+  `card_detail` defaults to `failure_detail`; `RunServer` passes the failed node's own output
+  instead, so the card shows what the agent actually said rather than the engine's terse reason.
+
+  This is NOT the only route to a failed run: `RunServer`'s routed `{:fail, reason}` decision
+  closes the run inside `apply_outcome/3`'s transaction and broadcasts for itself, so calling
+  this from there would re-close and double-broadcast. What both routes DO share is
+  `mark_card_failed/2` — the card half, and the only half that could drift.
+  """
+  def fail_run(%Run{} = run, failure_detail, card_detail \\ nil) do
+    run = close_run!(run, :failed, failure_detail)
+    mark_card_failed(run, card_detail)
+    broadcast_runs(board_id_of(run), {:run_finished, run})
+    run
+  end
+
+  @doc """
+  The one definition of "mark this run's card failed" (RE297) — shared by `fail_run/3` and
+  `RunServer`'s routed failure branch, which closes its own run.
+
+  `card_detail` wins, then the run's own `failure_detail`, then a generic sentence. The
+  fallback is blank-aware rather than a `||` chain because `""` is truthy in Elixir: a naive
+  chain would post a blank Comment body and crash `Relay.Cards.request_input/3`'s hard match.
+  """
+  def mark_card_failed(%Run{} = run, card_detail) do
+    card = Repo.get!(Card, run.card_id)
+    detail = first_present([card_detail, run.failure_detail]) || "The agent's run failed."
+    {:ok, _card} = Cards.mark_failed(card, detail, :agent)
+    :ok
+  end
+
+  defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
 
   @doc false
   def revoke_active_jobs(%Run{id: run_id}) do
