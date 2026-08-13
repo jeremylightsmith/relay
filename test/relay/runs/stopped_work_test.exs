@@ -78,4 +78,59 @@ defmodule Relay.Runs.StoppedWorkTest do
 
     assert Runs.stopped_work(board) == nil
   end
+
+  # The verdict is polled on the Runners view's 10s tick, so the expensive half — the scheduler
+  # snapshot (a full card list + stage/flow/run/executor reads) — must sit BEHIND the age guard,
+  # not in front of it. Otherwise a busy board with anything queued pays for a snapshot every tick.
+  test "builds no scheduler snapshot while the oldest queued job is under the threshold", %{board: board, works: works} do
+    queued_job(works, 30)
+    insert(:executor, board: board, name: "old", version: 0)
+
+    {verdict, sources} = with_query_sources(fn -> Runs.stopped_work(board) end)
+
+    assert verdict == nil
+    # `executors` and `stages` are read only by `Scheduler.Server.build_snapshot/2`.
+    refute "executors" in sources
+    refute "stages" in sources
+  end
+
+  test "still builds the snapshot once the oldest queued job passes the threshold", %{board: board, works: works} do
+    queued_job(works, 600)
+    insert(:executor, board: board, name: "old", version: 0)
+
+    {verdict, sources} = with_query_sources(fn -> Runs.stopped_work(board) end)
+
+    assert %{reason: :executor_outdated} = verdict
+    assert "executors" in sources
+  end
+
+  # Ecto's repo telemetry runs in the process that issued the query, so filtering on the test pid
+  # keeps this safe under `async: true`.
+  defp with_query_sources(fun) do
+    parent = self()
+    handler_id = {__MODULE__, parent}
+
+    :telemetry.attach(
+      handler_id,
+      [:relay, :repo, :query],
+      fn _event, _measurements, meta, ^parent ->
+        if self() == parent, do: send(parent, {:query_source, meta[:source]})
+      end,
+      parent
+    )
+
+    try do
+      {fun.(), drain_sources([])}
+    after
+      :telemetry.detach(handler_id)
+    end
+  end
+
+  defp drain_sources(acc) do
+    receive do
+      {:query_source, source} -> drain_sources([source | acc])
+    after
+      0 -> acc
+    end
+  end
 end

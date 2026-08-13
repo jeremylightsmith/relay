@@ -8,6 +8,7 @@ defmodule Storybook.RunComponents do
   def entry("run_mini_graph"), do: [icon: {:fa, "chart-gantt", :thin}]
   def entry("run_node_timeline"), do: [icon: {:fa, "list-timeline", :thin}]
   def entry("run_state_banner"), do: [icon: {:fa, "flag", :thin}]
+  def entry("stopped_work_banner"), do: [icon: {:fa, "triangle-exclamation", :thin}]
   def entry("run_history"), do: [icon: {:fa, "clock-rotate-left", :thin}]
   def entry("run_status"), do: [icon: {:fa, "table-list", :thin}]
 end

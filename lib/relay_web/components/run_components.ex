@@ -647,6 +647,46 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
+  # ---------- stopped_work_banner ----------
+
+  @doc ~S"""
+  `Relay.Runs.stopped_work/2`'s board-level verdict as one line. ONE copy of the
+  reason→severity mapping — `:executor_outdated` is the warning tint (the machines are there and
+  beating, they are just being refused), every other reason is the error tint (nothing is going
+  to pick the work up at all) — so the board and the Runners view can never drift.
+
+  The copy is `verdict.detail`, which is already a complete sentence; never re-derive it. The
+  caller owns layout margins via `class` and the DOM `id`, since the same verdict renders on two
+  pages under two different ids.
+
+  Deliberately no `<.icon>`: this module imports no CoreComponents (see the moduledoc), and
+  `icon/1` is only ever `<span class={[@name, @class]} />`.
+  """
+  attr :id, :string, required: true
+  attr :verdict, :map, required: true
+  attr :class, :any, default: nil
+
+  def stopped_work_banner(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={["flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm", @class]}
+      style={stopped_work_style(@verdict.reason)}
+    >
+      <span class="hero-exclamation-triangle size-4" />
+      <span class="flex-1">{@verdict.detail}</span>
+    </div>
+    """
+  end
+
+  defp stopped_work_style(:executor_outdated),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+
+  defp stopped_work_style(_reason),
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));"
+
   attr :totals, :map, required: true
 
   defp failure_stats(assigns) do

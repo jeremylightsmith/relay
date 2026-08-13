@@ -337,6 +337,56 @@ defmodule RelayWeb.RunComponentsTest do
     end
   end
 
+  describe "stopped_work_banner/1" do
+    test "renders the verdict's own sentence, never a re-derived one" do
+      html =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "stopped-work-banner",
+          verdict: %{
+            reason: :no_executor,
+            detail: "No jobs claimed in 3m · no executor is connected to run this board's work."
+          }
+        )
+
+      assert html =~ ~s(id="stopped-work-banner")
+      # split around the apostrophe: HEEx escapes it to `&#39;` in the rendered output
+      assert html =~ "no executor is connected to run this board"
+      assert html =~ "work."
+      assert html =~ "hero-exclamation-triangle"
+    end
+
+    test "an outdated roster is the warning tint; everything else is the error tint" do
+      outdated =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "b1",
+          verdict: %{reason: :executor_outdated, detail: "running v0, requires v9."}
+        )
+
+      gone =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "b2",
+          verdict: %{reason: :executor_gone, detail: "no executor is connected."}
+        )
+
+      assert outdated =~ "var(--color-warning)"
+      refute outdated =~ "var(--color-error)"
+      assert gone =~ "var(--color-error)"
+      refute gone =~ "var(--color-warning)"
+    end
+
+    test "layout margins are the caller's, not the component's" do
+      html =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "b3",
+          class: "mx-4 mb-2 mt-2 sm:mx-5",
+          verdict: %{reason: :no_executor, detail: "nothing is running."}
+        )
+
+      assert html =~ "mx-4"
+      assert html =~ "sm:mx-5"
+    end
+  end
+
   describe "run_history/1" do
     test "prior runs collapse to DURATION · NODES · ATTEMPTS · COST" do
       html =

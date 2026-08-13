@@ -14,6 +14,20 @@ defmodule RelayWeb.BoardRunnersLive do
   version surface beyond the artboard; RLY-191 promotes it to a fourth freshness state) — filed
   back to the Design project as a follow-up, not blocking here.
 
+  RE307 adds a board-wide QUEUE section above the runner panels: every `queued` or `claimed`
+  node job on the board from `Relay.Runs.list_queue/2`, both kinds (`:node` and `:talk`),
+  claimed or not, in the order the server will hand them out. It renders on BOTH sides of the
+  `@runners == []` branch on purpose — the moment a human most needs to see six jobs stacked up
+  is the moment no runner is connected to work them. Like RLY-191's `OUTDATED` pill this is new
+  design ground (`docs/designs/Relay Runners.dc.html` has no queue section), built from the
+  artboard's existing vocabulary and filed back to the Design project as a follow-up, not
+  blocking here.
+
+  `Relay.Runs.stopped_work/2` on the 10s tick is deliberate and cheap: it returns `nil` after one
+  aggregate (`queued_jobs_summary/1`) whenever nothing is queued, and builds a scheduler snapshot
+  only once the oldest queued job has waited past the stopped-work threshold — i.e. exactly when
+  the answer can be non-nil. A board with work merely in flight pays one aggregate per tick.
+
   Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
   the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor
   holding the line's ref; unclaimed and ref-less lines are dropped — the board's log sheet
@@ -39,6 +53,7 @@ defmodule RelayWeb.BoardRunnersLive do
   alias Relay.AgentLog
   alias Relay.Boards
   alias Relay.Runs
+  alias RelayWeb.RunComponents
 
   @tick_every to_timeout(second: 10)
   @log_cap 30
@@ -71,13 +86,91 @@ defmodule RelayWeb.BoardRunnersLive do
         style="background:var(--color-base-200);min-height:calc(100vh - 74px);"
       >
         <div style="max-width:1120px;margin:0 auto;padding:30px 28px 72px 28px;">
+          <%!-- QUEUE (RE307) — the board's pending + in-flight work, deliberately ABOVE the
+                `@runners == []` branch so it renders whether or not a runner is connected.
+                No artboard governs this section (see moduledoc); it reuses the page's own
+                panel / row / pill vocabulary. --%>
+          <div id="queue-section" style={queue_panel_style()}>
+            <div style="display:flex;flex-direction:column;gap:8px;padding:15px 18px;">
+              <span
+                id="queue-label"
+                class="font-mono"
+                style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+              >
+                QUEUE · {length(@queue)}
+              </span>
+              <RunComponents.stopped_work_banner
+                :if={@stopped_work}
+                id="queue-diagnosis"
+                verdict={@stopped_work}
+              />
+              <%!-- Rows wear the artboard's job-row frame (`job_row_style/1`'s neutral `:fresh`
+                    face — a board-wide queue has no runner freshness of its own); queued vs
+                    claimed is carried by the dot and the pill. --%>
+              <div :for={row <- @queue} id={"queue-job-#{row.job_id}"} style={job_row_style(:fresh)}>
+                <span style={queue_dot_style(row.state)}></span>
+                <span
+                  class={["badge badge-sm font-mono font-bold", queue_pill_class(row.state)]}
+                  style="font-size:9.5px;letter-spacing:0.06em;"
+                >
+                  {queue_pill_label(row.state)}
+                </span>
+                <span class="font-mono" style={chip_style()}>{kind_label(row.kind)}</span>
+                <.link
+                  navigate={~p"/board/#{@board.slug}?card=#{row.ref}"}
+                  class="font-mono"
+                  style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+                >
+                  {row.ref}
+                </.link>
+                <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  {row.title}
+                </span>
+                <span class="font-mono" style={chip_style()}>{row.node_key}</span>
+                <span
+                  :if={row.flow_key}
+                  id={"queue-job-#{row.job_id}-flow"}
+                  class="font-mono"
+                  style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                >
+                  {row.flow_key}
+                </span>
+                <span
+                  class="font-mono"
+                  style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                >
+                  {row.isolation || "—"}
+                </span>
+                <span
+                  class="font-mono"
+                  style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                >
+                  {elapsed_label(row.age_s)}
+                </span>
+                <span
+                  :if={row.state == :claimed}
+                  class="font-mono"
+                  style="font-size:11px;white-space:nowrap;color:color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-content));"
+                >
+                  → {row.executor_name}
+                </span>
+              </div>
+              <div
+                :if={@queue == []}
+                id="queue-empty"
+                style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+              >
+                Nothing queued or running.
+              </div>
+            </div>
+          </div>
           <%= if @runners == [] do %>
             <%!-- Empty state — artboard lines ~139-157; command is bin/relay execute on
                  purpose (spec §6: npx relay-runner doesn't exist yet; RLY-139 retired the
                  legacy bin/relay watch board-runner this used to name). --%>
             <div
               id="runners-empty"
-              style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62vh;text-align:center;"
+              style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:auto;padding:32px 0;text-align:center;"
             >
               <div style="width:56px;height:56px;border-radius:16px;background:var(--color-field-hover);border:1px solid var(--color-base-300);display:flex;align-items:center;justify-content:center;margin-bottom:20px;position:relative;">
                 <div style="width:20px;height:20px;border-radius:50%;border:2px dashed color-mix(in oklab, var(--color-base-content) 40%, var(--color-base-100));">
@@ -299,10 +392,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;">
                           {job.title}
                         </span>
-                        <span
-                          class="font-mono"
-                          style="font-size:9.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border-radius:4px;padding:2px 6px;white-space:nowrap;"
-                        >
+                        <span class="font-mono" style={chip_style()}>
                           {job.node_key}
                         </span>
                         <span
@@ -421,12 +511,14 @@ defmodule RelayWeb.BoardRunnersLive do
   end
 
   # Re-derives everything time- and roster-dependent in one place: the executor list
-  # (freshness-augmented by the context), the summary counts, the ref → executor routing
-  # map, and drops log buffers for executors that fell off the roster. Two queries; a board
-  # has a handful of executors, not thousands.
+  # (freshness-augmented by the context), the board-wide queue and its stopped-work verdict, the
+  # summary counts, the ref → executor routing map, and drops log buffers for executors that fell
+  # off the roster. One `now` for the whole pass, so the roster and the queue can never disagree
+  # about the clock.
   defp assign_runners(socket) do
     now = DateTime.utc_now()
-    runners = Runs.list_executor_status(socket.assigns.board, now)
+    board = socket.assigns.board
+    runners = Runs.list_executor_status(board, now)
 
     counts = Enum.frequencies_by(runners, & &1.display_state)
     names = Enum.map(runners, & &1.name)
@@ -434,6 +526,8 @@ defmodule RelayWeb.BoardRunnersLive do
     socket
     |> assign(:now, now)
     |> assign(:runners, runners)
+    |> assign(:queue, Runs.list_queue(board, now))
+    |> assign(:stopped_work, Runs.stopped_work(board, now))
     |> assign(:summary, %{
       fresh: counts[:fresh] || 0,
       stale: counts[:stale] || 0,
@@ -465,6 +559,10 @@ defmodule RelayWeb.BoardRunnersLive do
     "background:var(--color-base-100);border:1px solid #{border};border-radius:13px;overflow:hidden;" <>
       "box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
   end
+
+  # The queue borrows the artboard's runner-panel frame (13px radius, base-300 border);
+  # `:fresh` IS that neutral treatment — a board-wide queue has no freshness of its own.
+  defp queue_panel_style, do: panel_style(:fresh) <> "margin-bottom:20px;"
 
   defp fresh_color(:fresh), do: @green
   defp fresh_color(:stale), do: @amber
@@ -563,6 +661,34 @@ defmodule RelayWeb.BoardRunnersLive do
   defp job_dot_style(:fresh), do: "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{@violet};"
   defp job_dot_style(_freshness), do: "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{@rose};"
 
+  # CLAIMED is violet: an AI is working it, which is exactly what violet means in this palette.
+  # QUEUED is neutral and deliberately NOT amber — amber is Blocked, and a job queued for two
+  # seconds on a healthy board is not blocked. The amber/error signal belongs to the diagnosis
+  # banner, which fires only once work has genuinely stopped.
+  defp queue_dot_style(:claimed), do: "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{@violet};"
+
+  defp queue_dot_style(_queued),
+    do:
+      "width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:color-mix(in oklab, var(--color-base-content) 35%, var(--color-base-200));"
+
+  defp queue_pill_class(:claimed), do: "badge-secondary"
+  defp queue_pill_class(_queued), do: "badge-ghost"
+
+  defp queue_pill_label(:claimed), do: "CLAIMED"
+  defp queue_pill_label(_queued), do: "QUEUED"
+
+  # Every row is tagged with its dispatcher (ADR 0009). A TALK row carries no flow key and no
+  # isolation class, so without the tag it reads as a broken NODE row rather than a talk turn.
+  defp kind_label(:talk), do: "TALK"
+  defp kind_label(_node), do: "NODE"
+
+  # The artboard's small mono chip — the node-key treatment on a job row (line ~104), shared by
+  # the working-now rows and the queue rows so there is one chip, not two.
+  defp chip_style do
+    "font-size:9.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);" <>
+      "background:var(--color-field-hover);border-radius:4px;padding:2px 6px;white-space:nowrap;"
+  end
+
   # The log tail is a fixed-dark "terminal" treatment (background var(--color-neutral) in
   # both themes) — the fresh dot and streaming cursor use a brightened success mix so they
   # still read against that dark band rather than the plain (darker) success token.
@@ -588,10 +714,9 @@ defmodule RelayWeb.BoardRunnersLive do
   end
 
   defp elapsed_label(nil, _now), do: "—"
+  defp elapsed_label(started_at, now), do: elapsed_label(max(DateTime.diff(now, started_at), 0))
 
-  defp elapsed_label(started_at, now) do
-    seconds = max(DateTime.diff(now, started_at), 0)
-
+  defp elapsed_label(seconds) when is_integer(seconds) do
     if seconds >= 3600 do
       "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
     else

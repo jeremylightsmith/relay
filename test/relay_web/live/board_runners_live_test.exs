@@ -9,6 +9,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
   setup :register_and_log_in_user
 
   setup %{user: user} do
+    start_capacity!()
     board = Boards.get_or_create_default_board(user)
 
     # Reuse one of the board's OWN stages rather than inserting another. The default board
@@ -34,6 +35,26 @@ defmodule RelayWeb.BoardRunnersLiveTest do
         node_execution: ne,
         executor_name: executor_name,
         state: opts[:state] || :claimed,
+        payload: %{"isolation" => opts[:isolation] || "shared_clean"}
+      )
+
+    %{card: card, job: job}
+  end
+
+  # A queued, unclaimed job on this board, inserted `age_s` ago.
+  defp queued_job(stage, opts \\ []) do
+    at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -(opts[:age_s] || 0), :second)
+    card = insert(:card, stage: stage, title: opts[:title] || "Ship the thing")
+    run = insert(:run, card: card, flow_key: "code")
+    ne = insert(:node_execution, run: run, node_key: opts[:node_key] || "implement", inserted_at: at)
+
+    job =
+      insert(:node_job,
+        node_execution: ne,
+        state: :queued,
+        executor_name: nil,
+        claimed_at: nil,
+        inserted_at: at,
         payload: %{"isolation" => opts[:isolation] || "shared_clean"}
       )
 
@@ -294,6 +315,96 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       assert has_element?(view, "#runner-old-version", "requires v#{Relay.Runs.min_executor_version()}")
       # header summary gains an N outdated chip
       assert has_element?(view, "#summary-outdated")
+    end
+  end
+
+  describe "the QUEUE section (RE307)" do
+    test "a job nobody has claimed renders with a QUEUED pill and a NODE tag",
+         %{conn: conn, board: board, stage: stage} do
+      %{card: card, job: job} = queued_job(stage, node_key: "write_plan")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-job-#{job.id}", ref(board, card))
+      assert has_element?(view, "#queue-job-#{job.id}", "write_plan")
+      assert has_element?(view, "#queue-job-#{job.id} .badge-ghost", "QUEUED")
+      assert has_element?(view, "#queue-job-#{job.id}", "NODE")
+      assert has_element?(view, "#queue-job-#{job.id}", "shared_clean")
+      assert has_element?(view, "#queue-label", "QUEUE · 1")
+
+      assert has_element?(
+               view,
+               ~s|#queue-job-#{job.id} a[href="/board/#{board.slug}?card=#{ref(board, card)}"]|
+             )
+    end
+
+    test "the queue renders alongside the no-runners empty state, not instead of it",
+         %{conn: conn, board: board, stage: stage} do
+      %{job: job} = queued_job(stage)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # Both on screen at once — this is the case the page used to handle worst.
+      assert has_element?(view, "#runners-empty", "No runners connected")
+      assert has_element?(view, "#queue-job-#{job.id}")
+      # ...and the empty state no longer reserves 62vh, which would push the queue off-screen.
+      refute render(element(view, "#runners-empty")) =~ "62vh"
+    end
+
+    test "a claimed job names the runner holding it, in violet",
+         %{conn: conn, board: board, stage: stage} do
+      executor(board, "mac-mini")
+      %{job: job} = active_job(stage, "mac-mini")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      row = render(element(view, "#queue-job-#{job.id}"))
+      assert row =~ "CLAIMED"
+      assert row =~ "badge-secondary"
+      assert row =~ "mac-mini"
+    end
+
+    test "a queued talk turn is tagged TALK with no flow key and a dash isolation",
+         %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage, title: "Talk to me")
+      job = Relay.Runs.insert_talk_job!(card, %{"turn_id" => 1}, nil)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      row = render(element(view, "#queue-job-#{job.id}"))
+      assert row =~ "TALK"
+      # no isolation class → the dash placeholder, and no flow-key chip at all
+      assert row =~ "—"
+      refute has_element?(view, "#queue-job-#{job.id}-flow")
+    end
+
+    test "an idle board says nothing is queued", %{conn: conn, board: board} do
+      executor(board, "mac-mini")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-empty", "Nothing queued or running.")
+      assert has_element?(view, "#queue-label", "QUEUE · 0")
+    end
+
+    test "the stopped-work verdict renders above the rows when work has stopped",
+         %{conn: conn, board: board, stage: stage} do
+      # Queued 10 minutes with an empty roster: `stopped_work/1` returns :no_executor.
+      queued_job(stage, age_s: 600)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-diagnosis", "no executor is connected to run this board's work")
+    end
+
+    test "no diagnosis line on a board whose queue is merely young",
+         %{conn: conn, board: board, stage: stage} do
+      queued_job(stage, age_s: 5)
+      executor(board, "mac-mini", version: Relay.Runs.min_executor_version())
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#queue-diagnosis")
     end
   end
 end
