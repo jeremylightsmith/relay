@@ -34,6 +34,7 @@ defmodule Relay.Runs do
   alias Ecto.Changeset
   alias Relay.Activity
   alias Relay.Cards
+  alias Relay.Flows
   alias Relay.Repo
   alias Relay.Runs.Audit
   alias Relay.Runs.Capacity
@@ -454,7 +455,7 @@ defmodule Relay.Runs do
   # flow this run points at (matched by key within the card's board, exactly as the board
   # function matches), or [] when that flow row is gone.
   defp happy_path_for(%Card{board_id: board_id}, %Run{flow_key: flow_key}) do
-    case Relay.Flows.get_flow(%Board{id: board_id}, flow_key) do
+    case Flows.get_flow(%Board{id: board_id}, flow_key) do
       nil -> []
       flow -> happy_path(flow)
     end
@@ -693,12 +694,14 @@ defmodule Relay.Runs do
   """
   def start_run(%Card{board_id: board_id} = card, %Flow{board_id: board_id} = flow, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
-    start_target = Enum.find(flow.edges, &(&1.from == "start")).to
+    start_target = Flow.start_node(flow)
 
     cond do
       not flow.enabled -> {:error, :flow_disabled}
       Enum.any?(flow.nodes, &(&1.type not in Flow.Node.runnable_types())) -> {:error, :unsupported_node_type}
-      start_target == "done" -> {:error, :empty_flow}
+      # nil (no start edge at all) is a shape the changeset rejects, but it means the same thing
+      # here as `"done"` — no first node — and refusing beats inserting a run pointed at nothing.
+      start_target in [nil, "done"] -> {:error, :empty_flow}
       true -> do_start_run(card, flow, start_target, context)
     end
   end
@@ -2215,6 +2218,10 @@ defmodule Relay.Runs do
   node in the flow; `"start"`/`"done"` are edge sentinels, not nodes, so they
   are refused like any unknown key.
 
+  RE297: a run whose flow ROW was deleted (the FK nilifies `flow_id`) re-adopts the flow that
+  works the card's current stage and re-enters at THAT flow's start node — see
+  `retry_flow/1`.
+
   Every cap the engine consults is raised by `retries` (see
   `Relay.Runs.Engine`), so a retry buys exactly one more move — never a reset.
 
@@ -2226,11 +2233,59 @@ defmodule Relay.Runs do
   def retry_run(%Run{} = run, opts \\ []) do
     with :ok <- check_retryable(run),
          :ok <- check_no_active_run(run),
-         {:ok, flow} <- load_flow(run),
-         {:ok, node, mode} <- resolve_retry_target(run, flow, Keyword.get(opts, :at)),
-         :ok <- check_retry_executor(run, flow) do
-      revive_run(run, node, mode, Keyword.get(opts, :actor, :agent))
+         {:ok, flow, origin} <- retry_flow(run),
+         {:ok, node, mode} <- resolve_retry_target(run, flow, origin, Keyword.get(opts, :at)),
+         {:ok, run} <- settle_retry_pin(run, flow, origin) do
+      revive_run(run, flow, node, mode, Keyword.get(opts, :actor, :agent))
     end
+  end
+
+  # The executor pin, decided against the flow this retry actually runs. Returns the run to
+  # revive — the same struct, or one whose pin has been released.
+  #
+  # For the run's OWN flow the pin is a hard guard (`check_retry_executor/2`): re-entry lands on
+  # the node that died, whose half-finished work is on the pinned machine's worktree, so reviving
+  # it anywhere else is worse than refusing.
+  #
+  # RE297: a RE-ADOPTED flow re-enters at that flow's START node instead, so there is no
+  # mid-flight node whose worktree must be preserved — and the old row's pin is the last link of
+  # the dead end. Honouring a pin to a machine that is provably not coming back would revive the
+  # run straight back into `pinned_executor_absent`, refused every tick until the reaper fails it
+  # again. So a re-adopted retry RELEASES a dead pin and lets the scheduler re-pin on the next
+  # claim, exactly as it would for a fresh `start_run/3`. A pin whose machine is alive is kept:
+  # the worktree really is still there.
+  defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :own) do
+    with :ok <- check_retry_executor(run, flow), do: {:ok, run}
+  end
+
+  defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :readopted) do
+    case check_retry_executor(run, flow) do
+      :ok -> {:ok, run}
+      {:error, {:executor_unavailable, _name}} -> {:ok, %{run | pinned_executor_name: nil}}
+    end
+  end
+
+  # Which flow the retry runs, and whether it is the run's OWN row or a re-adopted replacement.
+  #
+  # RE297: replacing a flow (disable, delete, recreate on the same trigger stages) nilifies
+  # `runs.flow_id` on every run of the old row, and `abandon_unresumable_runs/1` now fails such
+  # a run outright — so retry is the hatch a human reaches for on exactly the shape that used
+  # to dead-end. Refusing it `:no_flow` while the board plainly shows a flow working the stage
+  # that card sits in was that dead end's last link, so retry re-adopts that flow
+  # (`Flows.working_flow/1` — the same lookup rejection re-entry uses).
+  #
+  # `:no_flow` survives for the genuinely unresolvable case: no ENABLED flow works in the
+  # card's stage, so there is nothing to re-enter and `retry_refusal_message(:no_flow)` is the
+  # honest answer.
+  defp retry_flow(%Run{flow_id: nil} = run) do
+    case Flows.working_flow(Repo.get!(Card, run.card_id)) do
+      nil -> {:error, :no_flow}
+      flow -> {:ok, flow, :readopted}
+    end
+  end
+
+  defp retry_flow(%Run{} = run) do
+    with {:ok, flow} <- load_flow(run), do: {:ok, flow, :own}
   end
 
   defp check_retryable(%Run{} = run) do
@@ -2314,21 +2369,31 @@ defmodule Relay.Runs do
     if active?, do: {:error, :active_run_exists}, else: :ok
   end
 
-  defp resolve_retry_target(run, flow, nil) do
+  defp resolve_retry_target(_run, flow, _origin, at) when is_binary(at) do
+    validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
+  end
+
+  # A RE-ADOPTED flow (RE297) is a different graph: the node this run died on need not exist in
+  # it, and this run's per-visit history there is meaningless. So re-enter at the replacement's
+  # START node on a fresh visit — the one node every flow is guaranteed to name. An empty flow
+  # (start edge straight to `"done"`) and a struct with no start edge both fall through
+  # `validate_node_in_flow/3` as `{:unknown_node, key}` rather than reviving a run pointed at a
+  # sentinel.
+  defp resolve_retry_target(_run, flow, :readopted, nil) do
+    validate_node_in_flow(Flow.start_node(flow), flow, {:reenter_new_visit, nil})
+  end
+
+  defp resolve_retry_target(run, flow, :own, nil) do
     case last_executed_node(run) do
       nil -> {:error, {:unknown_node, "(none)"}}
       node -> validate_node_in_flow(node, flow, {:reenter, nil})
     end
   end
 
-  defp resolve_retry_target(_run, flow, at) when is_binary(at) do
-    validate_node_in_flow(at, flow, {:reenter_new_visit, nil})
-  end
-
   # `at` arrives straight off a JSON body, so it can be any term. Anything that
   # is not a node key is refused with the same closed vocabulary the endpoint
   # documents — never a raise, which `action_fallback` cannot turn into a 422.
-  defp resolve_retry_target(_run, _flow, at), do: {:error, {:unknown_node, inspect(at)}}
+  defp resolve_retry_target(_run, _flow, _origin, at), do: {:error, {:unknown_node, inspect(at)}}
 
   # Flow definitions are mutable in place (`Relay.Flows.update_flow/2`,
   # `save_definition/2`), so a node key that existed when this run failed can
@@ -2375,7 +2440,7 @@ defmodule Relay.Runs do
     end
   end
 
-  defp revive_run(run, node, mode, actor) do
+  defp revive_run(run, flow, node, mode, actor) do
     result =
       try do
         # From-state is the run's OWN current status, not a hardcoded :failed: `restartable?/1`
@@ -2385,6 +2450,14 @@ defmodule Relay.Runs do
         # edges, so guarding on the run's actual status covers either origin exactly.
         Transitions.transition(run, [run.status], :running,
           set: [
+            # Written unconditionally: identical to what is already there for the run's OWN
+            # flow, and the whole point of a re-adoption (`retry_flow/1`) — a revived run whose
+            # `flow_id` stayed nil would boot a RunServer that immediately fails `:no_flow`.
+            flow_id: flow.id,
+            flow_key: flow.key,
+            # Likewise unconditional: nil only when `settle_retry_pin/3` released a dead pin on a
+            # re-adoption, and a rewrite of the column's own value in every other case.
+            pinned_executor_name: run.pinned_executor_name,
             parked_reason: nil,
             current_node: node,
             failure_detail: nil,

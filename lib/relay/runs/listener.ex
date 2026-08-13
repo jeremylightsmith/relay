@@ -40,7 +40,6 @@ defmodule Relay.Runs.Listener do
   alias Relay.Runs
   alias Relay.Runs.Policy
   alias Schemas.Card
-  alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.Run
 
@@ -164,13 +163,7 @@ defmodule Relay.Runs.Listener do
   defp maybe_reenter_after_rejection(%Card{rejection: nil}), do: :ok
 
   defp maybe_reenter_after_rejection(%Card{status: :ready} = card) do
-    flow =
-      Repo.one(
-        from f in Flow,
-          where: f.board_id == ^card.board_id and f.works_in_stage_id == ^card.stage_id and f.enabled,
-          order_by: f.key,
-          limit: 1
-      )
+    flow = Relay.Flows.working_flow(card)
 
     if flow && Relay.Cards.active_owner_type(card) == :ai do
       _result = Runs.start_run(card, flow, context: %{"changes_requested" => card.rejection.note})

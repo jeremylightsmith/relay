@@ -103,6 +103,46 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
     %{card: card, run: run}
   end
 
+  # A run the reaper gave up on (`abandon_unresumable_runs/1`, RE297): terminally `:failed`,
+  # `flow_id` nil because the flow row it pointed at was deleted, and the engine's own sentence
+  # on `failure_detail` — the one state whose cause lives nowhere but that column.
+  defp abandoned_card(board, detail) do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    card = insert(:card, stage: spec, title: "Unresumable")
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        flow_id: nil,
+        failure_detail: detail
+      )
+
+    insert(:node_execution, run: run, node_key: "brainstorm", outcome: :failed)
+    %{card: card, run: run}
+  end
+
+  test "a stalled row carries the run's failure detail under the reason", ctx do
+    escalated = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    abandoned =
+      abandoned_card(
+        ctx.board,
+        "The scheduler could not resume this run for 31m (resume_refused_reason=no_isolation)."
+      )
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-detail-#{abandoned.card.id}", "resume_refused_reason=no_isolation")
+    # The RE247 headline still owns the first line: the detail is added under it, not swapped in.
+    assert has_element?(view, "#stalled-row-#{abandoned.card.id}", "Failed at brainstorm")
+    # An escalation park has no `failure_detail`, and renders no empty element for one.
+    refute has_element?(view, "#stalled-detail-#{escalated.card.id}")
+    assert has_element?(view, "#stalled-row-#{escalated.card.id}", "brainstorm failed — your call")
+  end
+
   test "the header control opens a dialog naming every stalled card", ctx do
     a = park(ctx.board, ctx.flow, "Escalated A", :failed)
     b = park(ctx.board, ctx.flow, "Escalated B", :failed)

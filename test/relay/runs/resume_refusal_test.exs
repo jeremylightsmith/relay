@@ -263,7 +263,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
           })
         )
 
-      {:ok, _replacement} = Relay.Flows.enable_flow(replacement)
+      {:ok, replacement} = Relay.Flows.enable_flow(replacement)
       assert Runs.get_run!(run.id).flow_id == nil
 
       # 1. The scheduler refuses it, and says why.
@@ -278,15 +278,20 @@ defmodule Relay.Runs.ResumeRefusalTest do
       assert failed.status == :failed
       assert failed.failure_detail =~ "resume_refused_reason=no_isolation"
 
-      # 3. The dead end is gone: retry is no longer refused with `not_failed` — the guard that
-      # composed with the never-resuming scheduler into a state nothing could move. What it
-      # refuses with now is `:no_flow`, the actionable answer the failure detail already names
-      # ("move the card back to re-run it on the current flow").
-      result = Runs.retry_run(failed)
-      refute match?({:error, {:not_failed, _status}}, result)
-      refute match?({:error, {:executor_unavailable, _name}}, result)
-      assert result == {:error, :no_flow}
-      assert Runs.retry_refusal_code(:no_flow) == "no_flow"
+      # 3. The dead end is gone, all the way through: retry is refused by NOTHING. The
+      # `not_failed` guard that composed with the never-resuming scheduler into a state nothing
+      # could move is behind us (step 2), and `:no_flow` no longer stands in either — the run's
+      # flow ROW is gone, but the card still sits in the work lane the REPLACEMENT flow owns, so
+      # retry re-adopts that flow and re-enters at its start node.
+      assert {:ok, revived} = Runs.retry_run(failed)
+      assert revived.status == :running
+      assert revived.flow_id == replacement.id
+      assert revived.current_node == "work"
+      assert revived.failure_detail == nil
+      # The pin to the gone exec-a is released with the re-adoption: keeping it would revive the
+      # run straight back into `pinned_executor_absent`, refused every tick until the reaper
+      # failed it again — the dead end rebuilt one link further along.
+      assert revived.pinned_executor_name == nil
     end
 
     test "a parked exclusive run whose pinned executor never returns ages out and retries clean",

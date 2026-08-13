@@ -21,6 +21,7 @@ defmodule Relay.Flows do
   alias Relay.Flows.Document
   alias Relay.Repo
   alias Schemas.Board
+  alias Schemas.Card
   alias Schemas.Flow
   alias Schemas.FlowVersion
   alias Schemas.Run
@@ -96,6 +97,25 @@ defmodule Relay.Flows do
   @doc "Like get_flow/2 but raises Ecto.NoResultsError when not found."
   def get_flow!(%Board{id: board_id}, key) when is_binary(key) do
     Repo.get_by!(Flow, board_id: board_id, key: key)
+  end
+
+  @doc """
+  The enabled flow whose work lane is `card`'s CURRENT stage, or nil — "which flow owns this
+  card where it now sits", answered from the card's stage alone rather than from any run FK.
+
+  The ONE place that lookup lives (AGENTS.md): rejection re-entry (`Relay.Runs.Listener`) and
+  retry's re-adoption of a replaced flow (`Relay.Runs.retry_run/2`, RE297) both ask it, and a
+  second copy could answer differently about the same card. `key` order with `limit: 1` keeps
+  the answer deterministic when two enabled flows share a work lane — nothing forbids that,
+  since only `pulls_from_stage_id` carries the partial unique index.
+  """
+  def working_flow(%Card{board_id: board_id, stage_id: stage_id}) do
+    Repo.one(
+      from f in Flow,
+        where: f.board_id == ^board_id and f.works_in_stage_id == ^stage_id and f.enabled,
+        order_by: f.key,
+        limit: 1
+    )
   end
 
   @doc """

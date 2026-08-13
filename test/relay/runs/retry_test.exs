@@ -154,11 +154,29 @@ defmodule Relay.Runs.RetryTest do
     assert Runs.get_run!(run.id).status == :failed
   end
 
-  test "a run whose flow is gone is refused", ctx do
+  test "a run whose flow row is gone re-adopts the flow working the card's stage (RE297)", ctx do
     run = failed_run(ctx.card, ctx.flow)
     run = run |> Ecto.Changeset.change(flow_id: nil) |> Repo.update!()
 
-    assert {:error, :no_flow} = Runs.retry_run(run)
+    # The row this run pointed at is gone, but the card still sits in a work lane an enabled
+    # flow owns — so retry re-adopts that flow rather than refusing `:no_flow`, and re-enters at
+    # its START node: the node this run died on need not exist in a replacement graph.
+    assert {:ok, revived} = Runs.retry_run(run)
+    assert revived.status == :running
+    assert revived.flow_id == ctx.flow.id
+    assert revived.flow_key == ctx.flow.key
+    assert revived.current_node == "brainstorm"
+  end
+
+  test "a run whose flow is gone and whose stage no flow works is refused", ctx do
+    run = failed_run(ctx.card, ctx.flow)
+    run = run |> Ecto.Changeset.change(flow_id: nil) |> Repo.update!()
+    {:ok, _disabled} = Relay.Flows.disable_flow(ctx.flow)
+
+    # Nothing enabled works the card's stage, so there is genuinely no node to re-enter and
+    # `:no_flow` is the honest answer — the refusal survives the RE297 re-adoption above.
+    assert {:error, :no_flow = reason} = Runs.retry_run(run)
+    assert Runs.retry_refusal_code(reason) == "no_flow"
     assert Runs.get_run!(run.id).status == :failed
   end
 

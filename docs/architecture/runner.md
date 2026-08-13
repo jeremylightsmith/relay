@@ -377,6 +377,19 @@ than starting a new one. Re-entry (`RunServer.handle_continue({:reenter, _})`) n
 the flow's start edge, so the Code flow's destructive `branch` node is unreachable from a
 retry by construction, and finished commits cannot be thrown away.
 
+**Re-adoption (RE297).** Deleting a flow nils `runs.flow_id` on every run of that row, and the
+reaper now fails such a run outright (D6 in [failures.md](failures.md)) — so retry is the hatch a
+human reaches for on exactly that shape, and refusing it `no_flow` while the board plainly shows a
+flow working the card's stage was the dead end's last link. When `flow_id` is nil, retry re-adopts
+the enabled flow whose work lane is the card's current stage (`Relay.Flows.working_flow/1` — the
+same lookup rejection re-entry uses) and re-enters at **that flow's start node**, since the node
+this run died on need not exist in a replacement graph. Two things follow only in this case: the
+run's `flow_id`/`flow_key` are rewritten to the adopted flow, and a pin to a **dead** executor is
+released rather than refused on (`settle_retry_pin/3`) — honouring it would revive the run straight
+back into `pinned_executor_absent`, refused every tick until the reaper failed it again. A pin whose
+machine is alive is kept: the worktree really is still there. `no_flow` survives for the genuinely
+unresolvable case — no enabled flow works the card's stage, so there is nothing to re-enter.
+
 - `POST /api/runs/:id/retry` (`RelayWeb.Api.RunController.retry/2`) — id-addressed.
 - `POST /api/cards/:ref/retry` (`.retry_card/2`) — ref-addressed alias resolving the card's
   most recent run; what `relay retry <ref>` calls. Both take an optional `{"at": "<node_key>"}`
