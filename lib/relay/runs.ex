@@ -1434,6 +1434,78 @@ defmodule Relay.Runs do
   defp display_state(:fresh, true), do: :outdated
   defp display_state(:fresh, false), do: :fresh
 
+  @doc ~S"""
+  The board's **active queue** at `now` — every `queued` or `claimed` node job on the board, both
+  kinds (`:node` and `:talk`), whether or not an executor holds it. The read-only answer to "what
+  is waiting?" that `POST /api/node-jobs/claim` — a mutation that *assigns* the job it finds —
+  cannot give (RE307).
+
+  Deliberately NOT filtered by `executor_name`: an unclaimed job having no holder is the whole
+  point, and that filter is exactly why `active_jobs_by_executor/1` cannot answer this. Both
+  reads share `board_jobs_query/1`, whose LEFT join on `Run` is what lets a talk turn (no run —
+  ADR 0009) appear here at all.
+
+  **Ordering is load-bearing, not cosmetic.** Queued rows come first in `asc: j.id` — the same
+  order `do_claim_next_job/4` claims in under `FOR UPDATE SKIP LOCKED` — so this list literally IS
+  the order the server will hand work out. Claimed rows follow in `asc: j.claimed_at`, matching
+  `active_jobs_by_executor/1`. A single `asc_nulls_first: j.claimed_at, asc: j.id` expresses both,
+  because a queued row never has a `claimed_at` (`requeue_job/3` clears it on the way back), and
+  that holds for a queued row PINNED to an executor too.
+
+  `age_s` is "how long it has been in THIS state" — since `claimed_at` on a claimed row, since
+  `inserted_at` on a queued one. `now` is injectable exactly as `list_executor_status/2` does it,
+  so age is testable without sleeping.
+  """
+  @spec list_queue(Board.t(), DateTime.t() | nil) :: [
+          %{
+            job_id: integer(),
+            kind: :node | :talk,
+            state: :queued | :claimed,
+            ref: String.t(),
+            title: String.t(),
+            node_key: String.t(),
+            flow_key: String.t() | nil,
+            isolation: String.t() | nil,
+            executor_name: String.t() | nil,
+            age_s: non_neg_integer()
+          }
+        ]
+  def list_queue(%Board{} = board, now \\ nil) do
+    now = now || now()
+
+    board
+    |> board_jobs_query()
+    |> order_by([j], asc_nulls_first: j.claimed_at, asc: j.id)
+    |> select([j, c, r], %{
+      job_id: j.id,
+      kind: j.kind,
+      state: j.state,
+      ref_number: c.ref_number,
+      title: c.title,
+      node_key: j.node_key,
+      flow_key: r.flow_key,
+      isolation: fragment("?->>'isolation'", j.payload),
+      executor_name: j.executor_name,
+      claimed_at: j.claimed_at,
+      inserted_at: j.inserted_at
+    })
+    |> Repo.all()
+    |> Enum.map(fn row ->
+      %{
+        job_id: row.job_id,
+        kind: row.kind,
+        state: row.state,
+        ref: Cards.ref(board, %Card{ref_number: row.ref_number}),
+        title: row.title,
+        node_key: row.node_key,
+        flow_key: row.flow_key,
+        isolation: row.isolation,
+        executor_name: row.executor_name,
+        age_s: max(DateTime.diff(now, row.claimed_at || row.inserted_at), 0)
+      }
+    end)
+  end
+
   @doc "The board's raw `Executor` rows — the lean read `Scheduler.Server` builds its snapshot's `executors` map from."
   def list_board_executors(board_id) do
     Repo.all(from e in Executor, where: e.board_id == ^board_id)
@@ -1743,33 +1815,48 @@ defmodule Relay.Runs do
   """
   defdelegate preflight_flow(flow, now \\ nil), to: Preflight, as: :run
 
-  # Every active job on this board that some executor is holding, grouped by `executor_name`.
-  # Same join shape as reclaim_executor/1 — NodeJob → Run → Card — scoped by board so one
-  # executor name shared across boards never leaks work sideways.
-  defp active_jobs_by_executor(%Board{} = board) do
-    from(j in NodeJob,
-      join: r in Run,
-      on: r.id == j.run_id,
+  # The ONE board-scoped read of LIVE node jobs, shared by `list_queue/2` and
+  # `active_jobs_by_executor/1` so the two can never disagree about what "on this board and
+  # still live" means. Each caller adds its own filters, order and select.
+  #
+  # `Card` is joined on `j.card_id` — the board-scoping join for BOTH kinds, since `card_id` is
+  # required on every row while `run_id` is nil on a talk turn (ADR 0009). `insert_job!/3` writes
+  # `card_id: run.card_id`, so a flow job resolves the same card it always did.
+  #
+  # `Run` is **LEFT**-joined, and only for `flow_key`: an inner join here is the exact bug that
+  # makes every other queue read flow-only. `active_jobs_by_executor/1` is unaffected because its
+  # own `flow_kinds()` filter already guarantees `run_id` is non-nil.
+  defp board_jobs_query(%Board{id: board_id}) do
+    from j in NodeJob,
       join: c in Card,
-      on: c.id == r.card_id,
-      where: c.board_id == ^board.id,
-      where: j.state in ^NodeJob.active_states(),
-      where: not is_nil(j.executor_name),
-      # Explicit: the runners view's per-executor job list is FLOW jobs only (step 1) — the
-      # inner join on Run already excludes talk jobs (run_id nil).
-      where: j.kind in ^NodeJob.flow_kinds(),
-      order_by: [asc: j.claimed_at, asc: j.id],
-      select: %{
-        executor_name: j.executor_name,
-        job_id: j.id,
-        ref_number: c.ref_number,
-        title: c.title,
-        node_key: j.node_key,
-        state: j.state,
-        isolation: fragment("?->>'isolation'", j.payload),
-        claimed_at: j.claimed_at
-      }
-    )
+      on: c.id == j.card_id,
+      left_join: r in Run,
+      on: r.id == j.run_id,
+      where: c.board_id == ^board_id,
+      where: j.state in ^NodeJob.active_states()
+  end
+
+  # Every active job on this board that some executor is holding, grouped by `executor_name`.
+  # Board-scoped by the shared base query, so one executor name shared across boards never leaks
+  # work sideways.
+  defp active_jobs_by_executor(%Board{} = board) do
+    board
+    |> board_jobs_query()
+    |> where([j], not is_nil(j.executor_name))
+    # Explicit: the runners view's per-executor job list is FLOW jobs only (step 1). Now that the
+    # shared base LEFT-joins Run, this filter is the ONLY thing excluding talk jobs — it must stay.
+    |> where([j], j.kind in ^NodeJob.flow_kinds())
+    |> order_by([j], asc: j.claimed_at, asc: j.id)
+    |> select([j, c], %{
+      executor_name: j.executor_name,
+      job_id: j.id,
+      ref_number: c.ref_number,
+      title: c.title,
+      node_key: j.node_key,
+      state: j.state,
+      isolation: fragment("?->>'isolation'", j.payload),
+      claimed_at: j.claimed_at
+    })
     |> Repo.all()
     |> Enum.group_by(& &1.executor_name, fn row ->
       %{
