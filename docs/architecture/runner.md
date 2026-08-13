@@ -321,7 +321,12 @@ that stays server-side.
   terminal-type stage (RLY-233). This is safe to treat as an unambiguous leak because run
   dispatch (`Relay.Runs.start_run/3`) now moves the card into the flow's work lane and inserts
   the run row in one transaction: no committed state ever has an active run sitting on a
-  terminal-type stage except a genuine leak.
+  terminal-type stage except a genuine leak. The tick's third sweep,
+  `Relay.Runs.abandon_unresumable_runs/0`, applies the clock to the refusals the scheduler
+  recorded: a parked run whose resume has been refused continuously for
+  `Relay.Runs.unresumable_after_s/0` (30 minutes) is failed, so a run the planner keeps
+  allowing but can never place becomes a visible failure a human can `retry` rather than a
+  silent forever-wait (RE297).
 - **Log `node_job_id` convergence.** `POST /api/board/logs` entries may carry an optional
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
