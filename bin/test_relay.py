@@ -982,28 +982,55 @@ class LegacyIdentityWarningTest(unittest.TestCase):
     job boundary, which is "nothing in flight", not "nothing pinned to me")."""
 
     def setUp(self):
+        isolate_executor_locks(self)
         self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
         self.addCleanup(setattr, relay.socket, "gethostname", relay.socket.gethostname)
+        self.addCleanup(setattr, relay, "env", relay.env)
         relay.ROOT = "/Users/j/src/relay"
         relay.socket.gethostname = lambda: "box.local"
+        relay.env = lambda name: "http://relay.test"
 
-    def test_the_defaulted_name_warns_and_names_the_legacy_identity(self):
+    def _an_executor_ran_here_as(self, name):
+        """Leave the residue `acquire_singleton_lock` leaves and never unlinks: an identity
+        lock file, keyed on `sha256(RELAY_URL + "\\0" + name)`. It exists iff an executor
+        actually ran on THIS machine against THIS board under that name."""
+        with open(relay.identity_lock_path({"name": name}), "w", encoding="utf-8") as f:
+            f.write("{}\n")
+
+    def test_the_defaulted_name_warns_when_the_old_identity_ran_here(self):
+        self._an_executor_ran_here_as("box.local")
         warning = relay.legacy_identity_warning(relay.default_executor_name())
         self.assertIsNotNone(warning)
         self.assertIn('"relay@box"', warning)      # the identity it answers to now
         self.assertIn('"box.local"', warning)      # the identity its pins were written under
 
-    def test_the_warning_names_both_ways_out(self):
+    def test_a_machine_that_never_ran_the_legacy_identity_is_silent(self):
+        """The gate. Ungated, `name == default_executor_name()` and `default != gethostname()`
+        are true FOREVER, on every start, for every executor that has not pinned a name —
+        so a brand-new install with no pre-RE305 history and no pinned runs at all would eat a
+        permanent `kind="error"` line, mirrored to the board feed on every start and every
+        auto-update re-exec."""
+        self.assertIsNone(relay.legacy_identity_warning(relay.default_executor_name()))
+
+    def test_the_warning_points_at_a_per_invocation_flag_not_the_shared_config(self):
+        """`.relay/executor.json` is TRACKED IN GIT. Advising a bare hostname there restores
+        one shared identity across every checkout — precisely the collision RE305 exists to
+        split apart, and the second `relay execute` is then refused by its own identity
+        lock. So the escape hatch is `--name`, and the config path appears only as a caution."""
+        self._an_executor_ran_here_as("box.local")
         warning = relay.legacy_identity_warning(relay.default_executor_name())
-        self.assertIn(relay.EXECUTOR_CONFIG_PATH, warning)   # keep the old identity, or
-        self.assertIn("--name", warning)                     # pass it for one invocation
+        self.assertIn('--name "box.local"', warning)          # adopt the pins here, or
+        self.assertIn("shared by every checkout", warning)    # ...don't pin it in the config
+        self.assertIn("baton", warning)                       # let them park and hand back
 
     def test_a_name_the_developer_chose_is_silent(self):
         """`--name` or an explicit `"name"` in the config is a human choosing an identity —
         nothing moved under them, so there is nothing to warn about."""
+        self._an_executor_ran_here_as("box.local")
         self.assertIsNone(relay.legacy_identity_warning("chosen"))
 
     def test_keeping_the_legacy_hostname_is_silent(self):
+        self._an_executor_ran_here_as("box.local")
         self.assertIsNone(relay.legacy_identity_warning("box.local"))
 
 
@@ -3536,7 +3563,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.DRY = False
         # RE305: startup now fetches the board to name it on the startup line. Stub it, or
         # these harnesses start making real HTTP calls.
-        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         # Don't sleep real seconds between placement retries: an unplaceable job walks the full
         # PLACEMENT_ATTEMPTS loop, which at the shipped 1.0s interval is ~9s of `wake.wait` per
         # test. These tests exercise routing/reporting, not the backoff duration.
@@ -3594,6 +3621,17 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
 
         self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
+
+    def test_the_dry_run_line_renders_capacity_the_one_way(self):
+        """`fmt_capacity` is the ONE rendering of a capacity map. The dry-run line sits two
+        lines below the startup line and used to interpolate the raw dict, so `--dry-run` —
+        the output this card's own smoke step reads — printed capacity two ways at once."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
+
+        self.assertIn("  (dry) would claim advertising shared_clean=1 exclusive=0", lines)
 
     def test_a_malformed_claimed_job_is_reported_failed_not_dropped(self):
         """A job missing `isolation` blows up ExecutorPool.assign with a KeyError; untrusted
@@ -3759,14 +3797,20 @@ class ExecuteLoopTest(unittest.TestCase):
             relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
                                                  name="   "))
 
-    def test_a_defaulted_name_warns_that_the_identity_moved(self):
-        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so an
-        executor that quietly answers to the new default strands them. Warn at startup —
-        the hop happens unattended, via auto-update's in-place re-exec."""
+    def _defaults_the_name(self):
         relay.load_executor_config = lambda: {
             "name": relay.default_executor_name(), "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 0},
             "poll_timeout": 1, "heartbeat_interval": 60}
+
+    def test_a_defaulted_name_warns_when_the_old_identity_ran_here(self):
+        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so an
+        executor that quietly answers to the new default strands them. Warn at startup —
+        the hop happens unattended, via auto-update's in-place re-exec."""
+        self._defaults_the_name()
+        with open(relay.identity_lock_path({"name": relay.socket.gethostname()}),
+                  "w", encoding="utf-8") as f:
+            f.write("{}\n")     # an executor really did run here under the bare hostname
         lines = []
         relay.log = lambda msg, **k: lines.append(msg)
         relay.claim_node_job = lambda *a, **k: None
@@ -3776,6 +3820,19 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertTrue(any(relay.socket.gethostname() in m and m.startswith("WARNING:")
                             for m in lines), lines)
+
+    def test_a_defaulted_name_on_a_fresh_machine_gets_no_identity_warning(self):
+        """No legacy identity lock → no pre-RE305 executor ever ran here → nothing moved.
+        A fresh install must start clean, not with a permanent false-positive error line."""
+        self._defaults_the_name()
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertEqual([m for m in lines if m.startswith("WARNING:")], [])
 
     def test_an_explicitly_named_executor_gets_no_identity_warning(self):
         lines = []
@@ -3808,7 +3865,7 @@ class ExecuteLoopTest(unittest.TestCase):
         its cycle."""
         lines = []
         relay.log = lambda msg, **k: lines.append((msg, k.get("kind")))
-        relay.get_board = lambda: relay.die("API 401: invalid API key")
+        relay.get_board = lambda **_k: relay.die("API 401: invalid API key")
         polls = []
         relay.claim_node_job = lambda *a, **k: (polls.append(1) or None)
 
@@ -3822,6 +3879,35 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertIn("API 401: invalid API key", warnings[0][0])
         self.assertEqual(warnings[0][1], "error")
         self.assertEqual(len(polls), 1)      # it kept going
+
+    def test_the_startup_board_fetch_is_bounded(self):
+        """The startup GET now gates the startup line, so an UNBOUNDED request against a host
+        that DROPs (VPN down, firewalled box) would hang `relay execute` printing nothing at
+        all — the exact "running but not pulling, and the terminal won't say why" condition
+        this card exists to kill."""
+        seen = {}
+        self.addCleanup(setattr, relay, "api", relay.api)
+        relay.api = lambda *a, **k: (seen.update(k) or {"board": {"name": "B", "key": "K"}})
+        relay.get_board = self._saved["get_board"]      # the real one, over setUp's stub
+
+        relay.board_identity()
+
+        self.assertEqual(seen.get("timeout"), relay.BOARD_FETCH_TIMEOUT_S)
+
+    def test_a_board_fetch_that_times_out_still_reaches_the_loop(self):
+        def timed_out(**_kw):
+            raise relay.socket.timeout("timed out")
+        relay.get_board = timed_out
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        polls = []
+        relay.claim_node_job = lambda *a, **k: (polls.append(1) or None)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any("board UNREACHABLE" in m for m in lines), lines)
+        self.assertEqual(len(polls), 1)      # bounded, warned, and still polling
 
     def test_fmt_capacity_renders_key_equals_value_pairs(self):
         self.assertEqual(relay.fmt_capacity({"shared_clean": 3, "exclusive": 2}),
@@ -3899,7 +3985,7 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         relay.log = lambda *a, **k: None
         # RE305: startup now fetches the board to name it on the startup line. Stub it, or
         # these harnesses start making real HTTP calls.
-        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.load_executor_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 1},
@@ -3955,7 +4041,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         relay.log = lambda *a, **k: None
         # RE305: startup now fetches the board to name it on the startup line. Stub it, or
         # these harnesses start making real HTTP calls.
-        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.report_outcome = lambda *a: "done"
@@ -4424,7 +4510,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.log = lambda msg, **k: self.logs.append((msg, k.get("kind")))
         # RE305: startup now fetches the board to name it on the startup line. Stub it, or
         # these harnesses start making real HTTP calls.
-        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None)

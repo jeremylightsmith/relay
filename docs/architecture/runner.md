@@ -469,9 +469,16 @@ silently billed to the paid API.
   name is the exclusive-affinity pin key (see Node-job transport above), runs pinned under the
   old bare-hostname identity park `:executor_gone` instead of resuming. The hop happens
   unattended — auto-update re-execs at a *job* boundary, which is "nothing in flight", not "no
-  run pinned to me" — so a defaulted executor prints a one-time `WARNING:` at startup naming
-  the pre-RE305 identity. To keep it, set `"name": "<hostname>"` in `.relay/executor.json` (or
-  pass `--name <hostname>`) and restart. Also `namespace`
+  run pinned to me" — so a defaulted executor prints a `WARNING:` at startup naming the
+  pre-RE305 identity. It is **gated on evidence the identity actually moved on this machine**:
+  an identity lock file for the bare hostname (`acquire_singleton_lock` writes one and never
+  unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. To adopt
+  those pins, restart the one checkout that owns them with `--name <hostname>` — per
+  invocation, **not** as a `"name"` key in `.relay/executor.json`, which is tracked in git and
+  shared by every checkout, so a bare hostname there restores exactly the shared identity this
+  default exists to split apart. Otherwise let them park and clear the pin with a human baton;
+  the board already says `Executor "X" is not currently connected.` on the parked run. Also
+  `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a

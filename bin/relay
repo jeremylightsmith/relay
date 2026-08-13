@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 50
-EXECUTOR_FINGERPRINT = "ac7d7216c559c8f2eab77d6ff674a560af3167d2ae356957e10a4c5efe1c51b5"
+EXECUTOR_VERSION = 51
+EXECUTOR_FINGERPRINT = "9d0ccd839c84a0d8b45d140aab5a2b03bb852a414a203f73b416bb2733de0aaf"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -408,8 +408,16 @@ def read_arg(text):
     return text
 
 
-def get_board():
-    return api("GET", "/api/board")
+# Bound on the ONE startup GET /api/board (RE305). Every other executor request either has
+# its own bound (the long-poll claim, `_fetch`) or runs where a stall is visible; this one
+# gates the startup line, so unbounded it would hang `relay execute` printing NOTHING at all
+# against a host that DROPs — a VPN that is down, a firewalled box — through three `api`
+# retries. Generous enough that a slow-but-alive board still names itself.
+BOARD_FETCH_TIMEOUT_S = 10
+
+
+def get_board(timeout=None):
+    return api("GET", "/api/board", timeout=timeout)
 
 
 def board_identity():
@@ -429,11 +437,16 @@ def board_identity():
     `GET /api/board` also returns the board's cards, which is more payload than this line
     needs. Accepted: one request per process start, reusing the endpoint the CLI already
     has, rather than adding a `board` block to the heartbeat reply — which would mean a
-    contract-fixture change for a log line."""
+    contract-fixture change for a log line.
+
+    Bounded by BOARD_FETCH_TIMEOUT_S. `api()` re-raises `socket.timeout` rather than
+    retrying it, and `socket.timeout` is an `OSError`, so a dropped connection lands in the
+    `except` below and becomes `board UNREACHABLE` + the warning + keep polling — the same
+    path a bad key takes."""
     captured = io.StringIO()
     try:
         with contextlib.redirect_stderr(captured):
-            board = get_board()["board"]
+            board = get_board(timeout=BOARD_FETCH_TIMEOUT_S)["board"]
         return f'"{board["name"]}" ({board["key"]})', None
     except (Exception, SystemExit) as e:      # SystemExit is not an Exception subclass
         return None, captured.getvalue().strip() or f"{type(e).__name__}: {e}"
@@ -1186,16 +1199,42 @@ def legacy_identity_warning(name):
 
     Silent when the developer named the executor themselves (`--name`, or `"name"` in
     .relay/executor.json): they chose the identity, so nothing moved under them. Silent, too,
-    if the default ever coincides with the legacy hostname — the condition is that the
-    identity actually moved, not that this card shipped."""
+    if the default ever coincides with the legacy hostname.
+
+    And silent — the load-bearing gate — unless an executor ACTUALLY ran on this machine,
+    against this board, under the bare hostname. Without that check the two remaining
+    conditions are true forever, on every start, for every executor that has not pinned a
+    name, so a brand-new install with no pre-RE305 history and no pinned runs would carry a
+    permanent `kind="error"` line, mirrored to the board's runner feed on every start and
+    every auto-update re-exec. `identity_lock_path` is the evidence: `acquire_singleton_lock`
+    creates that file and never unlinks it, and it is keyed on `sha256(RELAY_URL + "\\0" +
+    name)` — so it exists iff this pairing really did run here.
+
+    The escape hatch is deliberately `--name` and NOT a `"name"` key: `.relay/executor.json`
+    is tracked in git, so a bare hostname written there hands every checkout on every machine
+    the one shared identity RE305 exists to split apart — which is the card's motivating bug,
+    reintroduced by the card's own warning."""
     legacy = socket.gethostname()
     if name != default_executor_name() or name == legacy:
         return None
-    return (f'WARNING: this executor now defaults to "{name}"; before RE305 it was '
-            f'"{legacy}". Exclusive runs pinned to "{legacy}" resolve by NAME and will park '
-            f":executor_gone rather than resume here. To keep the old identity, set "
-            f'"name": "{legacy}" in {EXECUTOR_CONFIG_PATH} (or pass --name "{legacy}" for '
-            f"this invocation) and restart.")
+    if not _identity_ran_here(legacy):
+        return None
+    return (f'WARNING: this executor now answers to "{name}"; an executor previously ran here '
+            f'as "{legacy}" (the pre-RE305 default). Exclusive runs pinned to "{legacy}" '
+            f"resolve by NAME and will park :executor_gone rather than resume here. To adopt "
+            f'those pins, restart THIS checkout with --name "{legacy}" — pass it per '
+            f"invocation, not as a \"name\" in {EXECUTOR_CONFIG_PATH}, which is shared by "
+            f"every checkout of this repo and would re-collide the identities. Otherwise let "
+            f"them park: take the baton on the parked run and hand it back, and it "
+            f"re-dispatches under the new name.")
+
+
+def _identity_ran_here(name):
+    """True iff an executor has run on this machine, against this board, under `name`."""
+    try:
+        return os.path.exists(identity_lock_path({"name": name}))
+    except (Exception, SystemExit):     # no RELAY_URL to key the lock on; SystemExit via die()
+        return False
 
 
 def load_executor_config():
@@ -3582,7 +3621,7 @@ def cmd_execute(args):
             wake.clear()
             continue
         if DRY:
-            log(f"  (dry) would claim advertising {cap}")
+            log(f"  (dry) would claim advertising {fmt_capacity(cap)}")
             break
         pool.refresh_idle_shared()
         try:
