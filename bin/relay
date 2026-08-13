@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 55
-EXECUTOR_FINGERPRINT = "ed369de1a3fbb969b5e0d71a858c63dad9ac99e7029a9f38c0edb92e199ae30d"
+EXECUTOR_VERSION = 56
+EXECUTOR_FINGERPRINT = "dd72be686e209e6981ed00a56b6fff04d02f588f8790661cb3c3097ebd22094a"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -3887,7 +3887,8 @@ def cmd_outcome(args):
     # RE310: --no-changes asserts "succeeded, and the work was already committed". On any other
     # outcome it cannot mean anything, and silently ignoring it would read downstream exactly
     # like an accepted claim.
-    if getattr(args, "no_changes", False) and args.outcome != "succeeded":
+    no_changes = bool(args.no_changes)
+    if no_changes and args.outcome != "succeeded":
         die("--no-changes may only accompany `succeeded` — it asserts that this node's work was "
             f"already committed (got {args.outcome!r})")
     path = os.environ.get("RELAY_NODE_OUTCOME")
@@ -3895,8 +3896,7 @@ def cmd_outcome(args):
         die("RELAY_NODE_OUTCOME is not set — `relay outcome` only runs inside an agent node")
     detail = read_arg(args.detail) if args.detail else ""
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"outcome": args.outcome, "detail": detail,
-                   "no_changes": bool(getattr(args, "no_changes", False))}, f)
+        json.dump({"outcome": args.outcome, "detail": detail, "no_changes": no_changes}, f)
     return {"outcome": args.outcome}
 
 

@@ -2215,6 +2215,33 @@ class AdvanceCommandTest(unittest.TestCase):
         self.assertEqual(args.ref, "RE-1")
         self.assertIs(args.func, relay.cmd_advance)
 
+    def test_a_422_refusal_prints_the_server_message_and_exits_non_zero(self):
+        # Docstring's claim: "Like `retry`, a 422 refusal becomes a die() rather than a silent
+        # success." Exercised through the real api()/urlopen transport, like RetryTest's
+        # equivalent, rather than through a fake api() that could never surface a die().
+        import urllib.error
+
+        def boom(*_a, **_k):
+            raise urllib.error.HTTPError(
+                "http://x/api/cards/RE-1/advance", 422, "Unprocessable", {},
+                io.BytesIO(json.dumps(
+                    {"error": {"code": "no_commits", "message": "This task produced no commits"}}
+                ).encode()),
+            )
+
+        import urllib.request
+        real_urlopen = urllib.request.urlopen
+        self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
+        urllib.request.urlopen = boom
+        os.environ.setdefault("RELAY_URL", "http://x")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            relay.cmd_advance(argparse.Namespace(ref="RE-1", json=False, field=None))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("This task produced no commits", err.getvalue())
+
 
 class RunNodeJobTest(unittest.TestCase):
     def setUp(self):
@@ -2326,6 +2353,17 @@ class RunNodeJobTest(unittest.TestCase):
                 vars={"ref": "RLY-2"})
         outcome, detail, sha, session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
+
+    def test_agent_job_carries_the_no_changes_assertion_through_to_the_return(self):
+        """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
+        reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
+        relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
+            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9")
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "already committed", True)
+        j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
+                vars={"ref": "RLY-2"})
+        result = relay.run_node_job(j, "/tmp/wt", self.control)
+        self.assertIs(result[4], True)
 
     def test_agent_job_passes_the_agent_flag_through_to_stream_claude_job(self):
         """A flow node's `agent` (e.g. "plan-implementer") rides the claim payload as
@@ -3360,6 +3398,17 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(self.created, ["exec-RLY-1"])               # created before use
         self.assertEqual(self.prepared, ["RLY-1"])                  # then warmed
         self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, False))
+
+    def test_a_no_changes_assertion_reaches_report_outcome(self):
+        """RE310: execute_one must forward run_node_job's no_changes element to
+        report_outcome unchanged — this is the join between the two ends the fixture and
+        determine_agent_outcome tests already pin."""
+        relay.run_node_job = lambda job, path, control, partition=None: (
+            "succeeded", "", "sha1", None, True)
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, True))
 
     def test_shared_job_is_not_reset(self):
         relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha2", None, False)
