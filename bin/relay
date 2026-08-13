@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 52
-EXECUTOR_FINGERPRINT = "962d2094ec7c137036d13ee4e97c27c582028e881b3b7753de6bf1711a91a55d"
+EXECUTOR_VERSION = 53
+EXECUTOR_FINGERPRINT = "f5d57cdd9619a4a5cd9f7798f87836b3c2bea0b9fea04d668888a6cadc54a98c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1218,8 +1218,18 @@ def legacy_identity_warning(name):
     permanently true on every machine that ever ran a pre-RE305 executor, so without a second
     marker the upgraded install trades the fresh install's false positive for a `kind="error"`
     line forever, with no way to acknowledge it short of pinning a name. Emitting therefore
-    drops `<identity lock>.re305-warned` beside the lock, keyed on the same
-    (board, legacy identity) pair — one telling per identity that moved, not one per start.
+    drops `<identity lock>.re305-warned` beside the NEW identity's lock. Keyed on the new
+    name, not the legacy one: the legacy name is the bare hostname, so its key is
+    machine-global (`sha256(RELAY_URL + "\\0" + hostname)`, no ROOT in it) and the first
+    checkout to start would eat the only telling while the others stayed silent forever — with
+    the advice being checkout-specific ("restart THIS checkout"), usually silencing the very
+    checkout that holds the pins. The new name embeds the checkout directory, so each one is
+    told exactly once.
+
+    A DRY RUN PRINTS BUT DOES NOT BURN IT. `--dry-run` starts no LogForwarder, so `forward()`
+    no-ops and the `kind="error"` line reaches no board feed — marking it said there would
+    spend the one telling on a terminal and mirror it nowhere. This card's own acceptance
+    criteria run `execute --dry-run` four times before ever starting a real executor.
 
     The escape hatch is deliberately `--name` and NOT a `"name"` key: `.relay/executor.json`
     is tracked in git, so a bare hostname written there hands every checkout on every machine
@@ -1238,9 +1248,9 @@ def legacy_identity_warning(name):
     legacy = socket.gethostname()
     if name != default_executor_name() or name == legacy:
         return None
-    if not _identity_ran_here(legacy) or _identity_warned_here(legacy):
+    if not _identity_ran_here(legacy) or _identity_warned_here(name):
         return None
-    _mark_identity_warned_here(legacy)
+    _mark_identity_warned_here(name)
     return (f'WARNING: this executor now answers to "{name}"; an executor previously ran here '
             f'as "{legacy}" (the pre-RE305 default). Exclusive runs pinned to "{legacy}" '
             f"resolve by NAME and will park :executor_gone rather than resume here. To adopt "
@@ -1254,8 +1264,9 @@ def legacy_identity_warning(name):
             f"once — this line will not repeat.")
 
 
-# Suffix of the emitted-once marker for the RE305 identity warning, written beside the legacy
-# identity's own lock file so it is keyed on the same (board, name) pair the lock hashes.
+# Suffix of the emitted-once marker for the RE305 identity warning, written beside the NEW
+# identity's lock file — that key embeds the checkout (via the directory basename in the name),
+# so two checkouts on one machine are each told once instead of the first one eating the telling.
 IDENTITY_WARNED_SUFFIX = ".re305-warned"
 
 
@@ -1281,7 +1292,13 @@ def _identity_warned_here(name):
 
 def _mark_identity_warned_here(name):
     """Record that the warning has been said, so the next start is quiet. Best effort: an
-    unwritable lock dir must not stop the executor, it just costs a repeated warning."""
+    unwritable lock dir must not stop the executor, it just costs a repeated warning.
+
+    A dry run records NOTHING: it prints the warning but has not said it anywhere durable (no
+    LogForwarder, so no board feed), and burning the one telling on it would leave the real
+    start silent."""
+    if DRY:
+        return
     path = _identity_lock_or_none(name)
     if not path:
         return

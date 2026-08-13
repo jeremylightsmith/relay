@@ -1056,6 +1056,42 @@ class LegacyIdentityWarningTest(unittest.TestCase):
         relay.socket.gethostname = lambda: "other-host"
         self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
 
+    def test_each_checkout_is_told_even_though_they_share_a_legacy_identity(self):
+        """Round-4 blocking #1. The marker used to be keyed on the LEGACY name — machine-global
+        (`sha256(RELAY_URL + "\\0" + hostname)`), with ROOT nowhere in it. Two checkouts of one
+        project on one machine is RE305's motivating scenario, so the first one to start ate the
+        only telling and the other was silent forever — and the advice is checkout-specific
+        ("restart THIS checkout with --name"), so the one that got it often could not act on it
+        while the one holding the pins never heard. Key it on the NEW identity, which embeds the
+        checkout via the directory basename."""
+        self._an_executor_ran_here_as("box.local")
+
+        relay.ROOT = "/Users/j/src/relay"
+        first = relay.legacy_identity_warning(relay.default_executor_name())
+        relay.ROOT = "/Users/j/scratch/relay-clean"
+        second = relay.legacy_identity_warning(relay.default_executor_name())
+
+        self.assertIsNotNone(first, "the first checkout must be told")
+        self.assertIsNotNone(second, "the second checkout must be told too, not silenced")
+        self.assertIn('"relay-clean@box"', second)   # ...and told about ITS own new identity
+
+    def test_a_dry_run_prints_the_warning_without_burning_it(self):
+        """Round-4 blocking #2. `--dry-run` computed the warning, and computing it wrote the
+        one-shot marker. A dry run starts no LogForwarder, so `forward()` no-ops and the
+        `kind="error"` line never reaches the board feed — the telling was burned in a terminal
+        and mirrored nowhere. The card's own acceptance criteria run `execute --dry-run` four
+        times before criterion 6 ever starts a real executor."""
+        self.addCleanup(setattr, relay, "DRY", relay.DRY)
+        self._an_executor_ran_here_as("box.local")
+
+        relay.DRY = True
+        dry = relay.legacy_identity_warning(relay.default_executor_name())
+        relay.DRY = False
+        real = relay.legacy_identity_warning(relay.default_executor_name())
+
+        self.assertIsNotNone(dry, "a dry run should still PRINT the warning")
+        self.assertIsNotNone(real, "...but must not have claimed it was said")
+
     def test_a_name_the_developer_chose_is_silent(self):
         """`--name` or an explicit `"name"` in the config is a human choosing an identity —
         nothing moved under them, so there is nothing to warn about."""

@@ -474,8 +474,11 @@ silently billed to the paid API.
   an identity lock file for the bare hostname (`acquire_singleton_lock` writes one and never
   unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. Because
   that lock is never unlinked the gate stays true forever once it is true, so emitting also
-  drops a `<identity lock>.re305-warned` marker beside it: the line is said **once** per
-  (machine, board, legacy identity), not on every start and every re-exec. To adopt those pins,
+  drops a `.re305-warned` marker beside the **new** identity's lock: the line is said **once**
+  per (machine, board, *new* identity), not on every start and every re-exec. Keyed on the new
+  name because the legacy one is the bare hostname and so machine-global — keyed there, the first
+  checkout to start would eat the only telling and leave the others (often the one actually
+  holding the pins) silent. A `--dry-run` prints the line but does not spend it. To adopt those pins,
   restart the one checkout that owns them with `--name <hostname>` — per invocation, **not** as
   a `"name"` key in `.relay/executor.json`, which is tracked in git and shared by every
   checkout, so a bare hostname there restores exactly the shared identity this default exists
@@ -527,11 +530,13 @@ silently billed to the paid API.
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
-  longer collide on identity) and per
+  longer collide on identity, *provided their directories are named differently*) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
   locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
   `sha256(RELAY_URL + "\0" + name)` (since `name` embeds the checkout directory, two clones on
-  one host now hash to different lock paths — RE305), and a *namespace* lock at
+  one host **in differently-named directories** now hash to different lock paths — RE305;
+  `default_executor_name/0` uses the directory's BASENAME, so same-named directories still
+  collide and the identity lock refuses the second one by name), and a *namespace* lock at
   `<ROOT>/.claude/worktrees/.<namespace>.lock`
   — held for the life of the process by keeping their fds open. A second process for a
   colliding identity or a shared worktree namespace refuses to start (`relay: already
