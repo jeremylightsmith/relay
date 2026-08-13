@@ -2905,6 +2905,10 @@ defmodule Relay.Runs do
         detail: detail,
         failure_signature: signature,
         git_sha: attrs[:git_sha],
+        # RE310: what the node CLAIMED, not what the guard decided — the guard has already
+        # rewritten `outcome` by the time we get here, and a rejected claim must still read as
+        # `no_changes: true` with `outcome: :failed`. Absent key => false (an old executor).
+        no_changes: attrs[:no_changes] == true,
         session_id: attrs[:session_id],
         cost: attrs[:cost],
         finished_at: now()

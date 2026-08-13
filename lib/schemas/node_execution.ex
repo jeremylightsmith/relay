@@ -14,6 +14,10 @@ defmodule Schemas.NodeExecution do
   foreach): it is what makes "which task is in flight" renderable on the card,
   and it is the key `Engine.decide/4` scopes `max_loops`/`max_retries`/the
   visit cap to. Programmatic, never cast.
+
+  `no_changes` records that the node ASSERTED "succeeded, and no changes were needed" (RE310) —
+  what was claimed, not what the engine decided, so a rejected claim is still readable as
+  `no_changes: true` with `outcome: :failed`.
   """
 
   use Ecto.Schema
@@ -30,6 +34,7 @@ defmodule Schemas.NodeExecution do
     field :detail, :string
     field :failure_signature, :string
     field :git_sha, :string
+    field :no_changes, :boolean, default: false
     field :session_id, :string
     field :cost, :decimal
     field :started_at, :utc_datetime

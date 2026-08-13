@@ -361,17 +361,28 @@ defmodule Relay.Runs.RunServer do
     {execution, job}
   end
 
-  # RLY-194: a node that must produce commits (expects_commits) but reported :succeeded
-  # with HEAD unmoved from before it ran did not do its work. Rewrite the outcome to
-  # :failed BEFORE finalize_job! — the seam is load-time deliberate: it is the only place
-  # with the flow node (expects_commits), the run (baseline sha) and the raw attrs before
-  # finalize_job! computes the failure_signature (which it does only for :failed). Fail
-  # open on nil: a missing sha on either side is not evidence of a lie.
+  # RLY-194 / RE310: a node that must produce commits (expects_commits) but reported :succeeded
+  # with HEAD unmoved from before the VISIT ran did not do its work — UNLESS it can prove the work
+  # is already on the branch because this same node already committed for the thing it is bound
+  # to. Rewrite the outcome to :failed BEFORE finalize_job! — the seam is load-time deliberate: it
+  # is the only place with the flow node (expects_commits), the run (the baselines) and the raw
+  # attrs before finalize_job! computes the failure_signature (which it does only for :failed).
+  # Fail open on nil: a missing sha on either side is not evidence of a lie.
+  #
+  #     not expects_commits, or HEAD moved  -> unchanged (as today)
+  #     HEAD unmoved, claim, prior commits  -> ACCEPT :succeeded   (RE310)
+  #     HEAD unmoved, otherwise             -> rewrite to :failed
+  #
+  # Default-deny survives. On a node's FIRST visit for a binding the binding baseline EQUALS the
+  # visit baseline, so a claim is always rejected there — the RLY-194 case that once merged a
+  # subset of its work (a node that has never committed anything) is caught exactly as before.
+  # Only a node that demonstrably already committed for this binding can assert its way out,
+  # which is precisely the RE306 shape.
   defp override_no_op_success(run, flow, job, %{outcome: :succeeded, git_sha: sha} = attrs) when is_binary(sha) do
     node = Enum.find(flow.nodes, &(&1.key == job.node_key))
 
     if node && node.expects_commits && baseline_sha(run, job) == sha do
-      Map.merge(attrs, %{outcome: :failed, detail: no_op_detail(job.node_key, sha)})
+      resolve_no_op(run, job, sha, attrs)
     else
       attrs
     end
@@ -379,20 +390,37 @@ defmodule Relay.Runs.RunServer do
 
   defp override_no_op_success(_run, _flow, _job, attrs), do: attrs
 
-  # The git_sha of the most recent outcome-bearing execution with a non-nil sha PRECEDING this
-  # node's first attempt of this visit — "HEAD before the node was entered", not "HEAD before
-  # this attempt" (the just-finalized row is not written yet, and even if it were it carries a
-  # nil git_sha until finalize).
+  # The three ways a stalled expects_commits node ends, and the three details a retry receives as
+  # its findings (RE251) — in ONE place, because a wrong message here is what kept RE306 going in
+  # circles for four attempts and two human answers.
+  defp resolve_no_op(run, job, sha, attrs) do
+    case {attrs[:no_changes] == true, binding_produced_commits?(run, job, sha)} do
+      {true, true} -> attrs
+      {true, false} -> Map.merge(attrs, %{outcome: :failed, detail: no_changes_unproven_detail(job.node_key)})
+      {false, true} -> Map.merge(attrs, %{outcome: :failed, detail: already_committed_detail(job.node_key, sha)})
+      {false, false} -> Map.merge(attrs, %{outcome: :failed, detail: no_op_detail(job.node_key, sha)})
+    end
+  end
+
+  # Can this node prove it already committed for what it is currently bound to? True only when the
+  # BINDING baseline resolves and differs from the reported sha.
   #
-  # RE298: the per-VISIT boundary is the load-bearing part. An attempt that commits and then dies
-  # before writing its outcome file is recorded :failed carrying the POST-work sha; baselining on
-  # that row leaves the retry structurally unable to pass the guard — the work is already
-  # committed, so it cannot move HEAD, and the only way to report success is to fabricate a
-  # commit. Per-visit, the visit's real commit still counts, while a visit that genuinely
-  # committed nothing is still caught. Not same-node across visits: a spec_review between two
-  # implements reports the identical sha. Fall back to the unbounded lookup when the boundary
-  # can't be resolved — a missing row is not evidence of a lie.
-  defp baseline_sha(run, job) do
+  # Note the deliberate asymmetry with the guard above: that one FAILS OPEN on a nil sha ("a
+  # missing row is not evidence of a lie"), this one FAILS CLOSED. The burden of proof is on the
+  # claimant, so an unresolvable binding baseline rejects the claim rather than honouring it.
+  defp binding_produced_commits?(run, job, sha) do
+    case binding_baseline_sha(run, job) do
+      baseline when is_binary(baseline) -> baseline != sha
+      nil -> false
+    end
+  end
+
+  # The git_sha of the most recent outcome-bearing execution with a non-nil sha PRECEDING
+  # `boundary_id` — "HEAD before that row". Both baselines below are this same query at a
+  # different boundary, so it is written once (AGENTS.md). A nil `boundary_id` means the boundary
+  # could not be resolved and degrades to the unbounded lookup; what each CALLER does with a nil
+  # RESULT differs on purpose, see below.
+  defp baseline_before(run, boundary_id) do
     latest =
       from e in NodeExecution,
         where: e.run_id == ^run.id and not is_nil(e.git_sha),
@@ -400,13 +428,59 @@ defmodule Relay.Runs.RunServer do
         limit: 1,
         select: e.git_sha
 
-    query =
-      case visit_first_attempt_id(run, job) do
-        nil -> latest
-        id -> where(latest, [e], e.id < ^id)
-      end
+    query = if boundary_id, do: where(latest, [e], e.id < ^boundary_id), else: latest
 
     Repo.one(query)
+  end
+
+  # HEAD before this VISIT was entered — not "before this attempt" (the just-finalized row is not
+  # written yet, and even if it were it carries a nil git_sha until finalize).
+  #
+  # RE298: the per-VISIT boundary is the load-bearing part. An attempt that commits and then dies
+  # before writing its outcome file is recorded :failed carrying the POST-work sha; baselining on
+  # that row leaves the retry structurally unable to pass the guard. Per-visit, the visit's real
+  # commit still counts, while a visit that genuinely committed nothing is still caught. Not
+  # same-node across visits: a spec_review between two implements reports the identical sha. Fall
+  # back to the unbounded lookup when the boundary can't be resolved — a missing row is not
+  # evidence of a lie.
+  defp baseline_sha(run, job), do: baseline_before(run, visit_first_attempt_id(run, job))
+
+  # RE310: HEAD before this BINDING was first entered — the wider boundary a `--no-changes` claim
+  # is checked against. Returns nil when the binding cannot be resolved, which
+  # `binding_produced_commits?/3` reads as "unproven" (fail closed). It deliberately does NOT
+  # degrade to the unbounded lookup the way baseline_sha/2 does: that lookup can return a
+  # different node's sha and would turn an unresolvable binding into a free pass.
+  defp binding_baseline_sha(run, job) do
+    case binding_first_execution_id(run, job) do
+      nil -> nil
+      id -> baseline_before(run, id)
+    end
+  end
+
+  # The FIRST execution row of this job's binding. Binding is defined here, once, and generalises
+  # the foreach case rather than special-casing it:
+  #
+  #   * `sub_task_id` present -> the first execution in this run with the same node_key AND
+  #     sub_task_id (the foreach shape: this node's first go at THIS task);
+  #   * `sub_task_id` nil     -> the first execution in this run with the same node_key (this
+  #     node's first visit in the run — final_fix, smoke_fix, acceptance_fix).
+  defp binding_first_execution_id(run, job) do
+    case Repo.get(NodeExecution, job.node_execution_id) do
+      %NodeExecution{node_key: node_key, sub_task_id: sub_task_id} ->
+        base =
+          from e in NodeExecution,
+            where: e.run_id == ^run.id and e.node_key == ^node_key,
+            order_by: [asc: e.id],
+            limit: 1,
+            select: e.id
+
+        query = if sub_task_id, do: where(base, [e], e.sub_task_id == ^sub_task_id), else: base
+
+        Repo.one(query)
+
+      nil ->
+        nil
+    end
   end
 
   # The execution row id of attempt 1 of the {node_key, visit} the given job belongs to — the
@@ -473,6 +547,28 @@ defmodule Relay.Runs.RunServer do
     "`#{node_key}` reported success but produced no commits — HEAD is still `#{short}`, " <>
       "unchanged from before the node ran. A node that must produce commits and produced " <>
       "none has not done its work. (no_op_success: #{node_key})"
+  end
+
+  # (2) RE306/RE310: the node's OWN earlier commit for this binding IS the work, so it cannot move
+  # HEAD again. Same `no_op_success` machine token as (1), deliberately a DIFFERENT sentence — and
+  # therefore a different failure_signature and a different circuit-breaker bucket, which is
+  # correct: they are different situations. This is the just-in-time discoverability channel for
+  # `--no-changes`: the agent reads it as findings at the exact moment it is stuck.
+  defp already_committed_detail(node_key, sha) do
+    short = String.slice(sha, 0, 7)
+
+    "`#{node_key}` reported success but produced no commits — HEAD is still `#{short}`. " <>
+      "This task's work appears to be committed already (`#{short}` was produced by an earlier " <>
+      "visit of this node for this task), so it cannot move HEAD again. If there is genuinely " <>
+      "nothing left to change, report `relay outcome succeeded --no-changes`; if there is, " <>
+      "make the change and commit it. (no_op_success: #{node_key})"
+  end
+
+  # (3) The claim the engine could not corroborate.
+  defp no_changes_unproven_detail(node_key) do
+    "`#{node_key}` reported `--no-changes`, but this node has not produced a commit for this " <>
+      "task in this run, so there is nothing that could already be done. Do the work and commit " <>
+      "it. (no_changes_unproven: #{node_key})"
   end
 
   # RE244: a node that declares `writes` (card fields it must fill) but reported :succeeded with

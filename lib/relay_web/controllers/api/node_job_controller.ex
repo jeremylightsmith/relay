@@ -203,7 +203,9 @@ defmodule RelayWeb.Api.NodeJobController do
   must still be held by a live claim (else 409 `conflict`). Replies with the
   run's post-outcome `run_state` (running|parked|done|failed|cancelled) so the
   executor knows whether to keep or free an exclusive worktree slot bound to
-  this run (ExecutorPool.release, bin/relay).
+  this run (ExecutorPool.release, bin/relay). `no_changes` (RE310) is the
+  node's assertion that its work was already committed; the engine honours it
+  only when this node's own history proves it (see `Relay.Runs.RunServer`).
   """
   def outcome(conn, %{"id" => id} = params) do
     board = conn.assigns.current_board
@@ -230,7 +232,11 @@ defmodule RelayWeb.Api.NodeJobController do
       outcome: outcome,
       detail: params["detail"],
       git_sha: params["git_sha"],
-      session_id: params["session_id"]
+      session_id: params["session_id"],
+      # RE310: the agent's assertion that no changes were needed. An executor predating the flag
+      # omits the key, which reads false — byte-identical to today's behaviour, which is why
+      # `@min_executor_version` is deliberately NOT raised for this change.
+      no_changes: params["no_changes"] == true
     }
 
     case Runs.report_outcome(job, attrs) do
