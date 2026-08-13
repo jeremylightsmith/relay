@@ -90,6 +90,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay approve` · `bin/relay reject RLY-12 ["note"]` | Gate: advance / send back |
 | `bin/relay retry RLY-12 [--at NODE]` | Retry the failed run — last node, or `--at NODE` |
 | `bin/relay cancel RLY-12 [--reason "…"]` | Cancel the card's active run — the stop half of `retry`. Never moves the card; follow with `move` |
+| `bin/relay advance RLY-12` | The task is already done — check it off and continue with the next one |
 
 Full table with every flag: `$RELAY_URL/docs/cli`.
 
@@ -109,7 +110,8 @@ deployed SHA. For *flow-level* time/cost bottlenecks, `bin/relay flow-stats <flo
 
 **Hand-drive a card through any state.** You can move a card through its whole lifecycle by hand:
 `own` it, `move` it stage to stage, set `status`, `approve`/`reject` at gates, `retry` a failed
-run, `release` when done. The board reacts the same as if a flow drove it.
+run, `advance` past a task whose work is already committed, `release` when done. The board
+reacts the same as if a flow drove it.
 
 ## Working inside a flow (for skills & agents that run as nodes)
 
@@ -120,6 +122,11 @@ Whether a stage authors the spec, consumes the plan, or writes criteria is flow 
 and it changes per board and over time. Read the **installed skills**, **Settings › Flows**, and
 `bin/relay why` to learn what the current flow expects of your step, rather than hard-coding a
 hand-off. Write results with the CLI verbs above so they travel on the card.
+
+**When your node's work is already committed.** If you are re-entered onto a task whose change is
+already on the branch, do not fabricate a commit and do not escalate — declare
+`bin/relay outcome succeeded --no-changes`. The server checks that against this run's history and
+refuses it unless this node has already committed for this task.
 
 ### The `RELAY_NODE_SCRATCH` contract
 

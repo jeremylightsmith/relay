@@ -106,6 +106,7 @@
     "request": {
       "detail": "asked the human",
       "git_sha": "0000000000000000000000000000000000000000",
+      "no_changes": false,
       "outcome": "needs_input",
       "session_id": "<session-id>"
     },
