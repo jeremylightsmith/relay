@@ -64,6 +64,24 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
     assert Repo.get!(Schemas.Run, ctx.run.id).status == :cancelled
   end
 
+  # RE309 — cancel_run/2 hardcoded actor: :agent, so a human killing a run from the board
+  # was logged as Relay AI. The confirm-move handler now passes the signed-in user.
+  test "the cancel is credited to the human who confirmed it, not the agent", ctx do
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    drop(view, ctx.board, ctx.card, ctx.done)
+
+    view |> element("#stranded-move-confirm") |> render_click()
+
+    entry =
+      Schemas.Card
+      |> Repo.get!(ctx.card.id)
+      |> Relay.Activity.list_timeline()
+      |> Enum.find(&match?(%Schemas.Activity{type: :action, text: "run cancelled"}, &1))
+
+    assert entry.actor_type == :user
+    assert entry.user_id == ctx.user.id
+  end
+
   test "an ordinary move of a card with no run is not interrupted", ctx do
     plain = insert(:card, stage: ctx.code, title: "No run")
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")

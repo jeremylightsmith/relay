@@ -49,6 +49,41 @@ defmodule Relay.RunsTest do
     card
   end
 
+  # A fresh card with a run to cancel — each cancel test needs its own, because a cancelled
+  # run cannot be cancelled twice. Inserted directly rather than dispatched: these tests are
+  # about cancel_run/2's OPTIONS, not the engine, and a factory run keeps them independent of
+  # dispatch timing (the same shape board_live_stranded_move_test.exs uses). cancel_run/2
+  # needs no server and no flow — stop_server/1 and revoke_active_jobs/1 are no-ops here.
+  defp cancellable_run(board) do
+    stage = Enum.find(board.stages, &(&1.name == "Spec"))
+    # board_id derives from the stage (card_factory), so `stage:` alone is enough.
+    card = insert(:card, stage: stage)
+
+    run =
+      insert(:run,
+        card: card,
+        status: :parked,
+        parked_reason: :needs_input,
+        current_node: "brainstorm"
+      )
+
+    {card, run}
+  end
+
+  # The card's "run cancelled…" timeline entry — the one row these tests assert on.
+  defp cancel_entry(board, card) do
+    board
+    |> Relay.Cards.get_card(card.id)
+    |> Relay.Activity.list_timeline()
+    |> Enum.find(fn
+      %Schemas.Activity{type: :action, text: text} when is_binary(text) ->
+        String.starts_with?(text, "run cancelled")
+
+      _other ->
+        false
+    end)
+  end
+
   defp retry_flow(board) do
     next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
@@ -379,7 +414,7 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "cancel_run/1" do
+  describe "cancel_run/2" do
     test "revokes the in-flight job, closes the run, and logs to the card timeline", %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
@@ -397,6 +432,56 @@ defmodule Relay.RunsTest do
                Relay.Activity.list_timeline(card),
                &match?(%Schemas.Activity{type: :action, text: "run cancelled"}, &1)
              )
+    end
+
+    test "a :reason is folded into the timeline text", %{board: board} do
+      {card, run} = cancellable_run(board)
+
+      assert {:ok, %Run{status: :cancelled}} =
+               Runs.cancel_run(run, reason: "work already merged")
+
+      assert cancel_entry(board, card).text == "run cancelled — work already merged"
+    end
+
+    test "a blank or whitespace-only reason keeps the plain text", %{board: board} do
+      for reason <- [nil, "", "   \n\t"] do
+        {card, run} = cancellable_run(board)
+
+        assert {:ok, %Run{status: :cancelled}} = Runs.cancel_run(run, reason: reason)
+        assert cancel_entry(board, card).text == "run cancelled"
+      end
+    end
+
+    test "an over-long reason is truncated, so one CLI argument cannot bloat the timeline",
+         %{board: board} do
+      {card, run} = cancellable_run(board)
+
+      assert {:ok, %Run{status: :cancelled}} =
+               Runs.cancel_run(run, reason: String.duplicate("x", 250))
+
+      assert cancel_entry(board, card).text ==
+               "run cancelled — " <> String.duplicate("x", 199) <> "…"
+    end
+
+    test "the actor defaults to the agent and can be a user", %{board: board, user: user} do
+      {agent_card, agent_run} = cancellable_run(board)
+      assert {:ok, _} = Runs.cancel_run(agent_run)
+      assert cancel_entry(board, agent_card).actor_type == :agent
+
+      {user_card, user_run} = cancellable_run(board)
+      assert {:ok, _} = Runs.cancel_run(user_run, actor: {:user, user.id})
+      entry = cancel_entry(board, user_card)
+      assert entry.actor_type == :user
+      assert entry.user_id == user.id
+    end
+
+    test "the refusal names itself for the wire", %{board: board} do
+      {_card, run} = cancellable_run(board)
+      assert {:ok, _} = Runs.cancel_run(run)
+
+      assert Runs.cancel_run(Runs.get_run!(run.id)) == {:error, :not_active}
+      assert Runs.cancel_refusal_code(:not_active) == "no_active_run"
+      assert Runs.cancel_refusal_message(:not_active) =~ "no active run"
     end
   end
 
@@ -455,7 +540,7 @@ defmodule Relay.RunsTest do
 
       assert Enum.any?(
                Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
-               &match?(%Schemas.Activity{type: :action, text: "run closed — card already completed"}, &1)
+               &match?(%Schemas.Activity{type: :action, text: "run cancelled — card already completed"}, &1)
              )
     end
   end

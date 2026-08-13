@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 53
-EXECUTOR_FINGERPRINT = "f5d57cdd9619a4a5cd9f7798f87836b3c2bea0b9fea04d668888a6cadc54a98c"
+EXECUTOR_VERSION = 54
+EXECUTOR_FINGERPRINT = "bbaa5176077687bbb438da3fc0c2ea8e91b41d78119f274a633107f3409da99d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -754,6 +754,26 @@ def cmd_retry(args):
     d = api("POST", f"/api/cards/{args.ref}/retry", body)["data"]
     emit(args, d, lambda: log(f"{args.ref}: run {d['run_id']} re-entered at {d['node']} "
                               f"(retry {d['retries']})"))
+
+
+def cmd_cancel(args):
+    """Kill the card's ACTIVE run (RE309) — the stop half of the pair `retry` starts.
+
+    Cancel only: it never moves the card. Unsticking a card whose live run strands it is
+    `relay cancel REF && relay move REF Review` — two composable calls, so `move`'s 409
+    keeps meaning exactly what it says.
+
+    A card with no active run is refused 422 `no_active_run`, which api() turns into a
+    die() — a silent success on a refused cancel is the failure mode this command exists
+    to prevent, the same reasoning cmd_retry records.
+
+    Self-cancel is permitted and NOT guarded: a flow node that cancels its own ref revokes
+    its own job. The executor handles revocation gracefully and an operator agent may
+    legitimately need it, so this is a documented property of the verb."""
+    body = {"reason": args.reason} if getattr(args, "reason", None) else {}
+    d = api("POST", f"/api/cards/{args.ref}/cancel", body)["data"]
+    emit(args, d, lambda: log(f"{args.ref}: run {d['run_id']} cancelled "
+                              f"(was {d['previous_status']} at {d['node'] or 'no node'})"))
 
 
 def cmd_runs(args):
@@ -4090,6 +4110,8 @@ def build_parser():
     add("why", cmd_why, "ref", json_flag=True)
     rt = add("retry", cmd_retry, "ref", json_flag=True)
     rt.add_argument("--at")
+    cn = add("cancel", cmd_cancel, "ref", json_flag=True)
+    cn.add_argument("--reason")
     add("runs", cmd_runs, "ref", json_flag=True)
     add("executors", cmd_executors, json_flag=True)
     fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)

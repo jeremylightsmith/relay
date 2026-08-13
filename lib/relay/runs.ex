@@ -869,13 +869,29 @@ defmodule Relay.Runs do
     end
   end
 
+  @max_cancel_reason 200
+
   @doc """
-  Cancels an active run: stops its server, revokes any in-flight job,
-  marks the run `:cancelled`, and logs an `:action` entry (`log_text`,
-  default `"run cancelled"`) to the card's timeline. The card itself is
-  left where it sits.
+  Cancels an active run: stops its server, revokes any in-flight job, marks the run
+  `:cancelled`, and logs an `:action` entry to the card's timeline. The card itself is left
+  where it sits — cancelling never moves it (RE309); a caller that wants the card elsewhere
+  follows with `Relay.Cards.move_card/4`, whose own refusal keeps meaning what it says.
+
+  Options:
+
+    * `:reason` — folded into the timeline text as `"run cancelled — <reason>"`. `nil` (the
+      default), a blank or whitespace-only string, or anything that is not a string keeps
+      the plain `"run cancelled"`. Trimmed, and truncated to `#{@max_cancel_reason}`
+      characters so one pathological CLI argument cannot bloat a timeline entry.
+    * `:actor` — `:agent | {:user, user_id}`, default `:agent`, passed straight to
+      `Relay.Activity.log/2`. `BoardLive` passes the signed-in user, so a human cancelling
+      from the board is no longer logged as the agent; the board-key API, the run
+      `Listener` and the `ExecutorReaper` take the default.
+
+  Returns `{:ok, cancelled}`, or `{:error, :not_active}` when the run is already terminal —
+  the refusal `cancel_refusal_code/1` names `"no_active_run"`.
   """
-  def cancel_run(%Run{} = run, log_text \\ "run cancelled") do
+  def cancel_run(%Run{} = run, opts \\ []) do
     stop_server(run)
     run = Repo.get!(Run, run.id)
     revoke_active_jobs(run)
@@ -885,12 +901,40 @@ defmodule Relay.Runs do
          ) do
       {:ok, cancelled} ->
         card = Repo.get!(Card, cancelled.card_id)
-        {:ok, _entry} = Activity.log(card, %{type: :action, actor: :agent, text: log_text})
+
+        {:ok, _entry} =
+          Activity.log(card, %{
+            type: :action,
+            actor: Keyword.get(opts, :actor, :agent),
+            text: cancel_log_text(Keyword.get(opts, :reason))
+          })
+
         broadcast_runs(card.board_id, {:run_finished, cancelled})
         {:ok, cancelled}
 
       {:error, :not_in_expected_state} ->
         {:error, :not_active}
+    end
+  end
+
+  # The ONE place the "run cancelled" literal lives (RE309). Every caller composes its
+  # timeline text through here, so a reason is a suffix and never a second spelling of the
+  # event. Non-binaries fall through to the plain text: `:reason` arrives straight off a
+  # JSON body, and a `{"reason": 5}` must not become a 500.
+  defp cancel_log_text(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> "run cancelled"
+      trimmed -> "run cancelled — " <> truncate_cancel_reason(trimmed)
+    end
+  end
+
+  defp cancel_log_text(_not_a_reason), do: "run cancelled"
+
+  defp truncate_cancel_reason(reason) do
+    if String.length(reason) > @max_cancel_reason do
+      String.slice(reason, 0, @max_cancel_reason - 1) <> "…"
+    else
+      reason
     end
   end
 
@@ -913,7 +957,7 @@ defmodule Relay.Runs do
     )
     |> Repo.all()
     |> Enum.reduce(0, fn run, closed ->
-      case cancel_run(run, "run closed — card already completed") do
+      case cancel_run(run, reason: "card already completed") do
         {:ok, _cancelled} -> closed + 1
         {:error, :not_active} -> closed
       end
@@ -2547,6 +2591,16 @@ defmodule Relay.Runs do
   def retry_refusal_message(:awaiting_answer) do
     "This run is waiting on a human answer, not stalled — answer it instead of restarting."
   end
+
+  @doc "The machine token for a `cancel_run/2` refusal — what tests and the API's `error.code` match on."
+  def cancel_refusal_code(:not_active), do: "no_active_run"
+
+  @doc """
+  The human sentence for a `cancel_run/2` refusal. ONE code covers both shapes of "nothing to
+  cancel" — no run row at all, and a run that raced to terminal between lookup and cancel —
+  because they are the same fact to the caller.
+  """
+  def cancel_refusal_message(:not_active), do: "This card has no active run to cancel."
 
   @doc """
   The most recent run of `card`, whatever its status — the resolution behind
