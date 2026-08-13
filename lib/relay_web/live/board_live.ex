@@ -116,6 +116,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Talk
   alias Relay.Votes
   alias RelayWeb.ChangesetErrors
+  alias RelayWeb.RunComponents
   alias RelayWeb.StoryMapComponents
   alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
@@ -251,15 +252,12 @@ defmodule RelayWeb.BoardLive do
               Restore
             </button>
           </div>
-          <div
+          <RunComponents.stopped_work_banner
             :if={@stopped_work}
             id="stopped-work-banner"
-            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
-            style={stopped_work_banner_style(@stopped_work.reason)}
-          >
-            <.icon name="hero-exclamation-triangle" class="size-4" />
-            <span class="flex-1">{@stopped_work.detail}</span>
-          </div>
+            verdict={@stopped_work}
+            class="mx-4 mb-2 mt-2 sm:mx-5"
+          />
           <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
                 strip. Hidden at ≥45rem; the BoardPager hook owns the data-active
                 highlight and chip-tap scrolling (see assets/js/hooks/board_pager.js). --%>
@@ -2714,14 +2712,6 @@ defmodule RelayWeb.BoardLive do
     |> assign(:run_face_meta, meta)
     |> assign(:stopped_work, Runs.stopped_work(board, now))
   end
-
-  defp stopped_work_banner_style(:executor_outdated),
-    do:
-      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
-
-  defp stopped_work_banner_style(_reason),
-    do:
-      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));"
 
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()
