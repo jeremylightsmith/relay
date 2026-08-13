@@ -933,6 +933,176 @@ class ApiAuthTest(unittest.TestCase):
         self.assertIn('"sha": "abc123"', buf.getvalue())
 
 
+class ExecutorNameTest(unittest.TestCase):
+    """RE305: the default executor name is `<checkout-dir>@<short-host>`.
+
+    That name is the executor's identity BOTH on the board (the server upserts on
+    `(board_id, name)`) and in the local singleton flock, so a bare hostname made two
+    checkouts of one project on one machine into one executor row — and got the second
+    `relay execute` refused outright by its own identity lock. The checkout DIRECTORY is
+    what differs between two clones, which is why it, and not the git remote, is the
+    project part."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        self.addCleanup(setattr, relay.socket, "gethostname", relay.socket.gethostname)
+
+    def _given(self, root, hostname):
+        relay.ROOT = root
+        relay.socket.gethostname = lambda: hostname
+
+    def test_default_is_checkout_dir_at_short_host(self):
+        self._given("/Users/j/src/relay", "Jeremys-MBP.local")
+        self.assertEqual(relay.default_executor_name(), "relay@Jeremys-MBP")
+
+    def test_two_checkouts_of_one_project_get_different_names(self):
+        self._given("/Users/j/src/relay", "box")
+        first = relay.default_executor_name()
+        self._given("/Users/j/src/relay-clean", "box")
+        self.assertNotEqual(first, relay.default_executor_name())
+
+    def test_a_trailing_separator_does_not_blank_the_project_part(self):
+        self._given("/Users/j/src/relay/", "box")
+        self.assertEqual(relay.default_executor_name(), "relay@box")
+
+    def test_unsafe_characters_are_sanitized(self):
+        self._given("/Users/j/my project (2)", "weird host!")
+        self.assertEqual(relay.default_executor_name(), "my-project-2@weird-host")
+
+    def test_empty_parts_fall_back_instead_of_producing_a_blank(self):
+        self._given("/", "")
+        self.assertEqual(relay.default_executor_name(), "project@host")
+
+
+class LegacyIdentityWarningTest(unittest.TestCase):
+    """RE305: the default name moved from the bare hostname, and that name is a DURABLE key —
+    `runs.pinned_executor_name` pins an exclusive run to the executor that claimed it and is
+    KEPT through an `:executor_gone` park. An executor that silently answers to a new name
+    therefore strands every run pinned to the old one, unattended (auto-update re-execs at a
+    job boundary, which is "nothing in flight", not "nothing pinned to me")."""
+
+    def setUp(self):
+        isolate_executor_locks(self)
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        self.addCleanup(setattr, relay.socket, "gethostname", relay.socket.gethostname)
+        self.addCleanup(setattr, relay, "env", relay.env)
+        relay.ROOT = "/Users/j/src/relay"
+        relay.socket.gethostname = lambda: "box.local"
+        relay.env = lambda name: "http://relay.test"
+
+    def _an_executor_ran_here_as(self, name):
+        """Leave the residue `acquire_singleton_lock` leaves and never unlinks: an identity
+        lock file, keyed on `sha256(RELAY_URL + "\\0" + name)`. It exists iff an executor
+        actually ran on THIS machine against THIS board under that name."""
+        with open(relay.identity_lock_path({"name": name}), "w", encoding="utf-8") as f:
+            f.write("{}\n")
+
+    def test_the_defaulted_name_warns_when_the_old_identity_ran_here(self):
+        self._an_executor_ran_here_as("box.local")
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIsNotNone(warning)
+        self.assertIn('"relay@box"', warning)      # the identity it answers to now
+        self.assertIn('"box.local"', warning)      # the identity its pins were written under
+
+    def test_a_machine_that_never_ran_the_legacy_identity_is_silent(self):
+        """The gate. Ungated, `name == default_executor_name()` and `default != gethostname()`
+        are true FOREVER, on every start, for every executor that has not pinned a name —
+        so a brand-new install with no pre-RE305 history and no pinned runs at all would eat a
+        permanent `kind="error"` line, mirrored to the board feed on every start and every
+        auto-update re-exec."""
+        self.assertIsNone(relay.legacy_identity_warning(relay.default_executor_name()))
+
+    def test_the_warning_points_at_a_per_invocation_flag_not_the_shared_config(self):
+        """`.relay/executor.json` is TRACKED IN GIT. Advising a bare hostname there restores
+        one shared identity across every checkout — precisely the collision RE305 exists to
+        split apart, and the second `relay execute` is then refused by its own identity
+        lock. So the escape hatch is `--name`, and the config path appears only as a caution."""
+        self._an_executor_ran_here_as("box.local")
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIn('--name "box.local"', warning)          # adopt the pins here, or
+        self.assertIn("shared by every checkout", warning)    # ...don't pin it in the config
+
+    def test_the_per_run_recovery_is_the_one_that_actually_clears_the_pin(self):
+        """`Runs.park_claimed/1` (lib/relay/runs.ex) is the ONLY writer that nils
+        `pinned_executor_name`, and it transitions from `[:running]` only — the listener calls
+        it for `%Run{status: :running}` and leaves a `%Run{status: :parked, parked_reason:
+        :executor_gone}` on its defensive no-op clause. So "take the baton" clears the pin only
+        while the run is still RUNNING; once it has parked the pin cannot be cleared in place
+        (the scheduler's resume still targets the gone executor and `relay retry` refuses with
+        `executor_unavailable`), and cancelling is the only way out. Telling an operator to
+        take the baton on an already-parked run strands it — in a card whose whole point is
+        telling the terminal the truth."""
+        self._an_executor_ran_here_as("box.local")
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIn("still RUNNING, take the baton", warning)
+        self.assertIn("can no longer be cleared", warning)
+        self.assertIn("Cancel run", warning)
+
+    def test_the_warning_is_shown_once_not_on_every_start_forever(self):
+        """The identity lock the gate reads is never unlinked, so on any machine that ever ran
+        a pre-RE305 executor the gate stays true forever — a `kind="error"` line on every start
+        and every auto-update re-exec, with no acknowledgement path. Emitting drops a marker
+        beside that lock, so the warning is one-time per machine + board + legacy identity."""
+        self._an_executor_ran_here_as("box.local")
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
+        self.assertIsNone(relay.legacy_identity_warning(relay.default_executor_name()))
+
+    def test_the_marker_is_keyed_on_the_identity_not_left_global(self):
+        """The marker sits beside the legacy identity's own lock, so warning about one legacy
+        identity never silences a different board's (the lock path hashes RELAY_URL + name)."""
+        self._an_executor_ran_here_as("box.local")
+        self._an_executor_ran_here_as("other-host")
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
+        relay.socket.gethostname = lambda: "other-host"
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
+
+    def test_each_checkout_is_told_even_though_they_share_a_legacy_identity(self):
+        """Round-4 blocking #1. The marker used to be keyed on the LEGACY name — machine-global
+        (`sha256(RELAY_URL + "\\0" + hostname)`), with ROOT nowhere in it. Two checkouts of one
+        project on one machine is RE305's motivating scenario, so the first one to start ate the
+        only telling and the other was silent forever — and the advice is checkout-specific
+        ("restart THIS checkout with --name"), so the one that got it often could not act on it
+        while the one holding the pins never heard. Key it on the NEW identity, which embeds the
+        checkout via the directory basename."""
+        self._an_executor_ran_here_as("box.local")
+
+        relay.ROOT = "/Users/j/src/relay"
+        first = relay.legacy_identity_warning(relay.default_executor_name())
+        relay.ROOT = "/Users/j/scratch/relay-clean"
+        second = relay.legacy_identity_warning(relay.default_executor_name())
+
+        self.assertIsNotNone(first, "the first checkout must be told")
+        self.assertIsNotNone(second, "the second checkout must be told too, not silenced")
+        self.assertIn('"relay-clean@box"', second)   # ...and told about ITS own new identity
+
+    def test_a_dry_run_prints_the_warning_without_burning_it(self):
+        """Round-4 blocking #2. `--dry-run` computed the warning, and computing it wrote the
+        one-shot marker. A dry run starts no LogForwarder, so `forward()` no-ops and the
+        `kind="error"` line never reaches the board feed — the telling was burned in a terminal
+        and mirrored nowhere. The card's own acceptance criteria run `execute --dry-run` four
+        times before criterion 6 ever starts a real executor."""
+        self.addCleanup(setattr, relay, "DRY", relay.DRY)
+        self._an_executor_ran_here_as("box.local")
+
+        relay.DRY = True
+        dry = relay.legacy_identity_warning(relay.default_executor_name())
+        relay.DRY = False
+        real = relay.legacy_identity_warning(relay.default_executor_name())
+
+        self.assertIsNotNone(dry, "a dry run should still PRINT the warning")
+        self.assertIsNotNone(real, "...but must not have claimed it was said")
+
+    def test_a_name_the_developer_chose_is_silent(self):
+        """`--name` or an explicit `"name"` in the config is a human choosing an identity —
+        nothing moved under them, so there is nothing to warn about."""
+        self._an_executor_ran_here_as("box.local")
+        self.assertIsNone(relay.legacy_identity_warning("chosen"))
+
+    def test_keeping_the_legacy_hostname_is_silent(self):
+        self._an_executor_ran_here_as("box.local")
+        self.assertIsNone(relay.legacy_identity_warning("box.local"))
+
+
 class ExecutorConfigTest(unittest.TestCase):
     def setUp(self):
         self._path = relay.EXECUTOR_CONFIG_PATH
@@ -953,7 +1123,20 @@ class ExecutorConfigTest(unittest.TestCase):
         self.assertEqual(cfg["capacity"], {"shared_clean": 1, "exclusive": 1})
         self.assertEqual(cfg["poll_timeout"], 25)
         self.assertEqual(cfg["heartbeat_interval"], 15)
-        self.assertTrue(cfg["name"])  # defaults to hostname
+        self.assertTrue(cfg["name"])  # defaults to <checkout-dir>@<short-host>
+
+    def test_default_name_is_the_checkout_dir_at_the_short_host(self):
+        """Asserted against the function, never a hardcoded string: this suite runs in
+        whatever directory the executor gave it (an exec worktree included)."""
+        relay.EXECUTOR_CONFIG_PATH = "/nope/does/not/exist.json"
+        self.assertEqual(relay.load_executor_config()["name"],
+                         relay.default_executor_name())
+
+    def test_an_explicit_name_in_the_config_still_wins(self):
+        self._write({"name": "chosen"})
+        cfg = relay.load_executor_config()
+        self.assertEqual(cfg["name"], "chosen")
+        self.assertNotEqual(cfg["name"], relay.default_executor_name())
 
     def test_partial_capacity_merges_over_defaults(self):
         self._write({"capacity": {"shared_clean": 3}})
@@ -1177,6 +1360,33 @@ class ExecutorPoolTest(unittest.TestCase):
         p.release(self.excl("r1", "RLY-1"), "exec-nope", "done")
         p.release(self.excl("r1", "RLY-1"), None, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
+
+    # -- what is holding the pool (RE305) -------------------------------------
+    def test_busy_summary_names_the_refs_and_their_states(self):
+        """The zero-capacity skip is the path most likely to explain "running but not
+        pulling" — most often a RETAINED failed worktree, which is terminal and holds its
+        exclusive slot until reclaimed. Naming what holds the slots is what makes the line
+        actionable."""
+        p = self.pool()
+        p.shared_used = 2
+        p.wts = {
+            "exec-RE300": {"run_id": "r1", "state": "active", "live": True,
+                           "partition": "1"},
+            "exec-RE291": {"run_id": "r2", "state": "retained", "live": False,
+                           "partition": None},
+            "exec-RE280": {"run_id": "r3", "state": "active", "live": False,
+                           "partition": "2"},
+            "exec-RE270": {"run_id": None, "state": "active", "live": False,
+                           "talk_users": 1, "partition": "3"},
+        }
+        self.assertEqual(
+            p.busy_summary(),
+            "shared_clean 2/2 busy; exclusive: RE270 talk, RE280 bound, "
+            "RE291 retained, RE300 running")
+
+    def test_busy_summary_says_idle_when_no_card_holds_a_worktree(self):
+        p = self.pool()
+        self.assertEqual(p.busy_summary(), "shared_clean 0/2 busy; exclusive: idle")
 
 
 class ExecutorPoolRecoverTest(unittest.TestCase):
@@ -3325,6 +3535,86 @@ def isolate_executor_locks(test):
     test.addCleanup(_release)
 
 
+class IdleLogTest(unittest.TestCase):
+    """RE305: the loop's two 'nothing is happening' lines are throttled to one per interval
+    per reason — enough to debug "running but not pulling", not enough to flood a terminal
+    that sits idle overnight. Pure but for the injected clock, so no test sleeps."""
+
+    def setUp(self):
+        self.now = 1000.0
+        self.idle = relay.IdleLog(interval=300, clock=lambda: self.now)
+
+    def test_the_first_line_for_a_reason_is_due_and_covers_one_poll(self):
+        self.assertEqual(self.idle.due("no_work"), 1)
+
+    def test_a_second_line_inside_the_interval_is_throttled(self):
+        self.idle.due("no_work")
+        self.now += 10
+        self.assertIsNone(self.idle.due("no_work"))
+
+    def test_the_next_line_past_the_interval_carries_the_suppressed_count(self):
+        self.idle.due("no_work")
+        for _ in range(11):
+            self.now += 10
+            self.assertIsNone(self.idle.due("no_work"))
+        self.now += 300
+        self.assertEqual(self.idle.due("no_work"), 12)   # 11 suppressed + this one
+        self.now += 300
+        self.assertEqual(self.idle.due("no_work"), 1)    # tally cleared when reported
+
+    def test_two_reasons_throttle_independently(self):
+        self.assertEqual(self.idle.due("no_work"), 1)
+        self.assertEqual(self.idle.due("no_free_slots"), 1)
+        self.now += 10
+        self.assertIsNone(self.idle.due("no_work"))
+        self.assertIsNone(self.idle.due("no_free_slots"))
+
+    def test_reset_re_arms_every_reason(self):
+        self.idle.due("no_work")
+        self.idle.due("no_free_slots")
+        self.now += 5
+        self.assertIsNone(self.idle.due("no_work"))
+        self.idle.reset()
+        self.assertEqual(self.idle.due("no_work"), 1)
+        self.assertEqual(self.idle.due("no_free_slots"), 1)
+
+    def test_the_shipped_interval_is_five_minutes(self):
+        self.assertEqual(relay.IDLE_LOG_INTERVAL, 300)
+
+    def test_tally_is_the_one_rendering_of_a_due_count(self):
+        """Both idle lines render their count through this, so they cannot drift apart."""
+        self.assertEqual(self.idle.tally(1), "1 poll in the last 5m")
+        self.assertEqual(self.idle.tally(12), "12 polls in the last 5m")
+
+
+class ClaimLineTest(unittest.TestCase):
+    """RE305 item 4: there was no 'claimed' line anywhere — the first evidence that work
+    arrived was the node's own tagged output, so "the board is offering nothing" and "the
+    board handed us a job and the node is quiet" looked identical."""
+
+    def test_a_node_job_names_the_ref_node_run_and_isolation(self):
+        j = job(case="exclusive_shell", id="nj-1", run_id="r1", vars={"ref": "RLY-9"})
+        self.assertEqual(relay.claim_line(j),
+                         f"claimed RLY-9 · {j['node_id']} (run r1, exclusive)")
+
+    def test_a_talk_turn_gets_the_talk_wording(self):
+        turn = json.loads(json.dumps(CONTRACT["talk_claim"]["first_turn"]))
+        self.assertEqual(relay.claim_line(turn), "claimed talk turn for CB2")
+
+    def test_job_ref_prefers_vars_ref_then_ref_then_the_job_id(self):
+        self.assertEqual(relay.job_ref({"vars": {"ref": "A"}, "ref": "B", "id": "C"}), "A")
+        self.assertEqual(relay.job_ref({"vars": None, "ref": "B", "id": "C"}), "B")
+        self.assertEqual(relay.job_ref({"id": "C"}), "C")
+
+    def test_job_ref_is_total_on_a_payload_carrying_none_of_the_three(self):
+        """The claim line runs ABOVE the placement block whose `except (KeyError, TypeError)`
+        routes a malformed job to `reject`, so a subscript here would crash the daemon on
+        exactly the untrusted payload that guard exists to survive."""
+        self.assertIsNone(relay.job_ref({"isolation": "shared_clean"}))
+        self.assertIsNone(relay.job_ref({}))
+        self.assertIsNotNone(relay.claim_line({"isolation": "shared_clean"}))
+
+
 class ExecuteLoopTest(unittest.TestCase):
     """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
     work', not an error."""
@@ -3335,11 +3625,14 @@ class ExecuteLoopTest(unittest.TestCase):
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "report_talk_outcome", "reset_worktree",
                         "refresh_worktree", "FORWARDER", "env", "log", "DRY",
-                        "PLACEMENT_RETRY_S")}
+                        "PLACEMENT_RETRY_S", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                          relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         # Don't sleep real seconds between placement retries: an unplaceable job walks the full
         # PLACEMENT_ATTEMPTS loop, which at the shipped 1.0s interval is ~9s of `wake.wait` per
         # test. These tests exercise routing/reporting, not the backoff duration.
@@ -3375,7 +3668,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
         self.assertEqual(self.reports[0][3], "sha")
@@ -3385,7 +3678,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: self.reports.append(a)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports, [])   # nothing ran, no error raised
 
@@ -3394,9 +3687,20 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: calls.append(a)
         relay.report_outcome = lambda *a: calls.append(a)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
 
         self.assertEqual(calls, [])          # dry-run performs no claim / no outcome
+
+    def test_the_dry_run_line_renders_capacity_the_one_way(self):
+        """`fmt_capacity` is the ONE rendering of a capacity map. The dry-run line sits two
+        lines below the startup line and used to interpolate the raw dict, so `--dry-run` —
+        the output this card's own smoke step reads — printed capacity two ways at once."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
+
+        self.assertIn("  (dry) would claim advertising shared_clean=1 exclusive=0", lines)
 
     def test_a_malformed_claimed_job_is_reported_failed_not_dropped(self):
         """A job missing `isolation` blows up ExecutorPool.assign with a KeyError; untrusted
@@ -3408,9 +3712,23 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-9", "failed"))
+
+    def test_a_claim_payload_with_no_id_is_rejected_and_the_loop_survives(self):
+        """RE305: the claim line sits ABOVE the placement block whose
+        `except (KeyError, TypeError)` is the only guard against a malformed server payload,
+        so anything it subscripts crashes the daemon on precisely the input `reject` exists to
+        survive. A payload with no `id` must still fall through to `reject`."""
+        relay.claim_node_job = lambda *a, **k: {"isolation": "shared_clean"}
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.report_outcome = lambda *a: self.fail("no id — nothing to report an outcome on")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
+
+        self.assertTrue(any("rejecting claimed job" in line for line in lines), lines)
 
     def test_an_unplaceable_job_is_reported_failed_not_dropped(self):
         """The server can hand back a job whose isolation class this executor has no free
@@ -3423,7 +3741,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-10", "failed"))
 
@@ -3440,7 +3758,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.report_talk_outcome = lambda tid, status, sid, detail: (
             talk_reports.append((tid, status, sid)) or status)
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(node_reports, [])                       # never the node-job route
         self.assertEqual(talk_reports, [(77, "failed", None)])
@@ -3457,7 +3775,7 @@ class ExecuteLoopTest(unittest.TestCase):
             talk_reports.append((tid, status)) or status)
         relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(talk_reports, [(78, "failed")])
 
@@ -3474,7 +3792,7 @@ class ExecuteLoopTest(unittest.TestCase):
             talk_reports.append(detail) or status)
         relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertNotIn("None", talk_reports[0])
         self.assertIn("talk", talk_reports[0])
@@ -3488,7 +3806,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: None
         relay.report_outcome = lambda *a: None
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(calls, [])
 
@@ -3518,7 +3836,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.addCleanup(watchdog.cancel)
         watchdog.start()
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(len(calls), 1)
         cfg, hb, state, config_url = calls[0]
@@ -3526,6 +3844,196 @@ class ExecuteLoopTest(unittest.TestCase):
         self.assertIsNotNone(hb)
         self.assertIsInstance(state, dict)
         self.assertTrue(config_url)
+
+    def test_name_override_reaches_both_the_wire_and_the_identity_lock(self):
+        """RE305: `--name` has to be applied BEFORE acquire_executor_locks — that call
+        hashes cfg["name"] into the identity lock path, so a later override would lock
+        under one name and advertise another."""
+        seen = {}
+        relay.claim_node_job = lambda executor, cap, timeout, running: (
+            seen.update(executor=executor) or None)
+        relay.report_outcome = lambda *a: "done"
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name="foobar"))
+
+        self.assertEqual(seen["executor"]["name"], "foobar")
+        with open(relay.identity_lock_path({"name": "foobar"}), encoding="utf-8") as f:
+            self.assertEqual(json.loads(f.read())["name"], "foobar")
+
+    def test_a_blank_name_is_refused(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                                 name="   "))
+
+    def _defaults_the_name(self):
+        relay.load_executor_config = lambda: {
+            "name": relay.default_executor_name(), "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60}
+
+    def test_a_defaulted_name_warns_when_the_old_identity_ran_here(self):
+        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so an
+        executor that quietly answers to the new default strands them. Warn at startup —
+        the hop happens unattended, via auto-update's in-place re-exec."""
+        self._defaults_the_name()
+        with open(relay.identity_lock_path({"name": relay.socket.gethostname()}),
+                  "w", encoding="utf-8") as f:
+            f.write("{}\n")     # an executor really did run here under the bare hostname
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any(relay.socket.gethostname() in m and m.startswith("WARNING:")
+                            for m in lines), lines)
+
+    def test_a_defaulted_name_on_a_fresh_machine_gets_no_identity_warning(self):
+        """No legacy identity lock → no pre-RE305 executor ever ran here → nothing moved.
+        A fresh install must start clean, not with a permanent false-positive error line."""
+        self._defaults_the_name()
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertEqual([m for m in lines if m.startswith("WARNING:")], [])
+
+    def test_an_explicitly_named_executor_gets_no_identity_warning(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name="foobar"))
+
+        self.assertEqual([m for m in lines if m.startswith("WARNING:")], [])
+
+    def test_the_startup_line_names_the_board_url_version_and_capacity(self):
+        """RE305: a key pointed at the WRONG board used to look identical to a correct
+        one — the line named the URL and the executor but never the board."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn(
+            f'executor box v{relay.EXECUTOR_VERSION} → board "Test Board" (TB) '
+            "at http://relay.test — advertising shared_clean=1 exclusive=0 — one job",
+            lines)
+
+    def test_an_unreachable_board_warns_with_the_cause_and_keeps_polling(self):
+        """RE305 decision 3: a transient outage or a bad key at startup must not kill a
+        long-running executor. This is the regression that matters — the loop still runs
+        its cycle."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append((msg, k.get("kind")))
+        relay.get_board = lambda **_k: relay.die("API 401: invalid API key")
+        polls = []
+        relay.claim_node_job = lambda *a, **k: (polls.append(1) or None)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any("board UNREACHABLE" in m for m, _ in lines))
+        warnings = [(m, kind) for m, kind in lines if m.startswith("WARNING:")]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("http://relay.test", warnings[0][0])
+        self.assertIn("API 401: invalid API key", warnings[0][0])
+        self.assertEqual(warnings[0][1], "error")
+        self.assertEqual(len(polls), 1)      # it kept going
+
+    def test_the_startup_board_fetch_is_bounded(self):
+        """The startup GET now gates the startup line, so an UNBOUNDED request against a host
+        that DROPs (VPN down, firewalled box) would hang `relay execute` printing nothing at
+        all — the exact "running but not pulling, and the terminal won't say why" condition
+        this card exists to kill."""
+        seen = {}
+        self.addCleanup(setattr, relay, "api", relay.api)
+        relay.api = lambda *a, **k: (seen.update(k) or {"board": {"name": "B", "key": "K"}})
+        relay.get_board = self._saved["get_board"]      # the real one, over setUp's stub
+
+        relay.board_identity()
+
+        self.assertEqual(seen.get("timeout"), relay.BOARD_FETCH_TIMEOUT_S)
+
+    def test_a_board_fetch_that_times_out_still_reaches_the_loop(self):
+        def timed_out(**_kw):
+            raise relay.socket.timeout("timed out")
+        relay.get_board = timed_out
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        polls = []
+        relay.claim_node_job = lambda *a, **k: (polls.append(1) or None)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any("board UNREACHABLE" in m for m in lines), lines)
+        self.assertEqual(len(polls), 1)      # bounded, warned, and still polling
+
+    def test_fmt_capacity_renders_key_equals_value_pairs(self):
+        self.assertEqual(relay.fmt_capacity({"shared_clean": 3, "exclusive": 2}),
+                         "shared_clean=3 exclusive=2")
+
+    def test_a_claim_logs_exactly_one_line_naming_the_node_and_run(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        j = job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1"})
+        relay.claim_node_job = lambda *a, **k: j
+        relay.report_outcome = lambda *a: "done"
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertEqual([m for m in lines if m.startswith("claimed ")],
+                         [relay.claim_line(j)])
+
+    def test_no_work_logs_a_throttled_idle_line_with_the_advertised_capacity(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn("idle — board offered no work (1 poll in the last 5m, "
+                      "advertising shared_clean=1 exclusive=0)", lines)
+
+    def test_no_free_slots_logs_a_line_naming_what_holds_them(self):
+        """The zero-capacity `continue` is silent today and is the likeliest explanation
+        for "running but not pulling". First cycle: no capacity -> the line. Second cycle:
+        capacity back, no work -> `--once` breaks, so the test terminates."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        cycles = {"n": 0}
+
+        def capacity(_self):
+            cycles["n"] += 1
+            return ({"shared_clean": 0, "exclusive": 0} if cycles["n"] == 1
+                    else {"shared_clean": 1, "exclusive": 0})
+
+        self.addCleanup(setattr, relay.ExecutorPool, "capacity",
+                        relay.ExecutorPool.capacity)
+        relay.ExecutorPool.capacity = capacity
+        self.addCleanup(setattr, relay.ExecutorPool, "busy_summary",
+                        relay.ExecutorPool.busy_summary)
+        relay.ExecutorPool.busy_summary = lambda _self: "shared_clean 1/1 busy; " \
+                                                       "exclusive: RE291 retained"
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn("idle — not claiming: no free slots (1 poll in the last 5m, "
+                      "shared_clean 1/1 busy; exclusive: RE291 retained)", lines)
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
@@ -3538,11 +4046,15 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         isolate_executor_locks(self)
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "execute_talk",
-                        "report_talk_outcome", "FORWARDER", "env", "log", "DRY")}
+                        "report_talk_outcome", "FORWARDER", "env", "log", "DRY",
+                        "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.env = lambda name: "x"
         relay.log = lambda *a, **k: None
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.load_executor_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 1},
@@ -3568,7 +4080,7 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
                    "prompt": "why?", "seed": {"fields": []}, "resume_session": None}
         relay.claim_node_job = lambda *a, **k: talk_job
 
-        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         # while the talk job ran, the node job's own entries must have been untouched
         self.assertEqual(seen, {"node_job_id": "real-node-job", "run_id": "real-run"})
@@ -3589,13 +4101,16 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
                         "maybe_auto_update", "ExecutorHeartbeat", "FORWARDER", "env", "log",
-                        "DRY")}
+                        "DRY", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                         relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
         relay.env = lambda name: "x"
         relay.log = lambda *a, **k: None
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.report_outcome = lambda *a: "done"
@@ -3641,7 +4156,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         threading.Timer(0.2, gate.set).start()   # let the job finish partway through
         self._interrupt_after(0.4)               # then stop the otherwise-endless loop
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(violations, [])   # never offered the boundary while the job ran
         self.assertTrue(idle_calls)        # but was, both before the claim and after it finished
@@ -3654,6 +4169,11 @@ class ExecuteParserTest(unittest.TestCase):
         self.assertTrue(args.once)
         self.assertTrue(args.dry_run)
         self.assertEqual(args.func, relay.cmd_execute)
+
+    def test_name_defaults_to_none_and_is_overridable(self):
+        self.assertIsNone(relay.build_parser().parse_args(["execute"]).name)
+        args = relay.build_parser().parse_args(["execute", "--name", "foobar"])
+        self.assertEqual(args.name, "foobar")
 
 
 class LegacyDispatcherRetiredTest(unittest.TestCase):
@@ -4049,7 +4569,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
-                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY")}
+                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                         relay.signal.getsignal(relay.signal.SIGINT))
@@ -4057,6 +4577,9 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.env = lambda name: "x"
         self.logs = []
         relay.log = lambda msg, **k: self.logs.append((msg, k.get("kind")))
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None)
@@ -4086,7 +4609,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
                                                 or relay.outdated_refusal(9))
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         # poll_timeout is 0.01s over ~0.3s of running: without the flag this would be dozens.
         self.assertEqual(len(calls), 1)
@@ -4095,7 +4618,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         hb = FakeHeartbeat.instances[0]
         self.assertEqual(hb.capacity, {"shared_clean": 0, "exclusive": 0})
@@ -4107,7 +4630,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
     def test_the_loop_wires_the_pool_release_functions_into_the_heartbeat(self):
         relay.claim_node_job = lambda *a, **k: None   # no work: just start, beat, idle
         self._interrupt_after(0.2)
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
         hb = FakeHeartbeat.instances[-1]
         self.assertTrue(callable(hb.bound_fn))
         self.assertTrue(callable(hb.on_release_run))
@@ -4119,7 +4642,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
         self._interrupt_after(0.3)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         outdated = [m for m, kind in self.logs if "OUTDATED" in m]
         self.assertEqual(len(outdated), 1, self.logs)   # once, not every poll
@@ -4148,7 +4671,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         threading.Timer(0.3, gate.set).start()
         self._interrupt_after(0.5)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual(reports[0][:2], ("nj-1", "succeeded"))
 
@@ -4156,7 +4679,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
 
         with self.assertRaises(SystemExit) as caught:
-            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None))
+            relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(caught.exception.code, 1)
 
@@ -4164,7 +4687,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: None      # 204 / long-poll timeout
         self._interrupt_after(0.2)
 
-        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None))
+        relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
 
         self.assertEqual([m for m, _k in self.logs if "OUTDATED" in m], [])
         self.assertEqual(FakeHeartbeat.instances[0].capacity,

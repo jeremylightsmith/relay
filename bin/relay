@@ -31,8 +31,10 @@ TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output;
 import argparse
 import base64
 import collections
+import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -68,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 48
-EXECUTOR_FINGERPRINT = "4552d75897b0f855b352fe45055e92cb8cc668b7b188071428f6f2889bb67c00"
+EXECUTOR_VERSION = 53
+EXECUTOR_FINGERPRINT = "f5d57cdd9619a4a5cd9f7798f87836b3c2bea0b9fea04d668888a6cadc54a98c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -406,8 +408,52 @@ def read_arg(text):
     return text
 
 
-def get_board():
-    return api("GET", "/api/board")
+# Bound on the ONE startup GET /api/board (RE305). Every other executor request either has
+# its own bound (the long-poll claim, `_fetch`) or runs where a stall is visible; this one
+# gates the startup line, so unbounded it would hang `relay execute` printing NOTHING at all
+# against a host that DROPs — a VPN that is down, a firewalled box. This is a PER-ATTEMPT
+# timeout, and that DROP case times out during CONNECT, which urllib wraps in `URLError` and
+# `_retryable` retries: worst case is ~31s (three attempts plus 1.5s of backoff), not 10s.
+# Bounded at all is the point. Generous enough that a slow-but-alive board still names itself.
+BOARD_FETCH_TIMEOUT_S = 10
+
+
+def get_board(timeout=None):
+    return api("GET", "/api/board", timeout=timeout)
+
+
+def board_identity():
+    """`('"Relay" (RE)', None)` for the startup line, or `(None, why)` when the board
+    cannot be reached (RE305).
+
+    NEVER raises. Decision 3 on the card: a wrong or expired RELAY_API_KEY, or a transient
+    outage at startup, must WARN and let the executor keep polling — the loop and
+    auto-update already retry, and killing a long-running executor over one failed GET is
+    strictly worse than a noisy start.
+
+    `api()` reports a failure by printing to stderr and raising SystemExit (`die`), so the
+    cause is captured here rather than left on a separate line nobody connects to the
+    warning. Safe to capture: this runs once, at startup, before the forwarder and
+    heartbeat threads exist, so nothing else can be writing to stderr at that moment.
+
+    `GET /api/board` also returns the board's cards, which is more payload than this line
+    needs. Accepted: one request per process start, reusing the endpoint the CLI already
+    has, rather than adding a `board` block to the heartbeat reply — which would mean a
+    contract-fixture change for a log line.
+
+    Bounded by BOARD_FETCH_TIMEOUT_S per attempt — ~31s worst case, not 10s. A READ timeout
+    raises `socket.timeout`, which `api()` re-raises rather than retrying; a CONNECT timeout
+    (the host that DROPs) is wrapped by urllib in `URLError`, which `_retryable` retries
+    through all `API_MAX_ATTEMPTS`. Either way the failure lands in the `except` below and
+    becomes `board UNREACHABLE` + the warning + keep polling — the same path a bad key
+    takes."""
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(captured):
+            board = get_board(timeout=BOARD_FETCH_TIMEOUT_S)["board"]
+        return f'"{board["name"]}" ({board["key"]})', None
+    except (Exception, SystemExit) as e:      # SystemExit is not an Exception subclass
+        return None, captured.getvalue().strip() or f"{type(e).__name__}: {e}"
 
 
 def get_card(ref):
@@ -1115,11 +1161,159 @@ def cmd_attach(args):
 DEFAULT_BASE = "origin/main"
 
 
+def _name_part(s):
+    """One segment of an executor name, safe for a DOM id, a filename and a log line."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", s or "").strip("-")
+
+
+def default_executor_name():
+    """`<checkout-dir>@<short-host>` (RE305).
+
+    This value is the executor's identity BOTH on the board — the server upserts on
+    `conflict_target: [:board_id, :name]` — and in the local singleton lock, which hashes
+    `RELAY_URL + "\\0" + name`. So it has to differ between two checkouts of one project on
+    one machine: a bare hostname did not, which made the two clobber each other's roster
+    row and got the second `relay execute` refused by its own lock. The checkout DIRECTORY
+    is what differs between two clones, so it, and not the git remote, is the project part.
+
+    The host part is trimmed to its first dot-segment (`box.local` -> `box`); the full FQDN
+    still rides in `executor_ident()["host"]`, which the Runners page and `relay executors`
+    already show separately, so nothing is lost. Both parts are sanitized and have a
+    fallback, so a directory with spaces or an empty `gethostname()` can never produce a
+    blank or shell-hostile name."""
+    project = _name_part(os.path.basename(ROOT.rstrip(os.sep))) or "project"
+    host = _name_part(socket.gethostname().split(".")[0]) or "host"
+    return f"{project}@{host}"
+
+
+def legacy_identity_warning(name):
+    """The startup warning for an executor whose identity CHANGED under it, or None (RE305).
+
+    The name is not cosmetic. The server pins an `exclusive` run to the executor that claimed
+    its job BY NAME (`runs.pinned_executor_name`) and **keeps** the pin through an
+    `:executor_gone` park, so the resume returns to the machine holding that run's worktree.
+    An executor that quietly starts answering to a different name therefore leaves every run
+    pinned to the old one waiting on an identity that will never heartbeat again: the
+    scheduler's resume targets a stale row, and `relay retry` refuses with "pinned to executor
+    X, which is not connected" — while the worktree sits right there under the same ROOT.
+
+    Nothing makes that visible on its own, and the hop is unattended: auto-update re-execs in
+    place at a *job* boundary, which means "nothing in flight", NOT "no run pinned to me". So
+    the pre-RE305 identity is named here, once, at startup, with both ways out.
+
+    Silent when the developer named the executor themselves (`--name`, or `"name"` in
+    .relay/executor.json): they chose the identity, so nothing moved under them. Silent, too,
+    if the default ever coincides with the legacy hostname.
+
+    And silent — the load-bearing gate — unless an executor ACTUALLY ran on this machine,
+    against this board, under the bare hostname. Without that check the two remaining
+    conditions are true forever, on every start, for every executor that has not pinned a
+    name, so a brand-new install with no pre-RE305 history and no pinned runs would carry a
+    permanent `kind="error"` line, mirrored to the board's runner feed on every start and
+    every auto-update re-exec. `identity_lock_path` is the evidence: `acquire_singleton_lock`
+    creates that file and never unlinks it, and it is keyed on `sha256(RELAY_URL + "\\0" +
+    name)` — so it exists iff this pairing really did run here.
+
+    And silent AFTER IT HAS BEEN SAID ONCE. That same never-unlinked lock file makes the gate
+    permanently true on every machine that ever ran a pre-RE305 executor, so without a second
+    marker the upgraded install trades the fresh install's false positive for a `kind="error"`
+    line forever, with no way to acknowledge it short of pinning a name. Emitting therefore
+    drops `<identity lock>.re305-warned` beside the NEW identity's lock. Keyed on the new
+    name, not the legacy one: the legacy name is the bare hostname, so its key is
+    machine-global (`sha256(RELAY_URL + "\\0" + hostname)`, no ROOT in it) and the first
+    checkout to start would eat the only telling while the others stayed silent forever — with
+    the advice being checkout-specific ("restart THIS checkout"), usually silencing the very
+    checkout that holds the pins. The new name embeds the checkout directory, so each one is
+    told exactly once.
+
+    A DRY RUN PRINTS BUT DOES NOT BURN IT. `--dry-run` starts no LogForwarder, so `forward()`
+    no-ops and the `kind="error"` line reaches no board feed — marking it said there would
+    spend the one telling on a terminal and mirror it nowhere. This card's own acceptance
+    criteria run `execute --dry-run` four times before ever starting a real executor.
+
+    The escape hatch is deliberately `--name` and NOT a `"name"` key: `.relay/executor.json`
+    is tracked in git, so a bare hostname written there hands every checkout on every machine
+    the one shared identity RE305 exists to split apart — which is the card's motivating bug,
+    reintroduced by the card's own warning.
+
+    The per-run recovery names the ONE thing that actually clears a pin. `Runs.park_claimed/1`
+    is the only writer that nils `pinned_executor_name` and it transitions from `[:running]`
+    only (`lib/relay/runs.ex`), reached from `Listener.reconcile_active/2`'s `%Run{status:
+    :running}` clause — so a human baton clears the pin only while the run is still running.
+    Once it has parked `:executor_gone` the listener leaves it on its no-op clause, the
+    scheduler's resume still targets `{:pinned, pinned_executor_id}` and finds no capacity, and
+    `relay retry` refuses `{:executor_unavailable, name}`: the pin cannot be cleared in place,
+    and cancelling is the only way out. Advertising the baton for an already-parked run would
+    strand it."""
+    legacy = socket.gethostname()
+    if name != default_executor_name() or name == legacy:
+        return None
+    if not _identity_ran_here(legacy) or _identity_warned_here(name):
+        return None
+    _mark_identity_warned_here(name)
+    return (f'WARNING: this executor now answers to "{name}"; an executor previously ran here '
+            f'as "{legacy}" (the pre-RE305 default). Exclusive runs pinned to "{legacy}" '
+            f"resolve by NAME and will park :executor_gone rather than resume here. To adopt "
+            f'those pins, restart THIS checkout with --name "{legacy}" — pass it per '
+            f"invocation, not as a \"name\" in {EXECUTOR_CONFIG_PATH}, which is shared by "
+            f"every checkout of this repo and would re-collide the identities. Per run: while "
+            f"it is still RUNNING, take the baton and hand it back — that clears the pin, so "
+            f"it re-dispatches under the new name. Once it has parked :executor_gone the pin "
+            f'can no longer be cleared in place, so move the card and confirm "Cancel run & '
+            f'move" to dispatch the card fresh (that run\'s worktree state is lost). Said '
+            f"once — this line will not repeat.")
+
+
+# Suffix of the emitted-once marker for the RE305 identity warning, written beside the NEW
+# identity's lock file — that key embeds the checkout (via the directory basename in the name),
+# so two checkouts on one machine are each told once instead of the first one eating the telling.
+IDENTITY_WARNED_SUFFIX = ".re305-warned"
+
+
+def _identity_lock_or_none(name):
+    """`identity_lock_path` for `name`, or None when there is nothing to key it on."""
+    try:
+        return identity_lock_path({"name": name})
+    except (Exception, SystemExit):     # no RELAY_URL to key the lock on; SystemExit via die()
+        return None
+
+
+def _identity_ran_here(name):
+    """True iff an executor has run on this machine, against this board, under `name`."""
+    path = _identity_lock_or_none(name)
+    return bool(path) and os.path.exists(path)
+
+
+def _identity_warned_here(name):
+    """True iff the RE305 identity warning for `name` has already been emitted here."""
+    path = _identity_lock_or_none(name)
+    return bool(path) and os.path.exists(path + IDENTITY_WARNED_SUFFIX)
+
+
+def _mark_identity_warned_here(name):
+    """Record that the warning has been said, so the next start is quiet. Best effort: an
+    unwritable lock dir must not stop the executor, it just costs a repeated warning.
+
+    A dry run records NOTHING: it prints the warning but has not said it anywhere durable (no
+    LogForwarder, so no board feed), and burning the one telling on it would leave the real
+    start silent."""
+    if DRY:
+        return
+    path = _identity_lock_or_none(name)
+    if not path:
+        return
+    try:
+        with open(path + IDENTITY_WARNED_SUFFIX, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"warned": int(time.time()), "name": name}) + "\n")
+    except OSError:
+        pass
+
+
 def load_executor_config():
     """Executor-local config from .relay/executor.json. Missing file → sensible defaults;
     capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
     defaults = {
-        "name": socket.gethostname(),
+        "name": default_executor_name(),
         "namespace": "exec",
         "capacity": {"shared_clean": 1, "exclusive": 1},
         "base": DEFAULT_BASE,
@@ -1414,6 +1608,28 @@ class ExecutorPool:
         Retained worktrees are terminal and do NOT keep the poller alive."""
         with self.lock:
             return any(r["state"] == "active" for r in self.wts.values())
+
+    def busy_summary(self):
+        """Human one-liner naming what occupies the pool — for the throttled "not claiming"
+        line (RE305). Refs come from the worktree names (`<ns>-<ref>`), states from the
+        registry: `running` for a live active slot, `talk` for one a talk turn is attached
+        to, `bound` for an active slot awaiting its run's next job, and `retained` for a
+        terminal one held for post-mortem (the state that most often explains "running but
+        not pulling", since it holds its slot until reclaimed)."""
+        with self.lock:
+            held = []
+            for name, rec in sorted(self.wts.items()):
+                if rec["state"] == "retained":
+                    state = "retained"
+                elif rec.get("live"):
+                    state = "running"
+                elif rec.get("talk_users", 0) > 0:
+                    state = "talk"
+                else:
+                    state = "bound"
+                held.append(f"{name[len(self.ns) + 1:]} {state}")
+            return (f"shared_clean {self.shared_used}/{self.cap_shared} busy; "
+                    f"exclusive: {', '.join(held) if held else 'idle'}")
 
     # ---- assign ---------------------------------------------------------
     def assign(self, job):
@@ -1950,6 +2166,80 @@ class JobControl:
 
 
 ZERO_CAPACITY = {"shared_clean": 0, "exclusive": 0}
+
+
+def fmt_capacity(cap):
+    """`shared_clean=1 exclusive=1` — the ONE rendering of a capacity map for a log line
+    (RE305), shared by the startup line and the throttled idle line. Insertion order is
+    deliberate and deterministic: every producer (the `defaults` dict, the config merge,
+    ExecutorPool.capacity, ZERO_CAPACITY) builds it shared_clean-first."""
+    return " ".join(f"{k}={v}" for k, v in cap.items())
+
+
+IDLE_LOG_INTERVAL = 300   # seconds between repeats of one "nothing is happening" line
+
+
+class IdleLog:
+    """Throttles a repeated "nothing is happening" line to one per interval, per reason
+    (RE305).
+
+    `due(reason)` returns the number of polls the line covers (>= 1) the first time a
+    reason appears and then at most once per `interval`, and None while it is throttled —
+    so the caller cannot emit a line without also getting the count of the polls it
+    swallowed. `reset()` re-arms every reason (called on a claim) so the next quiet stretch
+    reports at once rather than staying silent inside an already-open window.
+
+    Deliberately NOT configurable in .relay/executor.json: one module constant, per
+    AGENTS.md's "a policy number is defined exactly once". Pure but for the injected
+    clock — no sleeps in the tests."""
+
+    def __init__(self, interval=IDLE_LOG_INTERVAL, clock=time.monotonic):
+        self.interval = interval
+        self.clock = clock
+        self.last = {}          # reason -> clock() of the last line emitted for it
+        self.suppressed = {}    # reason -> polls swallowed since that line
+
+    def due(self, reason):
+        now = self.clock()
+        last = self.last.get(reason)
+        if last is not None and now - last < self.interval:
+            self.suppressed[reason] = self.suppressed.get(reason, 0) + 1
+            return None
+        self.last[reason] = now
+        return self.suppressed.pop(reason, 0) + 1
+
+    def tally(self, polls):
+        """`3 polls in the last 5m` — the ONE rendering of a `due()` count, so the loop's
+        two idle lines cannot drift into reporting the same number two ways (RE305)."""
+        return f"{polls} poll{'' if polls == 1 else 's'} in the last {self.interval // 60}m"
+
+    def reset(self):
+        self.last.clear()
+        self.suppressed.clear()
+
+
+def job_ref(job):
+    """The card ref a claimed job belongs to: `vars.ref` for a node job, `ref` for a talk
+    turn, the job id as a last resort — and None when the payload carries none of the three.
+    ONE definition, used by the claim line and by the loop's worker for log attribution
+    (RE305).
+
+    TOTAL on purpose. The claim line calls this on untrusted server input ABOVE the loop's
+    placement block, whose `except (KeyError, TypeError) -> reject(...)` is the only guard
+    against a malformed payload; a `job["id"]` here would raise out of `cmd_execute` and kill
+    the daemon on precisely the input that guard exists to survive."""
+    return (job.get("vars") or {}).get("ref") or job.get("ref") or job.get("id")
+
+
+def claim_line(job):
+    """The one-line "work arrived" announcement for a claimed job (RE305). Pure, so both
+    shapes are testable without driving the loop. Fields come straight from the claim
+    payload: `ref`, `node_id`, `run_id`, `isolation`, `kind`."""
+    ref = job_ref(job)
+    if job.get("kind") == "talk":
+        return f"claimed talk turn for {ref}"
+    return (f"claimed {ref} · {job.get('node_id')} "
+            f"(run {job.get('run_id')}, {job.get('isolation')})")
 
 
 def outdated_refusal(required):
@@ -3242,6 +3532,14 @@ def cmd_execute(args):
     global DRY, FORWARDER
     DRY = args.dry_run
     cfg = load_executor_config()
+    if args.name is not None:
+        # BEFORE acquire_executor_locks (below): that call hashes cfg["name"] into the
+        # identity lock path, so overriding any later would lock under one name and
+        # advertise another (RE305). Taken VERBATIM — an explicit human choice is
+        # respected; only blank is refused.
+        if not args.name.strip():
+            die("--name must not be blank")
+        cfg["name"] = args.name.strip()
     update_state = check_update_handshake(new_auto_update_state())
     config_url = scaffold_base()
     poll_timeout = args.interval or cfg["poll_timeout"]
@@ -3249,6 +3547,9 @@ def cmd_execute(args):
     acquire_executor_locks(cfg)   # RLY-193: refuse a colliding second executor before any work
     executor = executor_ident(cfg)
     pool = ExecutorPool(cfg)
+    # RE305: fetched here — after the locks (a refused second executor should do no network
+    # work) and before the forwarder/heartbeat threads exist (see board_identity).
+    board_desc, board_error = board_identity()
     if not DRY:
         FORWARDER = LogForwarder()
         FORWARDER.start()
@@ -3304,6 +3605,7 @@ def cmd_execute(args):
 
     outdated = False        # RLY-184: one-way — nothing in-process can pick up new code
     required_version = None
+    idle_log = IdleLog()    # RE305: throttles the two "nothing is happening" lines
 
     hb = None
     if not DRY:
@@ -3319,7 +3621,7 @@ def cmd_execute(args):
         hb.start()
 
     def worker(job, slot, reset, control):
-        ref = (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
+        ref = job_ref(job)
         # A talk job is deliberately NOT registered here (RE268): these maps
         # are keyed by ref and read by forward() to attribute board-log lines to a node job/run.
         # A talk turn has neither, so registering it would clobber a concurrently-running node
@@ -3348,8 +3650,17 @@ def cmd_execute(args):
         wake.set()
     signal.signal(signal.SIGINT, _shutdown)
 
-    log(f"executing on {os.environ['RELAY_URL']} as {cfg['name']}"
+    log(f"executor {cfg['name']} v{EXECUTOR_VERSION} → "
+        f"board {board_desc or 'UNREACHABLE'} at {env('RELAY_URL')} — "
+        f"advertising {fmt_capacity(cfg['capacity'])}"
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
+    if board_error:
+        log(f"WARNING: could not reach the board at {env('RELAY_URL')} — {board_error}. "
+            "Polling anyway; if no work ever arrives, check RELAY_URL and RELAY_API_KEY.",
+            kind="error")
+    identity_warning = legacy_identity_warning(cfg["name"])
+    if identity_warning:
+        log(identity_warning, kind="error")
 
     while not stop.is_set():
         # RE185: a job boundary — nothing in flight — is the only place a restart is free.
@@ -3371,11 +3682,18 @@ def cmd_execute(args):
         # run's pinned resume/next job is claimable regardless of advertised
         # capacity (affinity), so we must keep polling or the run never resumes.
         if not DRY and sum(cap.values()) <= 0 and not pool.has_bound_slots():
+            # RE305: silent today, and the likeliest real cause of "running but not pulling"
+            # (e.g. retained failed worktrees eating the exclusive slots). Name what holds
+            # them — that is what makes the line actionable.
+            polls = idle_log.due("no_free_slots")
+            if polls:
+                log(f"idle — not claiming: no free slots "
+                    f"({idle_log.tally(polls)}, {pool.busy_summary()})")
             wake.wait(poll_timeout)
             wake.clear()
             continue
         if DRY:
-            log(f"  (dry) would claim advertising {cap}")
+            log(f"  (dry) would claim advertising {fmt_capacity(cap)}")
             break
         pool.refresh_idle_shared()
         try:
@@ -3412,9 +3730,22 @@ def cmd_execute(args):
                 break
             continue
         if job is None:                             # long-poll timeout / 204 → re-poll
+            # `cap` here is FREE capacity — exactly the number the claim just advertised, which
+            # is the right one to print beside "the board offered nothing". (The startup line's
+            # "advertising" is the CONFIGURED total, which is what the heartbeat advertises.)
+            polls = idle_log.due("no_work")
+            if polls:
+                log(f"idle — board offered no work "
+                    f"({idle_log.tally(polls)}, advertising {fmt_capacity(cap)})")
             if args.once:
                 break
             continue
+        # RE305 item 4: the first evidence that work arrived. Placed after the
+        # revoked/executor_outdated/no-job branches and BEFORE placement, so it prints even
+        # when placement later fails. A claim also re-arms the idle throttle, so the next
+        # quiet stretch reports immediately instead of waiting out an already-open window.
+        log(claim_line(job), ref=job_ref(job))
+        idle_log.reset()
         # RE268: placement can fail TRANSIENTLY now, not just on real capacity exhaustion — a
         # talk turn occupying a retained tree makes `assign` refuse it for the length of one
         # turn. Rejecting on the first miss turned that into report_outcome("failed"), i.e. a
@@ -3805,6 +4136,9 @@ def build_parser():
     ex.add_argument("--once", action="store_true")
     ex.add_argument("--dry-run", action="store_true")
     ex.add_argument("--interval", type=int)
+    ex.add_argument("--name",
+                    help="this executor's name on the board "
+                         "(default: <checkout-dir>@<short-host>)")
     up = add("update", cmd_update, json_flag=True)
     up.add_argument("--check", action="store_true",
                     help="report what would change and write nothing")

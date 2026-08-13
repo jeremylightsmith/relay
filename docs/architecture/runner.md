@@ -225,7 +225,13 @@ that stays server-side.
   park (`Relay.Runs.park_claimed/1`, so the hand-back resume re-offers anywhere).
   `Relay.Runs.exclusive_holder/2` reads that column to pin each successive job, and
   `Relay.Runs.active_runs/1` resolves it to the executor row id so the **scheduler** resumes a
-  parked exclusive run on its holder (RLY-199) — one column, two readers. (A parked run whose
+  parked exclusive run on its holder (RLY-199) — one column, two readers. **The executor's
+  `name` is therefore a durable, run-affecting key, not a label:** renaming a running executor
+  strands every run pinned to the old name (the resume targets a row nothing beats again, and
+  `retry` refuses it as "not connected") because executor rows are never pruned. RE305 changed
+  the *default* name from the bare hostname to `<checkout-dir>@<short-host>`, so a defaulted
+  executor warns loudly at startup and names the legacy identity — see the Config bullet below.
+  (A parked run whose
   holder advertises `exclusive: 0` can still be handed its own resume — the executor keeps
   polling while it holds bound slots via `ExecutorPool.has_bound_slots/0`.)
 - **Version negotiation (RLY-184).** Every claim and heartbeat carries `executor.version`, the
@@ -457,7 +463,33 @@ Agent steps run headless Claude, which uses whatever authentication the local Cl
 metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
 silently billed to the paid API.
 
-- **Config.** `.relay/executor.json` holds `name` (defaults to hostname), `namespace`
+- **Config.** `.relay/executor.json` holds `name` (defaults to
+  `<checkout-dir>@<short-host>`, e.g. `relay@Jeremys-MBP`; override per invocation with
+  `relay execute --name foo`). **Upgrading past RE305 changes that default**, and because the
+  name is the exclusive-affinity pin key (see Node-job transport above), runs pinned under the
+  old bare-hostname identity park `:executor_gone` instead of resuming. The hop happens
+  unattended — auto-update re-execs at a *job* boundary, which is "nothing in flight", not "no
+  run pinned to me" — so a defaulted executor prints a `WARNING:` at startup naming the
+  pre-RE305 identity. It is **gated on evidence the identity actually moved on this machine**:
+  an identity lock file for the bare hostname (`acquire_singleton_lock` writes one and never
+  unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. Because
+  that lock is never unlinked the gate stays true forever once it is true, so emitting also
+  drops a `.re305-warned` marker beside the **new** identity's lock: the line is said **once**
+  per (machine, board, *new* identity), not on every start and every re-exec. Keyed on the new
+  name because the legacy one is the bare hostname and so machine-global — keyed there, the first
+  checkout to start would eat the only telling and leave the others (often the one actually
+  holding the pins) silent. A `--dry-run` prints the line but does not spend it. To adopt those pins,
+  restart the one checkout that owns them with `--name <hostname>` — per invocation, **not** as
+  a `"name"` key in `.relay/executor.json`, which is tracked in git and shared by every
+  checkout, so a bare hostname there restores exactly the shared identity this default exists
+  to split apart. Per run the recovery depends on where the run already is: while it is still
+  **running**, a human baton clears the pin (`Runs.park_claimed/1` nils `pinned_executor_name`,
+  and it transitions from `[:running]` only), so handing the baton back re-dispatches it
+  anywhere; once it has parked `:executor_gone` nothing clears the pin in place — the listener
+  leaves that shape untouched, the scheduler's resume still targets the gone executor, and
+  `relay retry` refuses `executor_unavailable` — so the way out is cancelling the run and
+  letting the card dispatch fresh, losing that run's worktree state. The board already says
+  `Executor "X" is not currently connected.` on the parked run. Also `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
@@ -480,12 +512,32 @@ silently billed to the paid API.
   > its own test database** (or equivalent) so parallel test suites don't truncate each other.
   > How you do that depends on your project's toolchain (the prepare hook below is where a
   > project wires per-worktree isolation).
+- **What the terminal tells you (RE305).** Startup prints ONE line naming the executor, its
+  version, the **board** it reached (display name + key), the URL, and the capacity it
+  advertises — so a key pointed at the wrong board is visible immediately instead of
+  looking identical to a correct one. If the board cannot be reached at startup the line
+  says `board UNREACHABLE`, a `WARNING:` line names the URL and the underlying error
+  (exactly the diagnostic for a wrong or expired `RELAY_API_KEY`), and the executor
+  **keeps polling** — a transient outage at startup must not kill a long-running process.
+
+  In the loop it prints `claimed <REF> · <node> (run <id>, <isolation>)` (or `claimed talk
+  turn for <REF>`) the moment work arrives, and two **throttled** `idle — …` lines for the
+  paths that were silent: the board offering no work, and every slot being busy — the
+  latter naming what holds them (`RE291 retained` is a failed run's worktree kept for
+  post-mortem, which holds its exclusive slot until reclaimed). Both are capped at one line
+  per reason per `IDLE_LOG_INTERVAL` (300s, a module constant, deliberately not a config
+  key), and a claim re-arms them, so a quiet executor costs ~2 lines per 5 minutes.
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
-  name}` (the pair the server keys an `Executor` on, `name` defaulting to hostname) and per
+  name}` (the pair the server keys an `Executor` on, `name` defaulting to
+  `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
+  longer collide on identity, *provided their directories are named differently*) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
   locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
-  `sha256(RELAY_URL + "\0" + name)` (machine-wide and checkout-independent, so two clones on
-  one host still collide), and a *namespace* lock at `<ROOT>/.claude/worktrees/.<namespace>.lock`
+  `sha256(RELAY_URL + "\0" + name)` (since `name` embeds the checkout directory, two clones on
+  one host **in differently-named directories** now hash to different lock paths — RE305;
+  `default_executor_name/0` uses the directory's BASENAME, so same-named directories still
+  collide and the identity lock refuses the second one by name), and a *namespace* lock at
+  `<ROOT>/.claude/worktrees/.<namespace>.lock`
   — held for the life of the process by keeping their fds open. A second process for a
   colliding identity or a shared worktree namespace refuses to start (`relay: already
   running: …`, naming the holder's pid) rather than registering as the same executor. Because
@@ -493,8 +545,10 @@ silently billed to the paid API.
   (this is why a flock and not a pidfile). This is what makes the RLY-170 orphan recovery above
   sound: that recovery requeues a job the executor no longer reports running, which is only
   correct because a single identity can no longer be split across two live processes each
-  beating a partial `running` list. Two executors on one host are therefore unsupported;
-  multi-executor-per-host capacity would be a separate card doing host+namespace identity work.
+  beating a partial `running` list. Two executors on one host **are** supported when they are
+  different checkouts — a distinct name gives a distinct identity lock, and a distinct `ROOT`
+  gives a distinct namespace lock; what remains unsupported is two executors sharing one
+  checkout and name.
 - `bin/relay update [--check] [--json]` — non-interactive, writes only the six
   Relay-owned files, needs no TTY and no board key.
 - **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
