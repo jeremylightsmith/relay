@@ -20,6 +20,10 @@ defmodule RelayWeb.Api.RunController do
   that wants it elsewhere follows with `POST /api/cards/:ref/move`, whose 409 keeps meaning
   exactly what it says.
 
+  `POST /api/runs/:id/advance` and `POST /api/cards/:ref/advance` are the same two
+  addressings for RE310's "this task is already done, continue" hatch, funnelling into
+  `Relay.Runs.advance_foreach/2`.
+
   Board-scoped like the rest of this scope: a run (or card) on another board is a 404,
   never a refusal that would confirm it exists.
   """
@@ -76,21 +80,30 @@ defmodule RelayWeb.Api.RunController do
     json(conn, %{data: %{status: "ok", restarted: summary.restarted, refused: summary.refused}})
   end
 
-  defp do_retry(conn, run, params) do
-    case Runs.retry_run(run, at: params["at"]) do
-      {:ok, run} ->
-        json(conn, %{
-          data: %{status: "ok", run_id: run.id, node: run.current_node, retries: run.retries}
-        })
+  @doc """
+  RE310 — check the bound foreach task off and continue with the next one. Same two addressings
+  and the same board scoping as retry; `Relay.Runs.advance_foreach/2` owns every refusal.
+  """
+  def advance(conn, %{"id" => id}) do
+    board = conn.assigns.current_board
 
-      {:error, reason} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> put_view(json: ErrorJSON)
-        |> render(:error,
-          code: Runs.retry_refusal_code(reason),
-          message: Runs.retry_refusal_message(reason)
-        )
+    with {run_id, ""} <- Integer.parse(id),
+         %Schemas.Run{} = run <- Runs.get_run(run_id),
+         true <- Runs.board_id_of(run) == board.id do
+      do_advance(conn, run)
+    else
+      _not_found -> {:error, :not_found}
+    end
+  end
+
+  def advance_card(conn, %{"ref" => ref}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         %Schemas.Run{} = run <- Runs.latest_run_for_retry(card) do
+      do_advance(conn, run)
+    else
+      _not_found -> {:error, :not_found}
     end
   end
 
@@ -164,5 +177,31 @@ defmodule RelayWeb.Api.RunController do
       code: Runs.cancel_refusal_code(reason),
       message: Runs.cancel_refusal_message(reason)
     )
+  end
+
+  defp do_advance(conn, run) do
+    case Runs.advance_foreach(run, actor: conn.assigns.actor) do
+      {:ok, run} -> render_revived(conn, run)
+      {:error, reason} -> refuse(conn, reason)
+    end
+  end
+
+  defp do_retry(conn, run, params) do
+    case Runs.retry_run(run, at: params["at"]) do
+      {:ok, run} -> render_revived(conn, run)
+      {:error, reason} -> refuse(conn, reason)
+    end
+  end
+
+  # One success shape and one refusal shape for both hatches — a second copy is what drifts.
+  defp render_revived(conn, run) do
+    json(conn, %{data: %{status: "ok", run_id: run.id, node: run.current_node, retries: run.retries}})
+  end
+
+  defp refuse(conn, reason) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: Runs.retry_refusal_code(reason), message: Runs.retry_refusal_message(reason))
   end
 end

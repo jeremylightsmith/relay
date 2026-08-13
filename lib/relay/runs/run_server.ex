@@ -22,6 +22,10 @@ defmodule Relay.Runs.RunServer do
       different node (`relay retry --at`, RLY-189): identical, except the
       current node is entered on a FRESH visit at attempt 1, matching what a
       real `{:transition, node}` does.
+    * `{:advance_foreach, resume_session}` — a human advancing a foreach past a task
+      whose work is already committed (`Runs.advance_foreach/2`, RE310): like
+      `{:reenter_new_visit, _}`, except the sub_task binding is RE-DERIVED from the
+      (now checked-off) cursor instead of inherited.
     * `:attach` — just serialize incoming reports (server was restarted
       or lazily started by `report_outcome/2`).
 
@@ -99,7 +103,16 @@ defmodule Relay.Runs.RunServer do
   # fresh visit of that node, attempt 1 — exactly like a real {:transition, node}.
   # Re-entering it on its old visit number would corrupt per-visit retry accounting.
   def handle_continue({:reenter_new_visit, resume_session}, state) do
-    reenter(state, &enter_new_visit!(&1, &2, resume_session))
+    reenter(state, &enter_new_visit!(&1, &2, resume_session, :inherit))
+  end
+
+  # RE310: the human "this task is already done, continue" hatch (`Runs.advance_foreach/2`). A
+  # fresh visit of the foreach head like {:reenter_new_visit, _}, except the binding is RE-DERIVED
+  # rather than inherited — advance_foreach/2 has just checked the stale task off, so the derived
+  # cursor is the NEXT one. This is the only caller allowed to re-derive it; every other re-entry
+  # inherits, which is what keeps a review-failed loop-back on the SAME task (RE252).
+  def handle_continue({:advance_foreach, resume_session}, state) do
+    reenter(state, &enter_new_visit!(&1, &2, resume_session, :rebind))
   end
 
   defp reenter(state, enter_fun) do
@@ -318,37 +331,25 @@ defmodule Relay.Runs.RunServer do
     end
   end
 
-  # The current node's binding, for a re-entry that starts a fresh attempt of the
-  # same visit (boot resume / needs-input answer / hand-back).
-  defp current_sub_task_id(run, node_key) do
-    Repo.one(
-      from e in NodeExecution,
-        where: e.run_id == ^run.id and e.node_key == ^node_key,
-        order_by: [desc: e.id],
-        limit: 1,
-        select: e.sub_task_id
-    )
-  end
-
   # Boot/park re-entry: fresh attempt of the current node, same visit.
   defp enter_same_node!(run, flow, resume_session) do
     node = run.current_node
     visit = max_for(run, node, :visit) || 1
     attempt = (max_in_visit(run, node, visit) || 0) + 1
-    enter!(run, flow, node, visit, attempt, resume_session)
+    enter!(run, flow, node, visit, attempt, resume_session, :inherit)
   end
 
-  # Retry --at re-entry: a fresh visit of the current node, attempt 1.
-  defp enter_new_visit!(run, flow, resume_session) do
+  # Retry --at / advance re-entry: a fresh visit of the current node, attempt 1.
+  defp enter_new_visit!(run, flow, resume_session, binding) do
     node = run.current_node
-    enter!(run, flow, node, next_visit(run, node), 1, resume_session)
+    enter!(run, flow, node, next_visit(run, node), 1, resume_session, binding)
   end
 
   # RLY-189: every re-entry carries the last failure forward as `findings`, exactly as
   # apply_decision({:retry, ...}) already does — a node re-entered after a failure must
   # know why, and a plain re-entry used to start blind.
-  defp enter!(run, flow, node, visit, attempt, resume_session) do
-    sub_task_id = current_sub_task_id(run, node)
+  defp enter!(run, flow, node, visit, attempt, resume_session, binding) do
+    sub_task_id = reentry_binding(run, node, binding)
     execution = Runs.insert_execution!(run, node, visit, attempt, sub_task_id)
 
     opts = [
@@ -360,6 +361,12 @@ defmodule Relay.Runs.RunServer do
     job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, node, opts))
     {execution, job}
   end
+
+  # Which iteration a RE-ENTRY binds to. `:inherit` is every existing re-entry — the node's most
+  # recent binding, so a resumed/retried node lands on the SAME task (RE252). `:rebind` is
+  # RE310's human hatch, and the only caller that may re-derive the cursor.
+  defp reentry_binding(run, _node, :rebind), do: Runs.next_sub_task_id(run)
+  defp reentry_binding(run, node, :inherit), do: Runs.current_sub_task_id(run, node)
 
   # RLY-194 / RE310: a node that must produce commits (expects_commits) but reported :succeeded
   # with HEAD unmoved from before the VISIT ran did not do its work — UNLESS it can prove the work
