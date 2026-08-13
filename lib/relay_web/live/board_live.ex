@@ -531,6 +531,7 @@ defmodule RelayWeb.BoardLive do
         talk_events={@streams.talk_events}
         runs={@card_runs}
         run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
+        advance_available?={@card_runs != [] and Runs.advance_foreach_available?(hd(@card_runs))}
         queued_flow={
           Runs.queued_flow(
             @selected_card,
@@ -1100,7 +1101,7 @@ defmodule RelayWeb.BoardLive do
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_next answer_back answer_goto answer_submit
-        review_approve review_reject retry_card retry_run confirm_move cancel_move
+        review_approve review_reject retry_card retry_run advance_run confirm_move cancel_move
         archive_card restore_card toggle_sub_task restart_one
         story_map_add_activity story_map_add_task story_map_add_release story_map_draft_submit
         story_map_rename_start story_map_rename_change story_map_rename_submit
@@ -2250,6 +2251,28 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("retry_run", _params, socket), do: {:noreply, socket}
+
+  # RE310 — check the bound foreach task off and continue with the next one. Acts on the run this
+  # socket already has in `:card_runs` (the one whose banner is on screen), exactly like
+  # "retry_run" above and for the same reason: a run started by someone else between render and
+  # click must surface as a refusal, not silently advance a run the human never looked at.
+  def handle_event("advance_run", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case List.first(socket.assigns.card_runs) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "This card has no run to advance.")}
+
+      run ->
+        case Runs.advance_foreach(run, actor: current_actor(socket)) do
+          {:ok, _run} ->
+            {:noreply, assign(socket, :card_runs, Runs.list_runs_for_card(card))}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, Runs.retry_refusal_message(reason))}
+        end
+    end
+  end
+
+  def handle_event("advance_run", _params, socket), do: {:noreply, socket}
 
   # RE247 — one row's Restart. The ref is resolved through THIS board (never a client-supplied
   # run id), then revived through retry_run/2 — the identical path the drawer's retry and the

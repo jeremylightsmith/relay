@@ -25,6 +25,7 @@ alias Schemas.Board
 alias Schemas.CardRejection
 alias Schemas.NodeExecution
 alias Schemas.Run
+alias Schemas.SubTask
 alias Schemas.User
 
 now = DateTime.truncate(DateTime.utc_now(), :second)
@@ -237,6 +238,70 @@ for {attempt, duration, spend} <- [{1, 210, "1.05"}, {2, 190, "0.98"}, {3, 205, 
     detail: commit_guard_detail
   })
 end
+
+# 3c · Already-committed deadlock (RE310): `implement` committed task 1's work but the sub-task
+# was never checked off, so the loop-back re-entered bound to the SAME task — whose work is
+# already on the branch, so it can never move HEAD. The run panel must offer "Task already
+# done — continue"; without this seed that control has no reachable state to look at.
+already_committed_detail = """
+`implement` reported success but produced no commits — HEAD is still `4c86f44`.
+This task's work appears to be committed already (`4c86f44` was produced by an earlier
+visit of this node for this task), so it cannot move HEAD again. If there is genuinely
+nothing left to change, report `relay outcome succeeded --no-changes`; if there is,
+make the change and commit it. (no_op_success: implement)
+"""
+
+stuck = new_card.("Code", "Paginate the activity feed")
+
+{:ok, stuck} =
+  Cards.set_sub_tasks(stuck, [
+    %{title: "Task 1: the query and its index", done: false},
+    %{title: "Task 2: the cursor component", done: false},
+    %{title: "Task 3: the LiveView wiring", done: false}
+  ])
+
+stale_task =
+  Repo.one!(from st in SubTask, where: st.card_id == ^stuck.id, order_by: [asc: st.position], limit: 1)
+
+{:ok, _stuck} = Cards.request_input(stuck, already_committed_detail, :agent)
+
+run =
+  add_run.(stuck, %{
+    status: :parked,
+    parked_reason: :needs_input,
+    current_node: "implement",
+    started_at: minutes_ago.(34)
+  })
+
+add_ne.(run, %{node: "branch", duration_s: 8, cost: cost.("0.00"), git_sha: "base000"})
+
+add_ne.(run, %{
+  node: "implement",
+  sub_task_id: stale_task.id,
+  duration_s: 240,
+  cost: cost.("1.20"),
+  git_sha: "4c86f44"
+})
+
+add_ne.(run, %{
+  node: "quality_review",
+  outcome: :failed,
+  duration_s: 40,
+  cost: cost.("0.30"),
+  git_sha: "4c86f44",
+  detail: "the session expired mid-review"
+})
+
+add_ne.(run, %{
+  node: "implement",
+  visit: 2,
+  sub_task_id: stale_task.id,
+  outcome: :failed,
+  duration_s: 150,
+  cost: cost.("0.80"),
+  git_sha: "4c86f44",
+  detail: already_committed_detail
+})
 
 # 4 · Baton revoked: a human claimed the card mid-run; run cancelled, work preserved.
 revoked = new_card.("Code", "Legacy import cleanup")
