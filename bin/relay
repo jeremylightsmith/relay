@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 51
-EXECUTOR_FINGERPRINT = "9d0ccd839c84a0d8b45d140aab5a2b03bb852a414a203f73b416bb2733de0aaf"
+EXECUTOR_VERSION = 52
+EXECUTOR_FINGERPRINT = "962d2094ec7c137036d13ee4e97c27c582028e881b3b7753de6bf1711a91a55d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -411,8 +411,10 @@ def read_arg(text):
 # Bound on the ONE startup GET /api/board (RE305). Every other executor request either has
 # its own bound (the long-poll claim, `_fetch`) or runs where a stall is visible; this one
 # gates the startup line, so unbounded it would hang `relay execute` printing NOTHING at all
-# against a host that DROPs — a VPN that is down, a firewalled box — through three `api`
-# retries. Generous enough that a slow-but-alive board still names itself.
+# against a host that DROPs — a VPN that is down, a firewalled box. This is a PER-ATTEMPT
+# timeout, and that DROP case times out during CONNECT, which urllib wraps in `URLError` and
+# `_retryable` retries: worst case is ~31s (three attempts plus 1.5s of backoff), not 10s.
+# Bounded at all is the point. Generous enough that a slow-but-alive board still names itself.
 BOARD_FETCH_TIMEOUT_S = 10
 
 
@@ -439,10 +441,12 @@ def board_identity():
     has, rather than adding a `board` block to the heartbeat reply — which would mean a
     contract-fixture change for a log line.
 
-    Bounded by BOARD_FETCH_TIMEOUT_S. `api()` re-raises `socket.timeout` rather than
-    retrying it, and `socket.timeout` is an `OSError`, so a dropped connection lands in the
-    `except` below and becomes `board UNREACHABLE` + the warning + keep polling — the same
-    path a bad key takes."""
+    Bounded by BOARD_FETCH_TIMEOUT_S per attempt — ~31s worst case, not 10s. A READ timeout
+    raises `socket.timeout`, which `api()` re-raises rather than retrying; a CONNECT timeout
+    (the host that DROPs) is wrapped by urllib in `URLError`, which `_retryable` retries
+    through all `API_MAX_ATTEMPTS`. Either way the failure lands in the `except` below and
+    becomes `board UNREACHABLE` + the warning + keep polling — the same path a bad key
+    takes."""
     captured = io.StringIO()
     try:
         with contextlib.redirect_stderr(captured):
@@ -1210,31 +1214,82 @@ def legacy_identity_warning(name):
     creates that file and never unlinks it, and it is keyed on `sha256(RELAY_URL + "\\0" +
     name)` — so it exists iff this pairing really did run here.
 
+    And silent AFTER IT HAS BEEN SAID ONCE. That same never-unlinked lock file makes the gate
+    permanently true on every machine that ever ran a pre-RE305 executor, so without a second
+    marker the upgraded install trades the fresh install's false positive for a `kind="error"`
+    line forever, with no way to acknowledge it short of pinning a name. Emitting therefore
+    drops `<identity lock>.re305-warned` beside the lock, keyed on the same
+    (board, legacy identity) pair — one telling per identity that moved, not one per start.
+
     The escape hatch is deliberately `--name` and NOT a `"name"` key: `.relay/executor.json`
     is tracked in git, so a bare hostname written there hands every checkout on every machine
     the one shared identity RE305 exists to split apart — which is the card's motivating bug,
-    reintroduced by the card's own warning."""
+    reintroduced by the card's own warning.
+
+    The per-run recovery names the ONE thing that actually clears a pin. `Runs.park_claimed/1`
+    is the only writer that nils `pinned_executor_name` and it transitions from `[:running]`
+    only (`lib/relay/runs.ex`), reached from `Listener.reconcile_active/2`'s `%Run{status:
+    :running}` clause — so a human baton clears the pin only while the run is still running.
+    Once it has parked `:executor_gone` the listener leaves it on its no-op clause, the
+    scheduler's resume still targets `{:pinned, pinned_executor_id}` and finds no capacity, and
+    `relay retry` refuses `{:executor_unavailable, name}`: the pin cannot be cleared in place,
+    and cancelling is the only way out. Advertising the baton for an already-parked run would
+    strand it."""
     legacy = socket.gethostname()
     if name != default_executor_name() or name == legacy:
         return None
-    if not _identity_ran_here(legacy):
+    if not _identity_ran_here(legacy) or _identity_warned_here(legacy):
         return None
+    _mark_identity_warned_here(legacy)
     return (f'WARNING: this executor now answers to "{name}"; an executor previously ran here '
             f'as "{legacy}" (the pre-RE305 default). Exclusive runs pinned to "{legacy}" '
             f"resolve by NAME and will park :executor_gone rather than resume here. To adopt "
             f'those pins, restart THIS checkout with --name "{legacy}" — pass it per '
             f"invocation, not as a \"name\" in {EXECUTOR_CONFIG_PATH}, which is shared by "
-            f"every checkout of this repo and would re-collide the identities. Otherwise let "
-            f"them park: take the baton on the parked run and hand it back, and it "
-            f"re-dispatches under the new name.")
+            f"every checkout of this repo and would re-collide the identities. Per run: while "
+            f"it is still RUNNING, take the baton and hand it back — that clears the pin, so "
+            f"it re-dispatches under the new name. Once it has parked :executor_gone the pin "
+            f'can no longer be cleared in place, so move the card and confirm "Cancel run & '
+            f'move" to dispatch the card fresh (that run\'s worktree state is lost). Said '
+            f"once — this line will not repeat.")
+
+
+# Suffix of the emitted-once marker for the RE305 identity warning, written beside the legacy
+# identity's own lock file so it is keyed on the same (board, name) pair the lock hashes.
+IDENTITY_WARNED_SUFFIX = ".re305-warned"
+
+
+def _identity_lock_or_none(name):
+    """`identity_lock_path` for `name`, or None when there is nothing to key it on."""
+    try:
+        return identity_lock_path({"name": name})
+    except (Exception, SystemExit):     # no RELAY_URL to key the lock on; SystemExit via die()
+        return None
 
 
 def _identity_ran_here(name):
     """True iff an executor has run on this machine, against this board, under `name`."""
+    path = _identity_lock_or_none(name)
+    return bool(path) and os.path.exists(path)
+
+
+def _identity_warned_here(name):
+    """True iff the RE305 identity warning for `name` has already been emitted here."""
+    path = _identity_lock_or_none(name)
+    return bool(path) and os.path.exists(path + IDENTITY_WARNED_SUFFIX)
+
+
+def _mark_identity_warned_here(name):
+    """Record that the warning has been said, so the next start is quiet. Best effort: an
+    unwritable lock dir must not stop the executor, it just costs a repeated warning."""
+    path = _identity_lock_or_none(name)
+    if not path:
+        return
     try:
-        return os.path.exists(identity_lock_path({"name": name}))
-    except (Exception, SystemExit):     # no RELAY_URL to key the lock on; SystemExit via die()
-        return False
+        with open(path + IDENTITY_WARNED_SUFFIX, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"warned": int(time.time()), "name": name}) + "\n")
+    except OSError:
+        pass
 
 
 def load_executor_config():

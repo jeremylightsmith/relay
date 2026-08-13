@@ -472,13 +472,21 @@ silently billed to the paid API.
   run pinned to me" — so a defaulted executor prints a `WARNING:` at startup naming the
   pre-RE305 identity. It is **gated on evidence the identity actually moved on this machine**:
   an identity lock file for the bare hostname (`acquire_singleton_lock` writes one and never
-  unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. To adopt
-  those pins, restart the one checkout that owns them with `--name <hostname>` — per
-  invocation, **not** as a `"name"` key in `.relay/executor.json`, which is tracked in git and
-  shared by every checkout, so a bare hostname there restores exactly the shared identity this
-  default exists to split apart. Otherwise let them park and clear the pin with a human baton;
-  the board already says `Executor "X" is not currently connected.` on the parked run. Also
-  `namespace`
+  unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. Because
+  that lock is never unlinked the gate stays true forever once it is true, so emitting also
+  drops a `<identity lock>.re305-warned` marker beside it: the line is said **once** per
+  (machine, board, legacy identity), not on every start and every re-exec. To adopt those pins,
+  restart the one checkout that owns them with `--name <hostname>` — per invocation, **not** as
+  a `"name"` key in `.relay/executor.json`, which is tracked in git and shared by every
+  checkout, so a bare hostname there restores exactly the shared identity this default exists
+  to split apart. Per run the recovery depends on where the run already is: while it is still
+  **running**, a human baton clears the pin (`Runs.park_claimed/1` nils `pinned_executor_name`,
+  and it transitions from `[:running]` only), so handing the baton back re-dispatches it
+  anywhere; once it has parked `:executor_gone` nothing clears the pin in place — the listener
+  leaves that shape untouched, the scheduler's resume still targets the gone executor, and
+  `relay retry` refuses `executor_unavailable` — so the way out is cancelling the run and
+  letting the card dispatch fresh, losing that run's worktree state. The board already says
+  `Executor "X" is not currently connected.` on the parked run. Also `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a

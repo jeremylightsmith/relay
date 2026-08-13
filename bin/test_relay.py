@@ -1021,7 +1021,40 @@ class LegacyIdentityWarningTest(unittest.TestCase):
         warning = relay.legacy_identity_warning(relay.default_executor_name())
         self.assertIn('--name "box.local"', warning)          # adopt the pins here, or
         self.assertIn("shared by every checkout", warning)    # ...don't pin it in the config
-        self.assertIn("baton", warning)                       # let them park and hand back
+
+    def test_the_per_run_recovery_is_the_one_that_actually_clears_the_pin(self):
+        """`Runs.park_claimed/1` (lib/relay/runs.ex) is the ONLY writer that nils
+        `pinned_executor_name`, and it transitions from `[:running]` only — the listener calls
+        it for `%Run{status: :running}` and leaves a `%Run{status: :parked, parked_reason:
+        :executor_gone}` on its defensive no-op clause. So "take the baton" clears the pin only
+        while the run is still RUNNING; once it has parked the pin cannot be cleared in place
+        (the scheduler's resume still targets the gone executor and `relay retry` refuses with
+        `executor_unavailable`), and cancelling is the only way out. Telling an operator to
+        take the baton on an already-parked run strands it — in a card whose whole point is
+        telling the terminal the truth."""
+        self._an_executor_ran_here_as("box.local")
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIn("still RUNNING, take the baton", warning)
+        self.assertIn("can no longer be cleared", warning)
+        self.assertIn("Cancel run", warning)
+
+    def test_the_warning_is_shown_once_not_on_every_start_forever(self):
+        """The identity lock the gate reads is never unlinked, so on any machine that ever ran
+        a pre-RE305 executor the gate stays true forever — a `kind="error"` line on every start
+        and every auto-update re-exec, with no acknowledgement path. Emitting drops a marker
+        beside that lock, so the warning is one-time per machine + board + legacy identity."""
+        self._an_executor_ran_here_as("box.local")
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
+        self.assertIsNone(relay.legacy_identity_warning(relay.default_executor_name()))
+
+    def test_the_marker_is_keyed_on_the_identity_not_left_global(self):
+        """The marker sits beside the legacy identity's own lock, so warning about one legacy
+        identity never silences a different board's (the lock path hashes RELAY_URL + name)."""
+        self._an_executor_ran_here_as("box.local")
+        self._an_executor_ran_here_as("other-host")
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
+        relay.socket.gethostname = lambda: "other-host"
+        self.assertIsNotNone(relay.legacy_identity_warning(relay.default_executor_name()))
 
     def test_a_name_the_developer_chose_is_silent(self):
         """`--name` or an explicit `"name"` in the config is a human choosing an identity —
