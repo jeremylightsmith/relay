@@ -3389,11 +3389,14 @@ class ExecuteLoopTest(unittest.TestCase):
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "report_talk_outcome", "reset_worktree",
                         "refresh_worktree", "FORWARDER", "env", "log", "DRY",
-                        "PLACEMENT_RETRY_S")}
+                        "PLACEMENT_RETRY_S", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                          relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
         # Don't sleep real seconds between placement retries: an unplaceable job walks the full
         # PLACEMENT_ATTEMPTS loop, which at the shipped 1.0s interval is ~9s of `wake.wait` per
         # test. These tests exercise routing/reporting, not the backoff duration.
@@ -3603,6 +3606,47 @@ class ExecuteLoopTest(unittest.TestCase):
                                                  name="   "))
 
 
+    def test_the_startup_line_names_the_board_url_version_and_capacity(self):
+        """RE305: a key pointed at the WRONG board used to look identical to a correct
+        one — the line named the URL and the executor but never the board."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn(
+            f'executor box v{relay.EXECUTOR_VERSION} → board "Test Board" (TB) '
+            "at http://relay.test — advertising shared_clean=1 exclusive=0 — one job",
+            lines)
+
+    def test_an_unreachable_board_warns_with_the_cause_and_keeps_polling(self):
+        """RE305 decision 3: a transient outage or a bad key at startup must not kill a
+        long-running executor. This is the regression that matters — the loop still runs
+        its cycle."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append((msg, k.get("kind")))
+        relay.get_board = lambda: relay.die("API 401: invalid API key")
+        polls = []
+        relay.claim_node_job = lambda *a, **k: (polls.append(1) or None)
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any("board UNREACHABLE" in m for m, _ in lines))
+        warnings = [(m, kind) for m, kind in lines if m.startswith("WARNING:")]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("http://relay.test", warnings[0][0])
+        self.assertIn("API 401: invalid API key", warnings[0][0])
+        self.assertEqual(warnings[0][1], "error")
+        self.assertEqual(len(polls), 1)      # it kept going
+
+    def test_fmt_capacity_renders_key_equals_value_pairs(self):
+        self.assertEqual(relay.fmt_capacity({"shared_clean": 3, "exclusive": 2}),
+                         "shared_clean=3 exclusive=2")
+
+
 class TalkJobRefMapIsolationTest(unittest.TestCase):
     """RE268: NODE_JOB_IDS/RUN_IDS are keyed by ref and read by
     forward() for whichever job is currently registered under that ref. worker() must not
@@ -3613,11 +3657,15 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         isolate_executor_locks(self)
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "execute_talk",
-                        "report_talk_outcome", "FORWARDER", "env", "log", "DRY")}
+                        "report_talk_outcome", "FORWARDER", "env", "log", "DRY",
+                        "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.env = lambda name: "x"
         relay.log = lambda *a, **k: None
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
         relay.load_executor_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 1},
@@ -3664,13 +3712,16 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
                         "maybe_auto_update", "ExecutorHeartbeat", "FORWARDER", "env", "log",
-                        "DRY")}
+                        "DRY", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                         relay.signal.getsignal(relay.signal.SIGINT))
         relay.DRY = False
         relay.env = lambda name: "x"
         relay.log = lambda *a, **k: None
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.report_outcome = lambda *a: "done"
@@ -4129,7 +4180,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self._saved = {k: getattr(relay, k) for k in
                        ("load_executor_config", "claim_node_job", "run_node_job",
                         "report_outcome", "reset_worktree", "refresh_worktree",
-                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY")}
+                        "ExecutorHeartbeat", "FORWARDER", "env", "log", "DRY", "get_board")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                         relay.signal.getsignal(relay.signal.SIGINT))
@@ -4137,6 +4188,9 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.env = lambda name: "x"
         self.logs = []
         relay.log = lambda msg, **k: self.logs.append((msg, k.get("kind")))
+        # RE305: startup now fetches the board to name it on the startup line. Stub it, or
+        # these harnesses start making real HTTP calls.
+        relay.get_board = lambda: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
         relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None)

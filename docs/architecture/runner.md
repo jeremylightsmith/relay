@@ -482,6 +482,13 @@ silently billed to the paid API.
   > its own test database** (or equivalent) so parallel test suites don't truncate each other.
   > How you do that depends on your project's toolchain (the prepare hook below is where a
   > project wires per-worktree isolation).
+- **What the terminal tells you (RE305).** Startup prints ONE line naming the executor, its
+  version, the **board** it reached (display name + key), the URL, and the capacity it
+  advertises — so a key pointed at the wrong board is visible immediately instead of
+  looking identical to a correct one. If the board cannot be reached at startup the line
+  says `board UNREACHABLE`, a `WARNING:` line names the URL and the underlying error
+  (exactly the diagnostic for a wrong or expired `RELAY_API_KEY`), and the executor
+  **keeps polling** — a transient outage at startup must not kill a long-running process.
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
