@@ -1232,6 +1232,33 @@ class ExecutorPoolTest(unittest.TestCase):
         p.release(self.excl("r1", "RLY-1"), None, "done")
         self.assertEqual(p.capacity()["exclusive"], 2)
 
+    # -- what is holding the pool (RE305) -------------------------------------
+    def test_busy_summary_names_the_refs_and_their_states(self):
+        """The zero-capacity skip is the path most likely to explain "running but not
+        pulling" — most often a RETAINED failed worktree, which is terminal and holds its
+        exclusive slot until reclaimed. Naming what holds the slots is what makes the line
+        actionable."""
+        p = self.pool()
+        p.shared_used = 2
+        p.wts = {
+            "exec-RE300": {"run_id": "r1", "state": "active", "live": True,
+                           "partition": "1"},
+            "exec-RE291": {"run_id": "r2", "state": "retained", "live": False,
+                           "partition": None},
+            "exec-RE280": {"run_id": "r3", "state": "active", "live": False,
+                           "partition": "2"},
+            "exec-RE270": {"run_id": None, "state": "active", "live": False,
+                           "talk_users": 1, "partition": "3"},
+        }
+        self.assertEqual(
+            p.busy_summary(),
+            "shared_clean 2/2 busy; exclusive: RE270 talk, RE280 bound, "
+            "RE291 retained, RE300 running")
+
+    def test_busy_summary_says_idle_when_no_card_holds_a_worktree(self):
+        p = self.pool()
+        self.assertEqual(p.busy_summary(), "shared_clean 0/2 busy; exclusive: idle")
+
 
 class ExecutorPoolRecoverTest(unittest.TestCase):
     """RLY-231 AC #8: a restart re-derives per-card worktrees from `git worktree list` — no
@@ -3379,6 +3406,73 @@ def isolate_executor_locks(test):
     test.addCleanup(_release)
 
 
+class IdleLogTest(unittest.TestCase):
+    """RE305: the loop's two 'nothing is happening' lines are throttled to one per interval
+    per reason — enough to debug "running but not pulling", not enough to flood a terminal
+    that sits idle overnight. Pure but for the injected clock, so no test sleeps."""
+
+    def setUp(self):
+        self.now = 1000.0
+        self.idle = relay.IdleLog(interval=300, clock=lambda: self.now)
+
+    def test_the_first_line_for_a_reason_is_due_and_covers_one_poll(self):
+        self.assertEqual(self.idle.due("no_work"), 1)
+
+    def test_a_second_line_inside_the_interval_is_throttled(self):
+        self.idle.due("no_work")
+        self.now += 10
+        self.assertIsNone(self.idle.due("no_work"))
+
+    def test_the_next_line_past_the_interval_carries_the_suppressed_count(self):
+        self.idle.due("no_work")
+        for _ in range(11):
+            self.now += 10
+            self.assertIsNone(self.idle.due("no_work"))
+        self.now += 300
+        self.assertEqual(self.idle.due("no_work"), 12)   # 11 suppressed + this one
+        self.now += 300
+        self.assertEqual(self.idle.due("no_work"), 1)    # tally cleared when reported
+
+    def test_two_reasons_throttle_independently(self):
+        self.assertEqual(self.idle.due("no_work"), 1)
+        self.assertEqual(self.idle.due("no_free_slots"), 1)
+        self.now += 10
+        self.assertIsNone(self.idle.due("no_work"))
+        self.assertIsNone(self.idle.due("no_free_slots"))
+
+    def test_reset_re_arms_every_reason(self):
+        self.idle.due("no_work")
+        self.idle.due("no_free_slots")
+        self.now += 5
+        self.assertIsNone(self.idle.due("no_work"))
+        self.idle.reset()
+        self.assertEqual(self.idle.due("no_work"), 1)
+        self.assertEqual(self.idle.due("no_free_slots"), 1)
+
+    def test_the_shipped_interval_is_five_minutes(self):
+        self.assertEqual(relay.IDLE_LOG_INTERVAL, 300)
+
+
+class ClaimLineTest(unittest.TestCase):
+    """RE305 item 4: there was no 'claimed' line anywhere — the first evidence that work
+    arrived was the node's own tagged output, so "the board is offering nothing" and "the
+    board handed us a job and the node is quiet" looked identical."""
+
+    def test_a_node_job_names_the_ref_node_run_and_isolation(self):
+        j = job(case="exclusive_shell", id="nj-1", run_id="r1", vars={"ref": "RLY-9"})
+        self.assertEqual(relay.claim_line(j),
+                         f"claimed RLY-9 · {j['node_id']} (run r1, exclusive)")
+
+    def test_a_talk_turn_gets_the_talk_wording(self):
+        turn = json.loads(json.dumps(CONTRACT["talk_claim"]["first_turn"]))
+        self.assertEqual(relay.claim_line(turn), "claimed talk turn for CB2")
+
+    def test_job_ref_prefers_vars_ref_then_ref_then_the_job_id(self):
+        self.assertEqual(relay.job_ref({"vars": {"ref": "A"}, "ref": "B", "id": "C"}), "A")
+        self.assertEqual(relay.job_ref({"vars": None, "ref": "B", "id": "C"}), "B")
+        self.assertEqual(relay.job_ref({"id": "C"}), "C")
+
+
 class ExecuteLoopTest(unittest.TestCase):
     """`execute --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
     work', not an error."""
@@ -3645,6 +3739,59 @@ class ExecuteLoopTest(unittest.TestCase):
     def test_fmt_capacity_renders_key_equals_value_pairs(self):
         self.assertEqual(relay.fmt_capacity({"shared_clean": 3, "exclusive": 2}),
                          "shared_clean=3 exclusive=2")
+
+    def test_a_claim_logs_exactly_one_line_naming_the_node_and_run(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        j = job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1"})
+        relay.claim_node_job = lambda *a, **k: j
+        relay.report_outcome = lambda *a: "done"
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertEqual([m for m in lines if m.startswith("claimed ")],
+                         [relay.claim_line(j)])
+
+    def test_no_work_logs_a_throttled_idle_line_with_the_advertised_capacity(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn("idle — board offered no work (1 poll in the last 5m, "
+                      "advertising shared_clean=1 exclusive=0)", lines)
+
+    def test_no_free_slots_logs_a_line_naming_what_holds_them(self):
+        """The zero-capacity `continue` is silent today and is the likeliest explanation
+        for "running but not pulling". First cycle: no capacity -> the line. Second cycle:
+        capacity back, no work -> `--once` breaks, so the test terminates."""
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        cycles = {"n": 0}
+
+        def capacity(_self):
+            cycles["n"] += 1
+            return ({"shared_clean": 0, "exclusive": 0} if cycles["n"] == 1
+                    else {"shared_clean": 1, "exclusive": 0})
+
+        self.addCleanup(setattr, relay.ExecutorPool, "capacity",
+                        relay.ExecutorPool.capacity)
+        relay.ExecutorPool.capacity = capacity
+        self.addCleanup(setattr, relay.ExecutorPool, "busy_summary",
+                        relay.ExecutorPool.busy_summary)
+        relay.ExecutorPool.busy_summary = lambda _self: "shared_clean 1/1 busy; " \
+                                                       "exclusive: RE291 retained"
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertIn("idle — not claiming: no free slots (shared_clean 1/1 busy; "
+                      "exclusive: RE291 retained)", lines)
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):

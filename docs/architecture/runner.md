@@ -489,6 +489,14 @@ silently billed to the paid API.
   says `board UNREACHABLE`, a `WARNING:` line names the URL and the underlying error
   (exactly the diagnostic for a wrong or expired `RELAY_API_KEY`), and the executor
   **keeps polling** — a transient outage at startup must not kill a long-running process.
+
+  In the loop it prints `claimed <REF> · <node> (run <id>, <isolation>)` (or `claimed talk
+  turn for <REF>`) the moment work arrives, and two **throttled** `idle — …` lines for the
+  paths that were silent: the board offering no work, and every slot being busy — the
+  latter naming what holds them (`RE291 retained` is a failed run's worktree kept for
+  post-mortem, which holds its exclusive slot until reclaimed). Both are capped at one line
+  per reason per `IDLE_LOG_INTERVAL` (300s, a module constant, deliberately not a config
+  key), and a claim re-arms them, so a quiet executor costs ~2 lines per 5 minutes.
 - **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
   name}` (the pair the server keys an `Executor` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no

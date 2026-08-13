@@ -71,7 +71,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 49
-EXECUTOR_FINGERPRINT = "9eb345938ad4e813b183639bcaef73fcdd962f2a54d05c014ab2d6ed22225a09"
+EXECUTOR_FINGERPRINT = "ad84f9f51e33f48c2258b0aff17cc34c23ed4ebc98ffe1777a39facf5fe17f6f"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1469,6 +1469,28 @@ class ExecutorPool:
         with self.lock:
             return any(r["state"] == "active" for r in self.wts.values())
 
+    def busy_summary(self):
+        """Human one-liner naming what occupies the pool — for the throttled "not claiming"
+        line (RE305). Refs come from the worktree names (`<ns>-<ref>`), states from the
+        registry: `running` for a live active slot, `talk` for one a talk turn is attached
+        to, `bound` for an active slot awaiting its run's next job, and `retained` for a
+        terminal one held for post-mortem (the state that most often explains "running but
+        not pulling", since it holds its slot until reclaimed)."""
+        with self.lock:
+            held = []
+            for name, rec in sorted(self.wts.items()):
+                if rec["state"] == "retained":
+                    state = "retained"
+                elif rec.get("live"):
+                    state = "running"
+                elif rec.get("talk_users", 0) > 0:
+                    state = "talk"
+                else:
+                    state = "bound"
+                held.append(f"{name[len(self.ns) + 1:]} {state}")
+            return (f"shared_clean {self.shared_used}/{self.cap_shared} busy; "
+                    f"exclusive: {', '.join(held) if held else 'idle'}")
+
     # ---- assign ---------------------------------------------------------
     def assign(self, job):
         """Reserve a worktree for `job`; return (slot_name, reset?) or None if none is free.
@@ -2012,6 +2034,61 @@ def fmt_capacity(cap):
     deliberate and deterministic: every producer (the `defaults` dict, the config merge,
     ExecutorPool.capacity, ZERO_CAPACITY) builds it shared_clean-first."""
     return " ".join(f"{k}={v}" for k, v in cap.items())
+
+
+IDLE_LOG_INTERVAL = 300   # seconds between repeats of one "nothing is happening" line
+
+
+class IdleLog:
+    """Throttles a repeated "nothing is happening" line to one per interval, per reason
+    (RE305).
+
+    `due(reason)` returns the number of polls the line covers (>= 1) the first time a
+    reason appears and then at most once per `interval`, and None while it is throttled —
+    so the caller cannot emit a line without also getting the count of the polls it
+    swallowed. `reset()` re-arms every reason (called on a claim) so the next quiet stretch
+    reports at once rather than staying silent inside an already-open window.
+
+    Deliberately NOT configurable in .relay/executor.json: one module constant, per
+    AGENTS.md's "a policy number is defined exactly once". Pure but for the injected
+    clock — no sleeps in the tests."""
+
+    def __init__(self, interval=IDLE_LOG_INTERVAL, clock=time.monotonic):
+        self.interval = interval
+        self.clock = clock
+        self.last = {}          # reason -> clock() of the last line emitted for it
+        self.suppressed = {}    # reason -> polls swallowed since that line
+
+    def due(self, reason):
+        now = self.clock()
+        last = self.last.get(reason)
+        if last is not None and now - last < self.interval:
+            self.suppressed[reason] = self.suppressed.get(reason, 0) + 1
+            return None
+        self.last[reason] = now
+        return self.suppressed.pop(reason, 0) + 1
+
+    def reset(self):
+        self.last.clear()
+        self.suppressed.clear()
+
+
+def job_ref(job):
+    """The card ref a claimed job belongs to: `vars.ref` for a node job, `ref` for a talk
+    turn, the job id as a last resort. ONE definition, used by the claim line and by the
+    loop's worker for log attribution (RE305)."""
+    return (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
+
+
+def claim_line(job):
+    """The one-line "work arrived" announcement for a claimed job (RE305). Pure, so both
+    shapes are testable without driving the loop. Fields come straight from the claim
+    payload: `ref`, `node_id`, `run_id`, `isolation`, `kind`."""
+    ref = job_ref(job)
+    if job.get("kind") == "talk":
+        return f"claimed talk turn for {ref}"
+    return (f"claimed {ref} · {job.get('node_id')} "
+            f"(run {job.get('run_id')}, {job.get('isolation')})")
 
 
 def outdated_refusal(required):
@@ -3377,6 +3454,7 @@ def cmd_execute(args):
 
     outdated = False        # RLY-184: one-way — nothing in-process can pick up new code
     required_version = None
+    idle_log = IdleLog()    # RE305: throttles the two "nothing is happening" lines
 
     hb = None
     if not DRY:
@@ -3392,7 +3470,7 @@ def cmd_execute(args):
         hb.start()
 
     def worker(job, slot, reset, control):
-        ref = (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
+        ref = job_ref(job)
         # A talk job is deliberately NOT registered here (RE268): these maps
         # are keyed by ref and read by forward() to attribute board-log lines to a node job/run.
         # A talk turn has neither, so registering it would clobber a concurrently-running node
@@ -3450,6 +3528,11 @@ def cmd_execute(args):
         # run's pinned resume/next job is claimable regardless of advertised
         # capacity (affinity), so we must keep polling or the run never resumes.
         if not DRY and sum(cap.values()) <= 0 and not pool.has_bound_slots():
+            # RE305: silent today, and the likeliest real cause of "running but not pulling"
+            # (e.g. retained failed worktrees eating the exclusive slots). Name what holds
+            # them — that is what makes the line actionable.
+            if idle_log.due("no_free_slots"):
+                log(f"idle — not claiming: no free slots ({pool.busy_summary()})")
             wake.wait(poll_timeout)
             wake.clear()
             continue
@@ -3491,9 +3574,23 @@ def cmd_execute(args):
                 break
             continue
         if job is None:                             # long-poll timeout / 204 → re-poll
+            # `cap` here is FREE capacity — exactly the number the claim just advertised, which
+            # is the right one to print beside "the board offered nothing". (The startup line's
+            # "advertising" is the CONFIGURED total, which is what the heartbeat advertises.)
+            polls = idle_log.due("no_work")
+            if polls:
+                log(f"idle — board offered no work ({polls} poll"
+                    f"{'' if polls == 1 else 's'} in the last "
+                    f"{idle_log.interval // 60}m, advertising {fmt_capacity(cap)})")
             if args.once:
                 break
             continue
+        # RE305 item 4: the first evidence that work arrived. Placed after the
+        # revoked/executor_outdated/no-job branches and BEFORE placement, so it prints even
+        # when placement later fails. A claim also re-arms the idle throttle, so the next
+        # quiet stretch reports immediately instead of waiting out an already-open window.
+        log(claim_line(job), ref=job_ref(job))
+        idle_log.reset()
         # RE268: placement can fail TRANSIENTLY now, not just on real capacity exhaustion — a
         # talk turn occupying a retained tree makes `assign` refuse it for the length of one
         # turn. Rejecting on the first miss turned that into report_outcome("failed"), i.e. a
