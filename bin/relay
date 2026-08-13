@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 49
-EXECUTOR_FINGERPRINT = "ad84f9f51e33f48c2258b0aff17cc34c23ed4ebc98ffe1777a39facf5fe17f6f"
+EXECUTOR_VERSION = 50
+EXECUTOR_FINGERPRINT = "ac7d7216c559c8f2eab77d6ff674a560af3167d2ae356957e10a4c5efe1c51b5"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1169,6 +1169,35 @@ def default_executor_name():
     return f"{project}@{host}"
 
 
+def legacy_identity_warning(name):
+    """The startup warning for an executor whose identity CHANGED under it, or None (RE305).
+
+    The name is not cosmetic. The server pins an `exclusive` run to the executor that claimed
+    its job BY NAME (`runs.pinned_executor_name`) and **keeps** the pin through an
+    `:executor_gone` park, so the resume returns to the machine holding that run's worktree.
+    An executor that quietly starts answering to a different name therefore leaves every run
+    pinned to the old one waiting on an identity that will never heartbeat again: the
+    scheduler's resume targets a stale row, and `relay retry` refuses with "pinned to executor
+    X, which is not connected" — while the worktree sits right there under the same ROOT.
+
+    Nothing makes that visible on its own, and the hop is unattended: auto-update re-execs in
+    place at a *job* boundary, which means "nothing in flight", NOT "no run pinned to me". So
+    the pre-RE305 identity is named here, once, at startup, with both ways out.
+
+    Silent when the developer named the executor themselves (`--name`, or `"name"` in
+    .relay/executor.json): they chose the identity, so nothing moved under them. Silent, too,
+    if the default ever coincides with the legacy hostname — the condition is that the
+    identity actually moved, not that this card shipped."""
+    legacy = socket.gethostname()
+    if name != default_executor_name() or name == legacy:
+        return None
+    return (f'WARNING: this executor now defaults to "{name}"; before RE305 it was '
+            f'"{legacy}". Exclusive runs pinned to "{legacy}" resolve by NAME and will park '
+            f":executor_gone rather than resume here. To keep the old identity, set "
+            f'"name": "{legacy}" in {EXECUTOR_CONFIG_PATH} (or pass --name "{legacy}" for '
+            f"this invocation) and restart.")
+
+
 def load_executor_config():
     """Executor-local config from .relay/executor.json. Missing file → sensible defaults;
     capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
@@ -2068,6 +2097,11 @@ class IdleLog:
         self.last[reason] = now
         return self.suppressed.pop(reason, 0) + 1
 
+    def tally(self, polls):
+        """`3 polls in the last 5m` — the ONE rendering of a `due()` count, so the loop's
+        two idle lines cannot drift into reporting the same number two ways (RE305)."""
+        return f"{polls} poll{'' if polls == 1 else 's'} in the last {self.interval // 60}m"
+
     def reset(self):
         self.last.clear()
         self.suppressed.clear()
@@ -2075,9 +2109,15 @@ class IdleLog:
 
 def job_ref(job):
     """The card ref a claimed job belongs to: `vars.ref` for a node job, `ref` for a talk
-    turn, the job id as a last resort. ONE definition, used by the claim line and by the
-    loop's worker for log attribution (RE305)."""
-    return (job.get("vars") or {}).get("ref") or job.get("ref") or job["id"]
+    turn, the job id as a last resort — and None when the payload carries none of the three.
+    ONE definition, used by the claim line and by the loop's worker for log attribution
+    (RE305).
+
+    TOTAL on purpose. The claim line calls this on untrusted server input ABOVE the loop's
+    placement block, whose `except (KeyError, TypeError) -> reject(...)` is the only guard
+    against a malformed payload; a `job["id"]` here would raise out of `cmd_execute` and kill
+    the daemon on precisely the input that guard exists to survive."""
+    return (job.get("vars") or {}).get("ref") or job.get("ref") or job.get("id")
 
 
 def claim_line(job):
@@ -3507,6 +3547,9 @@ def cmd_execute(args):
         log(f"WARNING: could not reach the board at {env('RELAY_URL')} — {board_error}. "
             "Polling anyway; if no work ever arrives, check RELAY_URL and RELAY_API_KEY.",
             kind="error")
+    identity_warning = legacy_identity_warning(cfg["name"])
+    if identity_warning:
+        log(identity_warning, kind="error")
 
     while not stop.is_set():
         # RE185: a job boundary — nothing in flight — is the only place a restart is free.
@@ -3531,8 +3574,10 @@ def cmd_execute(args):
             # RE305: silent today, and the likeliest real cause of "running but not pulling"
             # (e.g. retained failed worktrees eating the exclusive slots). Name what holds
             # them — that is what makes the line actionable.
-            if idle_log.due("no_free_slots"):
-                log(f"idle — not claiming: no free slots ({pool.busy_summary()})")
+            polls = idle_log.due("no_free_slots")
+            if polls:
+                log(f"idle — not claiming: no free slots "
+                    f"({idle_log.tally(polls)}, {pool.busy_summary()})")
             wake.wait(poll_timeout)
             wake.clear()
             continue
@@ -3579,9 +3624,8 @@ def cmd_execute(args):
             # "advertising" is the CONFIGURED total, which is what the heartbeat advertises.)
             polls = idle_log.due("no_work")
             if polls:
-                log(f"idle — board offered no work ({polls} poll"
-                    f"{'' if polls == 1 else 's'} in the last "
-                    f"{idle_log.interval // 60}m, advertising {fmt_capacity(cap)})")
+                log(f"idle — board offered no work "
+                    f"({idle_log.tally(polls)}, advertising {fmt_capacity(cap)})")
             if args.once:
                 break
             continue

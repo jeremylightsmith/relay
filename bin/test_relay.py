@@ -974,6 +974,39 @@ class ExecutorNameTest(unittest.TestCase):
         self.assertEqual(relay.default_executor_name(), "project@host")
 
 
+class LegacyIdentityWarningTest(unittest.TestCase):
+    """RE305: the default name moved from the bare hostname, and that name is a DURABLE key —
+    `runs.pinned_executor_name` pins an exclusive run to the executor that claimed it and is
+    KEPT through an `:executor_gone` park. An executor that silently answers to a new name
+    therefore strands every run pinned to the old one, unattended (auto-update re-execs at a
+    job boundary, which is "nothing in flight", not "nothing pinned to me")."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        self.addCleanup(setattr, relay.socket, "gethostname", relay.socket.gethostname)
+        relay.ROOT = "/Users/j/src/relay"
+        relay.socket.gethostname = lambda: "box.local"
+
+    def test_the_defaulted_name_warns_and_names_the_legacy_identity(self):
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIsNotNone(warning)
+        self.assertIn('"relay@box"', warning)      # the identity it answers to now
+        self.assertIn('"box.local"', warning)      # the identity its pins were written under
+
+    def test_the_warning_names_both_ways_out(self):
+        warning = relay.legacy_identity_warning(relay.default_executor_name())
+        self.assertIn(relay.EXECUTOR_CONFIG_PATH, warning)   # keep the old identity, or
+        self.assertIn("--name", warning)                     # pass it for one invocation
+
+    def test_a_name_the_developer_chose_is_silent(self):
+        """`--name` or an explicit `"name"` in the config is a human choosing an identity —
+        nothing moved under them, so there is nothing to warn about."""
+        self.assertIsNone(relay.legacy_identity_warning("chosen"))
+
+    def test_keeping_the_legacy_hostname_is_silent(self):
+        self.assertIsNone(relay.legacy_identity_warning("box.local"))
+
+
 class ExecutorConfigTest(unittest.TestCase):
     def setUp(self):
         self._path = relay.EXECUTOR_CONFIG_PATH
@@ -3452,6 +3485,11 @@ class IdleLogTest(unittest.TestCase):
     def test_the_shipped_interval_is_five_minutes(self):
         self.assertEqual(relay.IDLE_LOG_INTERVAL, 300)
 
+    def test_tally_is_the_one_rendering_of_a_due_count(self):
+        """Both idle lines render their count through this, so they cannot drift apart."""
+        self.assertEqual(self.idle.tally(1), "1 poll in the last 5m")
+        self.assertEqual(self.idle.tally(12), "12 polls in the last 5m")
+
 
 class ClaimLineTest(unittest.TestCase):
     """RE305 item 4: there was no 'claimed' line anywhere — the first evidence that work
@@ -3471,6 +3509,14 @@ class ClaimLineTest(unittest.TestCase):
         self.assertEqual(relay.job_ref({"vars": {"ref": "A"}, "ref": "B", "id": "C"}), "A")
         self.assertEqual(relay.job_ref({"vars": None, "ref": "B", "id": "C"}), "B")
         self.assertEqual(relay.job_ref({"id": "C"}), "C")
+
+    def test_job_ref_is_total_on_a_payload_carrying_none_of_the_three(self):
+        """The claim line runs ABOVE the placement block whose `except (KeyError, TypeError)`
+        routes a malformed job to `reject`, so a subscript here would crash the daemon on
+        exactly the untrusted payload that guard exists to survive."""
+        self.assertIsNone(relay.job_ref({"isolation": "shared_clean"}))
+        self.assertIsNone(relay.job_ref({}))
+        self.assertIsNotNone(relay.claim_line({"isolation": "shared_clean"}))
 
 
 class ExecuteLoopTest(unittest.TestCase):
@@ -3562,6 +3608,20 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
 
         self.assertEqual(self.reports[0][:2], ("nj-9", "failed"))
+
+    def test_a_claim_payload_with_no_id_is_rejected_and_the_loop_survives(self):
+        """RE305: the claim line sits ABOVE the placement block whose
+        `except (KeyError, TypeError)` is the only guard against a malformed server payload,
+        so anything it subscripts crashes the daemon on precisely the input `reject` exists to
+        survive. A payload with no `id` must still fall through to `reject`."""
+        relay.claim_node_job = lambda *a, **k: {"isolation": "shared_clean"}
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.report_outcome = lambda *a: self.fail("no id — nothing to report an outcome on")
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
+
+        self.assertTrue(any("rejecting claimed job" in line for line in lines), lines)
 
     def test_an_unplaceable_job_is_reported_failed_not_dropped(self):
         """The server can hand back a job whose isolation class this executor has no free
@@ -3699,6 +3759,33 @@ class ExecuteLoopTest(unittest.TestCase):
             relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
                                                  name="   "))
 
+    def test_a_defaulted_name_warns_that_the_identity_moved(self):
+        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so an
+        executor that quietly answers to the new default strands them. Warn at startup —
+        the hop happens unattended, via auto-update's in-place re-exec."""
+        relay.load_executor_config = lambda: {
+            "name": relay.default_executor_name(), "namespace": "exec",
+            "capacity": {"shared_clean": 1, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60}
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name=None))
+
+        self.assertTrue(any(relay.socket.gethostname() in m and m.startswith("WARNING:")
+                            for m in lines), lines)
+
+    def test_an_explicitly_named_executor_gets_no_identity_warning(self):
+        lines = []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.claim_node_job = lambda *a, **k: None
+
+        relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
+                                             name="foobar"))
+
+        self.assertEqual([m for m in lines if m.startswith("WARNING:")], [])
 
     def test_the_startup_line_names_the_board_url_version_and_capacity(self):
         """RE305: a key pointed at the WRONG board used to look identical to a correct
@@ -3790,8 +3877,8 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.cmd_execute(argparse.Namespace(once=True, dry_run=False, interval=None,
                                              name=None))
 
-        self.assertIn("idle — not claiming: no free slots (shared_clean 1/1 busy; "
-                      "exclusive: RE291 retained)", lines)
+        self.assertIn("idle — not claiming: no free slots (1 poll in the last 5m, "
+                      "shared_clean 1/1 busy; exclusive: RE291 retained)", lines)
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):

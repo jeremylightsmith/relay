@@ -225,7 +225,13 @@ that stays server-side.
   park (`Relay.Runs.park_claimed/1`, so the hand-back resume re-offers anywhere).
   `Relay.Runs.exclusive_holder/2` reads that column to pin each successive job, and
   `Relay.Runs.active_runs/1` resolves it to the executor row id so the **scheduler** resumes a
-  parked exclusive run on its holder (RLY-199) — one column, two readers. (A parked run whose
+  parked exclusive run on its holder (RLY-199) — one column, two readers. **The executor's
+  `name` is therefore a durable, run-affecting key, not a label:** renaming a running executor
+  strands every run pinned to the old name (the resume targets a row nothing beats again, and
+  `retry` refuses it as "not connected") because executor rows are never pruned. RE305 changed
+  the *default* name from the bare hostname to `<checkout-dir>@<short-host>`, so a defaulted
+  executor warns loudly at startup and names the legacy identity — see the Config bullet below.
+  (A parked run whose
   holder advertises `exclusive: 0` can still be handed its own resume — the executor keeps
   polling while it holds bound slots via `ExecutorPool.has_bound_slots/0`.)
 - **Version negotiation (RLY-184).** Every claim and heartbeat carries `executor.version`, the
@@ -459,7 +465,13 @@ silently billed to the paid API.
 
 - **Config.** `.relay/executor.json` holds `name` (defaults to
   `<checkout-dir>@<short-host>`, e.g. `relay@Jeremys-MBP`; override per invocation with
-  `relay execute --name foo`), `namespace`
+  `relay execute --name foo`). **Upgrading past RE305 changes that default**, and because the
+  name is the exclusive-affinity pin key (see Node-job transport above), runs pinned under the
+  old bare-hostname identity park `:executor_gone` instead of resuming. The hop happens
+  unattended — auto-update re-execs at a *job* boundary, which is "nothing in flight", not "no
+  run pinned to me" — so a defaulted executor prints a one-time `WARNING:` at startup naming
+  the pre-RE305 identity. To keep it, set `"name": "<hostname>"` in `.relay/executor.json` (or
+  pass `--name <hostname>`) and restart. Also `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
