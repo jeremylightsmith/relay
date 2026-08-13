@@ -89,6 +89,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay own` · `bin/relay release RLY-12` | Claim for the AI / hand back |
 | `bin/relay approve` · `bin/relay reject RLY-12 ["note"]` | Gate: advance / send back |
 | `bin/relay retry RLY-12 [--at NODE]` | Retry the failed run — last node, or `--at NODE` |
+| `bin/relay cancel RLY-12 [--reason "…"]` | Cancel the card's active run — the stop half of `retry`. Never moves the card; follow with `move` |
 
 Full table with every flag: `$RELAY_URL/docs/cli`.
 

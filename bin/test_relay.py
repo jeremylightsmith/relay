@@ -417,6 +417,90 @@ class RetryTest(unittest.TestCase):
         os.environ.setdefault("RELAY_API_KEY", "k")
 
 
+class CancelTest(unittest.TestCase):
+    """relay cancel REF [--reason TEXT] — POSTs the ref-addressed cancel route (RE309)."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or
+            {"data": {"status": "ok", "run_id": 412, "ref": "RLY-1",
+                      "previous_status": "parked", "node": "brainstorm"}}
+        )
+
+    def _args(self, argv):
+        return relay.build_parser().parse_args(argv)
+
+    def test_it_posts_the_card_cancel_route_with_an_empty_body(self):
+        relay.cmd_cancel(self._args(["cancel", "RLY-1"]))
+        self.assertEqual(self.sent, [("POST", "/api/cards/RLY-1/cancel", {})])
+
+    def test_a_reason_is_sent_in_the_body(self):
+        relay.cmd_cancel(self._args(["cancel", "RLY-1", "--reason", "work already merged"]))
+        self.assertEqual(
+            self.sent,
+            [("POST", "/api/cards/RLY-1/cancel", {"reason": "work already merged"})])
+
+    def test_the_human_line_names_what_was_cancelled(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_cancel(self._args(["cancel", "RLY-1"]))
+        out = buf.getvalue()
+        self.assertIn("412", out)
+        self.assertIn("parked", out)
+        self.assertIn("brainstorm", out)
+
+    def test_a_null_node_does_not_print_none(self):
+        relay.api = lambda method, path, body=None, **k: (
+            {"data": {"status": "ok", "run_id": 412, "ref": "RLY-1",
+                      "previous_status": "running", "node": None}})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_cancel(self._args(["cancel", "RLY-1"]))
+        self.assertIn("no node", buf.getvalue())
+
+    def test_json_prints_the_payload(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_cancel(self._args(["cancel", "RLY-1", "--json"]))
+        self.assertEqual(json.loads(buf.getvalue())["previous_status"], "parked")
+
+    def test_a_422_refusal_prints_the_server_message_and_exits_non_zero(self):
+        relay.api = self._api  # exercise the real transport's error handling
+
+        def boom(*_a, **_k):
+            raise urllib.error.HTTPError(
+                "http://x/api/cards/RLY-1/cancel", 422, "Unprocessable", {},
+                io.BytesIO(json.dumps(
+                    {"error": {"code": "no_active_run",
+                               "message": "This card has no active run to cancel."}}
+                ).encode()),
+            )
+
+        self._patch_urlopen(boom)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            relay.cmd_cancel(self._args(["cancel", "RLY-1"]))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("no active run to cancel", err.getvalue())
+
+    def test_the_cli_wires_cancel_beside_retry(self):
+        args = self._args(["cancel", "RLY-1", "--reason", "why", "--json"])
+        self.assertEqual(args.ref, "RLY-1")
+        self.assertEqual(args.reason, "why")
+        self.assertTrue(args.json)
+        self.assertIsNone(self._args(["cancel", "RLY-1"]).field)
+        self.assertEqual(args.func, relay.cmd_cancel)
+
+    def _patch_urlopen(self, fn):
+        import urllib.request
+        real = urllib.request.urlopen
+        self.addCleanup(setattr, urllib.request, "urlopen", real)
+        urllib.request.urlopen = fn
+
+
 class NeedsInputBodyTest(unittest.TestCase):
     """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
 

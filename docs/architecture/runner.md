@@ -426,6 +426,46 @@ deleted fails there with a clear message. Neither half ever silently restarts fr
 CLI: `relay retry <ref> [--at NODE] [--json]`. On a refusal it prints the server's message to
 stderr and exits non-zero.
 
+### Cancelling a run (RE309)
+
+The stop half of the same surface. `Relay.Runs.cancel_run/2` stops the run server, revokes
+any in-flight job (freeing the executor slot), transitions the run from
+`Relay.Schemas.Run.active_statuses/0` to `:cancelled`, logs an `:action` timeline entry and
+broadcasts `:run_finished`. Both `running` and `parked` runs cancel, with no extra flag —
+restricting it would leave a wedged `running` run needing a production console, which is
+the hole this exists to close.
+
+- `POST /api/runs/:id/cancel` (`RelayWeb.Api.RunController.cancel/2`) — id-addressed.
+- `POST /api/cards/:ref/cancel` (`.cancel_card/2`) — ref-addressed alias resolving the
+  card's **active** run via `Relay.Runs.active_run/1` (retry's alias resolves the *newest*
+  run instead, whatever its status); what `relay cancel <ref>` calls. Both take an optional
+  `{"reason": "…"}` body and funnel into `Relay.Runs.cancel_run/2`.
+
+Success is `200 {"data": {"status": "ok", "run_id", "ref", "previous_status", "node"}}`,
+where `previous_status` and `node` are the run's values *before* the cancel. The single
+refusal is `422 {"error": {"code": "no_active_run", "message"}}`, covering both shapes of
+"nothing to cancel" — no run row at all, and a run that raced to terminal between lookup and
+cancel — because they are the same fact to the caller. A card with no active run therefore
+gets a named 422, **never a silent success**. An unknown ref or run id, or a run on another
+board, is `404`.
+
+A `:reason` is folded into the timeline text as `run cancelled — <reason>`, trimmed and
+capped at `@max_cancel_reason` (200) characters; omitting it keeps the plain
+`run cancelled`. The `:actor` (`:agent | {:user, id}`) is logged with the entry, so
+"who killed this run?" is answerable: `BoardLive`'s confirm-move dialog passes the
+signed-in user, the board-key API passes `:agent`, and the run `Listener` and
+`ExecutorReaper` take the `:agent` default.
+
+**Cancelling never moves the card.** A caller that wants the card elsewhere follows with
+`POST /api/cards/:ref/move`, whose `409 would_strand_run` keeps meaning exactly what it
+says. That two-call sequence — `relay cancel REF && relay move REF Review` — is the
+supported way to unstick a card whose run must die.
+
+CLI: `relay cancel <ref> [--reason TEXT] [--json]`. On a refusal it prints the server's
+message to stderr and exits non-zero. Self-cancel is permitted and documented, not guarded:
+a flow node cancelling its own ref revokes its own job, and the executor handles revocation
+gracefully.
+
 ## Scheduler / Listener authority split (RLY-200)
 
 Before either owner below gets a say, `Relay.Runs.Listener.reconcile_card/2` runs a first,
