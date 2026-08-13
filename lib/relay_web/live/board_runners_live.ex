@@ -24,8 +24,9 @@ defmodule RelayWeb.BoardRunnersLive do
   blocking here.
 
   `Relay.Runs.stopped_work/2` on the 10s tick is deliberate and cheap: it returns `nil` after one
-  aggregate (`queued_jobs_summary/1`) whenever nothing is queued, and only builds a scheduler
-  snapshot when jobs are genuinely queued — i.e. exactly when the answer matters.
+  aggregate (`queued_jobs_summary/1`) whenever nothing is queued, and builds a scheduler snapshot
+  only once the oldest queued job has waited past the stopped-work threshold — i.e. exactly when
+  the answer can be non-nil. A board with work merely in flight pays one aggregate per tick.
 
   Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
   the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor

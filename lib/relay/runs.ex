@@ -1547,18 +1547,28 @@ defmodule Relay.Runs do
 
       %{count: count, oldest_inserted_at: oldest} ->
         age = DateTime.diff(now, oldest, :second)
-        {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
-        {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
 
-        if age > @stopped_work_after_s and reason in [:executor_outdated, :no_executor, :executor_gone] do
-          %{
-            reason: reason,
-            detail: stopped_work_detail(reason, bits, age),
-            queued_count: count,
-            oldest_queued_age_s: age,
-            evidence: bits
-          }
-        end
+        # The age guard comes FIRST on purpose: this is polled on the Runners view's 10s tick,
+        # and the snapshot behind `roster_verdict/3` is the expensive half (a full card list plus
+        # stage/flow/run/executor reads). A board with work merely in flight must not pay for a
+        # snapshot every tick — only one queued past the threshold, where the answer can be non-nil.
+        if age > @stopped_work_after_s, do: roster_verdict(board, count, age)
+    end
+  end
+
+  # Does the shared capacity diagnosis blame the roster rather than a legitimately busy board?
+  defp roster_verdict(%Board{} = board, count, age) do
+    {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
+    {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
+
+    if reason in [:executor_outdated, :no_executor, :executor_gone] do
+      %{
+        reason: reason,
+        detail: stopped_work_detail(reason, bits, age),
+        queued_count: count,
+        oldest_queued_age_s: age,
+        evidence: bits
+      }
     end
   end
 
