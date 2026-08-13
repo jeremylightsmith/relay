@@ -4,7 +4,6 @@ defmodule Relay.Runs.ResumeRefusalTest do
   import Ecto.Query
 
   alias Relay.Runs
-  alias Relay.Runs.Capacity
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.RunsEngine
   alias Relay.Runs.Scheduler.Server
@@ -84,7 +83,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
     end
 
     test "resume_run/2 clears the stamp", %{board: board, works: works} do
-      start_supervised!(Relay.Runs.Supervisor)
+      start_engine!()
       run = parked_run(works)
       :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], at(-600))
 
@@ -220,8 +219,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
   describe "end-to-end: run 368's shape (RE297)" do
     setup do
       Relay.Runs.FakeDispatcher.register(self())
-      start_supervised!(Relay.Runs.Supervisor)
-      Capacity.reset()
+      start_engine!()
 
       user = insert(:user)
       {:ok, board} = Relay.Boards.create_board(user, %{name: "RE297 Board"})
