@@ -466,6 +466,39 @@ message to stderr and exits non-zero. Self-cancel is permitted and documented, n
 a flow node cancelling its own ref revokes its own job, and the executor handles revocation
 gracefully.
 
+### Advancing past an already-committed task (RE310)
+
+A `foreach` node re-entered onto a task whose work is **already committed** has no exit: the
+commit guard rewrites its `succeeded` to `failed` (it cannot move HEAD — its own earlier commit
+IS the work), the failure edge loops it back or parks it, and no answer a human can type changes
+either. `Relay.Runs.advance_foreach/2` is the hatch: check the bound sub-task off through
+`Relay.Cards.set_sub_task_done/3` and revive the run at the foreach head **re-bound to the next
+task**, or — when that was the last one — at the flow's `when: :foreach_exhausted` target.
+
+- `POST /api/runs/:id/advance` (`RelayWeb.Api.RunController.advance/2`) — id-addressed.
+- `POST /api/cards/:ref/advance` (`.advance_card/2`) — ref-addressed alias; what
+  `relay advance <ref>` calls. Same success and refusal shapes as retry, and the same board
+  scoping (another board's run is a `404`).
+
+Eligibility is deliberately **wider** than retry's: a `:failed` run, or a `:parked` run with
+`parked_reason: :needs_input` — **either** park kind. RE306's actual state was a `:question` park,
+which retry refuses `awaiting_answer`, so reusing retry's rule would leave this hatch unable to
+open in the exact state it exists for. `:running`, `:parked/:executor_gone`, `:done` and
+`:cancelled` are refused. The refusal codes add `not_advanceable`, `no_foreach`,
+`no_exhausted_edge` and `not_bound` to retry's list, through the same
+`Relay.Runs.retry_refusal_code/1` pair; every refusal is checked before the check-off, so a
+refused advance writes nothing.
+
+The engine change is one thing: `RunServer`'s re-entry takes a binding MODE. Every existing
+re-entry **inherits** the node's current binding (which is what keeps a review-failed loop-back on
+the SAME task, RE252); the new `{:advance_foreach, _}` start mode **re-derives** it from
+`Runs.next_sub_task_id/1`, which — the stale task having just been checked off — is the next one.
+It is the only caller allowed to re-derive it.
+
+CLI: `relay advance <ref> [--json]`. UI: a `run-advance` button on the run panel's `:failed`,
+`:circuit` and `:parked` banners, rendered only when `Relay.Runs.advance_foreach_available?/1`
+holds — the LiveView computes that predicate and the component reads a boolean.
+
 ## Scheduler / Listener authority split (RLY-200)
 
 Before either owner below gets a say, `Relay.Runs.Listener.reconcile_card/2` runs a first,
@@ -901,9 +934,15 @@ Four rules sit on top of it:
   nothing" are different failures and the retry receives this detail as its findings. Without it
   the work is invisible — the retry redoes it from scratch and the next job on that slot sweeps it
   into a stash.
-- **A success claim must be backed by a commit.** On a node marked `expects_commits`, a
-  `succeeded` that left HEAD unmoved is rewritten to `failed` before finalize
-  ([failures.md](failures.md) A6).
+- **A success claim must be backed by a commit — or by proof the commit already exists.** On a
+  node marked `expects_commits`, a `succeeded` that left HEAD unmoved is rewritten to `failed`
+  before finalize ([failures.md](failures.md) A6). The one way out is `relay outcome succeeded
+  --no-changes` (RE310): an ASSERTION that the work was already committed, which the engine
+  honours only when it can show from this run's own history that this node already produced a
+  commit for the thing it is bound to — the same node and, under a `foreach`, the same sub-task.
+  On a node's first visit for that binding the two baselines coincide, so the claim is always
+  rejected and default-deny survives. The claim is recorded on the execution (`no_changes`)
+  whether accepted or rejected, and a rejected one fails with `(no_changes_unproven: <node>)`.
 - **A declared card write must actually land.** On a node declaring `writes`, a `succeeded` that
   left one of those card fields blank is rewritten to `failed` before finalize
   ([failures.md](failures.md) A10). `reads` is never checked at run time — it is advisory.

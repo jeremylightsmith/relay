@@ -21,7 +21,8 @@ is [runner.md](runner.md).
 | A3 | **Routed failure → fixer** | `failed` with a `:failed` edge to a fix node | follow it (`precommit→final_fix`, `smoke→smoke_fix`, `sync→sync_fix`, …) | continues |
 | A4 | **Escalated failure** | `failed` with a `:failed → needs_input` edge (RLY-194: `implement`, `*_fix`, `post`, `branch`) | park `:needs_input` for a human; classified `:escalation` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A5 | **No route** | `failed` with no `:failed` edge, or budgets spent | `{:fail}` → run `failed` → `mark_failed` → card `failed` | `failed` |
-| A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move since the node was *entered* — per visit, not per attempt, so a retry still counts a commit an earlier attempt of the same visit made (RE298) | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex`) → routes as A2–A5 | as A2–A5 |
+| A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move since the node was *entered* — per visit, not per attempt, so a retry still counts a commit an earlier attempt of the same visit made (RE298) | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex`) → routes as A2–A5. **Unless** the node asserted `--no-changes` AND this node already committed for what it is bound to (RE310) — then the `succeeded` stands | as A2–A5 |
+| A6b | **Work already committed** | an `expects_commits` node is re-entered onto work its own earlier visit already committed, so it *cannot* move HEAD (RE306) | the failure detail names the exit (`relay outcome succeeded --no-changes`) instead of repeating "produced no commits"; a human can also `relay advance <ref>` / press "Task already done — continue" to check the task off and move on (`Runs.advance_foreach/2`) | recoverable — previously an inescapable loop |
 | A7 | **Same error looping** | 3 identical `failure_signature`s | circuit breaker `{:fail}` even with budget left (`engine.ex:82`) | `failed` |
 | A8 | **Runaway** | `max_loops` on an edge, or 20 node visits, exceeded | `{:fail}` | `failed` |
 | A9 | **Unrouted non-failed outcome** | outcome (e.g. `partial`) with no matching edge | `degrade_to_failed` — follow the node's `:failed` edge, spending *its* budget (`engine.ex:145`) | as A3–A5 |
@@ -38,6 +39,17 @@ resumes the node with the human's note as `findings`, and a Retry beside it. The
 no "agent stopped" dead end: an agent that dies environmentally reports `failed` exactly like a node
 that ran and honestly failed, so the two are not distinguishable from the data and the UI must not
 pretend otherwise.
+
+**Telling a silent no-op from work already done (RE310).** Both look identical at the moment of
+the report — an `expects_commits` node saying `succeeded` with HEAD unmoved — and the engine tells
+them apart with a SECOND baseline. `baseline_sha/2` is HEAD before this **visit**;
+`binding_baseline_sha/2` is HEAD before this **binding** (the node's first execution for this
+sub-task, or its first visit in the run when it has none). When the binding baseline differs from
+the reported sha, this node has already committed for this work, and that is the only situation in
+which a `--no-changes` assertion is honoured. Both are one query — `baseline_before/2` — at
+different boundaries, so they cannot drift. The nil handling is deliberately asymmetric: the guard
+**fails open** on a missing sha ("a missing row is not evidence of a lie"), the claim check **fails
+closed** (the burden of proof is on the claimant).
 
 ## B. Plan / foreach
 

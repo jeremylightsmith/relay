@@ -474,6 +474,11 @@ defmodule RelayWeb.RunComponents do
     doc:
       "RE253: from `Relay.Runs.park_kind/1`. On :escalation the slot's panel supplies the label and sentence, so the banner omits its own to avoid a doubled heading."
 
+  attr :advance_available?, :boolean,
+    default: false,
+    doc:
+      "RE310: `Relay.Runs.advance_foreach_available?/1`, computed in the LiveView. The component must NEVER re-derive this rule — one rule, one place."
+
   slot :inner_block
 
   def run_state_banner(%{variant: :reentry} = assigns) do
@@ -555,6 +560,7 @@ defmodule RelayWeb.RunComponents do
       <pre style="background:var(--color-neutral);color:color-mix(in oklab, var(--color-neutral-content) 95%, transparent);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0 0 10px 0;"><%= @detail_text %></pre>
       <.failure_stats totals={@totals} />
       <.retry_button />
+      <.advance_button available?={@advance_available?} />
     </div>
     """
   end
@@ -586,6 +592,7 @@ defmodule RelayWeb.RunComponents do
       ><%= @detail_text %></pre>
       <.failure_stats :if={@totals} totals={@totals} />
       <.retry_button />
+      <.advance_button available?={@advance_available?} />
     </div>
     """
   end
@@ -612,6 +619,7 @@ defmodule RelayWeb.RunComponents do
           </div>
         </div>
         {render_slot(@inner_block)}
+        <.advance_button available?={@advance_available?} />
       </div>
       <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;">
         <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
@@ -643,6 +651,33 @@ defmodule RelayWeb.RunComponents do
       style="margin-top:10px;"
     >
       Retry
+    </button>
+    """
+  end
+
+  # RE310 — the human hatch out of the already-committed deadlock: check the bound foreach task
+  # off and continue with the next one. A secondary action beside the primary Retry (`btn-ghost`
+  # vs `btn-primary`), and it renders ONLY when `Relay.Runs.advance_foreach_available?/1` holds,
+  # so it is never a button that can only refuse.
+  #
+  # Deliberately not designed: `docs/designs/Relay Card Run Panel.dc.html` shows a retry
+  # affordance on a parked run and no "task already done" control, so there is nothing to match
+  # and this borrows `retry_button/1`'s shape instead. The three variants that render it
+  # (:circuit, :failed, :parked) are mutually exclusive on a page, so the shared `run-advance`
+  # DOM id is never duplicated.
+  attr :available?, :boolean, required: true
+
+  defp advance_button(assigns) do
+    ~H"""
+    <button
+      :if={@available?}
+      id="run-advance"
+      type="button"
+      class="btn btn-sm btn-ghost"
+      phx-click="advance_run"
+      style="margin-top:10px;margin-left:8px;"
+    >
+      Task already done — continue
     </button>
     """
   end

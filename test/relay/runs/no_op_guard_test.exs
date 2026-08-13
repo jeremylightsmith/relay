@@ -234,6 +234,154 @@ defmodule Relay.Runs.NoOpGuardTest do
     assert run.parked_reason == :needs_input
   end
 
+  # RE310 — the RE306 shape: `impl` commits, a reviewer bounces it, and the loop-back opens a NEW
+  # visit whose baseline IS the commit `impl` just made. `foreach?` picks the flavour: with a
+  # foreach the binding is {node, sub_task}, without one it is the node's first visit in the run.
+  # ONE flow definition, two bindings — the rule under test is general to every expects_commits
+  # node (implement, final_fix, smoke_fix, acceptance_fix), not special-cased to foreach.
+  #
+  # Note `impl` is NOT the loop tail here (the `when` guards sit on `review`), so a successful
+  # impl does not check its sub_task off — which is precisely the state that armed RE306.
+  defp looping_flow(board, foreach?) do
+    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
+    works = Enum.find(board.stages, &(&1.name == "Spec"))
+    lands = Enum.find(board.stages, &(&1.name == "Plan"))
+
+    impl = %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true}
+    impl = if foreach?, do: Map.put(impl, :foreach, "card.sub_tasks"), else: impl
+
+    loop_edges =
+      if foreach? do
+        [
+          %{from: "review", to: "impl", on: :succeeded, when: :foreach_remaining},
+          %{from: "review", to: "done", on: :succeeded, when: :foreach_exhausted}
+        ]
+      else
+        [%{from: "review", to: "done", on: :succeeded}]
+      end
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "looping-#{System.unique_integer([:positive])}",
+        isolation: :shared_clean,
+        pulls_from_stage_id: pulls.id,
+        works_in_stage_id: works.id,
+        lands_on_stage_id: lands.id,
+        nodes: [
+          %{key: "seed", type: :shell, run: "true"},
+          impl,
+          %{key: "review", type: :agent, run: "review {ref}"}
+        ],
+        edges:
+          [
+            %{from: "start", to: "seed"},
+            %{from: "seed", to: "impl", on: :succeeded},
+            %{from: "impl", to: "review", on: :succeeded},
+            %{from: "impl", to: "needs_input", on: :failed},
+            %{from: "review", to: "impl", on: :failed, max_loops: 3}
+          ] ++ loop_edges
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
+  # Drives the RE306 sequence up to the re-entered visit and returns THAT visit's job: seed
+  # baselines at @base, impl commits `sha`, review fails carrying the SAME sha, the loop-back
+  # opens visit 2 still bound to task 1. Sub_tasks are inserted BEFORE start_run — a foreach flow
+  # refuses to start without them (failures.md B1).
+  defp reentered_after_commit(board, flow, sha, sub_task_count) do
+    card = card_in(board, "Next up")
+    for position <- 1..sub_task_count//1, do: insert(:sub_task, card: card, position: position)
+
+    {:ok, _run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, %NodeJob{node_key: "seed"} = seed}
+    {:ok, _} = Runs.report_outcome(seed, %{outcome: :succeeded, detail: "ok", git_sha: @base})
+
+    assert_receive {:dispatched, %NodeJob{node_key: "impl"} = impl}
+    {:ok, _} = Runs.report_outcome(impl, %{outcome: :succeeded, detail: "task 1", git_sha: sha})
+
+    assert_receive {:dispatched, %NodeJob{node_key: "review"} = review}
+    {:ok, _} = Runs.report_outcome(review, %{outcome: :failed, detail: "a finding", git_sha: sha})
+
+    assert_receive {:dispatched, %NodeJob{node_key: "impl"} = reentered}
+    reentered
+  end
+
+  test "RE310: a re-entered visit whose task is already committed may assert --no-changes", ctx do
+    # The full RE306 sequence, foreach flavour: impl v1 commits `moved99` and never checks its
+    # sub_task off, the reviewer fails, and impl v2's baseline IS `moved99`. Without the assertion
+    # every exit is closed; with it, the engine corroborates the claim against its own history
+    # (impl already committed for THIS sub_task) and honours it.
+    flow = looping_flow(ctx.board, true)
+    reentered = reentered_after_commit(ctx.board, flow, "moved99", 2)
+
+    {:ok, _run} =
+      Runs.report_outcome(reentered, %{
+        outcome: :succeeded,
+        detail: "already committed",
+        git_sha: "moved99",
+        no_changes: true
+      })
+
+    exec = Repo.get!(NodeExecution, reentered.node_execution_id)
+    assert exec.outcome == :succeeded
+    assert exec.no_changes == true
+  end
+
+  test "RE310: the same escape works on a non-foreach expects_commits node", ctx do
+    # `final_fix` / `smoke_fix` / `acceptance_fix` sit on the identical loop-back with no
+    # sub_tasks at all, so the binding is the node's first visit in this run.
+    flow = looping_flow(ctx.board, false)
+    reentered = reentered_after_commit(ctx.board, flow, "moved99", 0)
+
+    {:ok, _run} =
+      Runs.report_outcome(reentered, %{
+        outcome: :succeeded,
+        detail: "already committed",
+        git_sha: "moved99",
+        no_changes: true
+      })
+
+    exec = Repo.get!(NodeExecution, reentered.node_execution_id)
+    assert exec.outcome == :succeeded
+  end
+
+  test "RE310: a first-visit --no-changes claim is still rewritten to failed", ctx do
+    # The constraint that makes the fix non-trivial: on a node's FIRST visit for a binding the
+    # binding baseline EQUALS the visit baseline, so a node that has never committed anything
+    # cannot assert its way past the guard (RLY-194's original case, unchanged).
+    flow = marked_flow(ctx.board)
+    impl = seed_then_impl(ctx.board, flow, @base)
+
+    {:ok, _run} =
+      Runs.report_outcome(impl, %{outcome: :succeeded, detail: "nothing to do", git_sha: @base, no_changes: true})
+
+    exec = Repo.get!(NodeExecution, impl.node_execution_id)
+    assert exec.outcome == :failed
+    assert exec.detail =~ "no_changes_unproven: impl"
+    # The CLAIM is recorded even though the engine disagreed — that is what makes "the agent
+    # asserted this and the engine rejected it" readable after the fact.
+    assert exec.no_changes == true
+  end
+
+  test "RE310: the dead-end failure names the exit instead of repeating 'no commits'", ctx do
+    # The same re-entered visit WITHOUT a claim. This detail is what a retry reads as its
+    # findings (RE251), and it is the just-in-time channel that teaches the flag.
+    flow = looping_flow(ctx.board, true)
+    reentered = reentered_after_commit(ctx.board, flow, "moved99", 2)
+
+    {:ok, _run} =
+      Runs.report_outcome(reentered, %{outcome: :succeeded, detail: "nothing left", git_sha: "moved99"})
+
+    exec = Repo.get!(NodeExecution, reentered.node_execution_id)
+    assert exec.outcome == :failed
+    assert exec.detail =~ "committed already"
+    assert exec.detail =~ "relay outcome succeeded --no-changes"
+    assert exec.detail =~ "no_op_success: impl"
+    assert exec.no_changes == false
+  end
+
   test "a reviewer's failed routes to its fix node on the first failure — no retry, no park (criterion 5)", ctx do
     # Pure engine assertion against the DB-round-tripped code flow: quality_review has no
     # max_retries, so its :failed routes straight to implement (not a retry, not a park).

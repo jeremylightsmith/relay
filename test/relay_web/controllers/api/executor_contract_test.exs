@@ -64,7 +64,10 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       "outcome" => "needs_input",
       "detail" => "asked the human",
       "git_sha" => "0000000000000000000000000000000000000000",
-      "session_id" => "sess-fixture"
+      "session_id" => "sess-fixture",
+      # RE310: always sent, never omitted — this is the key set bin/test_relay.py pins
+      # `outcome_body` against.
+      "no_changes" => false
     }
 
     outcome_response =

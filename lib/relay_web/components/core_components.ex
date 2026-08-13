@@ -1838,6 +1838,10 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil"
 
+  attr :advance_available?, :boolean,
+    default: false,
+    doc: "RE310: whether `Relay.Runs.advance_foreach_available?/1` holds for the card's latest run"
+
   attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
 
   attr :supporters, :list,
@@ -2824,17 +2828,20 @@ defmodule RelayWeb.CoreComponents do
                       :if={@latest_detail.breaker_tripped?}
                       variant={:circuit}
                       detail={@latest_detail}
+                      advance_available?={@advance_available?}
                     />
                     <RunComponents.run_state_banner
                       :if={@latest_detail.status == :failed and not @latest_detail.breaker_tripped?}
                       variant={:failed}
                       detail={@latest_detail}
+                      advance_available?={@advance_available?}
                     />
                     <RunComponents.run_state_banner
                       :if={@parked_run}
                       variant={:parked}
                       park_kind={@park_kind}
                       detail={@latest_detail}
+                      advance_available?={@advance_available?}
                     >
                       <.needs_input_panel
                         id_prefix="run-needs-input"

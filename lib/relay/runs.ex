@@ -2341,6 +2341,115 @@ defmodule Relay.Runs do
   end
 
   @doc """
+  "This task is already done; check it off and continue with the next one." The human hatch out of
+  RE310's deadlock: a `foreach` node re-entered onto a task whose work is already committed cannot
+  produce a commit, so the guard rejects every success it reports — and no answer a human can type
+  changes that.
+
+  Eligibility is deliberately WIDER than `retry_run/2`'s: a `:failed` run, or a `:parked` run whose
+  `parked_reason` is `:needs_input` — **either** park kind. RE306's actual state was a `:question`
+  park, which `retry_run/2` refuses `:awaiting_answer`, so reusing retry's rule would leave this
+  hatch unable to open in the exact state it exists for. `:running`, `:parked/:executor_gone` (the
+  scheduler resumes those), `:done` and `:cancelled` are refused.
+
+  Steps: check the bound sub-task off through `Relay.Cards.set_sub_task_done/3` (the normal path,
+  so the normal broadcast fires), then revive the run at either the foreach head — re-bound to the
+  derived cursor by `{:advance_foreach, nil}` — or, when that was the last task, at the flow's
+  `when: :foreach_exhausted` target. `revive_run/5` increments `retries`, so a human intervention
+  buys one more move everywhere, exactly as retry does.
+
+  Every refusal is checked BEFORE the check-off, so a refused advance writes nothing. Refusals:
+  `{:not_advanceable, what}`, `:active_run_exists`, `:no_flow`, `:no_foreach`,
+  `:no_exhausted_edge`, `:not_bound`, `{:unknown_node, key}`, `{:executor_unavailable, name}` —
+  each paired with `retry_refusal_code/1` and `retry_refusal_message/1`.
+  """
+  def advance_foreach(%Run{} = run, opts \\ []) do
+    actor = Keyword.get(opts, :actor, :agent)
+
+    with {:ok, flow, head, exhausted, sub_task_id} <- check_advance(run),
+         :ok <- check_off_bound_task(run, sub_task_id) do
+      {node, mode} = advance_target(run, head, exhausted)
+      revive_run(run, flow, node, mode, actor)
+    end
+  end
+
+  @doc """
+  Whether `advance_foreach/2` is offerable for `run` — the ONE rule the run panel's button reads,
+  so the component never re-derives it. Everything `advance_foreach/2` checks; a refusal that only
+  appears on the click (a race) still surfaces by name. Costs no queries at all for a `:running` or
+  terminal run, which is the common render.
+  """
+  def advance_foreach_available?(%Run{} = run), do: match?({:ok, _flow, _head, _exhausted, _id}, check_advance(run))
+
+  # Every read-only precondition, in one place so `advance_foreach/2` and
+  # `advance_foreach_available?/1` cannot drift. Returns the flow, BOTH possible destinations and
+  # the bound sub-task id.
+  defp check_advance(%Run{} = run) do
+    with :ok <- check_advanceable(run),
+         :ok <- check_no_active_run(run),
+         {:ok, flow} <- load_flow(run),
+         {:ok, head} <- check_foreach_node(flow),
+         {:ok, exhausted} <- check_exhausted_target(flow),
+         {:ok, sub_task_id} <- check_bound(run, head),
+         :ok <- check_retry_executor(run, flow) do
+      {:ok, flow, head, exhausted, sub_task_id}
+    end
+  end
+
+  defp check_advanceable(%Run{status: :failed}), do: :ok
+  defp check_advanceable(%Run{status: :parked, parked_reason: :needs_input}), do: :ok
+
+  defp check_advanceable(%Run{status: :parked, parked_reason: reason}),
+    do: {:error, {:not_advanceable, "parked (#{reason})"}}
+
+  defp check_advanceable(%Run{status: status}), do: {:error, {:not_advanceable, to_string(status)}}
+
+  defp check_foreach_node(%Flow{} = flow) do
+    case foreach_node_key(flow) do
+      nil -> {:error, :no_foreach}
+      key -> {:ok, key}
+    end
+  end
+
+  # The `when: :foreach_exhausted` edge's target, resolved BEFORE anything is written. It is a
+  # pure property of the flow, so validating it here is what keeps every refusal side-effect-free:
+  # once the sub-task is checked off, choosing a destination cannot fail. Validated even when
+  # tasks remain, because a foreach flow with no way out of its loop cannot terminate at all. A
+  # flow whose exhausted edge points at the `done` SENTINEL refuses `{:unknown_node, "done"}`:
+  # there is no node to enter, and finishing a run outright from this hatch is out of scope.
+  defp check_exhausted_target(%Flow{} = flow) do
+    case Enum.find(flow.edges, &(&1.when == :foreach_exhausted)) do
+      nil -> {:error, :no_exhausted_edge}
+      %{to: to} -> with {:ok, node, _mode} <- validate_node_in_flow(to, flow, nil), do: {:ok, node}
+    end
+  end
+
+  defp check_bound(%Run{} = run, node_key) do
+    case current_sub_task_id(run, node_key) do
+      nil -> {:error, :not_bound}
+      id -> {:ok, id}
+    end
+  end
+
+  # Through Relay.Cards, not a direct row write: this is a human checking a box, so it must
+  # broadcast exactly like the drawer's own checkbox does. `set_sub_task_done/3` takes no actor —
+  # attribution rides the revival below, which clears the card block as the acting human.
+  defp check_off_bound_task(%Run{card_id: card_id}, sub_task_id) do
+    case Cards.set_sub_task_done(Repo.get!(Card, card_id), sub_task_id, true) do
+      {:ok, _card} -> :ok
+      {:error, :not_found} -> {:error, :not_bound}
+    end
+  end
+
+  # Read AFTER the check-off, so the derived cursor already points at the next task.
+  defp advance_target(%Run{} = run, head, exhausted) do
+    case next_sub_task_id(run) do
+      nil -> {exhausted, {:reenter_new_visit, nil}}
+      _next -> {head, {:advance_foreach, nil}}
+    end
+  end
+
+  @doc """
   Which kind of `needs_input` park this is — the ONE place park provenance is decided (RE253).
 
     * `:question`   — the node reported `:needs_input`; a human is being asked something (A1).
@@ -2543,24 +2652,30 @@ defmodule Relay.Runs do
   # (RLY-189); an escalation-parked `:needs_input` card must ALSO unblock, or the board shows a
   # blocked card asking a question while its run is already live again. This two-element list is
   # an ad-hoc "card state retry has to clear" predicate, NOT a domain partition — do not replace
-  # it with a Card status vocabulary function. Genuine questions and `:executor_gone` parks never
-  # reach here: `check_retryable/1` refuses them.
+  # it with a Card status vocabulary function.
+  # `retry_run/2` refuses a genuine question and every `:executor_gone` park, so those reach here
+  # only through `advance_foreach/2` (RE310), which deliberately accepts either park kind — and a
+  # card left blocked behind a run that is already live again is exactly what this clears.
   defp clear_card_block(%Run{card_id: card_id}, actor) do
     card = Repo.get!(Card, card_id)
     if card.status in [:failed, :needs_input], do: {:ok, _card} = Cards.clear_failure(card, actor)
     :ok
   end
 
-  @doc "The machine token for a `retry_run/2` refusal — what tests and the API's `error.code` match on."
+  @doc "The machine token for a `retry_run/2` or `advance_foreach/2` refusal — what tests and the API's `error.code` match on."
   def retry_refusal_code({:not_failed, _status}), do: "not_failed"
   def retry_refusal_code(:active_run_exists), do: "active_run_exists"
   def retry_refusal_code(:no_flow), do: "no_flow"
   def retry_refusal_code({:unknown_node, _key}), do: "unknown_node"
   def retry_refusal_code({:executor_unavailable, _name}), do: "executor_unavailable"
   def retry_refusal_code(:awaiting_answer), do: "awaiting_answer"
+  def retry_refusal_code({:not_advanceable, _what}), do: "not_advanceable"
+  def retry_refusal_code(:no_foreach), do: "no_foreach"
+  def retry_refusal_code(:no_exhausted_edge), do: "no_exhausted_edge"
+  def retry_refusal_code(:not_bound), do: "not_bound"
 
   @doc """
-  The human sentence for a `retry_run/2` refusal — what a person reads when
+  The human sentence for a `retry_run/2` or `advance_foreach/2` refusal — what a person reads when
   retry says no, so each one names the specific thing that blocked it.
   """
   def retry_refusal_message({:not_failed, status}) do
@@ -2590,6 +2705,24 @@ defmodule Relay.Runs do
 
   def retry_refusal_message(:awaiting_answer) do
     "This run is waiting on a human answer, not stalled — answer it instead of restarting."
+  end
+
+  def retry_refusal_message({:not_advanceable, what}) do
+    "This run is #{what} — only a failed run, or one parked waiting on a human, can be advanced " <>
+      "past a task that is already done."
+  end
+
+  def retry_refusal_message(:no_foreach) do
+    "This run's flow has no `foreach` node, so there is no per-task loop to advance."
+  end
+
+  def retry_refusal_message(:no_exhausted_edge) do
+    "This run's flow has no `foreach_exhausted` edge, so there is nowhere for the loop to " <>
+      "continue to once the last task is checked off."
+  end
+
+  def retry_refusal_message(:not_bound) do
+    "This run is not working a specific task, so there is nothing to check off and skip past."
   end
 
   @doc "The machine token for a `cancel_run/2` refusal — what tests and the API's `error.code` match on."
@@ -2772,6 +2905,21 @@ defmodule Relay.Runs do
     end
   end
 
+  # The binding of `node_key`'s most recent execution in this run — "which iteration is this node
+  # on". Distinct from `next_sub_task_id/1`, which is the DERIVED cursor: this one answers "what
+  # is it bound to now", the other "what is next". Both `RunServer`'s re-entry and
+  # `advance_foreach/2` read it, so it lives here rather than privately in either.
+  @doc false
+  def current_sub_task_id(%Run{id: run_id}, node_key) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run_id and e.node_key == ^node_key,
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.sub_task_id
+    )
+  end
+
   # "Which task is next" is DERIVED, never persisted: the first sub_task in
   # position order that isn't done. Done-state already lives durably in Postgres,
   # so a crashed-and-resumed run recomputes the same answer with no cursor.
@@ -2905,6 +3053,10 @@ defmodule Relay.Runs do
         detail: detail,
         failure_signature: signature,
         git_sha: attrs[:git_sha],
+        # RE310: what the node CLAIMED, not what the guard decided — the guard has already
+        # rewritten `outcome` by the time we get here, and a rejected claim must still read as
+        # `no_changes: true` with `outcome: :failed`. Absent key => false (an old executor).
+        no_changes: attrs[:no_changes] == true,
         session_id: attrs[:session_id],
         cost: attrs[:cost],
         finished_at: now()

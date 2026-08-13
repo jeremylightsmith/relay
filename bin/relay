@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 54
-EXECUTOR_FINGERPRINT = "bbaa5176077687bbb438da3fc0c2ea8e91b41d78119f274a633107f3409da99d"
+EXECUTOR_VERSION = 56
+EXECUTOR_FINGERPRINT = "dd72be686e209e6981ed00a56b6fff04d02f588f8790661cb3c3097ebd22094a"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -774,6 +774,17 @@ def cmd_cancel(args):
     d = api("POST", f"/api/cards/{args.ref}/cancel", body)["data"]
     emit(args, d, lambda: log(f"{args.ref}: run {d['run_id']} cancelled "
                               f"(was {d['previous_status']} at {d['node'] or 'no node'})"))
+
+
+def cmd_advance(args):
+    """Check the run's bound foreach task off and continue with the next one (RE310).
+
+    The hatch for a run whose current task's work is ALREADY committed: the node cannot produce a
+    commit, so the commit guard rejects every success it reports, and no answer a human can type
+    changes that. Like `retry`, a 422 refusal becomes a die() rather than a silent success."""
+    d = api("POST", f"/api/cards/{args.ref}/advance", {})["data"]
+    emit(args, d, lambda: log(f"{args.ref}: task checked off, run {d['run_id']} continuing at "
+                              f"{d['node']} (retry {d['retries']})"))
 
 
 def cmd_runs(args):
@@ -2287,14 +2298,19 @@ def claim_node_job(executor, capacity, timeout, running=()):
     return resp or None
 
 
-def outcome_body(outcome, detail, git_sha, session_id=None):
+def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False):
     """The exact body POSTed to /api/node-jobs/:id/outcome.
 
     Pure and separate from the POST so bin/test_relay.py can pin its key set against
     test/fixtures/executor_contract.json's `outcome.request` — the same body the ExUnit
-    generator posts at the real controller (RLY-176)."""
+    generator posts at the real controller (RLY-176).
+
+    `no_changes` (RE310) is the node's ASSERTION that its work was already committed. It is
+    always sent, never omitted, so the controller reads one shape; the server decides whether to
+    honour it (it checks this run's own history) and rejects it by default."""
     return {"outcome": outcome, "detail": detail,
-            "git_sha": git_sha, "session_id": session_id}
+            "git_sha": git_sha, "session_id": session_id,
+            "no_changes": bool(no_changes)}
 
 
 def claim_body(executor, capacity, running=()):
@@ -2323,13 +2339,13 @@ def heartbeat_body(executor, capacity, running, bound_runs, capabilities=None):
     return body
 
 
-def report_outcome(job_id, outcome, detail, git_sha, session_id=None):
+def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes=False):
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the executor whether to keep or free an
     exclusive slot (§3). idempotent=True: the endpoint is first-writer-wins per job (RLY-202),
     so a dropped request/response retries into the server's duplicate-200 rather than die()ing."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
-               outcome_body(outcome, detail, git_sha, session_id), idempotent=True)
+               outcome_body(outcome, detail, git_sha, session_id, no_changes), idempotent=True)
     return (resp or {}).get("run_state")
 
 
@@ -2410,17 +2426,22 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None):
          `failed` for a node marked expects_commits that produced no commits (HEAD unchanged).
          That rule is server-side only — the three rules above are unchanged, and no field is
          added to the outcome payload — but an agent author reading only this docstring should
-         not be surprised to see a `succeeded` land as `failed` on such a node."""
+         not be surprised to see a `succeeded` land as `failed` on such a node.
+      5. RE310: the outcome file may also carry `no_changes` — the node ASSERTING that its work
+         was already committed (`relay outcome succeeded --no-changes`). It rides through as the
+         third element verbatim; only the server can verify such a claim, and it rejects it by
+         default (see the guard in lib/relay/runs/run_server.ex)."""
     ref = (job.get("vars") or {}).get("ref")
     if ref:
         card = get_card(ref)
         if card.get("status") == "needs_input":
-            return "needs_input", "agent asked the human"
+            return "needs_input", "agent asked the human", False
     if outcome_path and os.path.exists(outcome_path):
         try:
             with open(outcome_path) as f:
                 data = json.load(f)
-            return data.get("outcome", "succeeded"), data.get("detail", "")
+            return (data.get("outcome", "succeeded"), data.get("detail", ""),
+                    bool(data.get("no_changes", False)))
         except Exception as e:
             # The outcome file is the ONLY channel a node has to signal `partial`; if it's
             # unreadable/malformed (e.g. an LLM-driven step wrote truncated JSON), falling
@@ -2429,13 +2450,13 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None):
             # it as `failed` instead, and log so a human can see the node tried to report.
             log(f"  ⚠ {ref}: outcome file at {outcome_path} is unreadable/malformed: {e}",
                 ref=ref, kind="error")
-            return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}"
+            return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}", False
     if ok:
         return ("failed",
                 f"agent exited 0 but did not write an outcome to $RELAY_NODE_OUTCOME "
                 f"({outcome_path}) and did not raise needs-input — a node must declare its "
-                f"verdict, so this is not treated as success" + abandoned_work_note(cwd))
-    return ("failed", "agent exited non-zero" + abandoned_work_note(cwd))
+                f"verdict, so this is not treated as success" + abandoned_work_note(cwd), False)
+    return ("failed", "agent exited non-zero" + abandoned_work_note(cwd), False)
 
 
 def uncommitted_paths(path):
@@ -2559,6 +2580,11 @@ file for this node — write findings/logs there, not to an invented /tmp path. 
 Valid outcomes: succeeded | failed. Use `--detail @file` for anything long or
 containing quotes or newlines — do NOT hand-write the JSON yourself; this command writes it.
 
+If this node's work turns out to be ALREADY COMMITTED — you were sent back, the change is on the
+branch, and there is genuinely nothing left to change — add `--no-changes` to `succeeded`. The
+server verifies that claim against this run's history and rejects it unless this node really did
+already commit for this task.
+
 `detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the
 actual findings; for a failure, why. Exiting without declaring anything is reported as `failed`,
 because a node that declares nothing cannot be distinguished from one that did nothing.
@@ -2666,9 +2692,9 @@ def compose_node_prompt(job, cmd, vars):
 
 
 def run_node_job(job, slot_path, control, partition=None):
-    """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id).
-    Reuses the streaming primitives, tagged per job. Does NOT report — the caller POSTs the
-    outcome (§6) and acts on the run_state (§3).
+    """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id,
+    no_changes). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
+    POSTs the outcome (§6) and acts on the run_state (§3).
 
     `partition` (the caller's `pool.partition_for(slot)`, RLY-213) rides straight through to
     whichever streaming primitive runs the step — computed once by the caller, never
@@ -2708,7 +2734,7 @@ def run_node_job(job, slot_path, control, partition=None):
     detached = check_branch_attached(slot_path, job.get("isolation"), vars.get("branch"), cmd)
     if detached:
         log(f"  ⚠ {ref}: {detached}", ref=ref, kind="error")
-        return "failed", detached, git_head_sha(slot_path), None
+        return "failed", detached, git_head_sha(slot_path), None, False
 
     session_id = None
     if job.get("node_type") == "agent":
@@ -2724,7 +2750,7 @@ def run_node_job(job, slot_path, control, partition=None):
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
                 partition=partition, scratch=scratch, plan=plan)
-            outcome, detail = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path)
+            outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
@@ -2734,10 +2760,12 @@ def run_node_job(job, slot_path, control, partition=None):
                            plan=plan)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
+        # A shell/gate node's exit code is its whole verdict — it has nothing to assert.
+        no_changes = False
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
                               capture_output=True, text=True)
     git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
-    return outcome, detail, git_sha, session_id
+    return outcome, detail, git_sha, session_id, no_changes
 
 
 # ---- Talk (RE268 / ADR 0009) ------------------------------------------------
@@ -3070,7 +3098,7 @@ def execute_one(job, slot, reset, control, pool):
                 run_state = report_outcome(job["id"], "failed", detail,
                                            git_head_sha(slot_path), None)
                 return run_state
-        outcome, detail, git_sha, session_id = run_node_job(
+        outcome, detail, git_sha, session_id, no_changes = run_node_job(
             job, slot_path, control, partition=partition)
         if control.cancelled():
             revoked = True
@@ -3078,7 +3106,7 @@ def execute_one(job, slot, reset, control, pool):
             # card/run and is left on its branch to resume — NO reset/detach here anymore.
             return None
         completed_outcome = outcome
-        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id)
+        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id, no_changes)
         return run_state
     except (Exception, SystemExit) as e:
         # run_node_job (or the report_outcome call above) can raise SystemExit via api()'s
@@ -3848,15 +3876,27 @@ def cmd_outcome(args):
 
     So the JSON is written by json.dump here, and the agent only has to name an outcome and
     hand over text. `detail` accepts TEXT, "-" (stdin) or "@path", like every other text arg.
+
+    RE310: `--no-changes` asserts "succeeded, and the work was already committed" — the escape
+    from an `expects_commits` node re-entered onto work its own earlier visit already committed.
+    It is only meaningful alongside `succeeded`; the server verifies the claim against this run's
+    own history (see `Relay.Runs.RunServer`) rather than taking the node's word for it.
     """
     if args.outcome not in NODE_OUTCOMES:
         die(f"outcome must be one of {', '.join(NODE_OUTCOMES)} (got {args.outcome!r})")
+    # RE310: --no-changes asserts "succeeded, and the work was already committed". On any other
+    # outcome it cannot mean anything, and silently ignoring it would read downstream exactly
+    # like an accepted claim.
+    no_changes = bool(args.no_changes)
+    if no_changes and args.outcome != "succeeded":
+        die("--no-changes may only accompany `succeeded` — it asserts that this node's work was "
+            f"already committed (got {args.outcome!r})")
     path = os.environ.get("RELAY_NODE_OUTCOME")
     if not path:
         die("RELAY_NODE_OUTCOME is not set — `relay outcome` only runs inside an agent node")
     detail = read_arg(args.detail) if args.detail else ""
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"outcome": args.outcome, "detail": detail}, f)
+        json.dump({"outcome": args.outcome, "detail": detail, "no_changes": no_changes}, f)
     return {"outcome": args.outcome}
 
 
@@ -4112,6 +4152,7 @@ def build_parser():
     rt.add_argument("--at")
     cn = add("cancel", cmd_cancel, "ref", json_flag=True)
     cn.add_argument("--reason")
+    add("advance", cmd_advance, "ref", json_flag=True)
     add("runs", cmd_runs, "ref", json_flag=True)
     add("executors", cmd_executors, json_flag=True)
     fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)
@@ -4126,6 +4167,8 @@ def build_parser():
     add("git-fetch", cmd_git_fetch)
     oc = add("outcome", cmd_outcome, "outcome")
     oc.add_argument("--detail")
+    oc.add_argument("--no-changes", action="store_true",
+                    help="assert this node's work was already committed (succeeded only)")
     c = add("create", cmd_create, "title", json_flag=True)
     c.add_argument("--stage")
     c.add_argument("--description")
