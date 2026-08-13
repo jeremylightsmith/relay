@@ -1425,14 +1425,15 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-217 — the user confirmed a stranding move: cancel the run (frees its executor slot via the
   # existing revoke/release path) THEN apply the now-safe move. After cancel the run is terminal,
-  # so move_card no longer refuses. cancel_run/1 logs the "run cancelled" timeline entry.
+  # so move_card no longer refuses. cancel_run/2 logs the "run cancelled" timeline entry,
+  # credited to the human who confirmed it (RE309) rather than to the agent.
   def handle_event("confirm_move", _params, %{assigns: %{pending_move: %{} = pm}} = socket) do
     socket = assign(socket, :pending_move, nil)
 
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, pm.ref),
          %Stage{} = stage <- resolve_stage(socket, pm.target_stage_id),
          %Run{} = run <- Runs.get_run(pm.run_id) do
-      _ = Runs.cancel_run(run)
+      _ = Runs.cancel_run(run, actor: current_actor(socket))
 
       case Cards.move_card(card, stage, pm.index, current_actor(socket)) do
         {:ok, moved} -> {:noreply, apply_move(socket, card.stage_id, moved)}
