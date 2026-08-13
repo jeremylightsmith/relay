@@ -164,6 +164,22 @@ defmodule Relay.Runs.ResumeRefusalTest do
       assert Relay.Repo.get!(Schemas.NodeJob, job.id).state == :revoked
     end
 
+    test "skips a half-written stamp instead of taking the reaper's sweep down", %{works: works} do
+      run = parked_run(works)
+
+      # `since` set, `reason` nil — reachable if a writer dies between `stamp_refusal/2`'s two
+      # UPDATEs. `unresumable_detail/2` would call `Scheduler.resume_refusal_sentence(nil)`,
+      # which has no catch-all clause, so a FunctionClauseError here would kill every
+      # `ExecutorReaper` sweep tick until the row cleared.
+      Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id),
+        set: [resume_refused_since: at(-31 * 60), resume_refused_reason: nil]
+      )
+
+      :ok = Runs.abandon_unresumable_runs(at(0))
+
+      assert %Run{status: :parked} = Runs.get_run!(run.id)
+    end
+
     test "the 30-minute window is the one named policy number" do
       assert Runs.unresumable_after_s() == 1800
     end

@@ -1536,20 +1536,29 @@ defmodule Relay.Runs do
   end
 
   # Two guarded UPDATEs by primary key, each a no-op once the row already says this. Splitting
-  # them is what lets `since` be write-once while `reason` tracks the current cause.
+  # them is what lets `since` be write-once while `reason` tracks the current cause. They run in
+  # one transaction so the pair is never half-written: a row carrying `since` with no `reason`
+  # is a stamp nothing can name, and `abandon_unresumable_runs/1` has to skip it.
   defp stamp_refusal(%{run_id: run_id, reason: reason}, now) do
-    Repo.update_all(
-      from(r in Run, where: r.id == ^run_id and is_nil(r.resume_refused_since)),
-      set: [resume_refused_since: now]
-    )
+    {:ok, :ok} =
+      Repo.transaction(fn ->
+        Repo.update_all(
+          from(r in Run, where: r.id == ^run_id and is_nil(r.resume_refused_since)),
+          set: [resume_refused_since: now]
+        )
 
-    Repo.update_all(
-      from(r in Run,
-        where: r.id == ^run_id,
-        where: is_nil(r.resume_refused_reason) or r.resume_refused_reason != ^reason
-      ),
-      set: [resume_refused_reason: reason]
-    )
+        Repo.update_all(
+          from(r in Run,
+            where: r.id == ^run_id,
+            where: is_nil(r.resume_refused_reason) or r.resume_refused_reason != ^reason
+          ),
+          set: [resume_refused_reason: reason]
+        )
+
+        :ok
+      end)
+
+    :ok
   end
 
   # Board-scoped, and only over runs that actually carry a stamp — so the common case (nothing
@@ -1610,7 +1619,11 @@ defmodule Relay.Runs do
       Repo.all(
         from r in Run,
           where: r.status == :parked,
-          where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff
+          where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff,
+          # A stamp with no classified reason has nothing to name in its failure detail, and
+          # `Scheduler.resume_refusal_sentence/1` has no nil clause — sweeping it would raise
+          # inside `ExecutorReaper`'s tick. `clear_stale_refusals/2` collects the row instead.
+          where: not is_nil(r.resume_refused_reason)
       )
 
     Enum.each(runs, &abandon_unresumable_run(&1, now))
@@ -2807,21 +2820,41 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  The one definition of "a run failed" (RE297): close it terminally, mark its card `:failed`
-  with the detail a human reads, and broadcast `{:run_finished, run}`. Extracted from
-  `RunServer.fail_effects/3` so the engine and `abandon_unresumable_runs/1` cannot drift.
+  Close a run terminally, mark its card `:failed` with the detail a human reads, and broadcast
+  `{:run_finished, run}` (RE297). Extracted from `RunServer.fail_effects/3` so the engine's
+  no-flow paths and `abandon_unresumable_runs/1` cannot drift.
 
   `card_detail` defaults to `failure_detail`; `RunServer` passes the failed node's own output
   instead, so the card shows what the agent actually said rather than the engine's terse reason.
+
+  This is NOT the only route to a failed run: `RunServer`'s routed `{:fail, reason}` decision
+  closes the run inside `apply_outcome/3`'s transaction and broadcasts for itself, so calling
+  this from there would re-close and double-broadcast. What both routes DO share is
+  `mark_card_failed/2` — the card half, and the only half that could drift.
   """
   def fail_run(%Run{} = run, failure_detail, card_detail \\ nil) do
     run = close_run!(run, :failed, failure_detail)
-    card = Repo.get!(Card, run.card_id)
-    detail = card_detail || run.failure_detail || "The agent's run failed."
-    {:ok, _card} = Cards.mark_failed(card, detail, :agent)
+    mark_card_failed(run, card_detail)
     broadcast_runs(board_id_of(run), {:run_finished, run})
     run
   end
+
+  @doc """
+  The one definition of "mark this run's card failed" (RE297) — shared by `fail_run/3` and
+  `RunServer`'s routed failure branch, which closes its own run.
+
+  `card_detail` wins, then the run's own `failure_detail`, then a generic sentence. The
+  fallback is blank-aware rather than a `||` chain because `""` is truthy in Elixir: a naive
+  chain would post a blank Comment body and crash `Relay.Cards.request_input/3`'s hard match.
+  """
+  def mark_card_failed(%Run{} = run, card_detail) do
+    card = Repo.get!(Card, run.card_id)
+    detail = first_present([card_detail, run.failure_detail]) || "The agent's run failed."
+    {:ok, _card} = Cards.mark_failed(card, detail, :agent)
+    :ok
+  end
+
+  defp first_present(candidates), do: Enum.find(candidates, &(is_binary(&1) and String.trim(&1) != ""))
 
   @doc false
   def revoke_active_jobs(%Run{id: run_id}) do

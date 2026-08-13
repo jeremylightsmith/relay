@@ -181,7 +181,7 @@ A run is one traversal of a flow for one card.
 | Status | Meaning | Leaves it by |
 | --- | --- | --- |
 | `running` | A node is executing, or the next one is about to be dispatched. | Any of the four below. |
-| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, an executor claims, an executor returns. |
+| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, an executor claims, an executor returns — or the reaper giving up on an unresumable refusal (`Relay.Runs.abandon_unresumable_runs/1`, RE297), which fails it. |
 | `done` | The flow reached its `done` target. Terminal. | — |
 | `failed` | The engine decided the run cannot continue. | A human retry (`Relay.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
 | `cancelled` | A human stopped the run, or it was closed as a leak. Terminal. | — |
@@ -229,7 +229,7 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | --- | --- |
 | `needs_input` | A human to answer the node's question in the card drawer. |
 | `claimed` | An executor that has claimed the node-job to report its outcome. |
-| `executor_gone` | An executor that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost. |
+| `executor_gone` | An executor that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost — and fails it if the resume stays refused past `Relay.Runs.unresumable_after_s/0` (RE297). |
 
 Whether an agent may work a card at all — the human-baton gate, the fresh-pull gate, and the
 `:executor_gone` resume gate — is decided by `Relay.Runs.Policy` (`agent_may_hold?/1`,

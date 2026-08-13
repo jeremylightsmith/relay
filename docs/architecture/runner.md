@@ -438,6 +438,12 @@ A parked run has exactly one process allowed to resume it, keyed off `Schemas.Ru
 | `:executor_gone`  | `Relay.Runs.Scheduler`   | capacity-driven re-dispatch                   |
 | `nil` / unknown   | nobody                   | left untouched (mirrors the Listener's own fallback) |
 
+Resuming is not the only way a park can end. `Relay.Runs.ExecutorReaper` is the one process
+allowed to end a park *without* resuming it: when the scheduler has refused to resume a run
+continuously for `Relay.Runs.unresumable_after_s/0` (30 minutes),
+`Relay.Runs.abandon_unresumable_runs/1` fails it (RE297). That give-up path is scoped to the
+refusal clock — it never pre-empts the owner above, which still holds the resume itself.
+
 `Relay.Runs.Scheduler.resume_runs/5` filters on this before its existing human/needs-input
 guards, so it never even considers a Listener-owned park; `Scheduler.explain/2` mirrors the
 same split, surfacing `:awaiting_listener_resume` instead of `:awaiting_capacity` for a
