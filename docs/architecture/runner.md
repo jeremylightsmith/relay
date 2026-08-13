@@ -124,6 +124,15 @@ never 403s):
   `stale?` is the `freshness != :fresh` convenience flag), `version`/`outdated`
   (`Relay.Runs.executor_outdated?/1` — orthogonal to freshness, since a refused executor can
   still be beating normally), and the jobs each executor currently holds.
+- **Web: the Runners view** (`/board/:slug/runners`, `RelayWeb.BoardRunnersLive`) — the same
+  `Relay.Runs.list_executor_status/2` roster rendered one panel per machine, plus (RE307) the
+  board-wide **active queue** from `Relay.Runs.list_queue/2`: every `queued` or `claimed` node
+  job on the board, both kinds (`:node` and `:talk`), claimed or not, ordered as
+  `Relay.Runs.claim_next_job/1` will hand them out, with `Relay.Runs.stopped_work/2`'s verdict
+  above the rows. It renders whether or not a runner is connected — an empty roster is exactly
+  when a stacked queue matters. Read-only and deliberately **no** new endpoint and **no** new CLI
+  verb: `POST /api/node-jobs/claim` stays the only path a job is handed out on, and
+  `list_queue/2` is the function a future `relay queue` would render.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
   `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain
