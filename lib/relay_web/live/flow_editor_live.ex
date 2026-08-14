@@ -225,6 +225,7 @@ defmodule RelayWeb.FlowEditorLive do
       run: nil,
       model: nil,
       effort: nil,
+      agent: nil,
       max_retries: nil,
       timeout_minutes: nil,
       # RE244: the inspector dereferences these, so a freshly added node must carry them or

@@ -205,6 +205,7 @@ defmodule RelayWeb.FlowGraphComponents do
   defp node_model(node), do: Map.get(node, :model)
   defp node_effort(node), do: Map.get(node, :effort)
   defp node_run(node), do: Map.get(node, :run)
+  defp node_agent(node), do: Map.get(node, :agent)
 
   defp edge_colors, do: @edge_color
   defp edge_color(edge), do: Map.get(@edge_color, edge_on(edge), @edge_color[nil])
@@ -245,8 +246,13 @@ defmodule RelayWeb.FlowGraphComponents do
     "font-size:8px;font-weight:700;letter-spacing:0.07em;font-family:ui-monospace,monospace;color:#{meta.tag_c};" <> bg
   end
 
+  # Stack the whole agent binding: WHICH subagent it dispatches to (the thing the graph exists to
+  # make visible) then its model · effort tuning. Each part is dropped when absent, so a generic
+  # agent node reads `model · effort` and a bare one never renders an empty label.
   defp sub_label(%{type: :agent} = n) do
-    [node_model(n), node_effort(n)] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" · ")
+    [node_agent(n), node_model(n), node_effort(n)]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
   end
 
   defp sub_label(node), do: truncate(node_run(node))

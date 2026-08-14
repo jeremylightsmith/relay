@@ -215,6 +215,28 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert Enum.any?(nodes, &(&1.key == "implement" and &1.effort == "medium"))
   end
 
+  test "editing the AGENT field in the inspector persists the bound subagent", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    # the inspector surfaces the current binding in an editable field...
+    assert has_element?(view, "#inspector-node-agent")
+
+    # ...and typing a new value routes through edit_node_field(field: "agent")
+    view
+    |> element("#inspector-node-agent-form")
+    |> render_change(%{"field" => "agent", "value" => "spec-reviewer"})
+
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.agent == "spec-reviewer"))
+  end
+
   test "deleting the start edge blocks save with an inline error naming the problem", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
 

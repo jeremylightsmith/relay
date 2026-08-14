@@ -17,7 +17,10 @@ defmodule Storybook.FlowGraph do
         id: :default_code_flow,
         description:
           "The shipped Code flow: 14 nodes on a vertical spine, three fix nodes beside it, " <>
-            "back-edges in the right-hand gutter, dashed failed edges, max-N loop badges.",
+            "back-edges in the right-hand gutter, dashed failed edges, max-N loop badges. " <>
+            "Agent nodes stack their binding — subagent · model · effort (e.g. " <>
+            "plan-implementer · sonnet · high); a generic agent node with no subagent reads " <>
+            "just model · effort.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,

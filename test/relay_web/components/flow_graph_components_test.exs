@@ -77,6 +77,22 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     end
   end
 
+  describe "agent node label surfaces the bound subagent" do
+    test "an agent node stacks agent · model · effort in the sub-label" do
+      nodes = [%{key: "n", type: :agent, run: "go", model: "opus", effort: "high", agent: "plan-implementer"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+      assert html =~ "plan-implementer · opus · high"
+    end
+
+    test "a generic agent node (no `agent` field) still shows model · effort" do
+      nodes = [%{key: "n", type: :agent, run: "go", model: "sonnet", effort: "high"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+      assert html =~ "sonnet · high"
+    end
+  end
+
   describe "edges and end pill" do
     test "failed edges render dashed; loop badge shows outcome · max N" do
       nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]

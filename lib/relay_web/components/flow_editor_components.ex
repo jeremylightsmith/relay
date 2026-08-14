@@ -171,6 +171,28 @@ defmodule RelayWeb.FlowEditorComponents do
           </form>
         </div>
 
+        <%!-- Which subagent this node dispatches to (`.claude/agents/<name>.md`); blank means the
+        default agent runs the inline prompt. Empty submit clears it back to nil (cast_node_value). --%>
+        <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:7px;">
+          <.meta_label>
+            AGENT
+          </.meta_label>
+          <form id="inspector-node-agent-form" phx-change="edit_node_field">
+            <input type="hidden" name="key" value={@node.key} />
+            <input type="hidden" name="field" value="agent" />
+            <input
+              id="inspector-node-agent"
+              name="value"
+              type="text"
+              value={Map.get(@node, :agent)}
+              placeholder="(default agent)"
+              disabled={@read_only?}
+              phx-debounce="blur"
+              style="width:100%;padding:7px 9px;border:1px solid var(--color-field-border);border-radius:7px;font-size:13px;font-family:ui-monospace,monospace;color:var(--color-base-content);background:var(--color-field-bg);"
+            />
+          </form>
+        </div>
+
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:8px;">
           <.meta_label>
             MODEL

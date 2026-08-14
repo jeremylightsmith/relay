@@ -50,6 +50,27 @@ defmodule RelayWeb.FlowEditorComponentsTest do
     render_component(&FlowEditorComponents.node_inspector/1, assigns)
   end
 
+  describe "agent binding field" do
+    test "an agent node's inspector renders an editable agent field carrying the current value" do
+      html = inspector(agent_node(%{agent: "plan-implementer"}))
+      assert html =~ ~s(id="inspector-node-agent")
+      # edits route through edit_node_field targeting the `agent` field
+      assert html =~ ~s(name="field" value="agent")
+      assert html =~ ~s(value="plan-implementer")
+    end
+
+    test "a generic agent node (no bound agent) renders an empty agent field" do
+      html = inspector(agent_node(%{}))
+      assert html =~ ~s(id="inspector-node-agent")
+    end
+
+    test "a non-agent node has no agent field" do
+      shell = agent_node(%{type: :shell, agent: nil})
+      html = inspector(shell)
+      refute html =~ ~s(id="inspector-node-agent")
+    end
+  end
+
   describe "dark-mode-safe shadows" do
     test "the selected EFFORT segment's shadow mixes with --color-neutral, not --color-base-content" do
       html = inspector(agent_node(%{effort: "high"}))
