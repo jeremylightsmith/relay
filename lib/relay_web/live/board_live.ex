@@ -2354,8 +2354,16 @@ defmodule RelayWeb.BoardLive do
   # and it matches case-INSENSITIVELY, so a second key check here buys nothing and made Shift+T
   # (`%{"key" => "T"}`) a FunctionClauseError that killed the whole board LiveView. It also keeps
   # the literal "t" defined once, in the HEEx, next to the guard that shares it.
+  #
+  # RE306 round 2 — and it stands down entirely while the drawer has a text surface open. See
+  # `drawer_text_entry_open?/1` for the two focus windows the client-side guard structurally
+  # cannot see.
   def handle_event("talk_shortcut", _params, socket) do
-    {:noreply, select_drawer_tab(socket, :talk)}
+    if drawer_text_entry_open?(socket) do
+      {:noreply, socket}
+    else
+      {:noreply, select_drawer_tab(socket, :talk)}
+    end
   end
 
   # RE268 — the composer and the slash-chip row post the same way; a leading "/clear" routes to
@@ -3912,6 +3920,36 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp select_drawer_tab(socket, tab), do: assign(socket, :drawer_tab, tab)
+
+  # RE306 round 2 — the drawer's text-entry surfaces, named once, because `TypingKeyGuard` cannot
+  # see them. The hook only answers "is focus in a text field at this instant", and there are two
+  # reproduced windows where the user is typing but focus is not (yet) in the field:
+  #
+  #   * a click-to-edit field — the click pushes `edit_*` and the <textarea> only exists after
+  #     the round trip, so the first keystrokes land on the display <div>. `t` opened Talk and
+  #     tore the half-open editor down mid-word; the slower the link, the more characters fall in
+  #     the hole, which is why this survived a fix that only case-folded the key match.
+  #   * the Move-to menu — it opens with focus still on the chip <button>, so every key aimed at
+  #     "Filter stages…" reaches the guard as a keystroke on a button and `t` switched tabs.
+  #
+  # The server has no such blind spot: LiveView delivers one client's pushes in order, so the
+  # `toggle_stage_menu` / `edit_*` click is always handled BEFORE the keydown racing it, and by
+  # then these assigns already say a text surface is open. One list, one predicate — a new drawer
+  # editor is added here and nowhere else.
+  @drawer_text_entry_assigns [
+    :stage_menu_open,
+    :editing_title,
+    :editing_tag,
+    :editing_description,
+    :editing_public_desc,
+    :editing_acceptance_criteria,
+    :editing_spec,
+    :editing_plan
+  ]
+
+  defp drawer_text_entry_open?(%{assigns: assigns}) do
+    Enum.any?(@drawer_text_entry_assigns, &Map.get(assigns, &1, false))
+  end
 
   defp submit_talk(socket, raw_text) do
     text = String.trim(raw_text || "")

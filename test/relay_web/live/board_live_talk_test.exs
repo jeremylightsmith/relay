@@ -89,6 +89,54 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
   end
 
+  # RE306 round 2 — the reported "typing sends me to Talk" that survived the first fix.
+  # `TypingKeyGuard` can only answer "is focus in a text field at this instant", and two everyday
+  # drawer interactions make that the wrong question: a click-to-edit field, whose <textarea>
+  # only exists after the `edit_*` round trip (so the first keystrokes land on the display
+  # <div>), and the Move-to menu, which opens with focus still on the chip <button>. LiveView
+  # delivers one client's pushes in order, so by the time the racing keydown is handled the
+  # server already knows a text surface is open — assert it refuses the shortcut.
+  test "the `t` shortcut stands down while a click-to-edit field is open", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#card-drawer-description-display") |> render_click()
+    assert has_element?(view, "#card-drawer-description-input")
+
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+    refute has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+    assert has_element?(view, "#card-drawer-description-input")
+  end
+
+  test "the `t` shortcut stands down while the Move-to menu is open", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#card-drawer-stage-chip") |> render_click()
+    assert has_element?(view, "#card-drawer-stage-filter")
+
+    # Capital too: LiveView case-folds `phx-key`, so a Shift+T aimed at the filter arrives here
+    # as %{"key" => "T"} and must be refused for the same reason.
+    render_keydown(view, "talk_shortcut", %{"key" => "T"})
+
+    assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+    refute has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+    assert has_element?(view, "#card-drawer-stage-menu")
+  end
+
+  # The gate is a stand-down, not a removal: close the surface and the hotkey is a hotkey again.
+  test "closing the Move-to menu hands the `t` shortcut back", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#card-drawer-stage-chip") |> render_click()
+    view |> element("#card-drawer-stage-chip") |> render_click()
+    refute has_element?(view, "#card-drawer-stage-menu")
+
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+  end
+
   # RE268 whole-branch review — in the artboard the TALK block is a sibling of the tab nav and
   # spans the whole 1040px body; the 224px properties rail lives inside the Detail branch. Built
   # as a padded child of `-main` with the rail beside it, the terminal rendered ~520px wide.
