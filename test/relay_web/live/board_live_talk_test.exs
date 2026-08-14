@@ -124,6 +124,46 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert has_element?(view, "#card-drawer-stage-menu")
   end
 
+  # RE306 round 2 whole-branch review — every OTHER assign in `@drawer_text_entry_assigns` is
+  # reset by `assign_selected_card/2`, but `editing_public_desc` was only ever cleared by its own
+  # Save/Cancel buttons. Open the editor, leave without pressing Cancel, and the assign stayed
+  # true for the life of the LiveView — turning the new gate into a permanent `t` off switch for
+  # every card after it. The surface is gone, so the hotkey must come back with it.
+  test "leaving the public-description editor open on another card hands the `t` shortcut back", ctx do
+    backlog = Enum.find(ctx.board.stages, &(&1.name == "Backlog"))
+    {:ok, other} = Cards.create_card(backlog, %{title: "Second card"})
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#add-public-desc") |> render_click()
+    assert has_element?(view, "#public-desc-form")
+
+    render_patch(view, ~p"/board/#{ctx.board.slug}?card=#{Cards.ref(ctx.board, other)}")
+    render_async(view)
+    refute has_element?(view, "#public-desc-form")
+
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+  end
+
+  # The same leak through the other branch of `assign_selected_card/2` — closing the drawer
+  # routes there with `ref: nil`, and that keyword list missed the assign too.
+  test "leaving the public-description editor open and closing the drawer hands the `t` shortcut back", ctx do
+    view = open(ctx.conn, ctx.board, ctx.ref)
+
+    view |> element("#add-public-desc") |> render_click()
+    assert has_element?(view, "#public-desc-form")
+
+    view |> element("#card-drawer-close") |> render_click()
+    refute has_element?(view, "#public-desc-form")
+
+    render_patch(view, ~p"/board/#{ctx.board.slug}?card=#{ctx.ref}")
+    render_async(view)
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+  end
+
   # The gate is a stand-down, not a removal: close the surface and the hotkey is a hotkey again.
   test "closing the Move-to menu hands the `t` shortcut back", ctx do
     view = open(ctx.conn, ctx.board, ctx.ref)

@@ -190,4 +190,36 @@ defmodule RelayWeb.Browser.TypingKeyGuardTest do
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
     |> refute_has("#card-drawer-tab-talk[data-active='true']")
   end
+
+  # RE306 round 2 — the other half of the Move-to fix. The gate above stops `t` from switching
+  # tabs, but the keystrokes still had nowhere to go: the menu used to open with focus on the
+  # chip, so the filter box silently ignored everything typed at it. The activeElement read is
+  # the load-bearing assertion — it is the one thing only a real browser can see, and the one
+  # thing that was false before this task. The typing after it is the end-to-end confirmation:
+  # this is the reported interaction, keystroke for keystroke.
+  test "the Move-to menu opens with the caret in its filter box", ctx do
+    ctx.conn
+    |> open_drawer(ctx.board, ctx.card)
+    |> assert_has("#card-drawer-tab-detail[data-active='true']")
+    |> click("#card-drawer-stage-chip")
+    |> assert_has("#card-drawer-stage-filter")
+    |> unwrap(fn %{frame_id: frame_id} ->
+      {:ok, focused} =
+        Frame.evaluate(frame_id,
+          expression: "(() => document.activeElement && document.activeElement.id)()",
+          timeout: 2_000
+        )
+
+      assert focused == "card-drawer-stage-filter",
+             "the filter never took focus (activeElement was #{inspect(focused)}) — " <>
+               "everything typed at the Move-to menu goes to the board instead"
+
+      {:ok, _} =
+        Frame.type(frame_id, selector: "#card-drawer-stage-filter", text: "zzzz", timeout: 2_000)
+    end)
+    |> assert_has("#card-drawer-stage-none")
+    |> assert_has("#card-drawer-stage-menu")
+    |> assert_has("#card-drawer-tab-detail[data-active='true']")
+    |> refute_has("#card-drawer-tab-talk[data-active='true']")
+  end
 end

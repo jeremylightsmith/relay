@@ -3938,6 +3938,7 @@ defmodule RelayWeb.BoardLive do
   # editor is added here and nowhere else.
   @drawer_text_entry_assigns [
     :stage_menu_open,
+    :reject_open,
     :editing_title,
     :editing_tag,
     :editing_description,
@@ -4029,6 +4030,11 @@ defmodule RelayWeb.BoardLive do
           |> assign(:tag_suggestions, [])
           |> assign(:editing_description, false)
           |> assign(:description_form, nil)
+          # RE306 — this editor's own Save/Cancel were the only things that ever cleared it, so
+          # leaving the card with it open left the assign true for the life of the LiveView, and
+          # `drawer_text_entry_open?/1` then reported a text surface open on every later card.
+          |> assign(:editing_public_desc, false)
+          |> assign(:public_desc_form, nil)
           |> assign(:editing_acceptance_criteria, false)
           |> assign(:expanded_acceptance_criteria?, false)
           |> assign(:acceptance_criteria_form, nil)
@@ -4072,6 +4078,8 @@ defmodule RelayWeb.BoardLive do
           tag_suggestions: [],
           editing_description: false,
           description_form: nil,
+          editing_public_desc: false,
+          public_desc_form: nil,
           editing_acceptance_criteria: false,
           expanded_acceptance_criteria?: false,
           acceptance_criteria_form: nil,

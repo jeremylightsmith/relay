@@ -110,6 +110,41 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert entry.user_id == user.id
   end
 
+  # RE306 round 2 whole-branch review — the reject note is the third instance of the focus window
+  # the `t` gate exists to close: the panel opens on a button click, so focus stays on "Request
+  # changes" and the first characters of the note reach the window instead of the <textarea>.
+  # Without `:reject_open` in the closed set, typing "this needs a test" flipped the drawer to
+  # Talk and tore the half-typed note away.
+  test "the open reject panel switches the `t` hotkey off", %{conn: conn, board: board, review: review} do
+    in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+    render_async(view)
+
+    view |> element("#review-request-changes") |> render_click()
+    assert has_element?(view, "#review-request-note")
+
+    render_keydown(view, "talk_shortcut", %{"key" => "t"})
+
+    assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+    refute has_element?(view, "#card-drawer-tab-talk[data-active='true']")
+    assert has_element?(view, "#review-reject-panel")
+  end
+
+  # And the other half, as with the Move-to menu: the note takes the caret when the panel opens,
+  # so the keystrokes have somewhere to land instead of being silently dropped.
+  test "the reject note takes the caret when the panel opens", %{conn: conn, board: board, review: review} do
+    in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+    render_async(view)
+
+    html = view |> element("#review-request-changes") |> render_click()
+
+    [note_tag] = Regex.run(~r/<textarea[^>]*id="review-request-note"[^>]*>/, html)
+    assert note_tag =~ ~s(phx-mounted="[[&quot;focus&quot;,{}]]")
+  end
+
   test "Request changes expands in place, names the target, and routes back with the note",
        %{conn: conn, user: user, board: board, plan: plan, review: review} do
     in_review_card(review)
