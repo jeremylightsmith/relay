@@ -1989,6 +1989,7 @@ defmodule RelayWeb.CoreComponents do
                         name="q"
                         value={@stage_filter}
                         autocomplete="off"
+                        phx-mounted={JS.focus()}
                         placeholder="Filter stages…"
                         class="w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
                       />
@@ -2361,6 +2362,11 @@ defmodule RelayWeb.CoreComponents do
                       class="flex flex-col gap-2"
                       phx-submit="review_reject"
                     >
+                      <%!-- RE306 — the panel opens on a button click, so without this the caret
+                      stays on "Request changes" and the first words of the note are typed at the
+                      window. `commit={:form}` renders a plain <.input>, which has no CommitField
+                      hook to honour `data-autofocus`, so the caret is moved the same way the
+                      Move-to filter does it. --%>
                       <.boxed_field
                         id="review-request-note"
                         commit={:form}
@@ -2369,6 +2375,7 @@ defmodule RelayWeb.CoreComponents do
                         form={@reject_form}
                         field={:note}
                         placeholder="What needs to change? This note goes to the AI…"
+                        phx-mounted={JS.focus()}
                         phx-hook="SubmitOnCmdEnter"
                       />
                       <p

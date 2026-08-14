@@ -1168,6 +1168,12 @@ defmodule RelayWeb.CoreComponentsTest do
       # line ~50 — the filter input.
       assert html =~ ~s(id="card-drawer-stage-filter")
       assert html =~ ~s(placeholder="Filter stages…")
+
+      # RE306 round 2 — the menu must take the caret with it. Without this the menu opened with
+      # focus still on the chip <button>, so everything typed at "Filter stages…" went to the
+      # window instead and the `t` in it switched the drawer to Talk.
+      [filter_tag] = Regex.run(~r/<input[^>]*id="card-drawer-stage-filter"[^>]*>/, html)
+      assert filter_tag =~ ~s(phx-mounted="[[&quot;focus&quot;,{}]]")
       assert html =~ "w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
 
       # line ~51 — max-height:230px;overflow-y:auto;gap:1px.
