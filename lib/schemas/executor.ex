@@ -35,6 +35,11 @@ defmodule Schemas.Executor do
     # No default: nil means "never reported its inventory" and is deliberately distinct
     # from %{} ("reported, and empty"). Preflight branches on that difference.
     field :capabilities, :map
+    # RE311: heartbeat-written, defaulting to [] rather than nil — unlike `capabilities`,
+    # nothing branches on "never reported" here: an executor holding nothing and an executor
+    # that has not said are the same thing for occupancy purposes, and [] keeps every reader
+    # (chip count, tooltip, diagnosis) free of a nil case.
+    field :held, {:array, :map}, default: []
     field :version, :integer
     field :last_heartbeat, :utc_datetime
 
@@ -46,7 +51,17 @@ defmodule Schemas.Executor do
   @doc "Validates a programmatically-built executor row."
   def changeset(executor, attrs) do
     executor
-    |> cast(attrs, [:board_id, :name, :host, :interval, :capacity, :capabilities, :version, :last_heartbeat])
+    |> cast(attrs, [
+      :board_id,
+      :name,
+      :host,
+      :interval,
+      :capacity,
+      :capabilities,
+      :held,
+      :version,
+      :last_heartbeat
+    ])
     |> validate_required([:board_id, :name, :last_heartbeat])
     |> foreign_key_constraint(:board_id)
     |> unique_constraint([:board_id, :name], name: :executors_board_id_name_index)

@@ -299,6 +299,31 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#settings-tab-runners")
   end
 
+  test "the exclusive chip reports held occupancy and names it in a tooltip", %{conn: conn, board: board} do
+    executor(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      held: [%{"ref" => "TH77", "state" => "bound"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # 1/1, not 0/1: the worktree is held with no live job, which is invisible to a job count.
+    assert has_element?(view, "#runner-mac-mini-pool-exclusive", "1/1")
+    assert render(element(view, "#runner-mac-mini-pool-exclusive")) =~ "TH77 bound"
+  end
+
+  test "a shared_clean chip carries no holdings tooltip", %{conn: conn, board: board} do
+    executor(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      held: [%{"ref" => "TH77", "state" => "bound"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # Holdings describe per-card worktrees; naming them on the shared chip would be a lie.
+    refute render(element(view, "#runner-mac-mini-pool-shared_clean")) =~ "TH77"
+  end
+
   describe "an outdated-but-beating executor (RLY-191)" do
     test "renders the OUTDATED pill, a non-pulsing rose dot, no FRESH pill, and the version line",
          %{conn: conn, board: board} do

@@ -1104,6 +1104,7 @@ defmodule Relay.Runs do
       {base, [:host, :interval, :version, :last_heartbeat, :updated_at]}
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
+      |> put_reported(:held, normalize_held_attr(attrs["held"]))
 
     %Executor{}
     |> Executor.changeset(params)
@@ -1136,6 +1137,14 @@ defmodule Relay.Runs do
   # would knock a working executor off dispatch until its next good one.
   defp normalize_capacity(capacity) when is_map(capacity), do: Capacity.normalize(capacity)
   defp normalize_capacity(_capacity), do: nil
+
+  # RE311: the claim never carries `held` onto the attrs (the controller only routes it from the
+  # heartbeat), so an absent key means "this beat did not report" and the column is left alone —
+  # the same absent-means-untouched rule as capacity/capabilities. A present list goes through
+  # Schemas.Executor.normalize_held/1, the one normalizer both the claim path and the release
+  # reconciliation use, so the stored shape and the in-flight shape can never disagree.
+  defp normalize_held_attr(held) when is_list(held), do: Executor.normalize_held(held)
+  defp normalize_held_attr(_held), do: nil
 
   # nil = "this beat did not report an inventory" — the caller must then leave the stored
   # value alone. A malformed payload is treated the same way rather than stored as junk.
@@ -1548,6 +1557,9 @@ defmodule Relay.Runs do
         # :gone > :stale > :outdated > :fresh — a silent executor's silence is the more urgent
         # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
         display_state: display_state(freshness, outdated),
+        # RE311: what this executor declares it holds — the chip's `used` is derived from it,
+        # and the runners view names each entry in the chip's tooltip.
+        held: List.wrap(executor.held),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }
@@ -2167,17 +2179,29 @@ defmodule Relay.Runs do
   end
 
   # One chip per ADVERTISED class — we never invent a chip for capacity the executor never
-  # claimed to have. `used` counts that executor's active jobs in the class, treating any
-  # non-"exclusive" isolation as shared_clean (the same rule reclaim_executor/1 applies).
-  defp pools_for(%Executor{capacity: capacity}, jobs) do
+  # claimed to have.
+  defp pools_for(%Executor{capacity: capacity, held: held}, jobs) do
     used = Enum.frequencies_by(jobs, &isolation_class(&1.isolation))
+    held = List.wrap(held)
 
     capacity
     |> Enum.sort_by(fn {name, _total} -> name end)
-    |> Enum.map(fn {name, total} ->
-      %{name: name, used: Map.get(used, name, 0), total: total}
-    end)
+    |> Enum.map(fn {name, total} -> %{name: name, used: pool_used(name, used, held), total: total} end)
   end
+
+  # RE311: the `exclusive` chip's `used` is the count of DECLARED HOLDINGS in an active state —
+  # exactly `total - free` as the executor's own `capacity()` computes it, so the two sides now
+  # agree by construction. Counting active jobs (as every chip used to) made a bound-but-idle,
+  # talk-attached or retained worktree invisible, which is what reported "runner available"
+  # while the executor had zero free exclusive slots.
+  defp pool_used("exclusive", _jobs_used, held) do
+    Enum.count(held, &(&1["state"] in Executor.active_holding_states()))
+  end
+
+  # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the
+  # shared tree, so its occupancy is still the active-job count (any non-"exclusive" isolation
+  # counts as shared, the same rule reclaim_executor/1 applies).
+  defp pool_used(name, jobs_used, _held), do: Map.get(jobs_used, name, 0)
 
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"
