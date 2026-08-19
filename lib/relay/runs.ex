@@ -1007,7 +1007,14 @@ defmodule Relay.Runs do
   # the slot pool and reads the heartbeat `release_runs` reply as bare ids (it is now
   # {run_id, status} maps), so against the new server it would mis-bind worktrees and never
   # release them — worse than a stopped one.
-  @min_executor_version 21
+  # RE311 raised this to 57: the wire's release channel moved from run-id keying
+  # (`bound_runs`/`release_runs`) to ref keying (`held`/`release_held`), and the old channel is
+  # RETIRED rather than kept alongside — a second mechanism for one concern is the
+  # duplicated-fact bug this card exists to kill. A pre-57 executor sends no `held` and reads a
+  # reply that no longer carries `release_runs`, so against this server it would NEVER release a
+  # bound worktree: it silently fills its own pool until it deadlocks, which is genuinely worse
+  # than a stopped one (the AGENTS.md floor-raise rule, and the RLY-231 situation exactly).
+  @min_executor_version 57
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version
@@ -1024,14 +1031,22 @@ defmodule Relay.Runs do
   # executors doing the flow work they still handle correctly.
   @min_talk_executor_version 39
 
-  @doc "The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009)."
-  def min_talk_executor_version, do: @min_talk_executor_version
+  @doc """
+  The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009).
+
+  Never below `min_executor_version/0` (RE311): the talk floor is a SECOND, HIGHER floor, and
+  an executor below the base floor is refused every job anyway. Deriving the max here keeps that
+  relationship a fact of the code rather than a number two humans must remember to raise
+  together — `talk_capable?/1`, the executor contract fixture and the test factory all read this
+  as "a fully current executor".
+  """
+  def min_talk_executor_version, do: max(@min_talk_executor_version, @min_executor_version)
 
   @doc """
   Whether this executor is new enough to RUN a talk turn, not merely new enough to claim
   flow work. See `min_talk_executor_version/0`.
   """
-  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= @min_talk_executor_version
+  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= min_talk_executor_version()
 
   def talk_capable?(%Executor{}), do: false
 
@@ -1335,37 +1350,62 @@ defmodule Relay.Runs do
   def refresh_running_card_liveness(_board, _running), do: {0, nil}
 
   @doc """
-  The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
-  THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
-  the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it
-  may now release, because the run has ended server-side. Returned as `%{id, status}` maps so the
-  executor's recovery teardown can choose remove (done/cancelled) vs retain (failed).
+  Of the per-card worktrees an executor declares it HOLDS, those it may now release — the
+  ref-keyed replacement for the retired, run-id-keyed `terminal_among/2` (RE311).
 
-  Board-scoped and conservative for the same reason as `revoked_among/2`: a run-id this board does
-  not own is NOT returned (the slot stays bound rather than freeing on an id we cannot verify), and
-  a non-integer id is ignored rather than raising — a heartbeat must never 500. Empty in → empty out.
+  Run-id keying structurally could not see the case that mattered. A run cancelled (or
+  finished) while the executor was down is never torn down, and on restart `recover()` adopts
+  the worktree with `run_id: None` — so it never appeared in `bound_runs` at all, and the slot
+  was consumed permanently. The **ref** is the identity of a `<ns>-<ref>` worktree and it
+  survives a restart, which is exactly why it is the right key.
+
+  For each held entry:
+
+    * skip anything whose `state` is not in `Schemas.Executor.active_holding_states/0` — a
+      `retained` tree is the human's post-mortem and the executor's own to evict;
+    * resolve `ref` → card on **this board** (`Cards.get_card_by_ref/2`, the same authz
+      discipline as `revoked_among/2`); an unparseable, unknown or other-board ref is silently
+      skipped, so a stale or garbage ref can never become a teardown order across a board
+      boundary;
+    * include it only when the card has **at least one run** and **no run in
+      `Schemas.Run.active_statuses/0`**, carrying the LATEST run's status.
+
+  The "at least one run" clause is load-bearing: a card with zero runs is a **talk-only**
+  worktree, which ADR 0009 §2 says must outlive runs — naming it would tear down a live
+  conversation's tree. Talk-only trees are retired by the executor's own
+  `_retire_talk_only_locked`.
+
+  Returned as `%{ref, status}` maps so the executor's teardown can choose remove
+  (`done`/`cancelled`) vs retain (`failed`). Empty in → empty out; a malformed beat never raises.
   """
-  def terminal_among(%Board{id: board_id}, bound_run_ids) when is_list(bound_run_ids) do
-    ids = for id <- bound_run_ids, int = to_job_id(id), is_integer(int), do: int
+  def releasable_held(%Board{} = board, held) when is_list(held) do
+    cards =
+      for ref <- Executor.active_held_refs(held),
+          card = Cards.get_card_by_ref(board, ref),
+          do: {ref, card}
 
-    case ids do
-      [] ->
-        []
-
-      ids ->
-        Repo.all(
-          from r in Run,
-            join: c in Card,
-            on: c.id == r.card_id,
-            where:
-              c.board_id == ^board_id and r.id in ^ids and
-                r.status in ^Run.terminal_statuses(),
-            select: %{id: r.id, status: r.status}
-        )
+    case cards do
+      [] -> []
+      cards -> releasable_entries(cards)
     end
   end
 
-  def terminal_among(_board, _ids), do: []
+  def releasable_held(_board, _held), do: []
+
+  defp releasable_entries(cards) do
+    card_ids = Enum.map(cards, fn {_ref, card} -> card.id end)
+
+    runs_by_card =
+      from(r in Run, where: r.card_id in ^card_ids, select: %{card_id: r.card_id, id: r.id, status: r.status})
+      |> Repo.all()
+      |> Enum.group_by(& &1.card_id)
+
+    for {ref, card} <- cards,
+        runs = Map.get(runs_by_card, card.id, []),
+        runs != [],
+        Enum.all?(runs, &(&1.status not in Run.active_statuses())),
+        do: %{ref: ref, status: Enum.max_by(runs, & &1.id).status}
+  end
 
   defp to_job_id(id) when is_integer(id), do: id
 

@@ -45,7 +45,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       # and its shape for bin/test_relay.py to build against.
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => [],
-      "bound_runs" => []
+      "held" => []
     }
 
     heartbeat_response =
@@ -121,7 +121,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
 
     document = %{
-      "version" => 4,
+      "version" => 5,
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -140,7 +140,13 @@ defmodule RelayWeb.Api.ExecutorContractTest do
           "active" => stringify(Schemas.TalkTurn.active_statuses()),
           "reportable" => stringify(Schemas.TalkTurn.reportable_statuses())
         },
-        "talk_event_kinds" => stringify(Schemas.TalkEvent.kinds())
+        "talk_event_kinds" => stringify(Schemas.TalkEvent.kinds()),
+        # RE311 — `bin/relay` derives these four labels itself (`ExecutorPool._holding_state`)
+        # and the server SKIPS any it does not recognise, so a drift leaks an exclusive slot
+        # silently rather than erroring. Pinned here like every other mirrored vocabulary.
+        # Already strings on both sides (the field only ever exists on the wire), so no
+        # `stringify/1`.
+        "holding_states" => Schemas.Executor.holding_states()
       },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
@@ -179,7 +185,9 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   end
 
   # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.
-  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity, "running" => []}
+  # `held` (RE311) is what lets a job for a card this executor already holds the worktree for be
+  # offered at zero free capacity.
+  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity, "running" => [], "held" => []}
 
   defp stringify(atoms), do: Enum.map(atoms, &Atom.to_string/1)
 

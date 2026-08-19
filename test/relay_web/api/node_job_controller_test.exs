@@ -567,54 +567,57 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert %{"revoked" => []} = json_response(conn, 200)
     end
 
-    test "a cancelled bound run comes back in release_runs so the executor frees its slot",
+    test "a cancelled held ref comes back in release_held so the executor frees its slot",
          %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
       {:ok, _} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => release_runs} = json_response(conn, 200)
-      assert %{"run_id" => run.id, "status" => "cancelled"} in release_runs
+      assert %{"release_held" => release_held} = json_response(conn, 200)
+      assert %{"ref" => ref, "status" => "cancelled"} in release_held
     end
 
-    test "a still-active bound run is NOT in release_runs", %{conn: conn, board: board} do
+    test "a still-active held ref is NOT in release_held", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => []} = json_response(conn, 200)
+      assert %{"release_held" => []} = json_response(conn, 200)
     end
 
-    test "never reports another board's run in release_runs", %{conn: conn} do
+    test "never reports another board's ref in release_held", %{conn: conn} do
       {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board 2"})
       flow = four_outcome_flow(other)
       {run, _job} = start_queued_job(other, flow)
       {:ok, _} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(other, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => []} = json_response(conn, 200)
+      assert %{"release_held" => []} = json_response(conn, 200)
     end
 
     test "a non-map executor is a 422, not a 500", %{conn: conn} do

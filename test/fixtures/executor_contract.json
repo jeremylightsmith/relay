@@ -66,13 +66,13 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 39
+      "version": 57
     },
+    "held": [],
     "running": []
   },
   "heartbeat": {
     "request": {
-      "bound_runs": [],
       "capabilities": {
         "agents": [
           "plan-implementer"
@@ -89,15 +89,16 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 39
+        "version": 57
       },
+      "held": [],
       "running": []
     },
     "response": {
       "executor_outdated": false,
       "latest_executor_version": "<latest-executor-version>",
-      "release_runs": [],
-      "required_version": 21,
+      "release_held": [],
+      "required_version": 57,
       "revoked": [],
       "want_capabilities": false
     }
@@ -216,11 +217,17 @@
       "turn_state": "done"
     }
   },
-  "version": 4,
+  "version": 5,
   "vocabulary": {
     "audit_severities": [
       "error",
       "warning"
+    ],
+    "holding_states": [
+      "bound",
+      "retained",
+      "running",
+      "talk"
     ],
     "isolation": [
       "shared_clean",

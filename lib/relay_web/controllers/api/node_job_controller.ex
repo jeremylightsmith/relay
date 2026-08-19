@@ -137,14 +137,13 @@ defmodule RelayWeb.Api.NodeJobController do
 
       json(conn, %{
         revoked: Runs.revoked_among(board, running),
-        # RLY-218: the run-scoped analogue of `revoked`, one level up — the executor reports
-        # the run-ids of exclusive slots it holds with no live job (`bound_runs`), and this
-        # names the ones now terminal server-side so it can release those slots too.
-        release_runs:
-          Enum.map(
-            Runs.terminal_among(board, Map.get(params, "bound_runs", [])),
-            &%{run_id: &1.id, status: &1.status}
-          ),
+        # RE311: the ref-keyed release channel, replacing RLY-218's run-id-keyed
+        # `bound_runs`/`release_runs`. The executor reports every per-card worktree it holds
+        # (`held`), and this names the ones whose card's runs have all ended server-side, with
+        # the status that chooses remove (done/cancelled) vs retain (failed). Run-id keying
+        # structurally could not see a worktree recovered after a restart — its `run_id` is
+        # unknown — which is precisely how a cancelled run's slot leaked forever.
+        release_held: Runs.releasable_held(board, Executor.normalize_held(Map.get(params, "held"))),
         # RLY-182: `capabilities` is send-on-change, so an executor that already sent one
         # never sends it again — but the row can lose it (recreated row, or an executor
         # predating this change), which would strand preflight on a permanent false
@@ -179,7 +178,11 @@ defmodule RelayWeb.Api.NodeJobController do
   end
 
   # The heartbeat is the ONE writer of the durable roster state (RE311).
-  defp heartbeat_attrs(params, exec_attrs), do: Map.put(exec_attrs, "capacity", Map.get(params, "capacity"))
+  defp heartbeat_attrs(params, exec_attrs) do
+    exec_attrs
+    |> Map.put("capacity", Map.get(params, "capacity"))
+    |> Map.put("held", Map.get(params, "held"))
+  end
 
   # RLY-184. Rendered here rather than through FallbackController because the two version
   # numbers are per-request data, not a static string — the executor logs both of them, and a

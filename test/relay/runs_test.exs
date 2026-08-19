@@ -1249,40 +1249,81 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "terminal_among/2" do
-    test "returns on-board terminal run-ids, excluding active runs and other boards", %{board: board} do
+  describe "releasable_held/2 (RE311)" do
+    defp held(ref, state), do: %{"ref" => ref, "state" => state}
+
+    test "names a held ref whose card's only run is cancelled, with its status", %{board: board} do
       flow = retry_flow(board)
-      {:ok, active} = Runs.start_run(card_in(board, "Next up", "active"), flow)
+      card = card_in(board, "Next up", "cancelled card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(board, card)
 
-      {:ok, cancelled} = Runs.start_run(card_in(board, "Next up", "cancelled"), flow)
-      {:ok, cancelled} = Runs.cancel_run(cancelled)
-
-      {:ok, done} = Runs.start_run(card_in(board, "Next up", "done"), flow)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^done.id), set: [status: :done])
-
-      # A terminal run on a DIFFERENT board must never come back (cross-board leak).
-      {:ok, other_board} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
-      other_flow = retry_flow(other_board)
-      {:ok, elsewhere} = Runs.start_run(card_in(other_board, "Next up", "elsewhere"), other_flow)
-      {:ok, elsewhere} = Runs.cancel_run(elsewhere)
-
-      result = Runs.terminal_among(board, [active.id, cancelled.id, done.id, elsewhere.id])
-      ids = Enum.map(result, & &1.id)
-
-      assert cancelled.id in ids
-      assert done.id in ids
-      refute active.id in ids
-      refute elsewhere.id in ids
-      assert %{id: _, status: :cancelled} = Enum.find(result, &(&1.id == cancelled.id))
-      assert %{id: _, status: :done} = Enum.find(result, &(&1.id == done.id))
+      assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
-    test "an empty list in returns an empty list", %{board: board} do
-      assert Runs.terminal_among(board, []) == []
+    test "names a failed run's ref as failed, so the executor RETAINS rather than removes", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "failed card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :failed])
+      ref = Relay.Cards.ref(board, card)
+
+      assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
-    test "a run-id this board does not own is not returned", %{board: board} do
-      assert Runs.terminal_among(board, [999_999]) == []
+    test "never names a ref whose card has a running or parked run", %{board: board} do
+      flow = retry_flow(board)
+
+      for status <- Run.active_statuses() do
+        card = card_in(board, "Next up", "active #{status}")
+        {:ok, run} = Runs.start_run(card, flow)
+        {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: status])
+
+        assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "bound")]) == []
+      end
+    end
+
+    test "never names a ref whose card has no run at all (a talk-only worktree)", %{board: board} do
+      # ADR 0009 §2: a talk session's worktree spans runs and must outlive them. Naming it for
+      # release would tear down a live conversation's tree.
+      card = card_in(board, "Next up", "talk only")
+
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "talk")]) == []
+    end
+
+    test "never names a ref declared RETAINED — that tree is the executor's own to evict", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "retained card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(run)
+
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "retained")]) == []
+    end
+
+    test "an unparseable, unknown or other-board ref is silently skipped", %{board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311 held"})
+      other_flow = retry_flow(other)
+      other_card = card_in(other, "Next up", "elsewhere")
+      {:ok, other_run} = Runs.start_run(other_card, other_flow)
+      {:ok, _run} = Runs.cancel_run(other_run)
+
+      assert Runs.releasable_held(board, []) == []
+      assert Runs.releasable_held(board, [held("not-a-ref", "bound")]) == []
+      assert Runs.releasable_held(board, [held("RLY-999999", "bound")]) == []
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(other, other_card), "bound")]) == []
+    end
+
+    test "reports the LATEST run's status when a card has several", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "two runs")
+      {:ok, first} = Runs.start_run(card, flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^first.id), set: [status: :failed])
+      {:ok, second} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(second)
+      ref = Relay.Cards.ref(board, card)
+
+      assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
   end
 
