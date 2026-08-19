@@ -78,18 +78,24 @@ than double-booking (YAGNI: no multi-board reservation yet).
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, capacity,
-  running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
-  release_runs: [{run_id, status}], want_capabilities, executor_outdated,
+  release_held: [{ref, status}], want_capabilities, executor_outdated,
   required_version, latest_executor_version}`. It terminates each revoked job's live subprocess
   via its `JobControl` (see "Node-job transport" and "Executor mode" below). The advertised
-  `capacity` is the executor's configured per-class total; `running` is the jobs it believes it
-  holds, so the server can name the ones it no longer considers live. `bound_runs` (RLY-218) is
-  the run-ids of per-card worktrees the executor holds *without* a live job; `release_runs` is
-  the run-scoped analogue of `revoked` — the subset now terminal server-side, named with its
-  `status` (`done`/`failed`/`cancelled`, `Relay.Runs.terminal_among/2`, RLY-231) so the
-  executor's recovery teardown can remove (done/cancelled) or retain (failed) that worktree
-  within one heartbeat instead of waiting on a next outcome. The same
+  `capacity` is the executor's configured per-class total **and this route is its single writer
+  (RE311)** — the claim's `capacity` is a live FREE count, passed to `Relay.Runs.claim_next_job/3`
+  as an argument and never persisted, because one column carrying both meanings made the roster
+  flip-flop between the total and the free count while the board sat deadlocked. `running` is the
+  jobs the executor believes it holds, so the server can name the ones it no longer considers
+  live. `held` (RE311) is every per-card worktree the executor holds, each with a `state` from
+  `Schemas.Executor.holding_states/0` (`bound` | `retained` | `running` | `talk`); `release_held`
+  is its ref-keyed analogue of `revoked` — the subset whose card's runs have all ended
+  server-side, named with the status (`done`/`failed`/`cancelled`,
+  `Relay.Runs.releasable_held/2`) that chooses remove vs retain. It **replaces** RLY-218's
+  retired run-id-keyed release channel, which structurally could not see a worktree adopted
+  by `recover()` after a restart — its `run_id` is unknown — so a run cancelled while the
+  executor was down leaked its exclusive slot permanently. The same
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
@@ -224,10 +230,16 @@ that stays server-side.
   `NodeJob` (`Relay.Runs.claim_next_job/1`, `SELECT … FOR UPDATE SKIP LOCKED`). Long-polls
   up to ~25s on the `board:<id>:runs` topic when nothing is immediately claimable (`?wait=0`
   short-polls instead); serialises the raw `run` + resolved `vars` W5 already stored, never
-  a worktree path. **Eligibility respects exclusive affinity (ADR 0006 §5):** an *unpinned*
-  job (`executor_name` nil) needs advertised free capacity in its isolation class, but a job
-  *pinned* to the requesting executor (`executor_name` = its name) is claimable regardless of
-  advertised capacity — the executor is already holding that run's bound worktree slot.
+  a worktree path. **Eligibility is three-way (ADR 0006 §5, RE311):** a job is offered when it
+  is *pinned* to the requesting executor (`executor_name` = its name), OR when that executor
+  declares it *holds that card's worktree* (the job is `exclusive` and its `vars.ref` appears in
+  the claim's `held` with a state in `Schemas.Executor.active_holding_states/0`), OR when it fits
+  the *advertised free capacity* the claim carries. The middle clause exists because the pin is
+  only a proxy for the holding and the proxy can go missing: `settle_retry_pin/3`'s `:readopted`
+  branch releases a pin to a machine that is provably not answering (RE297), the job is inserted
+  unpinned, and the machine then returns and adopts `<ns>-<ref>` — consuming the very slot the
+  unpinned job needed to be offered through. The bypass is exclusive-only: a `shared_clean` job
+  runs in the shared worktree and must still respect shared capacity.
   Pinning is persisted on the run: `runs.pinned_executor_name` is set when an executor claims
   an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through an
   `:executor_gone` park (so the resume returns to the holder), and **cleared** by a human-baton
@@ -670,6 +682,12 @@ silently billed to the paid API.
   - **Capacity is reinterpreted, not reshaped:** `capacity.exclusive` is `max_worktrees` —
     the max number of concurrent *active* per-card worktrees an executor holds, not a fixed
     slot count. Advertised free `exclusive` = `max_worktrees − active_count`.
+    The runners view's `used` for the `exclusive` chip is now derived from the executor's
+    **declared holdings** (`executors.held`, RE311) rather than from its active jobs — which is
+    exactly `total − free` as `ExecutorPool.capacity()` computes it, so the two sides agree by
+    construction. Counting active jobs made a bound-but-idle, talk-attached or retained worktree
+    invisible, and that is what reported "runner available" while the executor had zero free
+    exclusive slots.
   - **Two states.** *Active*: bound to a non-terminal run, counts toward `max_worktrees`,
     holds a `MIX_TEST_PARTITION` index. *Retained*: a `failed` run's leftover kept on disk
     (marked with the gitignored `.relay-retained` sentinel at its root) for post-mortem, up
@@ -724,18 +742,20 @@ silently billed to the paid API.
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
 - **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
-  running: [job-ids], bound_runs: [run-ids]}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s and reads `{revoked: [job-ids],
-  release_runs: [{run_id, status}], latest_executor_version}` back (RLY-164, status shape
-  RLY-231), terminating each revoked job's live subprocess via its `JobControl`. `release_runs`
-  is the run-scoped
-  analogue of `revoked` (RLY-218): the executor advertises the run-ids of per-card worktrees
-  it holds with no live job (`bound_runs`), and the server names the subset gone terminal
-  server-side — with the status needed to choose remove vs retain
-  (`Relay.Runs.terminal_among/2`) — so the executor's `release_run/2` disposes of those
-  idle-bound worktrees within one heartbeat. This is how taking the baton (ADR 0004, via
-  `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on
-  its next outcome POST. **Never-detach (RLY-231):** a revoked job of either isolation class
+  release_held: [{ref, status}], latest_executor_version}` back (RLY-164, ref keying RE311),
+  terminating each revoked job's live subprocess via its `JobControl`. `release_held` is the
+  ref-scoped analogue of `revoked`: the executor advertises every per-card worktree it holds
+  (`held`), and the server names the subset whose card has at least one run and no run left in
+  `Schemas.Run.active_statuses/0` — with the status needed to choose remove vs retain
+  (`Relay.Runs.releasable_held/2`) — so `ExecutorPool.release_held/2` disposes of them within one
+  heartbeat. A card with **zero** runs is a talk-only worktree and is never named (ADR 0009 §2:
+  a talk session's tree spans runs and must outlive them), and a `retained` tree is the human's
+  post-mortem, the executor's own to evict. This is how taking the baton (ADR 0004, via
+  `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on its
+  next outcome POST — and, unlike the retired run-id-keyed channel, it also reaches a worktree
+  the executor re-derived from disk after a restart. **Never-detach (RLY-231):** a revoked job of either isolation class
   leaves its worktree exactly as it was — an exclusive worktree is bound 1:1 to its card and
   stays active + attached to the branch for the pinned resume to continue in, and a revoked
   `shared_clean` job already left `exec-clean` untouched (it's shared by other concurrently
@@ -808,9 +828,12 @@ claim/execute/report loop, one more branch.
   finishes it once the last one leaves — last occupant out tears down. The deferred disposition
   is read only after those early returns, so a non-final release cannot discard it.
 
-  A talk-created worktree carries `run_id: None`, so `release_run/2` — the run-terminal
-  recovery path — explicitly skips any record whose `run_id` is `None`; a legacy
-  `release_runs` entry can never tear down a tree bound to nothing. Once such a tree goes fully
+  A talk-created worktree carries `run_id: None`, but so does a worktree `recover()` re-derives
+  after a restart — the exact case `release_held/2`'s ref keying exists to reach (RE311) — so
+  `run_id` alone can no longer gate the skip. `release_held/2` instead checks the `talk` marker:
+  a talk-created record is skipped outright, because its tree spans runs and must outlive them,
+  while a recovered one is not, so a `release_held` entry can still tear down a tree bound to
+  nothing that was never talk-only. Once such a tree goes fully
   idle (its talk turn ends and no node job ever adopted it), `release_talk/1` **retires** it —
   releasing its partition and marking it `retained`, evictable oldest-first exactly like a
   failed run's leftover — so a card that was only ever talked to, never run, does not

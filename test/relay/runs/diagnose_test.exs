@@ -183,4 +183,130 @@ defmodule Relay.Runs.DiagnoseTest do
     assert evidence.isolation == nil
     assert Map.has_key?(evidence, :pinned_executor_id)
   end
+
+  describe "job_awaiting_slot (RE311)" do
+    # A live run on `works` whose current node-job is queued, unclaimed and `age_s` old, carrying
+    # the exclusive payload shape `Runs.build_payload/4` produces (the `vars.ref` matters: the
+    # detail names the holders, and the same field is what the claim's held-ref bypass reads).
+    defp awaiting_card(board, works, now, age_s) do
+      at = DateTime.add(now, -age_s, :second)
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "final_review")
+      execution = insert(:node_execution, run: run, node_key: "final_review", outcome: nil, finished_at: nil)
+
+      job =
+        insert(:node_job,
+          node_execution: execution,
+          state: :queued,
+          executor_name: nil,
+          claimed_at: nil,
+          inserted_at: at,
+          payload: %{"isolation" => "exclusive", "vars" => %{"ref" => Relay.Cards.ref(board, card)}}
+        )
+
+      {card, job}
+    end
+
+    test "a live run whose job has waited past the grace window with a full roster names all three facts",
+         %{board: board, works: works} do
+      # The incident verdict was `:run_active` — "Run 498 is live and working" — which was true
+      # of the run and useless to the operator whose job had been queued 90 minutes.
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, job} = awaiting_card(board, works, now, 5_460)
+
+      insert(:executor,
+        board: board,
+        name: "Jeremy's lappy",
+        last_heartbeat: now,
+        capacity: %{"shared_clean" => 3, "exclusive" => 2},
+        held: [%{"ref" => "TH56", "state" => "bound"}, %{"ref" => "TH77", "state" => "bound"}]
+      )
+
+      assert %{verdict: :job_awaiting_slot, detail: detail, evidence: evidence} =
+               Runs.diagnose(board, card, now)
+
+      assert detail =~ "Job #{job.id}"
+      assert detail =~ "final_review"
+      assert detail =~ "91m"
+      assert detail =~ "free `exclusive` slot"
+      assert detail =~ ~s("Jeremy's lappy" holds 2 of 2)
+      assert detail =~ "TH56 bound, TH77 bound"
+      assert evidence.queued_age_s >= 5_460
+      assert evidence.isolation == "exclusive"
+      assert [%{name: "Jeremy's lappy", used: 2, total: 2}] = evidence.executors
+    end
+
+    test "under the grace window the verdict is unchanged", %{board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 60)
+
+      insert(:executor,
+        board: board,
+        name: "lappy",
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => "TH1", "state" => "bound"}]
+      )
+
+      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+    end
+
+    test "a free slot in the job's class means this layer never fires", %{board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+
+      insert(:executor,
+        board: board,
+        name: "lappy",
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 2},
+        held: [%{"ref" => "TH1", "state" => "bound"}]
+      )
+
+      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+    end
+
+    test "with no executor connected the roster verdict still wins", %{board: board, works: works} do
+      # `:no_executor` is the more specific, more actionable answer; this layer must not
+      # generalise it into "everyone is busy".
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+
+      assert %{verdict: :no_executor} = Runs.diagnose(board, card, now)
+    end
+
+    test "an outdated-only roster still diagnoses :executor_outdated", %{board: board, works: works} do
+      # A refused executor claims nothing whatever its free slots say, so "no free slot" would be
+      # the wrong diagnosis even when it is also full.
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+
+      insert(:executor,
+        board: board,
+        name: "old",
+        version: 0,
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => "TH1", "state" => "bound"}]
+      )
+
+      assert %{verdict: :executor_outdated} = Runs.diagnose(board, card, now)
+    end
+
+    test "a parked run keeps its own specific verdict", %{board: board, works: works} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      card = insert(:card, stage: works, status: :working)
+      _run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: "final_review")
+
+      insert(:executor,
+        board: board,
+        name: "lappy",
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => "TH1", "state" => "bound"}]
+      )
+
+      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+    end
+  end
 end

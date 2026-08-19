@@ -1804,6 +1804,13 @@ defmodule Relay.Runs do
   # executor poll. Jobs queued only because every executor is legitimately busy return nil.
   @stopped_work_after_s 120
 
+  # A job queued unclaimed this long while every connected executor is FULL is waiting on a
+  # slot, not merely on the next poll. Its own named attribute on purpose (RE311): the sibling
+  # windows mean different things — @stranded_grace_s is "nothing alive is holding this" and
+  # @stopped_work_after_s is "the board has stopped" — and reusing either would make one number
+  # answer two questions, which is the bug pattern this card exists to remove.
+  @awaiting_slot_grace_s 300
+
   @doc """
   The board-level "work has stopped" verdict, or `nil` when the board is quiet. Non-`nil` only
   when: at least one node-job is queued and unclaimed, the oldest has waited past
@@ -1892,10 +1899,11 @@ defmodule Relay.Runs do
   SchedulerSupervisor]` (`use Boundary` above), so `RelayWeb` cannot reach
   `Relay.Runs.Scheduler` and must not know it exists. The dispatch verdicts come from
   `Scheduler.explain/2` over the **same snapshot the scheduler plans from**
-  (`Scheduler.Server.build_snapshot/2`); this function layers on the two verdicts that
+  (`Scheduler.Server.build_snapshot/2`); this function layers on the verdicts that
   need DB state the snapshot does not carry — `:run_failed` (the card has no active run
-  and its latest run failed) and `:job_stranded` (an active job past `@stranded_grace_s`
-  with no live executor).
+  and its latest run failed), `:job_stranded` (an active job past `@stranded_grace_s`
+  with no live executor), and `:job_awaiting_slot` (a queued job past `@awaiting_slot_grace_s`
+  with no connected executor holding a free slot in its class — RE311).
 
   Read-only: safe to call while a run is live. `now` is injectable for tests.
   """
@@ -1935,9 +1943,14 @@ defmodule Relay.Runs do
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
+    awaiting = awaiting_slot(run, job, board, now)
+
     cond do
-      run != nil and stranded?(job, board, now) ->
+      really_stranded?(run, job, board, now, capacity) ->
         stranded_verdict(base, job)
+
+      awaiting != nil ->
+        awaiting_slot_verdict(base, job, awaiting)
 
       run != nil and roster_blocked?(run, job, board, now, capacity) ->
         roster_blocked_verdict(base, capacity)
@@ -1949,6 +1962,20 @@ defmodule Relay.Runs do
         base
     end
   end
+
+  # RE311: an EMPTY roster (`capacity_diagnosis`'s :no_executor — map_size(executors) == 0, not
+  # merely "every executor is stale") is a more fundamental fact than "stranded": nothing was
+  # ever holding this job to go quiet on it. `stranded?` alone can't see that distinction
+  # (`any_live_executor?` reads "no live executor" the same way for zero rows and for a roster
+  # of stale rows), so this guard defers to `roster_blocked?`'s more specific `:no_executor`
+  # verdict. A roster with a stale or outdated executor still strands normally — this only
+  # excludes the "nobody has ever connected" case.
+  defp really_stranded?(run, job, board, now, capacity) do
+    run != nil and not empty_roster?(capacity) and stranded?(job, board, now)
+  end
+
+  defp empty_roster?({:no_executor, _bits}), do: true
+  defp empty_roster?(_capacity), do: false
 
   # For a parked pinned run, explain/2 has already named the awaited executor in the
   # detail sentence and stamped evidence.pinned_executor_name. The snapshot can't know
@@ -2077,6 +2104,91 @@ defmodule Relay.Runs do
       nil -> false
       executor -> not executor_stale?(executor, now)
     end
+  end
+
+  # A live run whose current job is queued, unclaimed, past the grace window, and which no
+  # connected executor has room for (RE311). `run_verdict/2` falls through to `:run_active` for
+  # any non-parked run — true of the run, and useless to the operator whose job had been queued
+  # 90 minutes. This layer is only POSSIBLE because the roster row is now truthful: `capacity`
+  # has one writer and `held` says what actually occupies the slots.
+  #
+  # Ordered BEFORE roster_blocked? and guarded on a non-empty roster: "nobody is connected" is
+  # the more specific answer and must keep winning. A :parked run is excluded for the same
+  # reason roster_blocked? excludes it — run_verdict/2 already gives it a specific verdict
+  # (and, for a parked pinned run, names the awaited machine) that this must not clobber.
+  #
+  # Returns the evidence map, or nil when this is not the situation — computed once and reused
+  # by the verdict, so the roster is read at most once per diagnosis. The cheap guards come
+  # first so a healthy card never pays for `list_executor_status/2`.
+  defp awaiting_slot(nil, _job, _board, _now), do: nil
+  defp awaiting_slot(%{status: :parked}, _job, _board, _now), do: nil
+
+  defp awaiting_slot(_run, %NodeJob{state: :queued, executor_name: nil} = job, board, now) do
+    age = DateTime.diff(now, job.inserted_at, :second)
+    isolation = job.payload["isolation"]
+
+    with true <- age > @awaiting_slot_grace_s,
+         true <- is_binary(isolation),
+         runners = connected_runners(board, now),
+         [_first | _rest] <- runners,
+         false <- Enum.any?(runners, &free_slot?(&1, isolation)) do
+      %{queued_age_s: age, isolation: isolation, executors: Enum.map(runners, &slot_evidence(&1, isolation))}
+    else
+      _not_awaiting -> nil
+    end
+  end
+
+  defp awaiting_slot(_run, _job, _board, _now), do: nil
+
+  # Read through list_executor_status/2 — the SAME read the runners page renders — so the
+  # verdict can never disagree with what an operator is looking at while they run `relay why`.
+  # OUTDATED rows are excluded: a refused executor claims nothing whatever its free slots say,
+  # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
+  # the more specific `:executor_outdated` from roster_blocked?/5 keeps winning.
+  defp connected_runners(board, now) do
+    board
+    |> list_executor_status(now)
+    |> Enum.filter(&(&1.freshness == :fresh and not &1.outdated))
+  end
+
+  defp free_slot?(runner, isolation) do
+    Enum.any?(runner.pools, fn pool -> pool.name == isolation and pool.used < pool.total end)
+  end
+
+  defp slot_evidence(runner, isolation) do
+    pool = Enum.find(runner.pools, &(&1.name == isolation))
+
+    %{
+      name: runner.name,
+      used: (pool && pool.used) || 0,
+      total: (pool && pool.total) || 0,
+      held: runner.held
+    }
+  end
+
+  defp awaiting_slot_verdict(base, job, %{queued_age_s: age, isolation: isolation, executors: executors}) do
+    %{
+      base
+      | verdict: :job_awaiting_slot,
+        detail:
+          "Job #{job.id} for node #{job.node_key} has been queued #{div(age, 60)}m. " <>
+            "No connected executor has a free `#{isolation}` slot — #{holders_phrase(executors)}.",
+        evidence:
+          base.evidence
+          |> Map.put(:queued_age_s, age)
+          |> Map.put(:isolation, isolation)
+          |> Map.put(:executors, executors)
+    }
+  end
+
+  defp holders_phrase(executors) do
+    Enum.map_join(executors, "; ", fn e -> ~s("#{e.name}" holds #{e.used} of #{e.total}) <> held_suffix(e.held) end)
+  end
+
+  defp held_suffix([]), do: ""
+
+  defp held_suffix(held) do
+    " (" <> Enum.map_join(held, ", ", &"#{&1["ref"]} #{&1["state"]}") <> ")"
   end
 
   defp last_execution_summary(%Run{node_executions: executions}) when is_list(executions) do
