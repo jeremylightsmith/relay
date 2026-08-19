@@ -2193,9 +2193,11 @@ defmodule Relay.Runs do
   # exactly `total - free` as the executor's own `capacity()` computes it, so the two sides now
   # agree by construction. Counting active jobs (as every chip used to) made a bound-but-idle,
   # talk-attached or retained worktree invisible, which is what reported "runner available"
-  # while the executor had zero free exclusive slots.
+  # while the executor had zero free exclusive slots. Routed through `active_held_refs/1` — the
+  # SAME derivation the claim bypass and the release reconciliation use — so the chip counts the
+  # dispatcher's definition of "occupied", not a second reimplementation of it.
   defp pool_used("exclusive", _jobs_used, held) do
-    Enum.count(held, &(&1["state"] in Executor.active_holding_states()))
+    held |> Executor.active_held_refs() |> length()
   end
 
   # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the

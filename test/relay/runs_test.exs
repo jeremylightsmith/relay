@@ -620,6 +620,32 @@ defmodule Relay.RunsTest do
 
       assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
+
+    test "a beat's held is normalized and persisted, junk entries dropped", %{board: board} do
+      # RE311: `held` must actually reach the column through the SAME normalizer the claim
+      # bypass and release reconciliation read — this is the write side of that guarantee, not
+      # just the normalizer's own unit tests.
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{
+          "name" => "holder",
+          "held" => [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "junk"}]
+        })
+
+      assert executor.held == [%{"ref" => "TH77", "state" => "bound"}]
+    end
+
+    test "a later call without held leaves the stored value untouched", %{board: board} do
+      {:ok, e1} =
+        Runs.upsert_executor(board, %{
+          "name" => "holder",
+          "held" => [%{"ref" => "TH77", "state" => "bound"}]
+        })
+
+      {:ok, e2} = Runs.upsert_executor(board, %{"name" => "holder"})
+
+      assert e2.id == e1.id
+      assert e2.held == [%{"ref" => "TH77", "state" => "bound"}]
+    end
   end
 
   describe "claim_next_job/1" do

@@ -324,6 +324,22 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     refute render(element(view, "#runner-mac-mini-pool-shared_clean")) =~ "TH77"
   end
 
+  test "the exclusive chip's tooltip names a retained holding it does not count", %{conn: conn, board: board} do
+    executor(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 2},
+      held: [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "TH8", "state" => "retained"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # `retained` holds no partition, so the chip counts only TH77 — but the tooltip still names
+    # both, the same "everything this executor is holding" reading `busy_summary()` prints.
+    assert has_element?(view, "#runner-mac-mini-pool-exclusive", "1/2")
+    tooltip = render(element(view, "#runner-mac-mini-pool-exclusive"))
+    assert tooltip =~ "TH77 bound"
+    assert tooltip =~ "TH8 retained"
+  end
+
   describe "an outdated-but-beating executor (RLY-191)" do
     test "renders the OUTDATED pill, a non-pulsing rose dot, no FRESH pill, and the version line",
          %{conn: conn, board: board} do

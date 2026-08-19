@@ -267,6 +267,31 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 2}
     end
 
+    test "a claim carrying held never writes the executor's held column", %{conn: conn, board: board} do
+      # The single-writer thesis (RE311): `executor_attrs/1` never puts "held" on a claim's
+      # upsert attrs, only `heartbeat_attrs/2` does — this is the request-shaped proof of it,
+      # not just a reading of the controller source.
+      post(
+        conn,
+        ~p"/api/node-jobs/claim",
+        Jason.encode!(%{
+          "executor" => %{
+            "name" => "fake",
+            "host" => "fake",
+            "interval" => 30,
+            "version" => Runs.min_talk_executor_version()
+          },
+          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+          "running" => [],
+          "held" => [%{"ref" => "RLY-9", "state" => "bound"}],
+          "wait" => "0"
+        })
+      )
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
+      assert executor.held == []
+    end
+
     test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
          %{conn: conn, board: board} do
       flow = exclusive_flow(board)

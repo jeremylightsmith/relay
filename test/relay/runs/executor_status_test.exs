@@ -77,8 +77,10 @@ defmodule Relay.Runs.ExecutorStatusTest do
          %{board: board, stage: stage} do
       now = DateTime.utc_now()
 
-      # RE311: `exclusive` occupancy comes from declared holdings, not the active-job count — an
-      # exclusive job with no matching `held` entry no longer moves the chip.
+      # RE311: `exclusive` occupancy comes from declared holdings, not the active-job count.
+      # No exclusive active job exists here at all — the exclusive chip's `used: 1` can only
+      # come from the `held` entry below, which is the point: an exclusive job with no
+      # matching `held` entry no longer moves the chip.
       insert(:executor,
         board: board,
         name: "e1",
@@ -88,7 +90,6 @@ defmodule Relay.Runs.ExecutorStatusTest do
 
       active_job(board, stage, "e1", isolation: "shared_clean")
       active_job(board, stage, "e1", isolation: "shared_clean")
-      active_job(board, stage, "e1", isolation: "exclusive")
 
       assert [%{pools: pools}] = Runs.list_executor_status(board, now)
 
