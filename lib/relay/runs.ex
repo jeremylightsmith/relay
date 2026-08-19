@@ -2172,7 +2172,7 @@ defmodule Relay.Runs do
       | verdict: :job_awaiting_slot,
         detail:
           "Job #{job.id} for node #{job.node_key} has been queued #{div(age, 60)}m. " <>
-            "No connected executor has a free `#{isolation}` slot — #{holders_phrase(executors)}.",
+            "No connected executor has a free #{isolation} slot — #{holders_phrase(executors)}.",
         evidence:
           base.evidence
           |> Map.put(:queued_age_s, age)

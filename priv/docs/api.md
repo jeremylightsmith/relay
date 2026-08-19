@@ -228,6 +228,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `not_eligible` | a flow pulls from this stage, but the card's status is not `ready`/`queued` |
 | `run_failed` | the card's last run failed; `evidence.last_execution.detail` carries the **full** failure text |
 | `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live executor |
+| `job_awaiting_slot` | a live run's job has sat `queued` unclaimed past the grace and no connected executor has a free slot in its class; `evidence.queued_age_s`, `evidence.isolation` and `evidence.executors` (each `%{name, used, total, held}`) name the job's age, class, and who holds the slots |
 | `executor_outdated` | every connected executor is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
 | `no_executor` | no executor is connected (or every one has gone silent), so nothing is running this board's node-jobs |
 

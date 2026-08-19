@@ -2,6 +2,7 @@ defmodule Relay.Runs.DiagnoseTest do
   use Relay.DataCase, async: true
 
   alias Relay.Runs
+  alias Schemas.Run
 
   setup do
     start_capacity!()
@@ -228,7 +229,7 @@ defmodule Relay.Runs.DiagnoseTest do
       assert detail =~ "Job #{job.id}"
       assert detail =~ "final_review"
       assert detail =~ "91m"
-      assert detail =~ "free `exclusive` slot"
+      assert detail =~ "free exclusive slot"
       assert detail =~ ~s("Jeremy's lappy" holds 2 of 2)
       assert detail =~ "TH56 bound, TH77 bound"
       assert evidence.queued_age_s >= 5_460
@@ -248,7 +249,7 @@ defmodule Relay.Runs.DiagnoseTest do
         held: [%{"ref" => "TH1", "state" => "bound"}]
       )
 
-      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+      assert %{verdict: :run_active} = Runs.diagnose(board, card, now)
     end
 
     test "a free slot in the job's class means this layer never fires", %{board: board, works: works} do
@@ -263,7 +264,7 @@ defmodule Relay.Runs.DiagnoseTest do
         held: [%{"ref" => "TH1", "state" => "bound"}]
       )
 
-      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+      assert %{verdict: :run_active} = Runs.diagnose(board, card, now)
     end
 
     test "with no executor connected the roster verdict still wins", %{board: board, works: works} do
@@ -293,10 +294,18 @@ defmodule Relay.Runs.DiagnoseTest do
       assert %{verdict: :executor_outdated} = Runs.diagnose(board, card, now)
     end
 
-    test "a parked run keeps its own specific verdict", %{board: board, works: works} do
+    test "a parked run keeps its own specific verdict, even behind an old queued job and a full roster",
+         %{board: board, works: works} do
+      # Built through awaiting_card/4 so the job WOULD qualify for :job_awaiting_slot on its own
+      # (queued, unclaimed, past grace, full roster) — then the run is parked. The
+      # `awaiting_slot(%{status: :parked}, ...)` guard must keep this on the run's own parked
+      # verdict rather than being clobbered by the awaiting-slot layer.
       now = DateTime.truncate(DateTime.utc_now(), :second)
-      card = insert(:card, stage: works, status: :working)
-      _run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: "final_review")
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+      run = Relay.Repo.get_by!(Run, card_id: card.id)
+
+      {1, _} =
+        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :parked, parked_reason: :needs_input])
 
       insert(:executor,
         board: board,
@@ -306,7 +315,7 @@ defmodule Relay.Runs.DiagnoseTest do
         held: [%{"ref" => "TH1", "state" => "bound"}]
       )
 
-      refute Runs.diagnose(board, card, now).verdict == :job_awaiting_slot
+      assert %{verdict: :awaiting_listener_resume} = Runs.diagnose(board, card, now)
     end
   end
 end
