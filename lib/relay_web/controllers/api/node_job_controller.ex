@@ -8,7 +8,9 @@ defmodule RelayWeb.Api.NodeJobController do
   use RelayWeb, :controller
 
   alias Relay.Runs
+  alias Relay.Runs.Capacity
   alias Relay.Talk
+  alias Schemas.Executor
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -25,22 +27,29 @@ defmodule RelayWeb.Api.NodeJobController do
   (claim doubles as a liveness touch), then atomically claims an eligible job.
   Long-polls up to ~25s on `board:<id>:runs` when nothing is immediately
   claimable; `?wait=0` degrades to short-poll (immediate 204).
+
+  RE311 — the claim's `capacity` is the executor's LIVE FREE count and its `held` is the set of
+  per-card worktrees it is holding right now. Both are request-scoped: they are normalized
+  through the domain's one normalizer and passed to `Relay.Runs.claim_next_job/3` as arguments,
+  and NEITHER is written to the executor row. The heartbeat owns the durable roster state.
   """
   def claim(conn, params) do
     board = conn.assigns.current_board
 
     with {:ok, exec_attrs} <- executor_attrs(params),
          {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
-      claim_for(conn, board, executor, params)
+      free = Capacity.normalize(Map.get(params, "capacity"))
+      held = Executor.normalize_held(Map.get(params, "held"))
+      claim_for(conn, board, executor, params, free, held)
     end
   end
 
-  defp claim_for(conn, board, executor, params) do
+  defp claim_for(conn, board, executor, params, free, held) do
     if Runs.executor_outdated?(executor) do
       refuse_outdated(conn, executor)
     else
-      case Runs.claim_next_job(executor) do
-        {:ok, nil} -> maybe_wait(conn, board, executor, params)
+      case Runs.claim_next_job(executor, free, held) do
+        {:ok, nil} -> maybe_wait(conn, board, executor, params, free, held)
         {:ok, job} -> json(conn, granted(job))
       end
     end
@@ -71,6 +80,10 @@ defmodule RelayWeb.Api.NodeJobController do
       hand-run `curl`. The `capacity` here is the executor's *configured* total, never a live
       free count: `Scheduler.Server.build_snapshot/1` debits in-flight `:running` runs itself,
       so a decremented count would double-debit every running run.
+
+      This route is also the SINGLE WRITER of `executors.capacity` (RE311): the claim's
+      `capacity` is a live free count with a different meaning, and one column carrying both is
+      what made the roster flip-flop between 2 and 0 while the board sat deadlocked.
 
     * **Revokes.** Under the pull model `dispatcher().revoke/1` is a no-op, so taking the
       baton (ADR 0004, via `park_claimed/1`) or cancelling from the run panel could not stop a
@@ -107,7 +120,7 @@ defmodule RelayWeb.Api.NodeJobController do
     board = conn.assigns.current_board
 
     with {:ok, exec_attrs} <- executor_attrs(params),
-         {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
+         {:ok, executor} <- Runs.upsert_executor(board, heartbeat_attrs(params, exec_attrs)) do
       running = Map.get(params, "running", [])
       advertise_capacity(executor, Map.get(params, "capacity"))
       # Recover the other direction too (RLY-170): a job this executor still HOLDS but is no
@@ -153,18 +166,20 @@ defmodule RelayWeb.Api.NodeJobController do
   # `Map.put/3` raise BadMapError → a 500 on the executor's front door. Reject the shape
   # here (a request-shape concern) rather than in Runs, which normalizes permissively.
   # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
+  # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
+  # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
   defp executor_attrs(params) do
     case Map.get(params, "executor", %{}) do
       executor when is_map(executor) ->
-        {:ok,
-         executor
-         |> Map.put("capacity", Map.get(params, "capacity"))
-         |> Map.put("capabilities", Map.get(params, "capabilities"))}
+        {:ok, Map.put(executor, "capabilities", Map.get(params, "capabilities"))}
 
       _ ->
         {:error, :invalid_executor}
     end
   end
+
+  # The heartbeat is the ONE writer of the durable roster state (RE311).
+  defp heartbeat_attrs(params, exec_attrs), do: Map.put(exec_attrs, "capacity", Map.get(params, "capacity"))
 
   # RLY-184. Rendered here rather than through FallbackController because the two version
   # numbers are per-request data, not a static string — the executor logs both of them, and a
@@ -192,7 +207,7 @@ defmodule RelayWeb.Api.NodeJobController do
   # normalizes (unknown classes dropped, bad values zeroed) — the controller must not
   # shape capacity itself, and must never atomize request keys.
   defp advertise_capacity(executor, capacity) when is_map(capacity) do
-    Runs.Capacity.put(executor.id, capacity)
+    Capacity.put(executor.id, capacity)
   end
 
   defp advertise_capacity(_executor, _capacity), do: :ok
@@ -258,21 +273,23 @@ defmodule RelayWeb.Api.NodeJobController do
 
   defp parse_outcome(_value), do: {:error, :unknown_outcome}
 
-  defp maybe_wait(conn, board, executor, params) do
+  defp maybe_wait(conn, board, executor, params, free, held) do
     running = List.wrap(params["running"])
 
     cond do
       params["wait"] in ["0", 0] ->
         no_work(conn, board, running)
 
-      # No advertised capacity → claim_next_job/1 can never succeed for this
-      # executor; a full 25s long-poll would be a wasted connection.
-      zero_capacity?(executor) ->
+      # Nothing this request could ever be granted → a full 25s long-poll would be a wasted
+      # connection. RE311: read from the REQUEST, not the row (the row now carries the
+      # configured total, which would make this always false), and only when the executor also
+      # declares no held worktree — a job for a held ref is claimable at zero free capacity.
+      nothing_claimable?(free, held) ->
         no_work(conn, board, running)
 
       true ->
         Runs.subscribe(board.id)
-        wait_loop(conn, board, executor, running, System.monotonic_time(:millisecond) + @long_poll_ms)
+        wait_loop(conn, board, executor, running, free, held, System.monotonic_time(:millisecond) + @long_poll_ms)
     end
   end
 
@@ -292,13 +309,13 @@ defmodule RelayWeb.Api.NodeJobController do
     end
   end
 
-  defp zero_capacity?(%{capacity: capacity}) do
-    Enum.all?(capacity, fn {_class, n} -> not (is_integer(n) and n > 0) end)
+  defp nothing_claimable?(free, held) do
+    Enum.all?(free, fn {_class, n} -> not (is_integer(n) and n > 0) end) and Executor.active_held_refs(held) == []
   end
 
   # Retry the atomic claim whenever a run event fires; anything else in the
   # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
-  defp wait_loop(conn, board, executor, running, deadline) do
+  defp wait_loop(conn, board, executor, running, free, held, deadline) do
     timeout = deadline - System.monotonic_time(:millisecond)
 
     if timeout <= 0 do
@@ -306,13 +323,13 @@ defmodule RelayWeb.Api.NodeJobController do
     else
       receive do
         run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
-          case Runs.claim_next_job(executor) do
+          case Runs.claim_next_job(executor, free, held) do
             # Woken with nothing to grant is the Stop case: `Talk.stop_turn/1` broadcasts a run
             # event precisely so this loop re-checks. Return as soon as something is revoked,
             # rather than sitting out the rest of the 25s with a kill order in hand.
             {:ok, nil} ->
               case Runs.revoked_among(board, running) do
-                [] -> wait_loop(conn, board, executor, running, deadline)
+                [] -> wait_loop(conn, board, executor, running, free, held, deadline)
                 revoked -> json(conn, %{revoked: revoked})
               end
 

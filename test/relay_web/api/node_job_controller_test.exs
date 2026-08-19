@@ -50,6 +50,32 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     flow
   end
 
+  # The Code shape: one exclusive node, so a claim exercises the exclusive capacity path.
+  defp exclusive_flow(board) do
+    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "excl",
+        isolation: :exclusive,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: plan.id,
+        nodes: [%{key: "work", type: :shell, run: "mix precommit"}],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "done", on: :succeeded},
+          %{from: "work", to: "done", on: :failed},
+          %{from: "work", to: "done", on: :partial}
+        ]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
   defp start_queued_job(board, flow) do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Do work"})
@@ -223,6 +249,52 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["kind"] == "talk"
       assert body["turn_id"] == turn.id
       assert Relay.Talk.get_turn(turn.id).status == :claimed
+    end
+
+    test "a claim never writes the executor's capacity column", %{conn: conn, board: board} do
+      # The incident's Bug 1: the claim wrote the FREE count and the heartbeat wrote the
+      # CONFIGURED total into one column, so `relay executors` and the runners page read
+      # whichever landed last.
+      post(conn, ~p"/api/node-jobs/heartbeat", %{
+        "executor" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "capacity" => %{"shared_clean" => 3, "exclusive" => 2},
+        "running" => []
+      })
+
+      claim(conn, %{"shared_clean" => 0, "exclusive" => 0})
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
+      assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 2}
+    end
+
+    test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
+         %{conn: conn, board: board} do
+      flow = exclusive_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      card = Relay.Repo.get!(Schemas.Card, run.card_id)
+      ref = Relay.Cards.ref(board, card)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/claim",
+          Jason.encode!(%{
+            "executor" => %{
+              "name" => "fake",
+              "host" => "fake",
+              "interval" => 30,
+              "version" => Runs.min_talk_executor_version()
+            },
+            "capacity" => %{"shared_clean" => 0, "exclusive" => 0},
+            "running" => [],
+            "held" => [%{"ref" => ref, "state" => "bound"}],
+            "wait" => "0"
+          })
+        )
+        |> json_response(200)
+
+      assert body["ref"] == ref
+      assert body["isolation"] == "exclusive"
     end
   end
 

@@ -1286,6 +1286,184 @@ defmodule Relay.RunsTest do
     end
   end
 
+  describe "held vocabulary (RE311)" do
+    test "the four holding states are defined once, and the active three are a subset" do
+      assert Schemas.Executor.holding_states() == ["bound", "retained", "running", "talk"]
+      assert Schemas.Executor.active_holding_states() == ["bound", "running", "talk"]
+
+      # `retained` is the one state that does NOT occupy an exclusive partition — a failed run's
+      # leftover the executor may evict itself.
+      assert Schemas.Executor.holding_states() -- Schemas.Executor.active_holding_states() == ["retained"]
+    end
+
+    test "normalize_held/1 keeps well-formed entries and drops everything else" do
+      held = [
+        %{"ref" => "RLY-1", "state" => "bound"},
+        %{"ref" => "RLY-2", "state" => "gpu"},
+        %{"ref" => 7, "state" => "bound"},
+        %{"state" => "bound"},
+        "junk"
+      ]
+
+      assert Schemas.Executor.normalize_held(held) == [%{"ref" => "RLY-1", "state" => "bound"}]
+    end
+
+    test "normalize_held/1 degrades a non-list to an empty list rather than raising" do
+      # A heartbeat must never 500 on a malformed beat.
+      assert Schemas.Executor.normalize_held(nil) == []
+      assert Schemas.Executor.normalize_held("nope") == []
+    end
+
+    test "active_held_refs/1 keeps the three states that occupy a partition" do
+      held = [
+        %{"ref" => "A1", "state" => "bound"},
+        %{"ref" => "A2", "state" => "running"},
+        %{"ref" => "A3", "state" => "talk"},
+        %{"ref" => "A4", "state" => "retained"}
+      ]
+
+      assert Schemas.Executor.active_held_refs(held) == ["A1", "A2", "A3"]
+    end
+  end
+
+  describe "upsert_executor/2 capacity ownership (RE311)" do
+    test "an upsert with no capacity leaves a previously-written one untouched", %{board: board} do
+      {:ok, _beat} =
+        Runs.upsert_executor(board, %{
+          "name" => "mac",
+          "host" => "mac.local",
+          "interval" => 30,
+          "version" => Runs.min_executor_version(),
+          "capacity" => %{"shared_clean" => 3, "exclusive" => 2}
+        })
+
+      # The claim's attrs carry NO capacity now — the free count rides as an argument instead.
+      {:ok, after_claim} =
+        Runs.upsert_executor(board, %{
+          "name" => "mac",
+          "host" => "mac.local",
+          "interval" => 30,
+          "version" => Runs.min_executor_version()
+        })
+
+      assert after_claim.capacity == %{"shared_clean" => 3, "exclusive" => 2}
+    end
+
+    test "an upsert with no capacity creates the row with an empty capacity", %{board: board} do
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{
+          "name" => "fresh",
+          "host" => "h",
+          "interval" => 30,
+          "version" => Runs.min_executor_version()
+        })
+
+      assert executor.capacity == %{}
+    end
+
+    test "a malformed capacity leaves the stored one alone rather than zeroing it", %{board: board} do
+      {:ok, _beat} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, after_junk} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => "junk"})
+
+      # Zeroing here would knock a working executor off dispatch on one bad beat.
+      assert after_junk.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+    end
+
+    test "a heartbeat still overwrites capacity with its configured total", %{board: board} do
+      {:ok, _first} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, second} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 1}})
+
+      assert second.capacity == %{"shared_clean" => 0, "exclusive" => 1}
+    end
+  end
+
+  describe "claim_next_job/3 held-ref bypass (RE311)" do
+    # The exact incident: the retry released the pin (settle_retry_pin's :readopted branch, with
+    # no executor alive), the job was inserted UNPINNED, the machine came back and adopted
+    # `<ns>-<ref>` as active — consuming the very slot the unpinned job needed to be offered
+    # through. The escape hatch was keyed on the pin; it should be keyed on "this executor holds
+    # that card's worktree", and now the executor says so.
+    #
+    # The payload is built the way `Runs.build_payload/4` builds it — `vars.ref` is the field the
+    # new eligibility disjunct reads, so a test payload without it would pass against a broken
+    # query.
+    defp queued_job_for(board, card, isolation) do
+      run = insert(:run, card: card)
+      execution = insert(:node_execution, run: run)
+
+      Runs.insert_job!(run, execution, %{
+        "isolation" => isolation,
+        "vars" => %{"ref" => Relay.Cards.ref(board, card)}
+      })
+    end
+
+    defp full_executor(board) do
+      insert(:executor, board: board, name: "holder", capacity: %{"shared_clean" => 0, "exclusive" => 0})
+    end
+
+    test "an unpinned exclusive job for a BOUND held ref is claimed at zero free capacity", %{board: board} do
+      card = card_in(board, "Spec", "held card")
+      job = queued_job_for(board, card, "exclusive")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      free = %{shared_clean: 0, exclusive: 0}
+      held = [%{"ref" => ref, "state" => "bound"}]
+
+      assert {:ok, claimed} = Runs.claim_next_job(executor, free, held)
+      assert claimed.id == job.id
+    end
+
+    test "a RETAINED held ref does not bypass — assign() would reject that job", %{board: board} do
+      card = card_in(board, "Spec", "retained card")
+      _job = queued_job_for(board, card, "exclusive")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => ref, "state" => "retained"}
+               ])
+    end
+
+    test "a shared_clean job for a held ref still respects shared capacity", %{board: board} do
+      card = card_in(board, "Spec", "shared card")
+      _job = queued_job_for(board, card, "shared_clean")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      # The bypass is exclusive-only: a shared_clean job runs in the SHARED worktree, so
+      # offering it on the strength of a per-card holding would oversubscribe the shared pool.
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => ref, "state" => "bound"}
+               ])
+    end
+
+    test "declaring another board's ref claims nothing here", %{board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311"})
+      other_card = card_in(other, "Spec", "elsewhere")
+      _job = queued_job_for(other, other_card, "exclusive")
+      executor = full_executor(board)
+
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => Relay.Cards.ref(other, other_card), "state" => "bound"}
+               ])
+    end
+
+    test "the free-capacity ARGUMENT decides eligibility, not the stored row", %{board: board} do
+      card = card_in(board, "Spec", "capacity arg")
+      job = queued_job_for(board, card, "exclusive")
+      # The row says the CONFIGURED total (what a heartbeat wrote); the claim says what is FREE.
+      executor = insert(:executor, board: board, name: "roomy", capacity: %{"exclusive" => 4})
+
+      assert {:ok, nil} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [])
+      assert {:ok, claimed} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 1}, [])
+      assert claimed.id == job.id
+    end
+  end
+
   describe "refresh_running_card_liveness/2 (RLY-226)" do
     # A card on `board` with a node-job in `state`. Returns {card, job}. Mirrors the
     # NodeJob → Run → Card shape the function joins over.
