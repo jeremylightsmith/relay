@@ -282,8 +282,8 @@ defmodule Relay.Runs.Scheduler do
   `:dispatchable` is decided by running `plan/1` itself, never re-derived; only the
   *reason* for a non-dispatch is walked, in the same order `plan/1` excludes cards.
   Returns `%{verdict, detail, evidence}`; `detail` is the human sentence `relay why`
-  prints. Verdicts needing DB state beyond the snapshot (`:run_failed`, `:job_stranded`)
-  are layered on by `Relay.Runs.diagnose/3`.
+  prints. Verdicts needing DB state beyond the snapshot (`:run_failed`, `:job_stranded`,
+  `:job_awaiting_slot`) are layered on by `Relay.Runs.diagnose/3`.
   """
   @spec explain(Snapshot.t(), term()) :: %{verdict: atom(), detail: String.t(), evidence: map()}
   def explain(%Snapshot{} = snapshot, card_id) do

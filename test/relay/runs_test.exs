@@ -620,6 +620,32 @@ defmodule Relay.RunsTest do
 
       assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
+
+    test "a beat's held is normalized and persisted, junk entries dropped", %{board: board} do
+      # RE311: `held` must actually reach the column through the SAME normalizer the claim
+      # bypass and release reconciliation read — this is the write side of that guarantee, not
+      # just the normalizer's own unit tests.
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{
+          "name" => "holder",
+          "held" => [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "junk"}]
+        })
+
+      assert executor.held == [%{"ref" => "TH77", "state" => "bound"}]
+    end
+
+    test "a later call without held leaves the stored value untouched", %{board: board} do
+      {:ok, e1} =
+        Runs.upsert_executor(board, %{
+          "name" => "holder",
+          "held" => [%{"ref" => "TH77", "state" => "bound"}]
+        })
+
+      {:ok, e2} = Runs.upsert_executor(board, %{"name" => "holder"})
+
+      assert e2.id == e1.id
+      assert e2.held == [%{"ref" => "TH77", "state" => "bound"}]
+    end
   end
 
   describe "claim_next_job/1" do
@@ -1249,40 +1275,313 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "terminal_among/2" do
-    test "returns on-board terminal run-ids, excluding active runs and other boards", %{board: board} do
+  describe "releasable_held/2 (RE311)" do
+    defp held(ref, state), do: %{"ref" => ref, "state" => state}
+
+    test "names a held ref whose card's only run is cancelled, with its status", %{board: board} do
       flow = retry_flow(board)
-      {:ok, active} = Runs.start_run(card_in(board, "Next up", "active"), flow)
+      card = card_in(board, "Next up", "cancelled card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(board, card)
 
-      {:ok, cancelled} = Runs.start_run(card_in(board, "Next up", "cancelled"), flow)
-      {:ok, cancelled} = Runs.cancel_run(cancelled)
-
-      {:ok, done} = Runs.start_run(card_in(board, "Next up", "done"), flow)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^done.id), set: [status: :done])
-
-      # A terminal run on a DIFFERENT board must never come back (cross-board leak).
-      {:ok, other_board} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
-      other_flow = retry_flow(other_board)
-      {:ok, elsewhere} = Runs.start_run(card_in(other_board, "Next up", "elsewhere"), other_flow)
-      {:ok, elsewhere} = Runs.cancel_run(elsewhere)
-
-      result = Runs.terminal_among(board, [active.id, cancelled.id, done.id, elsewhere.id])
-      ids = Enum.map(result, & &1.id)
-
-      assert cancelled.id in ids
-      assert done.id in ids
-      refute active.id in ids
-      refute elsewhere.id in ids
-      assert %{id: _, status: :cancelled} = Enum.find(result, &(&1.id == cancelled.id))
-      assert %{id: _, status: :done} = Enum.find(result, &(&1.id == done.id))
+      assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
-    test "an empty list in returns an empty list", %{board: board} do
-      assert Runs.terminal_among(board, []) == []
+    test "names a failed run's ref as failed, so the executor RETAINS rather than removes", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "failed card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :failed])
+      ref = Relay.Cards.ref(board, card)
+
+      assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
-    test "a run-id this board does not own is not returned", %{board: board} do
-      assert Runs.terminal_among(board, [999_999]) == []
+    test "never names a ref whose card has a running or parked run", %{board: board} do
+      flow = retry_flow(board)
+
+      for status <- Run.active_statuses() do
+        card = card_in(board, "Next up", "active #{status}")
+        {:ok, run} = Runs.start_run(card, flow)
+        {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: status])
+
+        assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "bound")]) == []
+      end
+    end
+
+    test "never names a ref whose card has no run at all (a talk-only worktree)", %{board: board} do
+      # ADR 0009 §2: a talk session's worktree spans runs and must outlive them. Naming it for
+      # release would tear down a live conversation's tree.
+      card = card_in(board, "Next up", "talk only")
+
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "talk")]) == []
+    end
+
+    test "never names a ref declared RETAINED — that tree is the executor's own to evict", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "retained card")
+      {:ok, run} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(run)
+
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "retained")]) == []
+    end
+
+    test "an unparseable, unknown or other-board ref is silently skipped", %{board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311 held"})
+      other_flow = retry_flow(other)
+      other_card = card_in(other, "Next up", "elsewhere")
+      {:ok, other_run} = Runs.start_run(other_card, other_flow)
+      {:ok, _run} = Runs.cancel_run(other_run)
+
+      assert Runs.releasable_held(board, []) == []
+      assert Runs.releasable_held(board, [held("not-a-ref", "bound")]) == []
+      assert Runs.releasable_held(board, [held("RLY-999999", "bound")]) == []
+      assert Runs.releasable_held(board, [held(Relay.Cards.ref(other, other_card), "bound")]) == []
+    end
+
+    test "never names a ref whose card has a terminal run AND a live one (cancel-then-retry)",
+         %{board: board} do
+      # RE311: `releasable_held/2` is CARD-scoped, not run-scoped. Cancel R1, hit Retry inside
+      # the ~15s before the release channel fires, and the card carries a cancelled run and a
+      # running one — the tree belongs to the live run, so the ref must not be named. The
+      # executor is what makes that safe: `assign` adopts the card's own idle tree for R2
+      # instead of refusing it (bin/test_relay.py's
+      # `test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run`).
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "cancel then retry")
+      {:ok, cancelled} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(cancelled)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.card_id == ^card.id), set: [status: :cancelled])
+      {:ok, _retry} = Runs.start_run(card, flow)
+      ref = Relay.Cards.ref(board, card)
+
+      assert Runs.releasable_held(board, [held(ref, "bound")]) == []
+    end
+
+    test "a colliding ref_number resolves against the REQUESTING board, never the other one",
+         %{board: board} do
+      # Board keys are not unique (every board defaults to "RLY"), so `<key>-5` can name a card
+      # on two boards. The executor is bound to ONE board by its API key, so its declared refs
+      # are read as that board's — a terminal run on the OTHER board's card 5 must not become a
+      # teardown order here.
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311 collide"})
+      other_flow = retry_flow(other)
+      mine = card_in(board, "Next up", "mine")
+      theirs = card_in(other, "Next up", "theirs")
+      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^mine.id), set: [ref_number: 4242])
+      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^theirs.id), set: [ref_number: 4242])
+      {:ok, their_run} = Runs.start_run(theirs, other_flow)
+      {:ok, _run} = Runs.cancel_run(their_run)
+      ref = "#{board.key}-4242"
+
+      # My card 4242 has no run at all, so the shared ref names nothing here...
+      assert Runs.releasable_held(board, [held(ref, "bound")]) == []
+
+      # ...and once MY card's run ends, the ref names my card, with my run's status.
+      my_flow = retry_flow(board)
+      {:ok, my_run} = Runs.start_run(Relay.Repo.reload!(mine), my_flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^my_run.id), set: [status: :failed])
+
+      assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
+    end
+
+    test "reports the LATEST run's status when a card has several", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "two runs")
+      {:ok, first} = Runs.start_run(card, flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^first.id), set: [status: :failed])
+      {:ok, second} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(second)
+      ref = Relay.Cards.ref(board, card)
+
+      assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
+    end
+  end
+
+  describe "held vocabulary (RE311)" do
+    test "the four holding states are defined once, and the active three are a subset" do
+      assert Schemas.Executor.holding_states() == ["bound", "retained", "running", "talk"]
+      assert Schemas.Executor.active_holding_states() == ["bound", "running", "talk"]
+
+      # `retained` is the one state that does NOT occupy an exclusive partition — a failed run's
+      # leftover the executor may evict itself.
+      assert Schemas.Executor.holding_states() -- Schemas.Executor.active_holding_states() == ["retained"]
+    end
+
+    test "normalize_held/1 keeps well-formed entries and drops everything else" do
+      held = [
+        %{"ref" => "RLY-1", "state" => "bound"},
+        %{"ref" => "RLY-2", "state" => "gpu"},
+        %{"ref" => 7, "state" => "bound"},
+        %{"state" => "bound"},
+        "junk"
+      ]
+
+      assert Schemas.Executor.normalize_held(held) == [%{"ref" => "RLY-1", "state" => "bound"}]
+    end
+
+    test "normalize_held/1 truncates a beat past held_limit/0" do
+      # An executor holds a handful of worktrees; an unbounded list would buy an unbounded
+      # query on the heartbeat's hot path.
+      held = for n <- 1..(Schemas.Executor.held_limit() + 50), do: %{"ref" => "RLY-#{n}", "state" => "bound"}
+
+      assert length(Schemas.Executor.normalize_held(held)) == Schemas.Executor.held_limit()
+    end
+
+    test "normalize_held/1 degrades a non-list to an empty list rather than raising" do
+      # A heartbeat must never 500 on a malformed beat.
+      assert Schemas.Executor.normalize_held(nil) == []
+      assert Schemas.Executor.normalize_held("nope") == []
+    end
+
+    test "active_held_refs/1 keeps the three states that occupy a partition" do
+      held = [
+        %{"ref" => "A1", "state" => "bound"},
+        %{"ref" => "A2", "state" => "running"},
+        %{"ref" => "A3", "state" => "talk"},
+        %{"ref" => "A4", "state" => "retained"}
+      ]
+
+      assert Schemas.Executor.active_held_refs(held) == ["A1", "A2", "A3"]
+    end
+  end
+
+  describe "upsert_executor/2 capacity ownership (RE311)" do
+    test "an upsert with no capacity leaves a previously-written one untouched", %{board: board} do
+      {:ok, _beat} =
+        Runs.upsert_executor(board, %{
+          "name" => "mac",
+          "host" => "mac.local",
+          "interval" => 30,
+          "version" => Runs.min_executor_version(),
+          "capacity" => %{"shared_clean" => 3, "exclusive" => 2}
+        })
+
+      # The claim's attrs carry NO capacity now — the free count rides as an argument instead.
+      {:ok, after_claim} =
+        Runs.upsert_executor(board, %{
+          "name" => "mac",
+          "host" => "mac.local",
+          "interval" => 30,
+          "version" => Runs.min_executor_version()
+        })
+
+      assert after_claim.capacity == %{"shared_clean" => 3, "exclusive" => 2}
+    end
+
+    test "an upsert with no capacity creates the row with an empty capacity", %{board: board} do
+      {:ok, executor} =
+        Runs.upsert_executor(board, %{
+          "name" => "fresh",
+          "host" => "h",
+          "interval" => 30,
+          "version" => Runs.min_executor_version()
+        })
+
+      assert executor.capacity == %{}
+    end
+
+    test "a malformed capacity leaves the stored one alone rather than zeroing it", %{board: board} do
+      {:ok, _beat} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, after_junk} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => "junk"})
+
+      # Zeroing here would knock a working executor off dispatch on one bad beat.
+      assert after_junk.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+    end
+
+    test "a heartbeat still overwrites capacity with its configured total", %{board: board} do
+      {:ok, _first} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, second} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 1}})
+
+      assert second.capacity == %{"shared_clean" => 0, "exclusive" => 1}
+    end
+  end
+
+  describe "claim_next_job/3 held-ref bypass (RE311)" do
+    # The exact incident: the retry released the pin (settle_retry_pin's :readopted branch, with
+    # no executor alive), the job was inserted UNPINNED, the machine came back and adopted
+    # `<ns>-<ref>` as active — consuming the very slot the unpinned job needed to be offered
+    # through. The escape hatch was keyed on the pin; it should be keyed on "this executor holds
+    # that card's worktree", and now the executor says so.
+    #
+    # The payload is built the way `Runs.build_payload/4` builds it — `vars.ref` is the field the
+    # new eligibility disjunct reads, so a test payload without it would pass against a broken
+    # query.
+    defp queued_job_for(board, card, isolation) do
+      run = insert(:run, card: card)
+      execution = insert(:node_execution, run: run)
+
+      Runs.insert_job!(run, execution, %{
+        "isolation" => isolation,
+        "vars" => %{"ref" => Relay.Cards.ref(board, card)}
+      })
+    end
+
+    defp full_executor(board) do
+      insert(:executor, board: board, name: "holder", capacity: %{"shared_clean" => 0, "exclusive" => 0})
+    end
+
+    test "an unpinned exclusive job for a BOUND held ref is claimed at zero free capacity", %{board: board} do
+      card = card_in(board, "Spec", "held card")
+      job = queued_job_for(board, card, "exclusive")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      free = %{shared_clean: 0, exclusive: 0}
+      held = [%{"ref" => ref, "state" => "bound"}]
+
+      assert {:ok, claimed} = Runs.claim_next_job(executor, free, held)
+      assert claimed.id == job.id
+    end
+
+    test "a RETAINED held ref does not bypass — assign() would reject that job", %{board: board} do
+      card = card_in(board, "Spec", "retained card")
+      _job = queued_job_for(board, card, "exclusive")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => ref, "state" => "retained"}
+               ])
+    end
+
+    test "a shared_clean job for a held ref still respects shared capacity", %{board: board} do
+      card = card_in(board, "Spec", "shared card")
+      _job = queued_job_for(board, card, "shared_clean")
+      executor = full_executor(board)
+      ref = Relay.Cards.ref(board, card)
+
+      # The bypass is exclusive-only: a shared_clean job runs in the SHARED worktree, so
+      # offering it on the strength of a per-card holding would oversubscribe the shared pool.
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => ref, "state" => "bound"}
+               ])
+    end
+
+    test "declaring another board's ref claims nothing here", %{board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311"})
+      other_card = card_in(other, "Spec", "elsewhere")
+      _job = queued_job_for(other, other_card, "exclusive")
+      executor = full_executor(board)
+
+      assert {:ok, nil} =
+               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+                 %{"ref" => Relay.Cards.ref(other, other_card), "state" => "bound"}
+               ])
+    end
+
+    test "the free-capacity ARGUMENT decides eligibility, not the stored row", %{board: board} do
+      card = card_in(board, "Spec", "capacity arg")
+      job = queued_job_for(board, card, "exclusive")
+      # The row says the CONFIGURED total (what a heartbeat wrote); the claim says what is FREE.
+      executor = insert(:executor, board: board, name: "roomy", capacity: %{"exclusive" => 4})
+
+      assert {:ok, nil} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [])
+      assert {:ok, claimed} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 1}, [])
+      assert claimed.id == job.id
     end
   end
 

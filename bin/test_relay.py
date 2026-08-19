@@ -234,7 +234,8 @@ class ReverseContractTest(unittest.TestCase):
 
     def test_heartbeat_body_key_set_matches_the_fixture(self):
         # Omitted (steady-state) beats are a SUBSET of the fixture's request keys;
-        # `capabilities` is optional and send-on-change (RLY-182).
+        # `capabilities` is optional and send-on-change (RLY-182). The positional `[]` here is
+        # `held` (RE311) — every per-card worktree this executor holds.
         body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
         self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
         # A beat that DOES carry the inventory matches the fixture's key set exactly.
@@ -251,24 +252,30 @@ class ReverseContractTest(unittest.TestCase):
         # ExecutorHeartbeat._beat() hands each of these to on_revoke().
         self.assertIn("revoked", CONTRACT["heartbeat"]["response"])
 
-    def test_the_heartbeat_request_carries_bound_runs(self):
-        # RLY-218: the executor reports its idle-bound run-ids so the server can name the
-        # terminal ones to release.
-        self.assertIn("bound_runs", CONTRACT["heartbeat"]["request"])
+    def test_the_heartbeat_request_carries_held(self):
+        # RE311: the executor reports every per-card worktree it holds so the server can name
+        # the ones whose runs have ended — ref-keyed, so a restart-recovered tree is visible.
+        self.assertIn("held", CONTRACT["heartbeat"]["request"])
 
-    def test_the_heartbeat_response_carries_release_runs(self):
-        # ExecutorHeartbeat._beat() hands each of these to on_release_run().
-        self.assertIn("release_runs", CONTRACT["heartbeat"]["response"])
+    def test_the_heartbeat_response_carries_release_held(self):
+        # ExecutorHeartbeat._beat() hands each of these to on_release_held().
+        self.assertIn("release_held", CONTRACT["heartbeat"]["response"])
+        self.assertNotIn("release_runs", CONTRACT["heartbeat"]["response"])
 
-    def test_the_claim_request_carries_the_running_ids(self):
+    def test_the_claim_request_carries_the_running_ids_and_the_held_worktrees(self):
         """RE268: the server needs the in-flight ids to answer a claim with `revoked`, which is
-        what makes Stop land in well under a second instead of on the next 15s heartbeat."""
+        what makes Stop land in well under a second instead of on the next 15s heartbeat.
+        RE311: it needs `held` to offer work for a card whose tree this executor already
+        holds — the claim that used to be refused forever."""
         self.assertIn("running", CONTRACT["claim_request"])
+        self.assertIn("held", CONTRACT["claim_request"])
         self.assertEqual(
-            set(relay.claim_body({"name": "x"}, {"shared_clean": 1}, [7, 9])),
+            set(relay.claim_body({"name": "x"}, {"shared_clean": 1}, [7, 9],
+                                 [{"ref": "A1", "state": "bound"}])),
             set(CONTRACT["claim_request"]),
         )
         self.assertEqual(relay.claim_body({"name": "x"}, {}, [7, 9])["running"], [7, 9])
+        self.assertEqual(relay.claim_body({"name": "x"}, {})["held"], [])
 
     def test_the_claim_request_carries_the_executor_version(self):
         # RLY-184: the server refuses a claim whose executor has no version, so this key is
@@ -1391,6 +1398,36 @@ class ExecutorPoolTest(unittest.TestCase):
         self.assertTrue(reset2)                                 # re-baseline for the new run
         self.assertEqual(p.wts[slot]["state"], "active")
 
+    def test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run(self):
+        """RE311: cancel R1 (a revoke deliberately leaves the tree active+bound+idle), then
+        Retry. R2's job must be placed in the card's OWN tree — the branch is the CARD's, and a
+        newer run legitimately continues in it — instead of hitting `assign`'s refusal and being
+        rejected with a misleading "no free 'exclusive' slot advertised"."""
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, None)      # revoke: active, idle, bound to r1
+        slot2, reset2 = p.assign(self.excl("r2", "RLY-1"))
+        self.assertEqual(slot2, slot)
+        self.assertFalse(reset2)                             # never re-baseline: r1's commits
+        self.assertEqual(p.wts[slot]["run_id"], "r2")
+        self.assertTrue(p.wts[slot]["live"])
+
+    def test_assign_still_refuses_a_worktree_held_by_a_live_run(self):
+        """The refusal the comment always named: never steal a LIVE worktree."""
+        p = self.pool()
+        p.assign(self.excl("r1", "RLY-1"))                   # live
+        self.assertIsNone(p.assign(self.excl("r2", "RLY-1")))
+
+    def test_assign_still_refuses_while_a_terminal_disposition_is_deferred(self):
+        """E2t (RE268): a disposition parked in `pending_finish` under a live talk turn still
+        owns the tree — adopting it would let `release_talk` tear the tree down under the new
+        run. The bounded placement retry covers that window."""
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.assign_talk("RLY-1")
+        p.release(self.excl("r1", "RLY-1"), slot, "done")    # deferred under the talk turn
+        self.assertIsNone(p.assign(self.excl("r2", "RLY-1")))
+
     def test_revoke_leaves_the_worktree_active_and_bound(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))
@@ -1416,35 +1453,80 @@ class ExecutorPoolTest(unittest.TestCase):
         s2, _ = p.assign(self.excl("r2", "RLY-2"))
         self.assertEqual(p.partition_for(s2), part)            # index recycled
 
-    # -- idle-bound / recovery release ---------------------------------------
-    def test_idle_bound_run_ids_lists_active_worktrees_without_a_live_job(self):
+    # -- holdings / recovery release (RE311) ----------------------------------
+    def test_holdings_reports_every_held_worktree_with_its_state(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))
-        self.assertEqual(p.idle_bound_run_ids(), [])           # live
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "running"}])
         p.release(self.excl("r1", "RLY-1"), slot, "parked")
-        self.assertEqual(p.idle_bound_run_ids(), ["r1"])
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "bound"}])
 
-    def test_release_run_done_removes_an_idle_worktree(self):
+    def test_every_holding_state_is_in_the_pinned_vocabulary(self):
+        p = self.pool()
+        p.wts = {
+            "exec-A1": {"ref": "A1", "run_id": "r1", "state": "active", "live": True, "partition": "1"},
+            "exec-A2": {"ref": "A2", "run_id": "r2", "state": "active", "live": False, "partition": "2"},
+            "exec-A3": {"ref": "A3", "run_id": None, "state": "active", "live": False,
+                        "talk_users": 1, "partition": "3"},
+            "exec-A4": {"ref": "A4", "run_id": None, "state": "retained", "live": False,
+                        "partition": None},
+        }
+        self.assertEqual(p.holdings(), [{"ref": "A1", "state": "running"},
+                                        {"ref": "A2", "state": "bound"},
+                                        {"ref": "A3", "state": "talk"},
+                                        {"ref": "A4", "state": "retained"}])
+        for h in p.holdings():
+            self.assertIn(h["state"], relay.HOLDING_STATES)
+
+    def test_release_held_done_removes_an_idle_worktree(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))
         p.release(self.excl("r1", "RLY-1"), slot, "parked")    # idle-bound
-        p.release_run("r1", "done")
+        p.release_held("RLY-1", "done")
         self.assertNotIn(slot, p.wts)
         self.assertEqual(p.capacity()["exclusive"], 2)
 
-    def test_release_run_failed_retains_an_idle_worktree(self):
+    def test_release_held_failed_retains_an_idle_worktree(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))
         p.release(self.excl("r1", "RLY-1"), slot, "parked")
-        p.release_run("r1", "failed")
+        p.release_held("RLY-1", "failed")
         self.assertEqual(p.wts[slot]["state"], "retained")
 
-    def test_release_run_skips_a_worktree_with_a_live_job(self):
+    def test_release_held_skips_a_worktree_with_a_live_job(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))           # live
-        p.release_run("r1", "done")                            # must NOT tear down
+        p.release_held("RLY-1", "done")                        # must NOT tear down
         self.assertIn(slot, p.wts)
         self.assertEqual(p.wts[slot]["state"], "active")
+
+    def test_release_held_defers_under_a_live_talk_turn(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.assign_talk("RLY-1")
+        p.release(self.excl("r1", "RLY-1"), slot, "parked")    # node job done, talk still here
+        p.release_held("RLY-1", "cancelled")
+        self.assertIn(slot, p.wts)                             # deferred, not torn down
+        self.assertEqual(p.wts[slot]["pending_finish"], "cancelled")
+
+    def test_release_held_never_touches_a_talk_only_worktree(self):
+        # ADR 0009 §2: a talk session's tree spans runs. The server never names one (the card
+        # has no runs), and this is the executor-side belt to that server-side brace.
+        p = self.pool()
+        slot, _ = p.assign_talk("RLY-9")
+        p.wts[slot]["talk_users"] = 0
+        p.release_held("RLY-9", "done")
+        self.assertIn(slot, p.wts)
+
+    def test_release_held_reclaims_a_worktree_recovered_after_a_restart(self):
+        # THE incident: run cancelled while the executor was down, `recover()` adopts the tree
+        # with run_id None, and the run-id-keyed channel could never name it.
+        p = self.pool()
+        p.wts["exec-RLY-1"] = {"ref": "RLY-1", "run_id": None, "state": "active",
+                               "live": False, "partition": "1"}
+        p.release_held("RLY-1", "cancelled")
+        self.assertNotIn("exec-RLY-1", p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 2)
 
     def test_release_on_unknown_slot_does_not_raise(self):
         p = self.pool()
@@ -1803,7 +1885,7 @@ class ClaimAndReportTest(unittest.TestCase):
         self.assertEqual((m, p), ("POST", "/api/node-jobs/claim"))
         self.assertEqual(b, {"executor": {"name": "box", "host": "h"},
                              "capacity": {"shared_clean": 2, "exclusive": 1},
-                             "running": []})
+                             "running": [], "held": []})
         self.assertEqual(k.get("timeout"), 25)
 
     def test_claim_empty_body_is_no_work(self):
@@ -4067,7 +4149,7 @@ class ExecuteLoopTest(unittest.TestCase):
         hashes cfg["name"] into the identity lock path, so a later override would lock
         under one name and advertise another."""
         seen = {}
-        relay.claim_node_job = lambda executor, cap, timeout, running: (
+        relay.claim_node_job = lambda executor, cap, timeout, running, held=(): (
             seen.update(executor=executor) or None)
         relay.report_outcome = lambda *a: "done"
 
@@ -4451,7 +4533,7 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         hb._beat()
         self.assertEqual(killed, ["nj-7"])
 
-    def test_the_beat_posts_bound_runs_from_bound_fn(self):
+    def test_the_beat_posts_held_from_held_fn(self):
         sent = {}
 
         def fake_api(method, path, body=None, **kw):
@@ -4461,29 +4543,20 @@ class ExecutorHeartbeatCapacityTest(unittest.TestCase):
         relay.api = fake_api
         hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
                                      capacity={"shared_clean": 1, "exclusive": 1},
-                                     bound_fn=lambda: [7, 9])
+                                     held_fn=lambda: [{"ref": "A1", "state": "bound"}])
         hb._beat()
-        self.assertEqual(sent["body"]["bound_runs"], [7, 9])
+        self.assertEqual(sent["body"]["held"], [{"ref": "A1", "state": "bound"}])
 
-    def test_release_runs_in_the_reply_are_handed_to_on_release_run(self):
+    def test_release_held_in_the_reply_is_handed_to_on_release_held(self):
         relay.api = lambda *a, **k: {"revoked": [],
-                                     "release_runs": [{"run_id": 42, "status": "done"},
-                                                      {"run_id": 43, "status": "failed"}]}
+                                     "release_held": [{"ref": "A1", "status": "done"},
+                                                      {"ref": "A2", "status": "failed"}]}
         released = []
         hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
                                      capacity={"shared_clean": 1, "exclusive": 1},
-                                     on_release_run=lambda rid, st: released.append((rid, st)))
+                                     on_release_held=lambda ref, st: released.append((ref, st)))
         hb._beat()
-        self.assertEqual(released, [(42, "done"), (43, "failed")])
-
-    def test_release_runs_tolerates_the_legacy_bare_int_form(self):
-        relay.api = lambda *a, **k: {"revoked": [], "release_runs": [7]}
-        released = []
-        hb = relay.ExecutorHeartbeat({"name": "e"}, lambda: [], lambda jid: None,
-                                     capacity={"shared_clean": 1, "exclusive": 1},
-                                     on_release_run=lambda rid, st: released.append((rid, st)))
-        hb._beat()
-        self.assertEqual(released, [(7, None)])
+        self.assertEqual(released, [("A1", "done"), ("A2", "failed")])
 
 
 class ExecutorSingletonLockTest(unittest.TestCase):
@@ -4669,6 +4742,12 @@ class ExecutorVocabularyContractTest(unittest.TestCase):
         for kind in (relay.TALK_KIND_TOOL, relay.TALK_KIND_OUT, relay.TALK_KIND_ERROR):
             self.assertIn(kind, relay.TALK_EVENT_KINDS)
 
+    def test_holding_states_match_the_fixture(self):
+        # RE311: the server SKIPS any held state it does not recognise, so a drift here does
+        # not error — it silently leaks the exclusive slot forever, which is the failure mode
+        # this whole card is about.
+        self.assertEqual(set(relay.HOLDING_STATES), set(self.vocab["holding_states"]))
+
 
 class ExecutorIdentTest(unittest.TestCase):
     """The `executor` dict both claim and heartbeat put on the wire. Pure and named for the
@@ -4756,11 +4835,11 @@ class FakeHeartbeat:
     instances = []
 
     def __init__(self, executor, running_fn, on_revoke, interval=15, capacity=None,
-                 bound_fn=None, on_release_run=None):
+                 held_fn=None, on_release_held=None):
         self.executor = executor
         self.capacity = capacity or {}
-        self.bound_fn = bound_fn
-        self.on_release_run = on_release_run
+        self.held_fn = held_fn
+        self.on_release_held = on_release_held
         self.beats = []
         FakeHeartbeat.instances.append(self)
 
@@ -4849,11 +4928,11 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         self._interrupt_after(0.2)
         relay.cmd_execute(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
         hb = FakeHeartbeat.instances[-1]
-        self.assertTrue(callable(hb.bound_fn))
-        self.assertTrue(callable(hb.on_release_run))
+        self.assertTrue(callable(hb.held_fn))
+        self.assertTrue(callable(hb.on_release_held))
         # the callbacks are the pool's own bound methods
-        self.assertEqual(hb.bound_fn.__name__, "idle_bound_run_ids")
-        self.assertEqual(hb.on_release_run.__name__, "release_run")
+        self.assertEqual(hb.held_fn.__name__, "holdings")
+        self.assertEqual(hb.on_release_held.__name__, "release_held")
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
@@ -6860,8 +6939,7 @@ class TalkWorktreeTest(unittest.TestCase):
     def test_a_talk_worktree_is_not_released_by_a_run_ending(self):
         pool = self._pool()
         pool.assign_talk("DE3")
-        pool.release_run(run_id=None, status="done")   # the None binding must NOT match
-        pool.release_run(run_id="run-9", status="done")
+        pool.release_held("DE3", "done")   # talk-created tree — must NOT be torn down
         self.assertIn("exec-DE3", pool.wts)
 
 
@@ -6937,13 +7015,13 @@ class TalkOccupancyTest(unittest.TestCase):
         self.assertTrue(pool.wts[slot]["live"])          # node occupancy untouched
         self.assertEqual(pool.wts[slot]["state"], "active")
 
-    def test_release_run_defers_the_same_way_as_release(self):
+    def test_release_held_defers_the_same_way_as_release(self):
         pool = self._pool()
         j = job("exclusive_shell", vars={"ref": "DE3"})
         slot, _reset = pool.assign(j)
         pool.release(j, slot, "parked")                 # idle-bound
         pool.assign_talk("DE3")                          # talk turn attaches to the idle tree
-        pool.release_run(run_id=j["run_id"], status="done")
+        pool.release_held("DE3", "done")
         self.assertIn(slot, pool.wts)                     # deferred — talk still there
         pool.release_talk(slot)
         self.assertNotIn(slot, pool.wts)                  # finished once talk also releases

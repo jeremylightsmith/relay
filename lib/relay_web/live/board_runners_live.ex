@@ -349,6 +349,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         <div
                           :for={pool <- runner.pools}
                           id={"runner-#{dom_id(runner)}-pool-#{pool.name}"}
+                          title={pool_tooltip(pool, runner)}
                           style={cap_chip_style(pool, runner.freshness)}
                         >
                           <span class="font-mono" style="font-size:11px;font-weight:600;">
@@ -628,6 +629,17 @@ defmodule RelayWeb.BoardRunnersLive do
     "display:flex;align-items:center;gap:8px;border:1px solid #{border};background:#{bg};" <>
       "border-radius:8px;padding:7px 11px;color:#{color};#{extra}"
   end
+
+  # RE311: the exclusive chip's `used` now comes from declared holdings, so the chip can name
+  # what occupies it — the same `<ref> <state>` one-liner `busy_summary()` prints in the
+  # executor's own log, now visible on the board. `nil` omits the attribute entirely, which is
+  # the right answer for the shared chip (holdings say nothing about the shared tree) and for an
+  # executor holding nothing.
+  defp pool_tooltip(%{name: "exclusive"}, %{held: [_first | _rest] = held}) do
+    Enum.map_join(held, " · ", &"#{&1["ref"]} #{&1["state"]}")
+  end
+
+  defp pool_tooltip(_pool, _runner), do: nil
 
   defp pips(%{total: total}), do: Enum.to_list(0..(total - 1)//1)
 

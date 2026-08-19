@@ -73,13 +73,23 @@ defmodule Relay.Runs.ExecutorStatusTest do
       assert zed.name == "zed"
     end
 
-    test "pools carry the advertised total and a used count from active jobs",
+    test "pools carry the advertised total, exclusive used from held and shared used from active jobs",
          %{board: board, stage: stage} do
       now = DateTime.utc_now()
-      insert(:executor, board: board, name: "e1", capacity: %{"shared_clean" => 3, "exclusive" => 1})
+
+      # RE311: `exclusive` occupancy comes from declared holdings, not the active-job count.
+      # No exclusive active job exists here at all — the exclusive chip's `used: 1` can only
+      # come from the `held` entry below, which is the point: an exclusive job with no
+      # matching `held` entry no longer moves the chip.
+      insert(:executor,
+        board: board,
+        name: "e1",
+        capacity: %{"shared_clean" => 3, "exclusive" => 1},
+        held: [%{"ref" => "X1", "state" => "bound"}]
+      )
+
       active_job(board, stage, "e1", isolation: "shared_clean")
       active_job(board, stage, "e1", isolation: "shared_clean")
-      active_job(board, stage, "e1", isolation: "exclusive")
 
       assert [%{pools: pools}] = Runs.list_executor_status(board, now)
 
@@ -206,6 +216,49 @@ defmodule Relay.Runs.ExecutorStatusTest do
       )
 
       assert [%{display_state: :gone}] = Runs.list_executor_status(board, now)
+    end
+  end
+
+  describe "held occupancy (RE311)" do
+    test "the exclusive chip counts DECLARED HOLDINGS, not active jobs", %{board: board} do
+      # The incident's Bug 3 at the operator's level: a bound-but-idle worktree holds an
+      # exclusive partition and has no active job, so the old count read 0/1 — "runner
+      # available" — while the executor had zero free exclusive slots.
+      insert(:executor,
+        board: board,
+        name: "holder",
+        capacity: %{"shared_clean" => 3, "exclusive" => 2},
+        held: [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "TH8", "state" => "retained"}]
+      )
+
+      [runner] = Runs.list_executor_status(board)
+      exclusive = Enum.find(runner.pools, &(&1.name == "exclusive"))
+
+      # `retained` holds no partition, so it does not count against the chip.
+      assert exclusive.used == 1
+      assert exclusive.total == 2
+      assert runner.held == [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "TH8", "state" => "retained"}]
+    end
+
+    test "the exclusive chip never reads BELOW the active exclusive job count", %{board: board, stage: stage} do
+      # The window between an executor's first exclusive claim and the beat that declares the
+      # holding: `held` is one short, and `free_slot?/2` reads this same number — an under-count
+      # there blames `:job_awaiting_slot` on an executor that has room, and an executor that has
+      # not reported `held` at all would render 0/N while running exclusive jobs.
+      insert(:executor, board: board, name: "claimer", capacity: %{"shared_clean" => 2, "exclusive" => 2}, held: [])
+      active_job(board, stage, "claimer", isolation: "exclusive")
+
+      [runner] = Runs.list_executor_status(board)
+      assert Enum.find(runner.pools, &(&1.name == "exclusive")).used == 1
+    end
+
+    test "the shared_clean chip still counts active jobs", %{board: board, stage: stage} do
+      # Holdings describe per-card worktrees only, so the shared chip's rule is unchanged.
+      insert(:executor, board: board, name: "sharer", capacity: %{"shared_clean" => 2, "exclusive" => 1})
+      active_job(board, stage, "sharer", isolation: "shared_clean")
+
+      [runner] = Runs.list_executor_status(board)
+      assert Enum.find(runner.pools, &(&1.name == "shared_clean")).used == 1
     end
   end
 end

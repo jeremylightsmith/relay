@@ -1007,7 +1007,14 @@ defmodule Relay.Runs do
   # the slot pool and reads the heartbeat `release_runs` reply as bare ids (it is now
   # {run_id, status} maps), so against the new server it would mis-bind worktrees and never
   # release them — worse than a stopped one.
-  @min_executor_version 21
+  # RE311 raised this to 57: the wire's release channel moved from run-id keying
+  # (`bound_runs`/`release_runs`) to ref keying (`held`/`release_held`), and the old channel is
+  # RETIRED rather than kept alongside — a second mechanism for one concern is the
+  # duplicated-fact bug this card exists to kill. A pre-57 executor sends no `held` and reads a
+  # reply that no longer carries `release_runs`, so against this server it would NEVER release a
+  # bound worktree: it silently fills its own pool until it deadlocks, which is genuinely worse
+  # than a stopped one (the AGENTS.md floor-raise rule, and the RLY-231 situation exactly).
+  @min_executor_version 57
 
   @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
   def min_executor_version, do: @min_executor_version
@@ -1024,14 +1031,22 @@ defmodule Relay.Runs do
   # executors doing the flow work they still handle correctly.
   @min_talk_executor_version 39
 
-  @doc "The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009)."
-  def min_talk_executor_version, do: @min_talk_executor_version
+  @doc """
+  The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009).
+
+  Never below `min_executor_version/0` (RE311): the talk floor is a SECOND, HIGHER floor, and
+  an executor below the base floor is refused every job anyway. Deriving the max here keeps that
+  relationship a fact of the code rather than a number two humans must remember to raise
+  together — `talk_capable?/1`, the executor contract fixture and the test factory all read this
+  as "a fully current executor".
+  """
+  def min_talk_executor_version, do: max(@min_talk_executor_version, @min_executor_version)
 
   @doc """
   Whether this executor is new enough to RUN a talk turn, not merely new enough to claim
   flow work. See `min_talk_executor_version/0`.
   """
-  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= @min_talk_executor_version
+  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= min_talk_executor_version()
 
   def talk_capable?(%Executor{}), do: false
 
@@ -1063,36 +1078,33 @@ defmodule Relay.Runs do
 
   @doc """
   Upserts the durable executor row keyed `{board_id, name}`, refreshing host,
-  interval, capacity, and `last_heartbeat`. Called by the claim endpoint (claim
-  doubles as a liveness touch) and by the extended heartbeat's capacity branch.
-  `attrs` is a STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"capacity"`,
-  and optionally `"capabilities"`).
+  interval, and `last_heartbeat`. Called by the claim endpoint (claim
+  doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
+  STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
+  `"capacity"` / `"capabilities"`).
 
-  `capabilities` rides send-on-change (RLY-182), so most beats omit it. The replace
-  list is therefore built per-call: replacing with the insert's values would null out
-  a good row on every beat that didn't carry the key, and preflight would then report
-  a healthy executor as missing every agent.
+  **Optional fields are absent-means-untouched.** `capabilities` rides send-on-change
+  (RLY-182) and `capacity` now rides the HEARTBEAT ONLY (RE311) — the claim's `capacity` is a
+  live free count with a different meaning, and writing it here is what made the roster
+  flip-flop between the configured total and the free count. The replace list is therefore
+  built per-call: replacing with the insert's values would null out a good row on every call
+  that didn't carry the key.
   """
   def upsert_executor(%Board{id: board_id}, attrs) do
-    params = %{
+    base = %{
       board_id: board_id,
       name: to_string(attrs["name"]),
       host: to_string(attrs["host"] || ""),
       interval: normalize_interval(attrs["interval"]),
-      capacity: normalize_capacity(attrs["capacity"]),
       version: normalize_version(attrs["version"]),
       last_heartbeat: now()
     }
 
     {params, replace} =
-      case normalize_capabilities(attrs["capabilities"]) do
-        nil ->
-          {params, [:host, :interval, :capacity, :version, :last_heartbeat, :updated_at]}
-
-        capabilities ->
-          {Map.put(params, :capabilities, capabilities),
-           [:host, :interval, :capacity, :capabilities, :version, :last_heartbeat, :updated_at]}
-      end
+      {base, [:host, :interval, :version, :last_heartbeat, :updated_at]}
+      |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
+      |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
+      |> put_reported(:held, normalize_held_attr(attrs["held"]))
 
     %Executor{}
     |> Executor.changeset(params)
@@ -1103,6 +1115,11 @@ defmodule Relay.Runs do
     )
   end
 
+  # nil = "this request did not report the field" → not in the params, not in the replace list,
+  # column untouched. The one place that discipline is expressed, for every optional field.
+  defp put_reported({params, replace}, _field, nil), do: {params, replace}
+  defp put_reported({params, replace}, field, value), do: {Map.put(params, field, value), [field | replace]}
+
   defp normalize_interval(i) when is_integer(i) and i > 0, do: i
   defp normalize_interval(_i), do: 30
 
@@ -1111,10 +1128,23 @@ defmodule Relay.Runs do
   defp normalize_version(_v), do: nil
 
   # RLY-201: one normalizer. The row and the ETS store must agree on what a malformed
-  # payload means, so both go through Relay.Runs.Capacity.normalize/1. Ecto stringifies
-  # the atom keys on save, so the row reads back as
+  # payload means, so a present, well-shaped map goes through Relay.Runs.Capacity.normalize/1.
+  # Ecto stringifies the atom keys on save, so the row reads back as
   # %{"shared_clean" => n, "exclusive" => n}.
-  defp normalize_capacity(cap), do: Capacity.normalize(cap)
+  #
+  # RE311: a missing key returns nil ("this request did not report capacity" — every claim),
+  # and so does a non-map payload. Untouched beats zeroed: writing zeros on one malformed beat
+  # would knock a working executor off dispatch until its next good one.
+  defp normalize_capacity(capacity) when is_map(capacity), do: Capacity.normalize(capacity)
+  defp normalize_capacity(_capacity), do: nil
+
+  # RE311: the claim never carries `held` onto the attrs (the controller only routes it from the
+  # heartbeat), so an absent key means "this beat did not report" and the column is left alone —
+  # the same absent-means-untouched rule as capacity/capabilities. A present list goes through
+  # Schemas.Executor.normalize_held/1, the one normalizer both the claim path and the release
+  # reconciliation use, so the stored shape and the in-flight shape can never disagree.
+  defp normalize_held_attr(held) when is_list(held), do: Executor.normalize_held(held)
+  defp normalize_held_attr(_held), do: nil
 
   # nil = "this beat did not report an inventory" — the caller must then leave the stored
   # value alone. A malformed payload is treated the same way rather than stored as junk.
@@ -1137,24 +1167,49 @@ defmodule Relay.Runs do
   Atomically claims the next eligible `queued` job for `executor`, scoped to
   the executor's board (a board-A key must never see board-B's jobs — the
   claim payload carries the run's `ref`/`vars`, so this is an authz boundary,
-  not just filtering): the oldest job whose `payload["isolation"]` is a class
-  with advertised free capacity `> 0` and that is unpinned (`executor_name`
-  nil) or already pinned to this executor. `SELECT … FOR UPDATE SKIP LOCKED`
-  inside a transaction so two executors never grab the same job. Returns
-  `{:ok, job}` or `{:ok, nil}` when nothing matches.
+  not just filtering).
+
+  **A job is offered when any one of three things is true** (RE311):
+
+    * it is **pinned** to this executor (`executor_name` = its name), or
+    * this executor **declares it holds that card's worktree** — the ref appears in `held` with
+      a state in `Schemas.Executor.active_holding_states/0` — and the job is `exclusive`, or
+    * it fits **advertised free capacity** (`free_capacity`), or it is a talk job (ADR 0009 §3).
+
+  The middle clause is the fix for the deadlock. The pin is the escape hatch for "the executor
+  already holds that slot", but the pin can be legitimately absent: `settle_retry_pin/3`'s
+  `:readopted` branch releases it when no executor is alive at retry time (RE297), and the job
+  is then inserted unpinned. The machine returns, `recover()` adopts `<ns>-<ref>` as active —
+  consuming the very slot the unpinned job needs to be offered through — and nothing ever
+  reaches `assign()`'s reuse branch. The escape hatch was keyed on the wrong fact.
+
+  `free_capacity` is the request's LIVE FREE count, passed as an argument and never persisted:
+  the row's `capacity` is the executor's configured total (see `Schemas.Executor`). It defaults
+  to `nil`, which falls back to the row — the in-process caller's "assume every configured slot
+  is free"; the transport always passes the real thing.
+
+  `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two executors never grab the same
+  job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
-  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity} = executor) do
-    allowed = for {class, n} <- capacity, is_integer(n) and n > 0, do: class
+  def claim_next_job(executor, free_capacity \\ nil, held \\ [])
+
+  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity} = executor, free_capacity, held) do
+    allowed = allowed_classes(free_capacity || capacity)
+    held_refs = Executor.active_held_refs(held)
     # RE268 — a talk job is only visible to an executor that can actually run one
     # (`talk_capable?/1`); an older executor still sees the flow kinds it handles correctly.
     kinds = if talk_capable?(executor), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
-    # Never short-circuit on empty capacity: a job pinned to this executor (an
-    # exclusive run it already holds — ADR 0006 §5) is claimable regardless of
-    # advertised free capacity, since the executor is already holding that slot.
-    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds) end)
+    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs) end)
   end
 
-  defp do_claim_next_job(board_id, name, allowed, kinds) do
+  # The isolation classes with room, as the STRINGS the payload stores. Accepts either shape:
+  # the atom-keyed map `Relay.Runs.Capacity.normalize/1` returns (the transport's free count) or
+  # the string-keyed row (the in-process fallback).
+  defp allowed_classes(capacity) do
+    for {class, n} <- capacity, is_integer(n) and n > 0, do: to_string(class)
+  end
+
+  defp do_claim_next_job(board_id, name, allowed, kinds, held_refs) do
     query =
       from j in NodeJob,
         join: c in Card,
@@ -1162,19 +1217,26 @@ defmodule Relay.Runs do
         where: c.board_id == ^board_id,
         where: j.state == :queued,
         where: j.kind in ^kinds,
-        # Unpinned FLOW jobs need advertised free capacity in their class; a job already
-        # pinned to this executor bypasses the capacity filter. An unpinned TALK job also
-        # bypasses it (ADR 0009 §3): a turn runs in the card's own worktree and advertises no
-        # isolation class, and the FIRST turn on a card is what CREATES the executor pin, so
-        # refusing it for want of an advertised slot would mean a card nobody has talked to
-        # can never be talked to on a busy executor. The exemption is the SERVER's: `assign_talk`
-        # in `bin/relay` still refuses a turn once the executor is at `max_worktrees`, and the
-        # person gets an immediate failed turn rather than a queue-and-wait (a known gap —
-        # runner.md "Talk"). This clause only ensures the job is offered at all.
+        # Three ways in, and only three (RE311). A job PINNED to this executor bypasses the
+        # capacity filter — the executor is already holding that run's slot. An unpinned job
+        # for a card whose worktree this executor DECLARES it holds bypasses it for the same
+        # reason, one level more honest: the pin is a proxy for the holding, and the proxy can
+        # go missing (a retry that released a dead pin) while the holding never does. That
+        # bypass is EXCLUSIVE-only: a `shared_clean` job runs in the shared worktree and must
+        # still respect shared capacity, or the bypass would oversubscribe the shared pool.
+        # An unpinned TALK job also bypasses (ADR 0009 §3): a turn runs in the card's own
+        # worktree and advertises no isolation class, and the FIRST turn on a card is what
+        # CREATES the executor pin, so refusing it for want of an advertised slot would mean a
+        # card nobody has talked to can never be talked to on a busy executor. The exemption is
+        # the SERVER's: `assign_talk` in `bin/relay` still refuses a turn once the executor is
+        # at `max_worktrees`. Everything else needs advertised free capacity in its class.
         where:
           j.executor_name == ^name or
             (is_nil(j.executor_name) and
-               (j.kind == ^NodeJob.talk_kind() or fragment("?->>'isolation'", j.payload) in ^allowed)),
+               (j.kind == ^NodeJob.talk_kind() or
+                  fragment("?->>'isolation'", j.payload) in ^allowed or
+                  (fragment("?->>'isolation'", j.payload) == "exclusive" and
+                     fragment("?->'vars'->>'ref'", j.payload) in ^held_refs))),
         order_by: [asc: j.id],
         limit: 1,
         lock: "FOR UPDATE SKIP LOCKED"
@@ -1297,37 +1359,63 @@ defmodule Relay.Runs do
   def refresh_running_card_liveness(_board, _running), do: {0, nil}
 
   @doc """
-  The subset of `bound_run_ids` whose run is TERMINAL (`status in Run.terminal_statuses()`) on
-  THIS board — the run-scoped analogue of `revoked_among/2`, one level up. The executor reports
-  the run-ids of exclusive slots it holds with no live job (`bound_runs`); this names the ones it
-  may now release, because the run has ended server-side. Returned as `%{id, status}` maps so the
-  executor's recovery teardown can choose remove (done/cancelled) vs retain (failed).
+  Of the per-card worktrees an executor declares it HOLDS, those it may now release — the
+  ref-keyed replacement for the retired, run-id-keyed `terminal_among/2` (RE311).
 
-  Board-scoped and conservative for the same reason as `revoked_among/2`: a run-id this board does
-  not own is NOT returned (the slot stays bound rather than freeing on an id we cannot verify), and
-  a non-integer id is ignored rather than raising — a heartbeat must never 500. Empty in → empty out.
+  Run-id keying structurally could not see the case that mattered. A run cancelled (or
+  finished) while the executor was down is never torn down, and on restart `recover()` adopts
+  the worktree with `run_id: None` — so it never appeared in `bound_runs` at all, and the slot
+  was consumed permanently. The **ref** is the identity of a `<ns>-<ref>` worktree and it
+  survives a restart, which is exactly why it is the right key.
+
+  For each held entry:
+
+    * skip anything whose `state` is not in `Schemas.Executor.active_holding_states/0` — a
+      `retained` tree is the human's post-mortem and the executor's own to evict;
+    * resolve `ref` → card id on **this board** (`Cards.card_ids_by_ref/2`, the same authz
+      discipline as `revoked_among/2` and — like it — ONE query however long the list is);
+      an unparseable or unknown ref is silently skipped, so a stale or garbage ref can never
+      become a teardown order. Resolution is board-scoped, and board keys are NOT unique, so
+      a ref is read as "card N **of the requesting board**": a checkout re-pointed at another
+      board declares holdings that belong to its new board, which is what an executor bound to
+      one API key means. `Schemas.Executor.normalize_held/1` caps the list at
+      `held_limit/0`, so a beat can never buy an unbounded query either;
+    * include it only when the card has **at least one run** and **no run in
+      `Schemas.Run.active_statuses/0`**, carrying the LATEST run's status.
+
+  The "at least one run" clause is load-bearing: a card with zero runs is a **talk-only**
+  worktree, which ADR 0009 §2 says must outlive runs — naming it would tear down a live
+  conversation's tree. Talk-only trees are retired by the executor's own
+  `_retire_talk_only_locked`.
+
+  Returned as `%{ref, status}` maps so the executor's teardown can choose remove
+  (`done`/`cancelled`) vs retain (`failed`). Empty in → empty out; a malformed beat never raises.
   """
-  def terminal_among(%Board{id: board_id}, bound_run_ids) when is_list(bound_run_ids) do
-    ids = for id <- bound_run_ids, int = to_job_id(id), is_integer(int), do: int
-
-    case ids do
-      [] ->
-        []
-
-      ids ->
-        Repo.all(
-          from r in Run,
-            join: c in Card,
-            on: c.id == r.card_id,
-            where:
-              c.board_id == ^board_id and r.id in ^ids and
-                r.status in ^Run.terminal_statuses(),
-            select: %{id: r.id, status: r.status}
-        )
+  def releasable_held(%Board{} = board, held) when is_list(held) do
+    case held |> Executor.active_held_refs() |> then(&Cards.card_ids_by_ref(board, &1)) do
+      empty when map_size(empty) == 0 -> []
+      cards -> releasable_entries(cards)
     end
   end
 
-  def terminal_among(_board, _ids), do: []
+  def releasable_held(_board, _held), do: []
+
+  # Two queries total (the ref→id resolution above and the runs below), never one per ref: this
+  # runs on every heartbeat of every executor.
+  defp releasable_entries(cards) do
+    card_ids = Map.values(cards)
+
+    runs_by_card =
+      from(r in Run, where: r.card_id in ^card_ids, select: %{card_id: r.card_id, id: r.id, status: r.status})
+      |> Repo.all()
+      |> Enum.group_by(& &1.card_id)
+
+    for {ref, card_id} <- Enum.sort(cards),
+        runs = Map.get(runs_by_card, card_id, []),
+        runs != [],
+        Enum.all?(runs, &(&1.status not in Run.active_statuses())),
+        do: %{ref: ref, status: Enum.max_by(runs, & &1.id).status}
+  end
 
   defp to_job_id(id) when is_integer(id), do: id
 
@@ -1430,8 +1518,11 @@ defmodule Relay.Runs do
 
   @doc """
   The runners-view roster for `board` at `now` — one map per executor, sorted by name, each
-  carrying its advertised capacity (with `used` counted from that executor's active jobs) and
-  the in-flight jobs attributed to it.
+  carrying its advertised capacity and the in-flight jobs attributed to it. A pool's `used` is
+  `pool_used/3`: the DECLARED HOLDINGS in an active state for `exclusive` (RE311 — a
+  bound-but-idle or talk-attached worktree occupies a slot with no active job; a `retained` one
+  holds no partition and does not count), the active-job count for `shared_clean`, and never
+  less than the active-job count for either.
 
   Pure w.r.t. the clock: `now` is injectable and defaults to the current time. Two queries,
   no N+1. Reads only Postgres, so the page survives an app restart — unlike `Runs.Capacity`,
@@ -1470,6 +1561,9 @@ defmodule Relay.Runs do
         # :gone > :stale > :outdated > :fresh — a silent executor's silence is the more urgent
         # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
         display_state: display_state(freshness, outdated),
+        # RE311: what this executor declares it holds — the chip's `used` is derived from it,
+        # and the runners view names each entry in the chip's tooltip.
+        held: List.wrap(executor.held),
         pools: pools_for(executor, jobs),
         jobs: jobs
       }
@@ -1714,6 +1808,13 @@ defmodule Relay.Runs do
   # executor poll. Jobs queued only because every executor is legitimately busy return nil.
   @stopped_work_after_s 120
 
+  # A job queued unclaimed this long while every connected executor is FULL is waiting on a
+  # slot, not merely on the next poll. Its own named attribute on purpose (RE311): the sibling
+  # windows mean different things — @stranded_grace_s is "nothing alive is holding this" and
+  # @stopped_work_after_s is "the board has stopped" — and reusing either would make one number
+  # answer two questions, which is the bug pattern this card exists to remove.
+  @awaiting_slot_grace_s 300
+
   @doc """
   The board-level "work has stopped" verdict, or `nil` when the board is quiet. Non-`nil` only
   when: at least one node-job is queued and unclaimed, the oldest has waited past
@@ -1802,10 +1903,11 @@ defmodule Relay.Runs do
   SchedulerSupervisor]` (`use Boundary` above), so `RelayWeb` cannot reach
   `Relay.Runs.Scheduler` and must not know it exists. The dispatch verdicts come from
   `Scheduler.explain/2` over the **same snapshot the scheduler plans from**
-  (`Scheduler.Server.build_snapshot/2`); this function layers on the two verdicts that
+  (`Scheduler.Server.build_snapshot/2`); this function layers on the verdicts that
   need DB state the snapshot does not carry — `:run_failed` (the card has no active run
-  and its latest run failed) and `:job_stranded` (an active job past `@stranded_grace_s`
-  with no live executor).
+  and its latest run failed), `:job_stranded` (an active job past `@stranded_grace_s`
+  with no live executor), and `:job_awaiting_slot` (a queued job past `@awaiting_slot_grace_s`
+  with no connected executor holding a free slot in its class — RE311).
 
   Read-only: safe to call while a run is live. `now` is injectable for tests.
   """
@@ -1845,9 +1947,14 @@ defmodule Relay.Runs do
   end
 
   defp override_verdict(base, run, last, job, board, now, capacity) do
+    awaiting = awaiting_slot(run, job, board, now)
+
     cond do
-      run != nil and stranded?(job, board, now) ->
+      really_stranded?(run, job, board, now, capacity) ->
         stranded_verdict(base, job)
+
+      awaiting != nil ->
+        awaiting_slot_verdict(base, job, awaiting)
 
       run != nil and roster_blocked?(run, job, board, now, capacity) ->
         roster_blocked_verdict(base, capacity)
@@ -1859,6 +1966,20 @@ defmodule Relay.Runs do
         base
     end
   end
+
+  # RE311: an EMPTY roster (`capacity_diagnosis`'s :no_executor — map_size(executors) == 0, not
+  # merely "every executor is stale") is a more fundamental fact than "stranded": nothing was
+  # ever holding this job to go quiet on it. `stranded?` alone can't see that distinction
+  # (`any_live_executor?` reads "no live executor" the same way for zero rows and for a roster
+  # of stale rows), so this guard defers to `roster_blocked?`'s more specific `:no_executor`
+  # verdict. A roster with a stale or outdated executor still strands normally — this only
+  # excludes the "nobody has ever connected" case.
+  defp really_stranded?(run, job, board, now, capacity) do
+    run != nil and not empty_roster?(capacity) and stranded?(job, board, now)
+  end
+
+  defp empty_roster?({:no_executor, _bits}), do: true
+  defp empty_roster?(_capacity), do: false
 
   # For a parked pinned run, explain/2 has already named the awaited executor in the
   # detail sentence and stamped evidence.pinned_executor_name. The snapshot can't know
@@ -1989,6 +2110,91 @@ defmodule Relay.Runs do
     end
   end
 
+  # A live run whose current job is queued, unclaimed, past the grace window, and which no
+  # connected executor has room for (RE311). `run_verdict/2` falls through to `:run_active` for
+  # any non-parked run — true of the run, and useless to the operator whose job had been queued
+  # 90 minutes. This layer is only POSSIBLE because the roster row is now truthful: `capacity`
+  # has one writer and `held` says what actually occupies the slots.
+  #
+  # Ordered BEFORE roster_blocked? and guarded on a non-empty roster: "nobody is connected" is
+  # the more specific answer and must keep winning. A :parked run is excluded for the same
+  # reason roster_blocked? excludes it — run_verdict/2 already gives it a specific verdict
+  # (and, for a parked pinned run, names the awaited machine) that this must not clobber.
+  #
+  # Returns the evidence map, or nil when this is not the situation — computed once and reused
+  # by the verdict, so the roster is read at most once per diagnosis. The cheap guards come
+  # first so a healthy card never pays for `list_executor_status/2`.
+  defp awaiting_slot(nil, _job, _board, _now), do: nil
+  defp awaiting_slot(%{status: :parked}, _job, _board, _now), do: nil
+
+  defp awaiting_slot(_run, %NodeJob{state: :queued, executor_name: nil} = job, board, now) do
+    age = DateTime.diff(now, job.inserted_at, :second)
+    isolation = job.payload["isolation"]
+
+    with true <- age > @awaiting_slot_grace_s,
+         true <- is_binary(isolation),
+         runners = connected_runners(board, now),
+         [_first | _rest] <- runners,
+         false <- Enum.any?(runners, &free_slot?(&1, isolation)) do
+      %{queued_age_s: age, isolation: isolation, executors: Enum.map(runners, &slot_evidence(&1, isolation))}
+    else
+      _not_awaiting -> nil
+    end
+  end
+
+  defp awaiting_slot(_run, _job, _board, _now), do: nil
+
+  # Read through list_executor_status/2 — the SAME read the runners page renders — so the
+  # verdict can never disagree with what an operator is looking at while they run `relay why`.
+  # OUTDATED rows are excluded: a refused executor claims nothing whatever its free slots say,
+  # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
+  # the more specific `:executor_outdated` from roster_blocked?/5 keeps winning.
+  defp connected_runners(board, now) do
+    board
+    |> list_executor_status(now)
+    |> Enum.filter(&(&1.freshness == :fresh and not &1.outdated))
+  end
+
+  defp free_slot?(runner, isolation) do
+    Enum.any?(runner.pools, fn pool -> pool.name == isolation and pool.used < pool.total end)
+  end
+
+  defp slot_evidence(runner, isolation) do
+    pool = Enum.find(runner.pools, &(&1.name == isolation))
+
+    %{
+      name: runner.name,
+      used: (pool && pool.used) || 0,
+      total: (pool && pool.total) || 0,
+      held: runner.held
+    }
+  end
+
+  defp awaiting_slot_verdict(base, job, %{queued_age_s: age, isolation: isolation, executors: executors}) do
+    %{
+      base
+      | verdict: :job_awaiting_slot,
+        detail:
+          "Job #{job.id} for node #{job.node_key} has been queued #{div(age, 60)}m. " <>
+            "No connected executor has a free #{isolation} slot — #{holders_phrase(executors)}.",
+        evidence:
+          base.evidence
+          |> Map.put(:queued_age_s, age)
+          |> Map.put(:isolation, isolation)
+          |> Map.put(:executors, executors)
+    }
+  end
+
+  defp holders_phrase(executors) do
+    Enum.map_join(executors, "; ", fn e -> ~s("#{e.name}" holds #{e.used} of #{e.total}) <> held_suffix(e.held) end)
+  end
+
+  defp held_suffix([]), do: ""
+
+  defp held_suffix(held) do
+    " (" <> Enum.map_join(held, ", ", &"#{&1["ref"]} #{&1["state"]}") <> ")"
+  end
+
   defp last_execution_summary(%Run{node_executions: executions}) when is_list(executions) do
     case List.last(executions) do
       nil ->
@@ -2089,17 +2295,37 @@ defmodule Relay.Runs do
   end
 
   # One chip per ADVERTISED class — we never invent a chip for capacity the executor never
-  # claimed to have. `used` counts that executor's active jobs in the class, treating any
-  # non-"exclusive" isolation as shared_clean (the same rule reclaim_executor/1 applies).
-  defp pools_for(%Executor{capacity: capacity}, jobs) do
+  # claimed to have.
+  defp pools_for(%Executor{capacity: capacity, held: held}, jobs) do
     used = Enum.frequencies_by(jobs, &isolation_class(&1.isolation))
+    held = List.wrap(held)
 
     capacity
     |> Enum.sort_by(fn {name, _total} -> name end)
-    |> Enum.map(fn {name, total} ->
-      %{name: name, used: Map.get(used, name, 0), total: total}
-    end)
+    |> Enum.map(fn {name, total} -> %{name: name, used: pool_used(name, used, held), total: total} end)
   end
+
+  # RE311: the `exclusive` chip's `used` is the count of DECLARED HOLDINGS in an active state —
+  # exactly `total - free` as the executor's own `capacity()` computes it, so the two sides now
+  # agree by construction. Counting active jobs (as every chip used to) made a bound-but-idle,
+  # talk-attached or retained worktree invisible, which is what reported "runner available"
+  # while the executor had zero free exclusive slots. Routed through `active_held_refs/1` — the
+  # SAME derivation the claim bypass and the release reconciliation use — so the chip counts the
+  # dispatcher's definition of "occupied", not a second reimplementation of it.
+  #
+  # Floored at the active-job count so the two facts can only ever ADD occupancy, never hide it:
+  # between an executor's first claim and the beat that declares the new holding, `held` is one
+  # short, and `free_slot?/2` reads this same number — an under-count there would blame
+  # `:job_awaiting_slot` on an executor that has room, or (with `held` absent entirely) read
+  # every running row as idle.
+  defp pool_used("exclusive", jobs_used, held) do
+    held |> Executor.active_held_refs() |> length() |> max(Map.get(jobs_used, "exclusive", 0))
+  end
+
+  # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the
+  # shared tree, so its occupancy is still the active-job count (any non-"exclusive" isolation
+  # counts as shared, the same rule reclaim_executor/1 applies).
+  defp pool_used(name, jobs_used, _held), do: Map.get(jobs_used, name, 0)
 
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"

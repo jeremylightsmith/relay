@@ -103,5 +103,11 @@ defmodule Relay.RunsExecutorVersionTest do
 
       assert Runs.min_executor_version() <= String.to_integer(declared)
     end
+
+    test "the talk floor is never below the base floor" do
+      # The factory and the executor contract fixture both use the talk floor as "a fully
+      # current executor". If the base floor ever passed it, every one of them would 409.
+      assert Runs.min_talk_executor_version() >= Runs.min_executor_version()
+    end
   end
 end

@@ -1051,6 +1051,28 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  The `%{ref => card_id}` map for `refs` on `board`, in ONE query — a ref that does not parse
+  against the board's key, or names no card on that board, is simply absent.
+
+  The batched sibling of `get_card_by_ref/2` for hot paths that need card IDENTITY only (the
+  heartbeat's release reconciliation, RE311): `get_card_by_ref/2` ends in `preload_owners/1`,
+  which is several queries per ref for associations such a caller never reads. Board-scoped for
+  the same reason `get_card_by_ref/2` is — a ref can never resolve to another board's card.
+  """
+  def card_ids_by_ref(%Board{} = board, refs) when is_list(refs) do
+    parsed = for ref <- refs, is_binary(ref), {:ok, n} <- [parse_ref_number(board, ref)], do: {ref, n}
+
+    ids =
+      Card
+      |> where([c], c.board_id == ^board.id and c.ref_number in ^Enum.map(parsed, &elem(&1, 1)))
+      |> select([c], {c.ref_number, c.id})
+      |> Repo.all()
+      |> Map.new()
+
+    for {ref, number} <- parsed, id = Map.get(ids, number), into: %{}, do: {ref, id}
+  end
+
+  @doc """
   Fetches the card a human-facing ref (e.g. `"RL12"`) points at on
   `board`, or `nil` when the ref does not parse against the board's key
   or no such card exists on that board. Scoping by `board_id` means a

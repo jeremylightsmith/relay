@@ -50,6 +50,32 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     flow
   end
 
+  # The Code shape: one exclusive node, so a claim exercises the exclusive capacity path.
+  defp exclusive_flow(board) do
+    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "excl",
+        isolation: :exclusive,
+        pulls_from_stage_id: next_up.id,
+        works_in_stage_id: spec.id,
+        lands_on_stage_id: plan.id,
+        nodes: [%{key: "work", type: :shell, run: "mix precommit"}],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "done", on: :succeeded},
+          %{from: "work", to: "done", on: :failed},
+          %{from: "work", to: "done", on: :partial}
+        ]
+      })
+
+    {:ok, flow} = Relay.Flows.enable_flow(flow)
+    flow
+  end
+
   defp start_queued_job(board, flow) do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Do work"})
@@ -223,6 +249,77 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["kind"] == "talk"
       assert body["turn_id"] == turn.id
       assert Relay.Talk.get_turn(turn.id).status == :claimed
+    end
+
+    test "a claim never writes the executor's capacity column", %{conn: conn, board: board} do
+      # The incident's Bug 1: the claim wrote the FREE count and the heartbeat wrote the
+      # CONFIGURED total into one column, so `relay executors` and the runners page read
+      # whichever landed last.
+      post(conn, ~p"/api/node-jobs/heartbeat", %{
+        "executor" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "capacity" => %{"shared_clean" => 3, "exclusive" => 2},
+        "running" => []
+      })
+
+      claim(conn, %{"shared_clean" => 0, "exclusive" => 0})
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
+      assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 2}
+    end
+
+    test "a claim carrying held never writes the executor's held column", %{conn: conn, board: board} do
+      # The single-writer thesis (RE311): `executor_attrs/1` never puts "held" on a claim's
+      # upsert attrs, only `heartbeat_attrs/2` does — this is the request-shaped proof of it,
+      # not just a reading of the controller source.
+      post(
+        conn,
+        ~p"/api/node-jobs/claim",
+        Jason.encode!(%{
+          "executor" => %{
+            "name" => "fake",
+            "host" => "fake",
+            "interval" => 30,
+            "version" => Runs.min_talk_executor_version()
+          },
+          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+          "running" => [],
+          "held" => [%{"ref" => "RLY-9", "state" => "bound"}],
+          "wait" => "0"
+        })
+      )
+
+      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
+      assert executor.held == []
+    end
+
+    test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
+         %{conn: conn, board: board} do
+      flow = exclusive_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      card = Relay.Repo.get!(Schemas.Card, run.card_id)
+      ref = Relay.Cards.ref(board, card)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/claim",
+          Jason.encode!(%{
+            "executor" => %{
+              "name" => "fake",
+              "host" => "fake",
+              "interval" => 30,
+              "version" => Runs.min_talk_executor_version()
+            },
+            "capacity" => %{"shared_clean" => 0, "exclusive" => 0},
+            "running" => [],
+            "held" => [%{"ref" => ref, "state" => "bound"}],
+            "wait" => "0"
+          })
+        )
+        |> json_response(200)
+
+      assert body["ref"] == ref
+      assert body["isolation"] == "exclusive"
     end
   end
 
@@ -495,54 +592,57 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert %{"revoked" => []} = json_response(conn, 200)
     end
 
-    test "a cancelled bound run comes back in release_runs so the executor frees its slot",
+    test "a cancelled held ref comes back in release_held so the executor frees its slot",
          %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
       {:ok, _} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => release_runs} = json_response(conn, 200)
-      assert %{"run_id" => run.id, "status" => "cancelled"} in release_runs
+      assert %{"release_held" => release_held} = json_response(conn, 200)
+      assert %{"ref" => ref, "status" => "cancelled"} in release_held
     end
 
-    test "a still-active bound run is NOT in release_runs", %{conn: conn, board: board} do
+    test "a still-active held ref is NOT in release_held", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => []} = json_response(conn, 200)
+      assert %{"release_held" => []} = json_response(conn, 200)
     end
 
-    test "never reports another board's run in release_runs", %{conn: conn} do
+    test "never reports another board's ref in release_held", %{conn: conn} do
       {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board 2"})
       flow = four_outcome_flow(other)
       {run, _job} = start_queued_job(other, flow)
       {:ok, _} = Runs.cancel_run(run)
+      ref = Relay.Cards.ref(other, Relay.Repo.get!(Schemas.Card, run.card_id))
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
           "executor" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
-          "bound_runs" => [run.id]
+          "held" => [%{"ref" => ref, "state" => "bound"}]
         })
 
-      assert %{"release_runs" => []} = json_response(conn, 200)
+      assert %{"release_held" => []} = json_response(conn, 200)
     end
 
     test "a non-map executor is a 422, not a 500", %{conn: conn} do
