@@ -1340,6 +1340,52 @@ defmodule Relay.RunsTest do
       assert Runs.releasable_held(board, [held(Relay.Cards.ref(other, other_card), "bound")]) == []
     end
 
+    test "never names a ref whose card has a terminal run AND a live one (cancel-then-retry)",
+         %{board: board} do
+      # RE311: `releasable_held/2` is CARD-scoped, not run-scoped. Cancel R1, hit Retry inside
+      # the ~15s before the release channel fires, and the card carries a cancelled run and a
+      # running one — the tree belongs to the live run, so the ref must not be named. The
+      # executor is what makes that safe: `assign` adopts the card's own idle tree for R2
+      # instead of refusing it (bin/test_relay.py's
+      # `test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run`).
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "cancel then retry")
+      {:ok, cancelled} = Runs.start_run(card, flow)
+      {:ok, _run} = Runs.cancel_run(cancelled)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.card_id == ^card.id), set: [status: :cancelled])
+      {:ok, _retry} = Runs.start_run(card, flow)
+      ref = Relay.Cards.ref(board, card)
+
+      assert Runs.releasable_held(board, [held(ref, "bound")]) == []
+    end
+
+    test "a colliding ref_number resolves against the REQUESTING board, never the other one",
+         %{board: board} do
+      # Board keys are not unique (every board defaults to "RLY"), so `<key>-5` can name a card
+      # on two boards. The executor is bound to ONE board by its API key, so its declared refs
+      # are read as that board's — a terminal run on the OTHER board's card 5 must not become a
+      # teardown order here.
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311 collide"})
+      other_flow = retry_flow(other)
+      mine = card_in(board, "Next up", "mine")
+      theirs = card_in(other, "Next up", "theirs")
+      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^mine.id), set: [ref_number: 4242])
+      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^theirs.id), set: [ref_number: 4242])
+      {:ok, their_run} = Runs.start_run(theirs, other_flow)
+      {:ok, _run} = Runs.cancel_run(their_run)
+      ref = "#{board.key}-4242"
+
+      # My card 4242 has no run at all, so the shared ref names nothing here...
+      assert Runs.releasable_held(board, [held(ref, "bound")]) == []
+
+      # ...and once MY card's run ends, the ref names my card, with my run's status.
+      my_flow = retry_flow(board)
+      {:ok, my_run} = Runs.start_run(Relay.Repo.reload!(mine), my_flow)
+      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^my_run.id), set: [status: :failed])
+
+      assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
+    end
+
     test "reports the LATEST run's status when a card has several", %{board: board} do
       flow = retry_flow(board)
       card = card_in(board, "Next up", "two runs")
@@ -1373,6 +1419,14 @@ defmodule Relay.RunsTest do
       ]
 
       assert Schemas.Executor.normalize_held(held) == [%{"ref" => "RLY-1", "state" => "bound"}]
+    end
+
+    test "normalize_held/1 truncates a beat past held_limit/0" do
+      # An executor holds a handful of worktrees; an unbounded list would buy an unbounded
+      # query on the heartbeat's hot path.
+      held = for n <- 1..(Schemas.Executor.held_limit() + 50), do: %{"ref" => "RLY-#{n}", "state" => "bound"}
+
+      assert length(Schemas.Executor.normalize_held(held)) == Schemas.Executor.held_limit()
     end
 
     test "normalize_held/1 degrades a non-list to an empty list rather than raising" do

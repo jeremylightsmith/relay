@@ -115,6 +115,29 @@ defmodule Relay.Runs.DiagnoseTest do
     assert job.state == :claimed
   end
 
+  test "an aged job with an EMPTY roster diagnoses :no_executor, not :job_stranded",
+       %{board: board, works: works} do
+    # RE311: "nothing was ever holding this job" is a more fundamental fact than "whatever held
+    # it went quiet", and it is the one an operator can act on (start an executor). `stranded?`
+    # alone cannot tell an empty roster from a roster of stale rows — `really_stranded?/5` is
+    # what defers to the more specific verdict. Every other stranded test inserts an executor
+    # row, so this is the branch nothing else covers.
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "implement")
+    execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+
+    insert(:node_job,
+      node_execution: execution,
+      state: :queued,
+      executor_name: nil,
+      claimed_at: nil,
+      inserted_at: DateTime.add(now, -3600, :second)
+    )
+
+    assert %{verdict: :no_executor} = Runs.diagnose(board, card, now)
+  end
+
   test "a live run with a fresh executor stays run_active", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)

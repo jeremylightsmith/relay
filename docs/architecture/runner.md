@@ -822,8 +822,9 @@ claim/execute/report loop, one more branch.
   tree down (or believe it idle) out from under the other: a node job's `release()` finishing
   while a talk turn was still streaming would run `git worktree remove --force` mid-answer and
   stash the person's uncommitted edits; a talk turn ending would clear `live` under a still-
-  running node job, defeating `release_run/2`'s "never touch a worktree with a live job"
-  guarantee. `release()`/`release_run/2` now DEFER a terminal disposition (`pending_finish`)
+  running node job, defeating the release path's "never touch a worktree with a live job"
+  guarantee. `release()`/`release_held/2` (which replaced the run-id-keyed `release_run/2` in
+  RE311, keeping both of its guards verbatim) DEFER a terminal disposition (`pending_finish`)
   while any other occupant (`live`, or `talk_users > 0`) is still present; `release_talk/1`
   finishes it once the last one leaves — last occupant out tears down. The deferred disposition
   is read only after those early returns, so a non-final release cannot discard it.
@@ -851,10 +852,35 @@ claim/execute/report loop, one more branch.
   turn's still-reading claude process — the same "refuse rather than steal a live
   worktree" precedent it already applies to a tree bound to a different live run.
 
+  **Restart durability of the `talk` marker (accepted gap, RE311).** That marker is in-memory
+  only: `recover()` rebuilds every adopted tree with no `talk` key, so after a restart a
+  talk-created tree on a card that HAS runs (all terminal) is named by the server and torn down,
+  which ADR 0009 §2 otherwise forbids. The exposure is narrow — an idle talk-only tree has
+  already been `retained` by `_retire_talk_only_locked`, and `retained` IS disk-marked and
+  survives — so it takes a talk turn that was live at crash time, whose `claude` process died
+  with the executor anyway; teardown stashes any dirty edits (`_teardown` salvages via
+  `git stash push -u`) rather than discarding them. Marking `talk` on disk the way
+  `RETAINED_MARKER` is would close it, but the marker would have to be written after the tree is
+  created (in the talk worker, not `assign_talk/1`) and CLEARED the moment a run adopts the tree
+  — a stale marker would make `release_held/2` skip that tree forever, which is the very slot
+  leak this card removed. Left as a documented gap rather than a half-durable marker.
+
+  **Adopting the card's own tree (RE311).** `assign/1` reuses an `active` record when it is
+  bound to this run, has an unknown binding (`run_id: None`, the `recover()` shape), OR is
+  **idle and bound to an earlier run of the same card** — the last case is cancel-then-retry: a
+  revoke deliberately leaves the tree `active`, idle and bound to the cancelled run, and the
+  release channel only frees it on a later beat (~15s). Refusing there placed nothing for the
+  bounded retry window and then failed the retry with a misleading "no free 'exclusive' slot
+  advertised", so a card's retry could fail for holding its own worktree. The refusal is now
+  exactly what its comment always claimed: a genuinely LIVE run, or a deferred `pending_finish`.
+
   **Bounded, and retried:** while a node job's terminal disposition sits deferred
   (`pending_finish`), the record stays `state="active"` bound to the OLD run_id. If a NEW run
-  for the same card is dispatched before the talk turn ends, `assign/1`'s "different live run"
-  branch refuses it (the run_id no longer matches). That refusal used to be reported as a
+  for the same card is dispatched before the talk turn ends, `assign/1` refuses it — a deferred
+  disposition still owns the tree, and adopting it would let `release_talk/1` tear the tree down
+  under the new run. (This is now the ONLY reason `assign/1` refuses an idle tree: since RE311
+  an idle `active` record bound to an EARLIER run of the same card is adopted, because the
+  tree's identity is the card's branch. See "Adopting the card's own tree" below.) That refusal used to be reported as a
   **failed job**, so someone asking "why did this fail?" during a retry failed the retry. The
   claim loop now retries placement for a bounded window (`PLACEMENT_ATTEMPTS` ×
   `PLACEMENT_RETRY_S`, ~10s, `bin/relay`) before rejecting, which covers one talk turn handing
@@ -925,9 +951,12 @@ from a follow-up review, 37 the branch-checkout non-destructiveness fix above, 3
 failure-line-into-the-transcript fix from the whole-branch review, 39 the `talk_users`
 occupancy count, the bounded placement retry, and the rejected-turn transcript line).
 
-**Two version floors.** `Relay.Runs.min_executor_version/0` (21) is **not** raised — an executor
+**Two version floors.** `Relay.Runs.min_executor_version/0` was **not** raised for Talk (it was
+21 at the time; RE311 has since raised it to 57 for the reshaped release channel) — an executor
 without Talk is not worse than a stopped one for the flow work it still does correctly. Talk gets
-its own, higher floor instead: `Relay.Runs.min_talk_executor_version/0` (38), applied by
+its own, higher floor instead: `Relay.Runs.min_talk_executor_version/0` (38 then; it now returns
+`max(@min_talk_executor_version, min_executor_version/0)`, so raising the base floor carries it
+along), applied by
 `talk_capable?/1` inside `claim_next_job/1`, which narrows the claim to `NodeJob.flow_kinds()`
 for anything below it. Without that second floor a pre-Talk executor would happily claim the
 first (deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key

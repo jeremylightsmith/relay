@@ -227,10 +227,10 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `run_active` | a run is live; `evidence.current_node` names the node |
 | `not_eligible` | a flow pulls from this stage, but the card's status is not `ready`/`queued` |
 | `run_failed` | the card's last run failed; `evidence.last_execution.detail` carries the **full** failure text |
-| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live executor |
+| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live executor, **and the board has at least one executor row**. An EMPTY roster is the more fundamental fact and diagnoses `no_executor` instead (RE311) |
 | `job_awaiting_slot` | a live run's job has sat `queued` unclaimed past the grace and no connected executor has a free slot in its class; `evidence.queued_age_s`, `evidence.isolation` and `evidence.executors` (each `%{name, used, total, held}`) name the job's age, class, and who holds the slots |
 | `executor_outdated` | every connected executor is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
-| `no_executor` | no executor is connected (or every one has gone silent), so nothing is running this board's node-jobs |
+| `no_executor` | no executor is connected (or every one has gone silent), so nothing is running this board's node-jobs. Also the verdict for an aged unclaimed job when the roster is empty — nothing was ever holding it to go quiet on it (RE311) |
 
 CLI: `bin/relay why RLY-12`.
 

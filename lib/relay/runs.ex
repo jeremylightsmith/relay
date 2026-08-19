@@ -1372,10 +1372,14 @@ defmodule Relay.Runs do
 
     * skip anything whose `state` is not in `Schemas.Executor.active_holding_states/0` — a
       `retained` tree is the human's post-mortem and the executor's own to evict;
-    * resolve `ref` → card on **this board** (`Cards.get_card_by_ref/2`, the same authz
-      discipline as `revoked_among/2`); an unparseable, unknown or other-board ref is silently
-      skipped, so a stale or garbage ref can never become a teardown order across a board
-      boundary;
+    * resolve `ref` → card id on **this board** (`Cards.card_ids_by_ref/2`, the same authz
+      discipline as `revoked_among/2` and — like it — ONE query however long the list is);
+      an unparseable or unknown ref is silently skipped, so a stale or garbage ref can never
+      become a teardown order. Resolution is board-scoped, and board keys are NOT unique, so
+      a ref is read as "card N **of the requesting board**": a checkout re-pointed at another
+      board declares holdings that belong to its new board, which is what an executor bound to
+      one API key means. `Schemas.Executor.normalize_held/1` caps the list at
+      `held_limit/0`, so a beat can never buy an unbounded query either;
     * include it only when the card has **at least one run** and **no run in
       `Schemas.Run.active_statuses/0`**, carrying the LATEST run's status.
 
@@ -1388,29 +1392,26 @@ defmodule Relay.Runs do
   (`done`/`cancelled`) vs retain (`failed`). Empty in → empty out; a malformed beat never raises.
   """
   def releasable_held(%Board{} = board, held) when is_list(held) do
-    cards =
-      for ref <- Executor.active_held_refs(held),
-          card = Cards.get_card_by_ref(board, ref),
-          do: {ref, card}
-
-    case cards do
-      [] -> []
+    case held |> Executor.active_held_refs() |> then(&Cards.card_ids_by_ref(board, &1)) do
+      empty when map_size(empty) == 0 -> []
       cards -> releasable_entries(cards)
     end
   end
 
   def releasable_held(_board, _held), do: []
 
+  # Two queries total (the ref→id resolution above and the runs below), never one per ref: this
+  # runs on every heartbeat of every executor.
   defp releasable_entries(cards) do
-    card_ids = Enum.map(cards, fn {_ref, card} -> card.id end)
+    card_ids = Map.values(cards)
 
     runs_by_card =
       from(r in Run, where: r.card_id in ^card_ids, select: %{card_id: r.card_id, id: r.id, status: r.status})
       |> Repo.all()
       |> Enum.group_by(& &1.card_id)
 
-    for {ref, card} <- cards,
-        runs = Map.get(runs_by_card, card.id, []),
+    for {ref, card_id} <- Enum.sort(cards),
+        runs = Map.get(runs_by_card, card_id, []),
         runs != [],
         Enum.all?(runs, &(&1.status not in Run.active_statuses())),
         do: %{ref: ref, status: Enum.max_by(runs, & &1.id).status}
@@ -1517,8 +1518,11 @@ defmodule Relay.Runs do
 
   @doc """
   The runners-view roster for `board` at `now` — one map per executor, sorted by name, each
-  carrying its advertised capacity (with `used` counted from that executor's active jobs) and
-  the in-flight jobs attributed to it.
+  carrying its advertised capacity and the in-flight jobs attributed to it. A pool's `used` is
+  `pool_used/3`: the DECLARED HOLDINGS in an active state for `exclusive` (RE311 — a
+  bound-but-idle or talk-attached worktree occupies a slot with no active job; a `retained` one
+  holds no partition and does not count), the active-job count for `shared_clean`, and never
+  less than the active-job count for either.
 
   Pure w.r.t. the clock: `now` is injectable and defaults to the current time. Two queries,
   no N+1. Reads only Postgres, so the page survives an app restart — unlike `Runs.Capacity`,
@@ -2308,8 +2312,14 @@ defmodule Relay.Runs do
   # while the executor had zero free exclusive slots. Routed through `active_held_refs/1` — the
   # SAME derivation the claim bypass and the release reconciliation use — so the chip counts the
   # dispatcher's definition of "occupied", not a second reimplementation of it.
-  defp pool_used("exclusive", _jobs_used, held) do
-    held |> Executor.active_held_refs() |> length()
+  #
+  # Floored at the active-job count so the two facts can only ever ADD occupancy, never hide it:
+  # between an executor's first claim and the beat that declares the new holding, `held` is one
+  # short, and `free_slot?/2` reads this same number — an under-count there would blame
+  # `:job_awaiting_slot` on an executor that has room, or (with `held` absent entirely) read
+  # every running row as idle.
+  defp pool_used("exclusive", jobs_used, held) do
+    held |> Executor.active_held_refs() |> length() |> max(Map.get(jobs_used, "exclusive", 0))
   end
 
   # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the

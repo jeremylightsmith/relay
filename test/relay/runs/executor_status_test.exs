@@ -240,6 +240,18 @@ defmodule Relay.Runs.ExecutorStatusTest do
       assert runner.held == [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "TH8", "state" => "retained"}]
     end
 
+    test "the exclusive chip never reads BELOW the active exclusive job count", %{board: board, stage: stage} do
+      # The window between an executor's first exclusive claim and the beat that declares the
+      # holding: `held` is one short, and `free_slot?/2` reads this same number — an under-count
+      # there blames `:job_awaiting_slot` on an executor that has room, and an executor that has
+      # not reported `held` at all would render 0/N while running exclusive jobs.
+      insert(:executor, board: board, name: "claimer", capacity: %{"shared_clean" => 2, "exclusive" => 2}, held: [])
+      active_job(board, stage, "claimer", isolation: "exclusive")
+
+      [runner] = Runs.list_executor_status(board)
+      assert Enum.find(runner.pools, &(&1.name == "exclusive")).used == 1
+    end
+
     test "the shared_clean chip still counts active jobs", %{board: board, stage: stage} do
       # Holdings describe per-card worktrees only, so the shared chip's rule is unchanged.
       insert(:executor, board: board, name: "sharer", capacity: %{"shared_clean" => 2, "exclusive" => 1})

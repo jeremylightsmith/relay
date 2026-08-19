@@ -1398,6 +1398,36 @@ class ExecutorPoolTest(unittest.TestCase):
         self.assertTrue(reset2)                                 # re-baseline for the new run
         self.assertEqual(p.wts[slot]["state"], "active")
 
+    def test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run(self):
+        """RE311: cancel R1 (a revoke deliberately leaves the tree active+bound+idle), then
+        Retry. R2's job must be placed in the card's OWN tree — the branch is the CARD's, and a
+        newer run legitimately continues in it — instead of hitting `assign`'s refusal and being
+        rejected with a misleading "no free 'exclusive' slot advertised"."""
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, None)      # revoke: active, idle, bound to r1
+        slot2, reset2 = p.assign(self.excl("r2", "RLY-1"))
+        self.assertEqual(slot2, slot)
+        self.assertFalse(reset2)                             # never re-baseline: r1's commits
+        self.assertEqual(p.wts[slot]["run_id"], "r2")
+        self.assertTrue(p.wts[slot]["live"])
+
+    def test_assign_still_refuses_a_worktree_held_by_a_live_run(self):
+        """The refusal the comment always named: never steal a LIVE worktree."""
+        p = self.pool()
+        p.assign(self.excl("r1", "RLY-1"))                   # live
+        self.assertIsNone(p.assign(self.excl("r2", "RLY-1")))
+
+    def test_assign_still_refuses_while_a_terminal_disposition_is_deferred(self):
+        """E2t (RE268): a disposition parked in `pending_finish` under a live talk turn still
+        owns the tree — adopting it would let `release_talk` tear the tree down under the new
+        run. The bounded placement retry covers that window."""
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.assign_talk("RLY-1")
+        p.release(self.excl("r1", "RLY-1"), slot, "done")    # deferred under the talk turn
+        self.assertIsNone(p.assign(self.excl("r2", "RLY-1")))
+
     def test_revoke_leaves_the_worktree_active_and_bound(self):
         p = self.pool()
         slot, _ = p.assign(self.excl("r1", "RLY-1"))

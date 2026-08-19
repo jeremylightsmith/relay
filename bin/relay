@@ -70,8 +70,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 57
-EXECUTOR_FINGERPRINT = "5ba68218259ba472d7a43af4a672fe5f8d6f99c50babbef4da71d0b622ff777a"
+EXECUTOR_VERSION = 58
+EXECUTOR_FINGERPRINT = "f103e48d709c211272c877b477905b7a70daf2e04326aecedf3272f1b5e653a7"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1705,10 +1705,17 @@ class ExecutorPool:
             name = self.wt_name(job["vars"]["ref"])
             rec = self.wts.get(name)
 
-            # Reuse an active worktree already bound to this run (a later node), OR one recovered
-            # from disk with an unknown binding (run_id None) that this job now adopts. Never
+            # Reuse an active worktree already bound to this run (a later node), one recovered
+            # from disk with an unknown binding (run_id None), or an IDLE one still bound to an
+            # EARLIER run of the same card (RE311): a worktree's identity is the card's branch,
+            # so the retry after a cancel legitimately continues in it. Without that last case a
+            # cancel-then-retry inside the ~15s before the release channel tears the tree down
+            # placed nowhere and failed R2 with "no free 'exclusive' slot advertised". A tree
+            # with a DEFERRED terminal disposition is excluded — see the refusal below. Never
             # re-baseline here — the branch holds the run's commits.
-            if rec and rec["state"] == "active" and rec["run_id"] in (run_id, None):
+            if rec and rec["state"] == "active" and (
+                    rec["run_id"] in (run_id, None)
+                    or (not rec.get("live") and not rec.get("pending_finish"))):
                 rec["run_id"] = run_id
                 rec["live"] = True
                 return name, False
@@ -1741,8 +1748,11 @@ class ExecutorPool:
                                   "partition": self._take_partition()}
                 return name, True
 
-            # rec is active but bound to a *different* live run (should not happen — one card
-            # never runs twice at once). Refuse rather than steal a live worktree.
+            # rec is active and bound to a different run that is either genuinely LIVE (should
+            # not happen — one card never runs twice at once) or holds a terminal disposition
+            # deferred under a talk turn (`pending_finish`, E2t): adopting that one would let
+            # `release_talk` tear the tree down under the new run. Refuse rather than steal a
+            # live worktree; `cmd_execute`'s bounded placement retry covers the deferred window.
             return None
 
     def release_talk(self, slot):
@@ -1793,8 +1803,12 @@ class ExecutorPool:
         stay untouched by the talk turn attaching (see the shared-flag hazard in release_talk,
         above).
 
-        A talk-created worktree is bound to no run (`run_id` None), so `release_run` can never
-        tear it down: the tree must survive a run ending, because a session spans runs."""
+        A talk-created worktree carries the in-memory `talk` marker, which is what makes
+        `release_held` skip it (RE311): the tree must survive a run ending, because a session
+        spans runs (ADR 0009 §2). `run_id is None` alone no longer identifies one — a tree
+        `recover()` adopts after a restart has exactly that shape and IS releasable, which is
+        also why the marker does not survive a restart (a documented gap, see runner.md's Talk
+        section)."""
         name = self.wt_name(ref)
         with self.lock:
             rec = self.wts.get(name)

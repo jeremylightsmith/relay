@@ -93,16 +93,27 @@ defmodule Schemas.Executor do
   @doc "The subset of `holding_states/0` that occupies an exclusive partition."
   def active_holding_states, do: @active_holding_states
 
+  # The most per-card worktrees one beat may declare. An executor holds one worktree per card
+  # and its `max_worktrees` is small (single digits in practice, and `capacity.exclusive` is
+  # what the board is told), so this is orders of magnitude above any honest executor — it
+  # exists so a malformed or hostile beat cannot buy an unbounded query on the heartbeat's hot
+  # path (`Runs.releasable_held/2`, `pool_used/3`), which every executor hits every interval.
+  @held_limit 500
+
+  @doc "The cap `normalize_held/1` applies to one beat's `held` list."
+  def held_limit, do: @held_limit
+
   @doc """
   The one normalizer for the `held` wire field: a list of `%{"ref" => ref, "state" => state}`
-  with a binary ref and a state in `holding_states/0`. Everything else is DROPPED.
+  with a binary ref and a state in `holding_states/0`, truncated to `held_limit/0`. Everything
+  else is DROPPED.
 
   Total by construction — any term in, a list out. Untrusted input degrades, never raises: a
   stray entry from an older or newer executor must not 500 the claim or the heartbeat, which
   are that executor's liveness path (the RLY-201 lesson, applied to a second field).
   """
   def normalize_held(held) when is_list(held) do
-    for %{"ref" => ref, "state" => state} <- held,
+    for %{"ref" => ref, "state" => state} <- Enum.take(held, @held_limit),
         is_binary(ref),
         state in @holding_states,
         do: %{"ref" => ref, "state" => state}
