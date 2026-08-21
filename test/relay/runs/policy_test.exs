@@ -37,12 +37,13 @@ defmodule Relay.Runs.PolicyTest do
       end
     end
 
+    # Built via a plain keyword list through Map.new/1 (not a map literal — the type checker
+    # narrows a literal's shape and would flag the missing key at compile time) so this is a
+    # genuine runtime FunctionClauseError, not a compile-time type warning.
+    defp opted_out_card(fields), do: Map.new(fields)
+
     test "blocked_by is required, not defaulted — a caller cannot silently opt out of the gate" do
-      # Round-tripped through the process dictionary (term() out), so the type checker cannot
-      # statically prove the key is missing — this must be a genuine runtime FunctionClauseError,
-      # not a compile-time type warning.
-      Process.put(:opted_out_card, %{active_owner: :ai, status: :ready})
-      opted_out = Process.get(:opted_out_card)
+      opted_out = opted_out_card(active_owner: :ai, status: :ready)
 
       assert_raise FunctionClauseError, fn ->
         Policy.pullable?(opted_out)

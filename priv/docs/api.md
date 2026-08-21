@@ -232,6 +232,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | verdict | means |
 | --- | --- |
 | `dispatchable` | would dispatch on the scheduler's next tick |
+| `blocked_by_dependencies` | the card declares blockers that have not reached a top-level Done column; `evidence.blocked_by` names their refs |
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
 | `awaiting_capacity` | a flow would dispatch; no executor advertises a free slot of the needed class |
 | `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_executor_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |

@@ -105,9 +105,10 @@ defmodule Relay.DocsContentTest do
 
     # The verdict vocabulary is the contract `relay why` prints — an undocumented verdict
     # is an operator staring at a word with no meaning.
-    for verdict <- ~w(dispatchable no_enabled_flow awaiting_capacity resume_refused wip_full
-                      owned_by_human blocked_on_input run_active not_eligible run_failed
-                      job_stranded job_awaiting_slot executor_outdated no_executor) do
+    for verdict <- ~w(dispatchable blocked_by_dependencies no_enabled_flow awaiting_capacity
+                      resume_refused wip_full owned_by_human blocked_on_input run_active
+                      not_eligible run_failed job_stranded job_awaiting_slot executor_outdated
+                      no_executor) do
       assert api =~ verdict, "api.md should document the `#{verdict}` verdict"
     end
   end

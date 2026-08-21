@@ -2792,7 +2792,7 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-137 — the board-face run affordance per card, rebuilt from a fresh card list
   # whenever one is on hand (mount, card_upserted, card_moved, reload_board) rather
-  # than patched incrementally like health: face_summary/4 is cheap (pure map lookups
+  # than patched incrementally like health: face_summary/5 is cheap (pure map lookups
   # over already-loaded :flows / :run_summaries) and a card's stage/status/owner can
   # all move its face at once (e.g. into the queued or review states).
   defp face_runs(cards, flows, summaries, blocked_by) do
@@ -2841,12 +2841,13 @@ defmodule RelayWeb.BoardLive do
 
   # RE93 — when a blocker reaches a Done column (or is archived), it is the DEPENDENT's stream
   # entry that must change, and nothing in the dependent's own row did, so no other handler would
-  # restream it. Recompute the map, diff it against the previous one, and stream_insert exactly
-  # the cards whose blocker list moved. @vote_counts (the :vote_changed handler) is the existing
+  # restream it. Recompute the map, diff it against the previous one, and repaint exactly the
+  # cards whose blocker list moved. @vote_counts (the :vote_changed handler) is the existing
   # precedent for this assign-plus-restream idiom.
   #
-  # Terminal-stage cards are skipped deliberately: that column is a paged window rebuilt with
-  # reset:, and a bare stream_insert would push a card in outside it.
+  # Routed through upsert_card_stream/3 (not a bare stream_insert) so a DEPENDENT sitting in the
+  # terminal Done column also repaints: that column is a paged window rebuilt with reset:, which
+  # upsert_card_stream already owns, rather than being skipped and left stale until reload.
   defp refresh_blocked_by(socket, cards_by_stage) do
     board = socket.assigns.board
     previous = socket.assigns.blocked_by
@@ -2865,8 +2866,8 @@ defmodule RelayWeb.BoardLive do
     Enum.reduce(changed, socket, fn id, acc ->
       card = Map.get(by_id, id)
 
-      if card && card.stage_id != acc.assigns.terminal_stage_id && find_stage_by_id(acc, card.stage_id) do
-        stream_insert(acc, stream_name(card.stage_id), card)
+      if card && find_stage_by_id(acc, card.stage_id) do
+        upsert_card_stream(acc, card, cards_by_stage)
       else
         acc
       end

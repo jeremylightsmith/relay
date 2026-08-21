@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardLiveDependencyGateTest do
   import Phoenix.LiveViewTest
 
   alias Relay.Cards
+  alias Relay.Repo
 
   setup :register_and_log_in_user
 
@@ -55,5 +56,23 @@ defmodule RelayWeb.BoardLiveDependencyGateTest do
     {:ok, _} = Cards.move_card(ctx.b, ctx.done, 0, :agent)
 
     assert has_element?(view, "#{card_el(ctx.a)} .run-face-queued")
+  end
+
+  test "archiving a blocker repaints a DONE-column dependent instead of leaving it stale", ctx do
+    dependent = insert(:card, stage: ctx.done, ref_number: 3, status: :in_review, title: "Original title")
+    insert(:card_owner, card: dependent)
+    {:ok, _} = Cards.set_dependencies(ctx.board, dependent, ["RE2"])
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    assert has_element?(view, card_el(dependent), "Original title")
+
+    # Mutate the row directly, bypassing Cards.update_card's own broadcast, so the ONLY
+    # thing that can pick up the new title is refresh_blocked_by's terminal-stage repaint —
+    # proving that repaint actually re-streams the card instead of skipping it (RE93).
+    Repo.update!(Ecto.Changeset.change(dependent, title: "Updated title"))
+
+    {:ok, _} = Cards.archive_card(ctx.b)
+
+    assert has_element?(view, card_el(dependent), "Updated title")
   end
 end

@@ -5,7 +5,7 @@ defmodule Relay.Runs.Policy do
   fresh-pull gate, and the executor-gone resume gate, so the scheduler, the run listener, and the
   board card face can never drift from one another.
 
-  Callers that hold a `Schemas.Card` (the listener, `Relay.Runs.queued_flow/4`) build the tiny
+  Callers that hold a `Schemas.Card` (the listener, `Relay.Runs.queued_flow/5`) build the tiny
   map at the call site; the scheduler passes its snapshot maps straight through, so
   `Relay.Runs.Scheduler`'s tests double as this module's tests. Internal to the `Relay.Runs`
   boundary; not exported.
