@@ -157,14 +157,53 @@ defmodule RelayWeb.BoardLiveSearchTest do
     assert has_element?(view, "#board-search-empty")
   end
 
-  test "Escape closes the popover", %{conn: conn, board: board} do
+  # Driving the keydown through the INPUT is the point of this test, not a detail: a scoped
+  # phx-keydown only fires when the event target carries it, and the target is whatever has
+  # focus. On the (unfocusable) wrapper div the handler was unreachable in a real browser while
+  # this test stayed green, because render_keydown/2 pushes straight at the server. element/2
+  # raises unless the element it names actually carries the binding, so this now pins it.
+  test "Escape on the input closes the popover", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
     search(view, "story map")
-    view |> element("#board-search") |> render_keydown(%{"key" => "Escape"})
+    view |> element("#board-search-input") |> render_keydown(%{"key" => "Escape"})
 
     refute has_element?(view, "#board-search-results")
     assert view |> element("#board-search-input") |> render() =~ ~s(value="")
+  end
+
+  test "the Escape binding is on the focusable input, not the wrapper",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    input = view |> element("#board-search-input") |> render()
+
+    assert input =~ ~s(phx-keydown="search_clear")
+    assert input =~ ~s(phx-key="Escape")
+    assert input =~ ~s(phx-hook="BoardSearchInput")
+  end
+
+  # LiveView never patches a focused input's value, and Escape leaves the cursor in the box —
+  # so emptying `query` server-side is only half of it. The push is what the BoardSearchInput
+  # hook listens for; without it the popover closes with the typed text still on screen.
+  test "clearing the box pushes board_search_cleared so the focused input empties",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    search(view, "story map")
+    view |> element("#board-search-input") |> render_keydown(%{"key" => "Escape"})
+
+    assert_push_event(view, "board_search_cleared", %{})
+  end
+
+  test "opening a result pushes board_search_cleared too", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    search(view, "story map")
+    view |> form("#board-search-form", %{"q" => "story map"}) |> render_submit()
+
+    assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+    assert_push_event(view, "board_search_cleared", %{})
   end
 
   test "an archived hit is never in the header search — that has its own browser",

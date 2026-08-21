@@ -4236,7 +4236,23 @@ defmodule RelayWeb.BoardLive do
           |> Enum.map(&search_row(socket.assigns, &1))
       end
 
-    socket |> assign(:search_query, query) |> assign(:search_results, results)
+    socket
+    |> maybe_push_search_cleared(query)
+    |> assign(:search_query, query)
+    |> assign(:search_results, results)
+  end
+
+  # The box emptying is the one thing the server cannot do alone: LiveView never patches a
+  # FOCUSED input's value (dom.js `mergeFocusedInput`), and Escape leaves the cursor in the box,
+  # so the popover would close with the typed text still on screen. Push only on the
+  # something -> nothing transition, so an ordinary keystroke never clears what is being typed;
+  # the BoardSearchInput hook does the rest. Same split as InlineNameInput (RE263).
+  defp maybe_push_search_cleared(socket, query) do
+    if String.trim(query) == "" and String.trim(socket.assigns[:search_query] || "") != "" do
+      push_event(socket, "board_search_cleared", %{})
+    else
+      socket
+    end
   end
 
   # One rendered row, resolved here so card_search/1 stays a pure presentation function.

@@ -975,9 +975,22 @@ defmodule RelayWeb.CoreComponents do
 
   Two placement decisions worth keeping: `phx-click-away` sits on the **popover**, not the
   wrapper, so a board with nothing typed is not pushing a `search_clear` on every click anywhere
-  on the page; and Escape is a **scoped** `phx-keydown` on the wrapper rather than
-  `phx-window-keydown`, because the card drawer already owns window-level Escape
-  (`close_drawer`) and two window handlers would fight over the same key.
+  on the page; and Escape is a **scoped** `phx-keydown` rather than `phx-window-keydown`,
+  because the card drawer already owns window-level Escape (`close_drawer`) and two window
+  handlers would fight over the same key.
+
+  A scoped `phx-keydown` MUST sit on the **focusable input**, never on the wrapper: LiveView
+  dispatches a non-window keydown only when the event target itself carries the attribute
+  (`live_socket.js` `bind/2`), and a keydown's target is the focused element — a `<div>` that
+  cannot take focus can never be one. On the wrapper the handler is simply unreachable in a
+  browser, and a `render_keydown/2` test cannot see the difference because it pushes straight
+  at the server. Same reason the compose textarea and the story-map rename input scope their
+  Escape to the input.
+
+  Clearing is two-sided. The server empties `query`, but LiveView deliberately never patches a
+  FOCUSED input's value (`dom.js` `mergeFocusedInput`), which is exactly the state Escape leaves
+  us in — so `BoardLive` pushes `board_search_cleared` and the `BoardSearchInput` hook empties
+  the box. Same split, same reason as `InlineNameInput` (RE263).
 
   Each `results` item is a plain map resolved server-side —
   `%{ref:, title:, stage:, archived:, path:}` — which keeps this a pure presentation function
@@ -987,14 +1000,13 @@ defmodule RelayWeb.CoreComponents do
   attr :results, :list, default: []
   attr :limit, :integer, default: 8
 
+  attr :hook, :string,
+    default: "BoardSearchInput",
+    doc: "nil renders the box without the hook (the storybook page, where there is no BoardLive)"
+
   def card_search(assigns) do
     ~H"""
-    <div
-      id="board-search"
-      class="relative flex-none"
-      phx-keydown="search_clear"
-      phx-key="Escape"
-    >
+    <div id="board-search" class="relative flex-none">
       <form id="board-search-form" phx-change="search" phx-submit="search_open_first">
         <input
           type="text"
@@ -1006,6 +1018,9 @@ defmodule RelayWeb.CoreComponents do
           aria-label="Search cards"
           placeholder="Search cards…"
           phx-debounce="200"
+          phx-hook={@hook}
+          phx-keydown="search_clear"
+          phx-key="Escape"
           class="input input-sm input-bordered min-h-[44px] w-[150px] text-[12.5px] sm:w-[210px]"
         />
       </form>

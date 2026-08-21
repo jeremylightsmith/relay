@@ -9,12 +9,15 @@ defmodule Storybook.Components.CoreComponents.CardSearch do
     %{ref: ref, title: title, stage: stage, archived: archived, path: "/board/demo?card=#{ref}"}
   end
 
+  # `hook: nil` renders the box inert: the BoardSearchInput hook lives in the app bundle and
+  # only has anything to clear inside BoardLive.
   def variations do
     [
-      %Variation{id: :empty, attributes: %{query: "", results: []}},
+      %Variation{id: :empty, attributes: %{query: "", results: [], hook: nil}},
       %Variation{
         id: :with_results,
         attributes: %{
+          hook: nil,
           query: "search",
           results: [
             row("RLY198", "Search for a card by ref or title", "Spec"),
@@ -23,10 +26,11 @@ defmodule Storybook.Components.CoreComponents.CardSearch do
           ]
         }
       },
-      %Variation{id: :no_match, attributes: %{query: "zzzznotarealcard", results: []}},
+      %Variation{id: :no_match, attributes: %{query: "zzzznotarealcard", results: [], hook: nil}},
       %Variation{
         id: :at_limit,
         attributes: %{
+          hook: nil,
           query: "widget",
           limit: 2,
           results: [row("RLY1", "Widget one", "Backlog"), row("RLY2", "Widget two", "Code")]

@@ -28,6 +28,7 @@ import BoardDnD from "./hooks/board_dnd"
 import StoryMapDnD from "./hooks/story_map_dnd"
 import StoryMapCursors from "./hooks/story_map_cursors"
 import BoardPager from "./hooks/board_pager"
+import BoardSearchInput from "./hooks/board_search_input"
 import TypingKeyGuard from "./hooks/typing_key_guard"
 import CommitField from "./hooks/commit_field"
 import InlineNameInput from "./hooks/inline_name_input"
@@ -51,6 +52,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     StoryMapDnD,
     StoryMapCursors,
     BoardPager,
+    BoardSearchInput,
     ArrowKeyGuard: TypingKeyGuard,
     TypingKeyGuard,
     CommitField,
