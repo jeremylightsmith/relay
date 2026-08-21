@@ -38,6 +38,23 @@ defmodule RelayWeb.BoardLiveSearchTest do
     refute has_element?(view, "#board-search-results")
   end
 
+  test "the header box yields space instead of covering the view toggle",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    [wrapper | _] = view |> element("#board-search") |> render() |> String.split(">")
+
+    # The top bar is ONE non-wrapping flex row, and `#top-bar-title` (board name +
+    # Board/Story map toggle) is its only `min-w-0` item. A `flex-none` 210px box
+    # therefore wins the whole space fight: the title crushes to width 0, the toggle
+    # overflows UNDER the search input, and below ~900px `elementFromPoint` over
+    # "Story map" returns the search box — the toggle is unclickable (smoke, RE198).
+    refute wrapper =~ "flex-none"
+    assert wrapper =~ "min-w-["
+    assert wrapper =~ "hidden"
+    assert wrapper =~ "lg:block"
+  end
+
   test "typing shows matching rows with their ref and stage", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 

@@ -995,6 +995,16 @@ defmodule RelayWeb.CoreComponents do
   Each `results` item is a plain map resolved server-side —
   `%{ref:, title:, stage:, archived:, path:}` — which keeps this a pure presentation function
   and lets the storybook story hand it literals.
+
+  **The box must never be pinned in the top bar, and the caller says when it is shown.** That
+  bar is one non-wrapping flex row whose only `min-w-0` item is `#top-bar-title` — the board
+  name plus the Board/Story map toggle. A `flex-none` box wins the entire space fight: the
+  title crushes to width 0 and the toggle overflows *underneath* the search input, so at 768px
+  `elementFromPoint` over "Story map" returned `board-search-input` and the toggle could not be
+  clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and
+  `class="hidden lg:block"` from `BoardLive` — below `lg` the bar has no room for it beside
+  "Restart stalled", the same reason those controls drop their labels under `sm`. Callers with
+  room of their own (the storybook page) pass no class and get the box unconditionally.
   """
   attr :query, :string, required: true
   attr :results, :list, default: []
@@ -1004,9 +1014,13 @@ defmodule RelayWeb.CoreComponents do
     default: "BoardSearchInput",
     doc: "nil renders the box without the hook (the storybook page, where there is no BoardLive)"
 
+  attr :class, :string,
+    default: nil,
+    doc: "wrapper class — the CALLER owns when the box is shown; see the visibility note above"
+
   def card_search(assigns) do
     ~H"""
-    <div id="board-search" class="relative flex-none">
+    <div id="board-search" class={["relative w-[210px] min-w-[150px]", @class]}>
       <form id="board-search-form" phx-change="search" phx-submit="search_open_first">
         <input
           type="text"
@@ -1021,7 +1035,7 @@ defmodule RelayWeb.CoreComponents do
           phx-hook={@hook}
           phx-keydown="search_clear"
           phx-key="Escape"
-          class="input input-sm input-bordered min-h-[44px] w-[150px] text-[12.5px] sm:w-[210px]"
+          class="input input-sm input-bordered min-h-[44px] w-full text-[12.5px]"
         />
       </form>
       <div

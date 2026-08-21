@@ -178,6 +178,7 @@ defmodule RelayWeb.BoardLive do
           query={@search_query}
           results={@search_results}
           limit={@search_result_limit}
+          class="hidden lg:block"
         />
         <StoryMapComponents.presence_stack
           :if={@live_action == :story_map}
