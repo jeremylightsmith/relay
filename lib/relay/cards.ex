@@ -194,6 +194,151 @@ defmodule Relay.Cards do
   defp exclude_stages(query, ids), do: where(query, [c], c.stage_id not in ^ids)
 
   @doc """
+  The cards on `board` whose ref or title matches `query` — the ONE definition of what
+  "matches" means (RE198). Every surface calls this: `GET /api/cards?q=`, `bin/relay search`,
+  and the board header's results popover. There is deliberately no second predicate anywhere.
+
+  Ranking is two-tier:
+
+    1. **The exact ref hit, if any.** A query that names a card on this board — `RLY198`,
+       `rly198`, `RLY-198`, or a bare `198` — puts that card at position 0. A ref for another
+       board's key does not parse and simply falls through to text matching; `board_id`
+       scoping means a ref can never resolve across boards, which is also the authorization
+       check (the same reasoning `get_card_by_ref/2` records).
+    2. **Then title matches, in board order** (`stage_id asc, position asc, id asc` — the
+       order `list_cards/1` renders). The ref hit is excluded from this second query, so it
+       can never appear twice.
+
+  Matching is **token-AND and case-insensitive**: the query splits on whitespace and a card
+  matches when *every* token appears in its title, so `story map` and `map story` both find
+  "Story map filter focus". A blank or whitespace-only query returns `[]` — never the whole
+  board.
+
+  **Corpus:** every non-archived card on the board, Done included — finished work is exactly
+  what the terminal column's bounded window hides, so search must not hide it too.
+
+  `opts`:
+    * `:archived` — `true` **widens** the corpus so archived cards join the results (it does
+      not switch to archived-only). Defaults to `false`.
+    * `:limit` — caps the total returned, the ref hit counting toward it. Defaults to `nil`
+      (all).
+
+  Results carry the same trimmed projection and preloads as `list_cards/1`, so a result
+  renders like any board card and the heavy `description`/`spec`/`plan`/`acceptance_criteria`
+  bodies stay unloaded.
+  """
+  @spec search(Board.t(), String.t(), keyword()) :: [Card.t()]
+  def search(%Board{} = board, query, opts \\ []) when is_binary(query) do
+    archived? = Keyword.get(opts, :archived, false)
+    limit = Keyword.get(opts, :limit)
+    trimmed = String.trim(query)
+
+    case String.split(trimmed) do
+      [] ->
+        []
+
+      tokens ->
+        ref_hits = search_ref_hits(board, trimmed, archived?)
+        title_hits = search_title_hits(board, tokens, archived?, Enum.map(ref_hits, & &1.id), limit)
+
+        (ref_hits ++ title_hits)
+        |> take_limit(limit)
+        |> Repo.preload(card_preloads())
+    end
+  end
+
+  # The exact-ref half of search/3. A 0- or 1-element list rather than `card | nil` so the
+  # caller concatenates instead of juggling a nil.
+  defp search_ref_hits(board, query, archived?) do
+    with {:ok, ref_number} <- search_ref_number(board, query),
+         %Card{} = card <-
+           Card
+           |> where([c], c.board_id == ^board.id and c.ref_number == ^ref_number)
+           |> archived_scope(archived?)
+           |> select([c], struct(c, @list_card_fields))
+           |> Repo.one() do
+      [card]
+    else
+      _ -> []
+    end
+  end
+
+  # The ref a search query names, if any. `parse_ref_number/2` stays the ONE ref parser; this
+  # only widens what reaches it — a bare positive integer (the ref number on its own), and a
+  # ref typed in lower case, which a human searching absolutely will do. Scans every
+  # whitespace token rather than only the query as a whole, so a compound query like
+  # "198 widget" still finds the ref (its title tokens are matched separately, in
+  # search_title_hits/5).
+  defp search_ref_number(board, query) do
+    query
+    |> String.split()
+    |> Enum.find_value(&token_ref_number(board, &1))
+    |> case do
+      nil -> :error
+      ref_number -> {:ok, ref_number}
+    end
+  end
+
+  defp token_ref_number(board, token) do
+    case Integer.parse(token) do
+      {ref_number, ""} when ref_number > 0 ->
+        ref_number
+
+      _ ->
+        case parse_ref_number(board, token) do
+          {:ok, ref_number} -> ref_number
+          :error -> upcased_ref_number(board, token)
+        end
+    end
+  end
+
+  defp upcased_ref_number(board, token) do
+    case parse_ref_number(board, String.upcase(token)) do
+      {:ok, ref_number} -> ref_number
+      :error -> nil
+    end
+  end
+
+  defp search_title_hits(board, tokens, archived?, exclude_ids, limit) do
+    Card
+    |> where([c], c.board_id == ^board.id and c.id not in ^exclude_ids)
+    |> archived_scope(archived?)
+    |> title_token_filter(tokens)
+    |> order_by([c], asc: c.stage_id, asc: c.position, asc: c.id)
+    |> select([c], struct(c, @list_card_fields))
+    |> limit_query(limit)
+    |> Repo.all()
+  end
+
+  defp title_token_filter(query, tokens) do
+    Enum.reduce(tokens, query, fn token, acc ->
+      pattern = "%" <> escape_like(token) <> "%"
+      where(acc, [c], ilike(c.title, ^pattern))
+    end)
+  end
+
+  # `%` and `_` are ILIKE wildcards: left unescaped, `search %` would return the entire board.
+  # Postgres's default LIKE escape character is a backslash, so the backslash itself is
+  # escaped first — otherwise a title containing one would be unsearchable.
+  defp escape_like(token) do
+    token
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
+
+  # `:archived` WIDENS the corpus rather than switching to archived-only, so `true` drops the
+  # filter entirely instead of inverting it.
+  defp archived_scope(query, true), do: query
+  defp archived_scope(query, false), do: where(query, [c], is_nil(c.archived_at))
+
+  defp limit_query(query, nil), do: query
+  defp limit_query(query, max), do: limit(query, ^max)
+
+  defp take_limit(cards, nil), do: cards
+  defp take_limit(cards, max), do: Enum.take(cards, max)
+
+  @doc """
   Returns the newest `limit` non-archived cards in `stage`, ordered
   `updated_at DESC, id DESC` — the terminal Done column's render window
   (RLY-53). `updated_at` is the recency proxy for "recently completed": a

@@ -1399,6 +1399,128 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "search/3" do
+    test "finds a card by a word in its title, case-insensitively", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Story map filter focus")
+      insert(:card, stage: stage, title: "Unrelated work")
+
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "STORY")
+    end
+
+    test "every whitespace token must match, in any order", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Story map filter focus")
+      insert(:card, stage: stage, title: "Story time")
+
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "story map")
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "map story")
+    end
+
+    test "a ref for this board is an exact hit", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "Card search")
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "RLY198")
+      assert [%Card{ref_number: 198}] = Cards.search(board, "RLY-198")
+      assert [%Card{ref_number: 198}] = Cards.search(board, "rly198")
+    end
+
+    test "a bare number is an exact hit too", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "Card search")
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "198")
+    end
+
+    test "the ref hit ranks first and is never duplicated by a title match",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "198 flavors", position: 9)
+      insert(:card, stage: stage, ref_number: 7, title: "198 bottles", position: 1)
+
+      assert [first, second] = Cards.search(board, "198")
+      assert first.ref_number == 198
+      assert second.ref_number == 7
+    end
+
+    test "title matches come back in board order", %{board: board, stage: stage} do
+      later = insert(:stage, board: board, position: 2)
+      insert(:card, stage: later, title: "alpha third", position: 1)
+      insert(:card, stage: stage, title: "alpha second", position: 2)
+      insert(:card, stage: stage, title: "alpha first", position: 1)
+
+      assert ["alpha first", "alpha second", "alpha third"] =
+               board |> Cards.search("alpha") |> Enum.map(& &1.title)
+    end
+
+    test "a blank or whitespace-only query returns nothing, not the whole board",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Anything")
+
+      assert Cards.search(board, "") == []
+      assert Cards.search(board, "   ") == []
+    end
+
+    test "ILIKE wildcards are escaped, not honored", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Plain title")
+      insert(:card, stage: stage, title: "100% done")
+      insert(:card, stage: stage, title: "snake_case rules")
+      insert(:card, stage: stage, title: "snakeXcase rules")
+
+      assert [%Card{title: "100% done"}] = Cards.search(board, "%")
+      assert [%Card{title: "snake_case rules"}] = Cards.search(board, "snake_case")
+    end
+
+    test "archived cards are excluded by default and included on request",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Live widget")
+
+      insert(:card,
+        stage: stage,
+        title: "Archived widget",
+        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+      assert [%Card{title: "Live widget"}] = Cards.search(board, "widget")
+
+      assert ["Archived widget", "Live widget"] =
+               board |> Cards.search("widget", archived: true) |> Enum.map(& &1.title) |> Enum.sort()
+    end
+
+    test "Done cards are in scope — no stage is excluded", %{board: board} do
+      done = insert(:stage, board: board, name: "Done", category: :complete, position: 9)
+      insert(:card, stage: done, title: "Finished widget")
+
+      assert [%Card{title: "Finished widget"}] = Cards.search(board, "widget")
+    end
+
+    test ":limit caps the total, ref hit included", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "widget one", position: 1)
+      insert(:card, stage: stage, title: "widget two", position: 2)
+      insert(:card, stage: stage, title: "widget three", position: 3)
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "198 widget", limit: 1)
+      assert length(Cards.search(board, "widget", limit: 2)) == 2
+    end
+
+    test "another board's cards and refs are never returned", %{board: board} do
+      other_board = insert(:board, key: "OPS")
+      other_stage = insert(:stage, board: other_board, position: 1)
+      insert(:card, stage: other_stage, ref_number: 5, title: "widget elsewhere")
+
+      assert Cards.search(board, "widget") == []
+      assert Cards.search(board, "OPS5") == []
+      assert Cards.search(board, "5") == []
+    end
+
+    test "results carry the board projection: owners preloaded, heavy bodies unloaded",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Projected widget", spec: "s", plan: "p")
+
+      assert [card] = Cards.search(board, "widget")
+      assert card.owners == []
+      assert card.sub_tasks == []
+      assert is_nil(card.spec)
+      assert is_nil(card.plan)
+    end
+  end
+
   defp stage_card_ids(board, stage) do
     board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
   end

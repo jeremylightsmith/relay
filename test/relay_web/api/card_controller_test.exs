@@ -368,4 +368,96 @@ defmodule RelayWeb.Api.CardControllerTest do
 
     assert Enum.any?(body["timeline"], &(&1["text"] == "implement: starting"))
   end
+
+  describe "GET /api/cards search (RE198)" do
+    test "no q leaves the listing exactly as it was", %{conn: conn, board: board, stage: stage} do
+      done = insert(:stage, board: board, name: "Done", category: :complete, position: 9)
+      insert(:card, stage: stage, title: "In spec")
+      insert(:card, stage: done, title: "Finished")
+
+      titles = fn conn ->
+        conn |> json_response(200) |> Map.fetch!("data") |> Enum.map(& &1["title"])
+      end
+
+      assert titles.(get(conn, ~p"/api/cards")) == ["In spec"]
+      assert "Finished" in titles.(get(conn, ~p"/api/cards?include_done=1"))
+    end
+
+    test "q filters to title matches", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, title: "Story map filter focus")
+      insert(:card, stage: stage, title: "Unrelated work")
+
+      data = conn |> get(~p"/api/cards?q=story+map") |> json_response(200) |> Map.fetch!("data")
+
+      assert Enum.map(data, & &1["title"]) == ["Story map filter focus"]
+    end
+
+    test "q ranks the exact ref first", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "198 flavors", position: 9)
+      insert(:card, stage: stage, ref_number: 7, title: "198 bottles", position: 1)
+
+      data = conn |> get(~p"/api/cards?q=198") |> json_response(200) |> Map.fetch!("data")
+
+      assert [%{"ref" => first} | _] = data
+      assert String.ends_with?(first, "198")
+      assert length(data) == 2
+    end
+
+    test "q ignores include_done — Done is always in scope", %{conn: conn, board: board} do
+      done = insert(:stage, board: board, name: "Done", category: :complete, position: 9)
+      insert(:card, stage: done, title: "Finished widget")
+
+      data = conn |> get(~p"/api/cards?q=widget") |> json_response(200) |> Map.fetch!("data")
+
+      assert Enum.map(data, & &1["title"]) == ["Finished widget"]
+    end
+
+    test "a present but blank q returns nothing, not the whole board", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, title: "Anything")
+
+      assert conn |> get(~p"/api/cards?q=") |> json_response(200) |> Map.fetch!("data") == []
+    end
+
+    test "limit caps the results", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, title: "widget one", position: 1)
+      insert(:card, stage: stage, title: "widget two", position: 2)
+
+      data = conn |> get(~p"/api/cards?q=widget&limit=1") |> json_response(200) |> Map.fetch!("data")
+
+      assert length(data) == 1
+    end
+
+    test "archived=1 widens the corpus", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, title: "Live widget")
+
+      insert(:card,
+        stage: stage,
+        title: "Archived widget",
+        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+      live_only = conn |> get(~p"/api/cards?q=widget") |> json_response(200) |> Map.fetch!("data")
+
+      widened =
+        conn |> get(~p"/api/cards?q=widget&archived=1") |> json_response(200) |> Map.fetch!("data")
+
+      assert Enum.map(live_only, & &1["title"]) == ["Live widget"]
+      assert length(widened) == 2
+    end
+
+    test "every card carries the archived flag", %{conn: conn, stage: stage} do
+      insert(:card, stage: stage, title: "Live widget")
+
+      insert(:card,
+        stage: stage,
+        title: "Archived widget",
+        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+      data = conn |> get(~p"/api/cards?q=widget&archived=1") |> json_response(200) |> Map.fetch!("data")
+
+      assert Map.new(data, &{&1["title"], &1["archived"]}) ==
+               %{"Live widget" => false, "Archived widget" => true}
+    end
+  end
 end

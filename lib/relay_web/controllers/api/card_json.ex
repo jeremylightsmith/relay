@@ -5,7 +5,8 @@ defmodule RelayWeb.Api.CardJSON do
 
   @doc """
   The shared card shape. `board` supplies the ref + key; `stages` (the board's in-memory stage
-  list) drives the derived `done`/`needs_you` facts. Heavy acceptance_criteria/plan/spec live on show/1.
+  list) drives the derived `done`/`needs_you` facts, and `archived_at` the `archived` flag.
+  Heavy acceptance_criteria/plan/spec live on show/1.
   """
   def data(board, card, stages) do
     %{
@@ -14,6 +15,10 @@ defmodule RelayWeb.Api.CardJSON do
       title: card.title,
       tag: card.tag,
       status: card.status,
+      # RE198 — a genuine card fact the API never exposed. `archived_at` is already in the
+      # `@list_card_fields` projection, so this costs nothing; `bin/relay search` marks
+      # archived rows from it.
+      archived: not is_nil(card.archived_at),
       done: Cards.done?(card, stages),
       needs_you: Cards.needs_you?(card, stages),
       branch: card.branch,
