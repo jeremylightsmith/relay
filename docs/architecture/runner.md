@@ -144,9 +144,15 @@ never 403s):
   `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain
   `:api` pipeline — it leaks nothing a deploy does not.
 - `GET /api/flows/:key/metrics` (`RelayWeb.Api.FlowMetricsController.metrics/2`) — the per-node
-  rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `summary` stat band and
-  a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null` until executors report
-  spend — `attempts_mean`, `verdict_split`, `loop_laps`). Read-only, board-scoped.
+  rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `scope`
+  (`"flow"` | `"card"`), the echoed `card` ref (`null` in flow scope), a `summary` stat band
+  (`total_runs`, `completed`, `completed_pct`, `total_spend`, `median_end_to_end`,
+  `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null`
+  until executors report spend — `duration_total`, `cost_total`, `attempts_mean`,
+  `verdict_split`, `loop_laps`). An optional `?card=<ref>` (RE235) scopes every figure to one
+  card's node executions across ALL of its runs of that flow: `?window=` is then ignored, the
+  four percentile keys and `median_end_to_end` come back `null` (a percentile over one card is
+  noise), and an unknown, unparseable or other-board ref is a `404`. Read-only, board-scoped.
 - `GET /api/flows/:key/audit` (`RelayWeb.Api.AuditController.audit/2`) — run-history health
   findings for a flow over a `?window=7d|30d|all` window (default `30d`), composing
   `Relay.Runs.audit/2` (`Relay.Runs.Audit.findings/2` over `Relay.Runs.recent_runs_for_flow/2`).
