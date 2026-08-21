@@ -21,6 +21,7 @@ defmodule Relay.Cards do
   alias Relay.Votes
   alias Schemas.Board
   alias Schemas.Card
+  alias Schemas.CardDependency
   alias Schemas.CardOwner
   alias Schemas.CardRejection
   alias Schemas.Flow
@@ -421,6 +422,9 @@ defmodule Relay.Cards do
   harmless re-stamp that logs nothing new (only the active→archived
   transition logs `:archived`). Returns `{:ok, card}` with owners
   preloaded.
+
+  Also deletes the dependency rows pointing AT the card (RE93 decision 2), permanently freeing
+  its dependents; the card's own blocked-by rows survive an archive/unarchive round trip.
   """
   def archive_card(%Card{} = card, actor \\ :agent) do
     was_active? = is_nil(card.archived_at)
@@ -435,6 +439,13 @@ defmodule Relay.Cards do
     if was_active? do
       {:ok, _entry} = Activity.log(archived, %{type: :archived, actor: actor})
     end
+
+    # RE93 decision 2: archiving a card deletes the dependency rows pointing AT it, freeing its
+    # dependents permanently — unarchiving does NOT restore them. The card's own OUTGOING rows
+    # (what it was waiting on) are untouched, so unarchiving restores its own blocked-by list.
+    # Runs BEFORE the broadcast so every open board recomputes and frees the dependents in the
+    # same beat.
+    Repo.delete_all(from d in CardDependency, where: d.depends_on_card_id == ^archived.id)
 
     Events.broadcast(archived.board_id, {:card_archived, archived})
     {:ok, archived}
@@ -592,6 +603,213 @@ defmodule Relay.Cards do
       nil ->
         {:error, :not_found}
     end
+  end
+
+  @doc """
+  Replaces `card`'s blocker set with the cards named by `refs` (board-scoped), mirroring
+  `set_sub_tasks/2`: it is a FULL replace, and `[]` clears the set.
+
+  All-or-nothing on unknown refs: **any** ref that does not resolve to a card on `board` rejects
+  the whole call, because a half-applied agent batch is worse than a rejected one. Duplicate refs
+  collapse. Self-reference and cycles are rejected before the write, naming the ref path the edge
+  would close (e.g. `["RE93", "RE94", "RE93"]`); a self-reference reads as `["RE93", "RE93"]`.
+
+  On a real change it logs a `:dependencies_changed` activity with
+  `meta: %{"added" => [ref], "removed" => [ref]}` and broadcasts `{:card_upserted, card}`;
+  a no-op re-set writes, logs and broadcasts nothing.
+  """
+  @spec set_dependencies(Board.t(), Card.t(), [String.t()], :agent | {:user, integer()}) ::
+          {:ok, Card.t()}
+          | {:error, {:unknown_refs, [String.t()]}}
+          | {:error, {:dependency_cycle, [String.t()]}}
+  def set_dependencies(%Board{} = board, %Card{} = card, refs, actor \\ :agent) when is_list(refs) do
+    wanted_refs = Enum.uniq(refs)
+    resolved = card_ids_by_ref(board, wanted_refs)
+
+    case Enum.reject(wanted_refs, &Map.has_key?(resolved, &1)) do
+      [] -> apply_dependencies(board, card, wanted_refs, resolved, actor)
+      unknown -> {:error, {:unknown_refs, unknown}}
+    end
+  end
+
+  @doc """
+  Board-wide `%{card_id => [unsatisfied blocker card_id]}` in ONE query — the single definition
+  of "is this card blocked", read by the scheduler, the board, the drawer and `relay why`. Cards
+  with no unmet blocker are absent from the map.
+
+  **Satisfied** is `Relay.Boards.top_level_done_stage_ids/1`: the blocker's *status is
+  irrelevant*, only its column, and that function is already the ONE definition of that set —
+  this is its third caller, not a fourth definition. Consequence, knowingly accepted: a blocker
+  in a *substage* of a complete stage is NOT satisfied, because that function returns top-level
+  ids only. An archived blocker never blocks (belt-and-braces with `archive_card/2`, which
+  deletes the rows pointing at it).
+
+  Deliberately a query rather than a fold over an in-memory card list: the callers' card lists
+  are variously filtered (`exclude_stage_ids`, the Done column's page window), and a fold would
+  have to carry a fragile "you must have passed me every non-complete card" contract.
+  """
+  @spec unmet_dependencies(Board.t(), [Stage.t()]) :: %{integer() => [integer()]}
+  def unmet_dependencies(%Board{} = board, stages) when is_list(stages) do
+    done_ids = Boards.top_level_done_stage_ids(stages)
+
+    CardDependency
+    |> join(:inner, [d], b in Card, on: b.id == d.depends_on_card_id)
+    |> where([d, b], b.board_id == ^board.id and is_nil(b.archived_at) and b.stage_id not in ^done_ids)
+    |> select([d, b], {d.card_id, d.depends_on_card_id})
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  @doc """
+  The drawer's **Blocked by** list for `card`, ordered by ref number. Includes SATISFIED
+  blockers (shown ticked, so the whole chain is visible) — `unmet_dependencies/2` is what gates
+  dispatch, this is what a human reads.
+  """
+  @spec list_dependencies(Board.t(), Card.t()) :: [%{ref: String.t(), title: String.t(), satisfied?: boolean()}]
+  def list_dependencies(%Board{} = board, %Card{} = card) do
+    done_ids = Boards.top_level_done_stage_ids(Boards.list_stages(board))
+
+    CardDependency
+    |> join(:inner, [d], b in Card, on: b.id == d.depends_on_card_id)
+    |> where([d, _b], d.card_id == ^card.id)
+    |> order_by([_d, b], asc: b.ref_number)
+    |> select([_d, b], {b.ref_number, b.title, b.stage_id, b.archived_at})
+    |> Repo.all()
+    |> Enum.map(fn {number, title, stage_id, archived_at} ->
+      %{
+        ref: format_ref(board.key, number),
+        title: title,
+        satisfied?: not is_nil(archived_at) or stage_id in done_ids
+      }
+    end)
+  end
+
+  @doc "The drawer's read-only **Blocks** list for `card` — the cards waiting on it, ref-ordered."
+  @spec list_dependents(Board.t(), Card.t()) :: [%{ref: String.t(), title: String.t()}]
+  def list_dependents(%Board{} = board, %Card{} = card) do
+    CardDependency
+    |> join(:inner, [d], dep in Card, on: dep.id == d.card_id)
+    |> where([d, dep], d.depends_on_card_id == ^card.id and is_nil(dep.archived_at))
+    |> order_by([_d, dep], asc: dep.ref_number)
+    |> select([_d, dep], {dep.ref_number, dep.title})
+    |> Repo.all()
+    |> Enum.map(fn {number, title} -> %{ref: format_ref(board.key, number), title: title} end)
+  end
+
+  @doc """
+  The human sentence for a `set_dependencies/4` refusal — the ONE rendering, read by both the
+  API's `FallbackController` (as the 422 body) and the card drawer (as inline text under the
+  add-blocker input), so the two surfaces cannot word the same refusal differently.
+  """
+  @spec dependency_error_message({:unknown_refs, [String.t()]} | {:dependency_cycle, [String.t()]}) :: String.t()
+  def dependency_error_message({:unknown_refs, refs}), do: "this board has no card with ref: #{Enum.join(refs, ", ")}"
+
+  def dependency_error_message({:dependency_cycle, path}),
+    do: "that would create a dependency cycle: #{Enum.join(path, " → ")}"
+
+  defp apply_dependencies(board, card, wanted_refs, resolved, actor) do
+    wanted_ids = wanted_refs |> Enum.map(&Map.fetch!(resolved, &1)) |> Enum.uniq()
+    existing_ids = existing_dependency_ids(card)
+
+    with :ok <- check_dependency_cycles(board, card, wanted_ids) do
+      added = wanted_ids -- existing_ids
+      removed = existing_ids -- wanted_ids
+
+      if added == [] and removed == [] do
+        {:ok, reload_with_owners(card)}
+      else
+        write_dependencies(card, added, removed)
+
+        {:ok, _entry} =
+          Activity.log(card, %{
+            type: :dependencies_changed,
+            actor: actor,
+            meta: %{"added" => refs_for_ids(board, added), "removed" => refs_for_ids(board, removed)}
+          })
+
+        broadcast_upserted({:ok, reload_with_owners(card)})
+      end
+    end
+  end
+
+  defp existing_dependency_ids(%Card{} = card) do
+    CardDependency
+    |> where([d], d.card_id == ^card.id)
+    |> select([d], d.depends_on_card_id)
+    |> Repo.all()
+  end
+
+  defp write_dependencies(%Card{} = card, added, removed) do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+
+    {:ok, _} =
+      Repo.transaction(fn ->
+        if removed != [] do
+          Repo.delete_all(from d in CardDependency, where: d.card_id == ^card.id and d.depends_on_card_id in ^removed)
+        end
+
+        if added != [] do
+          Repo.insert_all(
+            CardDependency,
+            Enum.map(added, &%{card_id: card.id, depends_on_card_id: &1, inserted_at: now})
+          )
+        end
+      end)
+
+    :ok
+  end
+
+  # Adding "card depends_on blocker" closes a cycle exactly when `blocker` already depends on
+  # `card`, transitively. So walk the board's existing DEPENDS-ON edges from each proposed
+  # blocker and see whether the walk reaches `card`. A board's edge count is small, so the edge
+  # list is loaded once and the walk runs in Elixir — testable, and no recursive CTE. A
+  # self-reference is the degenerate case: the walk starts on the target and returns immediately.
+  defp check_dependency_cycles(board, %Card{} = card, wanted_ids) do
+    edges = dependency_edges(board)
+
+    Enum.reduce_while(wanted_ids, :ok, fn blocker_id, :ok ->
+      case dependency_path(edges, blocker_id, card.id) do
+        nil -> {:cont, :ok}
+        path -> {:halt, {:error, {:dependency_cycle, refs_for_ids(board, [card.id | path])}}}
+      end
+    end)
+  end
+
+  # %{dependent_card_id => [blocker_card_id]} — every dependency edge on `board`.
+  defp dependency_edges(%Board{id: board_id}) do
+    CardDependency
+    |> join(:inner, [d], c in Card, on: c.id == d.card_id)
+    |> where([_d, c], c.board_id == ^board_id)
+    |> select([d, _c], {d.card_id, d.depends_on_card_id})
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  # Breadth-first from `start` along depends-on edges: the id path to `target`, or nil.
+  defp dependency_path(edges, start, target), do: dependency_bfs(edges, [{start, [start]}], MapSet.new([start]), target)
+
+  defp dependency_bfs(_edges, [], _seen, _target), do: nil
+
+  defp dependency_bfs(edges, [{id, path} | rest], seen, target) do
+    if id == target do
+      Enum.reverse(path)
+    else
+      next = edges |> Map.get(id, []) |> Enum.reject(&MapSet.member?(seen, &1))
+      dependency_bfs(edges, rest ++ Enum.map(next, &{&1, [&1 | path]}), Enum.into(next, seen), target)
+    end
+  end
+
+  defp refs_for_ids(_board, []), do: []
+
+  defp refs_for_ids(%Board{} = board, ids) do
+    numbers =
+      Card
+      |> where([c], c.id in ^ids)
+      |> select([c], {c.id, c.ref_number})
+      |> Repo.all()
+      |> Map.new()
+
+    for id <- ids, number = Map.get(numbers, id), do: format_ref(board.key, number)
   end
 
   @doc """

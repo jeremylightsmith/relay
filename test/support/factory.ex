@@ -148,6 +148,17 @@ defmodule Relay.Factory do
     sub_task |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # Full-control factory (RE93): `card` and `depends_on_card` (when overridden) must be
+  # persisted cards on the SAME board.
+  def card_dependency_factory(attrs) do
+    {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
+    {blocker, attrs} = Map.pop_lazy(attrs, :depends_on_card, fn -> insert(:card, stage: card.stage) end)
+
+    dependency = %Schemas.CardDependency{card_id: card.id, depends_on_card_id: blocker.id}
+
+    dependency |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   # Full-control factory: `card` (when overridden) must be a persisted card.
   # With a `user`, a human comment; without, an agent ("Relay AI") comment.
   def comment_factory(attrs) do

@@ -13,6 +13,9 @@ defmodule Schemas.Activity do
   empty meta. `:archived` / `:unarchived` (RLY-4) record a card being
   soft-hidden from the board and restored, with empty meta.
 
+  `:dependencies_changed` (RE93) records a replacement of the card's blocker set, with
+  `meta: %{"added" => [ref], "removed" => [ref]}`; a no-op re-set logs nothing.
+
   `:action` (RLY-112) is one runner log line, with the line in `text` and the AI
   session that emitted it in `run_id`; `:failure` (RLY-112) is the agent erroring.
   Both are written in bulk by `Relay.Activity.LogSink` via `insert_all`, which
@@ -42,7 +45,10 @@ defmodule Schemas.Activity do
     :archived,
     :unarchived,
     :action,
-    :failure
+    :failure,
+    # RE93 — the card's blocker set was replaced. meta: %{"added" => [ref], "removed" => [ref]},
+    # written only when the set actually changed.
+    :dependencies_changed
   ]
 
   schema "activities" do

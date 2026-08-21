@@ -335,6 +335,7 @@ erDiagram
     Stage |o--o{ Flow : "trigger (pulls-from / works-in / lands-on)"
     Flow ||--o{ FlowVersion : "immutable version snapshots"
     Card ||--o{ SubTask : has
+    Card ||--o{ CardDependency : "blocked by (RE93)"
     Card ||--o{ CardOwner : "owners (user or agent)"
     Card ||--o{ Comment : timeline
     Card ||--o{ Activity : timeline
@@ -382,6 +383,19 @@ card renumbers its whole target cell, and the **siblings** are renumbered with a
 `update_all` so their `updated_at` is untouched — that column is the recency proxy behind the
 Done column's render window and the needs-you feed, both board-lens orderings that would
 otherwise be silently reshuffled by a drag on the map.
+
+A `Card` may also be **blocked by** other cards on the same board (RE93). Each edge is a
+`CardDependency` row (`card_id` = the dependent, `depends_on_card_id` = the blocker), cascading
+on both FKs and unique on the pair. A blocker counts as **satisfied** when it sits in a
+top-level `:complete`-category stage — `Relay.Boards.top_level_done_stage_ids/1`, the same one
+definition the board's Done treatment and the API's index filter use; the blocker's *status* is
+irrelevant. `Relay.Cards.unmet_dependencies/2` is the single "is this card blocked" read, and
+`Relay.Runs.Policy.pullable?/1` is where it gates: a card with any unmet blocker is skipped by
+the scheduler's fresh pulls and by the board's "queued for X" face chip, together. It gates
+**fresh pulls only** — `Policy.resumable?/2` is deliberately untouched, so a dependency added
+mid-run can never strand a run in flight, and human moves are never blocked. Archiving a card
+deletes the rows pointing AT it, permanently freeing its dependents; its own outgoing rows
+survive.
 
 ---
 *Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*
