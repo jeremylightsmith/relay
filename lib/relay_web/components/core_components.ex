@@ -956,6 +956,98 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The board header's card search (RE198) — a results **popover**, not a column filter.
+
+  Filtering the rendered columns is the obvious first instinct and it is wrong here: the board
+  renders each stage as a LiveView stream (so filtering means re-streaming every stage with
+  `reset: true` on each keystroke), and the terminal Done column is a bounded window
+  (`Cards.done_page_size/0`) whose older cards are not in the stream at all — a filter would
+  structurally fail to find most finished work, which is precisely what search is for. A
+  popover queries the database instead: it sees the whole board, and costs zero stream churn.
+
+  **No artboard governs this.** Verified during RE198's brainstorm: no `docs/designs/*.dc.html`
+  contains a search control. It is built to the existing board-header idiom — daisyUI
+  `input input-sm`, the `min-h-[44px]` touch target every other header control uses, semantic
+  theme tokens only.
+
+  The form is the whole interaction: `phx-change` searches, `phx-submit` opens the first result,
+  so Enter works with **zero JavaScript** — no hook, no inline `<script>`.
+
+  Two placement decisions worth keeping: `phx-click-away` sits on the **popover**, not the
+  wrapper, so a board with nothing typed is not pushing a `search_clear` on every click anywhere
+  on the page; and Escape is a **scoped** `phx-keydown` on the wrapper rather than
+  `phx-window-keydown`, because the card drawer already owns window-level Escape
+  (`close_drawer`) and two window handlers would fight over the same key.
+
+  Each `results` item is a plain map resolved server-side —
+  `%{ref:, title:, stage:, archived:, path:}` — which keeps this a pure presentation function
+  and lets the storybook story hand it literals.
+  """
+  attr :query, :string, required: true
+  attr :results, :list, default: []
+  attr :limit, :integer, default: 8
+
+  def card_search(assigns) do
+    ~H"""
+    <div
+      id="board-search"
+      class="relative flex-none"
+      phx-keydown="search_clear"
+      phx-key="Escape"
+    >
+      <form id="board-search-form" phx-change="search" phx-submit="search_open_first">
+        <input
+          type="text"
+          id="board-search-input"
+          name="q"
+          value={@query}
+          autocomplete="off"
+          role="searchbox"
+          aria-label="Search cards"
+          placeholder="Search cards…"
+          phx-debounce="200"
+          class="input input-sm input-bordered min-h-[44px] w-[150px] text-[12.5px] sm:w-[210px]"
+        />
+      </form>
+      <div
+        :if={String.trim(@query) != ""}
+        id="board-search-results"
+        phx-click-away="search_clear"
+        class="absolute right-0 top-[48px] z-[60] flex w-[320px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+        style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+      >
+        <span
+          :if={@results == []}
+          id="board-search-empty"
+          class="rounded-md px-[9px] py-2 text-[12.5px] font-medium text-base-content/50"
+        >
+          No cards match "{@query}".
+        </span>
+        <.link
+          :for={row <- @results}
+          patch={row.path}
+          id={"board-search-result-#{row.ref}"}
+          class="flex items-baseline gap-2 rounded-md px-[9px] py-2 text-left text-[12.5px] hover:bg-base-200"
+        >
+          <span class="font-mono text-[11px] font-semibold text-base-content/65">{row.ref}</span>
+          <span class="min-w-0 flex-1 truncate font-medium text-base-content">{row.title}</span>
+          <span class="flex-none text-[11px] text-base-content/50">
+            {row.stage}<span :if={row.archived}> · archived</span>
+          </span>
+        </.link>
+        <span
+          :if={length(@results) >= @limit}
+          id="board-search-more"
+          class="rounded-md px-[9px] pb-1 pt-1.5 text-[11px] text-base-content/50"
+        >
+          Showing the first {@limit} — keep typing to narrow.
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
   The boards-home overlapping member avatar stack (RLY-32) — mockup
   "Relay Board.dc.html" lines ~114-124. Up to `limit` 24×24 colored-initials
   circles (2px white ring, -7px overlap), then a neutral +N overflow chip.
