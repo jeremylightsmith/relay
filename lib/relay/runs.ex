@@ -226,16 +226,38 @@ defmodule Relay.Runs do
   @doc "Completed-run count below which per-node percentiles aren't worth trusting (empty state)."
   def min_runs_for_percentiles, do: 10
 
+  @metric_scopes [:flow, :card]
+
+  @doc "The closed set of metrics scopes. Defined once; LiveView and controller read it."
+  def metric_scopes, do: @metric_scopes
+
+  @doc """
+  The scope a metrics query is in, given a resolved card id — `nil` means flow-wide. One
+  mapping so the page and the API can never label the same query differently (RE235).
+  """
+  def metric_scope(nil), do: :flow
+  def metric_scope(_card_id), do: :card
+
   @doc """
   Per-node rollup for `flow` over `opts[:window]` (one of `metric_windows/0`, default
   `default_window/0`). Returns one map per node key that has executions in the window, in the
   flow's node order. `runs` counts node executions, not cards. See moduledoc semantics.
+
+  `opts[:card_id]` scopes every figure to ONE card's executions (RE235) and, per decision 3,
+  makes the window irrelevant — all of that card's runs of this flow count. It takes an id
+  rather than a `%Card{}` because this is purely a `WHERE` filter that needs identity only: the
+  web layer resolves the ref with `Cards.card_ids_by_ref/2`, which is board-scoped and skips the
+  owners preload `get_card_by_ref/2` performs. Do not "correct" it to a struct.
+
+  `duration_total` and `cost_total` are present in BOTH scopes — they come out of the same
+  grouped pass as the percentiles, so scoping costs no extra round trip.
   """
   def node_metrics_for_flow(%Flow{} = flow, opts \\ []) do
-    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+    card_id = Keyword.get(opts, :card_id)
+    since = metrics_since(opts, card_id)
 
-    numeric = node_numeric_rows(flow, since)
-    verdicts = node_verdict_counts(flow, since)
+    numeric = node_numeric_rows(flow, since, card_id)
+    verdicts = node_verdict_counts(flow, since, card_id)
 
     flow.nodes
     |> Enum.map(& &1.key)
@@ -246,9 +268,17 @@ defmodule Relay.Runs do
     end)
   end
 
-  @doc "Stat-band summary for `flow` over `opts[:window]`."
+  @doc """
+  Stat-band summary for `flow` over `opts[:window]`, or for one card's runs of it when
+  `opts[:card_id]` is set (RE235 — see `node_metrics_for_flow/2` on why it's an id).
+
+  Carries BOTH `median_end_to_end` and `total_end_to_end` in one map shape; the renderer picks
+  by scope, because a median over one card's one or two runs is the percentile mistake this
+  card exists to fix.
+  """
   def flow_metrics_summary(%Flow{} = flow, opts \\ []) do
-    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+    card_id = Keyword.get(opts, :card_id)
+    since = metrics_since(opts, card_id)
 
     run_stats =
       from(r in Run,
@@ -263,10 +293,12 @@ defmodule Relay.Runs do
               "percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (? - ?)))",
               r.finished_at,
               r.started_at
-            )
+            ),
+          total_elapsed: fragment("SUM(EXTRACT(EPOCH FROM (? - ?)))::float", r.finished_at, r.started_at)
         }
       )
       |> filter_runs_since(since)
+      |> filter_runs_card(card_id)
       |> Repo.one()
 
     total = run_stats.total_runs
@@ -275,8 +307,9 @@ defmodule Relay.Runs do
       total_runs: total,
       completed: run_stats.completed,
       completed_pct: if(total > 0, do: round(run_stats.completed * 100 / total), else: 0),
-      total_spend: flow_total_spend(flow, since),
-      median_end_to_end: round_secs(run_stats.median)
+      total_spend: flow_total_spend(flow, since, card_id),
+      median_end_to_end: round_secs(run_stats.median),
+      total_end_to_end: round_secs(run_stats.total_elapsed)
     }
   end
 
@@ -318,8 +351,9 @@ defmodule Relay.Runs do
   end
 
   # One grouped pass over node_executions for the numeric columns. percentile_cont ignores NULLs,
-  # so a node with unset cost / open timestamps yields nil there without a FILTER clause.
-  defp node_numeric_rows(%Flow{} = flow, since) do
+  # so a node with unset cost / open timestamps yields nil there without a FILTER clause. The
+  # `*_total` columns ride along in the same pass — no second query for card scope (RE235).
+  defp node_numeric_rows(%Flow{} = flow, since, card_id) do
     from(ne in NodeExecution,
       join: r in Run,
       on: r.id == ne.run_id,
@@ -342,13 +376,16 @@ defmodule Relay.Runs do
             ne.finished_at,
             ne.started_at
           ),
+        duration_total: fragment("SUM(EXTRACT(EPOCH FROM (? - ?)))::float", ne.finished_at, ne.started_at),
         cost_p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?)", ne.cost),
         cost_p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?)", ne.cost),
+        cost_total: sum(ne.cost),
         attempts_mean: fragment("COUNT(*)::float / NULLIF(COUNT(DISTINCT (?, ?)), 0)", ne.run_id, ne.visit),
         loop_laps: fragment("COUNT(DISTINCT (?, ?)) FILTER (WHERE ? > 1)", ne.run_id, ne.visit, ne.visit)
       }
     )
     |> filter_since(since)
+    |> filter_card(card_id)
     |> Repo.all()
     |> Map.new(fn row ->
       {row.node_key,
@@ -357,8 +394,10 @@ defmodule Relay.Runs do
          runs: row.runs,
          duration_p50: round_secs(row.duration_p50),
          duration_p95: round_secs(row.duration_p95),
+         duration_total: round_secs(row.duration_total),
          cost_p50: to_decimal(row.cost_p50),
          cost_p95: to_decimal(row.cost_p95),
+         cost_total: to_decimal(row.cost_total),
          attempts_mean: (row.attempts_mean || 0.0) * 1.0,
          loop_laps: row.loop_laps || 0
        }}
@@ -367,7 +406,7 @@ defmodule Relay.Runs do
 
   # Verdict counts as a separate grouped pass so the outcome set stays sourced from
   # NodeExecution.outcomes/0 rather than retyped as SQL literals.
-  defp node_verdict_counts(%Flow{} = flow, since) do
+  defp node_verdict_counts(%Flow{} = flow, since, card_id) do
     from(ne in NodeExecution,
       join: r in Run,
       on: r.id == ne.run_id,
@@ -378,6 +417,7 @@ defmodule Relay.Runs do
       select: {ne.node_key, ne.outcome, count(ne.id)}
     )
     |> filter_since(since)
+    |> filter_card(card_id)
     |> Repo.all()
     |> Enum.group_by(fn {key, _o, _c} -> key end)
     |> Map.new(fn {key, triples} ->
@@ -389,7 +429,7 @@ defmodule Relay.Runs do
     Map.new(NodeExecution.outcomes(), fn outcome -> {outcome, Map.get(counts, outcome, 0)} end)
   end
 
-  defp flow_total_spend(%Flow{} = flow, since) do
+  defp flow_total_spend(%Flow{} = flow, since, card_id) do
     from(ne in NodeExecution,
       join: r in Run,
       on: r.id == ne.run_id,
@@ -399,6 +439,7 @@ defmodule Relay.Runs do
       select: sum(ne.cost)
     )
     |> filter_since(since)
+    |> filter_card(card_id)
     |> Repo.one()
     |> to_decimal()
   end
@@ -408,6 +449,23 @@ defmodule Relay.Runs do
 
   defp filter_runs_since(query, nil), do: query
   defp filter_runs_since(query, since), do: from([r] in query, where: r.started_at >= ^since)
+
+  # Decision 3 (RE235): a card's numbers always cover ALL of its executions, so a card-scoped
+  # query drops the window entirely. Defined here, once, so the page and the API cannot disagree.
+  defp metrics_since(_opts, card_id) when not is_nil(card_id), do: nil
+
+  defp metrics_since(opts, _card_id),
+    do: opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+
+  # Every metrics query over node_executions already joins Run then Card, so scoping to one card
+  # is a WHERE on the third binding — no new join, no schema change.
+  defp filter_card(query, nil), do: query
+  defp filter_card(query, card_id), do: from([_ne, _r, c] in query, where: c.id == ^card_id)
+
+  # The summary's run query joins Card second, hence its own arity-matched clause — the same
+  # split the existing filter_since/filter_runs_since pair already makes.
+  defp filter_runs_card(query, nil), do: query
+  defp filter_runs_card(query, card_id), do: from([_r, c] in query, where: c.id == ^card_id)
 
   defp normalize_window(window) when window in @metric_windows, do: window
   defp normalize_window(_), do: default_window()

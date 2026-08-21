@@ -38,6 +38,30 @@ defmodule Relay.Runs.NodeMetricsTest do
     )
   end
 
+  # A completed run of `flow_key` for an EXISTING card — card scoping needs two runs to share
+  # one card, which `completed_run/4` (which mints its own card) cannot express.
+  defp completed_run_for(card, flow_key, ago_s, elapsed_s) do
+    started = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -ago_s, :second)
+
+    insert(:run,
+      card: card,
+      flow_key: flow_key,
+      status: :done,
+      started_at: started,
+      finished_at: DateTime.add(started, elapsed_s, :second)
+    )
+  end
+
+  # Push a persisted execution back in time by `ago_s`, preserving its original elapsed
+  # duration (finished_at - started_at) — the factory stamps both timestamps near "now", so
+  # shifting only started_at would balloon the computed duration instead of just relocating it.
+  defp backdate(exec, ago_s) do
+    started = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -ago_s, :second)
+    elapsed = DateTime.diff(exec.finished_at, exec.started_at, :second)
+    finished = DateTime.add(started, elapsed, :second)
+    Relay.Repo.update!(Ecto.Changeset.change(exec, started_at: started, finished_at: finished))
+  end
+
   describe "node_metrics_for_flow/2" do
     test "one row per node with executions, in flow node order, with counts and percentiles" do
       board = insert(:board)
@@ -121,12 +145,105 @@ defmodule Relay.Runs.NodeMetricsTest do
     end
   end
 
+  describe "card scoping (RE235)" do
+    test "sums every run of the flow for one card and excludes other cards" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      stage = insert(:stage, board: board)
+      mine = insert(:card, board: board, stage: stage)
+      other = insert(:card, board: board, stage: stage)
+
+      # decision 4: two runs of the same flow for the same card — BOTH count
+      run_a = completed_run_for(mine, "code", 120, 600)
+      run_b = completed_run_for(mine, "code", 60, 300)
+      exec(run_a, "implement", duration_s: 30, cost: Decimal.new("0.50"))
+      exec(run_b, "implement", duration_s: 90, cost: Decimal.new("1.00"))
+
+      # another card's execution on the same node must not leak in
+      other_run = completed_run_for(other, "code", 60, 600)
+      exec(other_run, "implement", duration_s: 1000, cost: Decimal.new("9.00"))
+
+      [row] = Runs.node_metrics_for_flow(flow, window: "all", card_id: mine.id)
+
+      assert row.runs == 2
+      assert row.duration_total == 120
+      assert Decimal.equal?(row.cost_total, Decimal.new("1.50"))
+      assert row.verdict_split == %{succeeded: 2, failed: 0, partial: 0, needs_input: 0}
+
+      summary = Runs.flow_metrics_summary(flow, window: "all", card_id: mine.id)
+
+      assert summary.total_runs == 2
+      assert summary.completed == 2
+      assert summary.total_end_to_end == 900
+      assert Decimal.equal?(summary.total_spend, Decimal.new("1.50"))
+    end
+
+    test "card scope ignores the window — every execution of that card counts (decision 3)" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      card = insert(:card, board: board, stage: insert(:stage, board: board))
+
+      old_run = completed_run_for(card, "code", 40 * 86_400, 600)
+      recent_run = completed_run_for(card, "code", 86_400, 300)
+      old_run |> exec("implement", duration_s: 10) |> backdate(40 * 86_400)
+      exec(recent_run, "implement", duration_s: 20)
+
+      # the same "7d" window that drops the old row in flow scope...
+      assert [%{runs: 1}] = Runs.node_metrics_for_flow(flow, window: "7d")
+      # ...is not applied at all in card scope
+      assert [%{runs: 2, duration_total: 30}] =
+               Runs.node_metrics_for_flow(flow, window: "7d", card_id: card.id)
+
+      assert %{total_runs: 2, total_end_to_end: 900} =
+               Runs.flow_metrics_summary(flow, window: "7d", card_id: card.id)
+    end
+
+    test "totals are computed in flow scope too, and card_id: nil is exactly the unscoped query" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      run = completed_run(board, "code", 60, :done)
+      exec(run, "implement", duration_s: 30, cost: Decimal.new("0.50"))
+      exec(run, "implement", duration_s: 90, cost: Decimal.new("1.00"))
+
+      [row] = Runs.node_metrics_for_flow(flow, window: "all")
+      assert row.duration_total == 120
+      assert Decimal.equal?(row.cost_total, Decimal.new("1.50"))
+      assert Runs.flow_metrics_summary(flow, window: "all").total_end_to_end == 600
+
+      assert Runs.node_metrics_for_flow(flow, window: "all", card_id: nil) ==
+               Runs.node_metrics_for_flow(flow, window: "all")
+
+      assert Runs.flow_metrics_summary(flow, window: "all", card_id: nil) ==
+               Runs.flow_metrics_summary(flow, window: "all")
+    end
+
+    test "a card with no executions of this flow yields no rows and a zeroed summary" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      quiet = insert(:card, board: board, stage: insert(:stage, board: board))
+      exec(completed_run(board, "code", 60, :done), "implement")
+
+      assert Runs.node_metrics_for_flow(flow, window: "all", card_id: quiet.id) == []
+
+      assert %{total_runs: 0, completed: 0, completed_pct: 0, total_end_to_end: nil} =
+               Runs.flow_metrics_summary(flow, window: "all", card_id: quiet.id)
+    end
+  end
+
   describe "policy accessors" do
     test "windows and threshold are defined once" do
       assert Runs.metric_windows() == ["7d", "30d", "all"]
       assert Runs.default_window() == "30d"
       assert Runs.min_runs_for_percentiles() == 10
       assert Runs.default_window() in Runs.metric_windows()
+    end
+
+    test "the scope closed set and the card_id -> scope mapping are defined once (RE235)" do
+      assert Runs.metric_scopes() == [:flow, :card]
+      assert Runs.metric_scope(nil) == :flow
+      assert Runs.metric_scope(42) == :card
+      assert Runs.metric_scope(nil) in Runs.metric_scopes()
+      assert Runs.metric_scope(42) in Runs.metric_scopes()
     end
   end
 
