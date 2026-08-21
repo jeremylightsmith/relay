@@ -515,6 +515,90 @@ class CancelTest(unittest.TestCase):
         urllib.request.urlopen = fn
 
 
+class SearchTest(unittest.TestCase):
+    """relay search QUERY — GETs /api/cards?q=… and prints card_line rows (RE198)."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        self.cards = [
+            {"ref": "RE198", "title": "search for card", "status": "working",
+             "active_owner": "ai", "archived": False},
+        ]
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or {"data": self.cards}
+        )
+
+    def _args(self, argv):
+        return relay.build_parser().parse_args(argv)
+
+    def _run(self, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_search(self._args(argv))
+        return buf.getvalue()
+
+    def test_it_gets_the_card_index_with_an_encoded_query_and_the_default_limit(self):
+        self._run(["search", "story map"])
+        self.assertEqual(self.sent, [("GET", "/api/cards?q=story+map&limit=20", None)])
+
+    def test_a_wildcard_query_is_percent_encoded(self):
+        self._run(["search", "%"])
+        self.assertEqual(self.sent, [("GET", "/api/cards?q=%25&limit=20", None)])
+
+    def test_archived_and_limit_are_sent(self):
+        self._run(["search", "widget", "--archived", "--limit", "5"])
+        self.assertEqual(self.sent, [("GET", "/api/cards?q=widget&limit=5&archived=1", None)])
+
+    def test_it_prints_one_card_line_per_result(self):
+        out = self._run(["search", "search"])
+        self.assertIn(relay.card_line(self.cards[0]), out)
+
+    def test_an_archived_row_is_marked(self):
+        self.cards = [{"ref": "RE9", "title": "Old thing", "status": "ready",
+                       "active_owner": None, "archived": True}]
+        self.assertIn("(archived)", self._run(["search", "old"]))
+
+    def test_a_live_row_is_not_marked(self):
+        self.assertNotIn("(archived)", self._run(["search", "search"]))
+
+    def test_a_full_page_prints_the_truncation_hint(self):
+        self.cards = [dict(self.cards[0], ref=f"RE{n}") for n in range(3)]
+        out = self._run(["search", "widget", "--limit", "3"])
+        self.assertIn("showing the first 3", out)
+
+    def test_a_partial_page_prints_no_hint(self):
+        out = self._run(["search", "widget", "--limit", "3"])
+        self.assertNotIn("showing the first", out)
+
+    def test_no_matches_prints_the_message_and_exits_zero(self):
+        self.cards = []
+        out = self._run(["search", "zzzznotarealcard"])
+        self.assertEqual(out.strip(), 'No cards match "zzzznotarealcard".')
+
+    def test_json_prints_the_payload(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_search(self._args(["search", "search", "--json"]))
+        self.assertEqual(json.loads(buf.getvalue())["data"][0]["ref"], "RE198")
+
+    def test_field_selects_into_the_result_list(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            relay.cmd_search(self._args(["search", "search", "--field", "data.0.ref"]))
+        self.assertEqual(buf.getvalue().strip(), "RE198")
+
+    def test_the_cli_wires_search_with_its_flags(self):
+        args = self._args(["search", "words", "--archived", "--limit", "5", "--json"])
+        self.assertEqual(args.query, "words")
+        self.assertTrue(args.archived)
+        self.assertEqual(args.limit, 5)
+        self.assertTrue(args.json)
+        self.assertEqual(args.func, relay.cmd_search)
+        self.assertEqual(self._args(["search", "words"]).limit, 20)
+
+
 class NeedsInputBodyTest(unittest.TestCase):
     """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
 

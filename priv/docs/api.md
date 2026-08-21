@@ -118,6 +118,20 @@ All cards on the board (base shape).
 { "data": [ { "id": 42, "ref": "RLY-12", "…": "…" } ] }
 ```
 
+| param | effect |
+|---|---|
+| *(none)* | The board's cards, top-level Done stages excluded. |
+| `include_done=1` | Include the top-level Done stages. Ignored when `q` is present. |
+| `q=<text>` | **Search** by ref or title. A ref or bare number (`RLY-12`, `12`) is an exact hit ranked first, then title matches in board order; every whitespace-separated word must appear in the title, in any order; case-insensitive; `%` and `_` are literals, not wildcards. Done cards are always in scope. A present-but-blank `q` returns `[]`, never the whole board. |
+| `limit=<n>` | Cap the number of results (the exact-ref hit counts toward it). |
+| `archived=1` | Widen the corpus so archived cards join the results. |
+
+`bin/relay search "words"` is the CLI wrapper for `q`.
+
+```
+curl -H "Authorization: Bearer $RELAY_KEY" "https://relay.example/api/cards?q=login&limit=10"
+```
+
 ### POST /api/cards
 
 Create a card. Optional `stage` (a stage **id**; defaults to the board's first stage).

@@ -27,9 +27,24 @@ defmodule Relay.DocsContentTest do
   test "the CLI page documents the bin/relay command table" do
     html = read("cli.md")
 
-    for cmd <- ["bin/relay board", "bin/relay card", "bin/relay move", "bin/relay needs-input"] do
+    for cmd <- ["bin/relay board", "bin/relay card", "bin/relay move", "bin/relay needs-input", "bin/relay search"] do
       assert html =~ cmd, "cli.md should mention `#{cmd}`"
     end
+  end
+
+  test "card search is documented everywhere it is described, and the known gap is gone (RE198)" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    domain = File.read!(Path.join(File.cwd!(), "docs/architecture/domain.md"))
+    api = read("api.md")
+
+    # The card exists to close this hole — the line that named it must not survive.
+    refute relay_md =~ "known gap"
+
+    assert relay_md =~ "bin/relay search"
+    assert api =~ "bin/relay search"
+    assert api =~ "q=<text>"
+    assert domain =~ "bin/relay search"
+    assert domain =~ "Cards.search/3"
   end
 
   test "authentication.md still explains the API key + env vars" do

@@ -69,6 +69,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 |---|---|
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: spec, plan, branch, timeline |
+| `bin/relay search "words"` | Find a card by ref or title — ref/bare number first, then title; `--archived`, `--limit` |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `bin/relay runs RLY-12` | The card's runs + node executions, full failure detail |
 | `bin/relay executors` | Who's connected, their capacity, the jobs they hold |
@@ -100,9 +101,14 @@ Full table with every flag: `$RELAY_URL/docs/cli`.
 positional: put it left of where the work starts; it becomes pullable when an AI column sits to
 its right. Add a `--tag` to group it.
 
-**Dig / find / reorganize.** There is no search verb yet — query with `--json`:
-`bin/relay board --json` for the whole board, `bin/relay card RLY-12 --json --field plan` for one
-field. Reorganize with `move` (stage), `tag`, and `comment`. (A first-class `search` is a known gap.)
+**Dig / find / reorganize.** `bin/relay search "words"` finds a card by ref or title: a ref or a
+bare number (`RLY-12`, `12`) is an exact hit ranked first, otherwise every whitespace-separated
+word must appear in the title, in any order. Done cards are included — finished work is exactly
+what the board's bounded Done column hides. `--archived` widens it to archived cards (marked
+`(archived)`), `--limit N` caps it (default 20), and no match is a plain message on stdout with
+exit 0. For everything else query with `--json`: `bin/relay board --json` for the whole board,
+`bin/relay card RLY-12 --json --field plan` for one field. Reorganize with `move` (stage), `tag`,
+and `comment`.
 
 **Diagnose a stuck card.** Start with `bin/relay why RLY-12` — it names the cause in a sentence.
 Then `runs` for the untruncated failure, `executors` to see what's connected, `version` for the
