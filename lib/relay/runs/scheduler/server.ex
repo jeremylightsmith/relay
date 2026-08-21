@@ -114,12 +114,17 @@ defmodule Relay.Runs.Scheduler.Server do
   def build_snapshot(board_id, engine) do
     board = Boards.get_board_by_id!(board_id)
     cards = Cards.list_cards(board)
+    stages = Boards.list_stages(board)
+    # RE93 — the ONE "is this card blocked" read, done here where the stage list is already in
+    # hand, so the pure planner never re-derives "which stage is complete". Runs.diagnose/3
+    # reuses this same function, so plan and explain cannot disagree.
+    blocked_by = Cards.unmet_dependencies(board, stages)
     runs = engine.active_runs(board_id)
     executors = executor_snap(board_id)
 
     snapshot = %Snapshot{
-      stages: Enum.map(Boards.list_stages(board), &stage_snap/1),
-      cards: Enum.map(cards, &card_snap(&1, board)),
+      stages: Enum.map(stages, &stage_snap/1),
+      cards: Enum.map(cards, &card_snap(&1, board, blocked_by)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
       runs: runs,
       capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> drop_gone_capacity(executors),
@@ -223,14 +228,15 @@ defmodule Relay.Runs.Scheduler.Server do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
   end
 
-  defp card_snap(card, board) do
+  defp card_snap(card, board, blocked_by) do
     %{
       id: card.id,
       ref: Cards.ref(board, card),
       stage_id: card.stage_id,
       status: card.status,
       active_owner: Cards.active_owner_type(card),
-      position: card.position
+      position: card.position,
+      blocked_by: Map.get(blocked_by, card.id, [])
     }
   end
 

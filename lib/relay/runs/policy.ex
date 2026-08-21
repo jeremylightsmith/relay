@@ -19,9 +19,20 @@ defmodule Relay.Runs.Policy do
   @spec agent_may_hold?(%{active_owner: atom() | nil}) :: boolean()
   def agent_may_hold?(%{active_owner: owner}), do: owner != :human
 
-  @doc "A fresh card the scheduler would pull: agent-eligible and in a queueable status (`:ready`/`:queued`)."
-  @spec pullable?(%{active_owner: atom() | nil, status: atom()}) :: boolean()
-  def pullable?(%{status: status} = card), do: agent_may_hold?(card) and status in @queueable_statuses
+  @doc """
+  A fresh card the scheduler would pull: agent-eligible, in a queueable status (`:ready` /
+  `:queued`), and not waiting on an unfinished dependency (RE93).
+
+  `blocked_by` is the card's list of UNMET blocker ids (`Relay.Cards.unmet_dependencies/2`) and
+  is a **required** key rather than a defaulted one: every caller must decide what it holds, so
+  a new dispatch surface cannot silently opt out of the gate. `resumable?/2` deliberately does
+  NOT consult it — a run already in flight must never be stranded by a dependency added
+  mid-run; dependencies gate *fresh pulls* only.
+  """
+  @spec pullable?(%{active_owner: atom() | nil, status: atom(), blocked_by: [term()]}) :: boolean()
+  def pullable?(%{status: status, blocked_by: blocked_by} = card) do
+    agent_may_hold?(card) and status in @queueable_statuses and blocked_by == []
+  end
 
   @doc """
   The scheduler's `:executor_gone`-park resume gate (RLY-200): a parked run whose reason is

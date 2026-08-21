@@ -547,7 +547,8 @@ defmodule RelayWeb.BoardLive do
             @selected_card,
             Cards.active_owner_type(@selected_card),
             @flows,
-            Map.get(@run_summaries, @selected_card.id)
+            Map.get(@run_summaries, @selected_card.id),
+            Map.get(@blocked_by, @selected_card.id, [])
           )
         }
         vote_count={@drawer_vote_count}
@@ -954,6 +955,9 @@ defmodule RelayWeb.BoardLive do
     flows = Flows.list_flows(board)
     run_summaries = Runs.run_summaries_for_board(board)
     cards_by_stage = Enum.group_by(cards, & &1.stage_id)
+    # RE93 — %{card_id => [unmet blocker id]}. One board-scoped query; the ONE definition of
+    # "blocked", shared with the scheduler.
+    blocked_by = Cards.unmet_dependencies(board, board.stages)
 
     socket =
       socket
@@ -1034,7 +1038,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
-      |> assign(:face_runs, face_runs(cards, flows, run_summaries))
+      |> assign(:blocked_by, blocked_by)
+      |> assign(:face_runs, face_runs(cards, flows, run_summaries, blocked_by))
       |> assign(:vote_counts, Votes.counts_for_cards(Enum.map(cards, & &1.id)))
       |> assign(:drawer_supporters, [])
       |> assign(:drawer_vote_count, 0)
@@ -2458,6 +2463,7 @@ defmodule RelayWeb.BoardLive do
        |> upsert_card_stream(card, cards_by_stage)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
+       |> refresh_blocked_by(cards_by_stage)
        |> refresh_face_runs(cards_by_stage)
        |> maybe_refresh_drawer(card)
        |> refresh_story_map()}
@@ -2476,6 +2482,7 @@ defmodule RelayWeb.BoardLive do
        socket
        |> refresh_card_health(moved.id)
        |> apply_move(from_stage_id, moved)
+       |> refresh_blocked_by(cards_by_stage)
        |> refresh_face_runs(cards_by_stage)
        |> refresh_story_map()}
     else
@@ -2488,7 +2495,18 @@ defmodule RelayWeb.BoardLive do
   # drawer if the archived card is the one open here.
   def handle_info({:card_archived, %Card{} = card}, socket) do
     if find_stage_by_id(socket, card.stage_id) do
-      {:noreply, socket |> apply_archive(card) |> close_drawer_if_selected(card) |> refresh_story_map()}
+      # RE93 — archiving a card deletes the dependency rows pointing AT it, so its dependents
+      # are freed in this same beat and their chips must repaint. apply_archive/2 loads its own
+      # card list (it is also the local-action path); the second load here is one indexed select.
+      cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+      {:noreply,
+       socket
+       |> apply_archive(card)
+       |> refresh_blocked_by(cards_by_stage)
+       |> refresh_face_runs(cards_by_stage)
+       |> close_drawer_if_selected(card)
+       |> refresh_story_map()}
     else
       {:noreply, reload_board(socket)}
     end
@@ -2777,9 +2795,16 @@ defmodule RelayWeb.BoardLive do
   # than patched incrementally like health: face_summary/4 is cheap (pure map lookups
   # over already-loaded :flows / :run_summaries) and a card's stage/status/owner can
   # all move its face at once (e.g. into the queued or review states).
-  defp face_runs(cards, flows, summaries) do
+  defp face_runs(cards, flows, summaries, blocked_by) do
     Map.new(cards, fn card ->
-      {card.id, Runs.face_summary(card, Cards.active_owner_type(card), flows, summaries)}
+      {card.id,
+       Runs.face_summary(
+         card,
+         Cards.active_owner_type(card),
+         flows,
+         summaries,
+         Map.get(blocked_by, card.id, [])
+       )}
     end)
   end
 
@@ -2806,7 +2831,46 @@ defmodule RelayWeb.BoardLive do
 
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()
-    assign(socket, :face_runs, face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries))
+
+    assign(
+      socket,
+      :face_runs,
+      face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries, socket.assigns.blocked_by)
+    )
+  end
+
+  # RE93 — when a blocker reaches a Done column (or is archived), it is the DEPENDENT's stream
+  # entry that must change, and nothing in the dependent's own row did, so no other handler would
+  # restream it. Recompute the map, diff it against the previous one, and stream_insert exactly
+  # the cards whose blocker list moved. @vote_counts (the :vote_changed handler) is the existing
+  # precedent for this assign-plus-restream idiom.
+  #
+  # Terminal-stage cards are skipped deliberately: that column is a paged window rebuilt with
+  # reset:, and a bare stream_insert would push a card in outside it.
+  defp refresh_blocked_by(socket, cards_by_stage) do
+    board = socket.assigns.board
+    previous = socket.assigns.blocked_by
+    current = Cards.unmet_dependencies(board, board.stages)
+
+    changed =
+      previous
+      |> Map.keys()
+      |> Kernel.++(Map.keys(current))
+      |> Enum.uniq()
+      |> Enum.filter(&(Enum.sort(Map.get(previous, &1, [])) != Enum.sort(Map.get(current, &1, []))))
+
+    by_id = cards_by_stage |> Map.values() |> List.flatten() |> Map.new(&{&1.id, &1})
+    socket = assign(socket, :blocked_by, current)
+
+    Enum.reduce(changed, socket, fn id, acc ->
+      card = Map.get(by_id, id)
+
+      if card && card.stage_id != acc.assigns.terminal_stage_id && find_stage_by_id(acc, card.stage_id) do
+        stream_insert(acc, stream_name(card.stage_id), card)
+      else
+        acc
+      end
+    end)
   end
 
   # RLY-204 — record that `card_id`'s run changed and arm the debounce timer once per burst.
@@ -2840,7 +2904,14 @@ defmodule RelayWeb.BoardLive do
             do: Map.put(socket.assigns.run_summaries, card_id, summary),
             else: Map.delete(socket.assigns.run_summaries, card_id)
 
-        face = Runs.face_summary(card, Cards.active_owner_type(card), flows, run_summaries)
+        face =
+          Runs.face_summary(
+            card,
+            Cards.active_owner_type(card),
+            flows,
+            run_summaries,
+            Map.get(socket.assigns.blocked_by, card_id, [])
+          )
 
         socket =
           socket
@@ -3593,6 +3664,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)
       |> assign_archived_count()
+      |> assign(:blocked_by, Cards.unmet_dependencies(board, board.stages))
       |> refresh_face_runs(cards_by_stage)
 
     board.stages

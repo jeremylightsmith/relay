@@ -312,12 +312,24 @@ defmodule Relay.Runs.Scheduler do
       run != nil ->
         run_verdict(run, Enum.find(plan.refusals, &(&1.run_id == run.id)), evidence)
 
+      true ->
+        fresh_card_verdict(snapshot, card, flow, evidence)
+    end
+  end
+
+  # RE93 — split out of do_explain/2's cond (credo cyclomatic-complexity cap) to hold the reasons
+  # a FRESH (no run, agent-eligible, not needs_input) card is not dispatching.
+  defp fresh_card_verdict(snapshot, card, flow, evidence) do
+    cond do
       flow == nil ->
         verdict(
           :no_enabled_flow,
           "There is no enabled flow that pulls from this card's stage, so nothing will ever pick it up.",
           evidence
         )
+
+      card.blocked_by != [] ->
+        blocked_by_verdict(evidence)
 
       not fresh_eligible?(card, MapSet.new(), %{}) ->
         verdict(
@@ -338,6 +350,20 @@ defmodule Relay.Runs.Scheduler do
       true ->
         capacity_verdict(snapshot, flow, evidence)
     end
+  end
+
+  # RE93 — split out of do_explain/2's cond to keep its cyclomatic complexity down.
+  defp blocked_by_verdict(evidence) do
+    refs = evidence.blocked_by
+    noun = if length(refs) == 1, do: "card", else: "cards"
+    verb = if length(refs) == 1, do: "has", else: "have"
+
+    verdict(
+      :blocked_by_dependencies,
+      "This card is waiting on #{length(refs)} #{noun} that #{verb} not reached a Done column: " <>
+        "#{Enum.join(refs, ", ")}.",
+      evidence
+    )
   end
 
   defp capacity_verdict(snapshot, flow, evidence) do
@@ -447,6 +473,9 @@ defmodule Relay.Runs.Scheduler do
       card_status: card.status,
       stage_id: card.stage_id,
       active_owner: card.active_owner,
+      # RE93 — the refs, resolved from the snapshot's OWN card list: explain/2 must never need a
+      # DB read. Sorted by id so the sentence is deterministic.
+      blocked_by: blocked_refs(snapshot, card),
       flow_key: flow && flow.key,
       isolation: run_isolation(run, flow),
       capacity: snapshot.capacity,
@@ -468,6 +497,15 @@ defmodule Relay.Runs.Scheduler do
   # The run's own isolation (from the LIVE flow row) when it has one, else the pulling flow's —
   # a run whose flow row was deleted reads nil here, which is itself the diagnosis (RE297).
   defp run_isolation(run, flow), do: (run && run.isolation) || (flow && flow.isolation)
+
+  defp blocked_refs(snapshot, card) do
+    by_id = Map.new(snapshot.cards, &{&1.id, &1.ref})
+
+    card.blocked_by
+    |> Enum.sort()
+    |> Enum.map(&Map.get(by_id, &1))
+    |> Enum.reject(&is_nil/1)
+  end
 
   defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
 

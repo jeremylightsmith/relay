@@ -232,7 +232,7 @@ defmodule Relay.RunsReadSideTest do
     end
   end
 
-  describe "queued_flow/4" do
+  describe "queued_flow/5" do
     setup do
       user = insert(:user)
       {:ok, board} = Relay.Boards.create_board(user, %{name: "Queued"})
@@ -246,28 +246,34 @@ defmodule Relay.RunsReadSideTest do
     test "ready + AI baton + enabled flow pulls from stage + no active run", ctx do
       card = insert(:card, stage: ctx.pulls_from, status: :ready)
 
-      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(card, :ai, [ctx.flow], nil)
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(card, :ai, [ctx.flow], nil, [])
     end
 
     test "not queued when the baton is human, the flow is disabled, or a run is active", ctx do
       card = insert(:card, stage: ctx.pulls_from, status: :ready)
 
-      refute Runs.queued_flow(card, :human, [ctx.flow], nil)
-      refute Runs.queued_flow(card, :ai, [%{ctx.flow | enabled: false}], nil)
-      refute Runs.queued_flow(card, :ai, [ctx.flow], %{status: :running})
-      refute Runs.queued_flow(%{card | status: :working}, :ai, [ctx.flow], nil)
+      refute Runs.queued_flow(card, :human, [ctx.flow], nil, [])
+      refute Runs.queued_flow(card, :ai, [%{ctx.flow | enabled: false}], nil, [])
+      refute Runs.queued_flow(card, :ai, [ctx.flow], %{status: :running}, [])
+      refute Runs.queued_flow(%{card | status: :working}, :ai, [ctx.flow], nil, [])
     end
 
     test "queued for a :queued-status card and for an unowned ready card (RLY-206 face nudge)", ctx do
       queued = insert(:card, stage: ctx.pulls_from, status: :queued)
       unowned = insert(:card, stage: ctx.pulls_from, status: :ready)
 
-      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(queued, :ai, [ctx.flow], nil)
-      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(unowned, nil, [ctx.flow], nil)
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(queued, :ai, [ctx.flow], nil, [])
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(unowned, nil, [ctx.flow], nil, [])
+    end
+
+    test "a dependency-blocked card is not queued for any flow (RE93)", ctx do
+      card = insert(:card, stage: ctx.pulls_from, status: :ready)
+      refute Runs.queued_flow(card, :ai, [ctx.flow], nil, [123])
+      assert Runs.face_summary(card, :ai, [ctx.flow], %{}, [123]) == nil
     end
   end
 
-  describe "face_summary/4" do
+  describe "face_summary/5" do
     setup do
       user = insert(:user)
       {:ok, board} = Relay.Boards.create_board(user, %{name: "Face"})
@@ -281,7 +287,7 @@ defmodule Relay.RunsReadSideTest do
       card = insert(:card, stage: hd(ctx.board.stages), status: :working)
       summary = %{status: :running, flow_key: "code"}
 
-      assert {:run, ^summary} = Runs.face_summary(card, :ai, [ctx.flow], %{card.id => summary})
+      assert {:run, ^summary} = Runs.face_summary(card, :ai, [ctx.flow], %{card.id => summary}, [])
     end
 
     test "a terminal run stays on the face while the card sits in the flow's trigger stages", ctx do
@@ -289,7 +295,7 @@ defmodule Relay.RunsReadSideTest do
       card = insert(:card, stage: lands_on, status: :in_review)
       summary = %{status: :done, flow_key: "code"}
 
-      assert {:run, ^summary} = Runs.face_summary(card, :human, [ctx.flow], %{card.id => summary})
+      assert {:run, ^summary} = Runs.face_summary(card, :human, [ctx.flow], %{card.id => summary}, [])
     end
 
     test "a terminal run drops off once the card moves on", ctx do
@@ -305,7 +311,7 @@ defmodule Relay.RunsReadSideTest do
       card = insert(:card, stage: elsewhere, status: :ready)
       summary = %{status: :done, flow_key: "code"}
 
-      assert Runs.face_summary(card, nil, [ctx.flow], %{card.id => summary}) == nil
+      assert Runs.face_summary(card, nil, [ctx.flow], %{card.id => summary}, []) == nil
     end
 
     test "queued when no run and the enabled flow pulls from the card's stage", ctx do
@@ -313,7 +319,7 @@ defmodule Relay.RunsReadSideTest do
       card = insert(:card, stage: pulls_from, status: :ready)
 
       assert {:queued, %Schemas.Flow{key: "code"}} =
-               Runs.face_summary(card, :ai, [ctx.flow], %{})
+               Runs.face_summary(card, :ai, [ctx.flow], %{}, [])
     end
 
     test "an unowned ready card on a pulls-from stage shows the queued pill (RLY-206 nudge)", ctx do
@@ -321,7 +327,7 @@ defmodule Relay.RunsReadSideTest do
       card = insert(:card, stage: pulls_from, status: :ready)
 
       assert {:queued, %Schemas.Flow{key: "code"}} =
-               Runs.face_summary(card, nil, [ctx.flow], %{})
+               Runs.face_summary(card, nil, [ctx.flow], %{}, [])
     end
   end
 

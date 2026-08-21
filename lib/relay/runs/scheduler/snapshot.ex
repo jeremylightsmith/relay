@@ -7,8 +7,11 @@ defmodule Relay.Runs.Scheduler.Snapshot do
     * `stages` — `[%{id, position, parent_id, wip_limit}]`. `parent_id` links a
       sub-lane to its column; `position` orders stages left→right; `wip_limit`
       is `nil` or a positive integer.
-    * `cards` — `[%{id, ref, stage_id, status, active_owner, position}]`.
+    * `cards` — `[%{id, ref, stage_id, status, active_owner, position, blocked_by}]`.
       `active_owner` is `:ai | :human | nil` (from `Relay.Cards.active_owner_type/1`).
+      `blocked_by` (RE93) is the card's list of UNMET blocker card ids, from
+      `Relay.Cards.unmet_dependencies/2` — the ids and not a count, so `explain/2` can name the
+      refs from this snapshot's own card list without a DB read. `[]` when nothing blocks it.
     * `flows` — **enabled** flows only: `[%{key, pulls_from_stage_id,
       works_in_stage_id, isolation}]`; `isolation` is `:shared_clean | :exclusive`.
     * `runs` — **active** runs only (`status in Schemas.Run.active_statuses()`):
@@ -43,7 +46,8 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           stage_id: term(),
           status: atom(),
           active_owner: :ai | :human | nil,
-          position: integer()
+          position: integer(),
+          blocked_by: [term()]
         }
   @type flow :: %{
           key: String.t(),

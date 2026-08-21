@@ -27,7 +27,8 @@ defmodule Relay.Runs.SchedulerTest do
       stage_id: stage_id,
       status: Keyword.get(opts, :status, :ready),
       active_owner: Keyword.get(opts, :active_owner),
-      position: Keyword.get(opts, :position, id)
+      position: Keyword.get(opts, :position, id),
+      blocked_by: Keyword.get(opts, :blocked_by, [])
     }
   end
 
@@ -105,6 +106,21 @@ defmodule Relay.Runs.SchedulerTest do
         )
 
       assert %Plan{dispatches: [{:start, 12, "f", 7}]} = Scheduler.plan(s)
+    end
+
+    # RE93 — a blocked card is skipped like the WIP-full path: it keeps its :ready status and the
+    # next eligible card BEHIND it is still pulled, so one blocked card never wedges its column.
+    test "skips a dependency-blocked card and still pulls the next eligible one" do
+      s =
+        snap(
+          stages: [stage(1), stage(2, position: 2)],
+          cards: [card(10, 1, position: 1, blocked_by: [99]), card(11, 1, position: 2)],
+          flows: [flow("code", 1, 2)],
+          capacity: cap([{"ex", slots(2, 0)}])
+        )
+
+      assert %Plan{dispatches: dispatches} = Scheduler.plan(s)
+      assert dispatches == [{:start, 11, "code", "ex"}]
     end
   end
 

@@ -679,12 +679,20 @@ defmodule Relay.Runs do
   @doc """
   The enabled flow that will pick this card up, or nil. Queued (spec decision):
   an enabled flow pulls from the card's stage, the card is AI-ready (:ready +
-  baton with AI), and no active run exists. Pure — no scheduler/NodeJob read.
+  baton with AI), no unmet dependency (RE93), and no active run exists. Pure —
+  no scheduler/NodeJob read.
+
+  `blocked_by` is the card's unmet-blocker id list (RE93) — passed in rather than queried so
+  this stays a pure read over what the caller already loaded, and so the face chip and the real
+  dispatch go dark from the ONE predicate, `Policy.pullable?/1`.
   """
-  def queued_flow(%Card{} = card, active_owner, flows, summary) do
+  def queued_flow(%Card{} = card, active_owner, flows, summary, blocked_by) do
     active_run? = summary != nil and summary.status in Run.active_statuses()
 
-    if Policy.pullable?(%{status: card.status, active_owner: active_owner}) and not active_run? do
+    pullable? =
+      Policy.pullable?(%{status: card.status, active_owner: active_owner, blocked_by: blocked_by})
+
+    if pullable? and not active_run? do
       Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
     end
   end
@@ -695,8 +703,10 @@ defmodule Relay.Runs do
   stages (pulls-from / works-in / lands-on — the spec's "hasn't moved on" rule
   made precise, so a done run's totals survive landing on lands-on);
   {:queued, flow} when queued; nil → legacy strip logic.
+
+  `blocked_by` is the card's unmet-blocker id list (RE93), threaded through to `queued_flow/5`.
   """
-  def face_summary(%Card{} = card, active_owner, flows, summaries) do
+  def face_summary(%Card{} = card, active_owner, flows, summaries, blocked_by) do
     summary = Map.get(summaries, card.id)
 
     cond do
@@ -707,7 +717,7 @@ defmodule Relay.Runs do
         {:run, summary}
 
       true ->
-        case queued_flow(card, active_owner, flows, summary) do
+        case queued_flow(card, active_owner, flows, summary, blocked_by) do
           nil -> nil
           flow -> {:queued, flow}
         end
