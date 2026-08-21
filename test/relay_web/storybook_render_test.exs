@@ -23,4 +23,13 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "3 notes"
     assert html =~ "QUESTION"
   end
+
+  test "GET /storybook/flow_metrics/verdict_bar shows the RE235 actual-counts variations", %{conn: conn} do
+    conn = get(conn, "/storybook/flow_metrics/verdict_bar")
+    html = html_response(conn, 200)
+
+    assert html =~ "1 ok"
+    assert html =~ "2 ok · 1 fail"
+    assert html =~ "92% ok · 5% fail"
+  end
 end
