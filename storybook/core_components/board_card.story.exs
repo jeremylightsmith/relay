@@ -251,6 +251,16 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}],
           run: {:run, %{status: :done, duration_s: 581, cost: nil, flow_key: "code", flow_version: 3, attempts: 4}}
         }
+      },
+      %Variation{
+        id: :blocked_by_dependencies,
+        attributes: %{
+          id: "story-card-9",
+          ref: "RLY-9",
+          title: "Waiting on three other cards",
+          status: :ready,
+          blocked_count: 3
+        }
       }
     ]
   end

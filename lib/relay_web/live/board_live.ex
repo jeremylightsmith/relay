@@ -384,6 +384,7 @@ defmodule RelayWeb.BoardLive do
                   runs={@face_runs}
                   run_meta={@run_face_meta}
                   vote_counts={@vote_counts}
+                  blocked_by={@blocked_by}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -551,6 +552,10 @@ defmodule RelayWeb.BoardLive do
             Map.get(@blocked_by, @selected_card.id, [])
           )
         }
+        dependencies={@card_dependencies}
+        dependents={@card_dependents}
+        dependency_options={@dependency_options}
+        dependency_error={@dependency_error}
         vote_count={@drawer_vote_count}
         supporters={@drawer_supporters}
         public_description={@selected_card.public_description}
@@ -1043,6 +1048,10 @@ defmodule RelayWeb.BoardLive do
       |> assign(:vote_counts, Votes.counts_for_cards(Enum.map(cards, & &1.id)))
       |> assign(:drawer_supporters, [])
       |> assign(:drawer_vote_count, 0)
+      |> assign(:card_dependencies, [])
+      |> assign(:card_dependents, [])
+      |> assign(:dependency_options, [])
+      |> assign(:dependency_error, nil)
       |> assign(:editing_public_desc, false)
       |> assign(:public_desc_form, nil)
       |> assign(:dirty_run_cards, MapSet.new())
@@ -1109,6 +1118,7 @@ defmodule RelayWeb.BoardLive do
          |> assign(:drawer_tab, default_tab)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
+         |> assign_card_dependencies(card)
          |> stream_notes(conversation)
          |> stream(:activity, activity, reset: true)}
 
@@ -1620,6 +1630,22 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_tag", _params, socket), do: {:noreply, socket}
+
+  # RE93 — the rail edits the whole set, not one edge: the LiveView sends the full new ref list
+  # to Cards.set_dependencies/4, which is the one write path the API and CLI also use. The
+  # refusal is rendered INLINE under the input rather than as a flash, because it is about the
+  # text you just typed.
+  def handle_event("add_dependency", %{"ref" => ref}, socket) do
+    case String.trim(ref) do
+      "" -> {:noreply, socket}
+      trimmed -> apply_dependency_change(socket, Enum.map(socket.assigns.card_dependencies, & &1.ref) ++ [trimmed])
+    end
+  end
+
+  def handle_event("remove_dependency", %{"ref" => ref}, socket) do
+    remaining = socket.assigns.card_dependencies |> Enum.map(& &1.ref) |> List.delete(ref)
+    apply_dependency_change(socket, remaining)
+  end
 
   def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     {:noreply,
@@ -2863,6 +2889,14 @@ defmodule RelayWeb.BoardLive do
     by_id = cards_by_stage |> Map.values() |> List.flatten() |> Map.new(&{&1.id, &1})
     socket = assign(socket, :blocked_by, current)
 
+    # RE93 — a blocker reaching Done changes the SELECTED card's ticks too, and that card's own
+    # row did not change, so maybe_refresh_drawer/2 would never fire for it.
+    socket =
+      case socket.assigns.selected_card do
+        %Card{} = selected -> assign_card_dependencies(socket, selected)
+        _other -> socket
+      end
+
     Enum.reduce(changed, socket, fn id, acc ->
       card = Map.get(by_id, id)
 
@@ -3303,7 +3337,44 @@ defmodule RelayWeb.BoardLive do
     |> assign(:card_runs, Runs.list_runs_for_card(card))
     |> stream_notes(Activity.list_conversation(card))
     |> stream(:activity, activity, reset: true)
+    |> assign_card_dependencies(card)
     |> stream_insert(stream_name(card.stage_id), card)
+  end
+
+  # RE93 — the drawer's two rails plus the add-input's datalist. Three board-scoped indexed
+  # selects on the drawer-fill path, which already runs several; the alternative (deriving the
+  # options from a mount-time card list) would go stale the moment another session adds a card.
+  defp assign_card_dependencies(socket, %Card{} = card) do
+    board = socket.assigns.board
+
+    options =
+      for c <- Cards.list_cards(board),
+          c.id != card.id,
+          do: %{ref: Cards.format_ref(board.key, c.ref_number), title: c.title}
+
+    socket
+    |> assign(:card_dependencies, Cards.list_dependencies(board, card))
+    |> assign(:card_dependents, Cards.list_dependents(board, card))
+    |> assign(:dependency_options, options)
+    |> assign(:dependency_error, nil)
+  end
+
+  # RE93 — the add/remove_dependency handlers both funnel here: the rail edits the whole set, not
+  # one edge, so both send the full new ref list to Cards.set_dependencies/4, the one write path
+  # the API and CLI also use. assign_card_dependencies/2 clears :dependency_error on success; the
+  # failure branch does NOT route through it, so the just-set error assign survives.
+  defp apply_dependency_change(socket, refs) do
+    board = socket.assigns.board
+    card = socket.assigns.selected_card
+    actor = {:user, socket.assigns.current_scope.user.id}
+
+    case Cards.set_dependencies(board, card, refs, actor) do
+      {:ok, _card} ->
+        {:noreply, assign_card_dependencies(socket, card)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :dependency_error, Cards.dependency_error_message(reason))}
+    end
   end
 
   # Approve/reject moved the card: re-stream the source and target stage
