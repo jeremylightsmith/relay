@@ -1001,10 +1001,14 @@ defmodule RelayWeb.CoreComponents do
   name plus the Board/Story map toggle. A `flex-none` box wins the entire space fight: the
   title crushes to width 0 and the toggle overflows *underneath* the search input, so at 768px
   `elementFromPoint` over "Story map" returned `board-search-input` and the toggle could not be
-  clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and
-  `class="hidden lg:block"` from `BoardLive` — below `lg` the bar has no room for it beside
-  "Restart stalled", the same reason those controls drop their labels under `sm`. Callers with
-  room of their own (the storybook page) pass no class and get the box unconditionally.
+  clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and a
+  breakpoint `BoardLive` picks PER VIEW: `hidden lg:block` on the board, `hidden xl:block` on
+  the story map. The story-map bar carries five controls the board bar does not — `ZOOM`,
+  `Map`, `Compact`, `Full`, `Hide tasks` — so at `lg` it still has no budget: the box kept
+  painting over the toggle from 1024px through 1136px until `xl` (RE198 smoke, second pass).
+  Below those widths there is no room beside "Restart stalled" either, the same reason those
+  controls drop their labels under `sm`. Callers with room of their own (the storybook page)
+  pass no class and get the box unconditionally.
   """
   attr :query, :string, required: true
   attr :results, :list, default: []
