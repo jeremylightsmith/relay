@@ -86,8 +86,10 @@ heavy fields:
 
 `depends_on` is the card's blockers (`satisfied` is true once that blocker has reached a
 top-level Done column); `blocks` is the reverse edge. Both are **single-card only** — the list
-shape omits them. A card with an unsatisfied blocker is not dispatched, and
-`GET /api/cards/:ref/diagnosis` reports the `blocked_by_dependencies` verdict.
+shape omits them. A card with an unsatisfied blocker is never *pulled* by a flow, and
+`GET /api/cards/:ref/diagnosis` reports the `blocked_by_dependencies` verdict. Work already in
+flight is unaffected: a running run is not cancelled by a dependency added mid-run, and a card
+sent back for changes re-enters its flow as usual.
 
 A **stage** (returned inside `GET /api/board`):
 

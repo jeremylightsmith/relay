@@ -2013,7 +2013,7 @@ defmodule RelayWeb.CoreComponents do
   attr :embed, :boolean,
     default: false,
     doc:
-      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
+      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. RE93 adds a third: both dependency rails (Blocked by / Blocks) are dropped, because editing them needs the datalist + inline-refusal affordances the native host has no room for — note the *face* chip is NOT embed-gated, so a native reader can see \"Blocked by 2 cards\" without being able to see which two. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
 
   attr :drawer_tab, :atom,
     values: [:detail, :run, :talk, :activity],
@@ -2043,6 +2043,11 @@ defmodule RelayWeb.CoreComponents do
   attr :dependents, :list, default: [], doc: "RE93 [%{ref, title}] — the read-only Blocks rail"
   attr :dependency_options, :list, default: [], doc: "RE93 [%{ref, title}] for the add-blocker datalist"
   attr :dependency_error, :string, default: nil, doc: "RE93 the 422 sentence, rendered inline under the input"
+
+  attr :dependency_input, :string,
+    default: "",
+    doc:
+      "RE93 the add-blocker box's server-held text. Held in an assign rather than left uncontrolled so the LiveView can empty it after a successful add — morphdom will not clear a `value` the server never rendered."
 
   attr :supporters, :list,
     default: [],
@@ -3346,12 +3351,14 @@ defmodule RelayWeb.CoreComponents do
                 <form
                   :if={not @archived}
                   id={"#{@id}-add-dependency"}
+                  phx-change="validate_dependency"
                   phx-submit="add_dependency"
                   class="flex items-center gap-1"
                 >
                   <input
                     type="text"
                     name="ref"
+                    value={@dependency_input}
                     list={"#{@id}-dependency-options"}
                     placeholder="+ Add"
                     autocomplete="off"

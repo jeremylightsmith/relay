@@ -392,8 +392,12 @@ definition the board's Done treatment and the API's index filter use; the blocke
 irrelevant. `Relay.Cards.unmet_dependencies/2` is the single "is this card blocked" read, and
 `Relay.Runs.Policy.pullable?/1` is where it gates: a card with any unmet blocker is skipped by
 the scheduler's fresh pulls and by the board's "queued for X" face chip, together. It gates
-**fresh pulls only** — `Policy.resumable?/2` is deliberately untouched, so a dependency added
-mid-run can never strand a run in flight, and human moves are never blocked. Archiving a card
+**fresh pulls only**, and two starts are named carve-outs on `pullable?/1`'s doc:
+`Policy.resumable?/2` (a dependency added mid-run must not strand a run in flight) and the run
+listener's rejection re-entry (a send-back resumes the loop on a card an agent already worked).
+Both continue work in flight rather than pull a fresh card, and gating either would strand the
+card, because nothing re-reconciles a dependent when its blocker later reaches Done — the
+listener reacts to the blocker's event, not the dependent's. Human moves are never blocked. Archiving a card
 deletes the rows pointing AT it, permanently freeing its dependents; its own outgoing rows
 survive.
 

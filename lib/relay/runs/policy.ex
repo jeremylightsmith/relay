@@ -25,9 +25,18 @@ defmodule Relay.Runs.Policy do
 
   `blocked_by` is the card's list of UNMET blocker ids (`Relay.Cards.unmet_dependencies/2`) and
   is a **required** key rather than a defaulted one: every caller must decide what it holds, so
-  a new dispatch surface cannot silently opt out of the gate. `resumable?/2` deliberately does
-  NOT consult it — a run already in flight must never be stranded by a dependency added
-  mid-run; dependencies gate *fresh pulls* only.
+  a new dispatch surface cannot silently opt out of the gate.
+
+  Two starts are deliberately **outside** this gate, both for the same reason — they continue
+  work already in flight rather than pull a fresh card, and gating them would strand the card
+  (nothing re-reconciles a dependent when its *blocker* later reaches Done; the listener reacts
+  to the blocker's event, not the dependent's):
+
+    * `resumable?/2` — a run already running must never be stranded by a dependency added mid-run.
+    * `Relay.Runs.Listener`'s rejection re-entry (`maybe_reenter_after_rejection/1`) — a
+      send-back resumes the loop on a card an agent has already worked.
+
+  Dependencies gate **fresh pulls** only. Anything genuinely new must come through here.
   """
   @spec pullable?(%{active_owner: atom() | nil, status: atom(), blocked_by: [term()]}) :: boolean()
   def pullable?(%{status: status, blocked_by: blocked_by} = card) do

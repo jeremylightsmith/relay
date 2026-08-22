@@ -59,11 +59,14 @@ closed** (the burden of proof is on the claimant).
 
 ## C. Scheduling & capacity (diagnostic — the card waits, no run fails)
 
-`capacity_diagnosis/1` (`scheduler.ex:437`) classifies *why* a pull can't happen; these are
-**verdicts**, not run states — the card sits `:ready`/`:queued` and is explained in the UI.
+These are **verdicts**, not run states — the card sits `:ready`/`:queued` and is explained in the
+UI. C0 is decided before capacity is even consulted (`Relay.Runs.Policy.pullable?/1`); C1-C6 come
+from `capacity_diagnosis/1` (`scheduler.ex:437`), which classifies *why* an otherwise-eligible
+pull can't happen.
 
 | # | Verdict | Condition |
 | --- | --- | --- |
+| C0 | `blocked_by_dependencies` | card declares blockers that have not reached a top-level Done column (RE93); `evidence.blocked_by` names their refs. Fresh pulls only — a run in flight and a rejection re-entry both continue |
 | C1 | `awaiting_capacity` | ≥1 live current executor, simply no free slot → card marked `:queued` |
 | C2 | WIP-blocked | works-in stage at its `wip_limit` → flow halts, card stays `:ready` (does **not** queue) |
 | C3 | `no_executor` | executor roster empty |

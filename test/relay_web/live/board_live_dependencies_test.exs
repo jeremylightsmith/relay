@@ -2,6 +2,7 @@ defmodule RelayWeb.BoardLiveDependenciesTest do
   @moduledoc "RE93 — the face chip and the drawer's two dependency rails."
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Relay.Cards
@@ -140,5 +141,43 @@ defmodule RelayWeb.BoardLiveDependenciesTest do
   test "the Blocks rail is hidden entirely when the card blocks nothing", ctx do
     view = open_drawer(ctx)
     refute has_element?(view, "#card-drawer-blocks")
+  end
+
+  # RE93 — the box's text is server-held precisely so the success path can empty it: a bare
+  # uncontrolled input keeps what you typed (morphdom will not clear a `value` the server never
+  # rendered), so adding a second blocker would mean clearing the box by hand first.
+  test "the add-blocker box empties after a successful add and keeps a refused ref", ctx do
+    view = open_drawer(ctx)
+
+    view |> element("#card-drawer-add-dependency") |> render_change(%{"ref" => "RE2"})
+    assert has_element?(view, ~s(#card-drawer-add-dependency input[value="RE2"]))
+
+    view |> element("#card-drawer-add-dependency") |> render_submit(%{"ref" => "RE2"})
+
+    assert has_element?(view, "#card-drawer-blocked-by-RE2")
+    assert has_element?(view, ~s(#card-drawer-add-dependency input[value=""]))
+
+    # A refusal is about the text you just typed, so that text must survive to be corrected.
+    view |> element("#card-drawer-add-dependency") |> render_change(%{"ref" => "ZZ999"})
+    view |> element("#card-drawer-add-dependency") |> render_submit(%{"ref" => "ZZ999"})
+    assert has_element?(view, "#card-drawer-dependency-error")
+    assert has_element?(view, ~s(#card-drawer-add-dependency input[value="ZZ999"]))
+  end
+
+  # RE93 — refresh_blocked_by/2 rebuilds the datalist from the card list its caller ALREADY
+  # loaded, rather than issuing a second whole-board select with preloads on every broadcast.
+  # This pins the property that made the re-query look necessary: the options must still pick up
+  # a card another session just created, with no reload.
+  test "the datalist picks up a card created by another session, with no reload", ctx do
+    view = open_drawer(ctx)
+    refute render(view) =~ "Freshly created elsewhere"
+
+    # The factory seeded refs 1-3 without moving the board's counter, so let create_card allocate
+    # from there and go through the real broadcast another session would emit.
+    Relay.Repo.update_all(from(b in Schemas.Board, where: b.id == ^ctx.board.id), set: [card_seq: 3])
+    {:ok, _card} = Cards.create_card(ctx.next_up, %{title: "Freshly created elsewhere"})
+
+    assert has_element?(view, ~s(#card-drawer-dependency-options option[value="RE4"]))
+    assert render(view) =~ "Freshly created elsewhere"
   end
 end

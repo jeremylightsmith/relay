@@ -556,6 +556,7 @@ defmodule RelayWeb.BoardLive do
         dependents={@card_dependents}
         dependency_options={@dependency_options}
         dependency_error={@dependency_error}
+        dependency_input={@dependency_input}
         vote_count={@drawer_vote_count}
         supporters={@drawer_supporters}
         public_description={@selected_card.public_description}
@@ -1052,6 +1053,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:card_dependents, [])
       |> assign(:dependency_options, [])
       |> assign(:dependency_error, nil)
+      |> assign(:dependency_input, "")
       |> assign(:editing_public_desc, false)
       |> assign(:public_desc_form, nil)
       |> assign(:dirty_run_cards, MapSet.new())
@@ -1119,6 +1121,7 @@ defmodule RelayWeb.BoardLive do
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
          |> assign_card_dependencies(card)
+         |> assign(:dependency_input, "")
          |> stream_notes(conversation)
          |> stream(:activity, activity, reset: true)}
 
@@ -1635,6 +1638,14 @@ defmodule RelayWeb.BoardLive do
   # to Cards.set_dependencies/4, which is the one write path the API and CLI also use. The
   # refusal is rendered INLINE under the input rather than as a flash, because it is about the
   # text you just typed.
+  # The input's value is server-held (RE93): a bare uncontrolled <input> keeps whatever the user
+  # typed after a successful add, because nothing in the re-rendered markup changes and morphdom
+  # will not touch a `value` property it never wrote. Holding it in an assign is what lets the
+  # success path empty the box — the same reason the comment and compose forms hold theirs.
+  def handle_event("validate_dependency", %{"ref" => ref}, socket) do
+    {:noreply, assign(socket, :dependency_input, ref)}
+  end
+
   def handle_event("add_dependency", %{"ref" => ref}, socket) do
     case String.trim(ref) do
       "" -> {:noreply, socket}
@@ -2886,7 +2897,10 @@ defmodule RelayWeb.BoardLive do
       |> Enum.uniq()
       |> Enum.filter(&(Enum.sort(Map.get(previous, &1, [])) != Enum.sort(Map.get(current, &1, []))))
 
-    by_id = cards_by_stage |> Map.values() |> List.flatten() |> Map.new(&{&1.id, &1})
+    # list_cards/1's own ordering, so the datalist reads the same on this path as on the
+    # drawer-open one; the sort is in-memory over a list already in hand.
+    flat_cards = cards_by_stage |> Map.values() |> List.flatten() |> Enum.sort_by(&{&1.stage_id, &1.position, &1.id})
+    by_id = Map.new(flat_cards, &{&1.id, &1})
     socket = assign(socket, :blocked_by, current)
 
     # RE93 — a blocker reaching Done changes the SELECTED card's ticks too, and that card's own
@@ -2895,7 +2909,13 @@ defmodule RelayWeb.BoardLive do
       case socket.assigns.selected_card do
         # clear_error?: false — this fires on EVERY board broadcast, including ones about other
         # cards entirely. Clearing here would erase the drawer's inline refusal mid-read.
-        %Card{} = selected -> assign_card_dependencies(socket, selected, false)
+        #
+        # cards: — this path runs on every board broadcast, and the caller has ALREADY loaded the
+        # whole board into cards_by_stage one line earlier. Handing that list over keeps the
+        # datalist as fresh as a re-query would while costing zero extra selects: on an AI-first
+        # board, agents emit card_upserted on every status write, and a second
+        # list_cards + preload per open drawer per event is the hottest path there is.
+        %Card{} = selected -> assign_card_dependencies(socket, selected, clear_error?: false, cards: flat_cards)
         _other -> socket
       end
 
@@ -3343,19 +3363,21 @@ defmodule RelayWeb.BoardLive do
     |> stream_insert(stream_name(card.stage_id), card)
   end
 
-  # RE93 — the drawer's two rails plus the add-input's datalist. Three board-scoped indexed
-  # selects on the drawer-fill path, which already runs several; the alternative (deriving the
-  # options from a mount-time card list) would go stale the moment another session adds a card.
-  # clear_error? distinguishes the WRITE paths (opening/refreshing the drawer, and a successful
+  # RE93 — the drawer's two rails plus the add-input's datalist. The two rails are cheap indexed
+  # selects on the dependency table; the datalist needs the board's whole card list, which is the
+  # expensive part, so `:cards` lets a caller that already holds one hand it over instead of
+  # paying for a second `list_cards` + preload. Only the drawer-fill path (which holds no card
+  # list) falls back to querying.
+  #
+  # `:clear_error?` distinguishes the WRITE paths (opening/refreshing the drawer, and a successful
   # set_dependencies) — which own the error assign and reset it — from the passive board-broadcast
   # refresh, which must leave whatever the reader is looking at alone.
-  defp assign_card_dependencies(socket, card, clear_error? \\ true)
-
-  defp assign_card_dependencies(socket, %Card{} = card, clear_error?) do
+  defp assign_card_dependencies(socket, %Card{} = card, opts \\ []) do
     board = socket.assigns.board
+    cards = Keyword.get_lazy(opts, :cards, fn -> Cards.list_cards(board) end)
 
     options =
-      for c <- Cards.list_cards(board),
+      for c <- cards,
           c.id != card.id,
           do: %{ref: Cards.format_ref(board.key, c.ref_number), title: c.title}
 
@@ -3363,13 +3385,14 @@ defmodule RelayWeb.BoardLive do
     |> assign(:card_dependencies, Cards.list_dependencies(board, card))
     |> assign(:card_dependents, Cards.list_dependents(board, card))
     |> assign(:dependency_options, options)
-    |> then(&if clear_error?, do: assign(&1, :dependency_error, nil), else: &1)
+    |> then(&if Keyword.get(opts, :clear_error?, true), do: assign(&1, :dependency_error, nil), else: &1)
   end
 
   # RE93 — the add/remove_dependency handlers both funnel here: the rail edits the whole set, not
   # one edge, so both send the full new ref list to Cards.set_dependencies/4, the one write path
-  # the API and CLI also use. assign_card_dependencies/2 clears :dependency_error on success; the
-  # failure branch does NOT route through it, so the just-set error assign survives.
+  # the API and CLI also use. assign_card_dependencies/3 clears :dependency_error on success and
+  # the add-input empties with it; the failure branch does NOT route through it, so both the
+  # just-set error AND the text that caused it survive for the reader to correct.
   defp apply_dependency_change(socket, refs) do
     board = socket.assigns.board
     card = socket.assigns.selected_card
@@ -3377,7 +3400,7 @@ defmodule RelayWeb.BoardLive do
 
     case Cards.set_dependencies(board, card, refs, actor) do
       {:ok, _card} ->
-        {:noreply, assign_card_dependencies(socket, card)}
+        {:noreply, socket |> assign_card_dependencies(card) |> assign(:dependency_input, "")}
 
       {:error, reason} ->
         {:noreply, assign(socket, :dependency_error, Cards.dependency_error_message(reason))}
