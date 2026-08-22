@@ -348,8 +348,20 @@ defmodule RelayWeb.Api.CardController do
 
   defp move_index(_params), do: {:ok, 1_000_000}
 
-  # RLY-67: the card index drops the top-level Done column unless ?include_done is set.
+  # RE198 — `?q=` switches the index into search mode. `Cards.search/3` is the ONE definition
+  # of what matches; nothing is re-implemented here. `include_done` is deliberately ignored in
+  # search mode: a search that hides finished work is the gap this card closed. **No `q` at all
+  # is the untouched listing** — backward compatibility for every existing client is a hard
+  # requirement, so that branch must stay byte-for-byte what it was.
   defp index_cards(board, stages, params) do
+    case params["q"] do
+      nil -> list_index_cards(board, stages, params)
+      query -> Cards.search(board, query, archived: archived?(params), limit: search_limit(params))
+    end
+  end
+
+  # RLY-67: the card index drops the top-level Done column unless ?include_done is set.
+  defp list_index_cards(board, stages, params) do
     if include_done?(params) do
       Cards.list_cards(board)
     else
@@ -358,6 +370,23 @@ defmodule RelayWeb.Api.CardController do
   end
 
   defp include_done?(params), do: params["include_done"] in ["1", "true", true]
+  defp archived?(params), do: params["archived"] in ["1", "true", true]
+
+  # An unparsable or non-positive `limit` means "no limit" rather than a 400: the parameter is
+  # a convenience cap, and refusing a card listing over it would be a worse answer than all of
+  # it.
+  defp search_limit(params), do: positive_integer(params["limit"])
+
+  defp positive_integer(n) when is_integer(n) and n > 0, do: n
+
+  defp positive_integer(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp positive_integer(_other), do: nil
 
   # RLY-71 — light shape check on a structured needs-input payload. A valid payload is a non-empty
   # list of maps, each with a non-blank string prompt, string options (if given), a boolean

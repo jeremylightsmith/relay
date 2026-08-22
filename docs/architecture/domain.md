@@ -123,6 +123,14 @@ sharing behavior.
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
+  Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
+  the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
+  case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard
+  query cannot return the board. Board-scoped (a ref can never resolve across boards, the same
+  authorization check `get_card_by_ref/2` is), Done included, archived opt-in via `:archived`,
+  capped by `:limit`, and carrying `list_cards/1`'s trimmed projection. Three surfaces call it and
+  none re-implements it: `GET /api/cards?q=` (with `limit`/`archived`; **no `q` leaves that
+  listing exactly as it was**), `bin/relay search`, and the board header's results popover.
 - **Members** — board membership; who can see and act on a board.
 - **Presence** (`Relay.Presence`) — who is looking at a board's **story map** right now, and
   where their pointer is (RE257); the app's first `Phoenix.Presence` context, supervised

@@ -156,6 +156,10 @@ defmodule RelayWeb.BoardLive do
   # paint thousands of :action rows into the drawer. 200 covers the readable recent history.
   @activity_render_limit 200
 
+  # RE198 — how many search rows the header popover shows before it says "keep typing". A
+  # popover, not a page: eight rows is what fits without becoming a second board.
+  @search_result_limit 8
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -170,6 +174,12 @@ defmodule RelayWeb.BoardLive do
         />
       </:title>
       <:actions>
+        <.card_search
+          query={@search_query}
+          results={@search_results}
+          limit={@search_result_limit}
+          class={if(@live_action == :story_map, do: "hidden xl:block", else: "hidden lg:block")}
+        />
         <StoryMapComponents.presence_stack
           :if={@live_action == :story_map}
           people={@presence_people}
@@ -1014,6 +1024,13 @@ defmodule RelayWeb.BoardLive do
       |> assign(:overflow_open, false)
       |> assign(:stage_menu_open, false)
       |> assign(:stage_filter, "")
+      # RE198 — the header search box's whole state: what is typed, and the rows to show. The
+      # popover is a point-in-time query and deliberately does NOT live-update while open:
+      # results are clicked within seconds, and re-querying on every board PubSub message would
+      # be churn for no benefit.
+      |> assign(:search_query, "")
+      |> assign(:search_results, [])
+      |> assign(:search_result_limit, @search_result_limit)
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
@@ -1043,13 +1060,20 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign_selected_card(socket, card_ref(socket.assigns.live_action, params))}
+    ref = card_ref(socket.assigns.live_action, params)
+    {:noreply, socket |> maybe_clear_search(ref) |> assign_selected_card(ref)}
   end
 
   # Card mode selects from the path (/cards/:ref); board mode from ?card=<ref>. In card mode
   # the selection is never nil'd — there is no board behind the drawer to close back to.
   defp card_ref(:card, params), do: params["ref"]
   defp card_ref(_action, params), do: params["card"]
+
+  # Opening a card is the search's terminal action, so the box empties and the popover closes
+  # here rather than at each call site — the result link, Enter, and a deep link all patch
+  # through handle_params/3.
+  defp maybe_clear_search(socket, nil), do: socket
+  defp maybe_clear_search(socket, _ref), do: assign_search(socket, "")
 
   # RLY-68 — the async heavy-body fetch kicked off by
   # maybe_start_body_load/4. Compares the result's card id against the
@@ -2067,6 +2091,30 @@ defmodule RelayWeb.BoardLive do
   # round trip is not the cost.
   def handle_event("filter_stages", %{"q" => query}, socket) do
     {:noreply, assign(socket, :stage_filter, query)}
+  end
+
+  # RE198 — the header card search. `Cards.search/3` is the ONE definition of what matches;
+  # there is deliberately no in-memory predicate here. Server-side on purpose, exactly as
+  # filter_stages/2 is: a JS hook would avoid the round trip but would be invisible to
+  # Phoenix.LiveViewTest, and this query is board-indexed and small.
+  #
+  # None of the three is in the read_only? guard above: searching an archived board is
+  # reading it.
+  def handle_event("search", %{"q" => query}, socket) do
+    {:noreply, assign_search(socket, query)}
+  end
+
+  def handle_event("search_clear", _params, socket) do
+    {:noreply, assign_search(socket, "")}
+  end
+
+  # Enter opens the top result — the form's phx-submit, so it needs no JavaScript. The patch
+  # runs through handle_params/3, which is what clears the box.
+  def handle_event("search_open_first", _params, socket) do
+    case socket.assigns.search_results do
+      [%{path: path} | _rest] -> {:noreply, push_patch(socket, to: path)}
+      [] -> {:noreply, socket}
+    end
   end
 
   # RLY-32: any board member (or the agent) can be assigned — the old
@@ -4172,6 +4220,64 @@ defmodule RelayWeb.BoardLive do
   defp card_path(%{live_action: :story_map, board: board}, ref), do: ~p"/board/#{board.slug}/story-map?card=#{ref}"
 
   defp card_path(%{board: board}, ref), do: ~p"/board/#{board.slug}?card=#{ref}"
+
+  # The header search's assigns, always set as a pair so query and rows can never disagree.
+  # Archived cards are deliberately OUT of the UI search: they have their own dedicated
+  # browser (the "Archived cards" menu item), and `--archived` stays a CLI affordance —
+  # keeping the header box to live cards is the less surprising default.
+  defp assign_search(socket, query) do
+    results =
+      case String.trim(query) do
+        "" ->
+          []
+
+        _matchable ->
+          socket.assigns.board
+          |> Cards.search(query, limit: socket.assigns.search_result_limit)
+          |> Enum.map(&search_row(socket.assigns, &1))
+      end
+
+    socket
+    |> maybe_push_search_cleared(query)
+    |> assign(:search_query, query)
+    |> assign(:search_results, results)
+  end
+
+  # The box emptying is the one thing the server cannot do alone: LiveView never patches a
+  # FOCUSED input's value (dom.js `mergeFocusedInput`), and Escape leaves the cursor in the box,
+  # so the popover would close with the typed text still on screen. Push only on the
+  # something -> nothing transition, so an ordinary keystroke never clears what is being typed;
+  # the BoardSearchInput hook does the rest. Same split as InlineNameInput (RE263).
+  defp maybe_push_search_cleared(socket, query) do
+    if String.trim(query) == "" and String.trim(socket.assigns[:search_query] || "") != "" do
+      push_event(socket, "board_search_cleared", %{})
+    else
+      socket
+    end
+  end
+
+  # One rendered row, resolved here so card_search/1 stays a pure presentation function.
+  # `card_path/2` already branches on the story map, so a result opens the drawer from either
+  # view; `drawer_stage_name/2` is reused so a sub-lane never leaks its composite internal
+  # name ("Code:Review") into the popover.
+  defp search_row(assigns, %Card{} = card) do
+    ref = Cards.ref(assigns.board, card)
+
+    %{
+      ref: ref,
+      title: card.title,
+      stage: search_stage_name(assigns.board, card.stage_id),
+      archived: not is_nil(card.archived_at),
+      path: card_path(assigns, ref)
+    }
+  end
+
+  defp search_stage_name(board, stage_id) do
+    case Enum.find(board.stages, &(&1.id == stage_id)) do
+      %Stage{} = stage -> drawer_stage_name(stage, board.stages)
+      nil -> ""
+    end
+  end
 
   defp empty_compose_form, do: to_form(%{"title" => ""}, as: :card)
 

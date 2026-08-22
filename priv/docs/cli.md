@@ -17,6 +17,7 @@ exits non-zero.
 | `bin/relay update [--check]` | Install or refresh the six Relay-owned files from the board (`bin/relay`, the four `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `bin/relay board` | The board: stages with their cards |
 | `bin/relay card RLY-12` | One card: description, plan, branch, timeline |
+| `bin/relay search "words"` | **Find a card** by ref or title. A ref or bare number (`RLY-12`, `12`) is an exact hit ranked first; otherwise every whitespace-separated word must appear in the title, in any order. Done cards are included. `--archived` widens it to archived cards, `--limit N` caps it (default 20). No match prints a message and exits 0 |
 | `bin/relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `bin/relay runs RLY-12` | The card's runs and node executions (failure detail in full) |
 | `bin/relay executors` | Who is connected, their capacity, and the jobs they hold |

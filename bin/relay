@@ -12,6 +12,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay execute [--once] [--dry-run] [--interval N]   # the executor
   relay update [--check] [--json]   # install/refresh the Relay-owned files from the board
   relay board [--json]        relay card REF [--json]
+  relay search "words" [--archived] [--limit N] [--json]   # find a card by ref or title
   relay why REF [--json]      # why isn't this card moving? — one plain-language answer
   relay runs REF [--json]     # the card's runs + node executions, detail untruncated
   relay executors [--json]    # who is connected, their capacity, and the jobs they hold
@@ -50,6 +51,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.abspath(__file__)
@@ -70,8 +72,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 58
-EXECUTOR_FINGERPRINT = "f103e48d709c211272c877b477905b7a70daf2e04326aecedf3272f1b5e653a7"
+EXECUTOR_VERSION = 59
+EXECUTOR_FINGERPRINT = "ba37c8410dfa2151e22068628a16c568ebd4229bc7578dd283130cb1a074bcba"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -680,6 +682,18 @@ def format_board(b):
     return "\n".join(out)
 
 
+def format_search(query, cards, limit):
+    """Search results as ordinary card rows — `card_line` is the same renderer `relay board`
+    uses, so search output reads identically to every other card list. Finding nothing is a
+    valid answer printed on stdout, not an error."""
+    if not cards:
+        return f'No cards match "{query}".'
+    lines = [card_line(c) + (" (archived)" if c.get("archived") else "") for c in cards]
+    if limit and len(cards) >= limit:
+        lines.append(f"(showing the first {limit} — narrow the query or pass --limit)")
+    return "\n".join(lines)
+
+
 def select_field(data, path):
     """Resolve a dotted path (`status`, `owners.0.name`) against decoded JSON. Dies
     non-zero on an unresolvable path — a silent empty line would read as "the field is
@@ -735,6 +749,23 @@ def cmd_board(args):
 def cmd_card(args):
     c = get_card(args.ref)
     emit(args, c, lambda: print_card(c))
+
+
+def cmd_search(args):
+    """relay search QUERY — find a card by ref or title (RE198).
+
+    Matching lives server-side in Relay.Cards.search/3 and is NOT reimplemented here: a ref or
+    bare number is an exact hit ranked first, otherwise every whitespace token must appear in
+    the title, in any order. Exits 0 with a message when nothing matches — "found nothing" is
+    an answer, not a failure.
+
+    The truncation hint is deliberately a `len(cards) >= limit` guess rather than a total
+    count: a cheap honest signal, and no second query."""
+    params = {"q": args.query, "limit": str(args.limit)}
+    if args.archived:
+        params["archived"] = "1"
+    d = api("GET", "/api/cards?" + urllib.parse.urlencode(params))
+    emit(args, d, lambda: print(format_search(args.query, d["data"], args.limit)))
 
 
 def cmd_why(args):
@@ -4197,6 +4228,10 @@ def build_parser():
     bd = add("board", cmd_board, json_flag=True)
     bd.add_argument("--include-done", action="store_true")
     add("card", cmd_card, "ref", json_flag=True)
+    sr = add("search", cmd_search, "query", json_flag=True)
+    sr.add_argument("--archived", action="store_true",
+                    help="widen the search to archived cards too")
+    sr.add_argument("--limit", type=int, default=20)
     add("why", cmd_why, "ref", json_flag=True)
     rt = add("retry", cmd_retry, "ref", json_flag=True)
     rt.add_argument("--at")
