@@ -68,7 +68,7 @@ defmodule RelayWeb.Api.CardJSON do
         # RE93 — both directions, single-card only. data/3 (the index/summary shape) is
         # deliberately NOT extended: it would be an N+1 per card and no consumer needs it there.
         |> Map.put(:depends_on, Enum.map(Cards.list_dependencies(board, card), &dependency/1))
-        |> Map.put(:blocks, Cards.list_dependents(board, card))
+        |> Map.put(:blocks, Enum.map(Cards.list_dependents(board, card), &dependent/1))
         |> Map.put(:timeline, Enum.map(timeline, &entry/1))
     }
   end
@@ -131,8 +131,12 @@ defmodule RelayWeb.Api.CardJSON do
     %{id: st.id, title: st.title, done: st.done, position: st.position}
   end
 
-  # `satisfied?` is the context's internal boolean-suffix convention; the wire key is `satisfied`.
+  # Both directions are mapped key-by-key rather than passed through, so the wire shape stays a
+  # decision made here: `satisfied?` is the context's internal boolean-suffix convention and the
+  # wire key is `satisfied`, and anything later added to the context's maps stays internal.
   defp dependency(%{ref: ref, title: title, satisfied?: satisfied}), do: %{ref: ref, title: title, satisfied: satisfied}
+
+  defp dependent(%{ref: ref, title: title}), do: %{ref: ref, title: title}
 
   defp owner(%Schemas.CardOwner{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
 

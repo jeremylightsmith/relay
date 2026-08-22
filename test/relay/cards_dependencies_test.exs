@@ -113,6 +113,24 @@ defmodule Relay.CardsDependenciesTest do
     end
   end
 
+  describe "unknown_refs/2" do
+    test "names the refs resolving to no card on the board, in the order given", ctx do
+      assert Cards.unknown_refs(ctx.board, ["RE2", "ZZ999", "RE3", "RE404"]) == ["ZZ999", "RE404"]
+    end
+
+    test "is empty when every ref resolves, and duplicates collapse", ctx do
+      assert Cards.unknown_refs(ctx.board, ["RE2", "RE2", "RE3"]) == []
+      assert Cards.unknown_refs(ctx.board, []) == []
+    end
+
+    test "agrees with what set_dependencies/4 refuses", ctx do
+      refs = ["RE2", "ZZ999"]
+
+      assert Cards.unknown_refs(ctx.board, refs) == ["ZZ999"]
+      assert Cards.set_dependencies(ctx.board, ctx.a, refs) == {:error, {:unknown_refs, ["ZZ999"]}}
+    end
+  end
+
   describe "unmet_dependencies/2" do
     test "a blocker in a :complete top-level stage is satisfied REGARDLESS of its status", ctx do
       {:ok, _} = Cards.set_dependencies(ctx.board, ctx.a, ["RE2"])

@@ -626,11 +626,28 @@ defmodule Relay.Cards do
     wanted_refs = Enum.uniq(refs)
     resolved = card_ids_by_ref(board, wanted_refs)
 
-    case Enum.reject(wanted_refs, &Map.has_key?(resolved, &1)) do
+    case unresolved(wanted_refs, resolved) do
       [] -> apply_dependencies(board, card, wanted_refs, resolved, actor)
       unknown -> {:error, {:unknown_refs, unknown}}
     end
   end
+
+  @doc """
+  The `refs` that name no card on `board`, in the order given — the same all-or-nothing rule
+  `set_dependencies/4` refuses on, exposed so a caller can refuse BEFORE it writes anything.
+
+  `POST /api/cards` needs exactly that: it commits the card and only then applies its blockers,
+  and the web layer cannot open a transaction around the pair, so a create carrying a bad ref
+  would otherwise answer 422 to a caller whose card is already on the board. A brand new card
+  has no dependents, so an unknown ref is the only refusal that create can hit.
+  """
+  @spec unknown_refs(Board.t(), [String.t()]) :: [String.t()]
+  def unknown_refs(%Board{} = board, refs) when is_list(refs) do
+    wanted_refs = Enum.uniq(refs)
+    unresolved(wanted_refs, card_ids_by_ref(board, wanted_refs))
+  end
+
+  defp unresolved(wanted_refs, resolved), do: Enum.reject(wanted_refs, &Map.has_key?(resolved, &1))
 
   @doc """
   Board-wide `%{card_id => [unsatisfied blocker card_id]}` in ONE query — the single definition

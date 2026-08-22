@@ -73,8 +73,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 59
-EXECUTOR_FINGERPRINT = "16109dd09bd9cbbfe544d15c53df050488454a136acdb1e840d356499a67468c"
+EXECUTOR_VERSION = 60
+EXECUTOR_FINGERPRINT = "bfc90242f10c955a8cf3c0ffe14bab769e7e9faa210f15fd3271010d26f8c5a9"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -518,7 +518,8 @@ def set_dependencies(ref, refs):
 
 
 def split_refs(value):
-    """`--depends-on RE12,RE13` -> ["RE12", "RE13"]; blanks dropped."""
+    """`--depends-on RE12,RE13` -> ["RE12", "RE13"]; blanks dropped. The ONE ref-list parse, so
+    `relay create --depends-on` and `relay depends`'s positionals accept the same syntax."""
     return [r.strip() for r in value.split(",") if r.strip()]
 
 
@@ -1209,10 +1210,12 @@ def cmd_create(args):
 def cmd_depends(args):
     """relay depends REF [BLOCKER ...] — replace the card's blocker set; no BLOCKERs clears it.
 
+    Blockers may be given as separate arguments or comma-separated, like `--depends-on`.
+
     A blocked card is ineligible for AUTOMATIC dispatch until every blocker reaches a Done
     column; dragging it into a work column by hand is still legal. `relay why REF` explains the
     wait in prose."""
-    card = set_dependencies(args.ref, args.blockers)
+    card = set_dependencies(args.ref, [r for b in args.blockers for r in split_refs(b)])
     lines = dependency_lines(card) or ["blocked by: (none)"]
     emit(args, card, lambda: print("\n".join([card["ref"]] + lines)))
 

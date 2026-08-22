@@ -18,6 +18,7 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
+         :ok <- check_dependencies(board, params),
          {:ok, card} <- Cards.create_card(stage, params, :agent),
          {:ok, card} <- update_dependencies(board, card, params) do
       conn
@@ -67,9 +68,9 @@ defmodule RelayWeb.Api.CardController do
     else
       nil -> {:error, :not_found}
       :error -> {:error, :invalid_request}
-      # RE93 — {:unknown_refs, _} / {:dependency_cycle, _} must reach the FallbackController as
-      # themselves; the old blanket `{:error, changeset}` clause would have rebound them and
-      # handed a tuple to the changeset renderer.
+      # RE93 — this clause used to be named `{:error, changeset}`; it now also carries
+      # {:unknown_refs, _} / {:dependency_cycle, _} through to the FallbackController, so the
+      # name says `reason`.
       {:error, reason} -> {:error, reason}
     end
   end
@@ -107,16 +108,37 @@ defmodule RelayWeb.Api.CardController do
   # RE93 — a FULL REPLACE of the blocker set, mirroring "sub_tasks": [] clears it, the key absent
   # leaves it untouched, anything else is an invalid request. Ref resolution, the all-or-nothing
   # unknown-ref rule and the cycle check all live in Relay.Cards.set_dependencies/4.
-  defp update_dependencies(board, card, %{"depends_on" => refs}) when is_list(refs) do
-    if Enum.all?(refs, &is_binary/1) do
-      Cards.set_dependencies(board, card, refs, :agent)
-    else
-      {:error, :invalid_request}
+  defp update_dependencies(board, card, params) do
+    case depends_on_refs(params) do
+      {:ok, refs} -> Cards.set_dependencies(board, card, refs, :agent)
+      :absent -> {:ok, card}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp update_dependencies(_board, _card, %{"depends_on" => _}), do: {:error, :invalid_request}
-  defp update_dependencies(_board, card, _params), do: {:ok, card}
+  # RE93 — create/2's pre-flight: the card is committed before its blockers are applied and the
+  # web layer cannot open a transaction around the pair (boundary), so the one refusal a create
+  # can hit is checked first. `relay create --depends-on RE99` naming a card the agent has not
+  # written yet must not leave a blocker-less card behind for the retry to duplicate. A brand new
+  # card has no dependents, so it cannot close a cycle — unknown refs are the whole risk.
+  defp check_dependencies(board, params) do
+    case depends_on_refs(params) do
+      {:ok, refs} -> refuse_unknown(Cards.unknown_refs(board, refs))
+      :absent -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp refuse_unknown([]), do: :ok
+  defp refuse_unknown(unknown), do: {:error, {:unknown_refs, unknown}}
+
+  # The ONE reading of a `"depends_on"` payload, shared by the pre-flight and the write.
+  defp depends_on_refs(%{"depends_on" => refs}) when is_list(refs) do
+    if Enum.all?(refs, &is_binary/1), do: {:ok, refs}, else: {:error, :invalid_request}
+  end
+
+  defp depends_on_refs(%{"depends_on" => _}), do: {:error, :invalid_request}
+  defp depends_on_refs(_params), do: :absent
 
   defp update_status(card, %{"status" => status}) do
     Cards.set_status_snapped(card, %{"status" => status}, :agent)

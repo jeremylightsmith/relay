@@ -60,6 +60,18 @@ defmodule RelayWeb.Api.CardDependenciesTest do
     assert [%{"ref" => "RE2"}] = body["depends_on"]
   end
 
+  test "POST /api/cards refuses an unknown ref BEFORE the card is written", ctx do
+    body =
+      ctx.conn
+      |> post(~p"/api/cards", %{title: "New", stage: ctx.next_up.id, depends_on: ["RE2", "ZZ999"]})
+      |> json_response(422)
+
+    assert body["error"]["code"] == "unknown_refs"
+    assert body["error"]["message"] == "this board has no card with ref: ZZ999"
+    # the whole point: a create that answers 422 must not have left a card behind
+    refute Enum.any?(Cards.list_cards(ctx.board), &(&1.title == "New"))
+  end
+
   test "an unknown ref is a 422 naming it, and nothing is applied", ctx do
     body = ctx.conn |> patch(~p"/api/cards/RE1", %{depends_on: ["RE2", "ZZ999"]}) |> json_response(422)
 

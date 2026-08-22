@@ -408,6 +408,11 @@ class DependsTest(unittest.TestCase):
         out = capture(relay.cmd_depends, args)
         self.assertIn("blocked by: RE2 (waiting)", out)
 
+    def test_positional_blockers_accept_the_same_comma_syntax_as_the_flag(self):
+        args = relay.build_parser().parse_args(["depends", "RE1", "RE2,RE3", "RE4"])
+        capture(relay.cmd_depends, args)
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE1", {"depends_on": ["RE2", "RE3", "RE4"]})])
+
     def test_create_sends_comma_separated_blockers(self):
         self.assertEqual(relay.split_refs("RE2, RE3 ,"), ["RE2", "RE3"])
         relay.create_card("New", depends_on=["RE2"])
