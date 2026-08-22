@@ -14,6 +14,7 @@ defmodule Schemas do
       Attachment,
       Board,
       Card,
+      CardDependency,
       CardOwner,
       CardRejection,
       Comment,

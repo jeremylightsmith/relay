@@ -2,6 +2,7 @@ defmodule RelayWeb.Api.FallbackController do
   @moduledoc "Maps context error tuples to JSON error responses."
   use RelayWeb, :controller
 
+  alias Relay.Cards
   alias RelayWeb.Api.ErrorJSON
   alias RelayWeb.ChangesetErrors
 
@@ -50,6 +51,25 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error,
       code: "unknown_stages",
       message: "this board has no stage named: #{Enum.join(names, ", ")}"
+    )
+  end
+
+  # RE93 — both refusals are 422, and both take their sentence from Relay.Cards, the ONE
+  # rendering, so the API and the card drawer cannot word the same refusal differently.
+  def call(conn, {:error, {:unknown_refs, refs}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "unknown_refs", message: Cards.dependency_error_message({:unknown_refs, refs}))
+  end
+
+  def call(conn, {:error, {:dependency_cycle, path}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "dependency_cycle",
+      message: Cards.dependency_error_message({:dependency_cycle, path})
     )
   end
 

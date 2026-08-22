@@ -1234,6 +1234,10 @@ defmodule RelayWeb.CoreComponents do
     default: 0,
     doc: "RLY-69 public-vote count — the ↑ N badge shows in the meta row for unstarted cards with votes"
 
+  attr :blocked_count, :integer,
+    default: 0,
+    doc: "RE93 unmet blocker count — a quiet ghost lock chip in the meta row; 0 renders nothing"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -1375,6 +1379,14 @@ defmodule RelayWeb.CoreComponents do
           style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);"
         >
           #{@tag}
+        </span>
+        <span
+          :if={@blocked_count > 0}
+          class="card-blocked-chip badge badge-ghost badge-sm gap-1 font-medium"
+          style="font-size:10px;"
+        >
+          <.icon name="hero-lock-closed" class="size-3" />
+          Blocked by {@blocked_count} {if @blocked_count == 1, do: "card", else: "cards"}
         </span>
         <.support_badge
           :if={@category == :unstarted and @vote_count > 0}
@@ -1639,6 +1651,64 @@ defmodule RelayWeb.CoreComponents do
     ]}>
       {render_slot(@inner_block)}
     </span>
+    """
+  end
+
+  @doc """
+  The drawer's dependency rail list (RE93): one ghost chip per card — mono ref + truncated
+  title, a success tick and a struck-through ref when the blocker is satisfied, and a ✕ when
+  the list is editable.
+
+  One component for both directions: **Blocked by** (`removable`) and **Blocks** (read-only).
+  `satisfied?` is optional — the Blocks direction does not carry it, and its absence reads as
+  false. Semantic tokens only; no color literals.
+
+  ## Examples
+
+      <.dependency_list id="card-blocked-by" cards={@dependencies} removable />
+      <.dependency_list id="card-blocks" cards={@dependents} />
+  """
+  attr :id, :string, required: true
+
+  attr :cards, :list,
+    required: true,
+    doc: "[%{ref, title, satisfied?}] — satisfied? optional (absent in the Blocks direction)"
+
+  attr :removable, :boolean, default: false, doc: "render the ✕ that fires remove_dependency"
+  attr :empty_text, :string, default: "None"
+
+  def dependency_list(assigns) do
+    ~H"""
+    <div id={@id} class="dependency-list flex flex-col gap-1">
+      <span :if={@cards == []} class="text-base-content/55">{@empty_text}</span>
+      <div
+        :for={card <- @cards}
+        id={"#{@id}-#{card.ref}"}
+        class="dependency-chip badge badge-ghost badge-sm flex w-full items-center justify-start gap-1"
+        data-satisfied={to_string(Map.get(card, :satisfied?, false))}
+      >
+        <.icon
+          :if={Map.get(card, :satisfied?, false)}
+          name="hero-check-circle"
+          class="size-3 shrink-0 text-success"
+        />
+        <span class={["shrink-0 font-mono", Map.get(card, :satisfied?, false) && "line-through"]}>
+          {card.ref}
+        </span>
+        <span class="truncate text-base-content/65">{card.title}</span>
+        <button
+          :if={@removable}
+          type="button"
+          id={"#{@id}-remove-#{card.ref}"}
+          class="btn btn-ghost btn-xs btn-square ml-auto shrink-0"
+          phx-click="remove_dependency"
+          phx-value-ref={card.ref}
+          aria-label={"Remove #{card.ref} as a blocker"}
+        >
+          <.icon name="hero-x-mark" class="size-3" />
+        </button>
+      </div>
+    </div>
     """
   end
 
@@ -1943,7 +2013,7 @@ defmodule RelayWeb.CoreComponents do
   attr :embed, :boolean,
     default: false,
     doc:
-      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
+      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. RE93 adds a third: both dependency rails (Blocked by / Blocks) are dropped, because editing them needs the datalist + inline-refusal affordances the native host has no room for — note the *face* chip is NOT embed-gated, so a native reader can see \"Blocked by 2 cards\" without being able to see which two. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
 
   attr :drawer_tab, :atom,
     values: [:detail, :run, :talk, :activity],
@@ -1968,6 +2038,16 @@ defmodule RelayWeb.CoreComponents do
     doc: "RE310: whether `Relay.Runs.advance_foreach_available?/1` holds for the card's latest run"
 
   attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
+
+  attr :dependencies, :list, default: [], doc: "RE93 [%{ref, title, satisfied?}] — the Blocked by rail"
+  attr :dependents, :list, default: [], doc: "RE93 [%{ref, title}] — the read-only Blocks rail"
+  attr :dependency_options, :list, default: [], doc: "RE93 [%{ref, title}] for the add-blocker datalist"
+  attr :dependency_error, :string, default: nil, doc: "RE93 the 422 sentence, rendered inline under the input"
+
+  attr :dependency_input, :string,
+    default: "",
+    doc:
+      "RE93 the add-blocker box's server-held text. Held in an assign rather than left uncontrolled so the LiveView can empty it after a successful add — morphdom will not clear a `value` the server never rendered."
 
   attr :supporters, :list,
     default: [],
@@ -3260,6 +3340,49 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
+              <%!-- BLOCKED BY (RE93) — editable; hidden on @embed, the native card host --%>
+              <div :if={!@embed} class="rail-section flex flex-col gap-2">
+                <.section_label>Blocked by</.section_label>
+                <.dependency_list
+                  id={"#{@id}-blocked-by"}
+                  cards={@dependencies}
+                  removable={not @archived}
+                />
+                <form
+                  :if={not @archived}
+                  id={"#{@id}-add-dependency"}
+                  phx-change="validate_dependency"
+                  phx-submit="add_dependency"
+                  class="flex items-center gap-1"
+                >
+                  <input
+                    type="text"
+                    name="ref"
+                    value={@dependency_input}
+                    list={"#{@id}-dependency-options"}
+                    placeholder="+ Add"
+                    autocomplete="off"
+                    class="input input-xs w-full border border-dashed border-base-300 font-mono"
+                  />
+                  <datalist id={"#{@id}-dependency-options"}>
+                    <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
+                  </datalist>
+                </form>
+                <p
+                  :if={@dependency_error}
+                  id={"#{@id}-dependency-error"}
+                  class="text-xs text-error"
+                >
+                  {@dependency_error}
+                </p>
+              </div>
+
+              <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>
+              <div :if={!@embed and @dependents != []} class="rail-section flex flex-col gap-2">
+                <.section_label>Blocks</.section_label>
+                <.dependency_list id={"#{@id}-blocks"} cards={@dependents} />
+              </div>
+
               <%!-- FLOW inserts here when flow-overrides lands — not built in this pass. --%>
 
               <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
@@ -3835,6 +3958,20 @@ defmodule RelayWeb.CoreComponents do
   defp activity_phrase(%Activity{type: :action}), do: "agent activity"
   defp activity_phrase(%Activity{type: :failure}), do: "the agent stopped"
 
+  # RE93 — a dependencies_changed entry's meta is %{"added" => [ref], "removed" => [ref]};
+  # a no-op re-set never logs (see Cards.set_dependencies/4), so at least one side is non-empty.
+  defp activity_phrase(%Activity{type: :dependencies_changed, meta: meta}) do
+    added = Map.get(meta, "added", [])
+    removed = Map.get(meta, "removed", [])
+
+    [
+      added != [] && "blocked by #{Enum.join(added, ", ")}",
+      removed != [] && "unblocked from #{Enum.join(removed, ", ")}"
+    ]
+    |> Enum.filter(& &1)
+    |> Enum.join(", ")
+  end
+
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
   # offers the approve/send-back pair; an ungated one has no drawer decision
   # button (RLY-37) — move it forward by drag or Move to… when ready.
@@ -3971,6 +4108,10 @@ defmodule RelayWeb.CoreComponents do
   attr :vote_counts, :map,
     default: %{},
     doc: "RLY-69 card_id => public vote count, from BoardLive's :vote_counts assign"
+
+  attr :blocked_by, :map,
+    default: %{},
+    doc: "RE93 %{card_id => [unmet blocker id]} — the face chip's count comes from this"
 
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
@@ -4206,6 +4347,7 @@ defmodule RelayWeb.CoreComponents do
                       progress_at={run_meta_at(@run_meta, card.id)}
                       stalled?={run_meta_stalled?(@run_meta, card.id)}
                       vote_count={Map.get(@vote_counts, card.id, 0)}
+                      blocked_count={length(Map.get(@blocked_by, card.id, []))}
                     />
                   </div>
                   <%!--
@@ -4319,6 +4461,7 @@ defmodule RelayWeb.CoreComponents do
                   progress_at={run_meta_at(@run_meta, card.id)}
                   stalled?={run_meta_stalled?(@run_meta, card.id)}
                   vote_count={Map.get(@vote_counts, card.id, 0)}
+                  blocked_count={length(Map.get(@blocked_by, card.id, []))}
                 />
               </div>
             </div>

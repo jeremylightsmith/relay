@@ -57,6 +57,16 @@ the MMF design specs).
 - **Done (derived)** — a card is *Done* only when it is `:ready` at the board's **terminal** stage.
   A `:ready` card in a **mid-board Done substage** is **parked**, not done (`Cards.done?/2` is
   false there). Done is derived, never a stored flag.
+- **Dependency** — a directed edge between two cards on the same board (`Schemas.CardDependency`,
+  RE93): the *dependent* card is **blocked by** the *blocker* card. Written as a whole set
+  through `Relay.Cards.set_dependencies/4` (full replace; cycles and unknown refs refused).
+- **Blocked (dependency)** — a card with at least one **unsatisfied** blocker. A blocker is
+  *satisfied* when it sits in a top-level `:complete`-category stage — its status is irrelevant.
+  A dependency-blocked card is ineligible for **automatic flow dispatch** — no flow *pulls* it —
+  and wears a quiet ghost `Blocked by N cards` chip. It gates fresh pulls only: a run already in
+  flight, and a send-back re-entering its flow, both continue (see `Relay.Runs.Policy.pullable?/1`). It is NOT the same as **needs you** (amber, a
+  card demanding a human right now) and NOT the same as the `:queued` status (which means
+  *capacity*-blocked). Human moves of a blocked card stay legal.
 
 See also: `Schemas.Stage`, [ADR 0003](adr/0003-card-state-stage-type-validity.md), and card
 **RLY-76** (the Approve routing authority).

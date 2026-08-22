@@ -79,12 +79,13 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 | `bin/relay version` | The git SHA the deployed app was built from |
 | `bin/relay update [--check]` | Install or refresh the five Relay-owned files (`bin/relay` + the four `relay-*` skills) from the board's `/api/scaffold`. `--check` reports and writes nothing. Prefer `/relay-update`, which wraps it. |
-| `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`) |
+| `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`/`--depends-on`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
 | `bin/relay describe` · `bin/relay criteria` · `bin/relay plan` · `bin/relay sub-tasks RLY-12 @file` | Set spec / criteria / plan / checklist |
 | `bin/relay check` · `bin/relay uncheck RLY-12 42` | Toggle one sub-task done by id |
 | `bin/relay branch` · `bin/relay pr` · `bin/relay result RLY-12 …` | Record branch / PR url / AI result blob |
+| `bin/relay depends RLY-12 RLY-13 RLY-14` | Replace the card's blocker set — it stays undispatchable until every blocker reaches a top-level Done column. No BLOCKERs clears it. Refs may be separate args or comma-separated; `bin/relay create --depends-on RE12,RE13` sets them at creation |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `bin/relay own` · `bin/relay release RLY-12` | Claim for the AI / hand back |

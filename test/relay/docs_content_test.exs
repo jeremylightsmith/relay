@@ -105,10 +105,28 @@ defmodule Relay.DocsContentTest do
 
     # The verdict vocabulary is the contract `relay why` prints — an undocumented verdict
     # is an operator staring at a word with no meaning.
-    for verdict <- ~w(dispatchable no_enabled_flow awaiting_capacity resume_refused wip_full
-                      owned_by_human blocked_on_input run_active not_eligible run_failed
-                      job_stranded job_awaiting_slot executor_outdated no_executor) do
+    for verdict <- ~w(dispatchable blocked_by_dependencies no_enabled_flow awaiting_capacity
+                      resume_refused wip_full owned_by_human blocked_on_input run_active
+                      not_eligible run_failed job_stranded job_awaiting_slot executor_outdated
+                      no_executor) do
       assert api =~ verdict, "api.md should document the `#{verdict}` verdict"
+    end
+  end
+
+  # RE93 — the expected author of a dependency graph is an agent, and an agent reads relay.md,
+  # /docs/cli and /docs/api. A verb documented nowhere it looks ships dark.
+  test "the dependency surface is documented everywhere an agent reads (RE93)" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    cli = read("cli.md")
+    api = read("api.md")
+
+    for doc <- [relay_md, cli] do
+      assert doc =~ "bin/relay depends"
+      assert doc =~ "--depends-on"
+    end
+
+    for token <- ["depends_on", "\"blocks\"", "unknown_refs", "dependency_cycle"] do
+      assert api =~ token, "api.md should document `#{token}`"
     end
   end
 

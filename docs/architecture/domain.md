@@ -99,7 +99,7 @@ sharing behavior.
   **The scheduler brain**: `Relay.Runs.Scheduler.plan/1`, a pure `Snapshot → Plan` behind a
   per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
-  `run_summary_for_card/1`, `happy_path/1`, `queued_flow/4`, `face_summary/4` — one shared
+  `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
   private builder, so the summary shape is defined exactly once.
   **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
   pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
@@ -335,6 +335,7 @@ erDiagram
     Stage |o--o{ Flow : "trigger (pulls-from / works-in / lands-on)"
     Flow ||--o{ FlowVersion : "immutable version snapshots"
     Card ||--o{ SubTask : has
+    Card ||--o{ CardDependency : "blocked by (RE93)"
     Card ||--o{ CardOwner : "owners (user or agent)"
     Card ||--o{ Comment : timeline
     Card ||--o{ Activity : timeline
@@ -382,6 +383,23 @@ card renumbers its whole target cell, and the **siblings** are renumbered with a
 `update_all` so their `updated_at` is untouched — that column is the recency proxy behind the
 Done column's render window and the needs-you feed, both board-lens orderings that would
 otherwise be silently reshuffled by a drag on the map.
+
+A `Card` may also be **blocked by** other cards on the same board (RE93). Each edge is a
+`CardDependency` row (`card_id` = the dependent, `depends_on_card_id` = the blocker), cascading
+on both FKs and unique on the pair. A blocker counts as **satisfied** when it sits in a
+top-level `:complete`-category stage — `Relay.Boards.top_level_done_stage_ids/1`, the same one
+definition the board's Done treatment and the API's index filter use; the blocker's *status* is
+irrelevant. `Relay.Cards.unmet_dependencies/2` is the single "is this card blocked" read, and
+`Relay.Runs.Policy.pullable?/1` is where it gates: a card with any unmet blocker is skipped by
+the scheduler's fresh pulls and by the board's "queued for X" face chip, together. It gates
+**fresh pulls only**, and two starts are named carve-outs on `pullable?/1`'s doc:
+`Policy.resumable?/2` (a dependency added mid-run must not strand a run in flight) and the run
+listener's rejection re-entry (a send-back resumes the loop on a card an agent already worked).
+Both continue work in flight rather than pull a fresh card, and gating either would strand the
+card, because nothing re-reconciles a dependent when its blocker later reaches Done — the
+listener reacts to the blocker's event, not the dependent's. Human moves are never blocked. Archiving a card
+deletes the rows pointing AT it, permanently freeing its dependents; its own outgoing rows
+survive.
 
 ---
 *Sources of truth: `lib/relay.ex` (`exports`), `lib/schemas/*.ex`, ADRs 0002–0004, 0006.*

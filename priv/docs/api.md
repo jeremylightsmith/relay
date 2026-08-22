@@ -36,6 +36,8 @@ actor). Requests without a valid key get `401 unauthorized`.
 | 422 | `not_gated` | approve/reject on a card whose stage is not an approval gate |
 | 422 | `missing_note` | reject without a non-empty `note` |
 | 422 | `invalid_target` | reject `to` a stage that isn't a valid main-lane target |
+| 422 | `unknown_refs` | `depends_on` names a ref this board does not have (nothing is written) |
+| 422 | `dependency_cycle` | `depends_on` would close a dependency cycle; the message names the path |
 
 ## Card & stage shape
 
@@ -72,6 +74,8 @@ heavy fields:
   "acceptance_criteria": "…markdown…",
   "plan": "…markdown…",
   "spec": "…markdown…",
+  "depends_on": [{ "ref": "RLY-13", "title": "Ship the migration", "satisfied": false }],
+  "blocks": [{ "ref": "RLY-20", "title": "Backfill the index" }],
   "timeline": [
     { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
     { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
@@ -79,6 +83,13 @@ heavy fields:
   ]
 }
 ```
+
+`depends_on` is the card's blockers (`satisfied` is true once that blocker has reached a
+top-level Done column); `blocks` is the reverse edge. Both are **single-card only** — the list
+shape omits them. A card with an unsatisfied blocker is never *pulled* by a flow, and
+`GET /api/cards/:ref/diagnosis` reports the `blocked_by_dependencies` verdict. Work already in
+flight is unaffected: a running run is not cancelled by a dependency added mid-run, and a card
+sent back for changes re-enters its flow as usual.
 
 A **stage** (returned inside `GET /api/board`):
 
@@ -136,7 +147,9 @@ curl -H "Authorization: Bearer $RELAY_KEY" "https://relay.example/api/cards?q=lo
 
 Create a card. Optional `stage` (a stage **id**; defaults to the board's first stage).
 Accepts `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`,
-`pr_url`. Returns `201` with the single-card shape.
+`pr_url`, and `depends_on` (a list of card refs this card is blocked by). Returns `201` with
+the single-card shape. A `depends_on` that names an unknown ref is refused with `unknown_refs`
+**before** the card is created, so a refused create leaves no card behind.
 
 ```
 curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
@@ -159,7 +172,9 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 
 Update a card. Any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`,
 `plan`, `pr_url`; plus `status` (with optional `progress`); plus `owners` (a list of
-`"agent"` or `"user:<id>"`). Returns the single-card shape.
+`"agent"` or `"user:<id>"`); plus `depends_on`, a list of card refs that **replaces** the
+card's blocker set (`[]` clears it). Returns the single-card shape. `depends_on` is refused
+with `unknown_refs` or `dependency_cycle` and writes nothing.
 
 ```
 curl -X PATCH -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
@@ -232,6 +247,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | verdict | means |
 | --- | --- |
 | `dispatchable` | would dispatch on the scheduler's next tick |
+| `blocked_by_dependencies` | the card declares blockers that have not reached a top-level Done column; `evidence.blocked_by` names their refs |
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
 | `awaiting_capacity` | a flow would dispatch; no executor advertises a free slot of the needed class |
 | `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_executor_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |

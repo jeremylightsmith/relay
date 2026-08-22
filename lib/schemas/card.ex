@@ -71,6 +71,10 @@ defmodule Schemas.Card do
     belongs_to :release, Schemas.Release
     has_many :owners, Schemas.CardOwner
     has_many :sub_tasks, Schemas.SubTask
+    # RE93 — the cards this card is BLOCKED BY. Deliberately absent from changeset/2 and from
+    # Relay.Cards' @list_card_fields: the set is written through Relay.Cards.set_dependencies/4
+    # and read through unmet_dependencies/2, exactly the way sub_tasks is.
+    has_many :dependencies, Schemas.CardDependency
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
 
     timestamps(type: :utc_datetime)

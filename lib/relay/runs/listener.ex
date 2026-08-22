@@ -162,6 +162,12 @@ defmodule Relay.Runs.Listener do
 
   defp maybe_reenter_after_rejection(%Card{rejection: nil}), do: :ok
 
+  # RE93 — deliberately NOT gated on `Relay.Cards.unmet_dependencies/2`. A send-back continues a
+  # loop on a card an agent has already worked, so it is a resume, not a fresh pull, and the
+  # dependency gate is a fresh-pull gate (`Relay.Runs.Policy.pullable?/1` documents both
+  # carve-outs). Gating it here would also strand the card outright: nothing re-reconciles a
+  # dependent when its *blocker* later reaches Done, because the listener reacts to the blocker's
+  # event, not the dependent's.
   defp maybe_reenter_after_rejection(%Card{status: :ready} = card) do
     flow = Relay.Flows.working_flow(card)
 

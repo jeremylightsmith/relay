@@ -2241,4 +2241,62 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "oklch("
     end
   end
+
+  describe "dependency_list/1 and the blocked chip (RE93)" do
+    test "a blocked card face wears a ghost lock chip, pluralized, never amber" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "c1",
+          ref: "RE1",
+          title: "Dependent",
+          blocked_count: 3
+        )
+
+      assert html =~ "card-blocked-chip"
+      assert html =~ "badge badge-ghost badge-sm"
+      assert html =~ "hero-lock-closed"
+      assert html =~ "Blocked by 3 cards"
+      refute html =~ "badge-warning"
+    end
+
+    test "the chip reads in the singular for one blocker, and is absent at zero" do
+      one = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RE1", title: "T", blocked_count: 1)
+      assert one =~ "Blocked by 1 card"
+      refute one =~ "Blocked by 1 cards"
+
+      none = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RE1", title: "T")
+      refute none =~ "card-blocked-chip"
+    end
+
+    test "the list ticks and strikes through a satisfied blocker and offers ✕ only when removable" do
+      html =
+        render_component(&CoreComponents.dependency_list/1,
+          id: "blocked-by",
+          cards: [
+            %{ref: "RE2", title: "Waiting on this", satisfied?: false},
+            %{ref: "RE3", title: "Already done", satisfied?: true}
+          ],
+          removable: true
+        )
+
+      assert html =~ "hero-check-circle"
+      assert html =~ "text-success"
+      assert html =~ "line-through"
+      assert html =~ ~s(phx-value-ref="RE2")
+      assert html =~ "hero-x-mark"
+    end
+
+    test "a read-only list has no remove control, and an empty one says so" do
+      read_only =
+        render_component(&CoreComponents.dependency_list/1,
+          id: "blocks",
+          cards: [%{ref: "RE2", title: "Later"}]
+        )
+
+      refute read_only =~ "remove_dependency"
+
+      empty = render_component(&CoreComponents.dependency_list/1, id: "blocks", cards: [])
+      assert empty =~ "None"
+    end
+  end
 end

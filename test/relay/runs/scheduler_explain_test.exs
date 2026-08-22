@@ -25,7 +25,8 @@ defmodule Relay.Runs.SchedulerExplainTest do
       stage_id: stage_id,
       status: Keyword.get(opts, :status, :ready),
       active_owner: Keyword.get(opts, :active_owner),
-      position: Keyword.get(opts, :position, id)
+      position: Keyword.get(opts, :position, id),
+      blocked_by: Keyword.get(opts, :blocked_by, [])
     }
   end
 
@@ -327,6 +328,59 @@ defmodule Relay.Runs.SchedulerExplainTest do
         assert dispatched? == (verdict == :dispatchable),
                "card #{card.id} dispatched?=#{dispatched?} but verdict=#{verdict}"
       end
+    end
+  end
+
+  # RE93 — a dependency wait is a LEGITIMATE wait, so it is reported after the "no enabled flow"
+  # dead end (the worse news) and before :not_eligible.
+  describe "explain/2 — blocked by dependencies" do
+    test "names the count and the blocking refs" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1, blocked_by: [11, 12]), card(11, 1), card(12, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{verdict: :blocked_by_dependencies, detail: detail, evidence: evidence} =
+               Scheduler.explain(snapshot, 10)
+
+      assert detail ==
+               "This card is waiting on 2 cards that have not reached a Done column: RLY-11, RLY-12."
+
+      assert evidence.blocked_by == ["RLY-11", "RLY-12"]
+    end
+
+    test "reads 1 card / has in the singular" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1, blocked_by: [11]), card(11, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{detail: detail} = Scheduler.explain(snapshot, 10)
+      assert detail == "This card is waiting on 1 card that has not reached a Done column: RLY-11."
+    end
+
+    test "a missing flow is the worse news and still wins" do
+      snapshot = snap(stages: [stage(1, [])], cards: [card(10, 1, blocked_by: [11]), card(11, 1)], flows: [])
+
+      assert %{verdict: :no_enabled_flow} = Scheduler.explain(snapshot, 10)
+    end
+
+    test "evidence.blocked_by is [] for an unblocked card" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{evidence: %{blocked_by: []}} = Scheduler.explain(snapshot, 10)
     end
   end
 end

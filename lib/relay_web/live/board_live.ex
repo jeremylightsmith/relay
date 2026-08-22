@@ -384,6 +384,7 @@ defmodule RelayWeb.BoardLive do
                   runs={@face_runs}
                   run_meta={@run_face_meta}
                   vote_counts={@vote_counts}
+                  blocked_by={@blocked_by}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -547,9 +548,15 @@ defmodule RelayWeb.BoardLive do
             @selected_card,
             Cards.active_owner_type(@selected_card),
             @flows,
-            Map.get(@run_summaries, @selected_card.id)
+            Map.get(@run_summaries, @selected_card.id),
+            Map.get(@blocked_by, @selected_card.id, [])
           )
         }
+        dependencies={@card_dependencies}
+        dependents={@card_dependents}
+        dependency_options={@dependency_options}
+        dependency_error={@dependency_error}
+        dependency_input={@dependency_input}
         vote_count={@drawer_vote_count}
         supporters={@drawer_supporters}
         public_description={@selected_card.public_description}
@@ -954,6 +961,9 @@ defmodule RelayWeb.BoardLive do
     flows = Flows.list_flows(board)
     run_summaries = Runs.run_summaries_for_board(board)
     cards_by_stage = Enum.group_by(cards, & &1.stage_id)
+    # RE93 — %{card_id => [unmet blocker id]}. One board-scoped query; the ONE definition of
+    # "blocked", shared with the scheduler.
+    blocked_by = Cards.unmet_dependencies(board, board.stages)
 
     socket =
       socket
@@ -1034,10 +1044,16 @@ defmodule RelayWeb.BoardLive do
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
       |> assign(:run_summaries, run_summaries)
-      |> assign(:face_runs, face_runs(cards, flows, run_summaries))
+      |> assign(:blocked_by, blocked_by)
+      |> assign(:face_runs, face_runs(cards, flows, run_summaries, blocked_by))
       |> assign(:vote_counts, Votes.counts_for_cards(Enum.map(cards, & &1.id)))
       |> assign(:drawer_supporters, [])
       |> assign(:drawer_vote_count, 0)
+      |> assign(:card_dependencies, [])
+      |> assign(:card_dependents, [])
+      |> assign(:dependency_options, [])
+      |> assign(:dependency_error, nil)
+      |> assign(:dependency_input, "")
       |> assign(:editing_public_desc, false)
       |> assign(:public_desc_form, nil)
       |> assign(:dirty_run_cards, MapSet.new())
@@ -1104,6 +1120,8 @@ defmodule RelayWeb.BoardLive do
          |> assign(:drawer_tab, default_tab)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
+         |> assign_card_dependencies(card)
+         |> assign(:dependency_input, "")
          |> stream_notes(conversation)
          |> stream(:activity, activity, reset: true)}
 
@@ -1615,6 +1633,30 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_tag", _params, socket), do: {:noreply, socket}
+
+  # RE93 — the rail edits the whole set, not one edge: the LiveView sends the full new ref list
+  # to Cards.set_dependencies/4, which is the one write path the API and CLI also use. The
+  # refusal is rendered INLINE under the input rather than as a flash, because it is about the
+  # text you just typed.
+  # The input's value is server-held (RE93): a bare uncontrolled <input> keeps whatever the user
+  # typed after a successful add, because nothing in the re-rendered markup changes and morphdom
+  # will not touch a `value` property it never wrote. Holding it in an assign is what lets the
+  # success path empty the box — the same reason the comment and compose forms hold theirs.
+  def handle_event("validate_dependency", %{"ref" => ref}, socket) do
+    {:noreply, assign(socket, :dependency_input, ref)}
+  end
+
+  def handle_event("add_dependency", %{"ref" => ref}, socket) do
+    case String.trim(ref) do
+      "" -> {:noreply, socket}
+      trimmed -> apply_dependency_change(socket, Enum.map(socket.assigns.card_dependencies, & &1.ref) ++ [trimmed])
+    end
+  end
+
+  def handle_event("remove_dependency", %{"ref" => ref}, socket) do
+    remaining = socket.assigns.card_dependencies |> Enum.map(& &1.ref) |> List.delete(ref)
+    apply_dependency_change(socket, remaining)
+  end
 
   def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     {:noreply,
@@ -2458,6 +2500,7 @@ defmodule RelayWeb.BoardLive do
        |> upsert_card_stream(card, cards_by_stage)
        |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
        |> assign_archived_count()
+       |> refresh_blocked_by(cards_by_stage)
        |> refresh_face_runs(cards_by_stage)
        |> maybe_refresh_drawer(card)
        |> refresh_story_map()}
@@ -2476,6 +2519,7 @@ defmodule RelayWeb.BoardLive do
        socket
        |> refresh_card_health(moved.id)
        |> apply_move(from_stage_id, moved)
+       |> refresh_blocked_by(cards_by_stage)
        |> refresh_face_runs(cards_by_stage)
        |> refresh_story_map()}
     else
@@ -2488,7 +2532,18 @@ defmodule RelayWeb.BoardLive do
   # drawer if the archived card is the one open here.
   def handle_info({:card_archived, %Card{} = card}, socket) do
     if find_stage_by_id(socket, card.stage_id) do
-      {:noreply, socket |> apply_archive(card) |> close_drawer_if_selected(card) |> refresh_story_map()}
+      # RE93 — archiving a card deletes the dependency rows pointing AT it, so its dependents
+      # are freed in this same beat and their chips must repaint. apply_archive/2 loads its own
+      # card list (it is also the local-action path); the second load here is one indexed select.
+      cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+
+      {:noreply,
+       socket
+       |> apply_archive(card)
+       |> refresh_blocked_by(cards_by_stage)
+       |> refresh_face_runs(cards_by_stage)
+       |> close_drawer_if_selected(card)
+       |> refresh_story_map()}
     else
       {:noreply, reload_board(socket)}
     end
@@ -2774,12 +2829,19 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-137 — the board-face run affordance per card, rebuilt from a fresh card list
   # whenever one is on hand (mount, card_upserted, card_moved, reload_board) rather
-  # than patched incrementally like health: face_summary/4 is cheap (pure map lookups
+  # than patched incrementally like health: face_summary/5 is cheap (pure map lookups
   # over already-loaded :flows / :run_summaries) and a card's stage/status/owner can
   # all move its face at once (e.g. into the queued or review states).
-  defp face_runs(cards, flows, summaries) do
+  defp face_runs(cards, flows, summaries, blocked_by) do
     Map.new(cards, fn card ->
-      {card.id, Runs.face_summary(card, Cards.active_owner_type(card), flows, summaries)}
+      {card.id,
+       Runs.face_summary(
+         card,
+         Cards.active_owner_type(card),
+         flows,
+         summaries,
+         Map.get(blocked_by, card.id, [])
+       )}
     end)
   end
 
@@ -2806,7 +2868,66 @@ defmodule RelayWeb.BoardLive do
 
   defp refresh_face_runs(socket, cards_by_stage) do
     cards = cards_by_stage |> Map.values() |> List.flatten()
-    assign(socket, :face_runs, face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries))
+
+    assign(
+      socket,
+      :face_runs,
+      face_runs(cards, socket.assigns.flows, socket.assigns.run_summaries, socket.assigns.blocked_by)
+    )
+  end
+
+  # RE93 — when a blocker reaches a Done column (or is archived), it is the DEPENDENT's stream
+  # entry that must change, and nothing in the dependent's own row did, so no other handler would
+  # restream it. Recompute the map, diff it against the previous one, and repaint exactly the
+  # cards whose blocker list moved. @vote_counts (the :vote_changed handler) is the existing
+  # precedent for this assign-plus-restream idiom.
+  #
+  # Routed through upsert_card_stream/3 (not a bare stream_insert) so a DEPENDENT sitting in the
+  # terminal Done column also repaints: that column is a paged window rebuilt with reset:, which
+  # upsert_card_stream already owns, rather than being skipped and left stale until reload.
+  defp refresh_blocked_by(socket, cards_by_stage) do
+    board = socket.assigns.board
+    previous = socket.assigns.blocked_by
+    current = Cards.unmet_dependencies(board, board.stages)
+
+    changed =
+      previous
+      |> Map.keys()
+      |> Kernel.++(Map.keys(current))
+      |> Enum.uniq()
+      |> Enum.filter(&(Enum.sort(Map.get(previous, &1, [])) != Enum.sort(Map.get(current, &1, []))))
+
+    # list_cards/1's own ordering, so the datalist reads the same on this path as on the
+    # drawer-open one; the sort is in-memory over a list already in hand.
+    flat_cards = cards_by_stage |> Map.values() |> List.flatten() |> Enum.sort_by(&{&1.stage_id, &1.position, &1.id})
+    by_id = Map.new(flat_cards, &{&1.id, &1})
+    socket = assign(socket, :blocked_by, current)
+
+    # RE93 — a blocker reaching Done changes the SELECTED card's ticks too, and that card's own
+    # row did not change, so maybe_refresh_drawer/2 would never fire for it.
+    socket =
+      case socket.assigns.selected_card do
+        # clear_error?: false — this fires on EVERY board broadcast, including ones about other
+        # cards entirely. Clearing here would erase the drawer's inline refusal mid-read.
+        #
+        # cards: — this path runs on every board broadcast, and the caller has ALREADY loaded the
+        # whole board into cards_by_stage one line earlier. Handing that list over keeps the
+        # datalist as fresh as a re-query would while costing zero extra selects: on an AI-first
+        # board, agents emit card_upserted on every status write, and a second
+        # list_cards + preload per open drawer per event is the hottest path there is.
+        %Card{} = selected -> assign_card_dependencies(socket, selected, clear_error?: false, cards: flat_cards)
+        _other -> socket
+      end
+
+    Enum.reduce(changed, socket, fn id, acc ->
+      card = Map.get(by_id, id)
+
+      if card && find_stage_by_id(acc, card.stage_id) do
+        upsert_card_stream(acc, card, cards_by_stage)
+      else
+        acc
+      end
+    end)
   end
 
   # RLY-204 — record that `card_id`'s run changed and arm the debounce timer once per burst.
@@ -2840,7 +2961,14 @@ defmodule RelayWeb.BoardLive do
             do: Map.put(socket.assigns.run_summaries, card_id, summary),
             else: Map.delete(socket.assigns.run_summaries, card_id)
 
-        face = Runs.face_summary(card, Cards.active_owner_type(card), flows, run_summaries)
+        face =
+          Runs.face_summary(
+            card,
+            Cards.active_owner_type(card),
+            flows,
+            run_summaries,
+            Map.get(socket.assigns.blocked_by, card_id, [])
+          )
 
         socket =
           socket
@@ -3231,7 +3359,52 @@ defmodule RelayWeb.BoardLive do
     |> assign(:card_runs, Runs.list_runs_for_card(card))
     |> stream_notes(Activity.list_conversation(card))
     |> stream(:activity, activity, reset: true)
+    |> assign_card_dependencies(card)
     |> stream_insert(stream_name(card.stage_id), card)
+  end
+
+  # RE93 — the drawer's two rails plus the add-input's datalist. The two rails are cheap indexed
+  # selects on the dependency table; the datalist needs the board's whole card list, which is the
+  # expensive part, so `:cards` lets a caller that already holds one hand it over instead of
+  # paying for a second `list_cards` + preload. Only the drawer-fill path (which holds no card
+  # list) falls back to querying.
+  #
+  # `:clear_error?` distinguishes the WRITE paths (opening/refreshing the drawer, and a successful
+  # set_dependencies) — which own the error assign and reset it — from the passive board-broadcast
+  # refresh, which must leave whatever the reader is looking at alone.
+  defp assign_card_dependencies(socket, %Card{} = card, opts \\ []) do
+    board = socket.assigns.board
+    cards = Keyword.get_lazy(opts, :cards, fn -> Cards.list_cards(board) end)
+
+    options =
+      for c <- cards,
+          c.id != card.id,
+          do: %{ref: Cards.format_ref(board.key, c.ref_number), title: c.title}
+
+    socket
+    |> assign(:card_dependencies, Cards.list_dependencies(board, card))
+    |> assign(:card_dependents, Cards.list_dependents(board, card))
+    |> assign(:dependency_options, options)
+    |> then(&if Keyword.get(opts, :clear_error?, true), do: assign(&1, :dependency_error, nil), else: &1)
+  end
+
+  # RE93 — the add/remove_dependency handlers both funnel here: the rail edits the whole set, not
+  # one edge, so both send the full new ref list to Cards.set_dependencies/4, the one write path
+  # the API and CLI also use. assign_card_dependencies/3 clears :dependency_error on success and
+  # the add-input empties with it; the failure branch does NOT route through it, so both the
+  # just-set error AND the text that caused it survive for the reader to correct.
+  defp apply_dependency_change(socket, refs) do
+    board = socket.assigns.board
+    card = socket.assigns.selected_card
+    actor = {:user, socket.assigns.current_scope.user.id}
+
+    case Cards.set_dependencies(board, card, refs, actor) do
+      {:ok, _card} ->
+        {:noreply, socket |> assign_card_dependencies(card) |> assign(:dependency_input, "")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :dependency_error, Cards.dependency_error_message(reason))}
+    end
   end
 
   # Approve/reject moved the card: re-stream the source and target stage
@@ -3593,6 +3766,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)
       |> assign_archived_count()
+      |> assign(:blocked_by, Cards.unmet_dependencies(board, board.stages))
       |> refresh_face_runs(cards_by_stage)
 
     board.stages
