@@ -25,6 +25,7 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
   relay attach REF FILE [--caption TEXT] [--json]
   relay tag REF [VALUE]       # set the card's tag (omit VALUE to clear)
+  relay depends REF [BLOCKER ...]   # replace the card's blocker set (no BLOCKERs = clear)
 
 TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output;
 --field PATH prints one value bare (e.g. `relay card RLY-12 --field status`).
@@ -73,7 +74,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
 EXECUTOR_VERSION = 59
-EXECUTOR_FINGERPRINT = "ba37c8410dfa2151e22068628a16c568ebd4229bc7578dd283130cb1a074bcba"
+EXECUTOR_FINGERPRINT = "16109dd09bd9cbbfe544d15c53df050488454a136acdb1e840d356499a67468c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -509,6 +510,18 @@ def set_tag(ref, value):
     return api("PATCH", f"/api/cards/{ref}", {"tag": value or None})["data"]
 
 
+def set_dependencies(ref, refs):
+    """REPLACE the card's blocker set. Full replace, not append: the expected author is an agent
+    writing a whole dependency graph in one pass, and an append-only verb makes "set exactly
+    these" impossible to express. An empty list clears."""
+    return api("PATCH", f"/api/cards/{ref}", {"depends_on": list(refs)})["data"]
+
+
+def split_refs(value):
+    """`--depends-on RE12,RE13` -> ["RE12", "RE13"]; blanks dropped."""
+    return [r.strip() for r in value.split(",") if r.strip()]
+
+
 def set_sub_tasks(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"sub_tasks": _parse_sub_tasks(text)})["data"]
 
@@ -533,7 +546,7 @@ def move(ref, stage_name):
     return api("POST", f"/api/cards/{ref}/move", {"stage": resolve_stage_id(stage_name)})["data"]
 
 
-def create_card(title, stage_name=None, description=None, tag=None):
+def create_card(title, stage_name=None, description=None, tag=None, depends_on=None):
     body = {"title": title}
     if stage_name is not None:
         body["stage"] = resolve_stage_id(stage_name)
@@ -541,6 +554,8 @@ def create_card(title, stage_name=None, description=None, tag=None):
         body["description"] = description
     if tag is not None:
         body["tag"] = tag
+    if depends_on is not None:
+        body["depends_on"] = depends_on
     return api("POST", "/api/cards", body)["data"]
 
 
@@ -585,6 +600,20 @@ def card_line(c):
     return f'{c["ref"]} [{c.get("status", "?")}/{c.get("active_owner") or "-"}] {c["title"]}'
 
 
+def dependency_lines(c):
+    """The `blocked by:` / `blocks:` lines for a card, each omitted when empty. ONE renderer,
+    shared by `relay card` and `relay depends`, so the two can never disagree."""
+    lines = []
+    blocked = c.get("depends_on") or []
+    if blocked:
+        lines.append("blocked by: " + ", ".join(
+            f'{d["ref"]}{"" if d.get("satisfied") else " (waiting)"}' for d in blocked))
+    blocks = c.get("blocks") or []
+    if blocks:
+        lines.append("blocks: " + ", ".join(d["ref"] for d in blocks))
+    return lines
+
+
 def print_card(c):
     r = c.get("rejection")
     if r:
@@ -598,7 +627,10 @@ def print_card(c):
     line = f'status: {c.get("status", "?")}   active: {c.get("active_owner") or "-"}   owners: {owners}'
     if c.get("tag"):
         line += f'   tag: #{c["tag"]}'
-    print(line + "\n")
+    print(line)
+    for dep in dependency_lines(c):
+        print(dep)
+    print()
     print(c.get("description") or "(no description)")
     if c.get("acceptance_criteria"):
         print("\n--- acceptance criteria ---")
@@ -1169,8 +1201,20 @@ def cmd_create(args):
         stage_name=args.stage,
         description=read_arg(args.description) if args.description is not None else None,
         tag=args.tag,
+        depends_on=split_refs(args.depends_on) if args.depends_on else None,
     )
     emit(args, card, lambda: print_card(card))
+
+
+def cmd_depends(args):
+    """relay depends REF [BLOCKER ...] — replace the card's blocker set; no BLOCKERs clears it.
+
+    A blocked card is ineligible for AUTOMATIC dispatch until every blocker reaches a Done
+    column; dragging it into a work column by hand is still legal. `relay why REF` explains the
+    wait in prose."""
+    card = set_dependencies(args.ref, args.blockers)
+    lines = dependency_lines(card) or ["blocked by: (none)"]
+    emit(args, card, lambda: print("\n".join([card["ref"]] + lines)))
 
 
 def _simple(fn):
@@ -4258,6 +4302,8 @@ def build_parser():
     c.add_argument("--stage")
     c.add_argument("--description")
     c.add_argument("--tag")
+    c.add_argument("--depends-on", metavar="REF[,REF...]",
+                   help="blocker refs this card waits on (full replace)")
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
@@ -4268,6 +4314,8 @@ def build_parser():
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
     tg = add("tag", _simple(lambda a: set_tag(a.ref, a.value)), "ref", json_flag=True)
     tg.add_argument("value", nargs="?")
+    dp = add("depends", cmd_depends, "ref", json_flag=True)
+    dp.add_argument("blockers", nargs="*")
     add("sub-tasks", _simple(lambda a: set_sub_tasks(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
     add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)

@@ -375,6 +375,68 @@ class SetTagTest(unittest.TestCase):
         self.assertIsNone(args.value)
 
 
+class DependsTest(unittest.TestCase):
+    """relay depends REF [BLOCKER ...] — PATCHes a FULL REPLACE of depends_on."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or
+            {"data": {"ref": "RE1", "title": "Do it", "status": "ready", "active_owner": None,
+                      "owners": [], "description": "d",
+                      "depends_on": [{"ref": "RE2", "title": "B", "satisfied": False}],
+                      "blocks": []}})
+
+    def test_blockers_patch_the_full_set(self):
+        relay.set_dependencies("RE1", ["RE2", "RE3"])
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE1", {"depends_on": ["RE2", "RE3"]})])
+
+    def test_no_blockers_patches_an_empty_list_to_clear(self):
+        relay.set_dependencies("RE1", [])
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE1", {"depends_on": []})])
+
+    def test_cli_wiring_collects_zero_or_more_blockers(self):
+        p = relay.build_parser()
+        args = p.parse_args(["depends", "RE1", "RE2", "RE3"])
+        self.assertEqual((args.ref, args.blockers), ("RE1", ["RE2", "RE3"]))
+        self.assertEqual(p.parse_args(["depends", "RE1"]).blockers, [])
+
+    def test_depends_prints_the_resulting_blocker_list(self):
+        args = relay.build_parser().parse_args(["depends", "RE1", "RE2"])
+        out = capture(relay.cmd_depends, args)
+        self.assertIn("blocked by: RE2 (waiting)", out)
+
+    def test_create_sends_comma_separated_blockers(self):
+        self.assertEqual(relay.split_refs("RE2, RE3 ,"), ["RE2", "RE3"])
+        relay.create_card("New", depends_on=["RE2"])
+        self.assertEqual(self.sent, [("POST", "/api/cards", {"title": "New", "depends_on": ["RE2"]})])
+
+
+class PrintCardDependenciesTest(unittest.TestCase):
+    """`relay card` grows a `blocked by:` / `blocks:` line, each shown only when non-empty."""
+
+    def _card(self, **over):
+        c = {"ref": "RE1", "title": "Do it", "status": "ready", "active_owner": None,
+             "owners": [], "description": "d", "depends_on": [], "blocks": []}
+        c.update(over)
+        return c
+
+    def test_both_lines_render_when_present(self):
+        out = capture(relay.print_card, self._card(
+            depends_on=[{"ref": "RE2", "title": "B", "satisfied": False},
+                        {"ref": "RE3", "title": "C", "satisfied": True}],
+            blocks=[{"ref": "RE4", "title": "D"}]))
+        self.assertIn("blocked by: RE2 (waiting), RE3", out)
+        self.assertIn("blocks: RE4", out)
+
+    def test_the_lines_are_omitted_when_empty(self):
+        out = capture(relay.print_card, self._card())
+        self.assertNotIn("blocked by:", out)
+        self.assertNotIn("blocks:", out)
+
+
 class RetryTest(unittest.TestCase):
     """relay retry REF [--at NODE] — POSTs the ref-addressed retry route."""
 

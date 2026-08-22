@@ -18,7 +18,8 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
-         {:ok, card} <- Cards.create_card(stage, params, :agent) do
+         {:ok, card} <- Cards.create_card(stage, params, :agent),
+         {:ok, card} <- update_dependencies(board, card, params) do
       conn
       |> put_status(:created)
       |> render(:show,
@@ -55,7 +56,8 @@ defmodule RelayWeb.Api.CardController do
          {:ok, card} <- update_status(card, params),
          {:ok, card} <- update_owners(card, params),
          {:ok, card} <- update_ai_result(card, params),
-         {:ok, card} <- update_sub_tasks(card, params) do
+         {:ok, card} <- update_sub_tasks(card, params),
+         {:ok, card} <- update_dependencies(board, card, params) do
       render(conn, :show,
         board: board,
         card: card,
@@ -64,8 +66,11 @@ defmodule RelayWeb.Api.CardController do
       )
     else
       nil -> {:error, :not_found}
-      {:error, changeset} -> {:error, changeset}
       :error -> {:error, :invalid_request}
+      # RE93 — {:unknown_refs, _} / {:dependency_cycle, _} must reach the FallbackController as
+      # themselves; the old blanket `{:error, changeset}` clause would have rebound them and
+      # handed a tuple to the changeset renderer.
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -98,6 +103,20 @@ defmodule RelayWeb.Api.CardController do
 
   defp update_sub_tasks(_card, %{"sub_tasks" => _}), do: :error
   defp update_sub_tasks(card, _params), do: {:ok, card}
+
+  # RE93 — a FULL REPLACE of the blocker set, mirroring "sub_tasks": [] clears it, the key absent
+  # leaves it untouched, anything else is an invalid request. Ref resolution, the all-or-nothing
+  # unknown-ref rule and the cycle check all live in Relay.Cards.set_dependencies/4.
+  defp update_dependencies(board, card, %{"depends_on" => refs}) when is_list(refs) do
+    if Enum.all?(refs, &is_binary/1) do
+      Cards.set_dependencies(board, card, refs, :agent)
+    else
+      {:error, :invalid_request}
+    end
+  end
+
+  defp update_dependencies(_board, _card, %{"depends_on" => _}), do: {:error, :invalid_request}
+  defp update_dependencies(_board, card, _params), do: {:ok, card}
 
   defp update_status(card, %{"status" => status}) do
     Cards.set_status_snapped(card, %{"status" => status}, :agent)
