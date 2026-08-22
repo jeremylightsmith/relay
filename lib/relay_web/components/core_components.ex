@@ -3343,13 +3343,6 @@ defmodule RelayWeb.CoreComponents do
                   cards={@dependencies}
                   removable={not @archived}
                 />
-                <p
-                  :if={@dependency_error}
-                  id={"#{@id}-dependency-error"}
-                  class="text-xs text-error"
-                >
-                  {@dependency_error}
-                </p>
                 <form
                   :if={not @archived}
                   id={"#{@id}-add-dependency"}
@@ -3368,6 +3361,13 @@ defmodule RelayWeb.CoreComponents do
                     <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
                   </datalist>
                 </form>
+                <p
+                  :if={@dependency_error}
+                  id={"#{@id}-dependency-error"}
+                  class="text-xs text-error"
+                >
+                  {@dependency_error}
+                </p>
               </div>
 
               <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>

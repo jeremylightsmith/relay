@@ -113,6 +113,23 @@ defmodule Relay.DocsContentTest do
     end
   end
 
+  # RE93 — the expected author of a dependency graph is an agent, and an agent reads relay.md,
+  # /docs/cli and /docs/api. A verb documented nowhere it looks ships dark.
+  test "the dependency surface is documented everywhere an agent reads (RE93)" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    cli = read("cli.md")
+    api = read("api.md")
+
+    for doc <- [relay_md, cli] do
+      assert doc =~ "bin/relay depends"
+      assert doc =~ "--depends-on"
+    end
+
+    for token <- ["depends_on", "\"blocks\"", "unknown_refs", "dependency_cycle"] do
+      assert api =~ token, "api.md should document `#{token}`"
+    end
+  end
+
   test "cli.md lists every CLI verb RLY-177 added" do
     cli = read("cli.md")
 

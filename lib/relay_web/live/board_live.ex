@@ -2893,7 +2893,9 @@ defmodule RelayWeb.BoardLive do
     # row did not change, so maybe_refresh_drawer/2 would never fire for it.
     socket =
       case socket.assigns.selected_card do
-        %Card{} = selected -> assign_card_dependencies(socket, selected)
+        # clear_error?: false — this fires on EVERY board broadcast, including ones about other
+        # cards entirely. Clearing here would erase the drawer's inline refusal mid-read.
+        %Card{} = selected -> assign_card_dependencies(socket, selected, false)
         _other -> socket
       end
 
@@ -3344,7 +3346,12 @@ defmodule RelayWeb.BoardLive do
   # RE93 — the drawer's two rails plus the add-input's datalist. Three board-scoped indexed
   # selects on the drawer-fill path, which already runs several; the alternative (deriving the
   # options from a mount-time card list) would go stale the moment another session adds a card.
-  defp assign_card_dependencies(socket, %Card{} = card) do
+  # clear_error? distinguishes the WRITE paths (opening/refreshing the drawer, and a successful
+  # set_dependencies) — which own the error assign and reset it — from the passive board-broadcast
+  # refresh, which must leave whatever the reader is looking at alone.
+  defp assign_card_dependencies(socket, card, clear_error? \\ true)
+
+  defp assign_card_dependencies(socket, %Card{} = card, clear_error?) do
     board = socket.assigns.board
 
     options =
@@ -3356,7 +3363,7 @@ defmodule RelayWeb.BoardLive do
     |> assign(:card_dependencies, Cards.list_dependencies(board, card))
     |> assign(:card_dependents, Cards.list_dependents(board, card))
     |> assign(:dependency_options, options)
-    |> assign(:dependency_error, nil)
+    |> then(&if clear_error?, do: assign(&1, :dependency_error, nil), else: &1)
   end
 
   # RE93 — the add/remove_dependency handlers both funnel here: the rail edits the whole set, not

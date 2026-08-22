@@ -36,6 +36,8 @@ actor). Requests without a valid key get `401 unauthorized`.
 | 422 | `not_gated` | approve/reject on a card whose stage is not an approval gate |
 | 422 | `missing_note` | reject without a non-empty `note` |
 | 422 | `invalid_target` | reject `to` a stage that isn't a valid main-lane target |
+| 422 | `unknown_refs` | `depends_on` names a ref this board does not have (nothing is written) |
+| 422 | `dependency_cycle` | `depends_on` would close a dependency cycle; the message names the path |
 
 ## Card & stage shape
 
@@ -72,6 +74,8 @@ heavy fields:
   "acceptance_criteria": "…markdown…",
   "plan": "…markdown…",
   "spec": "…markdown…",
+  "depends_on": [{ "ref": "RLY-13", "title": "Ship the migration", "satisfied": false }],
+  "blocks": [{ "ref": "RLY-20", "title": "Backfill the index" }],
   "timeline": [
     { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
     { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
@@ -79,6 +83,11 @@ heavy fields:
   ]
 }
 ```
+
+`depends_on` is the card's blockers (`satisfied` is true once that blocker has reached a
+top-level Done column); `blocks` is the reverse edge. Both are **single-card only** — the list
+shape omits them. A card with an unsatisfied blocker is not dispatched, and
+`GET /api/cards/:ref/diagnosis` reports the `blocked_by_dependencies` verdict.
 
 A **stage** (returned inside `GET /api/board`):
 
@@ -136,7 +145,9 @@ curl -H "Authorization: Bearer $RELAY_KEY" "https://relay.example/api/cards?q=lo
 
 Create a card. Optional `stage` (a stage **id**; defaults to the board's first stage).
 Accepts `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`,
-`pr_url`. Returns `201` with the single-card shape.
+`pr_url`, and `depends_on` (a list of card refs this card is blocked by). Returns `201` with
+the single-card shape. A `depends_on` that names an unknown ref is refused with `unknown_refs`
+**before** the card is created, so a refused create leaves no card behind.
 
 ```
 curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
@@ -159,7 +170,9 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 
 Update a card. Any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`,
 `plan`, `pr_url`; plus `status` (with optional `progress`); plus `owners` (a list of
-`"agent"` or `"user:<id>"`). Returns the single-card shape.
+`"agent"` or `"user:<id>"`); plus `depends_on`, a list of card refs that **replaces** the
+card's blocker set (`[]` clears it). Returns the single-card shape. `depends_on` is refused
+with `unknown_refs` or `dependency_cycle` and writes nothing.
 
 ```
 curl -X PATCH -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \

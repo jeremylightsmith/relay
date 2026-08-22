@@ -22,7 +22,8 @@ exits non-zero.
 | `bin/relay runs RLY-12` | The card's runs and node executions (failure detail in full) |
 | `bin/relay executors` | Who is connected, their capacity, and the jobs they hold |
 | `bin/relay version` | The git SHA the deployed app was built from |
-| `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`) |
+| `bin/relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`/`--depends-on RE12,RE13`) |
+| `bin/relay depends RLY-12 RLY-13 RLY-14` | **Replace the card's blocker set** — the card stays undispatchable until every blocker reaches a top-level Done column (`bin/relay why` reports `blocked_by_dependencies`). Passing no BLOCKERs clears the set. Refs may be separate arguments or comma-separated. A ref this board does not have, or an edge that would close a cycle, is refused and nothing is written |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
 | `bin/relay status RLY-12 working` | Set status (any card status, e.g. `working` — see [Statuses & outcomes](/docs/statuses-and-outcomes); it snaps to one the stage allows) |

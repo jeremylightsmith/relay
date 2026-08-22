@@ -81,11 +81,31 @@ defmodule RelayWeb.BoardLiveDependenciesTest do
 
     view |> element("#card-drawer-add-dependency") |> render_submit(%{"ref" => "ZZ999"})
     assert has_element?(view, "#card-drawer-dependency-error")
-    assert render(view) =~ "this board has no card with ref: ZZ999"
+    html = render(view)
+    assert html =~ "this board has no card with ref: ZZ999"
+
+    # "under the input" is the fidelity spec, so pin the order, not just the presence.
+    assert :binary.match(html, "card-drawer-dependency-error") >
+             :binary.match(html, "card-drawer-add-dependency")
 
     {:ok, _} = Cards.set_dependencies(ctx.board, ctx.b, ["RE1"])
     view |> element("#card-drawer-add-dependency") |> render_submit(%{"ref" => "RE2"})
     assert render(view) =~ "that would create a dependency cycle: RE1 → RE2 → RE1"
+  end
+
+  # RE93 — refresh_blocked_by/2 runs on EVERY board broadcast while a drawer is open. It must
+  # not carry the drawer's inline error away with it: an agent touching any other card on an
+  # AI-first board would otherwise erase the refusal the reader is still reading.
+  test "an unrelated board broadcast leaves the inline error standing", ctx do
+    view = open_drawer(ctx)
+
+    view |> element("#card-drawer-add-dependency") |> render_submit(%{"ref" => "ZZ999"})
+    assert has_element?(view, "#card-drawer-dependency-error")
+
+    {:ok, _} = Cards.update_card(ctx.c, %{title: "Blocker C, retitled"})
+
+    assert has_element?(view, "#card-drawer-dependency-error")
+    assert render(view) =~ "this board has no card with ref: ZZ999"
   end
 
   test "a satisfied blocker is ticked in the drawer", ctx do
