@@ -38,7 +38,8 @@ flight at once; a card may be specced now and planned days later while others pa
 
 | The card carries | CLI to read/write |
 |---|---|
-| **spec** (the description) | `describe` |
+| **description** — the ask as stated | `describe` |
+| **spec** — the design spec authored at the Spec stage | `spec` |
 | **acceptance criteria** | `criteria` |
 | **plan** + **sub-task checklist** | `plan`, `sub-tasks` / `check` / `uncheck` |
 | **branch**, **PR url**, **result** blob | `branch`, `pr`, `result` |
@@ -82,7 +83,7 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`/`--depends-on`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
-| `bin/relay describe` · `bin/relay criteria` · `bin/relay plan` · `bin/relay sub-tasks RLY-12 @file` | Set spec / criteria / plan / checklist |
+| `bin/relay describe` · `bin/relay spec` · `bin/relay criteria` · `bin/relay plan` · `bin/relay sub-tasks RLY-12 @file` | Set description / spec / criteria / plan / checklist — `describe` and `spec` are **separate fields**, not synonyms |
 | `bin/relay check` · `bin/relay uncheck RLY-12 42` | Toggle one sub-task done by id |
 | `bin/relay branch` · `bin/relay pr` · `bin/relay result RLY-12 …` | Record branch / PR url / AI result blob |
 | `bin/relay depends RLY-12 RLY-13 RLY-14` | Replace the card's blocker set — it stays undispatchable until every blocker reaches a top-level Done column. No BLOCKERs clears it. Refs may be separate args or comma-separated; `bin/relay create --depends-on RE12,RE13` sets them at creation |

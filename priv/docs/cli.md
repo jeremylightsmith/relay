@@ -27,7 +27,8 @@ exits non-zero.
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
 | `bin/relay status RLY-12 working` | Set status (any card status, e.g. `working` — see [Statuses & outcomes](/docs/statuses-and-outcomes); it snaps to one the stage allows) |
-| `bin/relay describe RLY-12 @spec.md` | Set the card's description (the spec) |
+| `bin/relay describe RLY-12 @description.md` | Set the card's description — the ask as stated. **Not** the same field as `spec` |
+| `bin/relay spec RLY-12 @spec.md` | Set the card's spec — the design spec authored at the Spec stage |
 | `bin/relay criteria RLY-12 @criteria.md` | Set the card's acceptance criteria (numbered; read at the review gate) |
 | `bin/relay plan RLY-12 @plan.md` | Set the card's plan |
 | `bin/relay branch RLY-12 rly-12-…` | Record the branch this card's work lives on |
@@ -45,7 +46,7 @@ Text arguments accept `-` to read from **stdin** or `@path` to read from a **fil
 and plans can be piped in:
 
 ```bash
-bin/relay describe RLY-12 @spec.md
+bin/relay spec RLY-12 @spec.md
 git log -1 --format=%B | bin/relay comment RLY-12 -
 ```
 
