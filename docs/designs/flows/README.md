@@ -111,6 +111,14 @@ became comment-free JSON (RLY-241). Keyed by node.
   the plan is missing, the node fails and no branch is recorded). `post` likewise records the
   structured `ai_result` with `{relay} result {ref}` alongside its comment, and already has a
   `failed → needs_input` edge, so a malformed result parks for a human rather than merging blind.
+- **`post`'s house style** — the prompt is long on purpose, because `ai_result` is the only thing
+  a human reads before approving. Its reader is a busy product owner who knows the product but
+  not the code's names for it, so `summary` is 3-5 markdown bullets of 1-2 sentences pointed at
+  what to go *look at* — biggest behavior change, riskiest part, the UX least likely to match its
+  artboard — and `changes` is short user-facing verb phrases, scannable at a glance, because the
+  drawer renders them as a checked list. Without that, the node writes a restatement of its own
+  comment ("all criteria pass") and the summary section earns nothing. Pinned by
+  `test/relay/flows/default_library_test.exs`.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's sub_tasks. The `next_task` grep-gate is **gone** —
   "which task is next" is derived server-side, and `{sub_task}` names it in the prompt.

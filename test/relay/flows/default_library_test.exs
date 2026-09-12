@@ -294,4 +294,16 @@ defmodule Relay.Flows.DefaultLibraryTest do
     # `bin/relay result` does json.loads(text) — the argument must be a JSON object, not prose.
     assert post.run =~ "JSON object"
   end
+
+  test "the post node spells out the house style for `summary` and `changes`" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    post = Enum.find(flow.nodes, &(&1.key == "post"))
+
+    # The drawer renders `summary` as markdown and `changes` as a checked list, and the reader is
+    # a product owner deciding what to review — so the shape is an editorial contract, not taste.
+    # Dropping it turns the summary back into a "the task is complete" restatement of the comment.
+    assert post.run =~ "3-5 bullets"
+    assert post.run =~ "product owner"
+    assert post.run =~ "verb phrases"
+  end
 end

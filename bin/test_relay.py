@@ -1110,6 +1110,31 @@ class ApiRetryTest(unittest.TestCase):
         self.assertIsNone(relay.api("GET", "/api/cards/NOPE", soft_404=True))
         self.assertEqual(len(self.calls), 1)
 
+    def test_every_http_error_path_closes_the_response(self):
+        """An HTTPError IS the response — urllib.response.addbase, an open file object — so
+        abandoning one leaks it exactly as dropping a successful resp would. The success path
+        already gets this right with `with urlopen(...) as resp`; the error path is the one that
+        walked away. Python 3.14 made the leak audible: the implicit close warns on stderr, which
+        on the heartbeat's swallowed 404 means an error line per 15s tick, forever, from a call
+        the executor deliberately ignores (see ExecutorHeartbeatTest). Every way out of the
+        handler must close: swallowed, retried, or fatal.
+        """
+        soft = _http_error(404)
+        self._script([soft])
+        self.assertIsNone(relay.api("GET", "/api/cards/NOPE", soft_404=True))
+        self.assertTrue(soft.fp.closed, "the swallowed 404 response was left open")
+
+        retried = _http_error(500)
+        self._script([retried, _FakeResp(b"{}")])
+        self.assertEqual(relay.api("GET", "/api/board"), {})
+        self.assertTrue(retried.fp.closed, "the retried 500 response was left open")
+
+        fatal = _http_error(422, b'{"error": {"message": "bad"}}')
+        self._script([fatal])
+        with self.assertRaises(SystemExit):
+            relay.api("GET", "/api/board")
+        self.assertTrue(fatal.fp.closed, "the fatal 4xx response was left open")
+
     def test_idempotent_post_retries_5xx_then_succeeds(self):
         self._script([_http_error(500), _FakeResp(b'{"run_state": "done"}')])
         self.assertEqual(

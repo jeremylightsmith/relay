@@ -62,3 +62,4 @@ npm-debug.log
 
 # Relay executor: sentinel marking a retained (failed-run) per-card worktree (RLY-231)
 .relay-retained
+bin/__pycache__

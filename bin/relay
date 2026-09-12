@@ -73,8 +73,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 60
-EXECUTOR_FINGERPRINT = "bfc90242f10c955a8cf3c0ffe14bab769e7e9faa210f15fd3271010d26f8c5a9"
+EXECUTOR_VERSION = 61
+EXECUTOR_FINGERPRINT = "c4e6c1424a35c158265f691054bcc358a52cce8bf76b0e099f284e62619a3a66"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -159,25 +159,31 @@ def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=No
         except socket.timeout:
             raise   # long-poll read timeout — the claim caller treats it as 'no work'
         except urllib.error.HTTPError as e:
-            if soft_404 and e.code == 404:
-                return None
-            if soft_conflict and e.code == 409:
-                # A verdict, not a transient error (RLY-184): hand the body to the caller
-                # rather than die()ing into the loop's generic retry.
+            # An HTTPError IS the response — an open file object, like the `resp` the success
+            # path closes with `with`. Every exit below (swallow, retry, die) walks away from
+            # it, so closing has to happen here rather than on each path. Left open, the
+            # heartbeat's swallowed 404 leaks one per tick, and on Python 3.14 the implicit
+            # close prints a ResourceWarning to stderr every 15s for the life of the executor.
+            with contextlib.closing(e):
+                if soft_404 and e.code == 404:
+                    return None
+                if soft_conflict and e.code == 409:
+                    # A verdict, not a transient error (RLY-184): hand the body to the caller
+                    # rather than die()ing into the loop's generic retry.
+                    try:
+                        return json.loads(e.read())
+                    except Exception:
+                        return {"error": {"code": "conflict"}}
+                if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
+                    log(f"API {e.code} on {method} {path}, retrying "
+                        f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
+                    _api_backoff(attempt)
+                    continue
                 try:
-                    return json.loads(e.read())
+                    msg = json.loads(e.read())["error"]["message"]
                 except Exception:
-                    return {"error": {"code": "conflict"}}
-            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
-                log(f"API {e.code} on {method} {path}, retrying "
-                    f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
-                _api_backoff(attempt)
-                continue
-            try:
-                msg = json.loads(e.read())["error"]["message"]
-            except Exception:
-                msg = f"HTTP {e.code}"
-            die(f"API {e.code}: {msg}")
+                    msg = f"HTTP {e.code}"
+                die(f"API {e.code}: {msg}")
         except urllib.error.URLError as e:
             if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
                 log(f"request failed ({e.reason}) on {method} {path}, retrying "
