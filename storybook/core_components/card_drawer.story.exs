@@ -398,6 +398,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       },
       %Variation{
         id: :sub_tasks_and_result,
+        description:
+          "RE316 — AI Result leads the body, collapsed by default: the full summary, the deploy link and Show more (changes + screenshots hidden).",
         attributes: %{
           id: "story-drawer-9",
           ref: "RLY-18",
@@ -411,16 +413,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
                 %{id: 2, title: "Wire the PATCH sub_tasks API", done: true, position: 1},
                 %{id: 3, title: "Render the drawer panels", done: false, position: 2}
               ],
-              ai_result: %{
-                "summary" => "Added the **SUB-TASKS** and **AI RESULT** drawer panels and wired the toggle event.",
-                "changes" => [
-                  "Created sub_tasks table + schema",
-                  "Added PATCH /api/cards/:ref/sub-tasks/:id",
-                  "Rendered the drawer panels"
-                ],
-                "screens" => [%{"url" => nil, "caption" => "Drawer — sub-tasks complete"}],
-                "deploy_url" => "https://relayboard.fly.dev/board?card=RLY-18"
-              }
+              ai_result: story_ai_result()
           },
           stage_name: "Review",
           stage_owner: :human,
@@ -429,6 +422,34 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "AI result & sub-tasks"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          conversation: story_conversation(),
+          note_count: length(story_conversation()),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :ai_result_expanded,
+        description:
+          "RE316 — AI Result after Show more: labelled Changes and Screenshots inside the same violet box, with Show less.",
+        attributes: %{
+          id: "story-drawer-ai-result-expanded",
+          ref: "RLY-18",
+          board_slug: "storybook-board",
+          card: %{
+            story_card()
+            | status: :in_review,
+              progress: nil,
+              ai_result: story_ai_result()
+          },
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "AI result & sub-tasks"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          expanded_ai_result: true,
           conversation: story_conversation(),
           note_count: length(story_conversation()),
           activity: story_activity(),
@@ -549,6 +570,19 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       }
     ]
+  end
+
+  defp story_ai_result do
+    %{
+      "summary" => "Added the **SUB-TASKS** and **AI RESULT** drawer panels and wired the toggle event.",
+      "changes" => [
+        "Created sub_tasks table + schema",
+        "Added PATCH /api/cards/:ref/sub-tasks/:id",
+        "Rendered the drawer panels"
+      ],
+      "screens" => [%{"url" => nil, "caption" => "Drawer — sub-tasks complete"}],
+      "deploy_url" => "https://relayboard.fly.dev/board?card=RLY-18"
+    }
   end
 
   defp story_conversation do

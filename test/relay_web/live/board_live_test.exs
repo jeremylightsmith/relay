@@ -839,10 +839,10 @@ defmodule RelayWeb.BoardLiveTest do
       html = render_async(view)
 
       order = ~w(
+        ai-result
         card-drawer-description
         card-drawer-spec
         card-plan
-        ai-result
         sub-tasks
         card-drawer-conversation
         card-drawer-activity

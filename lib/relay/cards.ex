@@ -875,6 +875,13 @@ defmodule Relay.Cards do
   def sub_task_pct(_other), do: nil
 
   @doc """
+  Whether a card's `ai_result` counts as not given — `nil` or an empty map (RE316). The one
+  blank rule for `ai_result`: the `writes` contract check (`blank_contract_fields/2`) and the
+  drawer's AI Result section both call it, so "has an AI result" can never mean two things.
+  """
+  def ai_result_blank?(ai_result), do: ai_result in [nil, %{}]
+
+  @doc """
   The subset of `fields` that are blank on `card`, in the order given — the run-time half of a
   flow node's declared `writes` contract (RE244). The rule is deliberately "non-blank NOW", not
   "changed during the node": a delta check would fail an honest re-entry (a brainstorm returning
@@ -892,7 +899,7 @@ defmodule Relay.Cards do
   end
 
   defp blank_contract_field?(%Card{sub_tasks: sub_tasks}, :sub_tasks), do: sub_tasks == []
-  defp blank_contract_field?(%Card{ai_result: ai_result}, :ai_result), do: ai_result in [nil, %{}]
+  defp blank_contract_field?(%Card{ai_result: ai_result}, :ai_result), do: ai_result_blank?(ai_result)
   defp blank_contract_field?(%Card{} = card, field), do: card |> Map.fetch!(field) |> blank_text?()
 
   defp blank_text?(nil), do: true
