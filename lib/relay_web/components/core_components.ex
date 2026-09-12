@@ -2636,11 +2636,11 @@ defmodule RelayWeb.CoreComponents do
                     style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
                   >
                     <div
-                      :if={@card.ai_result["summary"]}
+                      :if={ai_text(@card.ai_result["summary"])}
                       id="ai-result-summary"
                       class="md text-sm leading-relaxed"
                     >
-                      {Relay.Markdown.to_html(@card.ai_result["summary"])}
+                      {Relay.Markdown.to_html(ai_text(@card.ai_result["summary"]))}
                     </div>
                     <%!-- RE316 — collapsed shows just the summary (in full) and the deploy link;
                     the changes and screenshots are the detail behind Show more. --%>
@@ -2652,7 +2652,7 @@ defmodule RelayWeb.CoreComponents do
                       <.section_label>Changes</.section_label>
                       <ul id="ai-result-changes" class="space-y-1">
                         <li
-                          :for={change <- @card.ai_result["changes"]}
+                          :for={change <- ai_list(@card.ai_result["changes"])}
                           class="flex items-start gap-2 text-sm"
                         >
                           <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
@@ -2667,30 +2667,33 @@ defmodule RelayWeb.CoreComponents do
                     >
                       <.section_label>Screenshots</.section_label>
                       <div id="ai-result-screens" class="flex flex-wrap gap-2">
-                        <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
+                        <figure
+                          :for={screen <- ai_screens(@card.ai_result["screens"])}
+                          class="w-32 space-y-1"
+                        >
                           <img
-                            :if={screen["url"]}
-                            src={screen["url"]}
-                            alt={screen["caption"] || "Screenshot"}
+                            :if={screen.url}
+                            src={screen.url}
+                            alt={screen.caption || "Screenshot"}
                             class="w-full cursor-zoom-in rounded border border-base-300"
                           />
                           <div
-                            :if={!screen["url"]}
+                            :if={!screen.url}
                             class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
                           />
                           <figcaption
-                            :if={screen["caption"]}
+                            :if={screen.caption}
                             class="text-[11px] leading-tight text-base-content/65"
                           >
-                            {screen["caption"]}
+                            {screen.caption}
                           </figcaption>
                         </figure>
                       </div>
                     </div>
                     <a
-                      :if={@card.ai_result["deploy_url"]}
+                      :if={ai_text(@card.ai_result["deploy_url"])}
                       id="ai-result-deploy"
-                      href={@card.ai_result["deploy_url"]}
+                      href={ai_text(@card.ai_result["deploy_url"])}
                       target="_blank"
                       rel="noopener"
                       class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
@@ -4941,8 +4944,49 @@ defmodule RelayWeb.CoreComponents do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
 
+  # `ai_result` is a free-form JSON blob an agent writes over the API, so the drawer can never
+  # assume a caller honoured the documented shape — and a raise here kills the LiveView on every
+  # mount, which the browser sees as an endless reconnect loop (TH8 on `changes`, TH95 on
+  # `screens`, where the smoke node wrote bare screenshot paths instead of maps). Every read of
+  # the blob goes through one of these, so no shape can break the render.
+  defp ai_text(value) when is_binary(value), do: value
+  defp ai_text(_value), do: nil
+
+  defp ai_list(value) when is_list(value), do: value
+  defp ai_list(value) when value in [nil, ""], do: []
+  defp ai_list(value), do: [value]
+
+  defp ai_screens(value), do: value |> ai_list() |> Enum.map(&ai_screen/1)
+
+  defp ai_screen(%{} = screen), do: screen_figure(ai_text(screen["url"]), ai_text(screen["caption"]))
+  defp ai_screen(screen) when is_binary(screen), do: screen_figure(screen, nil)
+  defp ai_screen(other), do: %{url: nil, caption: inspect(other)}
+
+  # A screenshot path on the agent's machine (`tmp/smoke/12-review.png`) is not something this
+  # browser can fetch, so it captions the placeholder tile instead of rendering as a broken image.
+  defp screen_figure(url, caption) do
+    if fetchable_image?(url),
+      do: %{url: url, caption: caption},
+      else: %{url: nil, caption: caption || (url && Path.basename(url))}
+  end
+
+  defp fetchable_image?("http://" <> _rest), do: true
+  defp fetchable_image?("https://" <> _rest), do: true
+  defp fetchable_image?("//" <> _rest), do: true
+  defp fetchable_image?("data:image/" <> _rest), do: true
+
+  # A root-relative src only resolves if this app serves that prefix; an agent's local screenshot
+  # path ("/Users/…/tmp/smoke/12-review.png") does not, and must not become a broken <img>.
+  defp fetchable_image?("/" <> path) do
+    [prefix | _rest] = String.split(path, "/", parts: 2)
+    prefix in RelayWeb.static_paths()
+  end
+
+  defp fetchable_image?(_url), do: false
+
   # RE316 — whether one of `ai_result`'s list keys ("changes", "screens") has anything to show.
-  defp ai_result_has?(ai_result, key), do: ai_result[key] not in [nil, []]
+  # Coerced through `ai_list/1` so Show more and the group `:if`s agree with what renders.
+  defp ai_result_has?(ai_result, key), do: ai_list(ai_result[key]) != []
 
   # RE316 — the AI Result box offers Show more only when there is detail behind it.
   defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes") or ai_result_has?(ai_result, "screens")
