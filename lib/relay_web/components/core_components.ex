@@ -1841,6 +1841,7 @@ defmodule RelayWeb.CoreComponents do
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
   `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state),
+  `"toggle_ai_result"` (flip the AI Result box between its summary and Show more detail),
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
   `"add_owner"` / `"remove_owner"` (phx-value
@@ -1901,6 +1902,12 @@ defmodule RelayWeb.CoreComponents do
   attr :editing_plan, :boolean, default: false
   attr :expanded_spec, :boolean, default: false
   attr :expanded_plan, :boolean, default: false
+
+  attr :expanded_ai_result, :boolean,
+    default: false,
+    doc:
+      "RE316: whether the AI Result box is expanded (Show more) to reveal its Changes and Screenshots; collapsed shows just the summary and the deploy link"
+
   attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
 
@@ -2635,42 +2642,50 @@ defmodule RelayWeb.CoreComponents do
                     >
                       {Relay.Markdown.to_html(@card.ai_result["summary"])}
                     </div>
-                    <ul
-                      :if={@card.ai_result["changes"] not in [nil, []]}
-                      id="ai-result-changes"
-                      class="space-y-1"
-                    >
-                      <li
-                        :for={change <- @card.ai_result["changes"]}
-                        class="flex items-start gap-2 text-sm"
-                      >
-                        <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
-                        <span>{ai_change_text(change)}</span>
-                      </li>
-                    </ul>
+                    <%!-- RE316 — collapsed shows just the summary (in full) and the deploy link;
+                    the changes and screenshots are the detail behind Show more. --%>
                     <div
-                      :if={@card.ai_result["screens"] not in [nil, []]}
-                      id="ai-result-screens"
-                      class="flex flex-wrap gap-2"
+                      :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "changes")}
+                      id="ai-result-changes-group"
+                      class="flex flex-col gap-1.5"
                     >
-                      <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
-                        <img
-                          :if={screen["url"]}
-                          src={screen["url"]}
-                          alt={screen["caption"] || "Screenshot"}
-                          class="w-full cursor-zoom-in rounded border border-base-300"
-                        />
-                        <div
-                          :if={!screen["url"]}
-                          class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
-                        />
-                        <figcaption
-                          :if={screen["caption"]}
-                          class="text-[11px] leading-tight text-base-content/65"
+                      <.section_label>Changes</.section_label>
+                      <ul id="ai-result-changes" class="space-y-1">
+                        <li
+                          :for={change <- @card.ai_result["changes"]}
+                          class="flex items-start gap-2 text-sm"
                         >
-                          {screen["caption"]}
-                        </figcaption>
-                      </figure>
+                          <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
+                          <span>{ai_change_text(change)}</span>
+                        </li>
+                      </ul>
+                    </div>
+                    <div
+                      :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "screens")}
+                      id="ai-result-screens-group"
+                      class="flex flex-col gap-1.5"
+                    >
+                      <.section_label>Screenshots</.section_label>
+                      <div id="ai-result-screens" class="flex flex-wrap gap-2">
+                        <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
+                          <img
+                            :if={screen["url"]}
+                            src={screen["url"]}
+                            alt={screen["caption"] || "Screenshot"}
+                            class="w-full cursor-zoom-in rounded border border-base-300"
+                          />
+                          <div
+                            :if={!screen["url"]}
+                            class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
+                          />
+                          <figcaption
+                            :if={screen["caption"]}
+                            class="text-[11px] leading-tight text-base-content/65"
+                          >
+                            {screen["caption"]}
+                          </figcaption>
+                        </figure>
+                      </div>
                     </div>
                     <a
                       :if={@card.ai_result["deploy_url"]}
@@ -2682,6 +2697,17 @@ defmodule RelayWeb.CoreComponents do
                     >
                       View deployment ↗
                     </a>
+                    <%!-- `block` keeps the link-style button on its own line below an inline deploy link. --%>
+                    <button
+                      :if={ai_result_more?(@card.ai_result)}
+                      type="button"
+                      id="ai-result-show-more"
+                      phx-click="toggle_ai_result"
+                      aria-expanded={to_string(@expanded_ai_result)}
+                      class="commit-field-showmore block"
+                    >
+                      {if @expanded_ai_result, do: "Show less", else: "Show more"}
+                    </button>
                   </div>
                 </section>
                 <section id={"#{@id}-description"} class="space-y-2">
@@ -4914,6 +4940,12 @@ defmodule RelayWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  # RE316 — whether one of `ai_result`'s list keys ("changes", "screens") has anything to show.
+  defp ai_result_has?(ai_result, key), do: ai_result[key] not in [nil, []]
+
+  # RE316 — the AI Result box offers Show more only when there is detail behind it.
+  defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes") or ai_result_has?(ai_result, "screens")
 
   # `ai_result["changes"]` items may be plain strings (the documented shape) or structured maps
   # (%{"change"=>_, "file"=>_, "lines"=>_}) that some agents write. HEEx cannot interpolate a map

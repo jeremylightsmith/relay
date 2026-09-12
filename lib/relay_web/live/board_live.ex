@@ -512,6 +512,7 @@ defmodule RelayWeb.BoardLive do
         editing_plan={@editing_plan}
         expanded_spec={@expanded_spec?}
         expanded_plan={@expanded_plan?}
+        expanded_ai_result={@expanded_ai_result?}
         spec_form={@spec_form}
         plan_form={@plan_form}
         current_user_id={@current_scope.user.id}
@@ -1823,6 +1824,10 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_plan", _params, socket) do
     {:noreply, update(socket, :expanded_plan?, &(!&1))}
+  end
+
+  def handle_event("toggle_ai_result", _params, socket) do
+    {:noreply, update(socket, :expanded_ai_result?, &(!&1))}
   end
 
   # RE257 — the tray's open state is SHARED board-wide, so the click writes through
@@ -4264,6 +4269,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:editing_plan, false)
           |> assign(:expanded_spec?, false)
           |> assign(:expanded_plan?, false)
+          |> assign(:expanded_ai_result?, false)
           |> assign(:spec_form, nil)
           |> assign(:plan_form, nil)
           |> assign(:comment_form, empty_comment_form())
@@ -4309,6 +4315,7 @@ defmodule RelayWeb.BoardLive do
           editing_plan: false,
           expanded_spec?: false,
           expanded_plan?: false,
+          expanded_ai_result?: false,
           spec_form: nil,
           plan_form: nil,
           comment_form: nil,

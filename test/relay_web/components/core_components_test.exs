@@ -2169,7 +2169,11 @@ defmodule RelayWeb.CoreComponentsTest do
         "changes" => [%{"change" => "rewrote the query", "file" => "lib/foo.ex", "lines" => "10-20"}]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(drawer_assigns(ai_result), :expanded_ai_result, true)
+        )
 
       assert html =~ "rewrote the query"
     end
@@ -2177,7 +2181,11 @@ defmodule RelayWeb.CoreComponentsTest do
     test "still renders plain string changes" do
       ai_result = %{"summary" => "s", "changes" => ["fixed the login bug"]}
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(drawer_assigns(ai_result), :expanded_ai_result, true)
+        )
 
       assert html =~ "fixed the login bug"
     end
@@ -2219,6 +2227,97 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert ai_skeleton < description_skeleton
       assert description_skeleton < plan_skeleton
+    end
+  end
+
+  describe "card_drawer/1 AI Result Show more (RE316)" do
+    defp full_ai_result do
+      %{
+        "summary" => "Did the thing",
+        "changes" => ["changed A"],
+        "screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}],
+        "deploy_url" => "https://example.com"
+      }
+    end
+
+    defp ai_query(html, selector), do: html |> LazyHTML.from_fragment() |> LazyHTML.query(selector)
+
+    defp ai_text(html, selector), do: html |> ai_query(selector) |> LazyHTML.text() |> String.trim()
+
+    defp ai_count(html, selector), do: html |> ai_query(selector) |> Enum.count()
+
+    test "collapsed (default) shows the full summary, the deploy link and Show more, but not changes or screens" do
+      long_summary = String.duplicate("Did the thing. ", 40)
+      ai_result = Map.put(full_ai_result(), "summary", long_summary)
+
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+      assert ai_text(html, "#ai-result #ai-result-summary") == String.trim(long_summary)
+      assert ai_count(html, "#ai-result #ai-result-deploy") == 1
+      assert ai_text(html, "#ai-result #ai-result-show-more") == "Show more"
+      assert ai_count(html, "#ai-result-show-more.commit-field-showmore") == 1
+      assert ai_count(html, "#ai-result-show-more[phx-click=toggle_ai_result]") == 1
+      assert ai_count(html, "#ai-result-changes") == 0
+      assert ai_count(html, "#ai-result-screens") == 0
+      assert ai_count(html, "#ai-result-changes-group") == 0
+      assert ai_count(html, "#ai-result-screens-group") == 0
+    end
+
+    test "expanded shows a Changes label above the checklist and a Screenshots label above the thumbnails, inside the box" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(drawer_assigns(full_ai_result()), :expanded_ai_result, true)
+        )
+
+      assert ai_text(html, "#ai-result #ai-result-changes-group > span") == "Changes"
+      assert ai_count(html, "#ai-result-changes-group > span + ul#ai-result-changes") == 1
+      assert ai_text(html, "#ai-result-changes") =~ "changed A"
+
+      assert ai_text(html, "#ai-result #ai-result-screens-group > span") == "Screenshots"
+      assert ai_count(html, "#ai-result-screens-group > span + div#ai-result-screens") == 1
+      assert ai_text(html, "#ai-result-screens figcaption") == "home"
+      assert ai_count(html, "#ai-result-screens img.cursor-zoom-in") == 1
+
+      assert ai_count(html, "#ai-result #ai-result-summary") == 1
+      assert ai_count(html, "#ai-result #ai-result-deploy") == 1
+      assert ai_text(html, "#ai-result #ai-result-show-more") == "Show less"
+    end
+
+    test "expanded renders only the labels whose lists are non-empty" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(
+            drawer_assigns(%{"summary" => "s", "changes" => ["changed A"], "screens" => []}),
+            :expanded_ai_result,
+            true
+          )
+        )
+
+      assert ai_count(html, "#ai-result-changes-group") == 1
+      assert ai_count(html, "#ai-result-screens-group") == 0
+      refute html =~ "Screenshots"
+    end
+
+    test "there is no Show more when there are no changes or screens to reveal" do
+      for ai_result <- [
+            %{"summary" => "Just a summary"},
+            %{"summary" => "Just a summary", "changes" => [], "screens" => []}
+          ] do
+        html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+        assert ai_text(html, "#ai-result-summary") == "Just a summary"
+        assert ai_count(html, "#ai-result-show-more") == 0
+      end
+    end
+
+    test "with no summary but changes, the box still renders with just Show more" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(%{"changes" => ["changed A"]}))
+
+      assert ai_count(html, "#ai-result") == 1
+      assert ai_count(html, "#ai-result-summary") == 0
+      assert ai_text(html, "#ai-result #ai-result-show-more") == "Show more"
     end
   end
 
