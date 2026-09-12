@@ -2183,80 +2183,42 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
-  describe "card_drawer/1 ai_result screens rendering" do
-    # Regression (TH95 prod crash loop): the smoke node wrote `ai_result["screens"]` as a list of
-    # bare screenshot *paths* instead of the documented `%{"url"=>_, "caption"=>_}` maps. The
-    # drawer indexed each entry with `screen["url"]` → FunctionClauseError in Access.get/3 on a
-    # binary → the LiveView died on every mount → the browser reconnected forever.
-    test "renders bare-string screens without crashing" do
-      ai_result = %{
-        "summary" => "s",
-        "screens" => ["/Users/jeremy/src/throughway/tmp/smoke/12-state3a-review.png"]
-      }
+  describe "card_drawer/1 AI Result placement (RE316)" do
+    test "renders no AI Result section when ai_result is nil" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(nil))
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
-
-      assert html =~ ~s(id="ai-result-screens")
-      # A local filesystem path is not fetchable by the browser, so it captions the placeholder
-      # rather than becoming a broken <img src>.
-      assert html =~ "12-state3a-review.png"
-      refute html =~ ~s(src="/Users/jeremy)
+      refute html =~ ~s(id="ai-result")
+      refute html =~ "AI Result"
     end
 
-    test "a bare string that is a real URL still renders as the image" do
-      ai_result = %{"summary" => "s", "screens" => ["https://example.com/shot.png"]}
+    test "renders no AI Result section (no empty violet box) when ai_result is an empty map" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(%{}))
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
-
-      assert html =~ ~s(src="https://example.com/shot.png")
+      refute html =~ ~s(id="ai-result")
+      refute html =~ "AI Result"
     end
 
-    test "still renders documented map screens" do
-      ai_result = %{
-        "summary" => "s",
-        "screens" => [%{"url" => "https://example.com/a.png", "caption" => "The drawer"}]
-      }
+    test "the AI Result section sits directly above Description" do
+      html =
+        render_component(&CoreComponents.card_drawer/1, drawer_assigns(%{"summary" => "Did the thing"}))
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+      {ai_result, _} = :binary.match(html, ~s(id="ai-result"))
+      {description, _} = :binary.match(html, ~s(id="test-drawer-description"))
+      {spec, _} = :binary.match(html, ~s(id="test-drawer-spec"))
 
-      assert html =~ ~s(src="https://example.com/a.png")
-      assert html =~ "The drawer"
+      assert ai_result < description
+      assert description < spec
     end
 
-    test "a root-relative url this app serves still renders as the image" do
-      ai_result = %{"summary" => "s", "screens" => [%{"url" => "/images/logo_light_128.png"}]}
+    test "the AI Result skeleton sits directly above the Description skeleton while loading" do
+      html = render_component(&CoreComponents.card_drawer/1, loading_drawer_assigns())
 
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+      {ai_skeleton, _} = :binary.match(html, ~s(id="ai-result-skeleton"))
+      {description_skeleton, _} = :binary.match(html, ~s(id="d-description-skeleton"))
+      {plan_skeleton, _} = :binary.match(html, ~s(id="card-plan-skeleton"))
 
-      assert html =~ ~s(src="/images/logo_light_128.png")
-    end
-
-    test "a map screen whose url is not a usable image src falls back to the placeholder" do
-      ai_result = %{"summary" => "s", "screens" => [%{"url" => "tmp/smoke/a.png"}]}
-
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
-
-      refute html =~ ~s(src="tmp/smoke/a.png")
-      assert html =~ "a.png"
-    end
-  end
-
-  describe "card_drawer/1 ai_result shape tolerance" do
-    # `ai_result` is a free-form blob written by an agent over the API, and a drawer crash takes
-    # the whole board down for that user (TH8, TH95). No shape a caller can put in the blob may
-    # raise during render.
-    test "scalar values where lists are documented do not crash the drawer" do
-      ai_result = %{
-        "summary" => %{"text" => "a map, not a string"},
-        "changes" => "one change, not a list",
-        "screens" => "one screen, not a list",
-        "deploy_url" => %{"href" => "nope"}
-      }
-
-      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
-
-      assert html =~ ~s(id="ai-result")
-      assert html =~ "one change, not a list"
+      assert ai_skeleton < description_skeleton
+      assert description_skeleton < plan_skeleton
     end
   end
 

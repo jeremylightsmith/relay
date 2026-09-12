@@ -2612,6 +2612,78 @@ defmodule RelayWeb.CoreComponents do
                     </.form>
                   </div>
                 </section>
+                <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
+                </section>
+                <%!-- RE316 — the AI's hand-back is the first thing a reviewer reads, so it leads the
+                body. `nil` and `%{}` both mean "not given" (Cards.ai_result_blank?/1): no empty box. --%>
+                <section
+                  :if={!@body_loading and !Cards.ai_result_blank?(@card.ai_result)}
+                  id="ai-result"
+                  class="space-y-2"
+                >
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div
+                    class="space-y-3 rounded-[10px] border p-3.5"
+                    style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
+                  >
+                    <div
+                      :if={@card.ai_result["summary"]}
+                      id="ai-result-summary"
+                      class="md text-sm leading-relaxed"
+                    >
+                      {Relay.Markdown.to_html(@card.ai_result["summary"])}
+                    </div>
+                    <ul
+                      :if={@card.ai_result["changes"] not in [nil, []]}
+                      id="ai-result-changes"
+                      class="space-y-1"
+                    >
+                      <li
+                        :for={change <- @card.ai_result["changes"]}
+                        class="flex items-start gap-2 text-sm"
+                      >
+                        <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
+                        <span>{ai_change_text(change)}</span>
+                      </li>
+                    </ul>
+                    <div
+                      :if={@card.ai_result["screens"] not in [nil, []]}
+                      id="ai-result-screens"
+                      class="flex flex-wrap gap-2"
+                    >
+                      <figure :for={screen <- @card.ai_result["screens"]} class="w-32 space-y-1">
+                        <img
+                          :if={screen["url"]}
+                          src={screen["url"]}
+                          alt={screen["caption"] || "Screenshot"}
+                          class="w-full cursor-zoom-in rounded border border-base-300"
+                        />
+                        <div
+                          :if={!screen["url"]}
+                          class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
+                        />
+                        <figcaption
+                          :if={screen["caption"]}
+                          class="text-[11px] leading-tight text-base-content/65"
+                        >
+                          {screen["caption"]}
+                        </figcaption>
+                      </figure>
+                    </div>
+                    <a
+                      :if={@card.ai_result["deploy_url"]}
+                      id="ai-result-deploy"
+                      href={@card.ai_result["deploy_url"]}
+                      target="_blank"
+                      rel="noopener"
+                      class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
+                    >
+                      View deployment ↗
+                    </a>
+                  </div>
+                </section>
                 <section id={"#{@id}-description"} class="space-y-2">
                   <.section_label>Description</.section_label>
                   <div
@@ -2767,75 +2839,6 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                 </section>
 
-                <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
-                  <.section_label accent="text-secondary">AI Result</.section_label>
-                  <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
-                </section>
-                <section :if={!@body_loading and @card.ai_result} id="ai-result" class="space-y-2">
-                  <.section_label accent="text-secondary">AI Result</.section_label>
-                  <div
-                    class="space-y-3 rounded-[10px] border p-3.5"
-                    style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
-                  >
-                    <div
-                      :if={ai_text(@card.ai_result["summary"])}
-                      id="ai-result-summary"
-                      class="md text-sm leading-relaxed"
-                    >
-                      {Relay.Markdown.to_html(ai_text(@card.ai_result["summary"]))}
-                    </div>
-                    <ul
-                      :if={ai_list(@card.ai_result["changes"]) != []}
-                      id="ai-result-changes"
-                      class="space-y-1"
-                    >
-                      <li
-                        :for={change <- ai_list(@card.ai_result["changes"])}
-                        class="flex items-start gap-2 text-sm"
-                      >
-                        <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
-                        <span>{ai_change_text(change)}</span>
-                      </li>
-                    </ul>
-                    <div
-                      :if={ai_screens(@card.ai_result["screens"]) != []}
-                      id="ai-result-screens"
-                      class="flex flex-wrap gap-2"
-                    >
-                      <figure
-                        :for={screen <- ai_screens(@card.ai_result["screens"])}
-                        class="w-32 space-y-1"
-                      >
-                        <img
-                          :if={screen.url}
-                          src={screen.url}
-                          alt={screen.caption || "Screenshot"}
-                          class="w-full cursor-zoom-in rounded border border-base-300"
-                        />
-                        <div
-                          :if={!screen.url}
-                          class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
-                        />
-                        <figcaption
-                          :if={screen.caption}
-                          class="text-[11px] leading-tight text-base-content/65"
-                        >
-                          {screen.caption}
-                        </figcaption>
-                      </figure>
-                    </div>
-                    <a
-                      :if={ai_text(@card.ai_result["deploy_url"])}
-                      id="ai-result-deploy"
-                      href={ai_text(@card.ai_result["deploy_url"])}
-                      target="_blank"
-                      rel="noopener"
-                      class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
-                    >
-                      View deployment ↗
-                    </a>
-                  </div>
-                </section>
                 <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
                   <div class="flex items-center gap-2">
                     <.section_label>Sub-tasks</.section_label>
@@ -4911,46 +4914,6 @@ defmodule RelayWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
-
-  # `ai_result` is a free-form JSON blob an agent writes over the API, so the drawer can never
-  # assume a caller honoured the documented shape — and a raise here kills the LiveView on every
-  # mount, which the browser sees as an endless reconnect loop (TH8 on `changes`, TH95 on
-  # `screens`, where the smoke node wrote bare screenshot paths instead of maps). Every read of
-  # the blob goes through one of these, so no shape can break the render.
-  defp ai_text(value) when is_binary(value), do: value
-  defp ai_text(_value), do: nil
-
-  defp ai_list(value) when is_list(value), do: value
-  defp ai_list(value) when value in [nil, ""], do: []
-  defp ai_list(value), do: [value]
-
-  defp ai_screens(value), do: value |> ai_list() |> Enum.map(&ai_screen/1)
-
-  defp ai_screen(%{} = screen), do: screen_figure(ai_text(screen["url"]), ai_text(screen["caption"]))
-  defp ai_screen(screen) when is_binary(screen), do: screen_figure(screen, nil)
-  defp ai_screen(other), do: %{url: nil, caption: inspect(other)}
-
-  # A screenshot path on the agent's machine (`tmp/smoke/12-review.png`) is not something this
-  # browser can fetch, so it captions the placeholder tile instead of rendering as a broken image.
-  defp screen_figure(url, caption) do
-    if fetchable_image?(url),
-      do: %{url: url, caption: caption},
-      else: %{url: nil, caption: caption || (url && Path.basename(url))}
-  end
-
-  defp fetchable_image?("http://" <> _rest), do: true
-  defp fetchable_image?("https://" <> _rest), do: true
-  defp fetchable_image?("//" <> _rest), do: true
-  defp fetchable_image?("data:image/" <> _rest), do: true
-
-  # A root-relative src only resolves if this app serves that prefix; an agent's local screenshot
-  # path ("/Users/…/tmp/smoke/12-review.png") does not, and must not become a broken <img>.
-  defp fetchable_image?("/" <> path) do
-    [prefix | _rest] = String.split(path, "/", parts: 2)
-    prefix in RelayWeb.static_paths()
-  end
-
-  defp fetchable_image?(_url), do: false
 
   # `ai_result["changes"]` items may be plain strings (the documented shape) or structured maps
   # (%{"change"=>_, "file"=>_, "lines"=>_}) that some agents write. HEEx cannot interpolate a map

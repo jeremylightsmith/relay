@@ -34,6 +34,13 @@ defmodule Relay.CardsContractFieldsTest do
     assert Cards.blank_contract_fields(card(%{ai_result: %{"summary" => "ok"}}), [:ai_result]) == []
   end
 
+  test "ai_result_blank?/1 is the one blank rule for ai_result (RE316)" do
+    assert Cards.ai_result_blank?(nil)
+    assert Cards.ai_result_blank?(%{})
+    refute Cards.ai_result_blank?(%{"summary" => "ok"})
+    refute Cards.ai_result_blank?(%{"changes" => ["changed A"]})
+  end
+
   test "sub_tasks is blank when empty and satisfied once seeded" do
     card = card()
     assert Cards.blank_contract_fields(card, [:sub_tasks]) == [:sub_tasks]
