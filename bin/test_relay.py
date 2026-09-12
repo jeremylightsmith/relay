@@ -3131,8 +3131,12 @@ class ExecutorHeartbeatTest(unittest.TestCase):
                                      lambda: [], lambda jid: None, interval=15)
         orig_env, orig_urlopen = relay.env, relay.urllib.request.urlopen
         relay.env = lambda name: "http://example.test"
+        # Hold the fake 404 and close it ourselves: Python 3.14's HTTPError warns
+        # (ResourceWarning, on stderr under unittest) when it is garbage-collected unclosed,
+        # which is the test's own fixture leaking, not relay printing anything.
+        not_found = _http_error(404)
         relay.urllib.request.urlopen = lambda req, *a, **k: (
-            _ for _ in ()).throw(_http_error(404))
+            _ for _ in ()).throw(not_found)
         err = io.StringIO()
         try:
             with contextlib.redirect_stderr(err):
@@ -3140,6 +3144,7 @@ class ExecutorHeartbeatTest(unittest.TestCase):
         finally:
             relay.env = orig_env
             relay.urllib.request.urlopen = orig_urlopen
+            not_found.close()
         self.assertEqual(err.getvalue(), "")
 
     def test_a_beat_stores_the_latest_fetchable_version(self):
