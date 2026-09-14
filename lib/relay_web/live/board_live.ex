@@ -545,6 +545,7 @@ defmodule RelayWeb.BoardLive do
         runs={@card_runs}
         run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
         advance_available?={@card_runs != [] and Runs.advance_foreach_available?(hd(@card_runs))}
+        rate_limited={@run_face_meta |> Map.get(@selected_card.id, %{}) |> Map.get(:rate_limited)}
         queued_flow={
           Runs.queued_flow(
             @selected_card,

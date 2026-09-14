@@ -2241,6 +2241,11 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "RE310: whether `Relay.Runs.advance_foreach_available?/1` holds for the card's latest run"
 
+  attr :rate_limited, :map,
+    default: nil,
+    doc:
+      "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its Claude usage limit — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
+
   attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
 
   attr :dependencies, :list, default: [], doc: "RE93 [%{ref, title, satisfied?}] — the Blocked by rail"
@@ -3279,6 +3284,11 @@ defmodule RelayWeb.CoreComponents do
                       View in flow metrics →
                     </.link>
                     <RunComponents.run_state_banner
+                      :if={@rate_limited && @latest_detail.status == :running}
+                      variant={:rate_limited}
+                      rate_limited={@rate_limited}
+                    />
+                    <RunComponents.run_state_banner
                       :if={@card.rejection && @latest_detail.status == :running}
                       variant={:reentry}
                       card={@card}
@@ -3382,7 +3392,11 @@ defmodule RelayWeb.CoreComponents do
                       class="text-[11.5px]"
                       style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
                     >
-                      {health_chip_label(@health)}
+                      <%!-- RE320: a quiet card whose runners are paused at their Claude usage
+                            limit is waiting on purpose, not gone quiet. --%>
+                      {if @rate_limited && @health == :stale,
+                        do: RunComponents.rate_limited_label(@rate_limited),
+                        else: health_chip_label(@health)}
                     </span>
                     <button
                       :if={@health == :stopped and !@archived}

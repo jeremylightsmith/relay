@@ -1242,6 +1242,17 @@ defmodule Relay.Runs do
   defp usage_percent(nil), do: "?"
   defp usage_percent(fraction), do: "#{round(fraction * 100)}%"
 
+  @doc """
+  The `:runner_rate_limited` run diagnosis sentence — ONE copy for `diagnose/3` (`relay why`, the
+  API) and the card drawer's Run tab, which reads `roster_rate_limit/2`'s `resumes_at` per tick
+  rather than paying for a full snapshot.
+  """
+  @spec rate_limited_run_detail(DateTime.t()) :: String.t()
+  def rate_limited_run_detail(%DateTime{} = resumes_at) do
+    "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
+      "Resumes #{resume_time_label(resumes_at)}."
+  end
+
   @doc ~S(When a paused runner resumes, as the board prints it: `3:40 PM UTC`.)
   def resume_time_label(%DateTime{} = at), do: Calendar.strftime(at, "%-I:%M %p UTC")
 
@@ -2259,9 +2270,7 @@ defmodule Relay.Runs do
     %{
       base
       | verdict: :runner_rate_limited,
-        detail:
-          "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
-            "Resumes #{resume_time_label(bits.resumes_at)}.",
+        detail: rate_limited_run_detail(bits.resumes_at),
         evidence: Map.merge(base.evidence, bits)
     }
   end

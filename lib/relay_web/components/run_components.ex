@@ -466,8 +466,9 @@ defmodule RelayWeb.RunComponents do
 
   # RE279: no :parked variant — a parked run's answer surface lives once, on the drawer's Detail
   # tab, and the blocked strip above the tabs carries the blocked state.
-  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed]
+  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :rate_limited]
   attr :detail, :map, default: nil
+  attr :rate_limited, :map, default: nil, doc: "RE320 %{resumes_at} for the :rate_limited variant"
   attr :card, :any, default: nil
   attr :claimer, :string, default: nil
 
@@ -563,6 +564,26 @@ defmodule RelayWeb.RunComponents do
   # The honest banner for every failure mode that ISN'T a tripped breaker. Same red
   # frame, no invented cause: it leads with `runs.failure_detail` — the engine's
   # human-first sentence, which the Run tab surfaced nowhere before RLY-179.
+  # RE320 — a live run whose queued job waits on a roster paused at its Claude usage limit. The
+  # sentence is `Relay.Runs.rate_limited_run_detail/1`, the same copy `relay why` prints; the
+  # warning tokens match the run face's "Rate limited" chip (no artboard covers rate limiting).
+  def run_state_banner(%{variant: :rate_limited} = assigns) do
+    ~H"""
+    <div
+      id="run-banner-rate-limited"
+      class="run-banner run-banner-rate-limited"
+      style="border-left:3px solid var(--color-warning);background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
+    >
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));margin-bottom:6px;">
+        ⏸ RATE LIMITED
+      </div>
+      <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);margin:0;">
+        {Runs.rate_limited_run_detail(@rate_limited.resumes_at)}
+      </p>
+    </div>
+    """
+  end
+
   def run_state_banner(%{variant: :failed} = assigns) do
     assigns =
       assigns
@@ -822,6 +843,13 @@ defmodule RelayWeb.RunComponents do
   defp history_duration_color(:failed), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
   defp history_duration_color(_status), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
+  @doc ~S"""
+  The short rate-limited label (RE320): `Rate limited · resumes 3:40 PM UTC`. Takes
+  `Relay.Runs.roster_rate_limit/2`'s `%{resumes_at}`; ONE copy for the run face chip and the
+  card drawer's Activity chip.
+  """
+  def rate_limited_label(%{resumes_at: resumes_at}), do: "Rate limited · resumes #{Runs.resume_time_label(resumes_at)}"
+
   # ---------- run_face (board card) ----------
 
   attr :run, :any, required: true
@@ -937,7 +965,7 @@ defmodule RelayWeb.RunComponents do
         class="run-face-rate-limited-note"
         style="font-family:var(--font-mono);font-size:10.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));"
       >
-        Rate limited · resumes {Runs.resume_time_label(@rate_limited.resumes_at)}
+        {rate_limited_label(@rate_limited)}
       </div>
     </div>
     """

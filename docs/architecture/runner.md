@@ -150,12 +150,15 @@ never 403s):
   and every live, current runner is paused. Its evidence carries `resumes_at` (the earliest reset)
   and `rate_limited_runners`. The roster-blaming reasons live once in
   `Scheduler.roster_blocking_reasons/0`. `Relay.Runs.stopped_work/2` returns the new reason for the
-  board and Runners-page banner (warning tint). `Relay.Runs.diagnose/3` (drawer, `relay why`,
+  board and Runners-page banner (warning tint). `Relay.Runs.diagnose/3` (`relay why`,
   `GET /api/cards/:ref/diagnosis`) returns verdict `:runner_rate_limited` for a live run whose job
-  is queued behind that roster. Paused runners are also excluded from `:job_awaiting_slot`'s
+  is queued behind that roster; its sentence is `Relay.Runs.rate_limited_run_detail/1`. Paused runners are also excluded from `:job_awaiting_slot`'s
   "connected runners". The card face reads `Relay.Runs.roster_rate_limit/2` (one runners query
   through the same diagnosis) intersected with `Relay.Runs.queued_run_ids/1` on BoardLive's
-  health tick, and shows `Rate limited · resumes …` without the 5-minute stall threshold. Copy
+  health tick, and shows `Rate limited · resumes …` without the 5-minute stall threshold. The card
+  drawer does not call `diagnose/3` (a full snapshot per render); it reads the same per-card
+  `:run_face_meta` entry, rendering `rate_limited_run_detail/1` as a Run-tab banner and swapping
+  the Activity tab's "gone quiet" chip for the rate-limited label. Copy
   comes from `Relay.Runs.rate_limit_phrase/1` and `resume_time_label/1`. No new PubSub topic.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by

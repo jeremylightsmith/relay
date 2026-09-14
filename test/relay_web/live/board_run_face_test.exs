@@ -1,6 +1,7 @@
 defmodule RelayWeb.BoardRunFaceTest do
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
@@ -237,6 +238,77 @@ defmodule RelayWeb.BoardRunFaceTest do
              )
 
       assert has_element?(view, "#stopped-work-banner", "paused at its Claude usage limit")
+    end
+
+    test "the drawer's Run tab carries the rate-limited diagnosis",
+         %{conn: conn, board: board, works: works, now: now} do
+      resets_at = DateTime.add(now, 3600, :second)
+
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      )
+
+      card = queued_run_card(works, now, 900)
+      ref = face_ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view)
+
+      assert has_element?(
+               view,
+               "#card-drawer-tab-panel-run #run-banner-rate-limited",
+               "every connected runner is paused at its Claude usage limit. " <>
+                 "Resumes #{Runs.resume_time_label(resets_at)}."
+             )
+    end
+
+    test "the drawer's Activity chip says paused, not gone quiet, for a quiet rate-limited card",
+         %{conn: conn, board: board, works: works, now: now} do
+      resets_at = DateTime.add(now, 3600, :second)
+
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      )
+
+      {:ok, card} = works |> queued_run_card(now, 900) |> Cards.assign_ai()
+      quiet = DateTime.add(now, -900, :second)
+      insert(:activity, card: card, type: :action, text: "claimed")
+
+      Relay.Repo.update_all(from(a in Schemas.Activity, where: a.card_id == ^card.id), set: [inserted_at: quiet])
+      ref = face_ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-activity-health-chip[data-health='stale']")
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity-health-chip",
+               "Rate limited · resumes #{Runs.resume_time_label(resets_at)}"
+             )
+
+      refute has_element?(view, "#card-drawer-activity-health-chip", "gone quiet")
+    end
+
+    test "the drawer shows no rate-limited diagnosis when another runner is free",
+         %{conn: conn, board: board, works: works, now: now} do
+      insert(:runner, board: board, name: "paused", last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+      insert(:runner, board: board, name: "free", last_heartbeat: now)
+      card = queued_run_card(works, now, 900)
+      ref = face_ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-tab-panel-run")
+      refute has_element?(view, "#run-banner-rate-limited")
     end
 
     test "nothing is flagged when another connected runner is free",
