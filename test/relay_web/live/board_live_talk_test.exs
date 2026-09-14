@@ -134,6 +134,8 @@ defmodule RelayWeb.BoardLiveTalkTest do
     {:ok, other} = Cards.create_card(backlog, %{title: "Second card"})
     view = open(ctx.conn, ctx.board, ctx.ref)
 
+    # RE282 — the empty description sits behind the unused-fields row; expand it first.
+    view |> element("#card-drawer-unused-toggle") |> render_click()
     view |> element("#add-public-desc") |> render_click()
     assert has_element?(view, "#public-desc-form")
 
@@ -151,6 +153,8 @@ defmodule RelayWeb.BoardLiveTalkTest do
   test "leaving the public-description editor open and closing the drawer hands the `t` shortcut back", ctx do
     view = open(ctx.conn, ctx.board, ctx.ref)
 
+    # RE282 — the empty description sits behind the unused-fields row; expand it first.
+    view |> element("#card-drawer-unused-toggle") |> render_click()
     view |> element("#add-public-desc") |> render_click()
     assert has_element?(view, "#public-desc-form")
 

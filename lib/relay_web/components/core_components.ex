@@ -1637,12 +1637,14 @@ defmodule RelayWeb.CoreComponents do
     do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
 
   @doc """
-  The drawer's mono-uppercase section label (main headings + rail labels).
+  The drawer's one micro-label (main headings + every rail label) — RE282 change 21.
 
-  Renders the shared label treatment
-  (`font-mono text-[10px] font-semibold uppercase tracking-[0.06em]`). Pass `accent`
-  (a full text-color class such as `text-secondary`) to tint it — e.g. the violet
-  AI Result heading — which replaces the default muted color.
+  Renders the shared recipe from `Relay Card Detail v5.dc.html`: JetBrains Mono 10px / 600 /
+  0.06em tracking / uppercase / ink at 0.6 alpha
+  (`font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60`).
+  Write the label in sentence case — `uppercase` does the casing. Pass `accent` (a full
+  text-color class such as `text-secondary`) to tint it — e.g. the violet AI Result heading —
+  which replaces the default muted color.
 
   ## Examples
 
@@ -1660,7 +1662,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <span class={[
       "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
-      @accent || "text-base-content/65",
+      @accent || "text-base-content/60",
       @class
     ]}>
       {render_slot(@inner_block)}
@@ -1837,7 +1839,8 @@ defmodule RelayWeb.CoreComponents do
   plus a right-side panel with the card's stage chip (stage name in the
   Human/AI owner color), its ref, an editable title, the plain-text
   description (whitespace-preserved view or a textarea editor), and a
-  properties rail (stage, tags, dates).
+  properties rail (status, dependencies, owners + Reassign, tags, updated time, flow path,
+  links, and the public fields).
 
   Render it only while a card is selected. The ✕ button and the scrim
   are `patch` links to `close_patch`, so closing is a URL change the
@@ -1860,6 +1863,10 @@ defmodule RelayWeb.CoreComponents do
   to the target stage's bottom) when a "Move to…" target is picked,
   `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
+  `"toggle_reassign"` (open/close the owners Reassign picker), `"toggle_unused_fields"` (RE282:
+  expand/collapse the rail's unused-fields group), `"start_public_desc"` /
+  `"cancel_public_desc"` / `"save_public_desc"` (param `public_description`) for the public
+  description editor,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
   from the Notes composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
@@ -1943,6 +1950,11 @@ defmodule RelayWeb.CoreComponents do
   attr :reassign_open, :boolean,
     default: false,
     doc: "whether the OWNERS reassign picker popover is open"
+
+  attr :unused_fields_open, :boolean,
+    default: false,
+    doc:
+      "RE282: whether the rail's unused-fields group (empty Public support / Public description) is expanded; BoardLive resets it on every card switch"
 
   attr :overflow_open, :boolean,
     default: false,
@@ -2048,11 +2060,13 @@ defmodule RelayWeb.CoreComponents do
 
   attr :run_flow, :any,
     default: nil,
-    doc: "RLY-137: the %Schemas.Flow{} the latest run belongs to (for the mini graph's happy path); nil when unknown"
+    doc:
+      "RLY-137: the %Schemas.Flow{} the latest run belongs to (for the mini graph's happy path, and RE282's rail Flow row); nil/false when unknown"
 
   attr :queued_flow, :any,
     default: nil,
-    doc: "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil"
+    doc:
+      "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil — RE282's Flow row falls back to it"
 
   attr :advance_available?, :boolean,
     default: false,
@@ -2137,6 +2151,11 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:park_kind, park_kind)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
+      |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
+      |> assign(
+        :unused_fields,
+        rail_unused_fields(assigns.vote_count, assigns.public_description, assigns.editing_public_desc)
+      )
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -3274,12 +3293,66 @@ defmodule RelayWeb.CoreComponents do
             <div
               id={"#{@id}-rail"}
               class={[
-                "flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0",
+                "flex w-full shrink-0 flex-col gap-[18px] border-t border-base-300 bg-base-200/30 px-[18px] py-5 text-sm drawer:w-[224px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0",
                 @drawer_tab == :talk && "drawer:hidden"
               ]}
             >
-              <%!-- OWNERS: avatars + names, active owner ringed (ACTIVE WORKER merged here) --%>
-              <div class="rail-section flex flex-col gap-2">
+              <%!-- RE282 (Relay Card Detail v5.dc.html, changes 15/21/23): Status → Blocked by → Blocks →
+                   Owners → Tags → Updated → Flow → Links → public fields → unused-fields row.
+                   Every row is a direct-child .rail-section whose first child is its section_label. --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Status</.section_label>
+                <div class="rail-status">
+                  <.status_badge status={@card.status} />
+                </div>
+              </div>
+
+              <%!-- BLOCKED BY (RE93) — editable; hidden on @embed, the native card host. Sits beside
+                   Status because it explains why a card is blocked. --%>
+              <div :if={!@embed} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Blocked by</.section_label>
+                <.dependency_list
+                  id={"#{@id}-blocked-by"}
+                  cards={@dependencies}
+                  removable={not @archived}
+                />
+                <form
+                  :if={not @archived}
+                  id={"#{@id}-add-dependency"}
+                  phx-change="validate_dependency"
+                  phx-submit="add_dependency"
+                  class="flex items-center gap-1"
+                >
+                  <input
+                    type="text"
+                    name="ref"
+                    value={@dependency_input}
+                    list={"#{@id}-dependency-options"}
+                    placeholder="+ Add"
+                    autocomplete="off"
+                    class="input input-xs w-full border border-dashed border-base-300 font-mono"
+                  />
+                  <datalist id={"#{@id}-dependency-options"}>
+                    <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
+                  </datalist>
+                </form>
+                <p
+                  :if={@dependency_error}
+                  id={"#{@id}-dependency-error"}
+                  class="text-xs text-error"
+                >
+                  {@dependency_error}
+                </p>
+              </div>
+
+              <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>
+              <div :if={!@embed and @dependents != []} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Blocks</.section_label>
+                <.dependency_list id={"#{@id}-blocks"} cards={@dependents} />
+              </div>
+
+              <%!-- OWNERS: avatars + names, active owner ringed; Reassign stays here because it acts on this field --%>
+              <div class="rail-section flex flex-col gap-1.5">
                 <.section_label>Owners</.section_label>
                 <div class="rail-owners space-y-2">
                   <div
@@ -3323,16 +3396,15 @@ defmodule RelayWeb.CoreComponents do
                     :if={!@archived}
                     type="button"
                     id={"#{@id}-reassign-toggle"}
-                    class="self-start"
+                    class="cursor-pointer self-start rounded-md px-1 py-0.5 text-left text-[11.5px] font-semibold text-primary transition-colors hover:bg-base-200"
                     phx-click="toggle_reassign"
-                    style="background:transparent;border:none;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;"
                   >
                     {if @reassign_open, do: "Done", else: "Reassign"}
                   </button>
                   <div
                     :if={!@archived and @reassign_open}
                     id={"#{@id}-reassign-picker"}
-                    style="display:flex;flex-direction:column;gap:4px;background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:9px;padding:7px;"
+                    class="flex flex-col gap-1 rounded-[9px] border border-base-300 bg-base-100 p-[7px]"
                   >
                     <button
                       :for={m <- reassignable_members(@members)}
@@ -3341,7 +3413,7 @@ defmodule RelayWeb.CoreComponents do
                       phx-click="add_owner"
                       phx-value-actor_type="user"
                       phx-value-user_id={m.user_id}
-                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
+                      class="flex cursor-pointer items-center gap-2 rounded-[7px] px-1.5 py-[5px] text-left transition-colors hover:bg-base-200"
                     >
                       <.avatar
                         size={22}
@@ -3350,13 +3422,10 @@ defmodule RelayWeb.CoreComponents do
                         name={m.user && m.user.name}
                         email={m.user && m.user.email}
                       />
-                      <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
+                      <span class="flex-1 text-[12.5px] text-base-content/90">
                         {user_name(m.user)}
                       </span>
-                      <span
-                        :if={user_owner?(@card, m.user_id)}
-                        style="font-size:11px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));"
-                      >
+                      <span :if={user_owner?(@card, m.user_id)} class="text-[11px] text-primary">
                         ✓
                       </span>
                     </button>
@@ -3365,16 +3434,13 @@ defmodule RelayWeb.CoreComponents do
                       id={"#{@id}-assign-ai"}
                       phx-click="add_owner"
                       phx-value-actor_type="agent"
-                      style="display:flex;align-items:center;gap:8px;background:transparent;border:none;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:left;"
+                      class="flex cursor-pointer items-center gap-2 rounded-[7px] px-1.5 py-[5px] text-left transition-colors hover:bg-base-200"
                     >
                       <.avatar size={22} actor={:ai} />
-                      <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);flex:1;">
+                      <span class="flex-1 text-[12.5px] text-base-content/90">
                         Relay AI
                       </span>
-                      <span
-                        :if={agent_owner?(@card)}
-                        style="font-size:11px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));"
-                      >
+                      <span :if={agent_owner?(@card)} class="text-[11px] text-primary">
                         ✓
                       </span>
                     </button>
@@ -3382,84 +3448,8 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
-              <div class="rail-section flex flex-col gap-2">
-                <.section_label>Status</.section_label>
-                <div class="rail-status">
-                  <.status_badge status={@card.status} />
-                </div>
-              </div>
-
-              <%!-- BLOCKED BY (RE93) — editable; hidden on @embed, the native card host --%>
-              <div :if={!@embed} class="rail-section flex flex-col gap-2">
-                <.section_label>Blocked by</.section_label>
-                <.dependency_list
-                  id={"#{@id}-blocked-by"}
-                  cards={@dependencies}
-                  removable={not @archived}
-                />
-                <form
-                  :if={not @archived}
-                  id={"#{@id}-add-dependency"}
-                  phx-change="validate_dependency"
-                  phx-submit="add_dependency"
-                  class="flex items-center gap-1"
-                >
-                  <input
-                    type="text"
-                    name="ref"
-                    value={@dependency_input}
-                    list={"#{@id}-dependency-options"}
-                    placeholder="+ Add"
-                    autocomplete="off"
-                    class="input input-xs w-full border border-dashed border-base-300 font-mono"
-                  />
-                  <datalist id={"#{@id}-dependency-options"}>
-                    <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
-                  </datalist>
-                </form>
-                <p
-                  :if={@dependency_error}
-                  id={"#{@id}-dependency-error"}
-                  class="text-xs text-error"
-                >
-                  {@dependency_error}
-                </p>
-              </div>
-
-              <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>
-              <div :if={!@embed and @dependents != []} class="rail-section flex flex-col gap-2">
-                <.section_label>Blocks</.section_label>
-                <.dependency_list id={"#{@id}-blocks"} cards={@dependents} />
-              </div>
-
-              <%!-- FLOW inserts here when flow-overrides lands — not built in this pass. --%>
-
-              <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
-              <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-2">
-                <.section_label>Links</.section_label>
-                <div class="rail-links flex flex-wrap items-center gap-2">
-                  <span
-                    :if={@card.branch}
-                    id="card-branch"
-                    class="badge badge-ghost badge-sm gap-1 font-mono"
-                  >
-                    <.icon name="hero-share" class="size-3" />
-                    {@card.branch}
-                  </span>
-                  <.link
-                    :if={@card.pr_url}
-                    id="card-pr"
-                    href={@card.pr_url}
-                    target="_blank"
-                    class="badge badge-ghost badge-sm gap-1 font-mono"
-                  >
-                    <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
-                  </.link>
-                </div>
-              </div>
-
               <%!-- TAGS --%>
-              <div class="rail-section flex flex-col gap-2">
+              <div class="rail-section flex flex-col gap-1.5">
                 <.section_label>Tags</.section_label>
                 <div class="rail-tags">
                   <.inline_field
@@ -3483,53 +3473,71 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
-              <%!-- DATES --%>
-              <div class="rail-section flex flex-col gap-2">
-                <.section_label>Dates</.section_label>
-                <div class="rail-dates space-y-0.5 font-mono text-xs text-base-content/70">
-                  <div>Created {Calendar.strftime(@card.inserted_at, "%b %d, %Y")}</div>
-                  <div>Updated {Calendar.strftime(@card.updated_at, "%b %d, %Y")}</div>
+              <%!-- UPDATED (RE282) — replaces Dates; Created left the drawer. UTC, artboard format. --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Updated</.section_label>
+                <span class="rail-updated font-mono text-xs text-base-content/80">
+                  {Calendar.strftime(@card.updated_at, "%b %d · %H:%M")}
+                </span>
+              </div>
+
+              <%!-- FLOW (RE282) — static happy path of the latest run's flow, else the queued flow;
+                   no row at all with neither --%>
+              <div :if={@rail_flow_path != []} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Flow</.section_label>
+                <span class="rail-flow font-mono text-xs text-base-content/80">
+                  {Enum.join(@rail_flow_path, " → ")}
+                </span>
+              </div>
+
+              <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
+              <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Links</.section_label>
+                <div class="rail-links flex flex-wrap items-center gap-2">
+                  <span
+                    :if={@card.branch}
+                    id="card-branch"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-share" class="size-3" />
+                    {@card.branch}
+                  </span>
+                  <.link
+                    :if={@card.pr_url}
+                    id="card-pr"
+                    href={@card.pr_url}
+                    target="_blank"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+                  </.link>
                 </div>
               </div>
 
-              <%!-- PUBLIC SUPPORT (RLY-69) --%>
-              <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
-                  PUBLIC SUPPORT
-                </span>
-                <.supporters_row
-                  :if={@vote_count > 0}
-                  supporters={supporter_faces(@supporters)}
-                  total={@vote_count}
-                />
-                <span
-                  :if={@vote_count == 0}
-                  style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
-                >
-                  No public supporters yet.
-                </span>
+              <%!-- PUBLIC SUPPORT (RLY-69) — a normal rail row once it has supporters; otherwise it
+                   waits in the unused-fields group below (RE282) --%>
+              <div
+                :if={:public_support not in @unused_fields}
+                id={"#{@id}-public-support"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public support</.section_label>
+                <.supporters_row supporters={supporter_faces(@supporters)} total={@vote_count} />
               </div>
 
-              <%!-- PUBLIC DESCRIPTION (RLY-69) --%>
-              <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
-                  PUBLIC DESCRIPTION
-                </span>
+              <%!-- PUBLIC DESCRIPTION (RLY-69) — a normal rail row once written or while its editor is open --%>
+              <div
+                :if={:public_description not in @unused_fields}
+                id={"#{@id}-public-description"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public description</.section_label>
                 <p
-                  :if={@public_description && !@editing_public_desc}
-                  style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin:0;white-space:pre-wrap;"
+                  :if={!@editing_public_desc}
+                  class="m-0 whitespace-pre-wrap text-[13px] leading-[1.55] text-base-content/80"
                 >
                   {@public_description}
                 </p>
-                <button
-                  :if={is_nil(@public_description) && !@editing_public_desc}
-                  id="add-public-desc"
-                  phx-click="start_public_desc"
-                  type="button"
-                  style="align-self:flex-start;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));cursor:pointer;"
-                >
-                  + Add a public description
-                </button>
                 <.form
                   :if={@editing_public_desc}
                   for={@public_desc_form}
@@ -3538,24 +3546,64 @@ defmodule RelayWeb.CoreComponents do
                 >
                   <textarea
                     name="public_description"
-                    style="width:100%;min-height:62px;border:1px solid var(--color-primary);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);outline:none;"
+                    class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
                   >{@public_description}</textarea>
-                  <div style="display:flex;gap:7px;margin-top:8px;">
-                    <button
-                      type="submit"
-                      style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;"
-                    >
+                  <div class="mt-2 flex gap-[7px]">
+                    <button type="submit" class="btn btn-primary btn-xs">
                       Save
                     </button>
                     <button
                       type="button"
                       phx-click="cancel_public_desc"
-                      style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;"
+                      class="btn btn-ghost btn-xs border border-base-300"
                     >
                       Cancel
                     </button>
                   </div>
                 </.form>
+              </div>
+
+              <%!-- UNUSED FIELDS (RE282 change 15) — empty public fields fold behind one dashed row;
+                   expanded, they render ABOVE the button (Relay Card Detail v5.dc.html). --%>
+              <div
+                :if={@unused_fields != []}
+                id={"#{@id}-unused-fields"}
+                class="flex flex-col gap-[9px]"
+              >
+                <div :if={@unused_fields_open} class="flex flex-col gap-3.5">
+                  <div
+                    :if={:public_support in @unused_fields}
+                    id={"#{@id}-unused-public-support"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public support</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">no supporters yet</span>
+                  </div>
+                  <div
+                    :if={:public_description in @unused_fields}
+                    id={"#{@id}-unused-public-description"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public description</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">not written</span>
+                    <button
+                      id="add-public-desc"
+                      type="button"
+                      phx-click="start_public_desc"
+                      class="cursor-pointer self-start rounded-md px-1 py-0.5 text-left text-xs font-semibold text-primary transition-colors hover:bg-base-200"
+                    >
+                      + Add a public description
+                    </button>
+                  </div>
+                </div>
+                <button
+                  id={"#{@id}-unused-toggle"}
+                  type="button"
+                  phx-click="toggle_unused_fields"
+                  class="w-full cursor-pointer rounded-[7px] border border-dashed border-base-300 px-[9px] py-[7px] text-left font-mono text-[11px] font-semibold text-base-content/55 transition-colors hover:border-base-content/30 hover:bg-base-200 hover:text-base-content/80"
+                >
+                  {unused_fields_label(@unused_fields, @unused_fields_open)}
+                </button>
               </div>
             </div>
           </div>
@@ -3569,6 +3617,24 @@ defmodule RelayWeb.CoreComponents do
   defp supporter_faces(users) do
     Enum.map(users, fn u -> %{name: u.name, email: u.email, src: u.avatar_url} end)
   end
+
+  @doc """
+  RE282 change 15 — which of the drawer's public fields are *unused*, in rail order, so they
+  fold behind the one dashed "N unused fields" row instead of each taking a slot to say "nothing
+  yet". Public support is unused with no votes; public description is unused when unwritten AND
+  its editor is closed — an open editor counts as in use, so the form never vanishes behind a
+  collapsed row mid-edit. This is the one definition of "unused"; the rail renders from it.
+  """
+  def rail_unused_fields(vote_count, public_description, editing_public_desc) do
+    Enum.filter(
+      [vote_count == 0 && :public_support, is_nil(public_description) && !editing_public_desc && :public_description],
+      & &1
+    )
+  end
+
+  defp unused_fields_label(_fields, true), do: "Hide unused fields"
+  defp unused_fields_label([_one], false), do: "1 unused field"
+  defp unused_fields_label(fields, false), do: "#{length(fields)} unused fields"
 
   attr :card, :any, required: true
   attr :question, :string, default: nil
@@ -3897,6 +3963,16 @@ defmodule RelayWeb.CoreComponents do
     case filter |> to_string() |> String.trim() |> String.downcase() do
       "" -> stages
       query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
+    end
+  end
+
+  # RE282 — the rail's Flow row: the latest run's flow, else the flow queued to pick the card up.
+  # BoardLive passes `run_flow` as `false` when the card has no runs, so `||` covers both `false`
+  # and `nil`. An empty happy path (no `start` edge) hides the row like no flow does.
+  defp rail_flow_path(run_flow, queued_flow) do
+    case run_flow || queued_flow do
+      nil -> []
+      flow -> Relay.Runs.happy_path(flow)
     end
   end
 

@@ -1089,11 +1089,14 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~
                "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
 
-      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer: (UNCHANGED).
+      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer:.
+      # RE282 — 224px wide, 20px/18px padding, 18px row gap (Relay Card Detail v5.dc.html rail).
       assert html =~ ~s(id="card-drawer-rail")
 
       assert html =~
-               "flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+               "flex w-full shrink-0 flex-col gap-[18px] border-t border-base-300 bg-base-200/30 px-[18px] py-5 text-sm drawer:w-[224px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+
+      refute html =~ "drawer:w-[220px]"
 
       # Regression: the old lg/1024 stack point is fully gone from the drawer.
       refute html =~ "lg:flex-row"
@@ -1340,6 +1343,325 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="card-drawer-move-to-1")
       refute html =~ ~s(id="card-drawer-move-to-2")
     end
+
+    # RE282 — the rail's section labels, top to bottom. Every row is a direct-child
+    # `.rail-section` whose first child is the section_label span.
+    defp rail_labels(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-rail > .rail-section > span:first-child")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
+
+    defp rail_text(html) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail") |> LazyHTML.text()
+    end
+
+    defp rail_flow do
+      %Schemas.Flow{
+        key: "spec",
+        edges: [
+          %{from: "start", on: nil, to: "spec"},
+          %{from: "spec", on: :succeeded, to: "implement"},
+          %{from: "implement", on: :succeeded, to: "review"},
+          %{from: "review", on: :succeeded, to: "done"}
+        ]
+      }
+    end
+
+    test "RE282: rail rows follow the artboard order" do
+      attrs =
+        drawer_attrs(
+          %{tag: "search", branch: "re282-rail"},
+          %{
+            run_flow: rail_flow(),
+            dependents: [%{ref: "RLY-9", title: "Downstream"}]
+          }
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert rail_labels(html) ==
+               ["Status", "Blocked by", "Blocks", "Owners", "Tags", "Updated", "Flow", "Links"]
+    end
+
+    test "RE282: every rail row label uses the section_label recipe" do
+      attrs = drawer_attrs(%{branch: "re282-rail"}, %{run_flow: rail_flow()})
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      classes =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-rail > .rail-section > span:first-child")
+        |> LazyHTML.attribute("class")
+
+      assert classes != []
+
+      for class <- classes do
+        assert class =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+        assert class =~ "text-base-content/60"
+      end
+    end
+
+    test "RE282: Updated replaces Dates, formatted Mon DD · HH:MM, and Created is gone" do
+      attrs =
+        drawer_attrs(
+          %{inserted_at: ~U[2026-07-01 08:00:00Z], updated_at: ~U[2026-08-04 09:12:00Z]},
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      updated =
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-updated")
+
+      assert LazyHTML.text(updated) =~ "Aug 04 · 09:12"
+      assert updated |> LazyHTML.attribute("class") |> List.first() =~ "font-mono"
+      refute html =~ "rail-dates"
+      refute rail_text(html) =~ "Created"
+      refute rail_text(html) =~ "Dates"
+    end
+
+    test "RE282: Flow row shows the latest run's flow happy path as plain mono text" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: rail_flow()}))
+
+      flow = html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-flow")
+
+      assert flow |> LazyHTML.text() |> String.trim() == "spec → implement → review"
+      assert flow |> LazyHTML.attribute("class") |> List.first() =~ "font-mono"
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-flow a") |> Enum.to_list() == []
+    end
+
+    test "RE282: Flow row falls back to the queued flow" do
+      queued = %Schemas.Flow{
+        key: "code",
+        edges: [
+          %{from: "start", on: nil, to: "implement"},
+          %{from: "implement", on: :succeeded, to: "review"},
+          %{from: "review", on: :succeeded, to: "done"}
+        ]
+      }
+
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{run_flow: false, queued_flow: queued})
+        )
+
+      assert rail_text(html) =~ "implement → review"
+      assert "Flow" in rail_labels(html)
+    end
+
+    test "RE282: Flow row is hidden with no run flow and no queued flow" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{run_flow: false, queued_flow: nil})
+        )
+
+      refute html =~ "rail-flow"
+      refute "Flow" in rail_labels(html)
+    end
+
+    test "RE282: Flow row is hidden when the flow has no start edge (empty happy path)" do
+      no_start = %Schemas.Flow{key: "broken", edges: [%{from: "a", on: :succeeded, to: "done"}]}
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: no_start}))
+
+      refute html =~ "rail-flow"
+      refute "Flow" in rail_labels(html)
+    end
+
+    test "RE282 change 23: Reassign toggle and picker rows are token-classed with a real hover" do
+      member = %{
+        user_id: 7,
+        user: %Schemas.User{id: 7, name: "Ada Lovelace", email: "ada@example.com", avatar_url: nil}
+      }
+
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{reassign_open: true, members: [member]})
+        )
+
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-reassign-toggle",
+            "#card-drawer-assign-user-7",
+            "#card-drawer-assign-ai"
+          ] do
+        node = LazyHTML.query(doc, selector)
+        assert node |> LazyHTML.attribute("class") |> List.first() =~ "hover:bg-base-200"
+        assert LazyHTML.attribute(node, "style") == []
+      end
+
+      picker = LazyHTML.query(doc, "#card-drawer-reassign-picker")
+      assert picker |> LazyHTML.attribute("class") |> List.first() =~ "border-base-300"
+      assert LazyHTML.attribute(picker, "style") == []
+    end
+
+    test "RE282: non-interactive rail values carry no hover" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: rail_flow()}))
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-rail .rail-status",
+            "#card-drawer-rail .rail-updated",
+            "#card-drawer-rail .rail-flow"
+          ] do
+        class = doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first()
+        refute class =~ "hover:"
+      end
+    end
+
+    defp unused_toggle_text(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-unused-toggle")
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp present?(html, selector) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.to_list() != []
+    end
+
+    test "RE282: both public fields empty collapse behind a dashed `2 unused fields` row" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: nil})
+        )
+
+      assert unused_toggle_text(html) == "2 unused fields"
+      refute present?(html, "#card-drawer-public-support")
+      refute present?(html, "#card-drawer-public-description")
+      refute present?(html, "#card-drawer-unused-public-support")
+      refute present?(html, "#add-public-desc")
+      refute "Public support" in rail_labels(html)
+
+      # Artboard: mono 11px/600, muted ink, 1px dashed border, 7px radius, 7px/9px padding, left-aligned,
+      # full rail width — plus a real hover (change 23).
+      class =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-unused-toggle")
+        |> LazyHTML.attribute("class")
+        |> List.first()
+
+      for token <-
+            ~w(w-full border border-dashed border-base-300 rounded-[7px] px-[9px] py-[7px] text-left font-mono text-[11px] font-semibold text-base-content/55 hover:bg-base-200) do
+        assert class =~ token
+      end
+    end
+
+    test "RE282: expanded, the unused fields show their hints and the toggle reads Hide unused fields" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: nil, unused_fields_open: true})
+        )
+
+      assert unused_toggle_text(html) == "Hide unused fields"
+
+      doc = LazyHTML.from_fragment(html)
+      support = LazyHTML.query(doc, "#card-drawer-unused-public-support")
+      description = LazyHTML.query(doc, "#card-drawer-unused-public-description")
+
+      assert LazyHTML.text(support) =~ "Public support"
+      assert LazyHTML.text(support) =~ "no supporters yet"
+      assert LazyHTML.text(description) =~ "Public description"
+      assert LazyHTML.text(description) =~ "not written"
+
+      add = LazyHTML.query(doc, "#card-drawer-unused-public-description #add-public-desc")
+      assert LazyHTML.text(add) =~ "+ Add a public description"
+      assert add |> LazyHTML.attribute("class") |> List.first() =~ "hover:bg-base-200"
+
+      # the expanded fields sit ABOVE the button (artboard order)
+      {support_at, _} = :binary.match(html, "card-drawer-unused-public-support")
+      {toggle_at, _} = :binary.match(html, "card-drawer-unused-toggle")
+      assert support_at < toggle_at
+    end
+
+    test "RE282: a written description renders as a normal section and the count drops to 1" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: "Ship the mobile app"})
+        )
+
+      assert unused_toggle_text(html) == "1 unused field"
+      assert List.last(rail_labels(html)) == "Public description"
+
+      section =
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-public-description")
+
+      assert LazyHTML.text(section) =~ "Ship the mobile app"
+      refute present?(html, "#card-drawer-unused-public-description")
+    end
+
+    test "RE282: both public fields filled render in place with no unused row" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 2, supporters: [], public_description: "Ship it"})
+        )
+
+      refute present?(html, "#card-drawer-unused-fields")
+      refute present?(html, "#card-drawer-unused-toggle")
+      assert Enum.take(rail_labels(html), -2) == ["Public support", "Public description"]
+    end
+
+    test "RE282: an open description editor stays visible outside the collapsed group" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{
+            vote_count: 0,
+            public_description: nil,
+            editing_public_desc: true,
+            public_desc_form: to_form(%{"public_description" => ""})
+          })
+        )
+
+      assert present?(html, "#card-drawer-public-description #public-desc-form")
+      assert unused_toggle_text(html) == "1 unused field"
+    end
+
+    test "RE282: the public fields use section_label and carry no inline styles" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{
+            vote_count: 1,
+            supporters: [],
+            public_description: nil,
+            editing_public_desc: true,
+            public_desc_form: to_form(%{"public_description" => ""})
+          })
+        )
+
+      refute html =~ "PUBLIC SUPPORT"
+      refute html =~ "PUBLIC DESCRIPTION"
+
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-public-description [style]",
+            "#card-drawer-public-description[style]",
+            "#card-drawer-unused-fields [style]"
+          ] do
+        assert doc |> LazyHTML.query(selector) |> Enum.to_list() == []
+      end
+
+      label =
+        doc
+        |> LazyHTML.query("#card-drawer-public-support > span:first-child")
+        |> LazyHTML.attribute("class")
+        |> List.first()
+
+      assert label =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+    end
   end
 
   describe "inline_field/1" do
@@ -1525,7 +1847,9 @@ defmodule RelayWeb.CoreComponentsTest do
   end
 
   describe "section_label/1" do
-    test "renders a mono uppercase label with the default muted token" do
+    # RE282 change 21 — the one micro-label recipe (Relay Card Detail v5.dc.html rail labels:
+    # JetBrains Mono 10px / 600 / letter-spacing 0.6px / uppercase / ink at 0.6 alpha).
+    test "renders the one micro-label recipe with the /60 muted token" do
       assigns = %{}
 
       html =
@@ -1534,9 +1858,9 @@ defmodule RelayWeb.CoreComponentsTest do
         """)
 
       assert html =~ "Owners"
-      assert html =~ "font-mono"
-      assert html =~ "uppercase"
-      assert html =~ "text-base-content/65"
+      assert html =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+      assert html =~ "text-base-content/60"
+      refute html =~ "text-base-content/65"
     end
 
     test "an accent class replaces the default muted token" do
@@ -1549,7 +1873,29 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ "AI Result"
       assert html =~ "text-secondary"
-      refute html =~ "text-base-content/65"
+      refute html =~ "text-base-content/60"
+    end
+  end
+
+  describe "rail_unused_fields/3 (RE282)" do
+    test "both public fields empty are both unused, support first" do
+      assert CoreComponents.rail_unused_fields(0, nil, false) == [:public_support, :public_description]
+    end
+
+    test "supporters make public support used" do
+      assert CoreComponents.rail_unused_fields(3, nil, false) == [:public_description]
+    end
+
+    test "a written description is used" do
+      assert CoreComponents.rail_unused_fields(0, "Ship it", false) == [:public_support]
+    end
+
+    test "an open description editor counts as in use" do
+      assert CoreComponents.rail_unused_fields(0, nil, true) == [:public_support]
+    end
+
+    test "both filled leaves nothing unused" do
+      assert CoreComponents.rail_unused_fields(2, "Ship it", false) == []
     end
   end
 
