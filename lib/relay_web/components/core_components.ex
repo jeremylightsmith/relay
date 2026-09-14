@@ -2708,6 +2708,7 @@ defmodule RelayWeb.CoreComponents do
                             :if={screen.url}
                             src={screen.url}
                             alt={screen.caption || "Screenshot"}
+                            data-caption={screen.caption || ""}
                             class="w-full cursor-zoom-in rounded border border-base-300"
                           />
                           <div
@@ -5065,11 +5066,14 @@ defmodule RelayWeb.CoreComponents do
   defp fetchable_image?("//" <> _rest), do: true
   defp fetchable_image?("data:image/" <> _rest), do: true
 
-  # A root-relative src only resolves if this app serves that prefix; an agent's local screenshot
-  # path ("/Users/…/tmp/smoke/12-review.png") does not, and must not become a broken <img>.
-  defp fetchable_image?("/" <> path) do
+  # A root-relative src only resolves if this app serves that path: a static prefix, or an uploaded
+  # attachment (RE322 — `relay attach` hands agents `/attachments/<id>`, a router route rather than a
+  # static path, so checking static_paths alone drew every uploaded screenshot as the placeholder).
+  # An agent's local screenshot path ("/Users/…/tmp/smoke/12-review.png") is neither, and must not
+  # become a broken <img>.
+  defp fetchable_image?("/" <> path = url) do
     [prefix | _rest] = String.split(path, "/", parts: 2)
-    prefix in RelayWeb.static_paths()
+    prefix in RelayWeb.static_paths() or RelayWeb.attachment_path?(url)
   end
 
   defp fetchable_image?(_url), do: false

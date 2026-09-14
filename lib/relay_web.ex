@@ -21,6 +21,24 @@ defmodule RelayWeb do
 
   def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 
+  @attachments_prefix "/attachments/"
+
+  @doc """
+  RE322 — the one definition of where an uploaded attachment is served
+  (`AttachmentController.show`). `CardJSON` builds the `url` and `markdown` that `relay attach`
+  hands back with it, and the drawer's screenshots strip recognises those urls with
+  `attachment_path?/1`. The router's `get "/attachments/:id"` is the only other spelling (a route
+  can't call a function); `RelayWeb.AttachmentPathTest` pins the two together.
+  """
+  def attachment_path(id), do: @attachments_prefix <> to_string(id)
+
+  @doc """
+  Whether `path` is a path `attachment_path/1` builds: the prefix plus a non-empty, single-segment
+  id. A bare `/attachments`, a nested path, or a non-string is not.
+  """
+  def attachment_path?(@attachments_prefix <> id) when id != "", do: not String.contains?(id, "/")
+  def attachment_path?(_path), do: false
+
   def router do
     quote do
       use Phoenix.Router, helpers: false

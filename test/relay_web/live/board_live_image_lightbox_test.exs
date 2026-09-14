@@ -56,5 +56,23 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
 
       assert has_element?(view, "#ai-result-screens img.cursor-zoom-in")
     end
+
+    test "a screenshot uploaded with relay attach renders as the image, not the placeholder (RE322)",
+         %{conn: conn, board: board, code: code} do
+      {:ok, card} = Cards.create_card(code, %{title: "Attached it"})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, _card} =
+        Cards.update_ai_result(card, %{
+          "summary" => "Done",
+          "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Board"}]
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+      view |> element("#ai-result-show-more") |> render_click()
+
+      assert has_element?(view, ~s(#ai-result-screens img[src="/attachments/#{uuid}"][data-caption="Board"]))
+    end
   end
 end

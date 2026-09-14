@@ -2696,6 +2696,64 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(src="tmp/smoke/a.png")
       assert html =~ "a.png"
     end
+
+    # RE322 — `relay attach` returns `/attachments/<uuid>`, which agents write into `screens`. It is
+    # a router route, not a static path, so the TH95 fetchability check drew every uploaded
+    # screenshot as the placeholder.
+    test "an uploaded attachment url renders as the image, in both the map and bare-string shapes" do
+      uuid = "0b9f3c5e-8a1d-4e2f-9c7b-3d6a1e5f2b40"
+
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Shot"}, "/attachments/#{uuid}"]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+
+      imgs = html |> LazyHTML.from_fragment() |> LazyHTML.query(~s(#ai-result-screens img[src="/attachments/#{uuid}"]))
+      assert Enum.count(imgs) == 2
+    end
+
+    test "paths that only look like attachments, and agent-local paths, still fall back to the placeholder" do
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [
+          "/attachments",
+          %{"url" => "/attachments/"},
+          "/Users/me/tmp/smoke/12-review.png",
+          %{"url" => "tmp/smoke/a.png"}
+        ]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#ai-result-screens figure") |> Enum.count() == 4
+      assert doc |> LazyHTML.query("#ai-result-screens img") |> Enum.count() == 0
+      assert html =~ "12-review.png"
+      assert html =~ "a.png"
+    end
+
+    # RE322 D3 — the carousel captions a screenshot with its figcaption; the <img> mirrors it so the
+    # JS never walks the figure. Blank (not absent) when there is no caption: the img's `alt` falls
+    # back to a generic "Screenshot", which must not become the viewer's caption.
+    test "a screenshot img carries its caption as data-caption, blank when it has none" do
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [%{"url" => "https://example.com/a.png", "caption" => "The drawer"}, "https://example.com/b.png"]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc
+             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/a.png"][data-caption="The drawer"]))
+             |> Enum.count() == 1
+
+      assert doc
+             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/b.png"][data-caption=""]))
+             |> Enum.count() == 1
+    end
   end
 
   describe "card_drawer/1 ai_result shape tolerance" do
