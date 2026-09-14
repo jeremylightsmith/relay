@@ -1378,7 +1378,7 @@ class RunnerNameTest(unittest.TestCase):
 class LegacyIdentityWarningTest(unittest.TestCase):
     """RE305: the default name moved from the bare hostname, and that name is a DURABLE key —
     `runs.pinned_runner_name` pins an exclusive run to the runner that claimed it and is
-    KEPT through an `:runner_gone` park. A runner that silently answers to a new name
+    KEPT through a `:runner_gone` park. A runner that silently answers to a new name
     therefore strands every run pinned to the old one, unattended (auto-update re-execs at a
     job boundary, which is "nothing in flight", not "nothing pinned to me")."""
 
@@ -4479,7 +4479,7 @@ class ExecuteLoopTest(unittest.TestCase):
             "poll_timeout": 1, "heartbeat_interval": 60}
 
     def test_a_defaulted_name_warns_when_the_old_identity_ran_here(self):
-        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so an
+        """RE305: the run pins written under the pre-RE305 hostname resolve by NAME, so a
         runner that quietly answers to the new default strands them. Warn at startup —
         the hop happens unattended, via auto-update's in-place re-exec."""
         self._defaults_the_name()

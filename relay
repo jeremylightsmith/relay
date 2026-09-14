@@ -55,7 +55,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 63
-RUNNER_FINGERPRINT = "2984abfa7d48dde0904cda13e477b70353d72b0d7b66712ba570cba893891555"
+RUNNER_FINGERPRINT = "c124450f53a6e97a6d7f3a9cf74cabdff1e29dbd85a1e1bb21a9d996c4463df2"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -315,7 +315,7 @@ class RunnerHeartbeat:
         actually work, before the first card moves.
 
     Best-effort by construction: swallows api()'s die() (SystemExit) and any other error, so a
-    heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for an
+    heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for a
     runner pointed at an older server, but the route now exists."""
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
@@ -1305,7 +1305,7 @@ def legacy_identity_warning(name):
     """The startup warning for a runner whose identity CHANGED under it, or None (RE305).
 
     The name is not cosmetic. The server pins an `exclusive` run to the runner that claimed
-    its job BY NAME (`runs.pinned_runner_name`) and **keeps** the pin through an
+    its job BY NAME (`runs.pinned_runner_name`) and **keeps** the pin through a
     `:runner_gone` park, so the resume returns to the machine holding that run's worktree.
     A runner that quietly starts answering to a different name therefore leaves every run
     pinned to the old one waiting on an identity that will never heartbeat again: the
@@ -1436,7 +1436,7 @@ def load_runner_config():
         "heartbeat_interval": 15,
         "max_retained_failed": 3,
         # RE185: auto-update is ON by default (a repo-less project has no other way to move
-        # forward); opt out with "auto_update": false. The interval floors how often an
+        # forward); opt out with "auto_update": false. The interval floors how often a
         # runner may ATTEMPT an update, so a flapping board cannot make it thrash.
         # (AUTO_UPDATE_DEFAULTS is defined further down, beside the rest of the auto-update code.)
         **AUTO_UPDATE_DEFAULTS,

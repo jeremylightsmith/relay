@@ -51,7 +51,7 @@ defmodule Relay.Runs.RestartTest do
       refute Runs.restartable?(genuine_question(stage))
     end
 
-    test "an :runner_gone park is NOT restartable", %{stage: stage} do
+    test "a :runner_gone park is NOT restartable", %{stage: stage} do
       {:ok, card} = Relay.Cards.create_card(stage, %{title: "Runner gone"})
       run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone)
       insert(:node_execution, run: run, node: "brainstorm", outcome: :failed)
@@ -66,7 +66,7 @@ defmodule Relay.Runs.RestartTest do
       end
     end
 
-    # RE297: an `:runner_gone` park is still not restartable IN PLACE — but it is no longer a
+    # RE297: a `:runner_gone` park is still not restartable IN PLACE — but it is no longer a
     # dead end, because `abandon_unresumable_runs/1` fails it once the refusal outlives the
     # grace window, and a `:failed` run is restartable by the first clause.
     test "a runner_gone park is not restartable, but the run it ages into is", %{stage: stage} do

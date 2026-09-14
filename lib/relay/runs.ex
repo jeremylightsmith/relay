@@ -76,7 +76,7 @@ defmodule Relay.Runs do
   until the run fails on its next transition).
 
   `pinned_runner_name` is the run's persisted exclusive-affinity pin (RLY-199,
-  set on claim, kept through an `:runner_gone` park, cleared by a human baton);
+  set on claim, kept through a `:runner_gone` park, cleared by a human baton);
   `pinned_runner_id` resolves it to that board's durable runner row id — the
   key `Relay.Runs.Capacity` is keyed by — via a left join on `(board_id, name)`
   (nil when unpinned or the runner row is absent). `Scheduler.resume_runs/2`
@@ -2778,7 +2778,7 @@ defmodule Relay.Runs do
   rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
   for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
   RLY-194/A4). False for a genuine `:needs_input` question, any `:runner_gone` park, and
-  `:running`/`:done`/`:cancelled`. An `:runner_gone` park is not restartable-in-place because
+  `:running`/`:done`/`:cancelled`. A `:runner_gone` park is not restartable-in-place because
   the scheduler resumes it when the machine returns — and when it never can,
   `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
   (RE297). The older "RLY-199 auto-resumes those" rationale was wrong: nothing bounded the wait.
@@ -2871,7 +2871,7 @@ defmodule Relay.Runs do
   # to an absent runner would queue a job nothing can claim.
   #
   # RE297: affinity is the run's OWN `pinned_runner_name` column — written on claim
-  # (`maybe_pin_run/2`), kept through an `:runner_gone` park, cleared by a human baton and by
+  # (`maybe_pin_run/2`), kept through a `:runner_gone` park, cleared by a human baton and by
   # `abandon_unresumable_runs/1` when the reason proves it unhonourable. Reading the last
   # NodeJob's `runner_name` instead was a SECOND copy of that fact: after the reaper
   # deliberately clears the pin, the dead machine's name still sits on the last job, and retry

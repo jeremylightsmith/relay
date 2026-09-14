@@ -6,7 +6,7 @@ defmodule Relay.Runs.Preflight do
   error on the first agent node, *after* the card had already moved.
 
   **Readiness is per-runner, never a union.** A run dispatches to ONE runner, so a union
-  across machines could report ready when no single machine can actually run the flow. An
+  across machines could report ready when no single machine can actually run the flow. A
   runner is a candidate only when it is `:fresh`, advertises capacity in the flow's own
   isolation class, and resolves every agent and skill the flow names.
 

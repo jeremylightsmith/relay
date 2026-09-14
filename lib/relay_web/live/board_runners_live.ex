@@ -36,7 +36,7 @@ defmodule RelayWeb.BoardRunnersLive do
   function of Postgres, the page also survives an app restart (`Relay.Runs.Capacity` is ETS
   and scheduler-only — a page backed by it would go blank on every deploy).
 
-  A ~10s self-tick is the ONLY refresh mechanism and is load-bearing, not laziness: an
+  A ~10s self-tick is the ONLY refresh mechanism and is load-bearing, not laziness: a
   runner going silent emits no event by definition, so freshness decay is observable only
   by polling. A 10s tick against a 15–30s beat is ample.
 
@@ -633,7 +633,7 @@ defmodule RelayWeb.BoardRunnersLive do
   # RE311: the exclusive chip's `used` now comes from declared holdings, so the chip can name
   # what occupies it — the same `<ref> <state>` one-liner `busy_summary()` prints in the
   # runner's own log, now visible on the board. `nil` omits the attribute entirely, which is
-  # the right answer for the shared chip (holdings say nothing about the shared tree) and for an
+  # the right answer for the shared chip (holdings say nothing about the shared tree) and for a
   # runner holding nothing.
   defp pool_tooltip(%{name: "exclusive"}, %{held: [_first | _rest] = held}) do
     Enum.map_join(held, " · ", &"#{&1["ref"]} #{&1["state"]}")

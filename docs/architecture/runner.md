@@ -253,7 +253,7 @@ that stays server-side.
   unpinned job needed to be offered through. The bypass is exclusive-only: a `shared_clean` job
   runs in the shared worktree and must still respect shared capacity.
   Pinning is persisted on the run: `runs.pinned_runner_name` is set when a runner claims
-  an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through an
+  an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through a
   `:runner_gone` park (so the resume returns to the holder), and **cleared** by a human-baton
   park (`Relay.Runs.park_claimed/1`, so the hand-back resume re-offers anywhere).
   `Relay.Runs.exclusive_holder/2` reads that column to pin each successive job, and
@@ -670,7 +670,7 @@ silently billed to the paid API.
   name}` (the pair the server keys a `Runner` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
   longer collide on identity, *provided their directories are named differently*) and per
-  worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
+  worktree namespace. At startup `cmd_start` takes two exclusive, non-blocking `fcntl.flock`
   locks — an *identity* lock under `$RELAY_RUNNER_LOCK_DIR` or `~/.relay/locks` keyed on
   `sha256(RELAY_URL + "\0" + name)` (since `name` embeds the checkout directory, two clones on
   one host **in differently-named directories** now hash to different lock paths — RE305;
@@ -753,7 +753,7 @@ silently billed to the paid API.
   (e.g. `exec-RLY-231`) holds its own index for the run's lifetime, recycled on teardown; the
   shared `exec-clean` is always partition `0`. `config/test.exs` already keys the database
   name off `MIX_TEST_PARTITION`.
-- **The claim/execute/report loop (`cmd_execute`).** Each iteration: advertise current free
+- **The claim/execute/report loop (`cmd_start`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
   "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
   free slots; the worker resets the slot if needed, runs the step (shell/gate via

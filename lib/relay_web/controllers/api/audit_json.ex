@@ -14,7 +14,7 @@ defmodule RelayWeb.Api.AuditJSON do
 
   # `severity` and `check` cross the wire as strings. The severity SET is pinned by
   # test/fixtures/runner_contract.json; check ids deliberately are not — ./relay prints them
-  # opaquely and must never branch on them, so the server can add a check without an
+  # opaquely and must never branch on them, so the server can add a check without a
   # runner bump.
   defp finding(finding) do
     %{
