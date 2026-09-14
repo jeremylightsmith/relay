@@ -137,4 +137,16 @@ defmodule Relay.DocsContentTest do
       assert cli =~ verb, "cli.md should mention `#{verb}`"
     end
   end
+
+  # RE318 — new API endpoints: the public API reference and the architecture page must both
+  # name them, including the refusal an agent will actually hit.
+  test "the archive/unarchive endpoints are documented in the API reference and architecture (RE318)" do
+    api = read("api.md")
+    domain = File.read!(Path.join(File.cwd!(), "docs/architecture/domain.md"))
+
+    for token <- ["POST /api/cards/:ref/archive", "POST /api/cards/:ref/unarchive", "active_run"] do
+      assert api =~ token, "api.md should document `#{token}`"
+      assert domain =~ token, "domain.md should document `#{token}`"
+    end
+  end
 end
