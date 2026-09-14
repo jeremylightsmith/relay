@@ -198,7 +198,12 @@ defmodule RelayWeb.CoreComponentsTest do
       assert chip =~ "flex:0 0 auto"
 
       assert doc |> LazyHTML.query(".card-meta > .card-votes") |> Enum.count() == 1
-      assert doc |> LazyHTML.query(".card-meta > .card-owners") |> Enum.count() == 1
+      # A flex:1 spacer keeps its zero basis on the current line, so a wrapped
+      # avatar cluster would land at the left. margin-left:auto on the cluster
+      # itself right-aligns it on whichever line it ends up on.
+      [owners] = style.(".card-meta > .card-owners")
+      assert owners =~ "margin-left:auto"
+      assert doc |> LazyHTML.query(~s(.card-meta > span[style="flex:1;"])) |> Enum.count() == 0
     end
 
     defp meta_row_ref(html) do

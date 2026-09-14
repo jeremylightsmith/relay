@@ -829,11 +829,19 @@ defmodule RelayWeb.CoreComponents do
 
   attr :size, :integer, default: 22
 
+  attr :style, :string,
+    default: "",
+    doc: "extra inline style appended to the cluster, e.g. placement within a parent flex row"
+
   def owner_avatars(assigns) do
     assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner))
 
     ~H"""
-    <div :if={@avatars != []} class="card-owners flex items-center" style="padding-left:2px;">
+    <div
+      :if={@avatars != []}
+      class="card-owners flex items-center"
+      style={"padding-left:2px;#{@style}"}
+    >
       <div :for={av <- @avatars} style={av.wrap} title={av.title} data-actor-type={av.actor_type}>
         <.avatar
           actor={av.actor}
@@ -1400,8 +1408,8 @@ defmodule RelayWeb.CoreComponents do
           variant={:count}
           class="card-votes"
         />
-        <span style="flex:1;"></span>
-        <.owner_avatars owners={@owners} active_owner={@active_owner} />
+        <%!-- margin-left:auto (not a flex:1 spacer) keeps the avatars at the right edge even when they wrap to a new line. --%>
+        <.owner_avatars owners={@owners} active_owner={@active_owner} style="margin-left:auto;" />
       </div>
     </article>
     """
