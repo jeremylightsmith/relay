@@ -54,11 +54,10 @@ both variables survive a new shell. **Never write a key into a tracked file.**
 ## Step 2 — Download the runner
 
 ```bash
-mkdir -p bin
-curl -fsSL "$RELAY_URL/api/scaffold/relay" -o ./relay && chmod +x ./relay
+curl -fsSL "$RELAY_URL/api/scaffold/relay" -o relay && chmod +x relay
 ```
 
-Confirm it: `./relay --help` should print the verb list. If `curl` fails, the board URL is
+Confirm it: `./relay -h` should print the command groups. If `curl` fails, the board URL is
 wrong or the board is unreachable — fix that before continuing; nothing below will work.
 
 ## Step 3 — Install the skills

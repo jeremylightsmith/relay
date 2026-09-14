@@ -64,6 +64,12 @@ Report `written` by name. If `./relay` is in that list, mention that a running
 `relay start` keeps serving the old code until it restarts (it will pick this up itself at a
 job boundary if `auto_update` is on).
 
+If the report's `removed` lists `bin/relay`, say so: the CLI moved to `./relay` (RE319) and the
+update deleted the old Relay-installed copy (and `bin/` if that left it empty) — include that
+deletion in the commit. A project whose update was run by an old `bin/relay` gets `./relay`
+installed but keeps the old file, because that old code predates the cleanup: run
+`./relay update` once more to remove it. A `bin/relay` that is not Relay's is never touched.
+
 ### 3. Confirm the commit, and explain why it matters
 
 These are **shared tooling** files. Ask the human where to commit them, and give the reason —

@@ -224,6 +224,12 @@ nothing, ever; `--json` on either. The runner rewrites itself through RE185's ve
 installer (`verify_runner_source` + `install_runner`'s atomic `os.replace` and write ledger),
 and every body is additionally checked against the manifest's sha256 before it touches disk.
 
+`relay update` also removes what an older layout left behind (RE319): a `bin/relay` that
+declares the pre-rename version constant is Relay's, so after installing `./relay` the update
+deletes it (and `bin/` when that leaves it empty) and reports it as `removed` (`--check`
+reports it as `obsolete` and writes nothing). A `bin/relay` without that line is someone else's
+and is never touched.
+
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
 The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine
@@ -261,6 +267,15 @@ that stays server-side.
   (A parked run whose
   holder advertises `exclusive: 0` can still be handed its own resume — the runner keeps
   polling while it holds bound slots via `RunnerPool.has_bound_slots/0`.)
+- **A process that predates the rename is refused, never served (RE319).** The wire's identity
+  key is `runner`, renamed as a hard cut with no alias. A claim or heartbeat whose body has no
+  `runner` object but carries the pre-rename identity key gets **409 `runner_outdated`** —
+  the same code a merely old runner gets, pinned in `test/fixtures/runner_contract.json`
+  (`claim_refused.outdated`) — with `required: Relay.Runs.min_runner_version/0` and a message
+  telling the operator to install `./relay` (`relay update`) and restart with `./relay start`.
+  Nothing is written for it. The check is one private function in
+  `RelayWeb.Api.NodeJobController`; a body that carries `runner` is current whatever else it
+  carries.
 - **Version negotiation (RLY-184).** Every claim and heartbeat carries `runner.version`, the
   `RUNNER_VERSION` the running `./relay` declares. `claim/2` compares it against
   `Relay.Runs.min_runner_version/0` and answers **409 `runner_outdated`** (with `required`

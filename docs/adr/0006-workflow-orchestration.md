@@ -307,7 +307,7 @@ and literal example rows: see the
 | Board stages (Next up, Spec ± Review/Done, Plan ± Done, Code, Review, Done; `ai_enabled`, WIP limits, reject-to) | configured in board settings | unchanged — triggers validate against them |
 | Board API key + `RELAY_URL` env | required for CLI + runner | unchanged (runner uses the same credential) |
 | Fly deploy | app has no workflow knowledge | migrations + default flows seeded per board + per-flow enable flags |
-| Runner/runner process on a dev machine | `bin/relay watch` in a terminal | `relay start` in a terminal (or launchd); registers itself, advertises capacity |
+| Runner process on a dev machine | the legacy board-runner, `bin/relay watch`, in a terminal (deleted) | `./relay start` in a terminal (or launchd); registers itself, advertises capacity |
 | Worktrees | `.claude/worktrees/{clean,work-N}` per config | runner-owned namespace (`exec-*`), auto-created |
 | `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every runner machine |
 | `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **kept** — still needed by long agent nodes on the runner path |

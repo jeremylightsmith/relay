@@ -166,4 +166,21 @@ defmodule Relay.DocsContentTest do
     refute relay_md =~ "./relay rename"
     refute cli =~ "./relay rename"
   end
+
+  test "the glossary defines Runner and notes that older mockups use the old word (RE319)" do
+    glossary = File.read!(Path.join(File.cwd!(), "docs/glossary.md"))
+
+    assert glossary =~ "- **Runner** —"
+    assert glossary =~ "older mockups still use that word"
+  end
+
+  test "the runner page documents the hard cut's refusal and the renamed roster route (RE319)" do
+    runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
+    api = read("api.md")
+
+    assert runner =~ "predates the rename"
+    assert runner =~ "`GET /api/runners`"
+    assert api =~ "### GET /api/runners"
+    assert api =~ "runner_outdated"
+  end
 end

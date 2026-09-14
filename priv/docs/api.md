@@ -326,7 +326,9 @@ distinction between "late" and "reclaimed" matters. `outdated` is **orthogonal t
 freshness**: a runner can be beating normally and still be running code below the
 server's minimum version, in which case it is refused work (409 `runner_outdated`) with
 no other visible symptom — this is the field that explains a healthy-looking runner that
-picks up nothing.
+picks up nothing. A runner process that predates the rename to *runner* is refused with the
+same 409 `runner_outdated` and told to install `./relay` (`relay update`) and restart it with
+`./relay start`.
 
 ```
 curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/runners
