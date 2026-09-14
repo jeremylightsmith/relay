@@ -1,36 +1,10 @@
 #!/usr/bin/env python3
-"""relay — one tool for a Relay board: a REST-API CLI, and (with `relay start`) the
-board *runner* that claims node-jobs from the server and runs them.
+"""relay — one tool for a Relay board.
 
-This file is generic: it knows the Relay REST API and how to execute node-jobs, but
-NOTHING about any particular board's columns, agents, or skills. All of that lives
-server-side as flow data (ADR 0006) — the runner just runs the node it is handed.
-
-Config (env): RELAY_URL, RELAY_API_KEY  (a board key from /board/settings)
-Runner-local config: .relay/runner.json (worktree namespace + capacity)
-
-  relay start [--once] [--dry-run] [--interval N]   # the runner
-  relay update [--check] [--json]   # install/refresh the Relay-owned files from the board
-  relay board [--json]        relay card REF [--json]
-  relay search "words" [--archived] [--limit N] [--json]   # find a card by ref or title
-  relay why REF [--json]      # why isn't this card moving? — one plain-language answer
-  relay runs REF [--json]     # the card's runs + node executions, detail untruncated
-  relay runners [--json]    # who is connected, their capacity, and the jobs they hold
-  relay audit [FLOW] [--window 7d|30d|all]   # board health: run history + CI parity (advisory)
-  relay version [--json]      # the git SHA the deployed app was built from — no RELAY_API_KEY needed
-  relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
-  relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
-  relay title REF TEXT        # retitle the card
-  relay archive REF / unarchive REF   # take the card off the board / put it back (a live run refuses archive — cancel it first)
-  relay own REF / release REF relay approve REF           relay reject REF NOTE
-  relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
-  relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
-  relay attach REF FILE [--caption TEXT] [--json]
-  relay tag REF [VALUE]       # set the card's tag (omit VALUE to clear)
-  relay depends REF [BLOCKER ...]   # replace the card's blocker set (no BLOCKERs = clear)
-
-TEXT/Q/NOTE accept "-" (stdin) or "@path" (file). --json for machine output;
---field PATH prints one value bare (e.g. `relay card RLY-12 --field status`).
+A REST-API CLI for cards, runs and flows and, with `relay start`, the runner that claims
+node-jobs from the server and runs them. It is generic: it knows the Relay REST API and how to run
+node-jobs, but nothing about any board's stages, agents or skills — that is flow data on the
+server (ADR 0006).
 """
 import argparse
 import base64
@@ -57,6 +31,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+try:
+    from rich_argparse import RichHelpFormatter    # optional: styles `relay -h` when installed
+except ImportError:
+    RichHelpFormatter = None
+
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(HERE)
 RUNNER_CONFIG_PATH = os.path.join(ROOT, ".relay", "runner.json")
@@ -76,7 +55,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 63
-RUNNER_FINGERPRINT = "4259aedee131fb737a2c5f5eef68bd7e62887664bee9b0fb8bfa0eb5b0685801"
+RUNNER_FINGERPRINT = "2984abfa7d48dde0904cda13e477b70353d72b0d7b66712ba570cba893891555"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -4326,17 +4305,132 @@ def cmd_update(args):
 
 
 # ============================ argparse ============================
+#
+# RE319 — `relay -h` groups the commands. argparse has no native subcommand groups, so COMMANDS
+# is the ONE table: every subparser's help line comes from it, the grouped listing is rendered
+# from it, and build_parser() refuses to build when a registered command and the table disagree.
+
+COMMANDS = (
+    ("Cards", "board", "show the board: its stages and their cards"),
+    ("Cards", "card", "show one card"),
+    ("Cards", "search", "find a card by ref or title"),
+    ("Cards", "create", "create a card"),
+    ("Cards", "move", "move a card to a stage"),
+    ("Cards", "title", "retitle a card"),
+    ("Cards", "archive", "take a card off the board (a live run refuses — cancel it first)"),
+    ("Cards", "unarchive", "put an archived card back on the board"),
+    ("Cards", "status", "set a card's status"),
+    ("Cards", "describe", "set a card's description"),
+    ("Cards", "spec", "set a card's spec"),
+    ("Cards", "criteria", "set a card's acceptance criteria"),
+    ("Cards", "plan", "set a card's plan"),
+    ("Cards", "sub-tasks", "replace a card's sub-tasks"),
+    ("Cards", "check", "tick one of a card's sub-tasks"),
+    ("Cards", "uncheck", "untick one of a card's sub-tasks"),
+    ("Cards", "branch", "record a card's git branch"),
+    ("Cards", "pr", "record a card's pull-request URL"),
+    ("Cards", "result", "set a card's AI result"),
+    ("Cards", "tag", "set a card's tag (omit VALUE to clear it)"),
+    ("Cards", "depends", "replace a card's blockers (none clears them)"),
+    ("Cards", "comment", "comment on a card"),
+    ("Cards", "attach", "upload a file to a card and print its markdown"),
+    ("Cards", "needs-input", "park a card on questions for a human"),
+    ("Cards", "own", "take the baton on a card"),
+    ("Cards", "release", "let go of a card's baton"),
+    ("Cards", "approve", "approve a card at its review gate"),
+    ("Cards", "reject", "request changes on a card, with a note"),
+    ("Runs & flows", "why", "why isn't this card moving? one plain-language answer"),
+    ("Runs & flows", "runs", "a card's runs and node executions, detail untruncated"),
+    ("Runs & flows", "retry", "re-enter a card's failed run at the node that died"),
+    ("Runs & flows", "cancel", "kill a card's active run (never moves the card)"),
+    ("Runs & flows", "advance", "check off a run's current task and continue with the next"),
+    ("Runs & flows", "outcome", "declare this node's outcome (inside a flow node)"),
+    ("Runs & flows", "flow", "list the board's flows, or print one"),
+    ("Runs & flows", "flow-push", "replace a flow with a document from a file or stdin"),
+    ("Runs & flows", "flow-stats", "a flow's per-node run metrics"),
+    ("Runs & flows", "audit", "board health: run history and CI parity (advisory)"),
+    ("Runner", "start", "run this machine as a runner: claim node-jobs and run them"),
+    ("Runner", "runners", "who is connected, their capacity, and the jobs they hold"),
+    ("Runner", "git-fetch", "git fetch with retry (for flow shell nodes)"),
+    ("Setup", "update", "install or refresh the Relay-owned files from the board"),
+    ("Setup", "version", "the git SHA the deployed app was built from (no API key needed)"),
+)
+
+# Help for the positionals `add()` registers by bare name; a (name, help) tuple overrides it.
+ARG_HELP = {
+    "ref": "the card ref, e.g. RLY-12",
+    "stage": "the stage name",
+    "status": "the status to set",
+    "title": "the card title",
+    "text": 'the text, "-" for stdin, or @path',
+    "note": 'the note, "-" for stdin, or @path',
+    "name": "the branch name",
+    "url": "the pull-request URL",
+    "id": "the sub-task id",
+    "query": "words to match against refs and titles",
+    "key": "the flow key",
+    "outcome": "the outcome to declare, e.g. succeeded",
+}
+
+HELP_DESCRIPTION = " ".join(__doc__.split("\n\n", 1)[1].split())
+
+HELP_EPILOG = ('TEXT, NOTE and QUESTION accept "-" (stdin) or "@path" (a file). --json prints '
+               "machine output; --field PATH prints one value bare (e.g. `relay card RLY-12 "
+               "--field status`). Needs RELAY_URL and RELAY_API_KEY; the runner also reads "
+               ".relay/runner.json.")
+
+
+def _help_formatter():
+    """rich-argparse's formatter when it is installed, else None (argparse's default). The ONE
+    branch on the optional dependency — the root parser and every subparser use what this returns."""
+    if RichHelpFormatter is None:
+        return None
+
+    class RelayHelpFormatter(RichHelpFormatter):
+        # rich-argparse title-cases group names by default ("Runs & Flows"); keep the table's.
+        group_name_formatter = staticmethod(str)
+
+    return RelayHelpFormatter
+
+
+def _parser_kwargs(formatter):
+    if formatter is not None:
+        return {"formatter_class": formatter}
+    # Python 3.14's own argparse colours help under FORCE_COLOR or a TTY; the fallback is PLAIN.
+    return {"color": False} if sys.version_info >= (3, 14) else {}
+
+
+def _add_command_groups(parser, sub):
+    """Render COMMANDS as one argument group per heading. The rows are display-only Actions put
+    on each group's list (argparse's `_group_actions`) and never on the parser, so they take no
+    part in parsing — the real subparsers action stays hidden and does all of that."""
+    unregistered = [name for _group, name, _help in COMMANDS if name not in sub.choices]
+    if unregistered:
+        raise RuntimeError(f"COMMANDS names commands build_parser never registered: {unregistered}")
+    groups = {}
+    for group, name, text in COMMANDS:
+        if group not in groups:
+            groups[group] = parser.add_argument_group(group)
+        groups[group]._group_actions.append(
+            argparse.Action(option_strings=[], dest=name, metavar=name, help=text))
+
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="relay", description=__doc__.splitlines()[1])
-    sub = p.add_subparsers(dest="cmd")
+    kwargs = _parser_kwargs(_help_formatter())
+    helps = {name: text for _group, name, text in COMMANDS}
+    p = argparse.ArgumentParser(prog="relay", usage="relay <command> [options]",
+                                description=HELP_DESCRIPTION, epilog=HELP_EPILOG, **kwargs)
+    sub = p.add_subparsers(dest="cmd", metavar="<command>", help=argparse.SUPPRESS)
 
     def add(name, fn, *pos, json_flag=False):
-        sp = sub.add_parser(name)
+        # helps[name] raising KeyError is the other half of the table guard: a command that is
+        # registered here but missing from COMMANDS never builds.
+        sp = sub.add_parser(name, help=helps[name], description=helps[name], **kwargs)
         for a in pos:
-            sp.add_argument(a)
+            arg, text = a if isinstance(a, tuple) else (a, ARG_HELP[a])
+            sp.add_argument(arg, help=text)
         if json_flag:
-            sp.add_argument("--json", action="store_true")
+            sp.add_argument("--json", action="store_true", help="print machine-readable JSON")
             # --field rides alongside --json on every JSON-returning command: a selector
             # available on only some of them is the inconsistency this card exists to kill.
             sp.add_argument("--field", metavar="PATH",
@@ -4344,82 +4438,95 @@ def build_parser():
         sp.set_defaults(func=fn)
         return sp
 
+    # ---- Cards ----
     bd = add("board", cmd_board, json_flag=True)
-    bd.add_argument("--include-done", action="store_true")
+    bd.add_argument("--include-done", action="store_true", help="include the Done stages' cards")
     add("card", cmd_card, "ref", json_flag=True)
     sr = add("search", cmd_search, "query", json_flag=True)
     sr.add_argument("--archived", action="store_true",
                     help="widen the search to archived cards too")
-    sr.add_argument("--limit", type=int, default=20)
-    add("why", cmd_why, "ref", json_flag=True)
-    rt = add("retry", cmd_retry, "ref", json_flag=True)
-    rt.add_argument("--at")
-    cn = add("cancel", cmd_cancel, "ref", json_flag=True)
-    cn.add_argument("--reason")
-    add("advance", cmd_advance, "ref", json_flag=True)
-    add("runs", cmd_runs, "ref", json_flag=True)
-    add("runners", cmd_runners, json_flag=True)
-    fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)
-    fs.add_argument("--window")
-    fl = add("flow", cmd_flow, json_flag=True)
-    fl.add_argument("key", nargs="?")
-    add("flow-push", cmd_flow_push, "key", "file", json_flag=True)
-    au = add("audit", cmd_audit, json_flag=True)
-    au.add_argument("key", nargs="?")
-    au.add_argument("--window")
-    add("version", cmd_version, json_flag=True)
-    add("git-fetch", cmd_git_fetch)
-    oc = add("outcome", cmd_outcome, "outcome")
-    oc.add_argument("--detail")
-    oc.add_argument("--no-changes", action="store_true",
-                    help="assert this node's work was already committed (succeeded only)")
+    sr.add_argument("--limit", type=int, default=20, help="the most matches to print (default: 20)")
     c = add("create", cmd_create, "title", json_flag=True)
-    c.add_argument("--stage")
-    c.add_argument("--description")
-    c.add_argument("--tag")
+    c.add_argument("--stage", help="the stage to create it in")
+    c.add_argument("--description", help='the description, "-" for stdin, or @path')
+    c.add_argument("--tag", help="the card's tag")
     c.add_argument("--depends-on", metavar="REF[,REF...]",
                    help="blocker refs this card waits on (full replace)")
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
+    add("title", _simple(lambda a: set_title(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("archive", _simple(lambda a: archive_card(a.ref), line=archived_line), "ref", json_flag=True)
     add("unarchive", _simple(lambda a: unarchive_card(a.ref), line=archived_line), "ref", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
-    add("title", _simple(lambda a: set_title(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
-    add("criteria", _simple(lambda a: set_acceptance_criteria(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("spec", _simple(lambda a: set_spec(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("criteria", _simple(lambda a: set_acceptance_criteria(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
-    add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
-    add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
-    tg = add("tag", _simple(lambda a: set_tag(a.ref, a.value)), "ref", json_flag=True)
-    tg.add_argument("value", nargs="?")
-    dp = add("depends", cmd_depends, "ref", json_flag=True)
-    dp.add_argument("blockers", nargs="*")
     add("sub-tasks", _simple(lambda a: set_sub_tasks(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
     add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)
+    add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
+    add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
     add("result", _simple(lambda a: set_result(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    tg = add("tag", _simple(lambda a: set_tag(a.ref, a.value)), "ref", json_flag=True)
+    tg.add_argument("value", nargs="?", help="the tag (omit to clear it)")
+    dp = add("depends", cmd_depends, "ref", json_flag=True)
+    dp.add_argument("blockers", nargs="*",
+                    help="blocker refs, separate or comma-separated (none clears them)")
+    add("comment", cmd_comment, "ref", "text")
+    at = add("attach", cmd_attach, "ref", ("file", "the file to upload"), json_flag=True)
+    at.add_argument("--caption", help="alt text for the printed markdown image")
     ni = add("needs-input", cmd_needs_input, "ref", json_flag=True)
-    ni.add_argument("question", nargs="?")
-    ni.add_argument("--questions")
+    ni.add_argument("question", nargs="?", help='one question, "-" for stdin, or @path')
+    ni.add_argument("--questions",
+                    help="a JSON array of {prompt, options, allow_text} questions, @path or -")
     add("own", _simple(lambda a: own(a.ref)), "ref", json_flag=True)
     add("release", _simple(lambda a: release(a.ref)), "ref", json_flag=True)
     add("approve", _simple(lambda a: api("POST", f"/api/cards/{a.ref}/approve", {})["data"]), "ref", json_flag=True)
     add("reject", cmd_reject, "ref", "note", json_flag=True)
-    add("comment", cmd_comment, "ref", "text")
-    at = add("attach", cmd_attach, "ref", "file", json_flag=True)
-    at.add_argument("--caption")
-    ex = add("start", cmd_start)
-    ex.add_argument("--once", action="store_true")
-    ex.add_argument("--dry-run", action="store_true")
-    ex.add_argument("--interval", type=int)
-    ex.add_argument("--name",
+
+    # ---- Runs & flows ----
+    add("why", cmd_why, "ref", json_flag=True)
+    add("runs", cmd_runs, "ref", json_flag=True)
+    rt = add("retry", cmd_retry, "ref", json_flag=True)
+    rt.add_argument("--at", help="the node to re-enter at (default: the node that died)")
+    cn = add("cancel", cmd_cancel, "ref", json_flag=True)
+    cn.add_argument("--reason", help="why, recorded on the run")
+    add("advance", cmd_advance, "ref", json_flag=True)
+    oc = add("outcome", cmd_outcome, "outcome")
+    oc.add_argument("--detail", help="one line for the next node, or @path for anything long")
+    oc.add_argument("--no-changes", action="store_true",
+                    help="assert this node's work was already committed (succeeded only)")
+    fl = add("flow", cmd_flow, json_flag=True)
+    fl.add_argument("key", nargs="?", help="the flow key (omit to list every flow)")
+    add("flow-push", cmd_flow_push, "key", ("file", 'the flow document, or "-" for stdin'), json_flag=True)
+    fs = add("flow-stats", cmd_flow_stats, "key", json_flag=True)
+    fs.add_argument("--window", help="the time window, e.g. 7d")
+    au = add("audit", cmd_audit, json_flag=True)
+    au.add_argument("key", nargs="?", help="one flow to audit (default: every flow)")
+    au.add_argument("--window", help="the time window, e.g. 7d")
+
+    # ---- Runner ----
+    st = add("start", cmd_start)
+    st.add_argument("--once", action="store_true", help="claim and run one job, then exit")
+    st.add_argument("--dry-run", action="store_true",
+                    help="say what would be claimed, then exit without claiming")
+    st.add_argument("--interval", type=int,
+                    help="long-poll timeout in seconds (default: poll_timeout in .relay/runner.json)")
+    st.add_argument("--name",
                     help="this runner's name on the board "
                          "(default: <checkout-dir>@<short-host>)")
+    add("runners", cmd_runners, json_flag=True)
+    add("git-fetch", cmd_git_fetch)
+
+    # ---- Setup ----
     up = add("update", cmd_update, json_flag=True)
     up.add_argument("--check", action="store_true",
                     help="report what would change and write nothing")
     up.add_argument("--force", action="store_true",
                     help="install even into the Relay app repo, where these six files are the source")
+    add("version", cmd_version, json_flag=True)
+
+    _add_command_groups(p, sub)
     return p
 
 
@@ -4427,8 +4534,7 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     if not getattr(args, "cmd", None):
-        # The board runner is gone (RLY-139): dispatch is server-side now, and this
-        # binary's runner mode is `relay start`.
+        # Dispatch is server-side (RLY-139); this binary's runner mode is `relay start`.
         parser.print_help()
         return
     args.func(args)

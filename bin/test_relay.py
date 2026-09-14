@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 import urllib.error
 
 RELAY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "relay")
@@ -6671,10 +6672,12 @@ class AuditReportTest(unittest.TestCase):
 
 
 class DiscoverabilityTest(unittest.TestCase):
-    def test_the_module_docstring_lists_every_new_verb(self):
-        for verb in ("relay why", "relay runs", "relay runners", "relay version",
-                     "relay update", "--field"):
-            self.assertIn(verb, relay.__doc__, f"the module docstring (relay --help) should list {verb}")
+    def test_the_help_lists_every_new_verb(self):
+        relay_help = relay.build_parser().format_help()
+        for verb in ("why", "runs", "runners", "version", "update"):
+            self.assertRegex(relay_help, rf"(?m)^  {re.escape(verb)}\s", f"relay -h should list {verb}")
+        sub = next(a for a in relay.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+        self.assertIn("--field", sub.choices["card"].format_help())
 
     def test_relay_md_documents_every_new_verb(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -6684,6 +6687,101 @@ class DiscoverabilityTest(unittest.TestCase):
         for verb in ("./relay why", "./relay runs", "./relay runners",
                      "./relay version", "./relay update", "--field"):
             self.assertIn(verb, doc, f"relay.md should document {verb}")
+
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class GroupedHelpTest(unittest.TestCase):
+    """RE319 — `relay -h` lists every command under four headings from ONE table, styled by
+    rich-argparse when it is installed and plain text when it is not. This suite must pass either
+    way, so the plain path forces RichHelpFormatter = None and the styled path is proven with a
+    stand-in formatter (plus the real library when it happens to be installed)."""
+
+    GROUPS = ("Cards", "Runs & flows", "Runner", "Setup")
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "RichHelpFormatter", relay.RichHelpFormatter)
+        env = unittest.mock.patch.dict(os.environ, {"COLUMNS": "200"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def subparsers(self, parser):
+        return next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+
+    def plain_help(self):
+        relay.RichHelpFormatter = None
+        return relay.build_parser().format_help()
+
+    def test_the_table_has_the_four_groups_in_order(self):
+        self.assertEqual(tuple(dict.fromkeys(g for g, _n, _h in relay.COMMANDS)), self.GROUPS)
+
+    def test_every_registered_command_is_in_the_table_exactly_once(self):
+        relay.RichHelpFormatter = None
+        names = [n for _g, n, _h in relay.COMMANDS]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(set(self.subparsers(relay.build_parser()).choices), set(names))
+
+    def test_plain_help_lists_each_heading_in_order_and_each_command_with_its_line(self):
+        out = self.plain_help()
+        positions = [out.index(f"\n{g}:\n") for g in self.GROUPS]
+        self.assertEqual(positions, sorted(positions))
+        for _g, name, text in relay.COMMANDS:
+            self.assertRegex(out, rf"(?m)^  {re.escape(name)}\s+{re.escape(text)}$")
+
+    def test_plain_help_has_no_colour_even_when_colour_is_forced(self):
+        with unittest.mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            self.assertIsNone(ANSI_ESCAPE.search(self.plain_help()))
+
+    def test_help_exits_zero(self):
+        relay.RichHelpFormatter = None
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stdout(io.StringIO()):
+            relay.build_parser().parse_args(["-h"])
+        self.assertEqual(cm.exception.code, 0)
+
+    def test_bare_relay_prints_the_grouped_help(self):
+        relay.RichHelpFormatter = None
+        with unittest.mock.patch.object(sys, "argv", ["relay"]):
+            out = capture(relay.main)
+        for group in self.GROUPS:
+            self.assertIn(f"{group}:", out)
+
+    def test_start_help_lists_its_flags(self):
+        relay.RichHelpFormatter = None
+        start = self.subparsers(relay.build_parser()).choices["start"].format_help()
+        for flag in ("--once", "--dry-run", "--interval", "--name"):
+            self.assertIn(flag, start)
+
+    def test_every_subcommand_argument_has_help(self):
+        relay.RichHelpFormatter = None
+        for name, sp in self.subparsers(relay.build_parser()).choices.items():
+            for action in sp._actions:
+                if isinstance(action, argparse._HelpAction):
+                    continue
+                self.assertTrue(action.help, f"relay {name}: {action.dest} has no help")
+
+    def test_the_rich_formatter_when_present_formats_the_root_and_every_subparser(self):
+        class StandIn(argparse.HelpFormatter):
+            pass
+
+        relay.RichHelpFormatter = StandIn
+        parser = relay.build_parser()
+        self.assertTrue(issubclass(parser.formatter_class, StandIn))
+        for name, sp in self.subparsers(parser).choices.items():
+            self.assertTrue(issubclass(sp.formatter_class, StandIn), name)
+        out = parser.format_help()
+        for group in self.GROUPS:
+            self.assertIn(f"\n{group}:\n", out)
+
+    @unittest.skipUnless(importlib.util.find_spec("rich_argparse"), "rich-argparse is not installed")
+    def test_real_rich_argparse_styles_the_same_headings(self):
+        from rich_argparse import RichHelpFormatter
+        relay.RichHelpFormatter = RichHelpFormatter
+        with unittest.mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            styled = relay.build_parser().format_help()
+        self.assertIsNotNone(ANSI_ESCAPE.search(styled))
+        for group in self.GROUPS:
+            self.assertIn(f"{group}:", ANSI_ESCAPE.sub("", styled))
 
 
 class TestPartitionTest(unittest.TestCase):
