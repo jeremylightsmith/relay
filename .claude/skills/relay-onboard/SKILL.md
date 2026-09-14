@@ -121,7 +121,10 @@ Show the **whole** plan before mutating anything, and get sign-off on it as a un
 
 - files to create or modify, each with its diff — including: if `.relay/runner.json` is
   missing, author it for this repo as part of the shown plan (it is already inside this skill's
-  declared blast radius, and nothing else installs it);
+  declared blast radius, and nothing else installs it). The file you author includes
+  `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` — `relay start` then stops claiming
+  new work once Claude usage passes 90% of the five-hour or seven-day window and resumes on its
+  own when the window resets;
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 

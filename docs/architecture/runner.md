@@ -78,7 +78,7 @@ than double-booking (YAGNI: no multi-board reservation yet).
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
-  running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}], rate_limit}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
   required_version, latest_runner_version}`. It terminates each revoked job's live subprocess
@@ -103,7 +103,10 @@ than double-booking (YAGNI: no multi-board reservation yet).
   `./relay` the app itself serves — `Relay.Runs.latest_runner_version/0`, delegating to
   `Relay.Scaffold.runner_version/0`, read from `priv/scaffold/relay` at runtime. Truthful
   by construction. It is a **target**, distinct from `required_version`'s **floor**; a runner
-  with `auto_update` on updates itself against it.
+  with `auto_update` on updates itself against it. `rate_limit` (RE320) is always sent — null
+  while claiming, `{window, utilization, max, resets_at, reason}` while the runner has paused
+  itself at a Claude usage limit — and stored on `Schemas.Runner.rate_limit` (see Usage limits
+  below).
 - **Run ids**: each runner worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -822,6 +825,52 @@ silently billed to the paid API.
   count** (the update took, so nothing before it was thrash); same or older, and auto-update is
   disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
   disable it the same way. Opt out with `"auto_update": false`.
+
+### Usage limits (RE320)
+
+`relay start` stops **claiming** once Claude subscription usage passes a configured fraction of
+either usage window. It tells the board and resumes by itself.
+
+- **Config.** `.relay/runner.json` → `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}`
+  (this repo and `/relay-onboard`'s authored file both use 0.9/0.9). A missing block or key means
+  no limit for that window. `validate_limits` refuses to start on an unknown key inside `limits`
+  or a value that is not a number in 0–1, and names the key. The window names live once in
+  `./relay` (`RATE_LIMIT_WINDOWS`, `limit_key/1`) and are pinned to
+  `Schemas.Runner.rate_limit_windows/0` by the runner contract fixture.
+- **Usage source.** There are no extra calls in the normal path. Every `claude -p --verbose
+  --output-format stream-json` run emits a `rate_limit_event` whose `rate_limit_info` carries
+  `status`, `rateLimitType`, `resetsAt` and `unifiedWindows.{five_hour,seven_day}.{utilization,
+  resetsAt}`. `_stream_claude_job` feeds every parsed event from agent nodes and talk turns to the
+  process's `UsageLimiter` (`USAGE_LIMITER`). The limiter parses defensively and never raises into
+  a job. A new runner has no numbers until its first agent/talk job streams one, and until then it
+  never pauses.
+  **Spike finding (Claude Code 2.1.270, 2026-09-14):** the event is emitted on *every* call, not
+  only above a warning threshold. A probe at 2% five-hour usage returned `status: "allowed"` with
+  both windows populated. So a probe that yields no event is not evidence, and the runner keeps
+  waiting for `resetsAt`. `overageStatus` can read `"rejected"` on an account with no overage
+  credits. It is not `status`, and the limiter ignores it.
+- **Pause.** A window trips at `utilization >= max`. A `status: "rejected"` event trips the window
+  named by `rateLimitType` even with no limit configured; the node that received it fails exactly
+  as before. When several windows trip, the latest `resets_at` is reported. Before each claim the
+  loop checks `UsageLimiter.paused(now)`. While paused it calls nothing on `/api/node-jobs/claim`,
+  for node, gate and talk work alike, and sleeps in `RATE_LIMIT_PAUSE_SLICE_S` slices. Jobs already
+  running finish, and a claim already in flight when the limit trips is honoured. The runner logs
+  one `⏸ rate limited: …` line on entering a pause and one
+  `▶ Claude usage back under limits — claiming again` on leaving it.
+- **Resume.** A tripped window clears at `resets_at`, and its stored reading is discarded then so
+  stale numbers cannot re-trip it. While paused, if nothing has produced a reading for
+  `RATE_LIMIT_PROBE_INTERVAL_S` (900s, not configurable), the loop runs `probe_claude_usage`:
+  `claude -p ok --model haiku --max-turns 1` from the system temp dir, with its event fed to the
+  limiter. If the probe shows usage back under the limits, claiming resumes early; for a refusal,
+  `status` must also no longer be `rejected`. A failed probe is logged once per pause and changes
+  nothing.
+- **Heartbeat.** `heartbeat_body` always carries `rate_limit`. It is `null`, or `{window,
+  utilization, max, resets_at, reason}` with `reason` in `Schemas.Runner.rate_limit_reasons/0`
+  (`limit` | `rejected`) and `max` null for a refusal with no limit. Beats continue while paused,
+  so the runner stays `fresh`. `POST /api/node-jobs/heartbeat` normalizes the value with
+  `Schemas.Runner.normalize_rate_limit/1`, storing nil and logging anything unrecognised. The
+  heartbeat is the only writer of `Schemas.Runner.rate_limit`, and a claim never touches it.
+  `@min_runner_version` was not raised: an older runner simply never pauses.
 
 ### Talk turns (RE268, ADR 0009)
 

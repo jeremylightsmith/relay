@@ -97,6 +97,21 @@ def capture_ret(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
+def rate_limit_event(five_hour=None, seven_day=None, resets_at=0, status="allowed",
+                     window="five_hour"):
+    """A `rate_limit_event` in the shape Claude Code 2.1.270 streams (fields nested under
+    `rate_limit_info`, verified for RE320)."""
+    windows = {}
+    if five_hour is not None:
+        windows["five_hour"] = {"utilization": five_hour, "resetsAt": resets_at}
+    if seven_day is not None:
+        windows["seven_day"] = {"utilization": seven_day, "resetsAt": resets_at}
+    return {"type": "rate_limit_event",
+            "rate_limit_info": {"status": status, "rateLimitType": window,
+                                "resetsAt": resets_at, "unifiedWindows": windows,
+                                "overageStatus": "rejected", "isUsingOverage": False}}
+
+
 class _FakeResp:
     """Minimal stand-in for a urlopen() result: a context manager with .read()."""
 
@@ -298,6 +313,21 @@ class ReverseContractTest(unittest.TestCase):
         the board actually serves), which is a DIFFERENT number from `required_version`
         (the floor below which work is refused)."""
         self.assertIn("latest_runner_version", CONTRACT["heartbeat"]["response"])
+
+    def test_the_heartbeat_body_always_carries_rate_limit(self):
+        # RE320: null while claiming, never omitted — the server CLEARS the pause on null.
+        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
+        self.assertIn("rate_limit", body)
+        self.assertIsNone(body["rate_limit"])
+        self.assertIn("rate_limit", CONTRACT["heartbeat"]["request"])
+
+    def test_a_paused_limiter_wire_matches_the_fixture_key_set(self):
+        limiter = relay.UsageLimiter({"max_five_hour": 0.9})
+        limiter.observe(rate_limit_event(five_hour=0.95, resets_at=2_000), 1_000)
+        self.assertEqual(set(limiter.wire(1_000)),
+                         set(CONTRACT["heartbeat"]["request"]["rate_limit"]))
+        body = relay.heartbeat_body({"name": "box"}, {}, [], [], rate_limit=limiter.wire(1_000))
+        self.assertEqual(body["rate_limit"]["reason"], "limit")
 
 
 class PrintCardTest(unittest.TestCase):
@@ -1586,6 +1616,42 @@ class RunnerConfigTest(unittest.TestCase):
         self._write({"base": "origin/master"})
         self.assertEqual(relay.load_runner_config()["base"], "origin/master")
 
+    def _dies(self, limits):
+        self._write({"limits": limits})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            relay.load_runner_config()
+        self.assertNotEqual(cm.exception.code, 0)
+        return err.getvalue()
+
+    def test_limits_default_to_no_limit(self):
+        relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
+        self.assertEqual(relay.load_runner_config()["limits"], {})
+
+    def test_valid_limits_load_as_floats_and_a_missing_key_is_no_limit(self):
+        self._write({"limits": {"max_five_hour": 0.9}})
+        self.assertEqual(relay.load_runner_config()["limits"], {"max_five_hour": 0.9})
+        self._write({"limits": {"max_five_hour": 1, "max_seven_day": 0}})
+        self.assertEqual(relay.load_runner_config()["limits"],
+                         {"max_five_hour": 1.0, "max_seven_day": 0.0})
+
+    def test_an_out_of_range_limit_refuses_to_start_naming_the_key_and_range(self):
+        msg = self._dies({"max_five_hour": 1.5})
+        self.assertIn("max_five_hour", msg)
+        self.assertIn("0–1", msg)
+
+    def test_a_non_numeric_or_boolean_limit_refuses_to_start(self):
+        self.assertIn("max_seven_day", self._dies({"max_seven_day": "high"}))
+        self.assertIn("max_seven_day", self._dies({"max_seven_day": True}))
+
+    def test_an_unknown_limits_key_refuses_to_start_naming_it(self):
+        msg = self._dies({"max_5_hour": 0.9})
+        self.assertIn("max_5_hour", msg)
+        self.assertIn("max_five_hour", msg)
+
+    def test_a_limits_value_that_is_not_an_object_refuses_to_start(self):
+        self.assertIn("limits", self._dies([0.9]))
+
 
 class RunnerPoolTest(unittest.TestCase):
     """Per-card worktree model (RLY-231): the exclusive class no longer has fixed
@@ -2040,6 +2106,16 @@ class RunnerConfigCommittedFileTest(unittest.TestCase):
             cfg = json.load(f)
         self.assertEqual(cfg["base"], "origin/main")
 
+    def test_committed_runner_json_sets_the_default_usage_limits(self):
+        """RE320: this repo's runners pause at 90% of either Claude usage window."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            ".relay", "runner.json",
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["limits"], {"max_five_hour": 0.9, "max_seven_day": 0.9})
+
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -2382,6 +2458,17 @@ class StreamClaudeJobTest(unittest.TestCase):
         out = capture(relay._stream_claude_job, "p", cwd="/tmp/wt")
         self.assertIn(bad[:200], out)          # fell back to the raw line
         self.assertIn("claude finished", out)  # ...and kept streaming the next event
+
+    def test_every_stream_event_feeds_the_runner_usage_limiter(self):
+        """RE320: agent nodes and talk turns both stream through here, so usage is tracked from
+        work the runner already does — no extra call in the normal path."""
+        self.addCleanup(setattr, relay, "USAGE_LIMITER", relay.USAGE_LIMITER)
+        relay.USAGE_LIMITER = relay.UsageLimiter({"max_five_hour": 0.9})
+        lines = [json.dumps(rate_limit_event(five_hour=0.95, resets_at=4_102_444_800)),
+                 json.dumps({"type": "result", "session_id": "s"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertEqual(relay.USAGE_LIMITER.paused(1_800_000_000)["window"], "five_hour")
 
 
 class AgentOutcomeContractTest(unittest.TestCase):
@@ -3296,6 +3383,22 @@ class RunnerHeartbeatTest(unittest.TestCase):
         finally:
             relay.api = orig
         self.assertIsNone(hb.latest_version)
+
+    def test_a_beat_carries_the_runner_rate_limit(self):
+        paused = {"window": "five_hour", "utilization": 0.95, "max": 0.9,
+                  "resets_at": 4_102_444_800, "reason": "limit"}
+        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: [], lambda jid: None,
+                                   interval=15, rate_limit_fn=lambda: paused)
+        calls, _revoked = self._capture(hb)
+        (_method, _path, body), = calls
+        self.assertEqual(body["rate_limit"], paused)
+
+    def test_a_beat_without_a_limiter_sends_null(self):
+        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: [], lambda jid: None,
+                                   interval=15)
+        calls, _revoked = self._capture(hb)
+        (_method, _path, body), = calls
+        self.assertIsNone(body["rate_limit"])
 
 
 def isolate_relay_state(test):
@@ -4221,6 +4324,163 @@ class ClaimLineTest(unittest.TestCase):
         self.assertIsNotNone(relay.claim_line({"isolation": "shared_clean"}))
 
 
+class UsageLimiterTest(unittest.TestCase):
+    """RE320: pure but for the injected `now` — no sleeps, no I/O."""
+
+    NOW = 1_800_000_000
+
+    def limiter(self, **limits):
+        return relay.UsageLimiter(limits)
+
+    def test_a_new_runner_with_no_readings_is_never_paused(self):
+        self.assertIsNone(self.limiter(max_five_hour=0.0).paused(self.NOW))
+
+    def test_a_window_at_or_over_its_max_trips(self):
+        lim = self.limiter(max_five_hour=0.9)
+        self.assertTrue(lim.observe(rate_limit_event(five_hour=0.9, resets_at=self.NOW + 600), self.NOW))
+        self.assertEqual(lim.paused(self.NOW), {"window": "five_hour", "utilization": 0.9,
+                                                "max": 0.9, "resets_at": self.NOW + 600,
+                                                "reason": "limit"})
+
+    def test_under_the_max_and_with_no_limit_configured_nothing_trips(self):
+        lim = self.limiter(max_five_hour=0.9)
+        lim.observe(rate_limit_event(five_hour=0.89, seven_day=0.99, resets_at=self.NOW + 600), self.NOW)
+        self.assertIsNone(lim.paused(self.NOW))   # seven_day has no limit configured
+
+    def test_several_tripped_windows_report_the_latest_reset(self):
+        lim = self.limiter(max_five_hour=0.5, max_seven_day=0.5)
+        ev = rate_limit_event()
+        ev["rate_limit_info"]["unifiedWindows"] = {
+            "five_hour": {"utilization": 0.9, "resetsAt": self.NOW + 600},
+            "seven_day": {"utilization": 0.6, "resetsAt": self.NOW + 86_400},
+        }
+        lim.observe(ev, self.NOW)
+        self.assertEqual(lim.paused(self.NOW)["window"], "seven_day")
+
+    def test_a_tripped_window_clears_at_its_reset_and_its_stale_reading_is_discarded(self):
+        lim = self.limiter(max_five_hour=0.9)
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
+        self.assertIsNotNone(lim.paused(self.NOW + 599))
+        self.assertIsNone(lim.paused(self.NOW + 600))
+        # A later event without a five_hour reading must not resurrect the old 0.95.
+        lim.observe(rate_limit_event(seven_day=0.1, resets_at=self.NOW + 90_000), self.NOW + 601)
+        self.assertIsNone(lim.paused(self.NOW + 601))
+
+    def test_a_rejection_pauses_even_with_no_limits_until_its_reset(self):
+        lim = self.limiter()
+        lim.observe(rate_limit_event(status="rejected", window="five_hour",
+                                     resets_at=self.NOW + 600), self.NOW)
+        self.assertEqual(lim.paused(self.NOW), {"window": "five_hour", "utilization": None,
+                                                "max": None, "resets_at": self.NOW + 600,
+                                                "reason": "rejected"})
+        self.assertIsNone(lim.paused(self.NOW + 600))
+
+    def test_a_later_allowed_event_under_the_limits_ends_a_rejection_early(self):
+        lim = self.limiter(max_five_hour=0.9)
+        lim.observe(rate_limit_event(status="rejected", resets_at=self.NOW + 3600), self.NOW)
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 3600), self.NOW + 10)
+        self.assertEqual(lim.paused(self.NOW + 10)["reason"], "limit")   # still over its max
+        lim.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 3600), self.NOW + 20)
+        self.assertIsNone(lim.paused(self.NOW + 20))
+
+    def test_overage_status_rejected_is_not_a_refusal(self):
+        # The 2.1.270 spike: an `allowed` call on an account with no overage credits carries
+        # `overageStatus: "rejected"`. Only `status` means Claude refused the call.
+        lim = self.limiter()
+        lim.observe(rate_limit_event(five_hour=0.02, resets_at=self.NOW + 600), self.NOW)
+        self.assertIsNone(lim.paused(self.NOW))
+
+    def test_the_top_level_shape_is_accepted_too(self):
+        lim = self.limiter(max_five_hour=0.9)
+        ev = rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600)
+        flat = dict(ev["rate_limit_info"], type="rate_limit_event")
+        self.assertTrue(lim.observe(flat, self.NOW))
+        self.assertIsNotNone(lim.paused(self.NOW))
+
+    def test_junk_events_are_ignored_and_never_raise(self):
+        lim = self.limiter(max_five_hour=0.9)
+        for junk in (None, "x", [], {"type": "assistant"},
+                     {"type": "rate_limit_event", "rate_limit_info": "junk"},
+                     {"type": "rate_limit_event",
+                      "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": "high",
+                                                                           "resetsAt": 5}}}},
+                     {"type": "rate_limit_event",
+                      "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": True,
+                                                                           "resetsAt": self.NOW + 9}}}},
+                     {"type": "rate_limit_event",
+                      "rate_limit_info": {"status": "rejected", "rateLimitType": ["five_hour"]}}):
+            lim.observe(junk, self.NOW)     # must not raise
+        self.assertIsNone(lim.paused(self.NOW))
+        self.assertFalse(lim.observe({"type": "assistant"}, self.NOW))
+
+    def test_a_probe_is_due_only_after_the_interval_since_the_last_event_or_probe(self):
+        lim = self.limiter(max_five_hour=0.9)
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200), self.NOW)
+        self.assertFalse(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S - 1))
+        self.assertTrue(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S))
+        lim.mark_probed(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S)
+        self.assertFalse(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S + 1))
+
+    def test_a_probe_reading_under_the_limit_resumes_before_the_reset(self):
+        """AC5: paused at 95%, a probe 15 minutes later reports 20% — claiming may resume."""
+        lim = self.limiter(max_five_hour=0.9)
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200), self.NOW)
+        later = self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S
+        self.assertTrue(lim.probe_due(later))
+        lim.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 7200), later)
+        self.assertIsNone(lim.paused(later))
+
+    def test_the_pause_line_names_window_usage_limit_reset_and_probe_cadence(self):
+        pause = {"window": "five_hour", "utilization": 0.95, "max": 0.9,
+                 "resets_at": self.NOW, "reason": "limit"}
+        line = relay.rate_limit_pause_line(pause)
+        self.assertTrue(line.startswith("⏸ rate limited: five_hour 95% ≥ 90% limit · resumes "))
+        self.assertTrue(line.endswith(" · probing every 15m"))
+        refused = relay.rate_limit_pause_line(dict(pause, reason="rejected", max=None))
+        self.assertIn("Claude refused (five_hour)", refused)
+
+
+class ProbeClaudeUsageTest(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(setattr, relay.subprocess, "run", relay.subprocess.run)
+
+    def test_the_probe_is_a_cheap_single_turn_call_outside_any_worktree_fed_to_the_limiter(self):
+        seen = {}
+        out = "\n".join([json.dumps({"type": "system", "subtype": "init"}),
+                         json.dumps(rate_limit_event(five_hour=0.2, resets_at=4_102_444_800)),
+                         json.dumps({"type": "result"})])
+
+        def fake_run(cmd, **kw):
+            seen.update(cmd=cmd, kw=kw)
+            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+        relay.subprocess.run = fake_run
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        self.assertIsNone(relay.probe_claude_usage(lim))
+        cmd = seen["cmd"]
+        self.assertEqual(cmd[:3], ["claude", "-p", "ok"])
+        self.assertEqual(cmd[cmd.index("--model") + 1], relay.RATE_LIMIT_PROBE_MODEL)
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "1")
+        self.assertIn("stream-json", cmd)
+        self.assertNotIn(relay.WORKTREES_DIR, seen["kw"]["cwd"])
+        self.assertEqual(seen["kw"]["timeout"], relay.RATE_LIMIT_PROBE_TIMEOUT_S)
+
+    def test_a_missing_binary_is_a_reason_not_a_crash(self):
+        def boom(cmd, **kw):
+            raise FileNotFoundError("claude")
+
+        relay.subprocess.run = boom
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        self.assertIn("claude", relay.probe_claude_usage(lim))
+
+    def test_a_probe_with_no_event_is_not_evidence(self):
+        relay.subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="oops", stderr="")
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=4_102_444_800), 1_000)
+        self.assertIn("no rate_limit_event", relay.probe_claude_usage(lim))
+        self.assertIsNotNone(lim.paused(1_001))
+
+
 class ExecuteLoopTest(unittest.TestCase):
     """`start --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
     work', not an error."""
@@ -4640,6 +4900,142 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertIn("idle — not claiming: no free slots (1 poll in the last 5m, "
                       "shared_clean 1/1 busy; exclusive: RE291 retained)", lines)
+
+
+class RateLimitLoopTest(unittest.TestCase):
+    """RE320: the claim loop's pause/probe/resume branch, on a fake usage clock."""
+
+    NOW = 1_800_000_000
+
+    def setUp(self):
+        ExecuteLoopTest.setUp(self)
+        for name in ("UsageLimiter", "usage_clock", "probe_claude_usage", "USAGE_LIMITER",
+                     "RATE_LIMIT_PAUSE_SLICE_S", "maybe_auto_update"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.usage_clock = lambda: self.NOW
+        relay.RATE_LIMIT_PAUSE_SLICE_S = 0.01
+        relay.maybe_auto_update = lambda *a, **k: False
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append(msg)
+        self.claims = []
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+
+    def _limits(self, **limits):
+        base = relay.load_runner_config()
+        relay.load_runner_config = lambda: dict(base, limits=limits)
+
+    def _use(self, limiter):
+        relay.UsageLimiter = lambda limits: limiter
+
+    def _claim_nothing(self):
+        relay.claim_node_job = lambda *a, **k: (self.claims.append(a) or None)
+
+    def _start(self, once=True):
+        relay.cmd_start(argparse.Namespace(once=once, dry_run=False, interval=None, name=None))
+
+    def test_a_paused_runner_claims_nothing_and_says_so_once(self):
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
+        self._use(lim)
+        self._claim_nothing()
+
+        self._start()
+
+        self.assertEqual(self.claims, [])
+        paused = [line for line in self.lines if line.startswith("⏸ rate limited")]
+        self.assertEqual(len(paused), 1)
+        self.assertIn("five_hour 95% ≥ 90% limit", paused[0])
+
+    def test_with_no_limits_an_over_limit_reading_still_claims(self):
+        """AC3."""
+        lim = relay.UsageLimiter({})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
+        self._use(lim)
+        self._claim_nothing()
+
+        self._start()
+
+        self.assertEqual(len(self.claims), 1)
+        self.assertFalse(any(line.startswith("⏸") for line in self.lines))
+
+    def test_the_node_that_crosses_the_limit_finishes_and_nothing_more_is_claimed(self):
+        """AC2 in miniature: capacity 1, the first job's stream crosses the limit mid-run."""
+        self._limits(max_five_hour=0.9, max_seven_day=0.9)
+        j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+
+        def claim(*a, **k):
+            self.claims.append(a)
+            return j if len(self.claims) == 1 else None
+
+        def run_node_job(job, path, control, partition=None):
+            relay.USAGE_LIMITER.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600),
+                                        self.NOW)
+            return ("succeeded", "", "sha", None, False)
+
+        relay.claim_node_job = claim
+        relay.run_node_job = run_node_job
+        watchdog = threading.Timer(2, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        watchdog.daemon = True
+        self.addCleanup(watchdog.cancel)
+        watchdog.start()
+
+        self._start(once=False)
+
+        self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
+        self.assertEqual(len(self.claims), 1)
+        self.assertEqual(sum(1 for line in self.lines if line.startswith("⏸ rate limited")), 1)
+
+    def test_a_probe_under_the_limits_resumes_claiming_before_the_reset(self):
+        """AC5: the loop half — the probe's reading is what un-pauses, then it claims."""
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200),
+                    self.NOW - relay.RATE_LIMIT_PROBE_INTERVAL_S)
+        self._use(lim)
+        probes = []
+
+        def probe(limiter):
+            probes.append(limiter)
+            limiter.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 7200), self.NOW)
+            return None
+
+        relay.probe_claude_usage = probe
+        self._claim_nothing()
+
+        self._start()
+
+        self.assertEqual(probes, [lim])
+        self.assertIn(relay.RATE_LIMIT_RESUME_LINE, self.lines)
+        self.assertEqual(len(self.claims), 1)
+
+    def test_a_failed_probe_logs_once_and_keeps_waiting(self):
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200),
+                    self.NOW - relay.RATE_LIMIT_PROBE_INTERVAL_S)
+        self._use(lim)
+        relay.probe_claude_usage = lambda limiter: "claude exited 1 with no rate_limit_event"
+        self._claim_nothing()
+
+        self._start()
+
+        self.assertEqual(self.claims, [])
+        self.assertEqual(sum(1 for line in self.lines if "probe failed" in line), 1)
+        self.assertNotIn(relay.RATE_LIMIT_RESUME_LINE, self.lines)
+
+    def test_the_heartbeat_reports_the_pause(self):
+        lim = relay.UsageLimiter({"max_five_hour": 0.9})
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
+        self._use(lim)
+        self._claim_nothing()
+        bodies = []
+        self.addCleanup(setattr, relay, "api", relay.api)
+        relay.api = lambda method, path, body=None, **k: (
+            bodies.append(body) if path == "/api/node-jobs/heartbeat" else None) or {}
+
+        self._start()
+
+        self.assertEqual(bodies[0]["rate_limit"]["window"], "five_hour")
+        self.assertEqual(bodies[0]["rate_limit"]["reason"], "limit")
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
@@ -5088,6 +5484,14 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         # this whole card is about.
         self.assertEqual(set(relay.HOLDING_STATES), set(self.vocab["holding_states"]))
 
+    def test_rate_limit_vocabularies_match_the_fixture(self):
+        # RE320: the server stores nil for a window/reason it does not know, so a drift here would
+        # silently erase every pause from the board.
+        self.assertEqual(relay.RATE_LIMIT_WINDOWS, tuple(self.vocab["rate_limit_windows"]))
+        self.assertEqual(relay.RATE_LIMIT_REASONS, tuple(self.vocab["rate_limit_reasons"]))
+        self.assertEqual((relay.RATE_LIMIT_REASON_LIMIT, relay.RATE_LIMIT_REASON_REJECTED),
+                         relay.RATE_LIMIT_REASONS)
+
 
 class RunnerIdentTest(unittest.TestCase):
     """The `runner` dict both claim and heartbeat put on the wire. Pure and named for the
@@ -5185,11 +5589,12 @@ class FakeHeartbeat:
     instances = []
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None):
+                 held_fn=None, on_release_held=None, rate_limit_fn=None):
         self.runner = runner
         self.capacity = capacity or {}
         self.held_fn = held_fn
         self.on_release_held = on_release_held
+        self.rate_limit_fn = rate_limit_fn
         self.beats = []
         FakeHeartbeat.instances.append(self)
 
@@ -6155,6 +6560,14 @@ class RunsAndRunnersRenderingTest(unittest.TestCase):
 
     def test_runners_render_says_so_when_nothing_is_connected(self):
         self.assertIn("no runners", relay.format_runners([]))
+
+    def test_runners_render_flags_a_rate_limited_runner(self):
+        paused = [dict(self.RUNNERS[0], rate_limit={"window": "five_hour", "utilization": 0.95,
+                                                     "max": 0.9, "reason": "limit",
+                                                     "resets_at": "2026-09-14T15:40:00Z"})]
+        out = relay.format_runners(paused)
+        self.assertIn("RATE LIMITED (five_hour, resumes 2026-09-14T15:40:00Z)", out)
+        self.assertNotIn("RATE LIMITED", relay.format_runners(self.RUNNERS))
 
     def test_the_cli_wires_runs_and_runners(self):
         parser = relay.build_parser()

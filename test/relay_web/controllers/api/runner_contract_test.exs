@@ -45,7 +45,16 @@ defmodule RelayWeb.Api.RunnerContractTest do
       # and its shape for bin/test_relay.py to build against.
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => [],
-      "held" => []
+      "held" => [],
+      # RE320: always sent — null while claiming, this shape while paused at a Claude usage
+      # limit. A far-future reset (2100-01-01) so the fixture never churns.
+      "rate_limit" => %{
+        "window" => "five_hour",
+        "utilization" => 0.95,
+        "max" => 0.9,
+        "resets_at" => 4_102_444_800,
+        "reason" => "limit"
+      }
     }
 
     heartbeat_response =
@@ -162,7 +171,11 @@ defmodule RelayWeb.Api.RunnerContractTest do
         # silently rather than erroring. Pinned here like every other mirrored vocabulary.
         # Already strings on both sides (the field only ever exists on the wire), so no
         # `stringify/1`.
-        "holding_states" => Schemas.Runner.holding_states()
+        "holding_states" => Schemas.Runner.holding_states(),
+        # RE320 — `./relay` mirrors both as RATE_LIMIT_WINDOWS / RATE_LIMIT_REASONS; the server
+        # stores nil for any value outside them, so a drift would silently erase the pause.
+        "rate_limit_windows" => Schemas.Runner.rate_limit_windows(),
+        "rate_limit_reasons" => Schemas.Runner.rate_limit_reasons()
       },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{

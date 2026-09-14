@@ -11,5 +11,9 @@
   "poll_timeout": 25,
   "heartbeat_interval": 15,
   "auto_update": true,
-  "auto_update_min_interval": 300
+  "auto_update_min_interval": 300,
+  "limits": {
+    "max_five_hour": 0.9,
+    "max_seven_day": 0.9
+  }
 }
