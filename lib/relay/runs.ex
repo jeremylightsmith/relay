@@ -1127,7 +1127,7 @@ defmodule Relay.Runs do
   # `./relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
   # what the retired `.relay/published.json` marker existed to paper over. Deliberately NOT
   # min_runner_version/0 (a floor, not a target). Read at RUNTIME, from `priv/scaffold/`,
-  # because a Mix release ships `priv/` but ships neither `bin/` nor `.claude/`.
+  # because a Mix release ships `priv/` but ships neither `relay` nor `.claude/`.
 
   @doc """
   The newest `./relay` RUNNER_VERSION a runner can download, or `nil`.

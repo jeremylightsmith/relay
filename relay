@@ -55,7 +55,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 63
-RUNNER_FINGERPRINT = "c124450f53a6e97a6d7f3a9cf74cabdff1e29dbd85a1e1bb21a9d996c4463df2"
+RUNNER_FINGERPRINT = "1dd531413ae507c3ac6332d0d354afe67cb04fd9ad2c939bb4115358aa37287b"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -4188,13 +4188,18 @@ def scaffold_status():
     A missing file needs no separate condition: `_sha256_file` returns None for it, which
     never equals a manifest sha, so it lands in `changed` like any other repair. `missing`
     stays in the report as information, not as a trigger.
+
+    `./relay` with matching bytes but no executable bit is `changed` too (RE319): an older CLI's
+    update writes every item except its own path at mode 644, so the upgrade from bin/relay
+    leaves exactly that state, and the reinstall through `install_runner` is what restores 0o755.
     """
     manifest = fetch_scaffold_manifest()
     served, local = manifest["version"], local_scaffold_version()
     missing = [i["path"] for i in manifest["items"]
                if not os.path.exists(_safe_path(i["path"]))]
     changed = [i["path"] for i in manifest["items"]
-               if _sha256_file(_safe_path(i["path"])) != i["sha256"]]
+               if _sha256_file(_safe_path(i["path"])) != i["sha256"]
+               or (i["path"] == RUNNER_REL and not os.access(_safe_path(i["path"]), os.X_OK))]
     return {"served_version": served, "local_version": local, "current": not changed,
             "missing": missing, "changed": changed, "items": manifest["items"]}
 
@@ -4221,7 +4226,7 @@ def install_scaffold(status):
         if hashlib.sha256(body).hexdigest() != item["sha256"]:
             die(f"{rel} does not match the manifest sha256 — refusing to write it")
         # install_runner() mkstemps NEXT TO the target and does not create directories, so a
-        # first-ever install into a bare project needs bin/ to exist before it runs.
+        # first-ever install into a bare project needs the target's directory to exist first.
         os.makedirs(os.path.dirname(_safe_path(rel)) or ".", exist_ok=True)
         if rel == RUNNER_REL:
             result = verify_runner_source(body, url)

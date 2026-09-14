@@ -209,7 +209,7 @@ behind" is deliberately unsupported.
 
 `mix relay.build_scaffold` writes `priv/scaffold/` (a gitignored build artifact) — from `mix
 setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and before
-`mix release`, because a release ships `priv/` but ships neither `bin/` nor `.claude/`.
+`mix release`, because a release ships `priv/` but ships neither `relay` nor `.claude/`.
 
 **Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
 projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
@@ -229,6 +229,13 @@ declares the pre-rename version constant is Relay's, so after installing `./rela
 deletes it (and `bin/` when that leaves it empty) and reports it as `removed` (`--check`
 reports it as `obsolete` and writes nothing). A `bin/relay` without that line is someone else's
 and is never touched.
+
+An old `bin/relay` running the upgrade installs `./relay` **without the executable bit**: its
+installer gives mode 755 only to its own path and writes every other item at 644. The one-time
+step is `chmod +x relay && ./relay update`, which also removes the leftover, and the commit must
+carry `relay` as mode 755. From then on the new CLI keeps it that way: `scaffold_status` counts a
+`./relay` whose bytes match but which is not executable as `changed`, so `relay update` reinstalls
+it through `install_runner` and restores 0o755.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 

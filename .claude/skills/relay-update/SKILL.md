@@ -67,8 +67,11 @@ job boundary if `auto_update` is on).
 If the report's `removed` lists `bin/relay`, say so: the CLI moved to `./relay` (RE319) and the
 update deleted the old Relay-installed copy (and `bin/` if that left it empty) — include that
 deletion in the commit. A project whose update was run by an old `bin/relay` gets `./relay`
-installed but keeps the old file, because that old code predates the cleanup: run
-`./relay update` once more to remove it. A `bin/relay` that is not Relay's is never touched.
+installed **without the executable bit** and keeps the old file, because that old code
+predates both the new path and the cleanup. Fix it once with
+`chmod +x relay && ./relay update` — the update also removes the leftover — and make sure the
+commit records `relay` as mode 755 (`git ls-files -s relay` shows `100755`). A `bin/relay` that
+is not Relay's is never touched.
 
 ### 3. Confirm the commit, and explain why it matters
 

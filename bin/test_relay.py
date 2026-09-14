@@ -5716,8 +5716,32 @@ class UpdateTest(unittest.TestCase):
     def make_current(self):
         for rel, content in self.served.items():
             self.write_local(rel, content)
+        os.chmod(self.path(relay.RUNNER_REL), 0o755)
         self.write_local(".relay/scaffold.json",
                          json.dumps({"version": self.manifest()["version"]}))
+
+    # RE319 final review finding 1: an old bin/relay's update writes every item but its own path
+    # at mode 644, so ./relay lands with the right bytes and no executable bit. A sha-only
+    # verdict called that current and never repaired it.
+    def test_update_restores_the_executable_bit_on_a_runner_with_matching_bytes(self):
+        self.make_current()
+        os.chmod(self.path(relay.RUNNER_REL), 0o644)
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(report["current"])
+        self.assertEqual(report["written"], [relay.RUNNER_REL])
+        self.assertTrue(os.access(self.path(relay.RUNNER_REL), os.X_OK))
+
+    def test_check_reports_a_non_executable_runner_as_changed(self):
+        self.make_current()
+        os.chmod(self.path(relay.RUNNER_REL), 0o644)
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertFalse(report["current"])
+        self.assertEqual(report["changed"], [relay.RUNNER_REL])
+        self.assertFalse(os.access(self.path(relay.RUNNER_REL), os.X_OK))
 
     # ---- RE319: the CLI moved from bin/relay to ./relay ----
 
