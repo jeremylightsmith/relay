@@ -14,6 +14,9 @@ defmodule RelayWeb.Api.RunnerJSON do
   a runner can be perfectly fresh and still be running code below
   `Runs.min_runner_version/0`, in which case the server refuses it work (409
   `runner_outdated`) even though nothing here would flag it as unreachable.
+
+  `rate_limit` (RE320) is the runner's live Claude usage pause from `Runs.active_rate_limit/2` —
+  beating and fresh, but claiming nothing until `resets_at`.
   """
 
   def index(%{runners: runners}), do: %{data: Enum.map(runners, &runner/1)}
@@ -30,6 +33,10 @@ defmodule RelayWeb.Api.RunnerJSON do
       stale?: e.freshness != :fresh,
       version: e.version,
       outdated: e.outdated,
+      # RE320: the roster's presentation state (`:gone > :stale > :outdated > :rate_limited >
+      # :fresh`) and the live usage pause behind `:rate_limited` — nil once it resets.
+      display_state: e.display_state,
+      rate_limit: e.rate_limit,
       jobs: Enum.map(e.jobs, &job/1)
     }
   end

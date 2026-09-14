@@ -91,4 +91,25 @@ defmodule RelayWeb.Api.RunnerControllerTest do
 
     assert conn |> get(~p"/api/runners") |> json_response(200) |> Map.fetch!("data") == []
   end
+
+  test "RE320: a paused runner exposes its rate_limit and :rate_limited display state", %{conn: conn, board: board} do
+    insert(:runner,
+      board: board,
+      name: "paused",
+      version: Runs.min_runner_version(),
+      rate_limit: build(:runner_rate_limit, resets_at: ~U[2100-01-01 00:00:00Z])
+    )
+
+    [body] = conn |> get(~p"/api/runners") |> json_response(200) |> Map.fetch!("data")
+
+    assert body["display_state"] == "rate_limited"
+
+    assert body["rate_limit"] == %{
+             "window" => "five_hour",
+             "utilization" => 0.95,
+             "max" => 0.9,
+             "resets_at" => "2100-01-01T00:00:00Z",
+             "reason" => "limit"
+           }
+  end
 end

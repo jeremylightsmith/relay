@@ -66,6 +66,32 @@ defmodule Relay.Runs.DiagnoseTest do
     assert detail =~ "requires v#{Runs.min_runner_version()}"
   end
 
+  test "RE320: a live run whose job is queued behind paused runners diagnoses :runner_rate_limited",
+       %{board: board, works: works} do
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+    resets_at = DateTime.add(now, 3600, :second)
+
+    insert(:runner,
+      board: board,
+      name: "paused",
+      last_heartbeat: now,
+      rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+    )
+
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "implement")
+    exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
+    insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil)
+
+    assert %{verdict: :runner_rate_limited, detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
+
+    assert detail ==
+             "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
+               "Resumes #{Runs.resume_time_label(resets_at)}."
+
+    assert evidence.resumes_at == resets_at
+  end
+
   # The other side of that branch: once the outdated runner has actually CLAIMED the job it is
   # working it, so the roster-blocked correction must not clobber :run_active with
   # :runner_outdated. The OUTDATED badge on the runners view is the separate, correct signal.
@@ -315,6 +341,24 @@ defmodule Relay.Runs.DiagnoseTest do
       )
 
       assert %{verdict: :runner_outdated} = Runs.diagnose(board, card, now)
+    end
+
+    test "RE320: a full, paused roster is :runner_rate_limited, not :job_awaiting_slot", %{board: board, works: works} do
+      # A paused runner claims nothing even when a slot frees, so "no free slot" would be the
+      # wrong diagnosis.
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => "TH1", "state" => "bound"}],
+        rate_limit: build(:runner_rate_limit)
+      )
+
+      assert %{verdict: :runner_rate_limited} = Runs.diagnose(board, card, now)
     end
 
     test "a parked run keeps its own specific verdict, even behind an old queued job and a full roster",

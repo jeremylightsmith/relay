@@ -60,7 +60,7 @@ closed** (the burden of proof is on the claimant).
 ## C. Scheduling & capacity (diagnostic — the card waits, no run fails)
 
 These are **verdicts**, not run states — the card sits `:ready`/`:queued` and is explained in the
-UI. C0 is decided before capacity is even consulted (`Relay.Runs.Policy.pullable?/1`); C1-C6 come
+UI. C0 is decided before capacity is even consulted (`Relay.Runs.Policy.pullable?/1`); C1-C7 come
 from `capacity_diagnosis/1` (`scheduler.ex:437`), which classifies *why* an otherwise-eligible
 pull can't happen.
 
@@ -73,6 +73,7 @@ pull can't happen.
 | C4 | `runner_gone` | roster non-empty but every runner's freshness is `:gone` |
 | C5 | `runner_outdated` | every live runner is below `Relay.Runs.min_runner_version/0` (57 since RE311) → claims get 409 `runner_outdated` (`node_job_controller.ex:38`). Normally transient: with `auto_update` on (the default) the refused runner upgrades itself and the card pulls on a later poll — see D4 |
 | C6 | `resume_refused` | a parked run's resume is refused on every tick; `evidence.resume_refused_reason` names why and `evidence.resume_refused_since` when it started (RE297) — see D6 for what happens when it persists |
+| C7 | `runner_rate_limited` | every live, current runner has paused itself at its Claude usage limit (`.relay/runner.json` `limits`, or Claude refused a call) — RE320. Transient by design: each runner resumes at its window's `resets_at` (or earlier on an under-limit probe); `evidence.resumes_at` is the earliest. A run's own queued job reads the same verdict in `diagnose/3` |
 
 ## D. Runner lifecycle
 

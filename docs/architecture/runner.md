@@ -132,7 +132,9 @@ never 403s):
   isolation class, last heartbeat, the tri-state `freshness` (`Relay.Runs.runner_freshness/2`;
   `stale?` is the `freshness != :fresh` convenience flag), `version`/`outdated`
   (`Relay.Runs.runner_outdated?/1` — orthogonal to freshness, since a refused runner can
-  still be beating normally), and the jobs each runner currently holds.
+  still be beating normally), `display_state` (`:gone > :stale > :outdated > :rate_limited >
+  :fresh`), `rate_limit` (`Relay.Runs.active_rate_limit/2` — the runner's live Claude usage
+  pause, nil once `resets_at` passes, RE320), and the jobs each runner currently holds.
 - **Web: the Runners view** (`/board/:slug/runners`, `RelayWeb.BoardRunnersLive`) — the same
   `Relay.Runs.list_runner_status/2` roster rendered one panel per machine, plus (RE307) the
   board-wide **active queue** from `Relay.Runs.list_queue/2`: every `queued` or `claimed` node
@@ -142,6 +144,19 @@ never 403s):
   when a stacked queue matters. Read-only and deliberately **no** new endpoint and **no** new CLI
   verb: `POST /api/node-jobs/claim` stays the only path a job is handed out on, and
   `list_queue/2` is the function a future `relay queue` would render.
+- **Rate-limited roster (RE320).** `Relay.Runs.runner_rate_limited?/2` is the one predicate: a
+  stored `Schemas.Runner.rate_limit` whose `resets_at` is still ahead. `Scheduler.capacity_diagnosis/1`
+  returns `:runner_rate_limited` when the roster has live runners, not all of them are outdated,
+  and every live, current runner is paused. Its evidence carries `resumes_at` (the earliest reset)
+  and `rate_limited_runners`. The roster-blaming reasons live once in
+  `Scheduler.roster_blocking_reasons/0`. `Relay.Runs.stopped_work/2` returns the new reason for the
+  board and Runners-page banner (warning tint). `Relay.Runs.diagnose/3` (drawer, `relay why`,
+  `GET /api/cards/:ref/diagnosis`) returns verdict `:runner_rate_limited` for a live run whose job
+  is queued behind that roster. Paused runners are also excluded from `:job_awaiting_slot`'s
+  "connected runners". The card face reads `Relay.Runs.roster_rate_limit/2` (one runners query
+  through the same diagnosis) intersected with `Relay.Runs.queued_run_ids/1` on BoardLive's
+  health tick, and shows `Rate limited · resumes …` without the 5-minute stall threshold. Copy
+  comes from `Relay.Runs.rate_limit_phrase/1` and `resume_time_label/1`. No new PubSub topic.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
   `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain

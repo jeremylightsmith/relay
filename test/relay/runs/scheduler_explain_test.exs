@@ -60,7 +60,8 @@ defmodule Relay.Runs.SchedulerExplainTest do
        name: Keyword.get(opts, :name, "e#{id}"),
        version: Keyword.get(opts, :version, 1),
        outdated: Keyword.get(opts, :outdated, false),
-       freshness: Keyword.get(opts, :freshness, :fresh)
+       freshness: Keyword.get(opts, :freshness, :fresh),
+       rate_limit: Keyword.get(opts, :rate_limit)
      }}
   end
 
@@ -381,6 +382,59 @@ defmodule Relay.Runs.SchedulerExplainTest do
         )
 
       assert %{evidence: %{blocked_by: []}} = Scheduler.explain(snapshot, 10)
+    end
+  end
+
+  describe "capacity_diagnosis/1 — rate limits (RE320)" do
+    defp paused_at(resets_at, overrides \\ %{}) do
+      Map.merge(%{window: "five_hour", utilization: 0.95, max: 0.9, resets_at: resets_at, reason: "limit"}, overrides)
+    end
+
+    test "every live current runner paused is :runner_rate_limited, resuming at the earliest reset" do
+      early = ~U[2026-09-14 15:40:00Z]
+      late = ~U[2026-09-14 18:00:00Z]
+
+      execs =
+        Map.new([
+          exec(1, rate_limit: paused_at(late)),
+          exec(2, rate_limit: paused_at(early, %{reason: "rejected", max: nil}))
+        ])
+
+      assert {:runner_rate_limited, evidence} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+      assert evidence.resumes_at == early
+
+      assert [%{name: "e1", window: "five_hour", reason: "limit"}, %{name: "e2", reason: "rejected"}] =
+               Enum.sort_by(evidence.rate_limited_runners, & &1.name)
+    end
+
+    test "one live current runner that is not paused keeps it :awaiting_capacity" do
+      execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z])), exec(2)])
+
+      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "outdated runners do not count: the current ones all being paused is enough" do
+      execs = Map.new([exec(1, outdated: true, version: 0), exec(2, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert {:runner_rate_limited, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "a gone runner's pause is irrelevant — the roster is :runner_gone" do
+      execs = Map.new([exec(1, freshness: :gone, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert {:runner_gone, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "roster_blocking_reasons/0 is every roster-blaming reason, never :awaiting_capacity" do
+      assert Scheduler.roster_blocking_reasons() == [:runner_outdated, :no_runner, :runner_gone, :runner_rate_limited]
+    end
+
+    test "explain/2 names the pause for a card the flow would dispatch" do
+      execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "every connected runner is paused at its Claude usage limit (five_hour 95% / 90%)"
+      assert detail =~ "resumes 3:40 PM UTC"
     end
   end
 end

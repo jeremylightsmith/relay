@@ -261,4 +261,79 @@ defmodule Relay.Runs.RunnerStatusTest do
       assert Enum.find(runner.pools, &(&1.name == "shared_clean")).used == 1
     end
   end
+
+  describe "rate limits (RE320)" do
+    setup %{board: board}, do: {:ok, board: board, now: DateTime.truncate(DateTime.utc_now(), :second)}
+
+    test "runner_rate_limited?/2 is true only until the window resets", %{now: now} do
+      paused = %Schemas.Runner{rate_limit: build(:runner_rate_limit, resets_at: DateTime.add(now, 60, :second))}
+      reset = %Schemas.Runner{rate_limit: build(:runner_rate_limit, resets_at: now)}
+
+      assert Runs.runner_rate_limited?(paused, now)
+      refute Runs.runner_rate_limited?(reset, now)
+      refute Runs.runner_rate_limited?(%Schemas.Runner{rate_limit: nil}, now)
+    end
+
+    test "a fresh, current, paused runner is :rate_limited and carries its pause", %{board: board, now: now} do
+      resets_at = DateTime.add(now, 3600, :second)
+
+      insert(:runner,
+        board: board,
+        name: "a",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      )
+
+      assert [%{display_state: :rate_limited, freshness: :fresh, rate_limit: rate_limit}] =
+               Runs.list_runner_status(board, now)
+
+      assert rate_limit == %{window: "five_hour", utilization: 0.95, max: 0.9, resets_at: resets_at, reason: "limit"}
+    end
+
+    test "outdatedness outranks the pause", %{board: board, now: now} do
+      insert(:runner, board: board, name: "a", version: 0, last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+
+      assert [%{display_state: :outdated}] = Runs.list_runner_status(board, now)
+    end
+
+    test "a pause past its reset reads :fresh with no rate_limit, before any beat clears it",
+         %{board: board, now: now} do
+      insert(:runner,
+        board: board,
+        name: "a",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: DateTime.add(now, -1, :second))
+      )
+
+      assert [%{display_state: :fresh, rate_limit: nil}] = Runs.list_runner_status(board, now)
+    end
+
+    test "roster_rate_limit/2 names the resume time only when every live current runner is paused",
+         %{board: board, now: now} do
+      resets_at = DateTime.add(now, 3600, :second)
+
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      )
+
+      assert Runs.roster_rate_limit(board, now) == %{resumes_at: resets_at}
+
+      insert(:runner, board: board, name: "free", last_heartbeat: now)
+
+      assert Runs.roster_rate_limit(board, now) == nil
+    end
+
+    test "the phrases the board prints" do
+      assert Runs.resume_time_label(~U[2026-09-14 15:40:00Z]) == "3:40 PM UTC"
+
+      assert Runs.rate_limit_phrase(%{window: "five_hour", utilization: 0.95, max: 0.9, reason: "limit"}) ==
+               "five_hour 95% / 90%"
+
+      assert Runs.rate_limit_phrase(%{window: "seven_day", utilization: nil, max: nil, reason: "rejected"}) ==
+               "Claude refused (seven_day)"
+    end
+  end
 end

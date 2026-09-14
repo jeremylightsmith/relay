@@ -27,11 +27,13 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       `:gone` runner's advertised capacity is dropped during assembly
       (`Server.build_snapshot/2`), so the planner never places work onto a
       machine the reaper has given up on (RLY-199).
-    * `runners` — `%{runner_id => %{name, version, outdated, freshness}}`: the durable
+    * `runners` — `%{runner_id => %{name, version, outdated, freshness, rate_limit}}`: the durable
       runner rows, `outdated` from `Relay.Runs.runner_outdated?/1` and `freshness` from
       `Relay.Runs.runner_freshness/2` (not a second computation). `plan/1` ignores this
       field; only `explain/2` / `capacity_diagnosis/1` read it, so the plan/explain agreement
       property is unaffected.
+      `rate_limit` is `Relay.Runs.active_rate_limit/2` — the runner's live Claude usage pause
+      as a plain map, or nil (RE320); all entries are built by `Relay.Runs.runner_snapshot_entry/2`.
   """
 
   @type stage :: %{
@@ -70,7 +72,8 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           name: String.t(),
           version: integer() | nil,
           outdated: boolean(),
-          freshness: :fresh | :stale | :gone
+          freshness: :fresh | :stale | :gone,
+          rate_limit: map() | nil
         }
 
   @type t :: %__MODULE__{
