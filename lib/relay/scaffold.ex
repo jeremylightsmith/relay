@@ -3,15 +3,15 @@ defmodule Relay.Scaffold do
   The six Relay-owned files the board serves at `/api/scaffold`, and the build that produces
   them (RE304, ADR 0010).
 
-  These files are Relay's, never a user's: a project's `bin/relay`, its four `relay-*` skills,
-  and `relay.md`. That is what lets `bin/relay update` overwrite them unconditionally — no
+  These files are Relay's, never a user's: a project's `./relay`, its four `relay-*` skills,
+  and `relay.md`. That is what lets `./relay update` overwrite them unconditionally — no
   provenance ledger, no per-file diff prompt.
 
   `relay.md` joined the set after RE304 (see ADR 0010's amendment). It is the agent-facing guide
   to driving a card — the CLI verbs, the node/outcome contract, the `RELAY_NODE_SCRATCH` rule —
   and it is entirely generic, with nothing repo-specific in it. Leaving it undistributed meant
   every project's copy froze at whatever `/relay-onboard` first wrote and silently rotted away
-  from the executor it describes.
+  from the runner it describes.
 
   **The version is derived, never maintained.** It is the first 12 hex characters of the
   sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when content changes,
@@ -21,7 +21,7 @@ defmodule Relay.Scaffold do
   `priv/scaffold/` is a build artifact: written by `mix relay.build_scaffold` (run by
   `mix setup`, by the `test` alias, and by the `Dockerfile` before `mix release`) and
   gitignored. Every read here is a runtime read, because a Mix release ships `priv/` but
-  ships neither `bin/` nor `.claude/`.
+  ships neither `relay` nor `.claude/`.
   """
 
   use Boundary, deps: []
@@ -33,7 +33,7 @@ defmodule Relay.Scaffold do
     ".claude/skills/relay-onboard/SKILL.md",
     ".claude/skills/relay-setup/SKILL.md",
     ".claude/skills/relay-update/SKILL.md",
-    "bin/relay",
+    "relay",
     "relay.md"
   ]
 
@@ -41,10 +41,10 @@ defmodule Relay.Scaffold do
 
   @version_length 12
 
-  # The ONE regex parse of `EXECUTOR_VERSION`, mirroring bin/relay's own EXECUTOR_VERSION_RE.
-  @executor_version_re ~r/^EXECUTOR_VERSION\s*=\s*(\d+)/m
+  # The ONE regex parse of `RUNNER_VERSION`, mirroring ./relay's own RUNNER_VERSION_RE.
+  @runner_version_re ~r/^RUNNER_VERSION\s*=\s*(\d+)/m
 
-  @executor_path "bin/relay"
+  @runner_path "relay"
 
   @doc "The Relay-owned paths, sorted. Nothing else is ever served or updated."
   @spec items() :: [String.t()]
@@ -96,24 +96,24 @@ defmodule Relay.Scaffold do
   end
 
   @doc """
-  The `EXECUTOR_VERSION` of the `bin/relay` this app actually serves, or `nil`.
+  The `RUNNER_VERSION` of the `./relay` this app actually serves, or `nil`.
 
-  This is what `Relay.Runs.latest_executor_version/0` answers with. It is truthful by
+  This is what `Relay.Runs.latest_runner_version/0` answers with. It is truthful by
   construction — the served bytes and the advertised number cannot disagree, which is exactly
   what the retired `.relay/published.json` marker existed to paper over.
   """
-  @spec executor_version() :: integer() | nil
-  def executor_version do
-    case fetch(@executor_path) do
-      {:ok, source} -> parse_executor_version(source)
+  @spec runner_version() :: integer() | nil
+  def runner_version do
+    case fetch(@runner_path) do
+      {:ok, source} -> parse_runner_version(source)
       :error -> nil
     end
   end
 
-  @doc "The `EXECUTOR_VERSION` a `bin/relay` source declares, or `nil`. The ONE parse of it."
-  @spec parse_executor_version(binary()) :: integer() | nil
-  def parse_executor_version(source) do
-    case Regex.run(@executor_version_re, source) do
+  @doc "The `RUNNER_VERSION` a `./relay` source declares, or `nil`. The ONE parse of it."
+  @spec parse_runner_version(binary()) :: integer() | nil
+  def parse_runner_version(source) do
+    case Regex.run(@runner_version_re, source) do
       [_, v] -> String.to_integer(v)
       _ -> nil
     end

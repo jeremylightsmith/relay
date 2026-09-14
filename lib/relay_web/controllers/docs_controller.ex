@@ -21,7 +21,7 @@ defmodule RelayWeb.DocsController do
     {"boards-and-stages", "Boards & stages", "Get started", "boards-and-stages.md"},
     {"cards-and-handoffs", "Cards & handoffs", "Get started", "cards-and-handoffs.md"},
     {"statuses-and-outcomes", "Statuses & outcomes", "Get started", "statuses-and-outcomes.md"},
-    {"cli", "CLI (bin/relay)", "Build with Relay", "cli.md"},
+    {"cli", "CLI (./relay)", "Build with Relay", "cli.md"},
     {"api", "REST API reference", "Build with Relay", "api.md"},
     {"authentication", "Authentication & API access", "Build with Relay", "authentication.md"},
     {"runbook-flow-cutover", "Enabling a flow safely", "Operations", "runbooks/flow-cutover.md"},

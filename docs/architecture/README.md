@@ -3,7 +3,7 @@
 The current-state map of how Relay is built: what the pieces are, how a request and a card
 move through them, and where each piece's code lives. Start with the system map below, then
 follow the page that covers the layer you care about — the domain contexts, the runtime and
-its supervised processes, the executor, the state machines, or the dependencies.
+its supervised processes, the runner, the state machines, or the dependencies.
 
 The *why* behind these shapes lives in [`docs/adr/`](../adr/README.md); terms are defined in
 [`../glossary.md`](../glossary.md); the product north star is [`../vision.md`](../vision.md);
@@ -17,7 +17,7 @@ flowchart LR
     subgraph client["Clients"]
         browser["Browser<br/>(LiveView over WebSocket)"]
         mobile["Mobile shell (iOS/Android)<br/>thin native wrapper — ADR 0001/0005"]
-        agents["Agents & runner<br/>bin/relay · claude sessions"]
+        agents["Agents & runner<br/>./relay · claude sessions"]
     end
     subgraph fly["Phoenix app — Fly app 'relayboard'"]
         web["RelayWeb<br/>LiveViews · REST controllers"]
@@ -43,7 +43,7 @@ controllers) may call the domain only through **`Relay`**'s exported contexts; c
 never reach into the web layer; **`Schemas`** is a peer both may use (ADR 0002). One
 LiveView UI serves web and mobile — the mobile apps are thin native shells around it
 (ADR 0001, ADR 0005). Agents drive the same domain through the board-key REST API and the
-`bin/relay` CLI/runner.
+`./relay` CLI/runner.
 
 ## Pages
 

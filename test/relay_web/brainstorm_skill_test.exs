@@ -12,11 +12,11 @@ defmodule Relay.BrainstormSkillTest do
   end
 
   test "writes the approved spec to the card via relay spec", %{doc: doc} do
-    assert doc =~ "bin/relay spec"
+    assert doc =~ "./relay spec"
   end
 
   test "creates a new card when no ref is given", %{doc: doc} do
-    assert doc =~ "bin/relay create"
+    assert doc =~ "./relay create"
   end
 
   test "asks the human via needs-input in headless/runner use", %{doc: doc} do
@@ -24,7 +24,7 @@ defmodule Relay.BrainstormSkillTest do
   end
 
   test "defers the questions payload shape to the injected outcome contract", %{doc: doc} do
-    # The shape is appended to every agent prompt by bin/relay's OUTCOME_CONTRACT. This skill
+    # The shape is appended to every agent prompt by ./relay's OUTCOME_CONTRACT. This skill
     # keeps the judgement it uniquely owns — how to write a good question — and stops carrying
     # a second copy of the schema that can drift from the validator.
     assert doc =~ "outcome contract"
@@ -41,7 +41,7 @@ defmodule Relay.BrainstormSkillTest do
   end
 
   test "writes the card's acceptance criteria via relay criteria", %{doc: doc} do
-    assert doc =~ "bin/relay criteria"
+    assert doc =~ "./relay criteria"
   end
 
   test "specifies the numbered-criterion / numbered-steps / one-expectation format", %{doc: doc} do

@@ -1,32 +1,32 @@
 defmodule Relay.Runs.Capacity do
   @moduledoc """
-  The executor-capacity seam (ADR 0006 / RLY-133): a GenServer owning a public
-  named ETS table of the **advertised** capacity each connected executor
-  carries per isolation class — `%{executor_id => %{shared_clean: n,
+  The runner-capacity seam (ADR 0006 / RLY-133): a GenServer owning a public
+  named ETS table of the **advertised** capacity each connected runner
+  carries per isolation class — `%{runner_id => %{shared_clean: n,
   exclusive: n}}`. Like `Relay.BoardWatch`, beats and reads never hop
   through the process, and state is lost on restart by design.
 
-  **Contract: this is the executor's configured per-class slot count, not a
+  **Contract: this is the runner's configured per-class slot count, not a
   live free count.** The heartbeat (`RelayWeb.Api.NodeJobController.heartbeat/2`) advertises
   the same total on every beat; it does not decrement as jobs run. In-flight
   `:running` runs are debited server-side, in
   `Relay.Runs.Scheduler.Server.build_snapshot/1`, before the snapshot reaches
   the planner — so a running run holds its slot across reconciles without the
-  executor having to re-advertise a decremented count (which would be racy
+  runner having to re-advertise a decremented count (which would be racy
   across reconciles).
 
-  Global (not board-scoped) within an engine instance: capacity is keyed by executor and read by
+  Global (not board-scoped) within an engine instance: capacity is keyed by runner and read by
   every board's scheduler. The table name is resolved through `Relay.Runs.Instance` — the
   application-wide `default_table/0` in production, a private table per test (ADR 0009), so one
   test's advertised capacity can never be read or wiped by another. The
-  `{:executor_capacity_changed, executor_id}` broadcast on `topic/0` stays global: a spurious
+  `{:runner_capacity_changed, runner_id}` broadcast on `topic/0` stays global: a spurious
   wake-up makes a scheduler re-reconcile against its own (correctly scoped) snapshot, which is
   idempotent. Every `put/2`/`clear/1` broadcasts it so schedulers reconcile immediately
-  (acceptance criterion 2's "without waiting a full tick"). The executor heartbeat feeds this
-  store; with no executor connected it is empty and the scheduler is dormant.
+  (acceptance criterion 2's "without waiting a full tick"). The runner heartbeat feeds this
+  store; with no runner connected it is empty and the scheduler is dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
-  concurrent per-card worktrees an executor holds, reinterpreted from the old fixed
+  concurrent per-card worktrees a runner holds, reinterpreted from the old fixed
   `-work-N` slot count — the per-class debit and the capacity numbers themselves are
   unchanged by that reinterpretation.
   """
@@ -55,23 +55,23 @@ defmodule Relay.Runs.Capacity do
   def subscribe, do: Phoenix.PubSub.subscribe(@pubsub, @topic)
 
   @doc """
-  Sets/replaces `executor_id`'s advertised (configured, not live-free) slots
+  Sets/replaces `runner_id`'s advertised (configured, not live-free) slots
   and broadcasts the change. Fire-and-forget: `:ok`.
 
   Takes the **raw** client map — string- or atom-keyed — and shapes it with
   `normalize/1`: unknown classes dropped, bad values zeroed, missing classes 0.
   Callers must not pre-atomize (RLY-201).
   """
-  def put(executor_id, slots) when is_map(slots) do
-    :ets.insert(table(), {executor_id, normalize(slots)})
-    broadcast(executor_id)
+  def put(runner_id, slots) when is_map(slots) do
+    :ets.insert(table(), {runner_id, normalize(slots)})
+    broadcast(runner_id)
     :ok
   end
 
-  @doc "Removes a gone executor and broadcasts the change."
-  def clear(executor_id) do
-    :ets.delete(table(), executor_id)
-    broadcast(executor_id)
+  @doc "Removes a gone runner and broadcasts the change."
+  def clear(runner_id) do
+    :ets.delete(table(), runner_id)
+    broadcast(runner_id)
     :ok
   end
 
@@ -102,9 +102,9 @@ defmodule Relay.Runs.Capacity do
 
   Key recognition is a literal pattern match, never `String.to_atom/1` or
   `String.to_existing_atom/1` — the latter is what made an unknown key
-  (`{"gpu": 1}`) raise `ArgumentError` and 500 the executor's liveness path.
+  (`{"gpu": 1}`) raise `ArgumentError` and 500 the runner's liveness path.
   Untrusted input degrades, never raises: a stray key from an older or newer
-  executor must not knock a working executor off the roster.
+  runner must not knock a working runner off the roster.
   """
   def normalize(slots) when is_map(slots) do
     %{
@@ -125,7 +125,7 @@ defmodule Relay.Runs.Capacity do
   defp non_neg(n) when is_integer(n) and n >= 0, do: n
   defp non_neg(_n), do: 0
 
-  defp broadcast(executor_id) do
-    Phoenix.PubSub.broadcast(@pubsub, @topic, {:executor_capacity_changed, executor_id})
+  defp broadcast(runner_id) do
+    Phoenix.PubSub.broadcast(@pubsub, @topic, {:runner_capacity_changed, runner_id})
   end
 end

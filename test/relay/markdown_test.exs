@@ -151,12 +151,12 @@ defmodule Relay.MarkdownTest do
     end
 
     test "strips backticks from display text but the anchor still matches the rendered id" do
-      [%{text: text, anchor: anchor}] = Markdown.table_of_contents("## CLI (`bin/relay`)")
-      assert text == "CLI (bin/relay)"
-      assert anchor == "cli-binrelay"
+      [%{text: text, anchor: anchor}] = Markdown.table_of_contents("## CLI (`./relay`)")
+      assert text == "CLI (./relay)"
+      assert anchor == "cli-relay"
 
-      {:safe, html} = Markdown.to_docs_html("## CLI (`bin/relay`)")
-      assert html =~ ~s(id="cli-binrelay")
+      {:safe, html} = Markdown.to_docs_html("## CLI (`./relay`)")
+      assert html =~ ~s(id="cli-relay")
     end
 
     test "nil returns an empty list" do

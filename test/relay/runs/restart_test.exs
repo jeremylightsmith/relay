@@ -51,9 +51,9 @@ defmodule Relay.Runs.RestartTest do
       refute Runs.restartable?(genuine_question(stage))
     end
 
-    test "an :executor_gone park is NOT restartable", %{stage: stage} do
-      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
-      run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone)
+    test "an :runner_gone park is NOT restartable", %{stage: stage} do
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Runner gone"})
+      run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone)
       insert(:node_execution, run: run, node: "brainstorm", outcome: :failed)
       refute Runs.restartable?(Runs.get_run!(run.id))
     end
@@ -66,12 +66,12 @@ defmodule Relay.Runs.RestartTest do
       end
     end
 
-    # RE297: an `:executor_gone` park is still not restartable IN PLACE — but it is no longer a
+    # RE297: an `:runner_gone` park is still not restartable IN PLACE — but it is no longer a
     # dead end, because `abandon_unresumable_runs/1` fails it once the refusal outlives the
     # grace window, and a `:failed` run is restartable by the first clause.
-    test "an executor_gone park is not restartable, but the run it ages into is", %{stage: stage} do
+    test "a runner_gone park is not restartable, but the run it ages into is", %{stage: stage} do
       {:ok, card} = Relay.Cards.create_card(stage, %{title: "Gone"})
-      run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: nil)
+      run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone, current_node: nil)
 
       refute Runs.restartable?(Runs.get_run!(run.id))
 
@@ -96,8 +96,8 @@ defmodule Relay.Runs.RestartTest do
     test "a run that is not a needs_input park has no park kind", %{stage: stage} do
       assert Runs.park_kind(clean_failed(stage)) == nil
 
-      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
-      gone = insert(:run, card: card, status: :parked, parked_reason: :executor_gone)
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Runner gone"})
+      gone = insert(:run, card: card, status: :parked, parked_reason: :runner_gone)
       insert(:node_execution, run: gone, node: "brainstorm", outcome: :failed)
       assert Runs.park_kind(Runs.get_run!(gone.id)) == nil
 
@@ -110,7 +110,7 @@ defmodule Relay.Runs.RestartTest do
       assert Runs.park_kind(:parked, :needs_input, :needs_input) == :question
       assert Runs.park_kind(:parked, :needs_input, :failed) == :escalation
       assert Runs.park_kind(:parked, :needs_input, nil) == :escalation
-      assert Runs.park_kind(:parked, :executor_gone, :failed) == nil
+      assert Runs.park_kind(:parked, :runner_gone, :failed) == nil
       assert Runs.park_kind(:failed, nil, :failed) == nil
       assert Runs.park_kind(:running, nil, nil) == nil
     end
@@ -122,8 +122,8 @@ defmodule Relay.Runs.RestartTest do
       assert Runs.restartable?(escalation_park(stage))
       refute Runs.restartable?(genuine_question(stage))
 
-      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone 2"})
-      gone = insert(:run, card: card, status: :parked, parked_reason: :executor_gone)
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Runner gone 2"})
+      gone = insert(:run, card: card, status: :parked, parked_reason: :runner_gone)
       insert(:node_execution, run: gone, node: "brainstorm", outcome: :failed)
       refute Runs.restartable?(Runs.get_run!(gone.id))
     end
@@ -302,12 +302,12 @@ defmodule Relay.Runs.RestartTest do
     end
 
     # stall_reason/1 describes exactly the states restartable?/1 admits and refuses anything else,
-    # so the dialog can never render a sentence for a card it does not list. :executor_gone is the
+    # so the dialog can never render a sentence for a card it does not list. :runner_gone is the
     # nearest miss: a park restartable?/1 rejects (RLY-199 auto-resumes those instead).
-    test "it refuses a run restartable?/1 rejects, such as an executor_gone park",
+    test "it refuses a run restartable?/1 rejects, such as a runner_gone park",
          %{stage: stage} do
-      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Executor gone"})
-      run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: "code")
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "Runner gone"})
+      run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone, current_node: "code")
 
       refute Runs.restartable?(Runs.get_run!(run.id))
       assert_raise FunctionClauseError, fn -> Runs.stall_reason(Runs.get_run!(run.id)) end

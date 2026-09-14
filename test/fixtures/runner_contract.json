@@ -62,13 +62,13 @@
     "capacity": {
       "shared_clean": 1
     },
-    "executor": {
+    "held": [],
+    "runner": {
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 57
+      "version": 63
     },
-    "held": [],
     "running": []
   },
   "heartbeat": {
@@ -85,21 +85,21 @@
         "exclusive": 1,
         "shared_clean": 1
       },
-      "executor": {
+      "held": [],
+      "runner": {
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 57
+        "version": 63
       },
-      "held": [],
       "running": []
     },
     "response": {
-      "executor_outdated": false,
-      "latest_executor_version": "<latest-executor-version>",
+      "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 57,
+      "required_version": 63,
       "revoked": [],
+      "runner_outdated": false,
       "want_capabilities": false
     }
   },
@@ -117,7 +117,7 @@
     }
   },
   "scaffold": {
-    "file_path_example": "/api/scaffold/bin/relay",
+    "file_path_example": "/api/scaffold/relay",
     "manifest": {
       "items": [
         {
@@ -142,7 +142,7 @@
         },
         {
           "bytes": "<bytes>",
-          "path": "bin/relay",
+          "path": "relay",
           "sha256": "<sha256>"
         },
         {
@@ -217,7 +217,7 @@
       "turn_state": "done"
     }
   },
-  "version": 5,
+  "version": 6,
   "vocabulary": {
     "audit_severities": [
       "error",

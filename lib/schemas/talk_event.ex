@@ -4,8 +4,8 @@ defmodule Schemas.TalkEvent do
   monotonic per session — **render order is this, never a timestamp**, because two lines
   written in the same second must still have one true order.
 
-  `client_seq` is the executor's own per-turn counter, unique with `talk_turn_id`. That
-  uniqueness is the whole at-least-once story: the executor may re-POST a batch it is unsure
+  `client_seq` is the runner's own per-turn counter, unique with `talk_turn_id`. That
+  uniqueness is the whole at-least-once story: the runner may re-POST a batch it is unsure
   landed, and the retry stores exactly once.
 
   `dim` is presentation only (the artboard's dim tool lines); it is never authority.

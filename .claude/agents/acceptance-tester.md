@@ -19,7 +19,7 @@ The card ref is in your task message. Read the criteria from the card — the ca
 source of truth, and they are deliberately NOT copied into the plan (at `$RELAY_PLAN`):
 
 ```bash
-./bin/relay card <ref> --json | jq -r '.acceptance_criteria // ""'
+./relay card <ref> --json | jq -r '.acceptance_criteria // ""'
 ```
 
 `RELAY_URL` + `RELAY_API_KEY` are already set. If the field is empty, return `verdict: "pass"`

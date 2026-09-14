@@ -1,7 +1,7 @@
 # REST API reference
 
 Relay exposes a small JSON REST API scoped to a single **board**. It is the same
-entry point the `bin/relay` CLI uses, so anything the CLI does you can do directly.
+entry point the `./relay` CLI uses, so anything the CLI does you can do directly.
 
 ## Base URL & authentication
 
@@ -137,7 +137,7 @@ All cards on the board (base shape).
 | `limit=<n>` | Cap the number of results (the exact-ref hit counts toward it). |
 | `archived=1` | Widen the corpus so archived cards join the results. |
 
-`bin/relay search "words"` is the CLI wrapper for `q`.
+`./relay search "words"` is the CLI wrapper for `q`.
 
 ```
 curl -H "Authorization: Bearer $RELAY_KEY" "https://relay.example/api/cards?q=login&limit=10"
@@ -234,7 +234,7 @@ recorded against Relay AI, and any dependency rows that name it as a blocker are
 is a `200` that records nothing new.
 
 A card with a live run is refused with **`409 active_run`** and nothing is written — cancel the
-run first (`POST /api/cards/:ref/cancel`, or `bin/relay cancel REF`), then archive. The board's
+run first (`POST /api/cards/:ref/cancel`, or `./relay cancel REF`), then archive. The board's
 own Archive button is not guarded this way.
 
 ```
@@ -272,7 +272,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 
 ```json
 { "data": { "verdict": "awaiting_capacity",
-  "detail": "The code flow would dispatch this card, but no executor is advertising a free shared_clean slot.",
+  "detail": "The code flow would dispatch this card, but no runner is advertising a free shared_clean slot.",
   "evidence": { "card_ref": "RLY-12", "card_status": "ready", "flow_key": "code", "run_id": null } } }
 ```
 
@@ -281,20 +281,20 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `dispatchable` | would dispatch on the scheduler's next tick |
 | `blocked_by_dependencies` | the card declares blockers that have not reached a top-level Done column; `evidence.blocked_by` names their refs |
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
-| `awaiting_capacity` | a flow would dispatch; no executor advertises a free slot of the needed class |
-| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_executor_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |
+| `awaiting_capacity` | a flow would dispatch; no runner advertises a free slot of the needed class |
+| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |
 | `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |
 | `owned_by_human` | a human holds the baton (ADR 0004) |
 | `blocked_on_input` | card status `needs_input`, or the run is parked `needs_input` |
 | `run_active` | a run is live; `evidence.current_node` names the node |
 | `not_eligible` | a flow pulls from this stage, but the card's status is not `ready`/`queued` |
 | `run_failed` | the card's last run failed; `evidence.last_execution.detail` carries the **full** failure text |
-| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live executor, **and the board has at least one executor row**. An EMPTY roster is the more fundamental fact and diagnoses `no_executor` instead (RE311) |
-| `job_awaiting_slot` | a live run's job has sat `queued` unclaimed past the grace and no connected executor has a free slot in its class; `evidence.queued_age_s`, `evidence.isolation` and `evidence.executors` (each `%{name, used, total, held}`) name the job's age, class, and who holds the slots |
-| `executor_outdated` | every connected executor is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
-| `no_executor` | no executor is connected (or every one has gone silent), so nothing is running this board's node-jobs. Also the verdict for an aged unclaimed job when the roster is empty — nothing was ever holding it to go quiet on it (RE311) |
+| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live runner, **and the board has at least one runner row**. An EMPTY roster is the more fundamental fact and diagnoses `no_runner` instead (RE311) |
+| `job_awaiting_slot` | a live run's job has sat `queued` unclaimed past the grace and no connected runner has a free slot in its class; `evidence.queued_age_s`, `evidence.isolation` and `evidence.runners` (each `%{name, used, total, held}`) name the job's age, class, and who holds the slots |
+| `runner_outdated` | every connected runner is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
+| `no_runner` | no runner is connected (or every one has gone silent), so nothing is running this board's node-jobs. Also the verdict for an aged unclaimed job when the roster is empty — nothing was ever holding it to go quiet on it (RE311) |
 
-CLI: `bin/relay why RLY-12`.
+CLI: `./relay why RLY-12`.
 
 ### GET /api/cards/:ref/runs
 
@@ -313,23 +313,23 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
   ] } ] }
 ```
 
-CLI: `bin/relay runs RLY-12`.
+CLI: `./relay runs RLY-12`.
 
-### GET /api/executors
+### GET /api/runners
 
-The board's connected executors: advertised capacity per isolation class, last
+The board's connected runners: advertised capacity per isolation class, last
 heartbeat, freshness, version, and the jobs each is currently holding.
 
 `freshness` is `"fresh"`, `"stale"` (missed a beat), or `"gone"` (reclaimed by the reaper);
 `stale?` is a `freshness != "fresh"` convenience flag — check `freshness` when the
 distinction between "late" and "reclaimed" matters. `outdated` is **orthogonal to
-freshness**: an executor can be beating normally and still be running code below the
-server's minimum version, in which case it is refused work (409 `executor_outdated`) with
-no other visible symptom — this is the field that explains a healthy-looking executor that
+freshness**: a runner can be beating normally and still be running code below the
+server's minimum version, in which case it is refused work (409 `runner_outdated`) with
+no other visible symptom — this is the field that explains a healthy-looking runner that
 picks up nothing.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
+curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/runners
 ```
 
 ```json
@@ -340,7 +340,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/executors
   ] } ] }
 ```
 
-CLI: `bin/relay executors`.
+CLI: `./relay runners`.
 
 ### GET /api/version
 
@@ -356,11 +356,11 @@ curl https://relay.example/api/version
 { "sha": "0123456789abcdef0123456789abcdef01234567", "built_at": "2026-07-19T10:00:00Z", "version": "0.1.0" }
 ```
 
-CLI: `bin/relay version`.
+CLI: `./relay version`.
 
 ### GET /api/scaffold
 
-The manifest of the six Relay-owned files this board serves: `bin/relay`, the four
+The manifest of the six Relay-owned files this board serves: `./relay`, the four
 `relay-*` skills, and `relay.md` (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
 pipeline as `GET /api/version` — `/relay-setup` runs before a project has a board key, so this
 has to be reachable with no `Authorization` header at all. `503 scaffold_unavailable` if the
@@ -373,7 +373,7 @@ curl https://relay.example/api/scaffold
 
 ```json
 { "version": "0123456789ab", "items": [
-  { "path": "bin/relay", "sha256": "…", "bytes": 12345 }
+  { "path": "relay", "sha256": "…", "bytes": 12345 }
 ] }
 ```
 
@@ -387,11 +387,11 @@ before it ever reaches the filesystem, so this is not a general file server: any
 the six Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
 
 ```
-curl https://relay.example/api/scaffold/bin/relay
+curl https://relay.example/api/scaffold/relay
 curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
 ```
 
-CLI: `bin/relay update` fetches the manifest, hashes each of the six files against it, and
+CLI: `./relay update` fetches the manifest, hashes each of the six files against it, and
 re-downloads only the ones whose content differs — which covers a file that is missing, and one
 that has been edited. `.relay/scaffold.json` records what was installed; it is not the trigger.
 
@@ -399,6 +399,6 @@ that has been edited. `.relay/scaffold.json` records what was installed; it is n
 
 ## CLI
 
-Most of the time you'll drive this API through the `bin/relay` CLI rather than raw
+Most of the time you'll drive this API through the `./relay` CLI rather than raw
 HTTP — it wraps pull/work/hand-back into a few commands. See `relay.md`
 in the repository for the full agent workflow.

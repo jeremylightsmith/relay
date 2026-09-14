@@ -13,7 +13,7 @@ Every failure mode here is a *dispatcher count* problem, and there are only two 
   another board's flow, a hand-run agent loop, a legacy watcher — enabling a flow on that
   stage means both claim the same cards and stomp each other's branches.
 - **Zero dispatchers.** A flow definition is inert until it is deployed, and a deployed
-  flow still dispatches nothing unless an executor is advertising the isolation class the
+  flow still dispatches nothing unless a runner is advertising the isolation class the
   flow's nodes ask for. Enable the flow before either is true and `<Stage>` cards simply
   sit in *Next up* looking broken.
 
@@ -31,23 +31,23 @@ The ritual below is ordered so neither window is ever open.
 
 3. **Turn the flow on** in the board's **Settings › Flows**. The toggle is the only enable
    path — there is no CLI or mix task. It shows a runner-readiness warning before turning
-   on: if no executor is connected and advertising capacity, cards will queue with no
+   on: if no runner is connected and advertising capacity, cards will queue with no
    dispatcher to pick them up.
 
-4. **Confirm an executor is advertising the right capacity class.** Start (or check)
-   `relay execute` and open the board's **Runners** view at `/board/:slug/runners`. The
-   executor should show a **FRESH** pill and capacity chips for the class the flow's nodes
+4. **Confirm a runner is advertising the right capacity class.** Start (or check)
+   `relay start` and open the board's **Runners** view at `/board/:slug/runners`. The
+   runner should show a **FRESH** pill and capacity chips for the class the flow's nodes
    need — `exclusive` for a flow whose nodes take a dedicated worktree, `shared_clean` for
    one that does not.
 
-   `relay execute` advertises its **configured** capacity (`.relay/executor.json`'s
+   `relay start` advertises its **configured** capacity (`.relay/runner.json`'s
    `capacity`) on its heartbeat, beating once immediately at startup and then every
    `heartbeat_interval` seconds. That beat is the only thing feeding the capacity store the
    scheduler reads, and because that store is deliberately lost on every app restart, the
    repeating beat is what makes dispatch resume by itself after a deploy. Nothing manual is
    required.
 
-   Two things to know when diagnosing: the executor advertises its configured **total**,
+   Two things to know when diagnosing: the runner advertises its configured **total**,
    not a live free count (the scheduler debits in-flight runs itself), and the `name` it
    beats with is the same one it claims with, so capacity lands on the row doing the
    claiming.
@@ -58,12 +58,12 @@ The ritual below is ordered so neither window is ever open.
 ## Verification — "it worked"
 
 - Exactly **one** dispatcher claims each `<Stage>` card.
-- The executor shows **FRESH** with the expected capacity chips on `/board/:slug/runners`.
+- The runner shows **FRESH** with the expected capacity chips on `/board/:slug/runners`.
 - A `Run` row appears on the card — its run panel / timeline shows the node starting —
   within one scheduler tick of the capacity beat landing.
 - Open the card's drawer **Run** tab and watch one real card through the flow end to end.
   That is the only check that proves the agent nodes themselves work; it needs a real
-  executor and a real deploy, so it cannot be done in a test suite.
+  runner and a real deploy, so it cannot be done in a test suite.
 
 ## Rollback
 
@@ -86,7 +86,7 @@ For Spec and Plan, a legacy `relay watch` dispatcher was still running, so the h
 stage from that file without restarting the watcher left it still pulling the stage.
 
 For Code the watcher was gone, so the hazard inverted to a **gap**: with only one
-dispatcher left, enabling the flow before an executor advertised `exclusive` capacity meant
+dispatcher left, enabling the flow before a runner advertised `exclusive` capacity meant
 *Plan:Done* cards sat with nothing to work them. The Code cutover PR deleted `relay watch`,
 `relay_config.json`, `/exec-plan` and `execute-plan.js`, so there is no legacy path left to
 fall back to — the only lever is the revert described under Rollback.

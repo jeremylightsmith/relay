@@ -198,10 +198,10 @@ defmodule Relay.Runs.RetryTest do
   # `describe` is invalid Elixir. The shipped "code" flow is already `isolation:
   # :exclusive` (default_library.ex:52), so it needs no modification.
   #
-  # RLY-199: affinity is now read off the run row's `pinned_executor_name` column
-  # (one column, two readers), not derived from the last job's `executor_name` —
+  # RLY-199: affinity is now read off the run row's `pinned_runner_name` column
+  # (one column, two readers), not derived from the last job's `runner_name` —
   # so the fixture pins the run directly.
-  defp exclusive_failed_run(ctx, executor_name) do
+  defp exclusive_failed_run(ctx, runner_name) do
     card = Repo.get!(Schemas.Card, ctx.card.id)
 
     run =
@@ -211,7 +211,7 @@ defmodule Relay.Runs.RetryTest do
         current_node: nil,
         flow_key: "code",
         flow_id: ctx.code_flow.id,
-        pinned_executor_name: executor_name
+        pinned_runner_name: runner_name
       )
 
     execution = insert(:node_execution, run: run, node_key: "precommit", outcome: :failed, detail: "gate failed")
@@ -219,7 +219,7 @@ defmodule Relay.Runs.RetryTest do
     insert(:node_job,
       node_execution: execution,
       state: :done,
-      executor_name: executor_name,
+      runner_name: runner_name,
       payload: %{"isolation" => "exclusive"}
     )
 
@@ -231,16 +231,16 @@ defmodule Relay.Runs.RetryTest do
       %{code_flow: Relay.Flows.get_flow!(ctx.board, "code")}
     end
 
-    test "the retry job is pinned to the executor that ran the last job", ctx do
-      insert(:executor, board: ctx.board, name: "mac-holder")
+    test "the retry job is pinned to the runner that ran the last job", ctx do
+      insert(:runner, board: ctx.board, name: "mac-holder")
       run = exclusive_failed_run(ctx, "mac-holder")
 
       {:ok, _revived} = Runs.retry_run(run)
-      assert_receive {:dispatched, %NodeJob{executor_name: "mac-holder"}}
+      assert_receive {:dispatched, %NodeJob{runner_name: "mac-holder"}}
     end
 
-    test "it refuses when the pinned executor has gone stale, naming it", ctx do
-      insert(:executor,
+    test "it refuses when the pinned runner has gone stale, naming it", ctx do
+      insert(:runner,
         board: ctx.board,
         name: "mac-gone",
         interval: 30,
@@ -249,28 +249,28 @@ defmodule Relay.Runs.RetryTest do
 
       run = exclusive_failed_run(ctx, "mac-gone")
 
-      assert {:error, {:executor_unavailable, "mac-gone"} = reason} = Runs.retry_run(run)
-      assert Runs.retry_refusal_code(reason) == "executor_unavailable"
+      assert {:error, {:runner_unavailable, "mac-gone"} = reason} = Runs.retry_run(run)
+      assert Runs.retry_refusal_code(reason) == "runner_unavailable"
       assert Runs.retry_refusal_message(reason) =~ "mac-gone"
       assert Runs.get_run!(run.id).status == :failed
       refute_receive {:dispatched, _job}, 100
     end
 
-    test "it refuses when the pinned executor has never connected", ctx do
+    test "it refuses when the pinned runner has never connected", ctx do
       run = exclusive_failed_run(ctx, "mac-never")
-      assert {:error, {:executor_unavailable, "mac-never"}} = Runs.retry_run(run)
+      assert {:error, {:runner_unavailable, "mac-never"}} = Runs.retry_run(run)
     end
 
     # RE297: `abandon_unresumable_runs/1` clears a provably-unhonourable pin, and the run's own
-    # column is what retry now reads — the dead executor's name still sitting on the last
+    # column is what retry now reads — the dead runner's name still sitting on the last
     # NodeJob must NOT keep the hatch shut.
-    test "an unpinned exclusive run retries even though the last job names a dead executor", ctx do
+    test "an unpinned exclusive run retries even though the last job names a dead runner", ctx do
       run = exclusive_failed_run(ctx, nil)
 
       insert(:node_job,
         node_execution: insert(:node_execution, run: run, node_key: "precommit", outcome: :failed),
         state: :done,
-        executor_name: "mac-dead",
+        runner_name: "mac-dead",
         payload: %{"isolation" => "exclusive"}
       )
 

@@ -107,7 +107,7 @@ defmodule Relay.DataCase do
 
   @doc """
   Starts this test's own runs engine — Registry, run `DynamicSupervisor`, `Listener`,
-  `ExecutorReaper`, boot-resume `Task` and a private capacity table — under unique names, and
+  `RunnerReaper`, boot-resume `Task` and a private capacity table — under unique names, and
   registers them on the calling process's `Relay.Runs.Instance`. Returns the instance.
 
   Replaces `start_supervised!(Relay.Runs.Supervisor)`, which started a globally-named tree and so
@@ -125,7 +125,7 @@ defmodule Relay.DataCase do
   > **every concurrent test's** card events and reconciles them on *this* test's sandbox
   > connection. Harmless when a test's cards are its own (a foreign reconcile is a no-op), but a
   > test that asserts on *how many times* the engine reacted, or that stops the tree mid-flight,
-  > will race. That is why `executor_reaper_test` and `board_settings_flow_preflight_test` are
+  > will race. That is why `runner_reaper_test` and `board_settings_flow_preflight_test` are
   > `async: false`. See the "Known limitation" bullet in ADR 0009's Consequences.
   """
   def start_engine!(opts \\ []) do
@@ -144,7 +144,7 @@ defmodule Relay.DataCase do
 
   @doc """
   Stops and restarts this test's engine tree under the **same** registry, run-supervisor,
-  listener, executor-reaper and capacity names — what a test that simulates an application
+  listener, runner-reaper and capacity names — what a test that simulates an application
   restart needs (the boot-resume `Task` runs again against the same rows), and what a test that
   pinned a name via `start_engine!(listener: Listener)` needs the pin to survive.
 
@@ -177,7 +177,7 @@ defmodule Relay.DataCase do
       registry: instance.registry,
       run_supervisor: instance.run_supervisor,
       listener: :"relay_runs_listener_#{n}",
-      executor_reaper: :"relay_runs_executor_reaper_#{n}",
+      runner_reaper: :"relay_runs_runner_reaper_#{n}",
       callers: [self()]
     ]
 

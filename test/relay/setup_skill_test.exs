@@ -25,7 +25,7 @@ defmodule Relay.SetupSkillTest do
     [_, step3] = String.split(doc, "## Step 3", parts: 2)
     [step3, _] = String.split(step3, "## Step 4", parts: 2)
 
-    assert step3 =~ "bin/relay update --json"
+    assert step3 =~ "./relay update --json"
     refute String.replace(step3, ~r/\s+/, " ") =~ "Invoke **`/relay-update`** (via the `Skill` tool)"
   end
 

@@ -26,15 +26,15 @@ defmodule Relay.TalkTest do
 
     author = insert(:user)
 
-    executor =
-      insert(:executor,
+    runner =
+      insert(:runner,
         board: board,
         name: "mac-1",
         capacity: %{"exclusive" => 1},
-        version: Runs.min_talk_executor_version()
+        version: Runs.min_talk_runner_version()
       )
 
-    %{board: board, stage: stage, card: card, author: author, executor: executor}
+    %{board: board, stage: stage, card: card, author: author, runner: runner}
   end
 
   test "the closed sets are defined once" do
@@ -85,7 +85,7 @@ defmodule Relay.TalkTest do
     assert job.payload["seed"]["summary"] =~ "3 fields"
     assert is_nil(job.payload["resume_session"])
 
-    assert {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, claimed} = Runs.claim_next_job(ctx.runner)
     assert claimed.id == job.id
   end
 
@@ -95,7 +95,7 @@ defmodule Relay.TalkTest do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "why is this stuck?")
     Talk.subscribe(ctx.card.id)
 
-    {:ok, job} = Runs.claim_next_job(ctx.executor)
+    {:ok, job} = Runs.claim_next_job(ctx.runner)
     assert {:ok, claimed} = Talk.mark_claimed(job)
 
     assert claimed.status == :claimed
@@ -158,34 +158,34 @@ defmodule Relay.TalkTest do
     assert Enum.map(stored, & &1.client_seq) == [2]
   end
 
-  test "finishing a turn persists the claude session id and pins the executor", ctx do
+  test "finishing a turn persists the claude session id and pins the runner", ctx do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
-    {:ok, _claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, _claimed} = Runs.claim_next_job(ctx.runner)
 
     {:ok, done} = Talk.finish_turn(turn, :done, %{session_id: "sess-abc"})
     assert done.status == :done
 
     session = Talk.session_for_card(ctx.card)
     assert session.claude_session_id == "sess-abc"
-    assert session.pinned_executor_name == "mac-1"
+    assert session.pinned_runner_name == "mac-1"
     assert Runs.get_job(turn.node_job_id).state == :done
   end
 
   test "the next turn resumes the stored session and is pinned to its holder", ctx do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
-    {:ok, _} = Runs.claim_next_job(ctx.executor)
+    {:ok, _} = Runs.claim_next_job(ctx.runner)
     {:ok, _} = Talk.finish_turn(turn, :done, %{session_id: "sess-abc"})
 
     {:ok, two} = Talk.post_message(ctx.card, ctx.author, "two")
     job = Runs.get_job(two.node_job_id)
 
     assert job.payload["resume_session"] == "sess-abc"
-    assert job.executor_name == "mac-1"
+    assert job.runner_name == "mac-1"
   end
 
   test "stop revokes the job, ends the turn non-error, and keeps the partial output", ctx do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
-    {:ok, _} = Runs.claim_next_job(ctx.executor)
+    {:ok, _} = Runs.claim_next_job(ctx.runner)
     {:ok, _} = Talk.append_events(turn, [event(1, "out", "half an ans")])
 
     Talk.subscribe(ctx.card.id)
@@ -221,9 +221,9 @@ defmodule Relay.TalkTest do
 
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "what is happening?")
 
-    assert {:ok, first} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, first} = Runs.claim_next_job(ctx.runner)
     assert first.id == node_job.id
-    assert {:ok, second} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, second} = Runs.claim_next_job(ctx.runner)
     assert second.id == turn.node_job_id
   end
 
@@ -252,14 +252,14 @@ defmodule Relay.TalkTest do
 
   test "finish_turn as :stopped or :failed leaves the claude session id and pin untouched", ctx do
     {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
-    {:ok, _claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, _claimed} = Runs.claim_next_job(ctx.runner)
 
     {:ok, stopped} = Talk.finish_turn(turn, :stopped)
     assert stopped.status == :stopped
 
     session = Talk.session_for_card(ctx.card)
     assert session.claude_session_id == nil
-    assert session.pinned_executor_name == nil
+    assert session.pinned_runner_name == nil
   end
 
   test "an unknown event kind degrades to :out", ctx do
@@ -332,7 +332,7 @@ defmodule Relay.TalkTest do
 
     # The claim long-poll subscribes to the board's run events; `post_message/3` already
     # broadcasts one so a NEW turn is picked up promptly. Without the same broadcast here, a Stop
-    # is invisible to that open connection and only reaches the executor on the next 15s beat —
+    # is invisible to that open connection and only reaches the runner on the next 15s beat —
     # which is why pressing Stop left `claude` streaming for ~13s.
     :ok = Runs.subscribe(ctx.card.board_id)
 
@@ -348,12 +348,12 @@ defmodule Relay.TalkTest do
     assert {:ok, still} = Talk.finish_turn(stopped, :done, %{session_id: "sess-late"})
     assert still.status == :stopped
     assert Talk.session_for_card(ctx.card).claude_session_id == nil
-    assert Talk.session_for_card(ctx.card).pinned_executor_name == nil
+    assert Talk.session_for_card(ctx.card).pinned_runner_name == nil
   end
 
   test "a replayed outcome POST does not rewrite the session or re-broadcast", ctx do
     {:ok, _queued} = Talk.post_message(ctx.card, ctx.author, "one")
-    {:ok, job} = Runs.claim_next_job(ctx.executor)
+    {:ok, job} = Runs.claim_next_job(ctx.runner)
     {:ok, turn} = Talk.mark_claimed(job)
 
     {:ok, done} = Talk.finish_turn(turn, :done, %{session_id: "sess-1"})

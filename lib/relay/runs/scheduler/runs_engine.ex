@@ -34,7 +34,7 @@ defmodule Relay.Runs.Scheduler.RunsEngine do
   def active_runs(board_id), do: Runs.active_runs(board_id)
 
   @impl true
-  def start_run(card_id, flow_key, _executor_id) do
+  def start_run(card_id, flow_key, _runner_id) do
     case lookup(card_id, flow_key) do
       {:ok, card, flow} ->
         case Runs.start_run(card, flow) do
@@ -70,7 +70,7 @@ defmodule Relay.Runs.Scheduler.RunsEngine do
   end
 
   @impl true
-  def resume_run(run_id, _executor_id) do
+  def resume_run(run_id, _runner_id) do
     case Runs.get_run(run_id) do
       %Run{status: :parked} = run ->
         _ = Runs.resume_run(run)

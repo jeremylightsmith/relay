@@ -9,7 +9,7 @@ defmodule UserAdmin do
 
   Deleting a user cascades at the DB level. The dangerous one is `boards.owner_id`
   (`on_delete: :delete_all`) — deleting a board owner destroys the whole board:
-  stages, cards, runs, comments, attachments, votes, flows, executors, api_keys.
+  stages, cards, runs, comments, attachments, votes, flows, runners, api_keys.
   `delete/2` refuses to do that unless you pass `force: true`.
 
   Everything else is benign: the user's memberships, card ownerships, comments,

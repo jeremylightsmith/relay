@@ -284,14 +284,14 @@ defmodule RelayWeb.RunComponentsTest do
         render_component(&RunComponents.stopped_work_banner/1,
           id: "stopped-work-banner",
           verdict: %{
-            reason: :no_executor,
-            detail: "No jobs claimed in 3m · no executor is connected to run this board's work."
+            reason: :no_runner,
+            detail: "No jobs claimed in 3m · no runner is connected to run this board's work."
           }
         )
 
       assert html =~ ~s(id="stopped-work-banner")
       # split around the apostrophe: HEEx escapes it to `&#39;` in the rendered output
-      assert html =~ "no executor is connected to run this board"
+      assert html =~ "no runner is connected to run this board"
       assert html =~ "work."
       assert html =~ "hero-exclamation-triangle"
     end
@@ -300,13 +300,13 @@ defmodule RelayWeb.RunComponentsTest do
       outdated =
         render_component(&RunComponents.stopped_work_banner/1,
           id: "b1",
-          verdict: %{reason: :executor_outdated, detail: "running v0, requires v9."}
+          verdict: %{reason: :runner_outdated, detail: "running v0, requires v9."}
         )
 
       gone =
         render_component(&RunComponents.stopped_work_banner/1,
           id: "b2",
-          verdict: %{reason: :executor_gone, detail: "no executor is connected."}
+          verdict: %{reason: :runner_gone, detail: "no runner is connected."}
         )
 
       assert outdated =~ "var(--color-warning)"
@@ -320,7 +320,7 @@ defmodule RelayWeb.RunComponentsTest do
         render_component(&RunComponents.stopped_work_banner/1,
           id: "b3",
           class: "mx-4 mb-2 mt-2 sm:mx-5",
-          verdict: %{reason: :no_executor, detail: "nothing is running."}
+          verdict: %{reason: :no_runner, detail: "nothing is running."}
         )
 
       assert html =~ "mx-4"

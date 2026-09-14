@@ -16,7 +16,7 @@ defmodule RelayWeb.Api.CardJSON do
       tag: card.tag,
       status: card.status,
       # RE198 — a genuine card fact the API never exposed. `archived_at` is already in the
-      # `@list_card_fields` projection, so this costs nothing; `bin/relay search` marks
+      # `@list_card_fields` projection, so this costs nothing; `./relay search` marks
       # archived rows from it.
       archived: not is_nil(card.archived_at),
       done: Cards.done?(card, stages),

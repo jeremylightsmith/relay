@@ -2211,7 +2211,7 @@ defmodule RelayWeb.CoreComponents do
 
     # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
     # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
-    # a park that is neither A1 nor A4 (e.g. an :executor_gone re-park of an already-blocked card).
+    # a park that is neither A1 nor A4 (e.g. an :runner_gone re-park of an already-blocked card).
     # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
     # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
     # fall outside needs_input_panel's declared `values: [:question, :escalation]`.
@@ -3049,7 +3049,7 @@ defmodule RelayWeb.CoreComponents do
                     </span>
                     <span class="flex-1"></span>
                     <%!-- True today: every flow node runs `relay card REF`, which prints the
-                          card's comment-kind timeline entries (see bin/relay's card printer).
+                          card's comment-kind timeline entries (see ./relay's card printer).
                           If that ever stops being true this chip is a lie — fix one or the other. --%>
                     <span class="rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success">
                       READ BY EVERY AGENT

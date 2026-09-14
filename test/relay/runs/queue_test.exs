@@ -1,7 +1,7 @@
 defmodule Relay.Runs.QueueTest do
   @moduledoc """
   RE307 — `list_queue/2` is the read `POST /api/node-jobs/claim` cannot be: it must show the
-  jobs NOBODY holds (the `executor_name` filter that made `active_jobs_by_executor/1` blind to
+  jobs NOBODY holds (the `runner_name` filter that made `active_jobs_by_runner/1` blind to
   them) and the talk turns that carry no run (the inner `Run` join that made every other job
   read flow-only).
   """
@@ -33,7 +33,7 @@ defmodule Relay.Runs.QueueTest do
       node_execution: ne,
       payload: %{"isolation" => opts[:isolation] || "shared_clean"},
       state: :queued,
-      executor_name: opts[:executor_name],
+      runner_name: opts[:runner_name],
       claimed_at: nil,
       inserted_at: at
     )
@@ -44,7 +44,7 @@ defmodule Relay.Runs.QueueTest do
       node_execution: ne,
       payload: %{"isolation" => opts[:isolation] || "shared_clean"},
       state: state,
-      executor_name: opts[:executor_name] || "mac-mini",
+      runner_name: opts[:runner_name] || "mac-mini",
       claimed_at: at
     )
   end
@@ -63,15 +63,15 @@ defmodule Relay.Runs.QueueTest do
     assert row.node_key == "implement"
     assert row.flow_key == "code"
     assert row.isolation == "shared_clean"
-    assert row.executor_name == nil
+    assert row.runner_name == nil
   end
 
-  test "a claimed job is in the queue, carrying the executor holding it", %{board: board, stage: stage} do
-    flow_job(stage, state: :claimed, executor_name: "mac-mini")
+  test "a claimed job is in the queue, carrying the runner holding it", %{board: board, stage: stage} do
+    flow_job(stage, state: :claimed, runner_name: "mac-mini")
 
     assert [row] = Runs.list_queue(board)
     assert row.state == :claimed
-    assert row.executor_name == "mac-mini"
+    assert row.runner_name == "mac-mini"
   end
 
   test "a talk turn appears with no flow key and no isolation — the LEFT join", %{board: board, stage: stage} do
@@ -117,8 +117,8 @@ defmodule Relay.Runs.QueueTest do
            ]
   end
 
-  test "a queued job PINNED to an executor still sorts with the queued rows", %{board: board, stage: stage} do
-    %{card: pinned} = flow_job(stage, state: :queued, executor_name: "mac-mini")
+  test "a queued job PINNED to a runner still sorts with the queued rows", %{board: board, stage: stage} do
+    %{card: pinned} = flow_job(stage, state: :queued, runner_name: "mac-mini")
     %{card: claimed} = flow_job(stage, state: :claimed, age_s: 600)
 
     assert refs(Runs.list_queue(board)) == [Relay.Cards.ref(board, pinned), Relay.Cards.ref(board, claimed)]
@@ -139,14 +139,14 @@ defmodule Relay.Runs.QueueTest do
     assert_in_delta later.age_s, 690, 2
   end
 
-  test "the per-executor jobs list is still flow-only — a talk job never enters it",
+  test "the per-runner jobs list is still flow-only — a talk job never enters it",
        %{board: board, stage: stage} do
-    insert(:executor, board: board, name: "mac-mini")
+    insert(:runner, board: board, name: "mac-mini")
     card = insert(:card, stage: stage)
     Runs.insert_talk_job!(card, %{"turn_id" => 1}, "mac-mini")
-    %{job: flow} = flow_job(stage, state: :claimed, executor_name: "mac-mini")
+    %{job: flow} = flow_job(stage, state: :claimed, runner_name: "mac-mini")
 
-    assert [%{jobs: jobs}] = Runs.list_executor_status(board)
+    assert [%{jobs: jobs}] = Runs.list_runner_status(board)
     assert Enum.map(jobs, & &1.job_id) == [flow.id]
   end
 end

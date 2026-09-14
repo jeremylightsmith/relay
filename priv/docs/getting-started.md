@@ -58,18 +58,18 @@ curl -fsSL "$RELAY_URL/api/scaffold/.claude/skills/relay-setup/SKILL.md" \
 /relay-setup
 ```
 
-That is the whole of CLI setup. `/relay-setup` downloads `bin/relay` from
-`$RELAY_URL/api/scaffold/bin/relay` and runs `bin/relay update` to install the four Relay-owned
+That is the whole of CLI setup. `/relay-setup` downloads `./relay` from
+`$RELAY_URL/api/scaffold/relay` and runs `./relay update` to install the four Relay-owned
 skills and `relay.md`. Because a skill written mid-session is not discoverable until the skill
 list is rebuilt, it then asks you to **restart Claude Code** and run `/relay-onboard`, which
-wires this repo to your board's flows. `/relay-onboard` also authors `.relay/executor.json` for
+wires this repo to your board's flows. `/relay-onboard` also authors `.relay/runner.json` for
 this repo if it is missing — that is where step 4's capacity configuration comes from.
 
 Relay owns exactly six files in your project and updates them as a set:
 
 | Item | Path |
 |---|---|
-| the executor | `bin/relay` |
+| the runner | `./relay` |
 | the agent guide | `relay.md` |
 | entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
 | updater skill | `.claude/skills/relay-update/SKILL.md` |
@@ -78,31 +78,31 @@ Relay owns exactly six files in your project and updates them as a set:
 
 Everything else in `.claude/` is yours; Relay never writes it.
 
-Already have `bin/relay`? Run `/relay-update` (or `bin/relay update --check` to see what would
+Already have `./relay`? Run `/relay-update` (or `./relay update --check` to see what would
 change first). It compares the board's scaffold manifest against what is on disk, refetches only
 what actually differs, and restores anything that has been deleted or edited.
 
 **Question for a human:** which project directory should agents work in? It must be a git
 repository, and it should be one you are willing to let agents create branches in.
 
-## 4. Start the executor
+## 4. Start the runner
 
 From that project directory:
 
 ```bash
-relay execute
+relay start
 ```
 
-The executor claims work from your board and runs it. It knows nothing about your board's
+The runner claims work from your board and runs it. It knows nothing about your board's
 particular columns or agents — the server tells it what to do, so it stays generic. It
 long-polls when idle, so leaving it running is cheap.
 
 **Confirm it is advertising capacity** before moving on. Open the **Runners** view at
 `/board/<slug>/runners`. Your machine should appear with a **FRESH** pill and capacity
-chips showing its configured totals. If it does not appear at all, `relay execute` is not
+chips showing its configured totals. If it does not appear at all, `relay start` is not
 reaching the board — re-check `RELAY_URL` and `RELAY_API_KEY` from step 2.
 
-Capacity comes from `.relay/executor.json`'s `capacity` and is advertised on a heartbeat
+Capacity comes from `.relay/runner.json`'s `capacity` and is advertised on a heartbeat
 every few seconds. Two classes matter:
 
 - `shared_clean` — jobs that can share one clean worktree;
@@ -154,10 +154,10 @@ order:
 
 1. **No flow is enabled for that stage.** Open **Settings › Flows** and confirm the flow
    covering that card's stage is on. This is the most common cause on a new board.
-2. **No executor is advertising capacity.** Open `/board/<slug>/runners`. If the roster is
-   empty, or your machine shows **STALE** or **GONE** rather than **FRESH**, `relay execute`
+2. **No runner is advertising capacity.** Open `/board/<slug>/runners`. If the roster is
+   empty, or your machine shows **STALE** or **GONE** rather than **FRESH**, `relay start`
    has stopped or lost the board — restart it and re-check.
-3. **The executor has capacity, but not the right class.** A Code-flow card needs
+3. **The runner has capacity, but not the right class.** A Code-flow card needs
    `exclusive` capacity. Check the capacity chips on the Runners view against what the flow
    needs.
 4. **The card is blocked on you.** A card in **needs input** is waiting for a human answer,
@@ -167,7 +167,7 @@ If none of those explain it, open the card's drawer **Run** tab: a run that star
 failed shows the node that failed and its outcome there.
 
 > [!TIP]
-> There is a dedicated diagnosis surface for exactly this question: run `bin/relay why <ref>`,
+> There is a dedicated diagnosis surface for exactly this question: run `./relay why <ref>`,
 > or read `GET /api/cards/:ref/diagnosis`. It answers "why isn't this card moving?" in one call
 > instead of four checks by hand.
 

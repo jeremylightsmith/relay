@@ -15,11 +15,11 @@ context, so authoring in-context is how those decisions reach the plan.
 1. **Resolve the card and spec.** Take the card ref from `$ARGUMENTS`; if absent, ask the user
    which card to plan. Read the approved spec from the card's `spec` field:
 
-       ./bin/relay card <ref> --json
+       ./relay card <ref> --json
 
    If the `spec` field is empty or missing, stop — there's no approved spec to plan from. Tell
    the user to produce one first with `/brainstorm <ref>`, then come back to `/write-plan <ref>`.
-   Do NOT invent a spec. Otherwise, read it fully. If `./bin/relay card <ref>` shows a
+   Do NOT invent a spec. Otherwise, read it fully. If `./relay card <ref>` shows a
    **CHANGES REQUESTED** block, treat resolving that feedback as this pass's primary goal.
 
    **Delta re-plan (rejected card):** if the card already has a **non-empty `plan`** AND an open
@@ -38,7 +38,7 @@ context, so authoring in-context is how those decisions reach the plan.
    card — do NOT leave a durable repo-root `plan.md` (the Code flow materializes it per-run at
    `$RELAY_PLAN`):
 
-       ./bin/relay plan <ref> @<tmpfile>
+       ./relay plan <ref> @<tmpfile>
 
    Then summarize the task breakdown to the user. There is no runner command to launch by hand
    anymore (RLY-139): once the card is approved into `Plan:Done`, the Code flow
@@ -55,7 +55,7 @@ server-side flow engine, ADR 0006 — `docs/designs/flows/code.json`). Assume th
 engineer has zero repo context and needs every detail.
 
 ### Input
-The approved spec, read from the card's `spec` field (`./bin/relay card <ref> --json`). Read
+The approved spec, read from the card's `spec` field (`./relay card <ref> --json`). Read
 it fully. **Design fidelity is the spec's call, not yours** — artboards drift from the shipped
 app, so match a mockup only where the spec **explicitly** says a UI should match a named
 `docs/designs/*.dc.html` artboard (`/brainstorm` settles this with the human and records the
@@ -74,11 +74,11 @@ setup/config/scaffolding/docs into the task whose deliverable needs them. **Spli
 a task crosses an independent module boundary, would be a very large diff, or is a risky
 refactor that benefits from isolation (e.g. keep a pure schema migration its own task).
 
-### Output: the plan you author (this is the executor's contract) — written to the card's `plan` field
+### Output: the plan you author (this is the runner's contract) — written to the card's `plan` field
 - A short header: **Goal**, **Architecture**, **Tech**, a **Global Constraints**
   section (project-wide rules copied verbatim from the spec), and a **`## Verification`**
   section (below).
-- **`## Verification`** — declares the gate the executor runs, because not every card is a
+- **`## Verification`** — declares the gate the runner runs, because not every card is a
   Phoenix card. Two lines:
   - **`Gate:`** the command(s) that must pass. **Default `mix precommit`** (the Elixir/LiveView
     app). A card that only touches **`flutter/`** declares `dart format --set-exit-if-changed .`
@@ -93,7 +93,7 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
   The `plan-implementer`, the whole-suite gate, the `smoke-tester`, and the `acceptance-tester`
   all read these lines, so they must be exact.
 - **Cover the card's acceptance criteria.** Read the card's `acceptance_criteria` field
-  (`./bin/relay card <ref> --json`) and make sure the plan's tasks actually deliver every
+  (`./relay card <ref> --json`) and make sure the plan's tasks actually deliver every
   criterion — a criterion no task covers is a gap: add a task for it. Do **NOT** copy the
   criteria into the plan: the `acceptance-tester` reads them off the card at the Code stage, so
   a copy here would only drift.
@@ -113,7 +113,7 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
   - Steps as checkboxes `- [ ]`, each ONE action: write failing test → run it (expect
     fail) → minimal implementation → run it (expect pass) → commit. Include the ACTUAL
     test code and implementation code in fenced blocks — no placeholders, no "similar to".
-    The executor sees only this plan, so the code in it is the executor's source of truth
+    The runner sees only this plan, so the code in it is the runner's source of truth
     and the reviewer's diff target; write it in full.
   - **Design fidelity (only where the spec calls for it):** if the spec says this task's UI
     must match a `docs/designs/*.dc.html` artboard, name that artboard file in the
@@ -126,7 +126,7 @@ refactor that benefits from isolation (e.g. keep a pure schema migration its own
     here — anything you leave out, they won't match. Non-visual tasks, and UI with no
     governing artboard, skip this.
   - End each task with an independently testable deliverable + the commit message to use.
-- **Task checkbox convention:** every task's steps use `- [ ]`. The executor flips them to
+- **Task checkbox convention:** every task's steps use `- [ ]`. The runner flips them to
   `- [x]` as it completes each task, so keep them clean GitHub task-list checkboxes.
 
 ### No placeholders
@@ -141,7 +141,7 @@ to a `docs/designs/*.dc.html` artboard names that artboard and carries the mocku
 values in the task and its tests); and **type/signature consistency** across
 tasks (a function defined as `clear_layers/1` in Task 3 but called as `clear_full_layers/1`
 in Task 7 is a bug — the Consumes/Produces names must match exactly). Fix inline. Then write
-the plan to the card (`./bin/relay plan <ref> @<tmpfile>`), summarize the task breakdown, and
+the plan to the card (`./relay plan <ref> @<tmpfile>`), summarize the task breakdown, and
 tell the user the Code flow picks the card up automatically once it's approved into
 `Plan:Done` (Settings › Flows) — there is no runner command to launch by hand. Do NOT move or
 approve the card yourself — that's a separate, human-gated step.
@@ -155,7 +155,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   the plan, stop.
 - **Blast radius: do not touch git, do not touch other cards.** No branches, no commits, no
   pushes, no stage moves. The only write you make is the plan on the card you were given
-  (`./bin/relay plan <ref> @<tmpfile>`).
+  (`./relay plan <ref> @<tmpfile>`).
 - **Terminal STOP.** When the plan is on the card, you are done — stop. Explicitly do **NOT**
   start implementing, and do not move or approve the card into `Plan:Done` yourself — the Code
   flow's dispatch is automatic and server-side (RLY-139) once a human does that. The
@@ -183,7 +183,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
         }
       ]
       JSON
-      ./bin/relay needs-input <ref> --questions @"$questions_file"
+      ./relay needs-input <ref> --questions @"$questions_file"
 
   Then stop. **Always the structured `--questions @<tmpfile>` JSON-array form** of
   `{prompt, options, allow_text}` objects — never a hand-numbered prose string. The drawer

@@ -18,7 +18,7 @@ board's history clean?"** (the audit). The gap between those was the whole bug �
 after a green doctor was followed, hours later, by five Relay bugs on one card, none of which
 was a naming problem.
 
-**Core principle:** never re-implement a check — resolution comes from the executor's own
+**Core principle:** never re-implement a check — resolution comes from the runner's own
 resolver, board health from `relay audit` — and change nothing without asking.
 
 `/relay-doctor` with no argument checks **every** flow, disabled ones included and marked
@@ -29,7 +29,7 @@ resolver, board health from `relay audit` — and change nothing without asking.
 
 ## When to Use
 
-- After editing a flow, or pushing one with `./bin/relay flow-push`.
+- After editing a flow, or pushing one with `./relay flow-push`.
 - After adding, renaming, or deleting a `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`,
   or `.claude/commands/*.md`.
 - After a run failed with an unknown agent or skill, or a node that never started.
@@ -40,21 +40,21 @@ resolver, board health from `relay audit` — and change nothing without asking.
 Everything comes from commands that already exist — this skill adds no code.
 
 ```bash
-./bin/relay flow --json          # every flow: full document (nodes, edges, trigger, enabled, version, isolation)
-./bin/relay flow <key> --json    # one flow, same shape
-./bin/relay executors --json     # capacity per class, freshness, stale?, version, outdated, jobs
-./bin/relay audit --json          # board health: run-history findings + CI parity (advisory, exits 0)
+./relay flow --json          # every flow: full document (nodes, edges, trigger, enabled, version, isolation)
+./relay flow <key> --json    # one flow, same shape
+./relay runners --json     # capacity per class, freshness, stale?, version, outdated, jobs
+./relay audit --json          # board health: run-history findings + CI parity (advisory, exits 0)
 ls .claude/agents/*.md           # check 7 ONLY — repo-local, never ~/.claude
 ```
 
-What this machine can resolve by name is the executor's own answer. Import it; do not
+What this machine can resolve by name is the runner's own answer. Import it; do not
 re-derive it:
 
 ```bash
 python3 -c "
 import importlib.machinery, importlib.util, json
-loader = importlib.machinery.SourceFileLoader('relay_runner', 'bin/relay')
-spec = importlib.util.spec_from_file_location('relay_runner', 'bin/relay', loader=loader)
+loader = importlib.machinery.SourceFileLoader('relay_runner', 'relay')
+spec = importlib.util.spec_from_file_location('relay_runner', 'relay', loader=loader)
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 print(json.dumps(mod.collect_capabilities()))
 "
@@ -62,7 +62,7 @@ print(json.dumps(mod.collect_capabilities()))
 
 That prints `{"agents": [...], "skills": [...]}` — repo `.claude/` **and** `~/.claude`
 (`agents/*.md`, `skills/*/SKILL.md`, `commands/*.md`) plus built-ins — byte-for-byte what
-this machine reports to the server. If it cannot load (no `python3`, no `bin/relay`), say
+this machine reports to the server. If it cannot load (no `python3`, no `./relay`), say
 so and **skip checks 1 and 2**: unknown is not missing. Check 7 still runs — it needs only
 `ls .claude/agents/*.md` and the flow documents, never the inventory.
 
@@ -82,8 +82,8 @@ in `lib/relay/flows.ex` — check the two still agree:
 | 2 | agent node's leading `/name` is in the inventory's skills | agent nodes | **error** |
 | 3 | `trigger.pulls_from` / `works_in` / `lands_on` all non-null | per flow | **error** if enabled, **warning** if not |
 | 4 | leading binaries of a `run` exist on PATH *on this machine* | shell + gate nodes | **error** |
-| 5 | a fresh executor advertises capacity in the flow's `isolation` class | per flow | **warning** |
-| 6 | at least one connected executor is **not** `outdated` | board-wide | **warning** |
+| 5 | a fresh runner advertises capacity in the flow's `isolation` class | per flow | **warning** |
+| 6 | at least one connected runner is **not** `outdated` | board-wide | **warning** |
 | 7 | a repo `.claude/agents/*.md` that no **enabled** flow node names | board-wide | **warning** |
 | 8 | a node with a declared `reads`/`writes` contract whose skill/agent shows no evidence of honoring it | nodes with `reads`/`writes` | **warning** ("couldn't confirm") |
 | 9 | a node with **no** declared contract in a flow whose stage implies one | agent + shell nodes | **warning** → the establish dialogue |
@@ -92,23 +92,23 @@ in `lib/relay/flows.ex` — check the two still agree:
 flow could still run right now.
 
 **Check 4 is a heuristic — say so in the finding.** Split `run` on `&&`, `||`, `;`, `|`;
-take each segment's first bare word; expand `{relay}` to `./bin/relay`; skip shell builtins,
+take each segment's first bare word; expand `{relay}` to `./relay`; skip shell builtins,
 keywords and grouping tokens (`test`, `[`, `]`, `cd`, `exit`, `echo`, `:`, `{`, `}`, `(`, `)`,
 `!`, `if`, `then`, `else`, `fi`, `for`, `while`, `do`, `done`), `VAR=$(…)` assignments, and
 any segment whose command word holds an unexpanded `{placeholder}`. A segment you cannot
 parse produces **no finding** — a false "missing binary" is worse than a miss. Every check-4
-finding says **"on this machine"**: PATH here is not PATH on the executor.
+finding says **"on this machine"**: PATH here is not PATH on the runner.
 
 **Checks 5–6 read, they do not compute.** Report the server's `freshness`, `stale?` and
 `outdated` fields; never compare version numbers yourself. Check 5 is a **fleet union** — the
-authoritative per-executor answer is the Flows enable confirm. Check 6 is **fleet-wide** — it
-warns only when *no* connected executor is current (the board can then place no work at all)
-— but the finding names every outdated executor.
+authoritative per-runner answer is the Flows enable confirm. Check 6 is **fleet-wide** — it
+warns only when *no* connected runner is current (the board can then place no work at all)
+— but the finding names every outdated runner.
 
 **Check 7 scans the repo's `.claude/agents/` only** — `~/.claude` globals are not this
 repo's dead code.
 
-**Checks 8–9 read the card contract off the flow document.** `./bin/relay flow --json` already
+**Checks 8–9 read the card contract off the flow document.** `./relay flow --json` already
 returns every node's `reads`/`writes` — no new gathering command, and this skill still adds no
 code.
 
@@ -129,7 +129,7 @@ skill, and looking only under `skills/` reports a false miss on the whole Plan f
 or `gate` node's evidence is its own `run` string. A file doctor cannot locate (a built-in, a
 `~/.claude` global) is **"couldn't confirm"**, never a violation.
 
-**Write evidence** is a `bin/relay` writer token appearing in that file:
+**Write evidence** is a `./relay` writer token appearing in that file:
 
 | field | write evidence |
 |---|---|
@@ -149,7 +149,7 @@ occurrence.
 
 ## Board health (the audit)
 
-`./bin/relay audit --json` answers the second question, and like everything else here the skill
+`./relay audit --json` answers the second question, and like everything else here the skill
 **reads it, never re-derives it**. Its findings share the checks' shape — severity, the node,
 the evidence, the fix — and split in two:
 
@@ -160,7 +160,7 @@ the evidence, the fix — and split in two:
 | `ci_parity` (WARNING) | `.github/workflows/*.yml` requires a verify command that **no enabled flow's gate node runs** — every gate can pass and the PR still fails required CI |
 
 `ci_parity` is a **heuristic about the files in *this* working directory** — a line-based read
-of the workflow YAML, because `bin/relay` is stdlib-only. Say so in the finding, exactly as
+of the workflow YAML, because `./relay` is stdlib-only. Say so in the finding, exactly as
 check 4 does about PATH. A step carrying `# relay-audit: ignore` on its `run:` line or the line
 above is a deliberate divergence and is already silenced.
 
@@ -177,8 +177,8 @@ code flow (enabled, v1)
   ERROR   node `smoke` names agent `smoke-tester`
           expected: .claude/agents/smoke-tester.md (or ~/.claude/agents/, or a built-in)
           fix: create that file, or clear the node's `agent` field and push the flow
-  WARNING no fresh executor advertises `exclusive` capacity
-          fix: start `bin/relay execute` on a machine with exclusive capacity
+  WARNING no fresh runner advertises `exclusive` capacity
+          fix: start `./relay start` on a machine with exclusive capacity
 ```
 
 Finish with one summary line — `3 errors, 2 warnings across 3 flows` — or an explicit
@@ -194,8 +194,8 @@ all-clear.
      whose body IS its system prompt; a skill is `.claude/skills/<name>/SKILL.md` with `name` +
      `description` frontmatter and the procedure in the body.
    - **Flow side** — the flow names something that should not exist: pull
-     (`./bin/relay flow <key> --json > /tmp/<key>.json`), edit the node, push
-     (`./bin/relay flow-push <key> /tmp/<key>.json`).
+     (`./relay flow <key> --json > /tmp/<key>.json`), edit the node, push
+     (`./relay flow-push <key> /tmp/<key>.json`).
 3. **A flow push is a real board mutation.** Show the exact node-level change and get
    explicit confirmation first. Never push a document the user has not seen.
 4. **Blast radius:** `.claude/` files and flow documents only. Never cards, git branches,
@@ -212,7 +212,7 @@ all-clear.
       server rewrites the node's `succeeded` to `failed` when the field is still blank. Declare
       what the skill does **today**, not what you wish it did.
    4. **Push once per flow, not once per node** — collect the confirmed nodes, show the exact
-      node-level diff, get explicit confirmation, then one `./bin/relay flow-push`. This is the
+      node-level diff, get explicit confirmation, then one `./relay flow-push`. This is the
       existing "never push a document the user has not seen" rule; do not weaken it.
 6. **Audit findings are reported and stopped at.** A `findings_dropped` ERROR is about a
    *shipped card* — a run that already happened — and this skill's blast radius is `.claude/`
@@ -222,7 +222,7 @@ all-clear.
 ## Common mistakes
 
 - **Re-implementing the resolver** instead of calling `collect_capabilities()` — the copy
-  drifts from the executor and the report starts lying.
+  drifts from the runner and the report starts lying.
 - **Pushing a flow the user has not seen** — every push is confirmed, node-level, first.
 - **Reporting a check-4 miss as certain** — it is a heuristic about *this machine's* PATH.
 - **Reporting an unloadable inventory as "everything missing"** — skip checks 1 and 2 and
@@ -234,6 +234,6 @@ all-clear.
   `.claude/commands/<name>.md` too, or check 8 reports a false miss on the Plan flow.
 - **Reporting a CI-parity warning as certain** — it is a heuristic about the workflow files in
   *this* working directory, on *this* machine, against the flows enabled *right now*.
-- **Branching on a finding's `check` id in `bin/relay`** — check ids are deliberately not pinned
-  by the executor contract; the executor prints them opaquely so the server can add a check
-  without an executor bump.
+- **Branching on a finding's `check` id in `./relay`** — check ids are deliberately not pinned
+  by the runner contract; the runner prints them opaquely so the server can add a check
+  without a runner bump.

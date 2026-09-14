@@ -2,7 +2,7 @@ defmodule Relay.Flows do
   @moduledoc """
   The Flows context (ADR 0006 / RLY-131): workflow definitions as
   declarative graph data owned by Relay. A flow is a per-board row — a
-  trigger (three stage ids), an isolation requirement the executor maps
+  trigger (three stage ids), an isolation requirement the runner maps
   (`:shared_clean` / `:exclusive`), and an embedded node/edge graph.
   Nothing here executes; the engine arrives with the Runs card (02).
 
@@ -57,7 +57,7 @@ defmodule Relay.Flows do
   What `flow`'s graph NAMES: the agents its nodes reference and the skills its agent nodes
   invoke as a leading slash command. Pure, sorted, deduped.
 
-  Deliberately knows nothing about executors — whether any machine HAS these is
+  Deliberately knows nothing about runners — whether any machine HAS these is
   `Relay.Runs.preflight_flow/1`'s question. `Relay.Flows` may not depend on `Relay.Runs`
   (which already depends on Flows); the reverse edge is a boundary cycle the compiler
   rejects.

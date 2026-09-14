@@ -35,27 +35,27 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
     {view, flow}
   end
 
-  # Named connect_executor/2, not connect/2 — RelayWeb.ConnCase imports
+  # Named connect_runner/2, not connect/2 — RelayWeb.ConnCase imports
   # Phoenix.ConnTest.connect/2, and a same-arity local def conflicts with it.
-  defp connect_executor(board, opts) do
-    executor =
-      insert(:executor,
+  defp connect_runner(board, opts) do
+    runner =
+      insert(:runner,
         board: board,
         name: opts[:name] || "mac-1",
         capabilities: opts[:capabilities],
         last_heartbeat: opts[:last_heartbeat] || DateTime.truncate(DateTime.utc_now(), :second)
       )
 
-    Capacity.put(executor.id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
-    executor
+    Capacity.put(runner.id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
+    runner
   end
 
-  test "with no runner connected the executor check fails and the CTA still works",
+  test "with no runner connected the runner check fails and the CTA still works",
        %{conn: conn, board: board} do
     {view, flow} = open_confirm(conn, board, "plan")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight")
-    assert has_element?(view, "#flow-#{flow.id}-preflight-executor.preflight-warn")
+    assert has_element?(view, "#flow-#{flow.id}-preflight-runner.preflight-warn")
     assert has_element?(view, "#flow-#{flow.id}-confirm-cta")
 
     # The Plan flow requires the write-plan skill — with no runner connected, that can't be
@@ -71,21 +71,21 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
        %{conn: conn, board: board} do
     gone_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-3600, :second)
 
-    connect_executor(board,
+    connect_runner(board,
       capabilities: %{"agents" => [], "skills" => ["write-plan"]},
       last_heartbeat: gone_at
     )
 
     {view, flow} = open_confirm(conn, board, "plan")
 
-    assert has_element?(view, "#flow-#{flow.id}-preflight-executor.preflight-warn")
+    assert has_element?(view, "#flow-#{flow.id}-preflight-runner.preflight-warn")
     assert has_element?(view, "#flow-#{flow.id}-preflight-skills.preflight-warn")
     refute has_element?(view, "#flow-#{flow.id}-preflight-unreported")
   end
 
   test "an exclusive flow with no exclusive capacity fails the capacity check",
        %{conn: conn, board: board} do
-    connect_executor(board, capacity: %{shared_clean: 3, exclusive: 0}, capabilities: %{"agents" => [], "skills" => []})
+    connect_runner(board, capacity: %{shared_clean: 3, exclusive: 0}, capabilities: %{"agents" => [], "skills" => []})
     {view, flow} = open_confirm(conn, board, "code")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-capacity.preflight-warn")
@@ -93,7 +93,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   end
 
   test "a missing agent is named in the agents check", %{conn: conn, board: board} do
-    connect_executor(board,
+    connect_runner(board,
       capacity: %{shared_clean: 1, exclusive: 1},
       capabilities: %{"agents" => ["plan-implementer"], "skills" => []}
     )
@@ -106,19 +106,19 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
 
   test "a fully-satisfied flow passes every check with nothing missing",
        %{conn: conn, board: board} do
-    connect_executor(board, capabilities: %{"agents" => [], "skills" => ["write-plan"]})
+    connect_runner(board, capabilities: %{"agents" => [], "skills" => ["write-plan"]})
     {view, flow} = open_confirm(conn, board, "plan")
 
-    for check <- ~w(stages executor capacity agents skills) do
+    for check <- ~w(stages runner capacity agents skills) do
       assert has_element?(view, "#flow-#{flow.id}-preflight-#{check}.preflight-ok")
     end
 
     refute has_element?(view, "#flow-#{flow.id}-preflight-unreported")
   end
 
-  test "an executor that never reported gets a caveat, not a missing-agents alarm",
+  test "a runner that never reported gets a caveat, not a missing-agents alarm",
        %{conn: conn, board: board} do
-    connect_executor(board, capabilities: nil)
+    connect_runner(board, capabilities: nil)
     {view, flow} = open_confirm(conn, board, "code")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-unreported")

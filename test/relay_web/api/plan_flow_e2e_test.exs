@@ -2,14 +2,14 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   @moduledoc """
   RLY-138 / W12 — the Plan cutover, proved end to end over the real REST API with no `claude`
   invocation: a card in *Spec:Done* is dispatched by the server-side scheduler, claimed by a
-  scripted executor over `POST /api/node-jobs/claim`, reported `succeeded` over
+  scripted runner over `POST /api/node-jobs/claim`, reported `succeeded` over
   `POST /api/node-jobs/:id/outcome`, and lands on *Plan:Done*.
 
   The second case is the real point of the card: **Spec and Plan enabled at once**, competing
   for one advertised `shared_clean` budget, both completing without interference. That is the
   test that would catch a Spec-specific assumption baked into W5-W8.
 
-  Uses `Relay.Runs.Scheduler.ScriptedExecutor` (W11's harness, `test/support/scripted_executor.ex`)
+  Uses `Relay.Runs.Scheduler.ScriptedRunner` (W11's harness, `test/support/scripted_runner.ex`)
   for the claim/outcome HTTP calls rather than re-implementing them here.
   """
   use RelayWeb.ConnCase, async: true
@@ -19,10 +19,10 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
+  alias Relay.Runs.Scheduler.ScriptedRunner, as: Exec
   alias Relay.Runs.Scheduler.Server
 
-  @executor_name "e2e-executor"
+  @runner_name "e2e-runner"
   @default_capacity %{"shared_clean" => 1, "exclusive" => 0}
 
   # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
@@ -56,7 +56,7 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     flow
   end
 
-  # The scripted executor here runs no real skill, so a card that goes on to report
+  # The scripted runner here runs no real skill, so a card that goes on to report
   # `succeeded` must already carry the fields the shipped Spec/Plan flows declare they write
   # (RE244) — the Spec e2e card carries `spec` + `acceptance_criteria`, the Plan e2e card
   # carries `spec` + `acceptance_criteria` + `plan` — otherwise the guard rewrites that
@@ -67,21 +67,21 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     card
   end
 
-  # Delegates the HTTP claim to ScriptedExecutor (W11's harness) — returns the decoded
+  # Delegates the HTTP claim to ScriptedRunner (W11's harness) — returns the decoded
   # payload map, or nil on 204 (nothing claimable).
-  defp claim(conn, capacity \\ @default_capacity), do: Exec.claim(conn, @executor_name, capacity)
+  defp claim(conn, capacity \\ @default_capacity), do: Exec.claim(conn, @runner_name, capacity)
 
-  # Delegates the HTTP outcome report to ScriptedExecutor.
+  # Delegates the HTTP outcome report to ScriptedRunner.
   defp report(conn, job_id, outcome), do: Exec.outcome(conn, job_id, %{"outcome" => outcome, "detail" => "ok"})
 
-  # Announce the executor over HTTP (a 204 claim doubles as the heartbeat that upserts it),
+  # Announce the runner over HTTP (a 204 claim doubles as the heartbeat that upserts it),
   # then publish its free slots so the scheduler can name it in a dispatch.
   defp announce(conn, board, slots) do
     capacity = %{"shared_clean" => slots.shared_clean, "exclusive" => slots.exclusive}
     assert claim(conn, capacity) == nil
-    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: @executor_name)
-    :ok = Capacity.put(executor.id, slots)
-    executor
+    runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: @runner_name)
+    :ok = Capacity.put(runner.id, slots)
+    runner
   end
 
   defp start_scheduler(board) do
@@ -143,8 +143,8 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
       # start_run moved the card into the flow's works_in stage.
       assert stage_name(board, card.id) == "Plan"
 
-      # The executor claims the node-job. The payload carries the RAW, unexpanded run string —
-      # template expansion is the executor's job, not the server's.
+      # The runner claims the node-job. The payload carries the RAW, unexpanded run string —
+      # template expansion is the runner's job, not the server's.
       body = claim(conn)
       assert body["run_id"] == run.id
       assert body["node_id"] == "write_plan"

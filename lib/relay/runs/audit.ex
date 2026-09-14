@@ -29,7 +29,7 @@ defmodule Relay.Runs.Audit do
   alias Schemas.Run
 
   # Ordered most severe first — `severity_rank/1` and every report's ordering read this list,
-  # and it is pinned on the wire by test/fixtures/executor_contract.json.
+  # and it is pinned on the wire by test/fixtures/runner_contract.json.
   @severities [:error, :warning]
   @checks [:findings_dropped, :verdict_flipped]
 

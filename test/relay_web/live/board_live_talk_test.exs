@@ -5,7 +5,7 @@ defmodule RelayWeb.BoardLiveTalkTest do
   import Phoenix.LiveViewTest
 
   alias Relay.Cards
-  alias Relay.FakeTalkExecutor
+  alias Relay.FakeTalkRunner
   alias Relay.Talk
 
   setup :register_and_log_in_user
@@ -236,7 +236,7 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "sending a turn posts it, shows Stop, and streams the answer in", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
 
@@ -245,8 +245,8 @@ defmodule RelayWeb.BoardLiveTalkTest do
     assert html =~ "why is this stuck?"
     assert has_element?(view, "#talk-pane-stop")
 
-    turn = FakeTalkExecutor.claim(executor)
-    FakeTalkExecutor.stream(turn, [{:tool, "Read · lib/relay.ex"}, {:out, "It is waiting on you."}])
+    turn = FakeTalkRunner.claim(runner)
+    FakeTalkRunner.stream(turn, [{:tool, "Read · lib/relay.ex"}, {:out, "It is waiting on you."}])
 
     html = render(view)
     assert html =~ "Read · lib/relay.ex"
@@ -257,13 +257,13 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "Stop ends the turn and keeps the partial output", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
     view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
 
-    turn = FakeTalkExecutor.claim(executor)
-    FakeTalkExecutor.stream(turn, [{:out, "half an ans"}])
+    turn = FakeTalkRunner.claim(runner)
+    FakeTalkRunner.stream(turn, [{:out, "half an ans"}])
 
     view |> element("#talk-pane-stop") |> render_click()
 
@@ -273,7 +273,7 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "closing the drawer does not stop a turn — it finishes and its output is waiting", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
     view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
@@ -281,8 +281,8 @@ defmodule RelayWeb.BoardLiveTalkTest do
     # Detaching is not cancelling (ADR 0009 §1): only Stop stops. Navigating to the bare board
     # ends this LiveView process, which is the strongest form of "the drawer was closed".
     {:ok, _board_view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
-    turn = FakeTalkExecutor.claim(executor)
-    FakeTalkExecutor.stream(turn, [{:out, "the whole answer"}])
+    turn = FakeTalkRunner.claim(runner)
+    FakeTalkRunner.stream(turn, [{:out, "the whole answer"}])
     {:ok, done} = Talk.finish_turn(turn, :done, %{session_id: "s"})
 
     assert done.status == :done
@@ -293,9 +293,9 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "the scrollback survives closing and reopening the drawer", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     {:ok, _turn} = Talk.post_message(ctx.card, ctx.user, "first")
-    FakeTalkExecutor.run(executor, [{:out, "an earlier answer"}])
+    FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
     view = open(ctx.conn, ctx.board, ctx.ref)
     html = view |> element("#card-drawer-tab-talk") |> render_click()
@@ -305,9 +305,9 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "/clear hides the scrollback without deleting it", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "first")
-    FakeTalkExecutor.run(executor, [{:out, "an earlier answer"}])
+    FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
@@ -319,9 +319,9 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "talk output never reaches the card timeline", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "first")
-    FakeTalkExecutor.run(executor, [{:out, "an earlier answer"}])
+    FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
     view = open(ctx.conn, ctx.board, ctx.ref)
     html = view |> element("#card-drawer-tab-activity") |> render_click()
@@ -355,9 +355,9 @@ defmodule RelayWeb.BoardLiveTalkTest do
   end
 
   test "an archived board still renders a transcript a live board already wrote", ctx do
-    executor = insert(:executor, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "why is this stuck?")
-    FakeTalkExecutor.run(executor, [{:out, "it is waiting on you"}])
+    FakeTalkRunner.run(runner, [{:out, "it is waiting on you"}])
     {:ok, _board} = Relay.Boards.archive_board(ctx.board)
 
     view = open(ctx.conn, ctx.board, ctx.ref)

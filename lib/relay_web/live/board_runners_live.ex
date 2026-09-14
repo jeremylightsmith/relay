@@ -5,11 +5,11 @@ defmodule RelayWeb.BoardRunnersLive do
   (dot + FRESH/STALE/GONE/OUTDATED pill, capacity chips with used/total pips, WORKING NOW rows
   linking into the card drawer, dark streaming log tail), header summary chips, the at-risk
   note on a stale/gone runner with jobs, and the empty state naming the real
-  `bin/relay execute` start command.
+  `./relay start` start command.
 
   RLY-191: `OUTDATED` is a top-level `display_state` (precedence
   `:gone > :stale > :outdated > :fresh`), replacing the FRESH pill/dot rather than sitting
-  beside it (RLY-184's additive badge) — a refusing executor must not read as healthy. This is
+  beside it (RLY-184's additive badge) — a refusing runner must not read as healthy. This is
   new design ground `docs/designs/Relay Runners.dc.html` does not cover (RLY-184 added the
   version surface beyond the artboard; RLY-191 promotes it to a fourth freshness state) — filed
   back to the Design project as a follow-up, not blocking here.
@@ -28,8 +28,8 @@ defmodule RelayWeb.BoardRunnersLive do
   only once the oldest queued job has waited past the stopped-work threshold — i.e. exactly when
   the answer can be non-nil. A board with work merely in flight pays one aggregate per tick.
 
-  Data comes from `Relay.Runs.list_executor_status/2` (the durable `executors` rows plus
-  the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the executor
+  Data comes from `Relay.Runs.list_runner_status/2` (the durable `runners` rows plus
+  the board's active `node_jobs`) and `Relay.AgentLog` (feed lines, routed to the runner
   holding the line's ref; unclaimed and ref-less lines are dropped — the board's log sheet
   still shows everything). RLY-167 swapped the source off the old ETS presence table, which
   lost its only writer when RLY-139 deleted `relay watch`; because the roster is now a pure
@@ -37,7 +37,7 @@ defmodule RelayWeb.BoardRunnersLive do
   and scheduler-only — a page backed by it would go blank on every deploy).
 
   A ~10s self-tick is the ONLY refresh mechanism and is load-bearing, not laziness: an
-  executor going silent emits no event by definition, so freshness decay is observable only
+  runner going silent emits no event by definition, so freshness decay is observable only
   by polling. A 10s tick against a 15–30s beat is ample.
 
   Log tails are a bounded per-runner ring buffer in assigns (last 30 lines per
@@ -152,7 +152,7 @@ defmodule RelayWeb.BoardRunnersLive do
                   class="font-mono"
                   style="font-size:11px;white-space:nowrap;color:color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-content));"
                 >
-                  → {row.executor_name}
+                  → {row.runner_name}
                 </span>
               </div>
               <div
@@ -165,7 +165,7 @@ defmodule RelayWeb.BoardRunnersLive do
             </div>
           </div>
           <%= if @runners == [] do %>
-            <%!-- Empty state — artboard lines ~139-157; command is bin/relay execute on
+            <%!-- Empty state — artboard lines ~139-157; command is ./relay start on
                  purpose (spec §6: npx relay-runner doesn't exist yet; RLY-139 retired the
                  legacy bin/relay watch board-runner this used to name). --%>
             <div
@@ -191,13 +191,13 @@ defmodule RelayWeb.BoardRunnersLive do
                   class="font-mono"
                   style="font-size:12.5px;color:color-mix(in oklab, var(--color-neutral-content) 85%, transparent);"
                 >
-                  <span style="color:var(--color-success);">$</span> bin/relay execute
+                  <span style="color:var(--color-success);">$</span> ./relay start
                 </span>
                 <button
                   type="button"
                   id="copy-start-command"
                   phx-hook=".CopyCmd"
-                  data-command="bin/relay execute"
+                  data-command="./relay start"
                   class="font-mono"
                   style="background:color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));border:1px solid color-mix(in oklab, var(--color-neutral-content) 25%, var(--color-neutral));color:color-mix(in oklab, var(--color-neutral-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;"
                 >
@@ -511,15 +511,15 @@ defmodule RelayWeb.BoardRunnersLive do
     end
   end
 
-  # Re-derives everything time- and roster-dependent in one place: the executor list
+  # Re-derives everything time- and roster-dependent in one place: the runner list
   # (freshness-augmented by the context), the board-wide queue and its stopped-work verdict, the
-  # summary counts, the ref → executor routing map, and drops log buffers for executors that fell
+  # summary counts, the ref → runner routing map, and drops log buffers for runners that fell
   # off the roster. One `now` for the whole pass, so the roster and the queue can never disagree
   # about the clock.
   defp assign_runners(socket) do
     now = DateTime.utc_now()
     board = socket.assigns.board
-    runners = Runs.list_executor_status(board, now)
+    runners = Runs.list_runner_status(board, now)
 
     counts = Enum.frequencies_by(runners, & &1.display_state)
     names = Enum.map(runners, & &1.name)
@@ -539,13 +539,13 @@ defmodule RelayWeb.BoardRunnersLive do
     |> update(:logs, &Map.take(&1, names))
   end
 
-  # Executor names can contain dots ("mac.local"), which are legal in DOM ids but break
+  # Runner names can contain dots ("mac.local"), which are legal in DOM ids but break
   # CSS #id selectors — sanitize for the id only; @logs stays keyed by the raw name.
   defp dom_id(%{name: name}), do: String.replace(name, ~r/[^A-Za-z0-9_-]/, "-")
 
   defp streaming?(runner), do: runner.freshness == :fresh and runner.jobs != []
 
-  # `:outdated` shares :gone's rose border — a refusing executor must not read as healthy,
+  # `:outdated` shares :gone's rose border — a refusing runner must not read as healthy,
   # even though (unlike :gone) it is genuinely beating.
   defp panel_style(:outdated), do: panel_style(:gone)
 
@@ -593,9 +593,9 @@ defmodule RelayWeb.BoardRunnersLive do
   # `v1 · requires v2` when outdated, plain `v1` otherwise — the mismatch legible without
   # hovering. "unversioned" rather than a bare `v`: a runner reporting nothing predates
   # RLY-184, and naming that is more useful than an empty slot.
-  defp version_label(%{version: nil, outdated: true}), do: "unversioned · requires v#{Runs.min_executor_version()}"
+  defp version_label(%{version: nil, outdated: true}), do: "unversioned · requires v#{Runs.min_runner_version()}"
 
-  defp version_label(%{version: version, outdated: true}), do: "v#{version} · requires v#{Runs.min_executor_version()}"
+  defp version_label(%{version: version, outdated: true}), do: "v#{version} · requires v#{Runs.min_runner_version()}"
 
   defp version_label(%{version: nil}), do: "unversioned"
   defp version_label(%{version: version}), do: "v#{version}"
@@ -632,9 +632,9 @@ defmodule RelayWeb.BoardRunnersLive do
 
   # RE311: the exclusive chip's `used` now comes from declared holdings, so the chip can name
   # what occupies it — the same `<ref> <state>` one-liner `busy_summary()` prints in the
-  # executor's own log, now visible on the board. `nil` omits the attribute entirely, which is
+  # runner's own log, now visible on the board. `nil` omits the attribute entirely, which is
   # the right answer for the shared chip (holdings say nothing about the shared tree) and for an
-  # executor holding nothing.
+  # runner holding nothing.
   defp pool_tooltip(%{name: "exclusive"}, %{held: [_first | _rest] = held}) do
     Enum.map_join(held, " · ", &"#{&1["ref"]} #{&1["state"]}")
   end

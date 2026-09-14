@@ -17,12 +17,12 @@ defmodule Relay.PlanSkillsTest do
     end
 
     test "reads the spec from the card", %{doc: doc} do
-      assert doc =~ "bin/relay card"
+      assert doc =~ "./relay card"
       assert doc =~ "spec"
     end
 
     test "writes the plan back to the card", %{doc: doc} do
-      assert doc =~ "bin/relay plan"
+      assert doc =~ "./relay plan"
     end
 
     test "no longer points onward to the retired /exec-plan command", %{doc: doc} do

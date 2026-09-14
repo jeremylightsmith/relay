@@ -1,23 +1,23 @@
 defmodule Relay.RunsCapabilitiesTest do
   @moduledoc """
-  `upsert_executor/2`'s capabilities branch (RLY-182). The subtle bug this guards: the
+  `upsert_runner/2`'s capabilities branch (RLY-182). The subtle bug this guards: the
   original `on_conflict: {:replace, [...]}` replaces with the INSERT's values, so a beat
   that omitted `capabilities` would null out a perfectly good row — and preflight would
-  then report every agent as missing on a healthy executor.
+  then report every agent as missing on a healthy runner.
   """
   use Relay.DataCase, async: true
 
   alias Relay.Repo
   alias Relay.Runs
-  alias Schemas.Executor
+  alias Schemas.Runner
 
   setup do
     %{board: insert(:board)}
   end
 
   defp beat(board, attrs) do
-    {:ok, executor} = Runs.upsert_executor(board, Map.merge(%{"name" => "mac-1"}, attrs))
-    Repo.get!(Executor, executor.id)
+    {:ok, runner} = Runs.upsert_runner(board, Map.merge(%{"name" => "mac-1"}, attrs))
+    Repo.get!(Runner, runner.id)
   end
 
   test "a first beat with no capabilities stores nil, not an empty map", %{board: board} do

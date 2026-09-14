@@ -314,7 +314,7 @@ defmodule RelayWeb.FlowMetricsLive do
           id="cost-blank-note"
           style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-bottom:12px;"
         >
-          Cost lights up once executors report spend. Duration, attempts and verdicts are recording live right now.
+          Cost lights up once runners report spend. Duration, attempts and verdicts are recording live right now.
         </p>
 
         <%= cond do %>

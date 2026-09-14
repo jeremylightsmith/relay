@@ -69,7 +69,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     assert %{"stamped" => 1} = json_response(beat(conn, ["RL7"]), 200)
   end
 
-  test "an executor beat (name + capacity) upserts an Executor row",
+  test "a runner beat (name + capacity) upserts a Runner row",
        %{conn: conn, board: board, stage: stage} do
     insert(:card, stage: stage, ref_number: 7)
 
@@ -91,11 +91,11 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
       )
 
     assert %{"stamped" => 1} = json_response(conn, 200)
-    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: "jeremy-mbp")
-    assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 1}
+    runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: "jeremy-mbp")
+    assert runner.capacity == %{"shared_clean" => 3, "exclusive" => 1}
   end
 
-  test "a capacity-less RLY-141 beat upserts no Executor row (additive, never subtractive)",
+  test "a capacity-less RLY-141 beat upserts no Runner row (additive, never subtractive)",
        %{conn: conn, board: _board, stage: stage} do
     insert(:card, stage: stage, ref_number: 7)
 
@@ -104,13 +104,13 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     |> post(~p"/api/board/heartbeat", Jason.encode!(%{"runner_id" => "w1", "interval" => 30, "refs" => ["RL7"]}))
     |> json_response(200)
 
-    assert Repo.aggregate(Schemas.Executor, :count) == 0
+    assert Repo.aggregate(Schemas.Runner, :count) == 0
   end
 
-  test "an executor beat carrying name + capacity lands free slots in Relay.Runs.Capacity",
+  test "a runner beat carrying name + capacity lands free slots in Relay.Runs.Capacity",
        %{conn: conn, board: board} do
     {:ok, %{id: exec_id}} =
-      Relay.Runs.upsert_executor(board, %{"name" => "exec-hb", "capacity" => %{"shared_clean" => 2}})
+      Relay.Runs.upsert_runner(board, %{"name" => "exec-hb", "capacity" => %{"shared_clean" => 2}})
 
     conn
     |> put_req_header("content-type", "application/json")
@@ -128,7 +128,7 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     assert %{shared_clean: 2, exclusive: 0} = Map.get(Capacity.snapshot(), exec_id)
   end
 
-  test "an executor beat with an unknown class and a garbage value degrades, never 500s",
+  test "a runner beat with an unknown class and a garbage value degrades, never 500s",
        %{conn: conn, board: board} do
     # RLY-201: both heartbeat routes must shape capacity the same way — one normalizer.
     conn
@@ -144,8 +144,8 @@ defmodule RelayWeb.Api.BoardHeartbeatTest do
     )
     |> json_response(200)
 
-    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-junk")
-    assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
-    assert Capacity.snapshot()[executor.id] == %{shared_clean: 0, exclusive: 2}
+    runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-junk")
+    assert runner.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+    assert Capacity.snapshot()[runner.id] == %{shared_clean: 0, exclusive: 2}
   end
 end

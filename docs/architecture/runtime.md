@@ -12,7 +12,7 @@ flowchart LR
         engine -- "PubSub run events" --> board
     end
     subgraph dev["Developer machine (or future cloud sandbox)"]
-        exec["bin/relay executor<br/>(thin: claim job, run, report)"]
+        exec["./relay runner<br/>(thin: claim job, run, report)"]
         agent["claude -p<br/>one agent node"]
         repo["project checkout + worktrees<br/>CLAUDE.md · .claude/skills · MCP<br/>(developer-owned)"]
         exec --> agent
@@ -34,15 +34,15 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
 | `Registry` (`Relay.Runs.InstanceRegistry`) | engine-instance lookup keyed by owner pid (RE298 / ADR 0009); empty in production, where every resolution falls through to `Relay.Runs.Instance.default/0` |
-| `Relay.Runs.Capacity` | ETS owner for per-executor advertised free capacity (RLY-133), fed by the executor heartbeat |
+| `Relay.Runs.Capacity` | ETS owner for per-runner advertised free capacity (RLY-133), fed by the runner heartbeat |
 | `Registry` (`Relay.Runs.SchedulerRegistry`) | per-board scheduler lookup keys (RLY-133) |
 | `Relay.Runs.SchedulerSupervisor` | DynamicSupervisor for per-board `Scheduler.Server`s (RLY-133); boot-starts per board only when `:runs_auto_start` |
 | `Relay.Activity.LogSink` | debounces runner log lines into one `insert_all` per burst (RLY-112) |
 | `Relay.Activity.Pruner` | ages `:action` chatter out after 14 days; first sweep one interval after boot |
 | `Task.Supervisor` (`Relay.Push.TaskSupervisor`) | push dispatch off the caller's process (RLY-81) |
 | `Finch` (`Relay.Push.APNSFinch`) | dedicated HTTP/2 pool — APNs requires h2; Req's default pool is h1-first |
-| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener` (which self-heals via its own `{:continue, :boot_reconcile}` sweep over every `:parked` run at startup — RLY-200), a boot task that resumes unfinished runs from Postgres (revokes orphaned jobs, re-dispatches the current node), and `Relay.Runs.ExecutorReaper` (RLY-134, inside this `rest_for_one` subtree). Not started in test. |
-| `Relay.Runs.ExecutorReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) run-lifecycle sweeps (executor liveness + orphaned-run closure + unresumable-run ageing): `Relay.Runs.reclaim_stale_executors/0` requeues a dead executor's `shared_clean` jobs and parks its `exclusive` runs (`parked_reason: :executor_gone`); `Relay.Runs.close_orphaned_runs/0` closes any run still active while its card is already in a terminal-type stage (RLY-233); `Relay.Runs.abandon_unresumable_runs/0` fails a parked run whose resume the scheduler has refused continuously for `Relay.Runs.unresumable_after_s/0` (30 min), so a dead end becomes a visible failure a human can `retry` (RE297). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
+| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener` (which self-heals via its own `{:continue, :boot_reconcile}` sweep over every `:parked` run at startup — RLY-200), a boot task that resumes unfinished runs from Postgres (revokes orphaned jobs, re-dispatches the current node), and `Relay.Runs.RunnerReaper` (RLY-134, inside this `rest_for_one` subtree). Not started in test. |
+| `Relay.Runs.RunnerReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) run-lifecycle sweeps (runner liveness + orphaned-run closure + unresumable-run ageing): `Relay.Runs.reclaim_stale_runners/0` requeues a dead runner's `shared_clean` jobs and parks its `exclusive` runs (`parked_reason: :runner_gone`); `Relay.Runs.close_orphaned_runs/0` closes any run still active while its card is already in a terminal-type stage (RLY-233); `Relay.Runs.abandon_unresumable_runs/0` fails a parked run whose resume the scheduler has refused continuously for `Relay.Runs.unresumable_after_s/0` (30 min), so a dead end becomes a visible failure a human can `retry` (RE297). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
 | `RelayWeb.Endpoint` | Bandit HTTP server, WebSockets |
 
 ## Session lifetime
@@ -92,7 +92,7 @@ tracked as a separate follow-up.
 | `story_map_cursor:<board_id>` | `Relay.Presence` | `{:story_map_cursor, user_id, name, email, x, y}`, `{:story_map_cursor_gone, user_id}` | the same sockets; each relays to its own client with `push_event/3` (no template diff). Does NOT bump `BoardWatch` |
 | `story_map_view:<board_id>` | `Relay.StoryMap.merge_view/2` (which `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose) | `{:story_map_view_changed, board_id, view}` — the board-wide shared map view settings changed | the same sockets, **including the writer** (there is no optimistic local assign). Does NOT bump `BoardWatch` |
 | `events:firehose` | `Relay.Events` — mirrors every board event as `{board_id, event}` | every `board:<board_id>` event, tagged with its board id | `Relay.Runs.Listener` (reconciles card events against runs — RLY-132; its first rule closes, rather than resumes, an active run whose card has reached a terminal-type stage — RLY-233) |
-| `runs:capacity` | `Relay.Runs.Capacity` | `{:executor_capacity_changed, executor_id}` — an executor's advertised free capacity changed | every per-board `Relay.Runs.Scheduler.Server` |
+| `runs:capacity` | `Relay.Runs.Capacity` | `{:runner_capacity_changed, runner_id}` — a runner's advertised free capacity changed | every per-board `Relay.Runs.Scheduler.Server` |
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
 | `card:<card_id>:talk` | `Relay.Talk` (RE268 / ADR 0009) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
 
@@ -149,5 +149,5 @@ reserved for the genuine question above; the two never overlap (RLY-179).
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,
 `lib/relay/agent_log.ex`, `lib/relay/board_watch.ex`,
 `lib/relay_web/api_log.ex`, `lib/relay/runs.ex`, `lib/relay/runs/supervisor.ex`,
-`lib/relay/runs/listener.ex`, `lib/relay/runs/executor_reaper.ex`, `lib/relay/runs/`,
+`lib/relay/runs/listener.ex`, `lib/relay/runs/runner_reaper.ex`, `lib/relay/runs/`,
 `lib/relay/talk.ex`.*

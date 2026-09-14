@@ -182,7 +182,7 @@ defmodule RelayWeb.Router do
 
   # Unauthenticated on purpose (RLY-177): the deployed SHA leaks nothing a deploy does not,
   # and "which release is live?" must be answerable before you have a board key in hand.
-  # RE304 puts the scaffold here for the same reason: `/relay-setup` downloads `bin/relay`
+  # RE304 puts the scaffold here for the same reason: `/relay-setup` downloads `./relay`
   # before a project has minted a key. The exact route precedes the glob so `/api/scaffold`
   # is the manifest, not a zero-segment file lookup.
   scope "/api", RelayWeb.Api do
@@ -206,7 +206,7 @@ defmodule RelayWeb.Router do
     get "/cards/:ref", CardController, :show
     get "/cards/:ref/diagnosis", DiagnosisController, :show
     get "/cards/:ref/runs", RunController, :index
-    get "/executors", ExecutorController, :index
+    get "/runners", RunnerController, :index
     get "/flows", FlowController, :index
     get "/flows/:key", FlowController, :show
     get "/flows/:key/metrics", FlowMetricsController, :metrics

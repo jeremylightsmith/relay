@@ -30,17 +30,17 @@ defmodule Relay.Runs.TransitionsTest do
     test "running -> parked sets the extra columns and returns {:ok, run}" do
       run = insert(:run, status: :running, current_node: "implement")
 
-      set = [parked_reason: :claimed, pinned_executor_name: nil]
+      set = [parked_reason: :claimed, pinned_runner_name: nil]
 
       assert {:ok, %Run{status: :parked, parked_reason: :claimed}} =
                Transitions.transition(run, [:running], :parked, set: set)
 
-      assert %Run{status: :parked, parked_reason: :claimed, pinned_executor_name: nil} =
+      assert %Run{status: :parked, parked_reason: :claimed, pinned_runner_name: nil} =
                Repo.get!(Run, run.id)
     end
 
     test "parked -> running clears parked_reason" do
-      run = insert(:run, status: :parked, parked_reason: :executor_gone)
+      run = insert(:run, status: :parked, parked_reason: :runner_gone)
 
       assert {:ok, %Run{status: :running, parked_reason: nil}} =
                Transitions.transition(run, [:parked], :running, set: [parked_reason: nil])

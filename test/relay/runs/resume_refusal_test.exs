@@ -17,7 +17,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
 
   defp parked_run(works) do
     card = insert(:card, stage: works, status: :working)
-    insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: nil)
+    insert(:run, card: card, status: :parked, parked_reason: :runner_gone, current_node: nil)
   end
 
   defp refusal(run, reason), do: %{run_id: run.id, card_id: run.card_id, reason: reason}
@@ -50,7 +50,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
       run = parked_run(works)
       first = at(-600)
 
-      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :pinned_executor_absent)], first)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :pinned_runner_absent)], first)
       :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], at(0))
 
       assert %Run{resume_refused_since: ^first, resume_refused_reason: :no_free_slot} = Runs.get_run!(run.id)
@@ -131,12 +131,12 @@ defmodule Relay.Runs.ResumeRefusalTest do
     test "clears the pin when the reason proves it unhonourable", %{board: board, works: works} do
       for reason <- Run.pin_unhonourable_refusal_reasons() do
         run = parked_run(works)
-        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_executor_name: "exec-a"])
+        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_runner_name: "exec-a"])
         :ok = Runs.record_resume_refusals(board.id, [refusal(run, reason)], at(-31 * 60))
 
         :ok = Runs.abandon_unresumable_runs(at(0))
 
-        assert %Run{status: :failed, pinned_executor_name: nil} = Runs.get_run!(run.id)
+        assert %Run{status: :failed, pinned_runner_name: nil} = Runs.get_run!(run.id)
       end
     end
 
@@ -144,12 +144,12 @@ defmodule Relay.Runs.ResumeRefusalTest do
          %{board: board, works: works} do
       for reason <- Run.resume_refusal_reasons() -- Run.pin_unhonourable_refusal_reasons() do
         run = parked_run(works)
-        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_executor_name: "exec-a"])
+        Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [pinned_runner_name: "exec-a"])
         :ok = Runs.record_resume_refusals(board.id, [refusal(run, reason)], at(-31 * 60))
 
         :ok = Runs.abandon_unresumable_runs(at(0))
 
-        assert %Run{status: :failed, pinned_executor_name: "exec-a"} = Runs.get_run!(run.id)
+        assert %Run{status: :failed, pinned_runner_name: "exec-a"} = Runs.get_run!(run.id)
       end
     end
 
@@ -170,7 +170,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
       # `since` set, `reason` nil — reachable if a writer dies between `stamp_refusal/2`'s two
       # UPDATEs. `unresumable_detail/2` would call `Scheduler.resume_refusal_sentence(nil)`,
       # which has no catch-all clause, so a FunctionClauseError here would kill every
-      # `ExecutorReaper` sweep tick until the row cleared.
+      # `RunnerReaper` sweep tick until the row cleared.
       Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id),
         set: [resume_refused_since: at(-31 * 60), resume_refused_reason: nil]
       )
@@ -186,7 +186,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
   end
 
   # Mirrors test/relay/runs/exclusive_resume_test.exs' park_pinned/1: a real exclusive run,
-  # claimed by exec-a, parked `:executor_gone` by the reaper when exec-a goes silent.
+  # claimed by exec-a, parked `:runner_gone` by the reaper when exec-a goes silent.
   defp park_pinned(board) do
     stages = Relay.Boards.list_stages(board)
     next_up = Enum.find(stages, &(&1.name == "Next up"))
@@ -209,17 +209,17 @@ defmodule Relay.Runs.ResumeRefusalTest do
     {:ok, run} = Runs.start_run(card, flow)
 
     {:ok, exec_a} =
-      Runs.upsert_executor(board, %{"name" => "exec-a", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+      Runs.upsert_runner(board, %{"name" => "exec-a", "interval" => 30, "capacity" => %{"exclusive" => 1}})
 
     {:ok, _claimed} = Runs.claim_next_job(exec_a)
 
-    Relay.Repo.update_all(from(e in Schemas.Executor, where: e.id == ^exec_a.id),
+    Relay.Repo.update_all(from(e in Schemas.Runner, where: e.id == ^exec_a.id),
       set: [last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -1000, :second), :second)]
     )
 
-    :ok = Runs.reclaim_stale_executors()
+    :ok = Runs.reclaim_stale_runners()
     parked = Runs.get_run!(run.id)
-    assert parked.status == :parked and parked.parked_reason == :executor_gone
+    assert parked.status == :parked and parked.parked_reason == :runner_gone
 
     %{run: parked, card: card, flow: flow, exec_a: exec_a}
   end
@@ -289,12 +289,12 @@ defmodule Relay.Runs.ResumeRefusalTest do
       assert revived.current_node == "work"
       assert revived.failure_detail == nil
       # The pin to the gone exec-a is released with the re-adoption: keeping it would revive the
-      # run straight back into `pinned_executor_absent`, refused every tick until the reaper
+      # run straight back into `pinned_runner_absent`, refused every tick until the reaper
       # failed it again — the dead end rebuilt one link further along.
-      assert revived.pinned_executor_name == nil
+      assert revived.pinned_runner_name == nil
     end
 
-    test "a parked exclusive run whose pinned executor never returns ages out and retries clean",
+    test "a parked exclusive run whose pinned runner never returns ages out and retries clean",
          %{e2e_board: board} do
       %{run: run} = park_pinned(board)
 
@@ -302,13 +302,13 @@ defmodule Relay.Runs.ResumeRefusalTest do
       # lingering slot anyway): its id is not a key in the capacity map, so the pin can never
       # be satisfied — `resumable?/2` yes, `take_slot/3` :none, on every tick, forever.
       plan = refuse_once(board, at(-31 * 60))
-      assert [%{run_id: _id, reason: :pinned_executor_absent}] = plan.refusals
+      assert [%{run_id: _id, reason: :pinned_runner_absent}] = plan.refusals
 
       :ok = Runs.abandon_unresumable_runs(at(0))
       failed = Runs.get_run!(run.id)
       assert failed.status == :failed
       # The pin is provably unhonourable, so it is cleared — otherwise the hatch stays shut.
-      assert failed.pinned_executor_name == nil
+      assert failed.pinned_runner_name == nil
 
       assert {:ok, revived} = Runs.retry_run(failed)
       assert revived.status == :running

@@ -1,6 +1,6 @@
 defmodule Relay.FlowsNodeRequirementsTest do
   @moduledoc """
-  What a flow's graph NAMES (RLY-182) — pure, no executor knowledge. This function lives in
+  What a flow's graph NAMES (RLY-182) — pure, no runner knowledge. This function lives in
   Flows precisely because it needs none: whether anyone HAS these is Runs' question, and
   Flows may not depend on Runs (boundary cycle).
   """

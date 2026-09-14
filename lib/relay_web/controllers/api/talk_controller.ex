@@ -1,7 +1,7 @@
 defmodule RelayWeb.Api.TalkController do
   @moduledoc """
-  The executor's transcript transport (RE268 / ADR 0009). Two routes, both board-scoped by the
-  same board-key auth as the rest of `/api`: the executor streams a turn's lines here as it
+  The runner's transcript transport (RE268 / ADR 0009). Two routes, both board-scoped by the
+  same board-key auth as the rest of `/api`: the runner streams a turn's lines here as it
   produces them, then reports the turn's end state.
 
   Deliberately NOT `POST /api/node-jobs/:id/outcome`: that route finalises a job through the RUN
@@ -20,7 +20,7 @@ defmodule RelayWeb.Api.TalkController do
 
   @doc """
   Appends a batch of transcript lines. At-least-once: a replayed `client_seq` is accepted and
-  stored once, so the executor may retry freely. Only a non-list `events` 422s the whole batch —
+  stored once, so the runner may retry freely. Only a non-list `events` 422s the whole batch —
   a list containing a malformed element is `Relay.Talk`'s concern, which drops that one line and
   stores the rest (the same "a mangled line must never cost the whole batch" rule as a map
   missing `client_seq`).
@@ -47,7 +47,7 @@ defmodule RelayWeb.Api.TalkController do
     end
   end
 
-  # The executor is untrusted input — the same rule `Relay.Talk.normalize_event/1` states for the
+  # The runner is untrusted input — the same rule `Relay.Talk.normalize_event/1` states for the
   # events route. Unchecked, a JSON object or number here fails `cast(…, :string)` and
   # `Repo.update!` raises `Ecto.InvalidChangesetError`, which the FallbackController cannot
   # render: a 500, and a turn left `:claimed` behind a `:done` job.

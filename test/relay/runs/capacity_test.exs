@@ -1,44 +1,44 @@
 defmodule Relay.Runs.CapacityTest do
-  # Uses the application-started Relay.Runs.Capacity instance, isolated by unique executor ids
+  # Uses the application-started Relay.Runs.Capacity instance, isolated by unique runner ids
   # (the BoardWatch test pattern), except the "instance scoping" describe block below, which
   # starts its own private capacity table via Relay.DataCase.start_capacity!/0 (ADR 0009).
   use Relay.DataCase, async: true
 
   alias Relay.Runs.Capacity
 
-  defp executor_id, do: System.unique_integer([:positive])
+  defp runner_id, do: System.unique_integer([:positive])
 
   test "put/2 then snapshot/0 round-trips normalized free slots" do
-    eid = executor_id()
+    eid = runner_id()
     :ok = Capacity.put(eid, %{shared_clean: 2, exclusive: 1})
 
     assert %{shared_clean: 2, exclusive: 1} = Capacity.snapshot()[eid]
   end
 
   test "put/2 defaults missing classes to 0 and floors negatives" do
-    eid = executor_id()
+    eid = runner_id()
     :ok = Capacity.put(eid, %{shared_clean: 3})
 
     assert %{shared_clean: 3, exclusive: 0} = Capacity.snapshot()[eid]
   end
 
-  test "clear/1 removes an executor" do
-    eid = executor_id()
+  test "clear/1 removes a runner" do
+    eid = runner_id()
     :ok = Capacity.put(eid, %{shared_clean: 1, exclusive: 0})
     :ok = Capacity.clear(eid)
 
     refute Map.has_key?(Capacity.snapshot(), eid)
   end
 
-  test "put/2 and clear/1 broadcast {:executor_capacity_changed, executor_id}" do
-    eid = executor_id()
+  test "put/2 and clear/1 broadcast {:runner_capacity_changed, runner_id}" do
+    eid = runner_id()
     :ok = Capacity.subscribe()
 
     :ok = Capacity.put(eid, %{shared_clean: 1, exclusive: 0})
-    assert_receive {:executor_capacity_changed, ^eid}
+    assert_receive {:runner_capacity_changed, ^eid}
 
     :ok = Capacity.clear(eid)
-    assert_receive {:executor_capacity_changed, ^eid}
+    assert_receive {:runner_capacity_changed, ^eid}
   end
 
   describe "normalize/1 (RLY-201: the single capacity normalizer)" do
@@ -85,7 +85,7 @@ defmodule Relay.Runs.CapacityTest do
     end
 
     test "put/2 accepts a raw string-keyed client map" do
-      eid = executor_id()
+      eid = runner_id()
       :ok = Capacity.put(eid, %{"gpu" => 1, "shared_clean" => "lots", "exclusive" => 2})
 
       assert Capacity.snapshot()[eid] == %{shared_clean: 0, exclusive: 2}

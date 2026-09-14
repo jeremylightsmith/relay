@@ -20,21 +20,21 @@ defmodule RelayWeb.BoardStoppedWorkTest do
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running)
     exec = insert(:node_execution, run: run, outcome: nil, finished_at: nil, inserted_at: at)
-    insert(:node_job, node_execution: exec, state: :queued, executor_name: nil, claimed_at: nil, inserted_at: at)
+    insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil, inserted_at: at)
   end
 
   test "shows the banner naming the outdated reason when work is stopped", %{conn: conn, board: board, works: works} do
     queued_job(works, 600)
-    insert(:executor, board: board, name: "old", version: 0)
+    insert(:runner, board: board, name: "old", version: 0)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
     assert has_element?(view, "#stopped-work-banner")
-    assert render(view) =~ "requires v#{Relay.Runs.min_executor_version()}"
+    assert render(view) =~ "requires v#{Relay.Runs.min_runner_version()}"
   end
 
   test "stays quiet on a healthy board", %{conn: conn, board: board, works: works} do
-    insert(:executor, board: board, name: "live", version: Relay.Runs.min_executor_version())
+    insert(:runner, board: board, name: "live", version: Relay.Runs.min_runner_version())
     insert(:card, stage: works, status: :working)
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")

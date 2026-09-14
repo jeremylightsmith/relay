@@ -100,7 +100,7 @@ defmodule Relay.Runs.Listener do
   defp reconcile_card(card, nil), do: maybe_reenter_after_rejection(card)
 
   # RLY-233: FIRST active-run rule. A card that has genuinely reached a terminal-type stage must
-  # not keep an active run — close it (freeing its executor slot) before any resume rule can
+  # not keep an active run — close it (freeing its runner slot) before any resume rule can
   # re-dispatch it. Being first, it pre-empts the :needs_input/:claimed resume clauses in
   # reconcile_active/2, so a parked run whose card was moved to Done is CANCELLED, not resumed
   # (which would regenerate a zombie).

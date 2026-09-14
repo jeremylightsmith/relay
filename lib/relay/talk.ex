@@ -1,7 +1,7 @@
 defmodule Relay.Talk do
   @moduledoc """
   Talk (ADR 0009): a person-driven execution lane. A person types in a card's terminal pane, one
-  turn becomes a `node_jobs` row with `kind: :talk` and no run, an executor claims it through
+  turn becomes a `node_jobs` row with `kind: :talk` and no run, a runner claims it through
   the SAME long-poll claim every flow node uses, and its output streams back as durable,
   ordered transcript rows.
 
@@ -10,22 +10,22 @@ defmodule Relay.Talk do
 
   **Ordering is `seq`, never a timestamp.** `append_events/2` assigns it server-side inside one
   transaction that also bumps `talk_sessions.last_event_seq`, so two concurrent batches cannot
-  interleave into the same number. Delivery from the executor is at-least-once, so a batch may
+  interleave into the same number. Delivery from the runner is at-least-once, so a batch may
   arrive twice — `(talk_turn_id, client_seq)` is unique and a replay is dropped, silently and
   without a second broadcast.
 
-  **The pin.** The session records which executor holds the `claude` session. It is written by
-  `finish_turn/3` (from the claiming executor recorded on the job row) and read by
-  `post_message/3`, which copies it onto the next job's `executor_name`. That is why
+  **The pin.** The session records which runner holds the `claude` session. It is written by
+  `finish_turn/3` (from the claiming runner recorded on the job row) and read by
+  `post_message/3`, which copies it onto the next job's `runner_name`. That is why
   `Relay.Runs.claim_next_job/1` needs no Talk knowledge: the pin is expressed in the same column
   an exclusive run's pin already uses.
 
-  **Known step-1 limitation.** A turn whose executor dies stays `claimed` — the orphan reaper
+  **Known step-1 limitation.** A turn whose runner dies stays `claimed` — the orphan reaper
   deliberately ignores talk jobs (requeueing one would hand a resumed session to a machine that
   does not hold it). `stop_turn/1` revokes unconditionally, so a person can always end it.
 
   **Not here in step 1**: receipts and `:field_changed` ([AC16]), `awaiting` turns ([AC17]), the
-  write lease and `bin/relay say` ([AC18]), card-level executor pinning ([AC12]). A talk turn
+  write lease and `./relay say` ([AC18]), card-level runner pinning ([AC12]). A talk turn
   does **not** move the card's baton (ADR 0009 §6).
 
   PubSub: `card:<card_id>:talk`, carrying `{:talk_event, event}` and `{:talk_turn_changed, turn}`.
@@ -96,7 +96,7 @@ defmodule Relay.Talk do
   @doc """
   Posts one human message: appends its `:user` line, inserts a `:queued` turn and the talk job
   that carries it, all in one transaction. The job is pinned to the session's holder (nil on the
-  first turn, which is what lets any executor take it and BECOME the holder) and carries the
+  first turn, which is what lets any runner take it and BECOME the holder) and carries the
   stored `claude_session_id` as `resume_session`.
 
   Refuses a blank message and refuses a second turn while one is in flight — a session is one
@@ -143,7 +143,7 @@ defmodule Relay.Talk do
       |> TalkTurn.changeset(%{status: :queued})
       |> Repo.insert!()
 
-    # The human's own line is `client_seq: 0`; the executor numbers its lines from 1, so the
+    # The human's own line is `client_seq: 0`; the runner numbers its lines from 1, so the
     # two writers of one turn's transcript can never collide on the unique index.
     [event] = insert_events!(locked, turn, [%{"client_seq" => 0, "kind" => "user", "text" => prompt, "dim" => false}])
 
@@ -157,15 +157,15 @@ defmodule Relay.Talk do
       "seed" => %{"summary" => locked.seed_summary, "fields" => locked.seed_fields}
     }
 
-    job = Runs.insert_talk_job!(card, payload, locked.pinned_executor_name)
+    job = Runs.insert_talk_job!(card, payload, locked.pinned_runner_name)
     turn = turn |> TalkTurn.changeset(%{node_job_id: job.id}) |> Repo.update!()
     {turn, event}
   end
 
   @doc """
-  Appends a batch of executor-sent lines. `seq` is assigned here (never by the executor); a line
+  Appends a batch of runner-sent lines. `seq` is assigned here (never by the runner); a line
   whose `(turn, client_seq)` already exists is dropped without a broadcast, which is what makes
-  the executor's retry safe. Returns only the lines that were genuinely new.
+  the runner's retry safe. Returns only the lines that were genuinely new.
   """
   def append_events(%TalkTurn{} = turn, raw) when is_list(raw) do
     session = Repo.get!(TalkSession, turn.talk_session_id)
@@ -217,7 +217,7 @@ defmodule Relay.Talk do
   # An unknown (but string) kind degrades to `:out` rather than raising. EVERY other shape
   # problem drops the one line (`:invalid`): not a map; no integer `client_seq`; a non-boolean
   # `dim`; a `text` that is missing, blank or not a string; a `kind` that is present but not a
-  # string. The executor is untrusted input, and a mangled line must never cost the whole batch —
+  # string. The runner is untrusted input, and a mangled line must never cost the whole batch —
   # not even the batch containing it. Each of those reached `Repo.insert!` before RE268's round-2
   # review: a blank `text` raised `Ecto.InvalidChangesetError` (the changeset requires `:text`)
   # and a non-string `text`/`kind` raised `Protocol.UndefinedError` in `to_string/1` — neither an
@@ -237,7 +237,7 @@ defmodule Relay.Talk do
     end
   end
 
-  # The batch arrives as JSON (string keys) from the executor and as atom-keyed maps from
+  # The batch arrives as JSON (string keys) from the runner and as atom-keyed maps from
   # `do_post/4`'s own seed line, so both are read here rather than at every call site.
   defp field(raw, key), do: raw[Atom.to_string(key)] || raw[key]
 
@@ -255,13 +255,13 @@ defmodule Relay.Talk do
   defp normalize_kind(kind), do: Enum.find(TalkEvent.kinds(), :out, &(Atom.to_string(&1) == kind))
 
   @doc """
-  Marks the turn carried by a just-claimed talk job `:claimed` — an executor now holds it and
+  Marks the turn carried by a just-claimed talk job `:claimed` — a runner now holds it and
   `claude -p` is about to run. Called by `RelayWeb.Api.NodeJobController` off the claim it just
   granted, which is what keeps `Relay.Runs` free of Talk knowledge: the run lifecycle claims a
   job, and only Talk knows a job can carry a turn.
 
   Only a `:queued` turn moves. Stop revokes the job but leaves it claimable for the moment
-  before the executor notices, and a claim must never drag a `:stopped` turn back to live.
+  before the runner notices, and a claim must never drag a `:stopped` turn back to live.
   """
   def mark_claimed(%NodeJob{kind: :talk} = job) do
     turn = Repo.one(from t in TalkTurn, where: t.node_job_id == ^job.id)
@@ -284,17 +284,17 @@ defmodule Relay.Talk do
   def mark_claimed(%NodeJob{}), do: {:error, :not_talk}
 
   @doc """
-  Ends a turn. `:done` persists the executor's `claude_session_id` on the session — the single
-  thing that makes the next turn a continuation — and records the claiming executor as the
+  Ends a turn. `:done` persists the runner's `claude_session_id` on the session — the single
+  thing that makes the next turn a continuation — and records the claiming runner as the
   session's pin. `:stopped` and `:failed` leave both alone: a turn that never finished cannot
   vouch for a session id.
 
   **First writer wins**, mirroring `stop_turn/1`'s guard: only an active turn moves. A turn the
   person already Stopped must not be dragged back to `:done` by a `claude -p` that finished in
-  the window before the revoke reached the executor — that would resurrect a terminal state AND
+  the window before the revoke reached the runner — that would resurrect a terminal state AND
   let a turn that never finished vouch for a session id. An already-finalised turn still returns
   `{:ok, turn}` (the `:already_finalized` precedent in
-  `RelayWeb.Api.NodeJobController.resolve_and_report/4`), so the executor's at-least-once retry
+  `RelayWeb.Api.NodeJobController.resolve_and_report/4`), so the runner's at-least-once retry
   still 200s instead of re-broadcasting and rewriting the pin.
   """
   def finish_turn(%TalkTurn{} = turn, status, attrs \\ %{}) when status in @reportable_statuses do
@@ -310,7 +310,7 @@ defmodule Relay.Talk do
   # One transaction, because the steps are not independent: `finish_talk_job!/1` committing while
   # the turn update raises leaves the job `:done` and the turn `:claimed` — and from there
   # `active_turn/1` keeps returning it, `post_message/3` refuses every later turn with
-  # `:turn_in_flight`, the orphan reaper skips talk jobs by design, and the executor's
+  # `:turn_in_flight`, the orphan reaper skips talk jobs by design, and the runner's
   # at-least-once retry re-raises forever. That wedges the card's Talk until a human hits Stop.
   # The split state is reachable from ANY raise between the job update and the turn update, not
   # just from bad input, so the fix belongs here rather than only at the controller.
@@ -339,16 +339,16 @@ defmodule Relay.Talk do
     session
     |> TalkSession.changeset(%{
       claude_session_id: attrs[:session_id] || session.claude_session_id,
-      pinned_executor_name: job.executor_name || session.pinned_executor_name
+      pinned_runner_name: job.runner_name || session.pinned_runner_name
     })
     |> Repo.update!()
   end
 
   @doc """
   The Stop button (ADR 0009 §1). Revokes the job — the heartbeat's `Relay.Runs.revoked_among/2`
-  then names it and the executor kills the running `claude -p` — and ends the turn `:stopped`,
+  then names it and the runner kills the running `claude -p` — and ends the turn `:stopped`,
   a normal non-error state whose partial output stays in the transcript. Server-side and
-  unconditional, so a turn whose executor is already gone still ends.
+  unconditional, so a turn whose runner is already gone still ends.
   """
   def stop_turn(%TalkTurn{} = turn) do
     turn = Repo.get!(TalkTurn, turn.id)
@@ -361,7 +361,7 @@ defmodule Relay.Talk do
       updated = turn |> TalkTurn.changeset(%{status: :stopped}) |> Repo.update!()
       broadcast(session.card_id, {:talk_turn_changed, updated})
 
-      # Wake the executor's open claim long-poll so the revocation lands in well under a second
+      # Wake the runner's open claim long-poll so the revocation lands in well under a second
       # instead of waiting out the 15s heartbeat. `post_message/3` already does this to get a NEW
       # turn picked up promptly; a Stop needs it just as much, and for the same channel — without
       # it the poll sleeps through the one event it most needs to hear.

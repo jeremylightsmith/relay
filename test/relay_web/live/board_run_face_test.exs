@@ -157,18 +157,18 @@ defmodule RelayWeb.BoardRunFaceTest do
           inserted_at: DateTime.add(now, -900, :second)
         )
 
-      insert(:node_job, node_execution: exec, state: :queued, executor_name: nil, claimed_at: nil)
+      insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       assert has_element?(view, ~s(#card-#{face_ref(board, card)}-run-face[data-stalled="true"]))
     end
 
-    test "a claimed job on a live executor stays neutral and keeps its age readout",
+    test "a claimed job on a live runner stays neutral and keeps its age readout",
          %{conn: conn, board: board, works: works} do
       now = DateTime.truncate(DateTime.utc_now(), :second)
       old = DateTime.add(now, -600, :second)
-      insert(:executor, board: board, name: "live", last_heartbeat: now)
+      insert(:runner, board: board, name: "live", last_heartbeat: now)
       card = insert(:card, stage: works, status: :working)
       run = insert(:run, card: card, status: :running, current_node: "implement")
 
@@ -181,7 +181,7 @@ defmodule RelayWeb.BoardRunFaceTest do
           inserted_at: old
         )
 
-      insert(:node_job, node_execution: exec, state: :claimed, executor_name: "live", claimed_at: old)
+      insert(:node_job, node_execution: exec, state: :claimed, runner_name: "live", claimed_at: old)
 
       ref = face_ref(board, card)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")

@@ -196,7 +196,7 @@ defmodule Relay.Cards do
 
   @doc """
   The cards on `board` whose ref or title matches `query` — the ONE definition of what
-  "matches" means (RE198). Every surface calls this: `GET /api/cards?q=`, `bin/relay search`,
+  "matches" means (RE198). Every surface calls this: `GET /api/cards?q=`, `./relay search`,
   and the board header's results popover. There is deliberately no second predicate anywhere.
 
   Ranking is two-tier:

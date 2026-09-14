@@ -13,9 +13,9 @@ defmodule RelayWeb.Api.AuditJSON do
   end
 
   # `severity` and `check` cross the wire as strings. The severity SET is pinned by
-  # test/fixtures/executor_contract.json; check ids deliberately are not — bin/relay prints them
+  # test/fixtures/runner_contract.json; check ids deliberately are not — ./relay prints them
   # opaquely and must never branch on them, so the server can add a check without an
-  # executor bump.
+  # runner bump.
   defp finding(finding) do
     %{
       severity: Atom.to_string(finding.severity),

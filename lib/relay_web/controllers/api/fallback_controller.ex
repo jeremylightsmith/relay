@@ -184,11 +184,11 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
-  def call(conn, {:error, :invalid_executor}) do
+  def call(conn, {:error, :invalid_runner}) do
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(json: ErrorJSON)
-    |> render(:error, code: "invalid_executor", message: "executor must be an object")
+    |> render(:error, code: "invalid_runner", message: "runner must be an object")
   end
 
   def call(conn, {:error, :unknown_status}) do

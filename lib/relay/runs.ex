@@ -13,7 +13,7 @@ defmodule Relay.Runs do
   rules. Node execution goes through the `Relay.Runs.Dispatcher`
   behaviour, resolved through `Relay.Runs.Instance` — `config :relay, :runs_dispatcher` in
   production, a per-test instance under test (ADR 0009) — so the whole engine is
-  provable with a fake executor before cards 04/05 exist.
+  provable with a fake runner before cards 04/05 exist.
   """
 
   use Boundary,
@@ -49,11 +49,11 @@ defmodule Relay.Runs do
   alias Relay.Runs.Transitions
   alias Schemas.Board
   alias Schemas.Card
-  alias Schemas.Executor
   alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
+  alias Schemas.Runner
   alias Schemas.Stage
   alias Schemas.SubTask
 
@@ -75,12 +75,12 @@ defmodule Relay.Runs do
   and excludes its card from fresh pulls, with `isolation: nil` → undispatchable
   until the run fails on its next transition).
 
-  `pinned_executor_name` is the run's persisted exclusive-affinity pin (RLY-199,
-  set on claim, kept through an `:executor_gone` park, cleared by a human baton);
-  `pinned_executor_id` resolves it to that board's durable executor row id — the
+  `pinned_runner_name` is the run's persisted exclusive-affinity pin (RLY-199,
+  set on claim, kept through an `:runner_gone` park, cleared by a human baton);
+  `pinned_runner_id` resolves it to that board's durable runner row id — the
   key `Relay.Runs.Capacity` is keyed by — via a left join on `(board_id, name)`
-  (nil when unpinned or the executor row is absent). `Scheduler.resume_runs/2`
-  targets `{:pinned, pinned_executor_id}` for an exclusive resume, so an
+  (nil when unpinned or the runner row is absent). `Scheduler.resume_runs/2`
+  targets `{:pinned, pinned_runner_id}` for an exclusive resume, so an
   `:exclusive` flow's parked run now resumes on the machine holding its worktree.
   """
   def active_runs(board_id) do
@@ -90,8 +90,8 @@ defmodule Relay.Runs do
         on: c.id == r.card_id,
         left_join: f in Flow,
         on: f.id == r.flow_id,
-        left_join: e in Executor,
-        on: e.board_id == c.board_id and e.name == r.pinned_executor_name,
+        left_join: e in Runner,
+        on: e.board_id == c.board_id and e.name == r.pinned_runner_name,
         where: c.board_id == ^board_id and r.status in ^Run.active_statuses(),
         select: %{
           id: r.id,
@@ -100,8 +100,8 @@ defmodule Relay.Runs do
           flow_key: r.flow_key,
           isolation: f.isolation,
           parked_reason: r.parked_reason,
-          pinned_executor_name: r.pinned_executor_name,
-          pinned_executor_id: e.id
+          pinned_runner_name: r.pinned_runner_name,
+          pinned_runner_id: e.id
         }
       )
     )
@@ -543,8 +543,8 @@ defmodule Relay.Runs do
   """
   def run_detail(run, flow), do: Relay.Runs.RunDetail.build(run, flow)
 
-  # A live run whose node-job is stuck (queued/unclaimed, or held by a silent executor) this long
-  # has stopped moving. It never applies to a job a live executor is holding: working_run_ids/2
+  # A live run whose node-job is stuck (queued/unclaimed, or held by a silent runner) this long
+  # has stopped moving. It never applies to a job a live runner is holding: working_run_ids/2
   # excludes those first, so a 40-minute plan-implementer node stays neutral no matter how far
   # past this threshold it runs (see run_stalled?/3, and RE255 for why that used to be false).
   @run_stale_after_s 300
@@ -578,21 +578,21 @@ defmodule Relay.Runs do
 
   @doc """
   Run ids whose current node-job is held by a live claim (`NodeJob.claimed_states/0`) on a
-  non-stale executor at `now`. The complement — queued, unclaimed, or held by a silent executor —
+  non-stale runner at `now`. The complement — queued, unclaimed, or held by a silent runner —
   is what BoardLive treats as a candidate for the stalled run-face treatment. Reuses
-  `executor_stale?/2`, so "working" can never disagree with what the reclaim sweep would act on.
+  `runner_stale?/2`, so "working" can never disagree with what the reclaim sweep would act on.
 
-  A claim IS the start signal: `bin/relay` claims a job and spawns its worker thread in the same
+  A claim IS the start signal: `./relay` claims a job and spawns its worker thread in the same
   loop iteration, so there is no meaningful claimed-but-not-working window (RE255). There is
   deliberately no time ceiling here — a hung-but-claimed agent is `Cards.health/1`'s signal, and
-  a job on an executor that has gone silent is already excluded by `executor_stale?/2`.
+  a job on a runner that has gone silent is already excluded by `runner_stale?/2`.
   """
   @spec working_run_ids(Board.t(), DateTime.t()) :: MapSet.t()
   def working_run_ids(%Board{} = board, %DateTime{} = now) do
     live_names =
       board.id
-      |> list_board_executors()
-      |> Enum.reject(&executor_stale?(&1, now))
+      |> list_board_runners()
+      |> Enum.reject(&runner_stale?(&1, now))
       |> MapSet.new(& &1.name)
 
     from(j in NodeJob,
@@ -602,9 +602,9 @@ defmodule Relay.Runs do
       on: c.id == r.card_id,
       where: c.board_id == ^board.id and j.state in ^NodeJob.claimed_states(),
       # Explicit: a talk job carries no run_id (excluded by the inner join already), and this
-      # function's result is `run_id => executor_name`, which is meaningless for a talk turn.
+      # function's result is `run_id => runner_name`, which is meaningless for a talk turn.
       where: j.kind in ^NodeJob.flow_kinds(),
-      select: {j.run_id, j.executor_name}
+      select: {j.run_id, j.runner_name}
     )
     |> Repo.all()
     |> Enum.reduce(MapSet.new(), fn {run_id, name}, acc ->
@@ -924,8 +924,8 @@ defmodule Relay.Runs do
   def report_outcome(%NodeJob{}, _attrs), do: {:error, :invalid_outcome}
 
   @doc "queued → claimed (04's claim endpoint becomes a thin wrapper). Race-proof via a guarded UPDATE."
-  def claim_job(%NodeJob{} = job, executor_name) when is_binary(executor_name) do
-    transition_job(job, [:queued], state: :claimed, executor_name: executor_name, claimed_at: now())
+  def claim_job(%NodeJob{} = job, runner_name) when is_binary(runner_name) do
+    transition_job(job, [:queued], state: :claimed, runner_name: runner_name, claimed_at: now())
   end
 
   defp transition_job(job, from_states, sets) do
@@ -954,7 +954,7 @@ defmodule Relay.Runs do
     * `:actor` — `:agent | {:user, user_id}`, default `:agent`, passed straight to
       `Relay.Activity.log/2`. `BoardLive` passes the signed-in user, so a human cancelling
       from the board is no longer logged as the agent; the board-key API, the run
-      `Listener` and the `ExecutorReaper` take the default.
+      `Listener` and the `RunnerReaper` take the default.
 
   Returns `{:ok, cancelled}`, or `{:error, :not_active}` when the run is already terminal —
   the refusal `cancel_refusal_code/1` names `"no_active_run"`.
@@ -1013,7 +1013,7 @@ defmodule Relay.Runs do
   its server, revokes its in-flight job (freeing a `shared_clean` slot), closes it `:cancelled`
   and drops it from `active_runs`/capacity (freeing an `exclusive` slot), logs, and broadcasts.
   Idempotent — a second call finds none (`cancel_run/2` returns `{:error, :not_active}` on a
-  now-terminal run). Invoked by the `ExecutorReaper` tick and usable directly as a catch-up.
+  now-terminal run). Invoked by the `RunnerReaper` tick and usable directly as a catch-up.
   """
   def close_orphaned_runs do
     from(r in Run,
@@ -1057,95 +1057,100 @@ defmodule Relay.Runs do
     )
   end
 
-  ## Executors (ADR 0006 card 04)
+  ## Runners (ADR 0006 card 04)
 
-  # The oldest `bin/relay` EXECUTOR_VERSION this server will hand work to (RLY-184). One
+  # The oldest `./relay` RUNNER_VERSION this server will hand work to (RLY-184). One
   # module owns the number; the controller and the runners view read it through
-  # min_executor_version/0 rather than re-deriving it. Raise it only when running the old
-  # executor is genuinely worse than a stopped one — every executor below it is refused at
+  # min_runner_version/0 rather than re-deriving it. Raise it only when running the old
+  # runner is genuinely worse than a stopped one — every runner below it is refused at
   # claim until a human restarts it.
   # RLY-223 raised this to 19: the Code flow's `branch` node now writes the plan to the
-  # executor-exported $RELAY_PLAN, so a pre-19 executor (which never exports it) would write to
+  # runner-exported $RELAY_PLAN, so a pre-19 runner (which never exports it) would write to
   # an empty path and fail every Code run — genuinely worse than a stopped one (AGENTS.md).
-  # (RLY-224 landed EXECUTOR_VERSION 18 on main first, with git-fetch retry but no $RELAY_PLAN
+  # (RLY-224 landed RUNNER_VERSION 18 on main first, with git-fetch retry but no $RELAY_PLAN
   # support, so 18 alone is NOT sufficient here — the floor must be the version that actually
   # carries RELAY_PLAN, which is 19 once both changes are combined.)
-  # RLY-231 raised this to 21: the executor moved from a fixed reused slot pool (`exec-work-N`,
-  # bound through an in-memory map) to one fresh worktree per card. A pre-21 executor still runs
+  # RLY-231 raised this to 21: the runner moved from a fixed reused slot pool (`exec-work-N`,
+  # bound through an in-memory map) to one fresh worktree per card. A pre-21 runner still runs
   # the slot pool and reads the heartbeat `release_runs` reply as bare ids (it is now
   # {run_id, status} maps), so against the new server it would mis-bind worktrees and never
   # release them — worse than a stopped one.
   # RE311 raised this to 57: the wire's release channel moved from run-id keying
   # (`bound_runs`/`release_runs`) to ref keying (`held`/`release_held`), and the old channel is
   # RETIRED rather than kept alongside — a second mechanism for one concern is the
-  # duplicated-fact bug this card exists to kill. A pre-57 executor sends no `held` and reads a
+  # duplicated-fact bug this card exists to kill. A pre-57 runner sends no `held` and reads a
   # reply that no longer carries `release_runs`, so against this server it would NEVER release a
   # bound worktree: it silently fills its own pool until it deadlocks, which is genuinely worse
   # than a stopped one (the AGENTS.md floor-raise rule, and the RLY-231 situation exactly).
-  @min_executor_version 57
+  # RE319 raised this to 63: the wire renamed its identity key to `runner` — and every key and
+  # error code derived from it — as a hard cut with no alias. A pre-63 process sends a body this
+  # server no longer reads and parses replies whose keys no longer exist, so it can do no correct
+  # work at all: genuinely worse than a stopped one. `RelayWeb.Api.NodeJobController` answers it
+  # with a legible 409 rather than a bare 422.
+  @min_runner_version 63
 
-  @doc "The minimum `bin/relay` EXECUTOR_VERSION this server will claim jobs to."
-  def min_executor_version, do: @min_executor_version
+  @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
+  def min_runner_version, do: @min_runner_version
 
   # RE268 — a SECOND, higher floor that applies only to `kind: :talk` jobs. A talk job is
   # unpinned on a card's first turn and deliberately bypasses the capacity filter, so without
-  # this ANY executor at or above @min_executor_version could take it — including every
-  # pre-Talk executor, which reads `job["isolation"]`, raises `KeyError`, rejects the job and
+  # this ANY runner at or above @min_runner_version could take it — including every
+  # pre-Talk runner, which reads `job["isolation"]`, raises `KeyError`, rejects the job and
   # then 404s on the flow-only outcome route. The turn is left `:claimed` forever (the orphan
   # reaper deliberately skips talk jobs) and `Talk.post_message/3` refuses every later turn with
-  # `:turn_in_flight` — one stale executor wedges Talk for the whole board.
+  # `:turn_in_flight` — one stale runner wedges Talk for the whole board.
   #
-  # Kept separate from @min_executor_version on purpose: raising THAT would also stop old
-  # executors doing the flow work they still handle correctly.
-  @min_talk_executor_version 39
+  # Kept separate from @min_runner_version on purpose: raising THAT would also stop old
+  # runners doing the flow work they still handle correctly.
+  @min_talk_runner_version 39
 
   @doc """
-  The minimum `bin/relay` EXECUTOR_VERSION that may claim a `kind: :talk` job (ADR 0009).
+  The minimum `./relay` RUNNER_VERSION that may claim a `kind: :talk` job (ADR 0009).
 
-  Never below `min_executor_version/0` (RE311): the talk floor is a SECOND, HIGHER floor, and
-  an executor below the base floor is refused every job anyway. Deriving the max here keeps that
+  Never below `min_runner_version/0` (RE311): the talk floor is a SECOND, HIGHER floor, and
+  a runner below the base floor is refused every job anyway. Deriving the max here keeps that
   relationship a fact of the code rather than a number two humans must remember to raise
-  together — `talk_capable?/1`, the executor contract fixture and the test factory all read this
-  as "a fully current executor".
+  together — `talk_capable?/1`, the runner contract fixture and the test factory all read this
+  as "a fully current runner".
   """
-  def min_talk_executor_version, do: max(@min_talk_executor_version, @min_executor_version)
+  def min_talk_runner_version, do: max(@min_talk_runner_version, @min_runner_version)
 
   @doc """
-  Whether this executor is new enough to RUN a talk turn, not merely new enough to claim
-  flow work. See `min_talk_executor_version/0`.
+  Whether this runner is new enough to RUN a talk turn, not merely new enough to claim
+  flow work. See `min_talk_runner_version/0`.
   """
-  def talk_capable?(%Executor{version: version}) when is_integer(version), do: version >= min_talk_executor_version()
+  def talk_capable?(%Runner{version: version}) when is_integer(version), do: version >= min_talk_runner_version()
 
-  def talk_capable?(%Executor{}), do: false
+  def talk_capable?(%Runner{}), do: false
 
-  # RE304: the version an executor can actually FETCH is the `EXECUTOR_VERSION` of the
-  # `bin/relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
+  # RE304: the version a runner can actually FETCH is the `RUNNER_VERSION` of the
+  # `./relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
   # what the retired `.relay/published.json` marker existed to paper over. Deliberately NOT
-  # min_executor_version/0 (a floor, not a target). Read at RUNTIME, from `priv/scaffold/`,
+  # min_runner_version/0 (a floor, not a target). Read at RUNTIME, from `priv/scaffold/`,
   # because a Mix release ships `priv/` but ships neither `bin/` nor `.claude/`.
 
   @doc """
-  The newest `bin/relay` EXECUTOR_VERSION an executor can download, or `nil`.
+  The newest `./relay` RUNNER_VERSION a runner can download, or `nil`.
 
   `nil` when the scaffold has not been built, which reads on the wire as "never auto-update" —
   the correct answer when there is nothing to fetch.
   """
-  @spec latest_executor_version() :: integer() | nil
-  def latest_executor_version, do: Relay.Scaffold.executor_version()
+  @spec latest_runner_version() :: integer() | nil
+  def latest_runner_version, do: Relay.Scaffold.runner_version()
 
   @doc """
-  Whether this executor is running code older than the server requires.
+  Whether this runner is running code older than the server requires.
 
-  `nil` is outdated by construction: an executor that reports no version predates RLY-184,
+  `nil` is outdated by construction: a runner that reports no version predates RLY-184,
   which is definitionally behind. That flags every currently-running stale process the moment
   this ships — the desired outcome, not an edge case.
   """
-  def executor_outdated?(%Executor{version: version}) when is_integer(version), do: version < @min_executor_version
+  def runner_outdated?(%Runner{version: version}) when is_integer(version), do: version < @min_runner_version
 
-  def executor_outdated?(%Executor{}), do: true
+  def runner_outdated?(%Runner{}), do: true
 
   @doc """
-  Upserts the durable executor row keyed `{board_id, name}`, refreshing host,
+  Upserts the durable runner row keyed `{board_id, name}`, refreshing host,
   interval, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
   STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
@@ -1158,7 +1163,7 @@ defmodule Relay.Runs do
   built per-call: replacing with the insert's values would null out a good row on every call
   that didn't carry the key.
   """
-  def upsert_executor(%Board{id: board_id}, attrs) do
+  def upsert_runner(%Board{id: board_id}, attrs) do
     base = %{
       board_id: board_id,
       name: to_string(attrs["name"]),
@@ -1174,8 +1179,8 @@ defmodule Relay.Runs do
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, normalize_held_attr(attrs["held"]))
 
-    %Executor{}
-    |> Executor.changeset(params)
+    %Runner{}
+    |> Runner.changeset(params)
     |> Repo.insert(
       on_conflict: {:replace, replace},
       conflict_target: [:board_id, :name],
@@ -1202,16 +1207,16 @@ defmodule Relay.Runs do
   #
   # RE311: a missing key returns nil ("this request did not report capacity" — every claim),
   # and so does a non-map payload. Untouched beats zeroed: writing zeros on one malformed beat
-  # would knock a working executor off dispatch until its next good one.
+  # would knock a working runner off dispatch until its next good one.
   defp normalize_capacity(capacity) when is_map(capacity), do: Capacity.normalize(capacity)
   defp normalize_capacity(_capacity), do: nil
 
   # RE311: the claim never carries `held` onto the attrs (the controller only routes it from the
   # heartbeat), so an absent key means "this beat did not report" and the column is left alone —
   # the same absent-means-untouched rule as capacity/capabilities. A present list goes through
-  # Schemas.Executor.normalize_held/1, the one normalizer both the claim path and the release
+  # Schemas.Runner.normalize_held/1, the one normalizer both the claim path and the release
   # reconciliation use, so the stored shape and the in-flight shape can never disagree.
-  defp normalize_held_attr(held) when is_list(held), do: Executor.normalize_held(held)
+  defp normalize_held_attr(held) when is_list(held), do: Runner.normalize_held(held)
   defp normalize_held_attr(_held), do: nil
 
   # nil = "this beat did not report an inventory" — the caller must then leave the stored
@@ -1232,41 +1237,41 @@ defmodule Relay.Runs do
   defp normalize_names(_names), do: []
 
   @doc """
-  Atomically claims the next eligible `queued` job for `executor`, scoped to
-  the executor's board (a board-A key must never see board-B's jobs — the
+  Atomically claims the next eligible `queued` job for `runner`, scoped to
+  the runner's board (a board-A key must never see board-B's jobs — the
   claim payload carries the run's `ref`/`vars`, so this is an authz boundary,
   not just filtering).
 
   **A job is offered when any one of three things is true** (RE311):
 
-    * it is **pinned** to this executor (`executor_name` = its name), or
-    * this executor **declares it holds that card's worktree** — the ref appears in `held` with
-      a state in `Schemas.Executor.active_holding_states/0` — and the job is `exclusive`, or
+    * it is **pinned** to this runner (`runner_name` = its name), or
+    * this runner **declares it holds that card's worktree** — the ref appears in `held` with
+      a state in `Schemas.Runner.active_holding_states/0` — and the job is `exclusive`, or
     * it fits **advertised free capacity** (`free_capacity`), or it is a talk job (ADR 0009 §3).
 
-  The middle clause is the fix for the deadlock. The pin is the escape hatch for "the executor
+  The middle clause is the fix for the deadlock. The pin is the escape hatch for "the runner
   already holds that slot", but the pin can be legitimately absent: `settle_retry_pin/3`'s
-  `:readopted` branch releases it when no executor is alive at retry time (RE297), and the job
+  `:readopted` branch releases it when no runner is alive at retry time (RE297), and the job
   is then inserted unpinned. The machine returns, `recover()` adopts `<ns>-<ref>` as active —
   consuming the very slot the unpinned job needs to be offered through — and nothing ever
   reaches `assign()`'s reuse branch. The escape hatch was keyed on the wrong fact.
 
   `free_capacity` is the request's LIVE FREE count, passed as an argument and never persisted:
-  the row's `capacity` is the executor's configured total (see `Schemas.Executor`). It defaults
+  the row's `capacity` is the runner's configured total (see `Schemas.Runner`). It defaults
   to `nil`, which falls back to the row — the in-process caller's "assume every configured slot
   is free"; the transport always passes the real thing.
 
-  `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two executors never grab the same
+  `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two runners never grab the same
   job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
-  def claim_next_job(executor, free_capacity \\ nil, held \\ [])
+  def claim_next_job(runner, free_capacity \\ nil, held \\ [])
 
-  def claim_next_job(%Executor{board_id: board_id, name: name, capacity: capacity} = executor, free_capacity, held) do
+  def claim_next_job(%Runner{board_id: board_id, name: name, capacity: capacity} = runner, free_capacity, held) do
     allowed = allowed_classes(free_capacity || capacity)
-    held_refs = Executor.active_held_refs(held)
-    # RE268 — a talk job is only visible to an executor that can actually run one
-    # (`talk_capable?/1`); an older executor still sees the flow kinds it handles correctly.
-    kinds = if talk_capable?(executor), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
+    held_refs = Runner.active_held_refs(held)
+    # RE268 — a talk job is only visible to a runner that can actually run one
+    # (`talk_capable?/1`); an older runner still sees the flow kinds it handles correctly.
+    kinds = if talk_capable?(runner), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
     Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs) end)
   end
 
@@ -1285,22 +1290,22 @@ defmodule Relay.Runs do
         where: c.board_id == ^board_id,
         where: j.state == :queued,
         where: j.kind in ^kinds,
-        # Three ways in, and only three (RE311). A job PINNED to this executor bypasses the
-        # capacity filter — the executor is already holding that run's slot. An unpinned job
-        # for a card whose worktree this executor DECLARES it holds bypasses it for the same
+        # Three ways in, and only three (RE311). A job PINNED to this runner bypasses the
+        # capacity filter — the runner is already holding that run's slot. An unpinned job
+        # for a card whose worktree this runner DECLARES it holds bypasses it for the same
         # reason, one level more honest: the pin is a proxy for the holding, and the proxy can
         # go missing (a retry that released a dead pin) while the holding never does. That
         # bypass is EXCLUSIVE-only: a `shared_clean` job runs in the shared worktree and must
         # still respect shared capacity, or the bypass would oversubscribe the shared pool.
         # An unpinned TALK job also bypasses (ADR 0009 §3): a turn runs in the card's own
         # worktree and advertises no isolation class, and the FIRST turn on a card is what
-        # CREATES the executor pin, so refusing it for want of an advertised slot would mean a
-        # card nobody has talked to can never be talked to on a busy executor. The exemption is
-        # the SERVER's: `assign_talk` in `bin/relay` still refuses a turn once the executor is
+        # CREATES the runner pin, so refusing it for want of an advertised slot would mean a
+        # card nobody has talked to can never be talked to on a busy runner. The exemption is
+        # the SERVER's: `assign_talk` in `./relay` still refuses a turn once the runner is
         # at `max_worktrees`. Everything else needs advertised free capacity in its class.
         where:
-          j.executor_name == ^name or
-            (is_nil(j.executor_name) and
+          j.runner_name == ^name or
+            (is_nil(j.runner_name) and
                (j.kind == ^NodeJob.talk_kind() or
                   fragment("?->>'isolation'", j.payload) in ^allowed or
                   (fragment("?->>'isolation'", j.payload) == "exclusive" and
@@ -1328,20 +1333,20 @@ defmodule Relay.Runs do
   # written by `Relay.Talk.finish_turn/3` onto the session row instead, one column, one
   # writer, per RLY-199's rule.
   defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) do
-    Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_executor_name: name])
+    Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_runner_name: name])
     :ok
   end
 
   defp maybe_pin_run(_job, _name), do: :ok
 
   @doc """
-  Of the job ids an executor reports it is running, those the server no longer considers
+  Of the job ids a runner reports it is running, those the server no longer considers
   live (RLY-164) — i.e. anything not in NodeJob.active_states() on THIS board, plus ids that
   don't exist here at all.
 
   Board-scoped on purpose: an id belonging to another board is not live *here*, so it comes
-  back as revoked-for-this-executor only if this board owns it. That prevents one board's
-  executor being told to kill another board's work, and it means a stale or malicious id is
+  back as revoked-for-this-runner only if this board owns it. That prevents one board's
+  runner being told to kill another board's work, and it means a stale or malicious id is
   harmless. Non-integer ids are ignored rather than raising — this is a heartbeat, and a
   malformed beat must never 500 a liveness path.
   """
@@ -1354,14 +1359,14 @@ defmodule Relay.Runs do
 
       ids ->
         # Only ids this board actually owns are candidates. An id we don't own is NOT
-        # reported revoked: instructing an executor to kill work on the strength of an id
+        # reported revoked: instructing a runner to kill work on the strength of an id
         # we can't see would cross the board boundary, and a stale/garbage id would become
         # a kill order. Jobs are never hard-deleted — they transition to :revoked/:done — so
         # "exists here and is no longer active" covers every real revoke.
         #
         # Joined on card_id (not through Run) so TALK jobs are included — this is what makes
-        # the Stop button reach the executor: `Relay.Runs.revoke_talk_job/1` flips the job to
-        # :revoked, and the executor learns to kill its `claude -p` from this same heartbeat
+        # the Stop button reach the runner: `Relay.Runs.revoke_talk_job/1` flips the job to
+        # :revoked, and the runner learns to kill its `claude -p` from this same heartbeat
         # path a flow job's revoke already used.
         on_board =
           Repo.all(
@@ -1379,10 +1384,10 @@ defmodule Relay.Runs do
   def revoked_among(_board, _running), do: []
 
   @doc """
-  Of the job ids an executor reports it is running, stamp `agent_heartbeat_at = now` on the cards
+  Of the job ids a runner reports it is running, stamp `agent_heartbeat_at = now` on the cards
   whose job is still active (`state in NodeJob.active_states()`) on THIS board (RLY-226). This is
   the exact positive complement of `revoked_among/2` — revoked = on-board but NOT active; refresh =
-  on-board AND active — and it is the "a live executor is actively holding this card" signal wired
+  on-board AND active — and it is the "a live runner is actively holding this card" signal wired
   into `Cards.health/1`, so a quiet-but-running agent no longer falsely ages to `:stale`.
 
   Requiring `active_states()` (not merely "reported running") is the conservative, self-consistent
@@ -1427,40 +1432,40 @@ defmodule Relay.Runs do
   def refresh_running_card_liveness(_board, _running), do: {0, nil}
 
   @doc """
-  Of the per-card worktrees an executor declares it HOLDS, those it may now release — the
+  Of the per-card worktrees a runner declares it HOLDS, those it may now release — the
   ref-keyed replacement for the retired, run-id-keyed `terminal_among/2` (RE311).
 
   Run-id keying structurally could not see the case that mattered. A run cancelled (or
-  finished) while the executor was down is never torn down, and on restart `recover()` adopts
+  finished) while the runner was down is never torn down, and on restart `recover()` adopts
   the worktree with `run_id: None` — so it never appeared in `bound_runs` at all, and the slot
   was consumed permanently. The **ref** is the identity of a `<ns>-<ref>` worktree and it
   survives a restart, which is exactly why it is the right key.
 
   For each held entry:
 
-    * skip anything whose `state` is not in `Schemas.Executor.active_holding_states/0` — a
-      `retained` tree is the human's post-mortem and the executor's own to evict;
+    * skip anything whose `state` is not in `Schemas.Runner.active_holding_states/0` — a
+      `retained` tree is the human's post-mortem and the runner's own to evict;
     * resolve `ref` → card id on **this board** (`Cards.card_ids_by_ref/2`, the same authz
       discipline as `revoked_among/2` and — like it — ONE query however long the list is);
       an unparseable or unknown ref is silently skipped, so a stale or garbage ref can never
       become a teardown order. Resolution is board-scoped, and board keys are NOT unique, so
       a ref is read as "card N **of the requesting board**": a checkout re-pointed at another
-      board declares holdings that belong to its new board, which is what an executor bound to
-      one API key means. `Schemas.Executor.normalize_held/1` caps the list at
+      board declares holdings that belong to its new board, which is what a runner bound to
+      one API key means. `Schemas.Runner.normalize_held/1` caps the list at
       `held_limit/0`, so a beat can never buy an unbounded query either;
     * include it only when the card has **at least one run** and **no run in
       `Schemas.Run.active_statuses/0`**, carrying the LATEST run's status.
 
   The "at least one run" clause is load-bearing: a card with zero runs is a **talk-only**
   worktree, which ADR 0009 §2 says must outlive runs — naming it would tear down a live
-  conversation's tree. Talk-only trees are retired by the executor's own
+  conversation's tree. Talk-only trees are retired by the runner's own
   `_retire_talk_only_locked`.
 
-  Returned as `%{ref, status}` maps so the executor's teardown can choose remove
+  Returned as `%{ref, status}` maps so the runner's teardown can choose remove
   (`done`/`cancelled`) vs retain (`failed`). Empty in → empty out; a malformed beat never raises.
   """
   def releasable_held(%Board{} = board, held) when is_list(held) do
-    case held |> Executor.active_held_refs() |> then(&Cards.card_ids_by_ref(board, &1)) do
+    case held |> Runner.active_held_refs() |> then(&Cards.card_ids_by_ref(board, &1)) do
       empty when map_size(empty) == 0 -> []
       cards -> releasable_entries(cards)
     end
@@ -1469,7 +1474,7 @@ defmodule Relay.Runs do
   def releasable_held(_board, _held), do: []
 
   # Two queries total (the ref→id resolution above and the runs below), never one per ref: this
-  # runs on every heartbeat of every executor.
+  # runs on every heartbeat of every runner.
   defp releasable_entries(cards) do
     card_ids = Map.values(cards)
 
@@ -1506,7 +1511,7 @@ defmodule Relay.Runs do
       success with the run's recorded state rather than a conflict.
     * `{:error, :not_found}` — no such job on the board, or `id` isn't a valid integer.
     * `{:error, :conflict}` — it exists but is `:queued` (reassigned) or `:revoked`
-      (zombie), so a stale executor cannot clobber it.
+      (zombie), so a stale runner cannot clobber it.
   """
   def get_claimed_job(%Board{} = board, id) when is_binary(id) do
     case Integer.parse(id) do
@@ -1537,44 +1542,44 @@ defmodule Relay.Runs do
     end
   end
 
-  @executor_stale_floor_s 60
+  @runner_stale_floor_s 60
 
   @doc """
-  The reclaim sweep (criterion 2): for every stale executor, return its in-flight
-  `shared_clean` jobs to `queued` (dropping `executor_name`, so W8 re-offers them)
-  and park its `exclusive` runs (`parked_reason: :executor_gone` — affinity is
+  The reclaim sweep (criterion 2): for every stale runner, return its in-flight
+  `shared_clean` jobs to `queued` (dropping `runner_name`, so W8 re-offers them)
+  and park its `exclusive` runs (`parked_reason: :runner_gone` — affinity is
   absolute; the run waits for its machine). Idempotent; `now` is injectable for
   the reaper's clock and tests.
   """
-  def reclaim_stale_executors(now \\ nil) do
+  def reclaim_stale_runners(now \\ nil) do
     now = now || now()
 
-    Executor
+    Runner
     |> Repo.all()
-    |> Enum.filter(&executor_stale?(&1, now))
-    |> Enum.each(&reclaim_executor/1)
+    |> Enum.filter(&runner_stale?(&1, now))
+    |> Enum.each(&reclaim_runner/1)
 
     :ok
   end
 
-  @doc "True when `executor` has been silent past `max(60s, 2 × interval)` at `now`. Pure."
-  def executor_stale?(%Executor{last_heartbeat: at, interval: interval}, %DateTime{} = now) do
-    DateTime.diff(now, at, :second) > max(@executor_stale_floor_s, 2 * (interval || 30))
+  @doc "True when `runner` has been silent past `max(60s, 2 × interval)` at `now`. Pure."
+  def runner_stale?(%Runner{last_heartbeat: at, interval: interval}, %DateTime{} = now) do
+    DateTime.diff(now, at, :second) > max(@runner_stale_floor_s, 2 * (interval || 30))
   end
 
   @doc """
-  The executor's freshness at `now`: `:fresh | :stale | :gone`. Pure.
+  The runner's freshness at `now`: `:fresh | :stale | :gone`. Pure.
 
-  `:gone` is deliberately *the same predicate the reaper uses* (`executor_stale?/2`) rather
-  than a second invented threshold — so a `gone` row on the runners view means the executor's
+  `:gone` is deliberately *the same predicate the reaper uses* (`runner_stale?/2`) rather
+  than a second invented threshold — so a `gone` row on the runners view means the runner's
   in-flight work has been requeued or parked, not merely that a beat looks late.
   """
-  def executor_freshness(%Executor{last_heartbeat: at, interval: interval} = executor, %DateTime{} = now) do
+  def runner_freshness(%Runner{last_heartbeat: at, interval: interval} = runner, %DateTime{} = now) do
     age = DateTime.diff(now, at, :second)
 
     cond do
       age <= 1.5 * (interval || 30) -> :fresh
-      executor_stale?(executor, now) -> :gone
+      runner_stale?(runner, now) -> :gone
       true -> :stale
     end
   end
@@ -1585,7 +1590,7 @@ defmodule Relay.Runs do
   @roster_window_s 86_400
 
   @doc """
-  The runners-view roster for `board` at `now` — one map per executor, sorted by name, each
+  The runners-view roster for `board` at `now` — one map per runner, sorted by name, each
   carrying its advertised capacity and the in-flight jobs attributed to it. A pool's `used` is
   `pool_used/3`: the DECLARED HOLDINGS in an active state for `exclusive` (RE311 — a
   bound-but-idle or talk-attached worktree occupies a slot with no active job; a `retained` one
@@ -1596,43 +1601,43 @@ defmodule Relay.Runs do
   no N+1. Reads only Postgres, so the page survives an app restart — unlike `Runs.Capacity`,
   which is ETS and scheduler-only.
   """
-  def list_executor_status(%Board{} = board, now \\ nil) do
+  def list_runner_status(%Board{} = board, now \\ nil) do
     now = now || now()
     cutoff = DateTime.add(now, -@roster_window_s, :second)
 
-    executors =
+    runners =
       Repo.all(
-        from e in Executor,
+        from e in Runner,
           where: e.board_id == ^board.id and e.last_heartbeat > ^cutoff,
           order_by: [asc: e.name]
       )
 
-    jobs_by_executor = active_jobs_by_executor(board)
+    jobs_by_runner = active_jobs_by_runner(board)
 
-    Enum.map(executors, fn executor ->
-      jobs = Map.get(jobs_by_executor, executor.name, [])
-      freshness = executor_freshness(executor, now)
-      outdated = executor_outdated?(executor)
+    Enum.map(runners, fn runner ->
+      jobs = Map.get(jobs_by_runner, runner.name, [])
+      freshness = runner_freshness(runner, now)
+      outdated = runner_outdated?(runner)
 
       %{
-        id: executor.id,
-        name: executor.name,
-        host: executor.host,
-        interval: executor.interval || 30,
-        last_heartbeat: executor.last_heartbeat,
+        id: runner.id,
+        name: runner.name,
+        host: runner.host,
+        interval: runner.interval || 30,
+        last_heartbeat: runner.last_heartbeat,
         freshness: freshness,
-        version: executor.version,
-        # Orthogonal to `freshness` on purpose (RLY-184): a refused executor is perfectly
+        version: runner.version,
+        # Orthogonal to `freshness` on purpose (RLY-184): a refused runner is perfectly
         # healthy and beating normally — it is just running old code.
         outdated: outdated,
         # RLY-191: the single presentation state the runners view renders from. Precedence
-        # :gone > :stale > :outdated > :fresh — a silent executor's silence is the more urgent
+        # :gone > :stale > :outdated > :fresh — a silent runner's silence is the more urgent
         # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
         display_state: display_state(freshness, outdated),
-        # RE311: what this executor declares it holds — the chip's `used` is derived from it,
+        # RE311: what this runner declares it holds — the chip's `used` is derived from it,
         # and the runners view names each entry in the chip's tooltip.
-        held: List.wrap(executor.held),
-        pools: pools_for(executor, jobs),
+        held: List.wrap(runner.held),
+        pools: pools_for(runner, jobs),
         jobs: jobs
       }
     end)
@@ -1645,24 +1650,24 @@ defmodule Relay.Runs do
 
   @doc ~S"""
   The board's **active queue** at `now` — every `queued` or `claimed` node job on the board, both
-  kinds (`:node` and `:talk`), whether or not an executor holds it. The read-only answer to "what
+  kinds (`:node` and `:talk`), whether or not a runner holds it. The read-only answer to "what
   is waiting?" that `POST /api/node-jobs/claim` — a mutation that *assigns* the job it finds —
   cannot give (RE307).
 
-  Deliberately NOT filtered by `executor_name`: an unclaimed job having no holder is the whole
-  point, and that filter is exactly why `active_jobs_by_executor/1` cannot answer this. Both
+  Deliberately NOT filtered by `runner_name`: an unclaimed job having no holder is the whole
+  point, and that filter is exactly why `active_jobs_by_runner/1` cannot answer this. Both
   reads share `board_jobs_query/1`, whose LEFT join on `Run` is what lets a talk turn (no run —
   ADR 0009) appear here at all.
 
   **Ordering is load-bearing, not cosmetic.** Queued rows come first in `asc: j.id` — the same
   order `do_claim_next_job/4` claims in under `FOR UPDATE SKIP LOCKED` — so this list literally IS
   the order the server will hand work out. Claimed rows follow in `asc: j.claimed_at`, matching
-  `active_jobs_by_executor/1`. A single `asc_nulls_first: j.claimed_at, asc: j.id` expresses both,
+  `active_jobs_by_runner/1`. A single `asc_nulls_first: j.claimed_at, asc: j.id` expresses both,
   because a queued row never has a `claimed_at` (`requeue_job/3` clears it on the way back), and
-  that holds for a queued row PINNED to an executor too.
+  that holds for a queued row PINNED to a runner too.
 
   `age_s` is "how long it has been in THIS state" — since `claimed_at` on a claimed row, since
-  `inserted_at` on a queued one. `now` is injectable exactly as `list_executor_status/2` does it,
+  `inserted_at` on a queued one. `now` is injectable exactly as `list_runner_status/2` does it,
   so age is testable without sleeping.
   """
   @spec list_queue(Board.t(), DateTime.t() | nil) :: [
@@ -1675,7 +1680,7 @@ defmodule Relay.Runs do
             node_key: String.t(),
             flow_key: String.t() | nil,
             isolation: String.t() | nil,
-            executor_name: String.t() | nil,
+            runner_name: String.t() | nil,
             age_s: non_neg_integer()
           }
         ]
@@ -1694,7 +1699,7 @@ defmodule Relay.Runs do
       node_key: j.node_key,
       flow_key: r.flow_key,
       isolation: fragment("?->>'isolation'", j.payload),
-      executor_name: j.executor_name,
+      runner_name: j.runner_name,
       claimed_at: j.claimed_at,
       inserted_at: j.inserted_at
     })
@@ -1709,15 +1714,15 @@ defmodule Relay.Runs do
         node_key: row.node_key,
         flow_key: row.flow_key,
         isolation: row.isolation,
-        executor_name: row.executor_name,
+        runner_name: row.runner_name,
         age_s: max(DateTime.diff(now, row.claimed_at || row.inserted_at), 0)
       }
     end)
   end
 
-  @doc "The board's raw `Executor` rows — the lean read `Scheduler.Server` builds its snapshot's `executors` map from."
-  def list_board_executors(board_id) do
-    Repo.all(from e in Executor, where: e.board_id == ^board_id)
+  @doc "The board's raw `Runner` rows — the lean read `Scheduler.Server` builds its snapshot's `runners` map from."
+  def list_board_runners(board_id) do
+    Repo.all(from e in Runner, where: e.board_id == ^board_id)
   end
 
   ## Resume refusals (RE297)
@@ -1798,9 +1803,9 @@ defmodule Relay.Runs do
   end
 
   # How long a run may be CONTINUOUSLY refused a resume before the scheduler gives up on it.
-  # Deliberately long and strongly biased against false alarms: a genuinely long executor
+  # Deliberately long and strongly biased against false alarms: a genuinely long runner
   # outage must never be escalated spuriously — 30 minutes of ACTIVE refusal is not an outage,
-  # it is a dead end. Sibling of @stopped_work_after_s and @executor_stale_floor_s.
+  # it is a dead end. Sibling of @stopped_work_after_s and @runner_stale_floor_s.
   @unresumable_after_s 1800
 
   @doc "Seconds of continuous refusal after which a parked run is failed. The single home of the 30-minute policy."
@@ -1808,7 +1813,7 @@ defmodule Relay.Runs do
 
   @doc """
   Fails every parked run whose resume has been refused for longer than `unresumable_after_s/0`
-  (RE297) — the clock `ExecutorReaper` applies to the facts `record_resume_refusals/3` wrote.
+  (RE297) — the clock `RunnerReaper` applies to the facts `record_resume_refusals/3` wrote.
   DB-only; no snapshot needed. `now` is injectable, as its reaper siblings are.
 
   Landing on `:failed` is what makes the stall visible with no new UI: a `:failed` card is
@@ -1831,7 +1836,7 @@ defmodule Relay.Runs do
           where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff,
           # A stamp with no classified reason has nothing to name in its failure detail, and
           # `Scheduler.resume_refusal_sentence/1` has no nil clause — sweeping it would raise
-          # inside `ExecutorReaper`'s tick. `clear_stale_refusals/2` collects the row instead.
+          # inside `RunnerReaper`'s tick. `clear_stale_refusals/2` collects the row instead.
           where: not is_nil(r.resume_refused_reason)
       )
 
@@ -1850,7 +1855,7 @@ defmodule Relay.Runs do
 
   defp clear_unhonourable_pin(%Run{resume_refused_reason: reason} = run) do
     if reason in Run.pin_unhonourable_refusal_reasons(),
-      do: run |> Changeset.change(pinned_executor_name: nil) |> Repo.update!(),
+      do: run |> Changeset.change(pinned_runner_name: nil) |> Repo.update!(),
       else: run
   end
 
@@ -1867,16 +1872,16 @@ defmodule Relay.Runs do
   ## Diagnosis (RLY-177)
 
   # A job that has sat queued or claimed this long with nothing alive behind it is
-  # stranded, not merely slow. Deliberately well above the executor grace floor
-  # (`@executor_stale_floor_s`) so a single missed beat never reads as stranded.
+  # stranded, not merely slow. Deliberately well above the runner grace floor
+  # (`@runner_stale_floor_s`) so a single missed beat never reads as stranded.
   @stranded_grace_s 300
 
   # A board with jobs queued unclaimed this long is stopped, not merely between claims —
   # deliberately far below the ~20m the RLY-191 incident ran and far above a normal ~5s
-  # executor poll. Jobs queued only because every executor is legitimately busy return nil.
+  # runner poll. Jobs queued only because every runner is legitimately busy return nil.
   @stopped_work_after_s 120
 
-  # A job queued unclaimed this long while every connected executor is FULL is waiting on a
+  # A job queued unclaimed this long while every connected runner is FULL is waiting on a
   # slot, not merely on the next poll. Its own named attribute on purpose (RE311): the sibling
   # windows mean different things — @stranded_grace_s is "nothing alive is holding this" and
   # @stopped_work_after_s is "the board has stopped" — and reusing either would make one number
@@ -1887,12 +1892,12 @@ defmodule Relay.Runs do
   The board-level "work has stopped" verdict, or `nil` when the board is quiet. Non-`nil` only
   when: at least one node-job is queued and unclaimed, the oldest has waited past
   `@stopped_work_after_s`, AND the shared `Scheduler.capacity_diagnosis/1` blames the roster
-  (outdated / no executor / all gone) rather than a legitimately busy board. `now` is injectable.
+  (outdated / no runner / all gone) rather than a legitimately busy board. `now` is injectable.
   """
   @spec stopped_work(Board.t(), DateTime.t() | nil) ::
           nil
           | %{
-              reason: :executor_outdated | :no_executor | :executor_gone,
+              reason: :runner_outdated | :no_runner | :runner_gone,
               detail: String.t(),
               queued_count: pos_integer(),
               oldest_queued_age_s: pos_integer(),
@@ -1910,7 +1915,7 @@ defmodule Relay.Runs do
 
         # The age guard comes FIRST on purpose: this is polled on the Runners view's 10s tick,
         # and the snapshot behind `roster_verdict/3` is the expensive half (a full card list plus
-        # stage/flow/run/executor reads). A board with work merely in flight must not pay for a
+        # stage/flow/run/runner reads). A board with work merely in flight must not pay for a
         # snapshot every tick — only one queued past the threshold, where the answer can be non-nil.
         if age > @stopped_work_after_s, do: roster_verdict(board, count, age)
     end
@@ -1921,7 +1926,7 @@ defmodule Relay.Runs do
     {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
     {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
 
-    if reason in [:executor_outdated, :no_executor, :executor_gone] do
+    if reason in [:runner_outdated, :no_runner, :runner_gone] do
       %{
         reason: reason,
         detail: stopped_work_detail(reason, bits, age),
@@ -1942,7 +1947,7 @@ defmodule Relay.Runs do
           on: c.id == r.card_id,
           where: c.board_id == ^board.id and j.state == :queued,
           # Explicit: "work has stopped" is a FLOW diagnosis — a talk job queued because no
-          # executor is connected is a separate, not-yet-built story, and the inner join on
+          # runner is connected is a separate, not-yet-built story, and the inner join on
           # Run already excludes it.
           where: j.kind in ^NodeJob.flow_kinds(),
           select: %{count: count(j.id), oldest: min(j.inserted_at)}
@@ -1954,14 +1959,14 @@ defmodule Relay.Runs do
     end
   end
 
-  defp stopped_work_detail(:executor_outdated, bits, age) do
-    "No jobs claimed in #{div(age, 60)}m · every connected executor is running old code and is " <>
+  defp stopped_work_detail(:runner_outdated, bits, age) do
+    "No jobs claimed in #{div(age, 60)}m · every connected runner is running old code and is " <>
       "being refused — #{Scheduler.running_versions_phrase(bits)}, requires v#{bits.required_version}. " <>
       "Restart it to pick up current code."
   end
 
-  defp stopped_work_detail(reason, _bits, age) when reason in [:no_executor, :executor_gone] do
-    "No jobs claimed in #{div(age, 60)}m · no executor is connected to run this board's work."
+  defp stopped_work_detail(reason, _bits, age) when reason in [:no_runner, :runner_gone] do
+    "No jobs claimed in #{div(age, 60)}m · no runner is connected to run this board's work."
   end
 
   @doc """
@@ -1974,8 +1979,8 @@ defmodule Relay.Runs do
   (`Scheduler.Server.build_snapshot/2`); this function layers on the verdicts that
   need DB state the snapshot does not carry — `:run_failed` (the card has no active run
   and its latest run failed), `:job_stranded` (an active job past `@stranded_grace_s`
-  with no live executor), and `:job_awaiting_slot` (a queued job past `@awaiting_slot_grace_s`
-  with no connected executor holding a free slot in its class — RE311).
+  with no live runner), and `:job_awaiting_slot` (a queued job past `@awaiting_slot_grace_s`
+  with no connected runner holding a free slot in its class — RE311).
 
   Read-only: safe to call while a run is live. `now` is injectable for tests.
   """
@@ -2035,52 +2040,52 @@ defmodule Relay.Runs do
     end
   end
 
-  # RE311: an EMPTY roster (`capacity_diagnosis`'s :no_executor — map_size(executors) == 0, not
-  # merely "every executor is stale") is a more fundamental fact than "stranded": nothing was
+  # RE311: an EMPTY roster (`capacity_diagnosis`'s :no_runner — map_size(runners) == 0, not
+  # merely "every runner is stale") is a more fundamental fact than "stranded": nothing was
   # ever holding this job to go quiet on it. `stranded?` alone can't see that distinction
-  # (`any_live_executor?` reads "no live executor" the same way for zero rows and for a roster
-  # of stale rows), so this guard defers to `roster_blocked?`'s more specific `:no_executor`
-  # verdict. A roster with a stale or outdated executor still strands normally — this only
+  # (`any_live_runner?` reads "no live runner" the same way for zero rows and for a roster
+  # of stale rows), so this guard defers to `roster_blocked?`'s more specific `:no_runner`
+  # verdict. A roster with a stale or outdated runner still strands normally — this only
   # excludes the "nobody has ever connected" case.
   defp really_stranded?(run, job, board, now, capacity) do
     run != nil and not empty_roster?(capacity) and stranded?(job, board, now)
   end
 
-  defp empty_roster?({:no_executor, _bits}), do: true
+  defp empty_roster?({:no_runner, _bits}), do: true
   defp empty_roster?(_capacity), do: false
 
-  # For a parked pinned run, explain/2 has already named the awaited executor in the
-  # detail sentence and stamped evidence.pinned_executor_name. The snapshot can't know
+  # For a parked pinned run, explain/2 has already named the awaited runner in the
+  # detail sentence and stamped evidence.pinned_runner_name. The snapshot can't know
   # whether that machine is connected RIGHT NOW, so layer the live freshness on here —
   # the same way current_node is layered from DB state the snapshot lacks.
-  defp layer_pin_freshness(%{evidence: %{pinned_executor_name: name}} = base, board, now) when is_binary(name) do
-    {label, sentence} = executor_freshness_note(board, name, now)
+  defp layer_pin_freshness(%{evidence: %{pinned_runner_name: name}} = base, board, now) when is_binary(name) do
+    {label, sentence} = runner_freshness_note(board, name, now)
 
     %{
       base
       | detail: base.detail <> " " <> sentence,
-        evidence: Map.put(base.evidence, :pinned_executor_freshness, label)
+        evidence: Map.put(base.evidence, :pinned_runner_freshness, label)
     }
   end
 
   defp layer_pin_freshness(base, _board, _now), do: base
 
-  defp executor_freshness_note(board, name, now) do
-    case Repo.get_by(Executor, board_id: board.id, name: name) do
+  defp runner_freshness_note(board, name, now) do
+    case Repo.get_by(Runner, board_id: board.id, name: name) do
       nil ->
-        {:absent, ~s(Executor "#{name}" is not currently connected.)}
+        {:absent, ~s(Runner "#{name}" is not currently connected.)}
 
-      executor ->
-        case executor_freshness(executor, now) do
-          :fresh -> {:fresh, ~s(Executor "#{name}" is connected and beating.)}
-          :stale -> {:stale, ~s(Executor "#{name}" is connected but a heartbeat is overdue.)}
-          :gone -> {:gone, ~s(Executor "#{name}" has gone silent past the stale threshold.)}
+      runner ->
+        case runner_freshness(runner, now) do
+          :fresh -> {:fresh, ~s(Runner "#{name}" is connected and beating.)}
+          :stale -> {:stale, ~s(Runner "#{name}" is connected but a heartbeat is overdue.)}
+          :gone -> {:gone, ~s(Runner "#{name}" has gone silent past the stale threshold.)}
         end
     end
   end
 
   # A live run whose current job is NOT being worked (queued/unclaimed, or held by a silent
-  # executor) while the roster reason is "everyone refused / nobody connected" — the RLY-191
+  # runner) while the roster reason is "everyone refused / nobody connected" — the RLY-191
   # false-"working" case explain/2 can't see, because run != nil short-circuits it to
   # :run_active. A busy-but-healthy roster (:awaiting_capacity) is deliberately excluded.
   #
@@ -2091,13 +2096,13 @@ defmodule Relay.Runs do
   defp roster_blocked?(%{status: :parked}, _job, _board, _now, _capacity), do: false
 
   defp roster_blocked?(_run, job, board, now, {reason, _bits}) do
-    reason in [:executor_outdated, :no_executor, :executor_gone] and not job_working?(job, board, now)
+    reason in [:runner_outdated, :no_runner, :runner_gone] and not job_working?(job, board, now)
   end
 
-  defp job_working?(%NodeJob{state: state, executor_name: name}, board, now) when is_binary(name) do
+  defp job_working?(%NodeJob{state: state, runner_name: name}, board, now) when is_binary(name) do
     with true <- state in NodeJob.claimed_states(),
-         %Executor{} = executor <- Repo.get_by(Executor, board_id: board.id, name: name) do
-      not executor_stale?(executor, now)
+         %Runner{} = runner <- Repo.get_by(Runner, board_id: board.id, name: name) do
+      not runner_stale?(runner, now)
     else
       _not_working -> false
     end
@@ -2105,23 +2110,23 @@ defmodule Relay.Runs do
 
   defp job_working?(_job, _board, _now), do: false
 
-  defp roster_blocked_verdict(base, {:executor_outdated, bits}) do
+  defp roster_blocked_verdict(base, {:runner_outdated, bits}) do
     %{
       base
-      | verdict: :executor_outdated,
+      | verdict: :runner_outdated,
         detail:
-          "This run's node-job is queued but unclaimed — every connected executor is running old " <>
+          "This run's node-job is queued but unclaimed — every connected runner is running old " <>
             "code and is being refused (#{Scheduler.running_versions_phrase(bits)}, " <>
             "requires v#{bits.required_version}). Restart it to pick up current code.",
         evidence: Map.merge(base.evidence, bits)
     }
   end
 
-  defp roster_blocked_verdict(base, {reason, bits}) when reason in [:no_executor, :executor_gone] do
+  defp roster_blocked_verdict(base, {reason, bits}) when reason in [:no_runner, :runner_gone] do
     %{
       base
-      | verdict: :no_executor,
-        detail: "This run's node-job is queued but no executor is connected to claim it.",
+      | verdict: :no_runner,
+        detail: "This run's node-job is queued but no runner is connected to claim it.",
         evidence: Map.merge(base.evidence, bits)
     }
   end
@@ -2132,13 +2137,13 @@ defmodule Relay.Runs do
       | verdict: :job_stranded,
         detail:
           "Job #{job.id} for node #{job.node_key} has been #{job.state} since " <>
-            "#{job.claimed_at || job.inserted_at} and no live executor#{executor_suffix(job.executor_name)}" <>
+            "#{job.claimed_at || job.inserted_at} and no live runner#{runner_suffix(job.runner_name)}" <>
             " is holding it — the run is stuck, not working."
     }
   end
 
-  defp executor_suffix(nil), do: ""
-  defp executor_suffix(name), do: " (#{name})"
+  defp runner_suffix(nil), do: ""
+  defp runner_suffix(name), do: " (#{name})"
 
   defp run_failed_verdict(base, last) do
     %{
@@ -2152,34 +2157,34 @@ defmodule Relay.Runs do
 
   defp put_evidence(base, key, value), do: %{base | evidence: Map.put(base.evidence, key, value)}
 
-  # A job is stranded when it is old enough to rule out normal latency AND the executor
+  # A job is stranded when it is old enough to rule out normal latency AND the runner
   # named on it is stale (or nothing is named and nothing on this board is fresh).
-  # Reuses `executor_stale?/2` rather than inventing a second threshold, so "stranded"
+  # Reuses `runner_stale?/2` rather than inventing a second threshold, so "stranded"
   # can never disagree with what the reclaim sweep would act on. A claimed job under a
-  # live executor needs no special clause — `any_live_executor?/3` already excludes it.
+  # live runner needs no special clause — `any_live_runner?/3` already excludes it.
   defp stranded?(nil, _board, _now), do: false
 
   defp stranded?(%NodeJob{} = job, board, now) do
     age = DateTime.diff(now, job.claimed_at || job.inserted_at, :second)
-    age > @stranded_grace_s and not any_live_executor?(job, board, now)
+    age > @stranded_grace_s and not any_live_runner?(job, board, now)
   end
 
-  defp any_live_executor?(%NodeJob{executor_name: nil}, board, now) do
-    Executor
+  defp any_live_runner?(%NodeJob{runner_name: nil}, board, now) do
+    Runner
     |> where([e], e.board_id == ^board.id)
     |> Repo.all()
-    |> Enum.any?(&(not executor_stale?(&1, now)))
+    |> Enum.any?(&(not runner_stale?(&1, now)))
   end
 
-  defp any_live_executor?(%NodeJob{executor_name: name}, board, now) do
-    case Repo.get_by(Executor, board_id: board.id, name: name) do
+  defp any_live_runner?(%NodeJob{runner_name: name}, board, now) do
+    case Repo.get_by(Runner, board_id: board.id, name: name) do
       nil -> false
-      executor -> not executor_stale?(executor, now)
+      runner -> not runner_stale?(runner, now)
     end
   end
 
   # A live run whose current job is queued, unclaimed, past the grace window, and which no
-  # connected executor has room for (RE311). `run_verdict/2` falls through to `:run_active` for
+  # connected runner has room for (RE311). `run_verdict/2` falls through to `:run_active` for
   # any non-parked run — true of the run, and useless to the operator whose job had been queued
   # 90 minutes. This layer is only POSSIBLE because the roster row is now truthful: `capacity`
   # has one writer and `held` says what actually occupies the slots.
@@ -2191,11 +2196,11 @@ defmodule Relay.Runs do
   #
   # Returns the evidence map, or nil when this is not the situation — computed once and reused
   # by the verdict, so the roster is read at most once per diagnosis. The cheap guards come
-  # first so a healthy card never pays for `list_executor_status/2`.
+  # first so a healthy card never pays for `list_runner_status/2`.
   defp awaiting_slot(nil, _job, _board, _now), do: nil
   defp awaiting_slot(%{status: :parked}, _job, _board, _now), do: nil
 
-  defp awaiting_slot(_run, %NodeJob{state: :queued, executor_name: nil} = job, board, now) do
+  defp awaiting_slot(_run, %NodeJob{state: :queued, runner_name: nil} = job, board, now) do
     age = DateTime.diff(now, job.inserted_at, :second)
     isolation = job.payload["isolation"]
 
@@ -2204,7 +2209,7 @@ defmodule Relay.Runs do
          runners = connected_runners(board, now),
          [_first | _rest] <- runners,
          false <- Enum.any?(runners, &free_slot?(&1, isolation)) do
-      %{queued_age_s: age, isolation: isolation, executors: Enum.map(runners, &slot_evidence(&1, isolation))}
+      %{queued_age_s: age, isolation: isolation, runners: Enum.map(runners, &slot_evidence(&1, isolation))}
     else
       _not_awaiting -> nil
     end
@@ -2212,14 +2217,14 @@ defmodule Relay.Runs do
 
   defp awaiting_slot(_run, _job, _board, _now), do: nil
 
-  # Read through list_executor_status/2 — the SAME read the runners page renders — so the
+  # Read through list_runner_status/2 — the SAME read the runners page renders — so the
   # verdict can never disagree with what an operator is looking at while they run `relay why`.
-  # OUTDATED rows are excluded: a refused executor claims nothing whatever its free slots say,
+  # OUTDATED rows are excluded: a refused runner claims nothing whatever its free slots say,
   # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
-  # the more specific `:executor_outdated` from roster_blocked?/5 keeps winning.
+  # the more specific `:runner_outdated` from roster_blocked?/5 keeps winning.
   defp connected_runners(board, now) do
     board
-    |> list_executor_status(now)
+    |> list_runner_status(now)
     |> Enum.filter(&(&1.freshness == :fresh and not &1.outdated))
   end
 
@@ -2238,23 +2243,23 @@ defmodule Relay.Runs do
     }
   end
 
-  defp awaiting_slot_verdict(base, job, %{queued_age_s: age, isolation: isolation, executors: executors}) do
+  defp awaiting_slot_verdict(base, job, %{queued_age_s: age, isolation: isolation, runners: runners}) do
     %{
       base
       | verdict: :job_awaiting_slot,
         detail:
           "Job #{job.id} for node #{job.node_key} has been queued #{div(age, 60)}m. " <>
-            "No connected executor has a free #{isolation} slot — #{holders_phrase(executors)}.",
+            "No connected runner has a free #{isolation} slot — #{holders_phrase(runners)}.",
         evidence:
           base.evidence
           |> Map.put(:queued_age_s, age)
           |> Map.put(:isolation, isolation)
-          |> Map.put(:executors, executors)
+          |> Map.put(:runners, runners)
     }
   end
 
-  defp holders_phrase(executors) do
-    Enum.map_join(executors, "; ", fn e -> ~s("#{e.name}" holds #{e.used} of #{e.total}) <> held_suffix(e.held) end)
+  defp holders_phrase(runners) do
+    Enum.map_join(runners, "; ", fn e -> ~s("#{e.name}" holds #{e.used} of #{e.total}) <> held_suffix(e.held) end)
   end
 
   defp held_suffix([]), do: ""
@@ -2295,7 +2300,7 @@ defmodule Relay.Runs do
       id: job.id,
       state: job.state,
       node_key: job.node_key,
-      executor_name: job.executor_name,
+      runner_name: job.runner_name,
       claimed_at: job.claimed_at
     }
   end
@@ -2307,7 +2312,7 @@ defmodule Relay.Runs do
   defdelegate preflight_flow(flow, now \\ nil), to: Preflight, as: :run
 
   # The ONE board-scoped read of LIVE node jobs, shared by `list_queue/2` and
-  # `active_jobs_by_executor/1` so the two can never disagree about what "on this board and
+  # `active_jobs_by_runner/1` so the two can never disagree about what "on this board and
   # still live" means. Each caller adds its own filters, order and select.
   #
   # `Card` is joined on `j.card_id` — the board-scoping join for BOTH kinds, since `card_id` is
@@ -2315,7 +2320,7 @@ defmodule Relay.Runs do
   # `card_id: run.card_id`, so a flow job resolves the same card it always did.
   #
   # `Run` is **LEFT**-joined, and only for `flow_key`: an inner join here is the exact bug that
-  # makes every other queue read flow-only. `active_jobs_by_executor/1` is unaffected because its
+  # makes every other queue read flow-only. `active_jobs_by_runner/1` is unaffected because its
   # own `flow_kinds()` filter already guarantees `run_id` is non-nil.
   defp board_jobs_query(%Board{id: board_id}) do
     from j in NodeJob,
@@ -2327,19 +2332,19 @@ defmodule Relay.Runs do
       where: j.state in ^NodeJob.active_states()
   end
 
-  # Every active job on this board that some executor is holding, grouped by `executor_name`.
-  # Board-scoped by the shared base query, so one executor name shared across boards never leaks
+  # Every active job on this board that some runner is holding, grouped by `runner_name`.
+  # Board-scoped by the shared base query, so one runner name shared across boards never leaks
   # work sideways.
-  defp active_jobs_by_executor(%Board{} = board) do
+  defp active_jobs_by_runner(%Board{} = board) do
     board
     |> board_jobs_query()
-    |> where([j], not is_nil(j.executor_name))
-    # Explicit: the runners view's per-executor job list is FLOW jobs only (step 1). Now that the
+    |> where([j], not is_nil(j.runner_name))
+    # Explicit: the runners view's per-runner job list is FLOW jobs only (step 1). Now that the
     # shared base LEFT-joins Run, this filter is the ONLY thing excluding talk jobs — it must stay.
     |> where([j], j.kind in ^NodeJob.flow_kinds())
     |> order_by([j], asc: j.claimed_at, asc: j.id)
     |> select([j, c], %{
-      executor_name: j.executor_name,
+      runner_name: j.runner_name,
       job_id: j.id,
       ref_number: c.ref_number,
       title: c.title,
@@ -2349,7 +2354,7 @@ defmodule Relay.Runs do
       claimed_at: j.claimed_at
     })
     |> Repo.all()
-    |> Enum.group_by(& &1.executor_name, fn row ->
+    |> Enum.group_by(& &1.runner_name, fn row ->
       %{
         job_id: row.job_id,
         ref: Cards.ref(board, %Card{ref_number: row.ref_number}),
@@ -2362,9 +2367,9 @@ defmodule Relay.Runs do
     end)
   end
 
-  # One chip per ADVERTISED class — we never invent a chip for capacity the executor never
+  # One chip per ADVERTISED class — we never invent a chip for capacity the runner never
   # claimed to have.
-  defp pools_for(%Executor{capacity: capacity, held: held}, jobs) do
+  defp pools_for(%Runner{capacity: capacity, held: held}, jobs) do
     used = Enum.frequencies_by(jobs, &isolation_class(&1.isolation))
     held = List.wrap(held)
 
@@ -2374,31 +2379,31 @@ defmodule Relay.Runs do
   end
 
   # RE311: the `exclusive` chip's `used` is the count of DECLARED HOLDINGS in an active state —
-  # exactly `total - free` as the executor's own `capacity()` computes it, so the two sides now
+  # exactly `total - free` as the runner's own `capacity()` computes it, so the two sides now
   # agree by construction. Counting active jobs (as every chip used to) made a bound-but-idle,
   # talk-attached or retained worktree invisible, which is what reported "runner available"
-  # while the executor had zero free exclusive slots. Routed through `active_held_refs/1` — the
+  # while the runner had zero free exclusive slots. Routed through `active_held_refs/1` — the
   # SAME derivation the claim bypass and the release reconciliation use — so the chip counts the
   # dispatcher's definition of "occupied", not a second reimplementation of it.
   #
   # Floored at the active-job count so the two facts can only ever ADD occupancy, never hide it:
-  # between an executor's first claim and the beat that declares the new holding, `held` is one
+  # between a runner's first claim and the beat that declares the new holding, `held` is one
   # short, and `free_slot?/2` reads this same number — an under-count there would blame
-  # `:job_awaiting_slot` on an executor that has room, or (with `held` absent entirely) read
+  # `:job_awaiting_slot` on a runner that has room, or (with `held` absent entirely) read
   # every running row as idle.
   defp pool_used("exclusive", jobs_used, held) do
-    held |> Executor.active_held_refs() |> length() |> max(Map.get(jobs_used, "exclusive", 0))
+    held |> Runner.active_held_refs() |> length() |> max(Map.get(jobs_used, "exclusive", 0))
   end
 
   # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the
   # shared tree, so its occupancy is still the active-job count (any non-"exclusive" isolation
-  # counts as shared, the same rule reclaim_executor/1 applies).
+  # counts as shared, the same rule reclaim_runner/1 applies).
   defp pool_used(name, jobs_used, _held), do: Map.get(jobs_used, name, 0)
 
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"
 
-  defp reclaim_executor(%Executor{board_id: board_id, name: name}) do
+  defp reclaim_runner(%Runner{board_id: board_id, name: name}) do
     rows =
       Repo.all(
         from j in NodeJob,
@@ -2406,8 +2411,8 @@ defmodule Relay.Runs do
           on: r.id == j.run_id,
           join: c in Card,
           on: c.id == r.card_id,
-          where: c.board_id == ^board_id and j.executor_name == ^name and j.state in ^NodeJob.active_states(),
-          # Explicit: a stale executor's talk turn is a separate recovery story (it stays
+          where: c.board_id == ^board_id and j.runner_name == ^name and j.state in ^NodeJob.active_states(),
+          # Explicit: a stale runner's talk turn is a separate recovery story (it stays
           # claimed until a human presses Stop — see requeue_orphaned_jobs/3's step-1 note),
           # and the inner join on Run already excludes it.
           where: j.kind in ^NodeJob.flow_kinds(),
@@ -2423,35 +2428,35 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  Requeues jobs this executor is holding but is no longer running (RLY-170).
+  Requeues jobs this runner is holding but is no longer running (RLY-170).
 
-  An executor that restarts loses its in-flight job state — it lives in-process — while the
+  A runner that restarts loses its in-flight job state — it lives in-process — while the
   job stays `:claimed` server-side. Neither existing recovery path can see it:
-  `claim_next_job/1` only ever offers `:queued` jobs, and `reclaim_stale_executors/0` only
-  touches a **stale** executor, whereas a restarted one is alive and beating. So the job sat
+  `claim_next_job/1` only ever offers `:queued` jobs, and `reclaim_stale_runners/0` only
+  touches a **stale** runner, whereas a restarted one is alive and beating. So the job sat
   stranded forever, the run stuck on that node, with nothing reporting a problem.
 
-  The heartbeat already tells us which jobs the executor IS running, so the **absence** of one
+  The heartbeat already tells us which jobs the runner IS running, so the **absence** of one
   from that list is the signal. Two things make this safe:
 
     * **A grace window.** A job claimed moments before a beat is legitimately not in `running`
       yet; requeuing it would double-dispatch LIVE work, which is worse than the bug. Jobs
       claimed more recently than `max(60s, 2 × interval)` — the same threshold shape as
-      `executor_stale?/2`, and provably longer than a beat — are left alone.
+      `runner_stale?/2`, and provably longer than a beat — are left alone.
     * **Exclusive jobs stay pinned.** The run's commits live in *that* machine's worktree, so
-      recovery must land back on the same executor. Keeping `executor_name` routes it there via
+      recovery must land back on the same runner. Keeping `runner_name` routes it there via
       the pinned-claim path (RLY-135), which bypasses the advertised-capacity filter. Only
-      `shared_clean` jobs are unpinned, since any executor can pick those up.
+      `shared_clean` jobs are unpinned, since any runner can pick those up.
 
   **Known step-1 limitation (RE268 / ADR 0009):** a TALK turn is never requeued here — the
   query below is explicitly `kind in NodeJob.flow_kinds()`. Requeueing a talk job would hand a
-  resumed `claude` session to a machine that does not hold it, so a turn whose executor dies
+  resumed `claude` session to a machine that does not hold it, so a turn whose runner dies
   stays `claimed` until a human presses Stop (`Relay.Runs.revoke_talk_job/1` revokes
   unconditionally).
   """
-  def requeue_orphaned_jobs(%Board{id: board_id}, %Executor{} = executor, running_ids) do
+  def requeue_orphaned_jobs(%Board{id: board_id}, %Runner{} = runner, running_ids) do
     held = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
-    cutoff = DateTime.add(now(), -orphan_grace_s(executor), :second)
+    cutoff = DateTime.add(now(), -orphan_grace_s(runner), :second)
 
     from(j in NodeJob,
       join: r in Run,
@@ -2459,7 +2464,7 @@ defmodule Relay.Runs do
       join: c in Card,
       on: c.id == r.card_id,
       where: c.board_id == ^board_id,
-      where: j.executor_name == ^executor.name,
+      where: j.runner_name == ^runner.name,
       where: j.state in ^NodeJob.active_states(),
       where: not is_nil(j.claimed_at) and j.claimed_at < ^cutoff,
       where: j.kind in ^NodeJob.flow_kinds(),
@@ -2467,21 +2472,21 @@ defmodule Relay.Runs do
     )
     |> Repo.all()
     |> Enum.reject(fn {job, _card_id} -> job.id in held end)
-    |> Enum.each(fn {job, card_id} -> requeue_orphan(job, executor, board_id, card_id) end)
+    |> Enum.each(fn {job, card_id} -> requeue_orphan(job, runner, board_id, card_id) end)
 
     :ok
   end
 
-  defp orphan_grace_s(%Executor{interval: interval}) do
-    max(@executor_stale_floor_s, 2 * (interval || 30))
+  defp orphan_grace_s(%Runner{interval: interval}) do
+    max(@runner_stale_floor_s, 2 * (interval || 30))
   end
 
-  defp requeue_orphan(%NodeJob{} = job, %Executor{name: name}, board_id, card_id) do
+  defp requeue_orphan(%NodeJob{} = job, %Runner{name: name}, board_id, card_id) do
     keep_pin = if job.payload["isolation"] == "exclusive", do: name
 
     Repo.update_all(
       from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
-      set: [state: :queued, executor_name: keep_pin, claimed_at: nil]
+      set: [state: :queued, runner_name: keep_pin, claimed_at: nil]
     )
 
     broadcast_runs(board_id, {:run_changed, card_id})
@@ -2492,7 +2497,7 @@ defmodule Relay.Runs do
     {1, _} =
       Repo.update_all(
         from(j in NodeJob, where: j.id == ^job.id and j.state in ^NodeJob.active_states()),
-        set: [state: :queued, executor_name: nil, claimed_at: nil]
+        set: [state: :queued, runner_name: nil, claimed_at: nil]
       )
 
     broadcast_runs(board_id, {:run_changed, card_id})
@@ -2502,10 +2507,10 @@ defmodule Relay.Runs do
   @doc false
   # Revokes any lingering active job regardless of the run's current status
   # FIRST — the job that triggered this reclaim must never stay stuck
-  # :claimed under a dead executor's name, even if the run itself
+  # :claimed under a dead runner's name, even if the run itself
   # already moved on (e.g. parked/finished via a concurrent path) by the time
   # this runs — then, only for a still-:running run, flips it to
-  # :parked/:executor_gone (affinity is absolute; the run waits for its
+  # :parked/:runner_gone (affinity is absolute; the run waits for its
   # machine).
   def park_for_reclaim(%Run{} = run) do
     stop_server(run)
@@ -2513,7 +2518,7 @@ defmodule Relay.Runs do
 
     revoke_active_jobs(run)
 
-    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :executor_gone]) do
+    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :runner_gone]) do
       {:ok, updated} -> broadcast_runs(board_id_of(updated), {:run_parked, updated})
       {:error, :not_in_expected_state} -> :ok
     end
@@ -2542,7 +2547,7 @@ defmodule Relay.Runs do
   @doc """
   Re-enters a terminally FAILED run inside its flow (RLY-189), at the node that
   died — or at `opts[:at]` — with the run's branch, worktree, history and
-  executor pin intact.
+  runner pin intact.
 
   This revives the dead run rather than starting a new one, because re-entry
   (`RunServer.handle_continue({:reenter, _})`) never consults the flow's start
@@ -2564,7 +2569,7 @@ defmodule Relay.Runs do
   `Relay.Runs.Engine`), so a retry buys exactly one more move — never a reset.
 
   Refusals: `{:not_failed, status}`, `:active_run_exists`, `:no_flow`,
-  `{:unknown_node, key}`, `{:executor_unavailable, name}`. Each pairs with a
+  `{:unknown_node, key}`, `{:runner_unavailable, name}`. Each pairs with a
   token from `retry_refusal_code/1` and a sentence from
   `retry_refusal_message/1`.
   """
@@ -2578,28 +2583,28 @@ defmodule Relay.Runs do
     end
   end
 
-  # The executor pin, decided against the flow this retry actually runs. Returns the run to
+  # The runner pin, decided against the flow this retry actually runs. Returns the run to
   # revive — the same struct, or one whose pin has been released.
   #
-  # For the run's OWN flow the pin is a hard guard (`check_retry_executor/2`): re-entry lands on
+  # For the run's OWN flow the pin is a hard guard (`check_retry_runner/2`): re-entry lands on
   # the node that died, whose half-finished work is on the pinned machine's worktree, so reviving
   # it anywhere else is worse than refusing.
   #
   # RE297: a RE-ADOPTED flow re-enters at that flow's START node instead, so there is no
   # mid-flight node whose worktree must be preserved — and the old row's pin is the last link of
   # the dead end. Honouring a pin to a machine that is provably not coming back would revive the
-  # run straight back into `pinned_executor_absent`, refused every tick until the reaper fails it
+  # run straight back into `pinned_runner_absent`, refused every tick until the reaper fails it
   # again. So a re-adopted retry RELEASES a dead pin and lets the scheduler re-pin on the next
   # claim, exactly as it would for a fresh `start_run/3`. A pin whose machine is alive is kept:
   # the worktree really is still there.
   defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :own) do
-    with :ok <- check_retry_executor(run, flow), do: {:ok, run}
+    with :ok <- check_retry_runner(run, flow), do: {:ok, run}
   end
 
   defp settle_retry_pin(%Run{} = run, %Flow{} = flow, :readopted) do
-    case check_retry_executor(run, flow) do
+    case check_retry_runner(run, flow) do
       :ok -> {:ok, run}
-      {:error, {:executor_unavailable, _name}} -> {:ok, %{run | pinned_executor_name: nil}}
+      {:error, {:runner_unavailable, _name}} -> {:ok, %{run | pinned_runner_name: nil}}
     end
   end
 
@@ -2643,7 +2648,7 @@ defmodule Relay.Runs do
   Eligibility is deliberately WIDER than `retry_run/2`'s: a `:failed` run, or a `:parked` run whose
   `parked_reason` is `:needs_input` — **either** park kind. RE306's actual state was a `:question`
   park, which `retry_run/2` refuses `:awaiting_answer`, so reusing retry's rule would leave this
-  hatch unable to open in the exact state it exists for. `:running`, `:parked/:executor_gone` (the
+  hatch unable to open in the exact state it exists for. `:running`, `:parked/:runner_gone` (the
   scheduler resumes those), `:done` and `:cancelled` are refused.
 
   Steps: check the bound sub-task off through `Relay.Cards.set_sub_task_done/3` (the normal path,
@@ -2654,7 +2659,7 @@ defmodule Relay.Runs do
 
   Every refusal is checked BEFORE the check-off, so a refused advance writes nothing. Refusals:
   `{:not_advanceable, what}`, `:active_run_exists`, `:no_flow`, `:no_foreach`,
-  `:no_exhausted_edge`, `:not_bound`, `{:unknown_node, key}`, `{:executor_unavailable, name}` —
+  `:no_exhausted_edge`, `:not_bound`, `{:unknown_node, key}`, `{:runner_unavailable, name}` —
   each paired with `retry_refusal_code/1` and `retry_refusal_message/1`.
   """
   def advance_foreach(%Run{} = run, opts \\ []) do
@@ -2685,7 +2690,7 @@ defmodule Relay.Runs do
          {:ok, head} <- check_foreach_node(flow),
          {:ok, exhausted} <- check_exhausted_target(flow),
          {:ok, sub_task_id} <- check_bound(run, head),
-         :ok <- check_retry_executor(run, flow) do
+         :ok <- check_retry_runner(run, flow) do
       {:ok, flow, head, exhausted, sub_task_id}
     end
   end
@@ -2772,8 +2777,8 @@ defmodule Relay.Runs do
   Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
   rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
   for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
-  RLY-194/A4). False for a genuine `:needs_input` question, any `:executor_gone` park, and
-  `:running`/`:done`/`:cancelled`. An `:executor_gone` park is not restartable-in-place because
+  RLY-194/A4). False for a genuine `:needs_input` question, any `:runner_gone` park, and
+  `:running`/`:done`/`:cancelled`. An `:runner_gone` park is not restartable-in-place because
   the scheduler resumes it when the machine returns — and when it never can,
   `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
   (RE297). The older "RLY-199 auto-resumes those" rationale was wrong: nothing bounded the wait.
@@ -2861,29 +2866,29 @@ defmodule Relay.Runs do
     Repo.one(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [desc: e.id], limit: 1, select: e.node_key)
   end
 
-  # Worktrees are executor-side state Phoenix cannot see, so the one thing the server CAN check
+  # Worktrees are runner-side state Phoenix cannot see, so the one thing the server CAN check
   # is whether the machine holding this run's worktree is still there. An exclusive run pinned
-  # to an absent executor would queue a job nothing can claim.
+  # to an absent runner would queue a job nothing can claim.
   #
-  # RE297: affinity is the run's OWN `pinned_executor_name` column — written on claim
-  # (`maybe_pin_run/2`), kept through an `:executor_gone` park, cleared by a human baton and by
+  # RE297: affinity is the run's OWN `pinned_runner_name` column — written on claim
+  # (`maybe_pin_run/2`), kept through an `:runner_gone` park, cleared by a human baton and by
   # `abandon_unresumable_runs/1` when the reason proves it unhonourable. Reading the last
-  # NodeJob's `executor_name` instead was a SECOND copy of that fact: after the reaper
+  # NodeJob's `runner_name` instead was a SECOND copy of that fact: after the reaper
   # deliberately clears the pin, the dead machine's name still sits on the last job, and retry
   # would stay refused exactly when the hatch must open.
-  defp check_retry_executor(%Run{pinned_executor_name: nil}, %Flow{isolation: :exclusive}), do: :ok
+  defp check_retry_runner(%Run{pinned_runner_name: nil}, %Flow{isolation: :exclusive}), do: :ok
 
-  defp check_retry_executor(%Run{pinned_executor_name: name} = run, %Flow{isolation: :exclusive}),
-    do: check_executor_live(run, name)
+  defp check_retry_runner(%Run{pinned_runner_name: name} = run, %Flow{isolation: :exclusive}),
+    do: check_runner_live(run, name)
 
-  defp check_retry_executor(_run, _flow), do: :ok
+  defp check_retry_runner(_run, _flow), do: :ok
 
-  defp check_executor_live(run, name) do
+  defp check_runner_live(run, name) do
     board_id = board_id_of(run)
 
-    case Repo.get_by(Executor, board_id: board_id, name: name) do
-      nil -> {:error, {:executor_unavailable, name}}
-      executor -> if executor_stale?(executor, now()), do: {:error, {:executor_unavailable, name}}, else: :ok
+    case Repo.get_by(Runner, board_id: board_id, name: name) do
+      nil -> {:error, {:runner_unavailable, name}}
+      runner -> if runner_stale?(runner, now()), do: {:error, {:runner_unavailable, name}}, else: :ok
     end
   end
 
@@ -2904,7 +2909,7 @@ defmodule Relay.Runs do
             flow_key: flow.key,
             # Likewise unconditional: nil only when `settle_retry_pin/3` released a dead pin on a
             # re-adoption, and a rewrite of the column's own value in every other case.
-            pinned_executor_name: run.pinned_executor_name,
+            pinned_runner_name: run.pinned_runner_name,
             parked_reason: nil,
             current_node: node,
             failure_detail: nil,
@@ -2947,7 +2952,7 @@ defmodule Relay.Runs do
   # blocked card asking a question while its run is already live again. This two-element list is
   # an ad-hoc "card state retry has to clear" predicate, NOT a domain partition — do not replace
   # it with a Card status vocabulary function.
-  # `retry_run/2` refuses a genuine question and every `:executor_gone` park, so those reach here
+  # `retry_run/2` refuses a genuine question and every `:runner_gone` park, so those reach here
   # only through `advance_foreach/2` (RE310), which deliberately accepts either park kind — and a
   # card left blocked behind a run that is already live again is exactly what this clears.
   defp clear_card_block(%Run{card_id: card_id}, actor) do
@@ -2961,7 +2966,7 @@ defmodule Relay.Runs do
   def retry_refusal_code(:active_run_exists), do: "active_run_exists"
   def retry_refusal_code(:no_flow), do: "no_flow"
   def retry_refusal_code({:unknown_node, _key}), do: "unknown_node"
-  def retry_refusal_code({:executor_unavailable, _name}), do: "executor_unavailable"
+  def retry_refusal_code({:runner_unavailable, _name}), do: "runner_unavailable"
   def retry_refusal_code(:awaiting_answer), do: "awaiting_answer"
   def retry_refusal_code({:not_advanceable, _what}), do: "not_advanceable"
   def retry_refusal_code(:no_foreach), do: "no_foreach"
@@ -2992,8 +2997,8 @@ defmodule Relay.Runs do
     "`#{key}` is not a node in this run's flow."
   end
 
-  def retry_refusal_message({:executor_unavailable, name}) do
-    "This run is pinned to executor `#{name}`, which is not connected. Its worktree is " <>
+  def retry_refusal_message({:runner_unavailable, name}) do
+    "This run is pinned to runner `#{name}`, which is not connected. Its worktree is " <>
       "unreachable, so the retry would queue a job nothing can claim."
   end
 
@@ -3043,7 +3048,7 @@ defmodule Relay.Runs do
   @doc """
   Revive every restartable run on `board` whose card is not already in a terminal-type stage
   — the mass-outage recovery (RLY-228). Each run is revived through the per-run `retry_run/2`
-  path, so its own guards (`check_no_active_run`, executor liveness) still apply; a run that
+  path, so its own guards (`check_no_active_run`, runner liveness) still apply; a run that
   can't revive is counted `refused`, never fatal. Returns `%{restarted: n, refused: m}` so the
   caller can flash "Restarted N cards."
   """
@@ -3083,7 +3088,7 @@ defmodule Relay.Runs do
   The two states are a clean `:failed` run and an ESCALATION park (`park_kind/1 == :escalation`
   — a node failed and the flow's `--on failed --> needs_input` edge handed the card to a human,
   RLY-194/A4). Nothing has died in either: the one state where an agent genuinely vanished is a
-  `:executor_gone` park, and `restartable?/1` excludes it. The escalation wording therefore
+  `:runner_gone` park, and `restartable?/1` excludes it. The escalation wording therefore
   echoes the card drawer's copy for the same state (`panel_label(:escalation)` /
   "<node> failed after N attempts — the flow handed this card to you", RE253) so the board
   names one state one way — keep the two in step if either changes.
@@ -3159,7 +3164,7 @@ defmodule Relay.Runs do
     stop_server(run)
     run = Repo.get!(Run, run.id)
 
-    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :claimed, pinned_executor_name: nil]) do
+    case Transitions.transition(run, [:running], :parked, set: [parked_reason: :claimed, pinned_runner_name: nil]) do
       {:ok, updated} ->
         revoke_active_jobs(updated)
         broadcast_runs(board_id_of(updated), {:run_parked, updated})
@@ -3257,7 +3262,7 @@ defmodule Relay.Runs do
       node_key: execution.node_key,
       state: :queued,
       payload: payload,
-      executor_name: exclusive_holder(run, payload)
+      runner_name: exclusive_holder(run, payload)
     }
     |> NodeJob.changeset()
     |> Repo.insert!()
@@ -3265,19 +3270,19 @@ defmodule Relay.Runs do
 
   @doc ~S"""
   Inserts one **talk** turn's dispatch row (ADR 0009): `kind: :talk`, no run, no node
-  execution, `card_id` set. `executor_name` is the session's pin — nil for the first turn on a
-  card, which is what lets ANY executor take it and become the holder. Mirrors
+  execution, `card_id` set. `runner_name` is the session's pin — nil for the first turn on a
+  card, which is what lets ANY runner take it and become the holder. Mirrors
   `exclusive_holder/2`'s pin-on-the-job-row shape exactly, so `claim_next_job/1` needs no Talk
   knowledge.
   """
-  def insert_talk_job!(%Card{} = card, payload, executor_name) when is_map(payload) do
+  def insert_talk_job!(%Card{} = card, payload, runner_name) when is_map(payload) do
     %NodeJob{
       kind: :talk,
       card_id: card.id,
       node_key: "talk",
       state: :queued,
       payload: payload,
-      executor_name: executor_name
+      runner_name: runner_name
     }
     |> NodeJob.changeset()
     |> Repo.insert!()
@@ -3287,9 +3292,9 @@ defmodule Relay.Runs do
   def get_job(id) when is_integer(id), do: Repo.get(NodeJob, id)
 
   @doc ~S"""
-  Withdraws a live **talk** job so the heartbeat's `revoked_among/2` tells its executor to kill
+  Withdraws a live **talk** job so the heartbeat's `revoked_among/2` tells its runner to kill
   the running `claude -p` — the Stop button (ADR 0009 §1). Unconditional server-side: a turn
-  whose executor is already gone still ends, which is the only thing that stops such a turn.
+  whose runner is already gone still ends, which is the only thing that stops such a turn.
   Flow jobs have no clause here on purpose: they are revoked through the run lifecycle
   (`revoke_active_jobs/1`), and a second path into `:revoked` is exactly the duplicated-fact
   bug AGENTS.md forbids.
@@ -3317,18 +3322,18 @@ defmodule Relay.Runs do
   @doc "How many `## Task N:` steps a card's plan declares. Wraps `Relay.Runs.PlanTasks` so the Talk seed line reads the plan through the ONE parser the foreach node uses."
   def plan_task_count(plan), do: plan |> PlanTasks.parse() |> length()
 
-  # Exclusive runs have absolute executor affinity (ADR 0006 §5): the machine that
-  # claims a run's first job is persisted as the run's `pinned_executor_name`
+  # Exclusive runs have absolute runner affinity (ADR 0006 §5): the machine that
+  # claims a run's first job is persisted as the run's `pinned_runner_name`
   # (`maybe_pin_run/2`), and every later job — the next node after an advance, a
-  # needs-input re-entry, or an `executor_gone` resume — is pinned to that same column,
+  # needs-input re-entry, or an `runner_gone` resume — is pinned to that same column,
   # so it lands on the machine holding the run's worktree. The first job of a fresh run
-  # reads nil (unpinned → any exclusive executor may start it). `park_claimed/1` (human
-  # baton) nils the column, so a baton resume re-offers to any free executor with a
-  # fresh worktree; `park_for_reclaim/1` (executor_gone) KEEPS it, so the resume returns
+  # reads nil (unpinned → any exclusive runner may start it). `park_claimed/1` (human
+  # baton) nils the column, so a baton resume re-offers to any free runner with a
+  # fresh worktree; `park_for_reclaim/1` (runner_gone) KEEPS it, so the resume returns
   # to the holder. `shared_clean` runs are never pinned. One column, two readers (here
   # and `active_runs/1`) — no second derivation to drift (RLY-199).
   defp exclusive_holder(%Run{id: run_id}, %{"isolation" => "exclusive"}) do
-    Repo.one(from r in Run, where: r.id == ^run_id, select: r.pinned_executor_name)
+    Repo.one(from r in Run, where: r.id == ^run_id, select: r.pinned_runner_name)
   end
 
   defp exclusive_holder(_run, _payload), do: nil
@@ -3349,7 +3354,7 @@ defmodule Relay.Runs do
         git_sha: attrs[:git_sha],
         # RE310: what the node CLAIMED, not what the guard decided — the guard has already
         # rewritten `outcome` by the time we get here, and a rejected claim must still read as
-        # `no_changes: true` with `outcome: :failed`. Absent key => false (an old executor).
+        # `no_changes: true` with `outcome: :failed`. Absent key => false (an old runner).
         no_changes: attrs[:no_changes] == true,
         session_id: attrs[:session_id],
         cost: attrs[:cost],
@@ -3445,11 +3450,11 @@ defmodule Relay.Runs do
     end)
   end
 
-  # Builds a job payload: the executor's whole contract. Placeholder
-  # expansion ({ref}/{branch}/{relay}) stays executor-side per
+  # Builds a job payload: the runner's whole contract. Placeholder
+  # expansion ({ref}/{branch}/{relay}) stays runner-side per
   # Schemas.Flow.Node; the engine only supplies the vars. `branch` follows
   # today's runner convention: the card's stored branch, else
-  # <key>-<n>-<title-slug> (mirrors bin/relay's slug()).
+  # <key>-<n>-<title-slug> (mirrors ./relay's slug()).
   @doc false
   def build_payload(%Run{} = run, %Flow{} = flow, node_key, opts) do
     card = Repo.get!(Card, run.card_id)

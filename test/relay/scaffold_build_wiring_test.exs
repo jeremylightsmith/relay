@@ -5,10 +5,10 @@ defmodule Relay.ScaffoldBuildWiringTest do
   A Mix release ships `priv/` but ships neither `bin/` nor `.claude/`, so
   `RUN mix relay.build_scaffold` is the ONLY thing that puts anything in `priv/scaffold/` for
   the image to serve. If that line is dropped, reordered after `RUN mix release`, or the
-  `COPY .claude` / `COPY bin` lines drift below it, the release ships an empty scaffold and the
+  `COPY .claude` / `COPY relay` lines drift below it, the release ships an empty scaffold and the
   failure is completely silent in production: `GET /api/scaffold` answers 503
-  `scaffold_unavailable`, every heartbeat advertises `latest_executor_version: null` (which the
-  executor reads as "never auto-update", indistinguishable from "nothing published"), and
+  `scaffold_unavailable`, every heartbeat advertises `latest_runner_version: null` (which the
+  runner reads as "never auto-update", indistinguishable from "nothing published"), and
   `/relay-setup` cannot bootstrap a project at all. Nothing else in the suite would fail.
   """
   use ExUnit.Case, async: true
@@ -43,7 +43,7 @@ defmodule Relay.ScaffoldBuildWiringTest do
     end
   end
 
-  # The top-level path each served item arrives by: `bin/relay` -> `bin`, a skill -> `.claude`,
+  # The top-level path each served item arrives by: `relay` -> `relay`, a skill -> `.claude`,
   # `relay.md` -> `relay.md` (a root file is copied by name).
   defp scaffold_copy_sources do
     Relay.Scaffold.items()

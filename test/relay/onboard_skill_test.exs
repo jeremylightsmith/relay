@@ -28,7 +28,7 @@ defmodule Relay.OnboardSkillTest do
   test "names its blast radius and what it excludes", %{doc: doc} do
     assert doc =~ "**Blast radius:**"
 
-    for allowed <- ["`.claude/`", "`.relay/executor.json`", "flow documents"] do
+    for allowed <- ["`.claude/`", "`.relay/runner.json`", "flow documents"] do
       assert doc =~ allowed
     end
 
@@ -41,7 +41,7 @@ defmodule Relay.OnboardSkillTest do
     refute doc =~ ~r/\bbin\/relay doctor\b/
   end
 
-  test "imports the executor's own capability resolver", %{doc: doc} do
+  test "imports the runner's own capability resolver", %{doc: doc} do
     assert doc =~ "collect_capabilities()"
   end
 
@@ -78,16 +78,16 @@ defmodule Relay.OnboardSkillTest do
     assert doc =~ "Never offer to enable a flow that still has errors"
   end
 
-  test "Phase 3's plan actually authors .relay/executor.json when missing", %{doc: doc} do
+  test "Phase 3's plan actually authors .relay/runner.json when missing", %{doc: doc} do
     [_, phase3_and_later] = String.split(doc, "## Phase 3", parts: 2)
     [phase3, _] = String.split(phase3_and_later, "## Phase 4", parts: 2)
 
-    assert phase3 =~ ".relay/executor.json"
+    assert phase3 =~ ".relay/runner.json"
     assert phase3 =~ "author it for this repo"
   end
 
   test "onboarding does not author relay.md — the scaffold serves it", %{doc: doc} do
-    # relay.md joined Scaffold.items/0, so `bin/relay update` installs and repairs it. If this
+    # relay.md joined Scaffold.items/0, so `./relay update` installs and repairs it. If this
     # skill still authored one per repo, the next update would silently overwrite that work.
     assert "relay.md" in Relay.Scaffold.items()
 
@@ -105,7 +105,7 @@ defmodule Relay.OnboardSkillTest do
 
     refute phase0 =~ "neither is something a skill can fix"
     assert phase0 =~ "a skill cannot mint a key"
-    assert phase0 =~ "self-heals via `bin/relay update`"
+    assert phase0 =~ "self-heals via `./relay update`"
   end
 
   # The missing `relay-*` skill may *be* `relay-update`, and the Skill tool cannot resolve a
@@ -114,7 +114,7 @@ defmodule Relay.OnboardSkillTest do
     [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
     [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
 
-    assert phase0 =~ "bin/relay update --json"
+    assert phase0 =~ "./relay update --json"
     refute String.replace(phase0, ~r/\s+/, " ") =~ "run `/relay-update` (via the `Skill` tool)"
   end
 

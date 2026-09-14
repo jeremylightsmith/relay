@@ -74,7 +74,7 @@ defmodule Relay.Runs.Scheduler.Server do
   def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending?: false})}
 
   # Any capacity change or card move/upsert on this board is a reason to reconcile.
-  def handle_info({:executor_capacity_changed, _executor_id}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:runner_capacity_changed, _runner_id}, state), do: {:noreply, mark_dirty(state)}
   def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state)}
   def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state)}
   def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state)}
@@ -97,9 +97,9 @@ defmodule Relay.Runs.Scheduler.Server do
     state
   end
 
-  defp dispatch({:start, card_id, flow_key, executor_id}, engine), do: engine.start_run(card_id, flow_key, executor_id)
+  defp dispatch({:start, card_id, flow_key, runner_id}, engine), do: engine.start_run(card_id, flow_key, runner_id)
 
-  defp dispatch({:resume, run_id, executor_id}, engine), do: engine.resume_run(run_id, executor_id)
+  defp dispatch({:resume, run_id, runner_id}, engine), do: engine.resume_run(run_id, runner_id)
 
   # --- snapshot assembly (returns the loaded card structs so apply_marking can write status) ---
 
@@ -120,49 +120,49 @@ defmodule Relay.Runs.Scheduler.Server do
     # reuses this same function, so plan and explain cannot disagree.
     blocked_by = Cards.unmet_dependencies(board, stages)
     runs = engine.active_runs(board_id)
-    executors = executor_snap(board_id)
+    runners = runner_snap(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(stages, &stage_snap/1),
       cards: Enum.map(cards, &card_snap(&1, board, blocked_by)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
       runs: runs,
-      capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> drop_gone_capacity(executors),
-      executors: executors
+      capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> drop_gone_capacity(runners),
+      runners: runners
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
   end
 
-  # A `:gone` executor's advertised capacity is void — its slots died with the machine, and the
+  # A `:gone` runner's advertised capacity is void — its slots died with the machine, and the
   # reaper has already requeued/parked its in-flight work. Drop it here (AFTER reserve_active_runs,
   # so a not-yet-reaped :running run still debits the machine it's stuck on before the machine
-  # leaves the map) so the pure planner never resumes or starts onto an executor it can't reach.
+  # leaves the map) so the pure planner never resumes or starts onto a runner it can't reach.
   # Without this, an exclusive run pinned to a dead machine oscillates forever — the scheduler
   # keeps resuming it onto the lingering capacity and the reaper keeps re-parking it (RLY-199) —
   # and `explain/2` reports "dispatchable" instead of naming the awaited machine. `:gone` is the
-  # reaper's own predicate (`executor_stale?/2`), so this is exactly the roster it has given up on.
-  defp drop_gone_capacity(capacity, executors) do
-    Map.reject(capacity, fn {executor_id, _slots} ->
-      match?(%{freshness: :gone}, Map.get(executors, executor_id))
+  # reaper's own predicate (`runner_stale?/2`), so this is exactly the roster it has given up on.
+  defp drop_gone_capacity(capacity, runners) do
+    Map.reject(capacity, fn {runner_id, _slots} ->
+      match?(%{freshness: :gone}, Map.get(runners, runner_id))
     end)
   end
 
-  # Reuses Relay.Runs.executor_outdated?/1 and executor_freshness/2 — the same truth the
+  # Reuses Relay.Runs.runner_outdated?/1 and runner_freshness/2 — the same truth the
   # runners view and the reaper read — so the scheduler's "outdated" can never disagree with
   # the roster's. `now` is read once for a consistent freshness pass.
-  defp executor_snap(board_id) do
+  defp runner_snap(board_id) do
     now = DateTime.utc_now()
 
     board_id
-    |> Relay.Runs.list_board_executors()
+    |> Relay.Runs.list_board_runners()
     |> Map.new(fn e ->
       {e.id,
        %{
          name: e.name,
          version: e.version,
-         outdated: Relay.Runs.executor_outdated?(e),
-         freshness: Relay.Runs.executor_freshness(e, now)
+         outdated: Relay.Runs.runner_outdated?(e),
+         freshness: Relay.Runs.runner_freshness(e, now)
        }}
     end)
   end
@@ -172,17 +172,17 @@ defmodule Relay.Runs.Scheduler.Server do
 
   defp build_snapshot(state), do: build_snapshot(state.board_id, state.engine)
 
-  # A run that is :running is being worked on an executor right now, so it holds
-  # one slot of its isolation class until it finishes — even if the executor's
+  # A run that is :running is being worked on a runner right now, so it holds
+  # one slot of its isolation class until it finishes — even if the runner's
   # next heartbeat hasn't yet reflected it. Subtract those held slots from the
   # advertised capacity before planning (parked runs hold no slot; the pure
   # planner's resume_runs consumes a slot only when it actually resumes one).
   #
   # NOTE (board-scoped vs. global): `runs` here is this board's active runs only
   # (`state.engine.active_runs(state.board_id)`), but `Capacity.snapshot/0` is
-  # global — an executor shared across boards has its capacity debited only by
+  # global — a runner shared across boards has its capacity debited only by
   # the runs each board's own scheduler knows about. Two boards dispatching to
-  # the same executor at once can each believe a slot is free. Tracked as a
+  # the same runner at once can each believe a slot is free. Tracked as a
   # follow-up; not a regression introduced here (there was no accounting at all
   # before this change).
   defp reserve_active_runs(capacity, runs) do
@@ -195,23 +195,23 @@ defmodule Relay.Runs.Scheduler.Server do
   # placement arithmetic — instead of a second copy, so this subtraction can
   # never drift out of sync with how the planner actually placed the run.
   #
-  # A pinned :exclusive run (RLY-199) debits its pinned executor via
+  # A pinned :exclusive run (RLY-199) debits its pinned runner via
   # `{:pinned, id}`, mirroring how resume_runs/2 will place its resume — so the
-  # accounting charges the executor that actually holds the run's slot. If that
-  # executor is absent from the capacity map (gone, or not yet re-advertised),
+  # accounting charges the runner that actually holds the run's slot. If that
+  # runner is absent from the capacity map (gone, or not yet re-advertised),
   # `take_slot` returns `:none` and we fall back to a greedy `:any` debit, which
   # keeps the AGGREGATE slot count correct (the property this accounting exists to
-  # protect) even if it charges the wrong executor. An unpinned run (a fresh
+  # protect) even if it charges the wrong runner. An unpinned run (a fresh
   # pre-first-claim exclusive run, or any shared_clean run) debits `:any` directly,
   # matching `Relay.Runs.Scheduler.place_fresh/4`. `:none` on the fallback leaves the
   # snapshot unchanged rather than raising. A deleted-flow run (isolation nil) holds
   # no slot.
   defp reserve_slot(cap, %{isolation: nil}), do: cap
 
-  defp reserve_slot(cap, %{pinned_executor_id: eid} = run) when not is_nil(eid) do
+  defp reserve_slot(cap, %{pinned_runner_id: eid} = run) when not is_nil(eid) do
     case Scheduler.take_slot(cap, run.isolation, {:pinned, eid}) do
       :none -> debit_any(cap, run)
-      {_executor_id, updated} -> updated
+      {_runner_id, updated} -> updated
     end
   end
 
@@ -220,7 +220,7 @@ defmodule Relay.Runs.Scheduler.Server do
   defp debit_any(cap, run) do
     case Scheduler.take_slot(cap, run.isolation, :any) do
       :none -> cap
-      {_executor_id, updated} -> updated
+      {_runner_id, updated} -> updated
     end
   end
 

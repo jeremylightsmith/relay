@@ -233,7 +233,7 @@ const SCREENS = {
         url: (s) => `/board/${s.board}?card=DE5`,
         wait: "#card-drawer-panel",
         selector: "body",
-        // Both are "no executor is connected to this dev machine" chrome, not a
+        // Both are "no runner is connected to this dev machine" chrome, not a
         // design state — they would read as part of the board if left in.
         hide: ["#stopped-work-banner", "#restart-stalled-button"],
         expand: false,

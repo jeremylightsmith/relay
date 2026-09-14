@@ -50,14 +50,14 @@ The name(s) of the changed artboard(s). If not given, ask which — one at a tim
    never batched**. Let them edit, merge, split, or drop items. Only **fix-app** items
    proceed.
 
-6. **Dedupe against open cards.** Run `bin/relay board` and compare the survivors against all
+6. **Dedupe against open cards.** Run `./relay board` and compare the survivors against all
    **non-Done** cards by *meaning*, not exact title. Surface each likely duplicate to the
    human to confirm (one at a time) rather than silently skipping — a near-match may be a
    genuinely different diff.
 
 7. **File the cards.** For each remaining item:
-   `bin/relay create "<name>" --stage Backlog --tag design`, then set its description
-   (`bin/relay describe <ref> @file`) to: the 2–3 sentence description + screen/state +
+   `./relay create "<name>" --stage Backlog --tag design`, then set its description
+   (`./relay describe <ref> @file`) to: the 2–3 sentence description + screen/state +
    artboard filename + saved screenshot paths. These are intake — point the user to
    `/brainstorm <ref>` for design.
 

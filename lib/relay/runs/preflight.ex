@@ -5,14 +5,14 @@ defmodule Relay.Runs.Preflight do
   agents, and it was previously done blind: a missing agent file surfaced as an engine-looking
   error on the first agent node, *after* the card had already moved.
 
-  **Readiness is per-executor, never a union.** A run dispatches to ONE executor, so a union
+  **Readiness is per-runner, never a union.** A run dispatches to ONE runner, so a union
   across machines could report ready when no single machine can actually run the flow. An
-  executor is a candidate only when it is `:fresh`, advertises capacity in the flow's own
+  runner is a candidate only when it is `:fresh`, advertises capacity in the flow's own
   isolation class, and resolves every agent and skill the flow names.
 
   **Unknown is not missing.** A row whose `capabilities` is nil has never reported its
   inventory. It must not be disqualified and its names must never be rendered as missing —
-  that is the false alarm this feature exists to avoid. Those executors are surfaced
+  that is the false alarm this feature exists to avoid. Those runners are surfaced
   separately in `:unreported`.
 
   **Report, do not block.** Nothing here gates enabling; the caller renders the verdict and
@@ -20,9 +20,9 @@ defmodule Relay.Runs.Preflight do
 
   Lives in `Relay.Runs`, not `Relay.Flows`: `Flows` owns what a flow REQUIRES
   (`Flows.node_requirements/1`, pure graph parsing) and may not depend on `Runs`, while this
-  needs executors and capacity. The reverse edge is a boundary cycle the compiler rejects.
+  needs runners and capacity. The reverse edge is a boundary cycle the compiler rejects.
 
-  Read-only and cheap enough for the render path: one executor query plus
+  Read-only and cheap enough for the render path: one runner query plus
   `Relay.Runs.Capacity.snapshot/0` (ETS). It is a SNAPSHOT taken on click — it does not
   subscribe to anything and does not live-update while the banner is open.
   """
@@ -33,8 +33,8 @@ defmodule Relay.Runs.Preflight do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Schemas.Executor
   alias Schemas.Flow
+  alias Schemas.Runner
 
   @type detail :: %{
           name: String.t(),
@@ -49,7 +49,7 @@ defmodule Relay.Runs.Preflight do
           ready?: boolean(),
           stages: :ok | {:missing, [:pulls_from | :works_in | :lands_on]},
           requires: %{agents: [String.t()], skills: [String.t()]},
-          executors: :none_connected | {:ok, String.t()} | {:no_candidate, [detail()]},
+          runners: :none_connected | {:ok, String.t()} | {:no_candidate, [detail()]},
           unreported: [String.t()]
         }
 
@@ -64,22 +64,22 @@ defmodule Relay.Runs.Preflight do
     capacity = Capacity.snapshot()
 
     details =
-      from(e in Executor, where: e.board_id == ^flow.board_id, order_by: [asc: e.name])
+      from(e in Runner, where: e.board_id == ^flow.board_id, order_by: [asc: e.name])
       |> Repo.all()
       |> Enum.map(&detail(&1, flow, requires, capacity, now))
       # A `:gone` row means the reaper has already requeued/parked its work (same predicate
-      # as `Runs.executor_stale?/2`) — it is not connected, and its stale inventory must not
+      # as `Runs.runner_stale?/2`) — it is not connected, and its stale inventory must not
       # be unioned into "missing" or counted toward "hasn't reported yet".
       |> Enum.reject(&(&1.freshness == :gone))
 
     stages = stage_check(flow)
-    executors = verdict(details)
+    runners = verdict(details)
 
     %{
-      ready?: stages == :ok and match?({:ok, _name}, executors),
+      ready?: stages == :ok and match?({:ok, _name}, runners),
       stages: stages,
       requires: requires,
-      executors: executors,
+      runners: runners,
       unreported: for(d <- details, not d.reported_capabilities?, do: d.name)
     }
   end
@@ -97,18 +97,18 @@ defmodule Relay.Runs.Preflight do
     end
   end
 
-  defp detail(%Executor{} = executor, %Flow{} = flow, requires, capacity, now) do
-    freshness = Runs.executor_freshness(executor, now)
-    reported? = is_map(executor.capabilities)
-    capacity_ok? = free_slots(capacity, executor.id, flow.isolation) > 0
+  defp detail(%Runner{} = runner, %Flow{} = flow, requires, capacity, now) do
+    freshness = Runs.runner_freshness(runner, now)
+    reported? = is_map(runner.capabilities)
+    capacity_ok? = free_slots(capacity, runner.id, flow.isolation) > 0
 
     # Unknown ≠ missing: with nothing reported there is nothing to subtract, so the lists
-    # stay empty and this executor is not accused of lacking anything.
-    missing_agents = missing(reported?, requires.agents, executor.capabilities, "agents")
-    missing_skills = missing(reported?, requires.skills, executor.capabilities, "skills")
+    # stay empty and this runner is not accused of lacking anything.
+    missing_agents = missing(reported?, requires.agents, runner.capabilities, "agents")
+    missing_skills = missing(reported?, requires.skills, runner.capabilities, "skills")
 
     %{
-      name: executor.name,
+      name: runner.name,
       freshness: freshness,
       capacity_ok?: capacity_ok?,
       missing_agents: missing_agents,
@@ -122,9 +122,9 @@ defmodule Relay.Runs.Preflight do
   defp missing(true, required, capabilities, key), do: required -- Map.get(capabilities, key, [])
 
   # Capacity.snapshot/0 is atom-keyed per isolation class and normalizes missing classes to
-  # 0. An executor absent from the store has advertised nothing since the last app restart.
-  defp free_slots(capacity, executor_id, isolation) do
-    capacity |> Map.get(executor_id, %{}) |> Map.get(isolation, 0)
+  # 0. A runner absent from the store has advertised nothing since the last app restart.
+  defp free_slots(capacity, runner_id, isolation) do
+    capacity |> Map.get(runner_id, %{}) |> Map.get(isolation, 0)
   end
 
   # The stage FKs are `on_delete: :nilify_all`, so deleting a trigger stage disarms the flow

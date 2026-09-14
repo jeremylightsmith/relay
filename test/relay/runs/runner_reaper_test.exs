@@ -1,4 +1,4 @@
-defmodule Relay.Runs.ExecutorReaperTest do
+defmodule Relay.Runs.RunnerReaperTest do
   # async: false — start_engine!/1's Listener subscribes to the global `Relay.Events` firehose
   # (there is no per-instance topic), so under async every concurrent test's card event reaches
   # this test's private Listener, which reconciles on THIS test's sandbox connection and can steal
@@ -11,7 +11,7 @@ defmodule Relay.Runs.ExecutorReaperTest do
   use Relay.DataCase, async: false
 
   alias Relay.Runs
-  alias Relay.Runs.ExecutorReaper
+  alias Relay.Runs.RunnerReaper
   alias Schemas.Run
 
   setup do
@@ -34,7 +34,7 @@ defmodule Relay.Runs.ExecutorReaperTest do
     # sandbox access comes from `callers:`, the same seam the engine tree uses.
     pid =
       start_supervised!(
-        {ExecutorReaper,
+        {RunnerReaper,
          interval_ms: to_timeout(hour: 1), name: :"reaper_#{System.unique_integer([:positive])}", callers: [self()]}
       )
 

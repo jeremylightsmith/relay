@@ -1,7 +1,7 @@
-defmodule Relay.Runs.Scheduler.ScriptedExecutor do
+defmodule Relay.Runs.Scheduler.ScriptedRunner do
   @moduledoc """
-  A test-only executor that speaks ONLY board-key HTTP (Phoenix.ConnTest) — the
-  exact surface a real `relay execute` uses — so the E2E test drives the whole
+  A test-only runner that speaks ONLY board-key HTTP (Phoenix.ConnTest) — the
+  exact surface a real `relay start` uses — so the E2E test drives the whole
   system with no `Relay.Runs` context calls and no `claude`. Each function takes
   an authed `conn` (board-key bearer) and returns the decoded response.
   """
@@ -26,11 +26,11 @@ defmodule Relay.Runs.Scheduler.ScriptedExecutor do
   def claim(conn, name, capacity) do
     conn =
       post(conn, "/api/node-jobs/claim?wait=0", %{
-        "executor" => %{
+        "runner" => %{
           "name" => name,
           "host" => "scripted",
           "interval" => 30,
-          "version" => Relay.Runs.min_executor_version()
+          "version" => Relay.Runs.min_runner_version()
         },
         "capacity" => capacity
       })

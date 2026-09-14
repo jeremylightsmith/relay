@@ -1,7 +1,7 @@
 defmodule Relay.Runs.FakeDispatcher do
   @moduledoc """
   Test dispatcher: forwards dispatch/revoke to the process registered via
-  `register/1`, so a test plays executor — receive `{:dispatched, job}` /
+  `register/1`, so a test plays runner — receive `{:dispatched, job}` /
   `{:revoked, job}`, then drive `claim_job/report_outcome`.
 
   The dispatcher and its notification target ride on the calling process's `Relay.Runs.Instance`

@@ -1,6 +1,6 @@
 defmodule RelayWeb.Api.NeedsInputContractTest do
   @moduledoc """
-  The questions schema `bin/relay` teaches every agent must be one the server actually accepts.
+  The questions schema `./relay` teaches every agent must be one the server actually accepts.
 
   `OUTCOME_CONTRACT` is appended to every agent node's prompt, and it now carries a worked
   `--questions` payload — the one thing an agent needs in order to ask a human and the one thing
@@ -9,7 +9,7 @@ defmodule RelayWeb.Api.NeedsInputContractTest do
   follows the documented shape, the server 422s it, the node exits without parking and without an
   outcome, and `determine_agent_outcome` reports `failed` with the question never delivered.
 
-  So this reads the literal example out of `bin/relay` and POSTs it at the real route. No payload
+  So this reads the literal example out of `./relay` and POSTs it at the real route. No payload
   is retyped here — retyping it would pin this test to itself rather than to what ships.
   """
   use RelayWeb.ConnCase, async: true
@@ -17,7 +17,7 @@ defmodule RelayWeb.Api.NeedsInputContractTest do
   alias Relay.ApiKeys
   alias Schemas.Card
 
-  # The one parse of the example out of bin/relay: the heredoc body inside OUTCOME_CONTRACT's
+  # The one parse of the example out of ./relay: the heredoc body inside OUTCOME_CONTRACT's
   # needs-input block, between `<<'JSON'` and its terminator. Matched structurally, against the
   # contract text agents actually receive, so editorial edits to the surrounding prose never
   # break it and no copy can be validated that is not the shipped one.
@@ -35,11 +35,11 @@ defmodule RelayWeb.Api.NeedsInputContractTest do
   end
 
   defp documented_example do
-    %{"json" => json} = Regex.named_captures(@example_re, File.read!("bin/relay"))
+    %{"json" => json} = Regex.named_captures(@example_re, File.read!("relay"))
     Jason.decode!(json)
   end
 
-  test "the example bin/relay teaches is accepted by the real endpoint", %{conn: conn, card: card} do
+  test "the example ./relay teaches is accepted by the real endpoint", %{conn: conn, card: card} do
     questions = documented_example()
 
     conn = post(conn, ~p"/api/cards/NI-1/needs-input", %{"questions" => questions})
