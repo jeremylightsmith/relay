@@ -5,6 +5,16 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
   def function, do: &RelayWeb.CoreComponents.board_card/1
   def render_source, do: :function
 
+  # RE321: render every variant at the board's real card width (240px lane − 13px
+  # padding a side) so meta-row overflow is visible here, not only on the board.
+  def template do
+    """
+    <div style="width:214px;" psb-code-hidden>
+      <.psb-variation/>
+    </div>
+    """
+  end
+
   def variations do
     [
       %Variation{
@@ -260,6 +270,21 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           title: "Waiting on three other cards",
           status: :ready,
           blocked_count: 3
+        }
+      },
+      %Variation{
+        id: :busiest_meta_row,
+        attributes: %{
+          id: "story-card-busiest",
+          ref: "RE321",
+          title: "Every meta-row item at once",
+          tag: "design-system",
+          status: :ready,
+          category: :unstarted,
+          vote_count: 12,
+          blocked_count: 3,
+          active_owner: :ai,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
         }
       }
     ]

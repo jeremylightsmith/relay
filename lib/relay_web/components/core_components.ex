@@ -829,11 +829,19 @@ defmodule RelayWeb.CoreComponents do
 
   attr :size, :integer, default: 22
 
+  attr :style, :string,
+    default: "",
+    doc: "extra inline style appended to the cluster, e.g. placement within a parent flex row"
+
   def owner_avatars(assigns) do
     assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner))
 
     ~H"""
-    <div :if={@avatars != []} class="card-owners flex items-center" style="padding-left:2px;">
+    <div
+      :if={@avatars != []}
+      class="card-owners flex items-center"
+      style={"padding-left:2px;#{@style}"}
+    >
       <div :for={av <- @avatars} style={av.wrap} title={av.title} data-actor-type={av.actor_type}>
         <.avatar
           actor={av.actor}
@@ -1279,7 +1287,6 @@ defmodule RelayWeb.CoreComponents do
       >
         {@title}
       </span>
-      <span class="card-ref sr-only">{@ref}</span>
       <RunComponents.run_face
         :if={@run}
         run={@run}
@@ -1350,7 +1357,14 @@ defmodule RelayWeb.CoreComponents do
       >
         {@question}
       </p>
-      <div style="display:flex;align-items:center;gap:7px;">
+      <%!-- RE321: the ref leads the meta row and never shrinks. On the busiest cards, trailing items wrap inside the card instead of pushing the avatars out. --%>
+      <div class="card-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;">
+        <span
+          class="card-ref"
+          style="font-size:10.5px;font-weight:500;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);flex:0 0 auto;white-space:nowrap;"
+        >
+          {@ref}
+        </span>
         <span
           :if={@status == :working and @health == :none and is_nil(@run)}
           class="card-status"
@@ -1376,14 +1390,14 @@ defmodule RelayWeb.CoreComponents do
         <span
           :if={@tag && @status != :working}
           class="card-tag"
-          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
         >
           #{@tag}
         </span>
         <span
           :if={@blocked_count > 0}
           class="card-blocked-chip badge badge-ghost badge-sm gap-1 font-medium"
-          style="font-size:10px;"
+          style="font-size:10px;white-space:nowrap;flex:0 0 auto;"
         >
           <.icon name="hero-lock-closed" class="size-3" />
           Blocked by {@blocked_count} {if @blocked_count == 1, do: "card", else: "cards"}
@@ -1394,8 +1408,8 @@ defmodule RelayWeb.CoreComponents do
           variant={:count}
           class="card-votes"
         />
-        <span style="flex:1;"></span>
-        <.owner_avatars owners={@owners} active_owner={@active_owner} />
+        <%!-- margin-left:auto (not a flex:1 spacer) keeps the avatars at the right edge even when they wrap to a new line. --%>
+        <.owner_avatars owners={@owners} active_owner={@active_owner} style="margin-left:auto;" />
       </div>
     </article>
     """

@@ -105,6 +105,112 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "mix precommit failed: 3 tests, 1 failure"
       refute html =~ "the agent stopped"
     end
+
+    test "the ref stays at the bottom left when a run face is present (RE321)" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "card-run",
+          ref: "RE321",
+          title: "CSV export of the board",
+          status: :working,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run:
+            {:run,
+             %{
+               status: :running,
+               node_index: 2,
+               node_count: 4,
+               current_node: "implement",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 2
+             }}
+        )
+
+      assert html =~ ~s(id="card-RE321-run-face")
+      assert html |> meta_row_ref() |> LazyHTML.text() |> String.trim() == "RE321"
+    end
+
+    test "the ref stays at the bottom left on queued, parked, needs_input, in_review, and Done cards (RE321)" do
+      variants = [
+        %{status: :ready, run: {:queued, %{key: "code"}}},
+        %{
+          status: :needs_input,
+          question: "Full text?",
+          run: {:run, %{status: :parked, current_node: "brainstorm", flow_key: "spec", flow_version: 2, attempts: 1}}
+        },
+        %{status: :needs_input, question: "Which locales first?", active_owner: :ai, owners: [%{actor_type: :agent}]},
+        %{status: :in_review},
+        %{status: :ready, stage_type: :done, done: true, owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]}
+      ]
+
+      for extra <- variants do
+        html =
+          render_component(
+            &CoreComponents.board_card/1,
+            Map.merge(%{id: "card-state", ref: "RE7", title: "Every state"}, extra)
+          )
+
+        assert html |> meta_row_ref() |> LazyHTML.text() |> String.trim() == "RE7",
+               "expected the ref first in the meta row for #{inspect(extra)}"
+      end
+    end
+
+    test "the busiest meta row wraps inside the card and never truncates the ref (RE321)" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "card-busy",
+          ref: "RE321",
+          title: "Every meta-row item at once",
+          tag: "a-very-long-free-text-tag-name",
+          status: :ready,
+          category: :unstarted,
+          vote_count: 12,
+          blocked_count: 3,
+          active_owner: :ai,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      style = fn selector -> doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style") end
+
+      [meta] = style.("article.board-card > .card-meta:last-child")
+      assert meta =~ "display:flex"
+      assert meta =~ "flex-wrap:wrap"
+      assert meta =~ "gap:6px 7px"
+
+      [ref] = style.(".card-meta > .card-ref:first-child")
+      assert ref =~ "flex:0 0 auto"
+      assert ref =~ "white-space:nowrap"
+      refute ref =~ "overflow:hidden"
+      refute ref =~ "text-overflow"
+
+      [tag] = style.(".card-meta > .card-tag")
+      assert tag =~ "min-width:0"
+      assert tag =~ "max-width:100%"
+      assert tag =~ "overflow:hidden"
+      assert tag =~ "text-overflow:ellipsis"
+      assert tag =~ "white-space:nowrap"
+
+      [chip] = style.(".card-meta > .card-blocked-chip")
+      assert chip =~ "white-space:nowrap"
+      assert chip =~ "flex:0 0 auto"
+
+      assert doc |> LazyHTML.query(".card-meta > .card-votes") |> Enum.count() == 1
+      # A flex:1 spacer keeps its zero basis on the current line, so a wrapped
+      # avatar cluster would land at the left. margin-left:auto on the cluster
+      # itself right-aligns it on whichever line it ends up on.
+      [owners] = style.(".card-meta > .card-owners")
+      assert owners =~ "margin-left:auto"
+      assert doc |> LazyHTML.query(~s(.card-meta > span[style="flex:1;"])) |> Enum.count() == 0
+    end
+
+    defp meta_row_ref(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("article.board-card > .card-meta:last-child > .card-ref:first-child")
+    end
   end
 
   describe "stage_column/1" do

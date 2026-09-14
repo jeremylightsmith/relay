@@ -28,4 +28,14 @@ defmodule RelayWeb.StorybookStoriesTest do
     assert controls =~ "join"
     assert read("_core_components.index.exs") =~ ~s|def entry("controls")|
   end
+
+  test "board_card story renders a busiest meta-row variant at real lane width (RE321)" do
+    src = read("board_card.story.exs")
+    assert src =~ "id: :busiest_meta_row"
+    assert src =~ "blocked_count: 3"
+    assert src =~ "vote_count: 12"
+    assert src =~ "category: :unstarted"
+    assert src =~ ~s(style="width:214px;")
+    assert src =~ "<.psb-variation/>"
+  end
 end
