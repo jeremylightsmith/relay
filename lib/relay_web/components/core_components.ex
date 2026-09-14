@@ -1279,7 +1279,6 @@ defmodule RelayWeb.CoreComponents do
       >
         {@title}
       </span>
-      <span class="card-ref sr-only">{@ref}</span>
       <RunComponents.run_face
         :if={@run}
         run={@run}
@@ -1350,7 +1349,13 @@ defmodule RelayWeb.CoreComponents do
       >
         {@question}
       </p>
-      <div style="display:flex;align-items:center;gap:7px;">
+      <div class="card-meta" style="display:flex;align-items:center;gap:7px;">
+        <span
+          class="card-ref"
+          style="font-size:10.5px;font-weight:500;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);flex:0 0 auto;white-space:nowrap;"
+        >
+          {@ref}
+        </span>
         <span
           :if={@status == :working and @health == :none and is_nil(@run)}
           class="card-status"

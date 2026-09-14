@@ -105,6 +105,63 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "mix precommit failed: 3 tests, 1 failure"
       refute html =~ "the agent stopped"
     end
+
+    test "the ref stays at the bottom left when a run face is present (RE321)" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "card-run",
+          ref: "RE321",
+          title: "CSV export of the board",
+          status: :working,
+          active_owner: :ai,
+          owners: [%{actor_type: :agent}],
+          run:
+            {:run,
+             %{
+               status: :running,
+               node_index: 2,
+               node_count: 4,
+               current_node: "implement",
+               flow_key: "code",
+               flow_version: 3,
+               attempts: 2
+             }}
+        )
+
+      assert html =~ ~s(id="card-RE321-run-face")
+      assert html |> meta_row_ref() |> LazyHTML.text() |> String.trim() == "RE321"
+    end
+
+    test "the ref stays at the bottom left on queued, parked, needs_input, in_review, and Done cards (RE321)" do
+      variants = [
+        %{status: :ready, run: {:queued, %{key: "code"}}},
+        %{
+          status: :needs_input,
+          question: "Full text?",
+          run: {:run, %{status: :parked, current_node: "brainstorm", flow_key: "spec", flow_version: 2, attempts: 1}}
+        },
+        %{status: :needs_input, question: "Which locales first?", active_owner: :ai, owners: [%{actor_type: :agent}]},
+        %{status: :in_review},
+        %{status: :ready, stage_type: :done, done: true, owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}]}
+      ]
+
+      for extra <- variants do
+        html =
+          render_component(
+            &CoreComponents.board_card/1,
+            Map.merge(%{id: "card-state", ref: "RE7", title: "Every state"}, extra)
+          )
+
+        assert html |> meta_row_ref() |> LazyHTML.text() |> String.trim() == "RE7",
+               "expected the ref first in the meta row for #{inspect(extra)}"
+      end
+    end
+
+    defp meta_row_ref(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("article.board-card > .card-meta:last-child > .card-ref:first-child")
+    end
   end
 
   describe "stage_column/1" do
