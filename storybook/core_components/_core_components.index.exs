@@ -6,6 +6,7 @@ defmodule Storybook.CoreComponents do
 
   def entry("avatar"), do: [icon: {:fa, "circle-user", :thin}]
   def entry("back"), do: [icon: {:fa, "circle-left", :thin}]
+  def entry("blocked_strip"), do: [icon: {:fa, "hourglass-half", :thin}]
   def entry("board_card"), do: [icon: {:fa, "note-sticky", :thin}]
   def entry("board_view_tabs"), do: [icon: {:fa, "table-columns", :thin}]
   def entry("button"), do: [icon: {:fa, "rectangle-ad", :thin}]

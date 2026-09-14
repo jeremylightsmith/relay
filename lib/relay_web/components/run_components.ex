@@ -463,23 +463,17 @@ defmodule RelayWeb.RunComponents do
 
   # ---------- run_state_banner ----------
 
-  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :parked]
+  # RE279: no :parked variant — a parked run's answer surface lives once, on the drawer's Detail
+  # tab, and the blocked strip above the tabs carries the blocked state.
+  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed]
   attr :detail, :map, default: nil
   attr :card, :any, default: nil
   attr :claimer, :string, default: nil
-
-  attr :park_kind, :atom,
-    default: :question,
-    values: [:question, :escalation],
-    doc:
-      "RE253: from `Relay.Runs.park_kind/1`. On :escalation the slot's panel supplies the label and sentence, so the banner omits its own to avoid a doubled heading."
 
   attr :advance_available?, :boolean,
     default: false,
     doc:
       "RE310: `Relay.Runs.advance_foreach_available?/1`, computed in the LiveView. The component must NEVER re-derive this rule — one rule, one place."
-
-  slot :inner_block
 
   def run_state_banner(%{variant: :reentry} = assigns) do
     rejection = assigns.card.rejection
@@ -597,42 +591,6 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
-  def run_state_banner(%{variant: :parked} = assigns) do
-    assigns = assign(assigns, :attempt, assigns.detail.parked_attempt)
-
-    ~H"""
-    <div class="run-banner run-banner-parked" style="display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
-        <span style="width:8px;height:8px;border-radius:50%;background:var(--color-warning);" />
-        baton →
-        <span style="font-weight:700;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
-          YOU
-        </span>
-      </div>
-      <div style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border-radius:8px;padding:14px 16px;">
-        <div :if={@park_kind == :question}>
-          <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));margin-bottom:2px;">
-            RELAY AI NEEDS YOUR INPUT
-          </div>
-          <div style="font-size:12px;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin-bottom:10px;">
-            · paused at {@detail.current_node} · attempt {@attempt}
-          </div>
-        </div>
-        {render_slot(@inner_block)}
-        <.advance_button available?={@advance_available?} />
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;">
-        <span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);font-size:9px;animation:relaypulse 1.6s ease-in-out infinite;">
-          ?
-        </span>
-        <span style="font-family:var(--font-mono);font-size:12px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
-          Parked {TimeAgo.ago(DateTime.utc_now(), @detail.started_at)}
-        </span>
-      </div>
-    </div>
-    """
-  end
-
   # RLY-189 — the minimal Retry control on a terminally failed run's banner.
   #
   # Deliberately not designed: RLY-178 owns the human surface for run failure and
@@ -655,19 +613,22 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
-  # RE310 — the human hatch out of the already-committed deadlock: check the bound foreach task
-  # off and continue with the next one. A secondary action beside the primary Retry (`btn-ghost`
-  # vs `btn-primary`), and it renders ONLY when `Relay.Runs.advance_foreach_available?/1` holds,
-  # so it is never a button that can only refuse.
-  #
-  # Deliberately not designed: `docs/designs/Relay Card Run Panel.dc.html` shows a retry
-  # affordance on a parked run and no "task already done" control, so there is nothing to match
-  # and this borrows `retry_button/1`'s shape instead. The three variants that render it
-  # (:circuit, :failed, :parked) are mutually exclusive on a page, so the shared `run-advance`
-  # DOM id is never duplicated.
+  @doc """
+  RE310 — the human hatch out of the already-committed deadlock: check the bound foreach task
+  off and continue with the next one. A secondary action beside the primary Retry (`btn-ghost`
+  vs `btn-primary`), and it renders ONLY when `Relay.Runs.advance_foreach_available?/1` holds,
+  so it is never a button that can only refuse.
+
+  Deliberately not designed: `docs/designs/Relay Card Run Panel.dc.html` shows a retry
+  affordance on a parked run and no "task already done" control, so there is nothing to match
+  and this borrows `retry_button/1`'s shape instead. The places that render it — the `:circuit`
+  and `:failed` banners, and (for a parked run, RE279) `CoreComponents.needs_input_panel/1` — are
+  mutually exclusive on a page, because both banners require a run that is not parked, so the
+  shared `run-advance` DOM id is never duplicated.
+  """
   attr :available?, :boolean, required: true
 
-  defp advance_button(assigns) do
+  def advance_button(assigns) do
     ~H"""
     <button
       :if={@available?}

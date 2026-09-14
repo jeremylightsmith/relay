@@ -77,7 +77,9 @@ defmodule RelayWeb.BoardLiveAdvanceRunTest do
     %{card: card} = stuck(ctx.board, ctx.flow)
     view = open(ctx.conn, ctx.board, card)
 
-    assert has_element?(view, "#run-advance")
+    # RE279 — relocated from the deleted Run tab parked banner into the Detail answer panel
+    assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel #needs-input-advance #run-advance")
+    refute has_element?(view, ".run-banner-parked")
     assert render(view) =~ "Task already done"
   end
 

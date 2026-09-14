@@ -2205,16 +2205,16 @@ defmodule RelayWeb.CoreComponents do
 
   def card_drawer(assigns) do
     latest = List.first(assigns.runs)
-    # The card-status guard clears the parked banner the moment an answer flips the
-    # baton, before the engine's own run row update lands.
+    # The card-status guard clears the blocked strip's run eyebrow and the panel's advance control
+    # the moment an answer flips the baton, before the engine's own run row update lands.
     parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
 
     # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
     # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
     # a park that is neither A1 nor A4 (e.g. an :executor_gone re-park of an already-blocked card).
-    # Both degrade to the question face, and that nil policy is applied ONCE here so all three call
-    # sites share it — passing nil down would fall outside the components' declared
-    # `values: [:question, :escalation]` and silently drop the banner's "paused at" line.
+    # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
+    # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
+    # fall outside needs_input_panel's declared `values: [:question, :escalation]`.
     park_kind = (parked_run && Relay.Runs.park_kind(parked_run)) || :question
 
     assigns =
@@ -2225,6 +2225,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
       |> assign(:park_kind, park_kind)
+      |> assign_blocked_state(parked_run, park_kind)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
@@ -2483,6 +2484,22 @@ defmodule RelayWeb.CoreComponents do
             </.link>
           </header>
 
+          <%!--
+            RE279 — the blocked state, hoisted out of the tabs: one amber strip on EVERY tab. It
+            uses the same predicate as the Detail needs_input_panel, so the two always appear and
+            disappear together, and the card-status guard clears it the moment an answer flips the
+            baton. Renders in `embed` too.
+          --%>
+          <.blocked_strip
+            :if={@card.status == :needs_input and !@archived}
+            eyebrow={@strip_eyebrow}
+            question={@strip_question}
+            loading?={@body_loading}
+            blocked_since={@card.blocked_since}
+            step={@answer_step + 1}
+            step_count={length(@answer_questions || [])}
+          />
+
           <nav
             id="card-drawer-tabs"
             phx-window-keydown="talk_shortcut"
@@ -2610,6 +2627,7 @@ defmodule RelayWeb.CoreComponents do
                   node={@latest_detail && @latest_detail.current_node}
                   attempt={@latest_detail && @latest_detail.parked_attempt}
                   failure_detail={@latest_detail && @latest_detail.last_failure_detail}
+                  advance_available?={@panel_advance_available?}
                 />
                 <section
                   :if={@card.status == :in_review and !@archived}
@@ -3193,28 +3211,6 @@ defmodule RelayWeb.CoreComponents do
                       detail={@latest_detail}
                       advance_available?={@advance_available?}
                     />
-                    <RunComponents.run_state_banner
-                      :if={@parked_run}
-                      variant={:parked}
-                      park_kind={@park_kind}
-                      detail={@latest_detail}
-                      advance_available?={@advance_available?}
-                    >
-                      <.needs_input_panel
-                        id_prefix="run-needs-input"
-                        card={@card}
-                        question={@question}
-                        answer_questions={@answer_questions}
-                        answer_step={@answer_step}
-                        answer_values={@answer_values}
-                        answer_form={@answer_form}
-                        body_loading={@body_loading}
-                        park_kind={@park_kind}
-                        node={@latest_detail.current_node}
-                        attempt={@latest_detail.parked_attempt}
-                        failure_detail={@latest_detail.last_failure_detail}
-                      />
-                    </RunComponents.run_state_banner>
                     <RunComponents.run_mini_graph
                       :if={@latest_detail.status == :running and @run_flow}
                       path={Relay.Runs.happy_path(@run_flow)}
@@ -3713,6 +3709,159 @@ defmodule RelayWeb.CoreComponents do
   defp unused_fields_label([_one], false), do: "1 unused field"
   defp unused_fields_label(fields, false), do: "#{length(fields)} unused fields"
 
+  attr :eyebrow, :string, required: true, doc: "RE279: what asked and exited — build it with `blocked_strip_eyebrow/3`"
+
+  attr :question, :string,
+    default: nil,
+    doc: "RE279: the question as ONE line of plain text (`Relay.Markdown.to_plain/1`); nil renders no line"
+
+  attr :loading?, :boolean,
+    default: false,
+    doc: "RE279: RLY-68 optimistic drawer — a one-line skeleton stands in for the question"
+
+  attr :blocked_since, :any,
+    default: nil,
+    doc: "RE279: `Card.blocked_since` (a DateTime); nil omits the wait value and its sub-label"
+
+  attr :step, :integer, default: 1, doc: "RE279: 1-based index of the question the stepper is on"
+
+  attr :step_count, :integer,
+    default: 1,
+    doc: "RE279: questions in the batch — the `N/M` counter renders only when this is > 1"
+
+  @doc """
+  RE279 — the blocked state hoisted out of the tabs: ONE amber strip under the card drawer's
+  header, above the tab bar, visible on every tab. An eyebrow naming what asked and exited, the
+  question on one ellipsis-truncated line, the wait time at 21px mono, and an **Answer** button.
+
+  Presentation only — no card or run reasoning lives here; `card_drawer/1` derives every attr
+  (`blocked_strip_eyebrow/3`, `Relay.Markdown.to_plain/1`). Matches the "persistent needs-you strip"
+  in `docs/designs/Relay Card Detail v5.dc.html` (lines ~88–102), with its literals mapped to the
+  daisyUI warning tokens so dark mode flips.
+
+  **Answer** pushes `answer_jump`. The LiveView selects the Detail tab and pushes `focus-answer`,
+  which the colocated `.BlockedStrip` hook turns into focus on the first answer control inside
+  `#needs-input-panel` — after the patch, so the panel is no longer hidden. A pure client
+  `JS.focus` chain cannot do this: the Detail panel is still hidden until the server re-renders.
+  """
+  def blocked_strip(assigns) do
+    ~H"""
+    <section
+      id="card-drawer-blocked-strip"
+      phx-hook=".BlockedStrip"
+      aria-label="Waiting on you"
+      class="flex flex-none items-center gap-[14px] px-5 py-3"
+      style="background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100));border-top:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));border-bottom:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));"
+    >
+      <span
+        id="card-drawer-blocked-strip-accent"
+        class="w-[3px] flex-none self-stretch rounded-[2px]"
+        style="background:var(--color-warning);"
+      >
+      </span>
+      <div id="card-drawer-blocked-strip-text" class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          id="card-drawer-blocked-strip-eyebrow"
+          class="font-mono text-[10px] font-semibold uppercase tracking-[0.6px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+        >
+          {@eyebrow}
+        </span>
+        <div
+          :if={@loading?}
+          id="card-drawer-blocked-strip-question-skeleton"
+          class="skeleton h-[19px] w-3/4 rounded"
+        >
+        </div>
+        <span
+          :if={!@loading? and @question != nil}
+          id="card-drawer-blocked-strip-question"
+          title={@question}
+          class="truncate text-[13.5px] font-semibold leading-[1.4]"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          {@question}
+        </span>
+      </div>
+      <div
+        :if={@blocked_since != nil or @step_count > 1}
+        id="card-drawer-blocked-strip-meta"
+        class="flex flex-none flex-col items-end"
+      >
+        <div class="flex items-baseline gap-2">
+          <span
+            :if={@step_count > 1}
+            id="card-drawer-blocked-strip-counter"
+            class="font-mono text-[11px] font-semibold tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {@step}/{@step_count}
+          </span>
+          <span
+            :if={@blocked_since != nil}
+            id="card-drawer-blocked-strip-wait"
+            class="font-mono text-[21px] font-semibold leading-none tracking-[-0.02em] tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {wait_duration(@blocked_since)}
+          </span>
+        </div>
+        <span
+          :if={@blocked_since != nil}
+          id="card-drawer-blocked-strip-wait-label"
+          class="mt-0.5 font-mono text-[9.5px] font-semibold tracking-[0.5px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));opacity:0.8;"
+        >
+          waiting on you
+        </span>
+      </div>
+      <button
+        type="button"
+        id="card-drawer-blocked-answer"
+        phx-click="answer_jump"
+        class="h-[30px] flex-none whitespace-nowrap rounded-[7px] border-none px-[13px] text-[12px] font-semibold text-warning-content"
+        style="background:var(--color-warning);"
+      >
+        Answer
+      </button>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".BlockedStrip">
+        export default {
+          mounted() {
+            this.handleEvent("focus-answer", () => {
+              requestAnimationFrame(() => {
+                const panel = document.getElementById("needs-input-panel")
+                const target = panel && panel.querySelector("button:not([disabled]), textarea")
+                if (!target) return
+                target.focus({preventScroll: true})
+                target.scrollIntoView({block: "nearest"})
+              })
+            })
+          }
+        }
+      </script>
+    </section>
+    """
+  end
+
+  @doc """
+  RE279 — the blocked strip's eyebrow, and the ONE place its wording is decided.
+
+  `parked?` is whether the card has a parked run. `park_kind` is the drawer's already-classified
+  kind (`Relay.Runs.park_kind/1`, with its nil → `:question` policy applied once in `card_drawer/1`)
+  — never classify again here. `node` is the run's current node key, upcased as-is. With no parked
+  run, or no node key (e.g. a human set the block by hand), the eyebrow is `NEEDS YOUR ANSWER`.
+
+  Public only so its three rows are unit-testable without a database.
+  """
+  @spec blocked_strip_eyebrow(boolean(), :question | :escalation, String.t() | nil) :: String.t()
+  def blocked_strip_eyebrow(true, :question, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} ASKED AND EXITED"
+
+  def blocked_strip_eyebrow(true, :escalation, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} FAILED — YOUR CALL"
+
+  def blocked_strip_eyebrow(_parked?, _park_kind, _node), do: "NEEDS YOUR ANSWER"
+
   attr :card, :any, required: true
   attr :question, :string, default: nil
   attr :answer_questions, :list, default: nil
@@ -3720,10 +3869,6 @@ defmodule RelayWeb.CoreComponents do
   attr :answer_values, :map, default: %{}
   attr :answer_form, :any, default: nil
   attr :body_loading, :boolean, default: false
-
-  attr :id_prefix, :string,
-    default: "needs-input",
-    doc: "RE253: namespace for every DOM id, so the drawer can render the panel on two tabs at once"
 
   attr :park_kind, :atom,
     default: :question,
@@ -3733,6 +3878,11 @@ defmodule RelayWeb.CoreComponents do
   attr :node, :string, default: nil, doc: "RE253: the failed node's key, for the :escalation sentence"
   attr :attempt, :integer, default: nil, doc: "RE253: attempts spent on that node"
   attr :failure_detail, :string, default: nil, doc: "RE253: the failed execution's detail text"
+
+  attr :advance_available?, :boolean,
+    default: false,
+    doc:
+      "RE279/RE310: render the foreach advance control — true only for a parked run whose `Relay.Runs.advance_foreach_available?/1` holds; card_drawer/1 combines the two, this component never re-derives the rule"
 
   @doc """
   The needs-input answer panel (RLY-71/RLY-109/RE253): structured stepper when questions exist,
@@ -3756,8 +3906,11 @@ defmodule RelayWeb.CoreComponents do
   unblocks the card, the Listener resumes the run in the same visit with the human's note as
   `findings` and the agent's Claude session restored.
 
-  Every DOM id is `\#{id_prefix}-…`, which is what makes it legal to render this panel twice — the
-  drawer puts one copy on the Detail tab and one inside the Run tab's parked banner.
+  Renders exactly once, on the drawer's Detail tab (RE279): the Run tab's parked banner that held a
+  second copy is gone, and the blocked state itself — what asked, the one-line question, the wait
+  time — is hoisted into `blocked_strip/1` above the tabs. That strip's **Answer** focuses the first
+  enabled button or textarea in `#needs-input-panel`, so the RE310 advance control stays last in DOM
+  order.
   """
   def needs_input_panel(assigns) do
     assigns =
@@ -3769,10 +3922,12 @@ defmodule RelayWeb.CoreComponents do
 
     ~H"""
     <section
-      id={"#{@id_prefix}-panel"}
+      id="needs-input-panel"
       class="flex flex-col gap-4 rounded-[10px] p-5"
       style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
     >
+      <%!-- RE279: no wait readout here — the blocked strip above the tabs is the one place the wait
+      time shows. --%>
       <div class="flex items-center justify-between">
         <span
           class="font-mono text-[10px] font-semibold tracking-[0.05em]"
@@ -3780,20 +3935,12 @@ defmodule RelayWeb.CoreComponents do
         >
           {panel_label(@park_kind)}
         </span>
-        <span
-          :if={@card.blocked_since}
-          id={"#{@id_prefix}-waiting"}
-          class="font-mono text-[10px]"
-          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
-        >
-          {waiting_label(@card.blocked_since)}
-        </span>
       </div>
       <%!-- RE253 (A4): the flow escalated a node failure to a human. Say which node, how many
       attempts, and show the output — the old :stopped banner had this text and showed none of it. --%>
       <div
         :if={@park_kind == :escalation}
-        id={"#{@id_prefix}-escalation"}
+        id="needs-input-escalation"
         class="flex flex-col gap-3"
       >
         <p
@@ -3805,22 +3952,22 @@ defmodule RelayWeb.CoreComponents do
         </p>
         <pre
           :if={@failure_detail}
-          id={"#{@id_prefix}-failure-detail"}
+          id="needs-input-failure-detail"
           style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
         ><%= @failure_detail %></pre>
       </div>
       <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
       branch — a plain-string block writes no meta["questions"], so answer_questions is nil. --%>
-      <div :if={@answer_questions} id={"#{@id_prefix}-stepper"} class="flex flex-col gap-4">
+      <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
         <div
-          id={"#{@id_prefix}-progress"}
+          id="needs-input-progress"
           class="font-mono text-[10px]"
           style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
         >
           Question {@answer_step + 1} of {length(@answer_questions)}
         </div>
         <div
-          id={"#{@id_prefix}-question"}
+          id="needs-input-question"
           class="needs-input-question md text-[13.5px] leading-normal break-words"
           style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
         >
@@ -3834,7 +3981,7 @@ defmodule RelayWeb.CoreComponents do
           <button
             :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
             type="button"
-            id={"#{@id_prefix}-option-#{index}"}
+            id={"needs-input-option-#{index}"}
             phx-click="answer_select"
             phx-value-index={@answer_step}
             phx-value-option={option}
@@ -3863,12 +4010,12 @@ defmodule RelayWeb.CoreComponents do
         </div>
         <form
           :if={@stepper_question["allow_text"]}
-          id={"#{@id_prefix}-text-form"}
+          id="needs-input-text-form"
           phx-change="answer_custom"
         >
           <input type="hidden" name="answer[index]" value={@answer_step} />
           <textarea
-            id={"#{@id_prefix}-text"}
+            id="needs-input-text"
             name="answer[text]"
             rows="3"
             autocomplete="off"
@@ -3889,7 +4036,7 @@ defmodule RelayWeb.CoreComponents do
         <div class="flex items-center justify-between">
           <button
             :if={@answer_step > 0}
-            id={"#{@id_prefix}-back"}
+            id="needs-input-back"
             type="button"
             phx-click="answer_back"
             class="btn btn-sm btn-ghost rounded-[7px]"
@@ -3899,7 +4046,7 @@ defmodule RelayWeb.CoreComponents do
           <span :if={@answer_step == 0}></span>
           <button
             :if={@answer_step < length(@answer_questions) - 1}
-            id={"#{@id_prefix}-next"}
+            id="needs-input-next"
             type="button"
             phx-click="answer_next"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
@@ -3910,7 +4057,7 @@ defmodule RelayWeb.CoreComponents do
           </button>
           <button
             :if={@answer_step == length(@answer_questions) - 1}
-            id={"#{@id_prefix}-send"}
+            id="needs-input-send"
             type="button"
             phx-click="answer_submit"
             disabled={not Map.has_key?(@answer_values, @answer_step)}
@@ -3925,13 +4072,13 @@ defmodule RelayWeb.CoreComponents do
       <div :if={is_nil(@answer_questions)}>
         <div
           :if={@body_loading}
-          id={"#{@id_prefix}-question-skeleton"}
+          id="needs-input-question-skeleton"
           class="skeleton h-5 w-3/4 rounded"
         >
         </div>
         <div
           :if={!@body_loading && @question && !(@park_kind == :escalation && @failure_detail)}
-          id={"#{@id_prefix}-question"}
+          id="needs-input-question"
           class="needs-input-question md text-[13.5px] leading-normal"
           style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
         >
@@ -3939,13 +4086,13 @@ defmodule RelayWeb.CoreComponents do
         </div>
         <.form
           for={@answer_form}
-          id={"#{@id_prefix}-form"}
+          id="needs-input-form"
           class="flex flex-col items-start gap-[11px]"
           phx-submit="answer_input"
         >
           <div class="w-full">
             <.boxed_field
-              id={"#{@id_prefix}-answer"}
+              id="needs-input-answer"
               commit={:form}
               multiline
               rows="3"
@@ -3958,7 +4105,7 @@ defmodule RelayWeb.CoreComponents do
           </div>
           <div class="flex items-center gap-2">
             <button
-              id={"#{@id_prefix}-send"}
+              id="needs-input-send"
               type="submit"
               class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
               style="background:var(--color-warning);"
@@ -3969,7 +4116,7 @@ defmodule RelayWeb.CoreComponents do
             +1 retry-budget bonus, where an answer resumes the session with the note as findings. --%>
             <button
               :if={@park_kind == :escalation}
-              id={"#{@id_prefix}-retry"}
+              id="needs-input-retry"
               type="button"
               phx-click="retry_run"
               class="btn btn-sm rounded-[7px] font-semibold"
@@ -3979,6 +4126,11 @@ defmodule RelayWeb.CoreComponents do
             </button>
           </div>
         </.form>
+      </div>
+      <%!-- RE279/RE310 — relocated from the Run tab's deleted parked banner. Last in DOM order so the
+      blocked strip's Answer focuses an answer control, never this. --%>
+      <div :if={@advance_available?} id="needs-input-advance">
+        <RunComponents.advance_button available?={@advance_available?} />
       </div>
     </section>
     """
@@ -3993,6 +4145,36 @@ defmodule RelayWeb.CoreComponents do
 
   defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
   defp attempt_label(_n), do: "1 attempt"
+
+  # RE279 — what the blocked strip and the Detail answer panel show, worked out ONCE from assigns
+  # the drawer already has. `park_kind` arrives with its nil → :question policy already applied
+  # (see card_drawer/1), and `parked_run` is nil/false or the parked run itself.
+  defp assign_blocked_state(assigns, parked_run, park_kind) do
+    parked? = parked_run not in [nil, false]
+    node = assigns.latest_detail && assigns.latest_detail.current_node
+
+    assigns
+    |> assign(:strip_eyebrow, blocked_strip_eyebrow(parked?, park_kind, node))
+    |> assign(:strip_question, strip_question(assigns))
+    # RE310's advance control used to sit only in the Run tab's parked banner; it now renders in
+    # the Detail panel, still only for a parked run. The rule itself stays in the LiveView.
+    |> assign(:panel_advance_available?, parked? and assigns.advance_available?)
+  end
+
+  # RE279 — the strip's one-line question follows the stepper: the prompt of the step the human is
+  # on for a structured batch, else the plain question.
+  defp strip_question(%{answer_questions: [_ | _] = questions, answer_step: step}),
+    do: questions |> Enum.at(step, %{}) |> Map.get("prompt") |> plain_line()
+
+  defp strip_question(%{question: question}), do: plain_line(question)
+
+  # Blank flattens to nil, so the strip renders no empty question line.
+  defp plain_line(markdown) do
+    case Relay.Markdown.to_plain(markdown) do
+      "" -> nil
+      plain -> plain
+    end
+  end
 
   # ---------- RLY-137: Run tab helpers ----------
 
@@ -4181,15 +4363,15 @@ defmodule RelayWeb.CoreComponents do
 
   defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
 
-  # The panel's aging hint ("waiting 3h"), derived from Card.blocked_since —
-  # the mockup's small amber mono text beside the panel label.
-  defp waiting_label(%DateTime{} = blocked_since) do
+  # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
+  # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
+  defp wait_duration(%DateTime{} = blocked_since) do
     minutes = max(DateTime.diff(DateTime.utc_now(), blocked_since, :minute), 0)
 
     cond do
-      minutes < 60 -> "waiting #{minutes}m"
-      minutes < 1440 -> "waiting #{div(minutes, 60)}h"
-      true -> "waiting #{div(minutes, 1440)}d"
+      minutes < 60 -> "#{minutes}m"
+      minutes < 1440 -> "#{div(minutes, 60)}h"
+      true -> "#{div(minutes, 1440)}d"
     end
   end
 

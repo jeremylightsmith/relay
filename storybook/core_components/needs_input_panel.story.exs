@@ -23,7 +23,6 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
       %Variation{
         id: :question,
         attributes: %{
-          id_prefix: "sb-question",
           card: card(),
           question: "Should board search cover card bodies and comments, or just titles?",
           answer_form: answer_form()
@@ -32,7 +31,6 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
       %Variation{
         id: :question_stepper,
         attributes: %{
-          id_prefix: "sb-stepper",
           card: card(),
           answer_form: answer_form(),
           answer_step: 0,
@@ -51,7 +49,6 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
       %Variation{
         id: :escalation,
         attributes: %{
-          id_prefix: "sb-escalation",
           card: card(),
           park_kind: :escalation,
           node: "implement",
@@ -66,13 +63,26 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
       %Variation{
         id: :escalation_without_failure_detail,
         attributes: %{
-          id_prefix: "sb-escalation-partial",
           card: card(),
           park_kind: :escalation,
           node: "implement",
           attempt: 1,
           question: "implement reported `partial`: 2 of 5 plan tasks were left unimplemented.",
           answer_form: answer_form()
+        }
+      },
+      # RE279/RE310 — a parked run whose bound foreach task is already committed: the advance
+      # control now sits at the foot of this panel, after the answer controls.
+      %Variation{
+        id: :escalation_with_advance,
+        attributes: %{
+          card: card(),
+          park_kind: :escalation,
+          node: "implement",
+          attempt: 2,
+          failure_detail: "already committed: nothing to do for task 3",
+          answer_form: answer_form(),
+          advance_available?: true
         }
       }
     ]

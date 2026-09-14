@@ -153,7 +153,7 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     assert has_element?(view, "#card-drawer-tab-panel-run", "QUEUED")
   end
 
-  test "a parked run hosts the stepper in the Run tab and answering clears it", ctx do
+  test "a parked run's Run tab carries no answer surface; the stepper lives on Detail (RE279)", ctx do
     card = ai_card(ctx.code, "Parked one")
 
     {:ok, card} =
@@ -170,13 +170,14 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     view = open(ctx.conn, ctx.board, ref)
 
     refute has_element?(view, "#card-drawer-tab-panel-run.hidden")
-    assert has_element?(view, "#card-drawer-tab-panel-run #run-needs-input-stepper")
-    # RE253 — both tabs render the panel now (namespaced by id_prefix), so a parked run
-    # no longer suppresses the Detail tab's copy.
-    assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel")
+    assert has_element?(view, "#card-drawer-tab-panel-run", "Parked — waiting on your answer")
+    refute has_element?(view, ".run-banner-parked")
+    refute has_element?(view, "#run-needs-input-panel")
+    refute has_element?(view, "#card-drawer-tab-panel-run #needs-input-panel")
+    assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-stepper")
 
-    view |> element("#run-needs-input-option-0") |> render_click()
-    view |> element("#run-needs-input-send") |> render_click()
+    view |> element("#needs-input-option-0") |> render_click()
+    view |> element("#needs-input-send") |> render_click()
 
     card = Relay.Repo.reload!(card)
     assert card.status == :working

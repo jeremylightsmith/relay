@@ -2454,6 +2454,17 @@ defmodule RelayWeb.BoardLive do
     {:noreply, select_drawer_tab(socket, String.to_existing_atom(tab))}
   end
 
+  # RE279 — the blocked strip's Answer: select Detail through the ordinary tab path (so leaving
+  # Talk still unsubscribes), then ask the strip's `.BlockedStrip` hook to focus the first answer
+  # control. The focus has to happen after this patch: until the server re-renders, the Detail
+  # panel is still `hidden` and cannot take focus. Already on Detail, the tab change is a no-op and
+  # this only refocuses.
+  def handle_event("answer_jump", _params, %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket) do
+    {:noreply, socket |> select_drawer_tab(:detail) |> push_event("focus-answer", %{})}
+  end
+
+  def handle_event("answer_jump", _params, socket), do: {:noreply, socket}
+
   # RE268/RE306 — the `t` shortcut (guarded against typing by TypingKeyGuard on the tabs nav).
   # Params are deliberately ignored. LiveView has already filtered on `phx-key` before it pushes,
   # and it matches case-INSENSITIVELY, so a second key check here buys nothing and made Shift+T
