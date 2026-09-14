@@ -157,6 +157,50 @@ defmodule RelayWeb.CoreComponentsTest do
       end
     end
 
+    test "the busiest meta row wraps inside the card and never truncates the ref (RE321)" do
+      html =
+        render_component(&CoreComponents.board_card/1,
+          id: "card-busy",
+          ref: "RE321",
+          title: "Every meta-row item at once",
+          tag: "a-very-long-free-text-tag-name",
+          status: :ready,
+          category: :unstarted,
+          vote_count: 12,
+          blocked_count: 3,
+          active_owner: :ai,
+          owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      style = fn selector -> doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style") end
+
+      [meta] = style.("article.board-card > .card-meta:last-child")
+      assert meta =~ "display:flex"
+      assert meta =~ "flex-wrap:wrap"
+      assert meta =~ "gap:6px 7px"
+
+      [ref] = style.(".card-meta > .card-ref:first-child")
+      assert ref =~ "flex:0 0 auto"
+      assert ref =~ "white-space:nowrap"
+      refute ref =~ "overflow:hidden"
+      refute ref =~ "text-overflow"
+
+      [tag] = style.(".card-meta > .card-tag")
+      assert tag =~ "min-width:0"
+      assert tag =~ "max-width:100%"
+      assert tag =~ "overflow:hidden"
+      assert tag =~ "text-overflow:ellipsis"
+      assert tag =~ "white-space:nowrap"
+
+      [chip] = style.(".card-meta > .card-blocked-chip")
+      assert chip =~ "white-space:nowrap"
+      assert chip =~ "flex:0 0 auto"
+
+      assert doc |> LazyHTML.query(".card-meta > .card-votes") |> Enum.count() == 1
+      assert doc |> LazyHTML.query(".card-meta > .card-owners") |> Enum.count() == 1
+    end
+
     defp meta_row_ref(html) do
       html
       |> LazyHTML.from_fragment()

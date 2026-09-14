@@ -1349,7 +1349,8 @@ defmodule RelayWeb.CoreComponents do
       >
         {@question}
       </p>
-      <div class="card-meta" style="display:flex;align-items:center;gap:7px;">
+      <%!-- RE321: the ref leads the meta row and never shrinks. On the busiest cards, trailing items wrap inside the card instead of pushing the avatars out. --%>
+      <div class="card-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;">
         <span
           class="card-ref"
           style="font-size:10.5px;font-weight:500;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);flex:0 0 auto;white-space:nowrap;"
@@ -1381,14 +1382,14 @@ defmodule RelayWeb.CoreComponents do
         <span
           :if={@tag && @status != :working}
           class="card-tag"
-          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
         >
           #{@tag}
         </span>
         <span
           :if={@blocked_count > 0}
           class="card-blocked-chip badge badge-ghost badge-sm gap-1 font-medium"
-          style="font-size:10px;"
+          style="font-size:10px;white-space:nowrap;flex:0 0 auto;"
         >
           <.icon name="hero-lock-closed" class="size-3" />
           Blocked by {@blocked_count} {if @blocked_count == 1, do: "card", else: "cards"}
