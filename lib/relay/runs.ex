@@ -1154,7 +1154,7 @@ defmodule Relay.Runs do
   interval, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
   STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
-  `"capacity"` / `"capabilities"`).
+  `"capacity"` / `"capabilities"` / `"held"` / `"rate_limit"`).
 
   **Optional fields are absent-means-untouched.** `capabilities` rides send-on-change
   (RLY-182) and `capacity` now rides the HEARTBEAT ONLY (RE311) — the claim's `capacity` is a
@@ -1178,6 +1178,7 @@ defmodule Relay.Runs do
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, normalize_held_attr(attrs["held"]))
+      |> put_rate_limit(attrs)
 
     %Runner{}
     |> Runner.changeset(params)
@@ -1192,6 +1193,17 @@ defmodule Relay.Runs do
   # column untouched. The one place that discipline is expressed, for every optional field.
   defp put_reported({params, replace}, _field, nil), do: {params, replace}
   defp put_reported({params, replace}, field, value), do: {Map.put(params, field, value), [field | replace]}
+
+  # RE320: unlike the optional fields above, `rate_limit` has a meaningful nil — "not paused" — so
+  # the presence of the KEY decides whether the column is written. Only the heartbeat puts the
+  # key (already normalized by `Schemas.Runner.normalize_rate_limit/1`); a claim never does, so a
+  # claim cannot un-pause a runner's roster row.
+  defp put_rate_limit({params, replace}, attrs) do
+    case Map.fetch(attrs, "rate_limit") do
+      {:ok, rate_limit} -> {Map.put(params, :rate_limit, rate_limit), [:rate_limit | replace]}
+      :error -> {params, replace}
+    end
+  end
 
   defp normalize_interval(i) when is_integer(i) and i > 0, do: i
   defp normalize_interval(_i), do: 30

@@ -254,6 +254,19 @@ defmodule Relay.Factory do
     runner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # RE320: a runner's Claude usage pause, one hour out —
+  # `insert(:runner, rate_limit: build(:runner_rate_limit))`. Override `resets_at` to exercise
+  # an expired pause.
+  def runner_rate_limit_factory do
+    %Schemas.RunnerRateLimit{
+      window: "five_hour",
+      utilization: 0.95,
+      max: 0.9,
+      reason: "limit",
+      resets_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(3600, :second)
+    }
+  end
+
   # Full-control factory: `node_execution` (when overridden) must be persisted — the job's
   # `run_id` and `node_key` are derived from it so job, execution and run always agree.
   def node_job_factory(attrs) do

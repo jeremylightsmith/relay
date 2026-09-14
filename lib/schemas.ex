@@ -20,6 +20,7 @@ defmodule Schemas do
       Comment,
       DeviceToken,
       Runner,
+      RunnerRateLimit,
       Flow,
       Flow.Edge,
       Flow.Node,

@@ -756,5 +756,67 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert %{"revoked" => []} = json_response(conn, 200)
       assert Relay.Repo.get!(Schemas.Card, run.card_id).agent_heartbeat_at == nil
     end
+
+    @rate_limit_wire %{
+      "window" => "five_hour",
+      "utilization" => 0.95,
+      "max" => 0.9,
+      "resets_at" => 4_102_444_800,
+      "reason" => "limit"
+    }
+
+    defp beat_rate_limit(conn, name, extra) do
+      post(
+        conn,
+        ~p"/api/node-jobs/heartbeat",
+        Map.merge(%{"runner" => %{"name" => name}, "capacity" => %{"shared_clean" => 1}, "running" => []}, extra)
+      )
+    end
+
+    test "RE320: stores the beat's rate_limit, and a null rate_limit clears it", %{conn: conn, board: board} do
+      assert %{"revoked" => []} =
+               conn |> beat_rate_limit("exec-rl", %{"rate_limit" => @rate_limit_wire}) |> json_response(200)
+
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl")
+
+      assert %Schemas.RunnerRateLimit{
+               window: "five_hour",
+               utilization: 0.95,
+               max: 0.9,
+               reason: "limit",
+               resets_at: ~U[2100-01-01 00:00:00Z]
+             } = runner.rate_limit
+
+      conn |> beat_rate_limit("exec-rl", %{"rate_limit" => nil}) |> json_response(200)
+
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl").rate_limit == nil
+    end
+
+    test "RE320: a beat from an older runner (no rate_limit key) stores nil", %{conn: conn, board: board} do
+      conn |> beat_rate_limit("exec-old", %{}) |> json_response(200)
+
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-old").rate_limit == nil
+    end
+
+    test "RE320: a claim never touches the stored rate_limit", %{conn: conn, board: board} do
+      conn |> beat_rate_limit("exec-rl", %{"rate_limit" => @rate_limit_wire}) |> json_response(200)
+
+      {:ok, _runner} = Runs.upsert_runner(board, %{"name" => "exec-rl", "capacity" => %{"shared_clean" => 1}})
+
+      assert %Schemas.RunnerRateLimit{} =
+               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl").rate_limit
+    end
+
+    test "RE320: an unrecognised rate_limit degrades to nil and is logged, never a 4xx/500", %{conn: conn, board: board} do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn
+          |> beat_rate_limit("exec-junk-rl", %{"rate_limit" => %{@rate_limit_wire | "window" => "one_hour"}})
+          |> json_response(200)
+        end)
+
+      assert log =~ "rate_limit"
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-junk-rl").rate_limit == nil
+    end
   end
 end

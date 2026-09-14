@@ -25,6 +25,8 @@ defmodule Schemas.Runner do
 
   import Ecto.Changeset
 
+  alias Schemas.RunnerRateLimit
+
   @type t :: %__MODULE__{}
 
   schema "runners" do
@@ -42,6 +44,11 @@ defmodule Schemas.Runner do
     field :held, {:array, :map}, default: []
     field :version, :integer
     field :last_heartbeat, :utc_datetime
+
+    # RE320: nil = claiming normally (or a runner predating RE320). Heartbeat-written only; a
+    # value whose `resets_at` has passed is treated as not paused by
+    # `Relay.Runs.runner_rate_limited?/2` before the next beat clears it.
+    embeds_one :rate_limit, RunnerRateLimit, on_replace: :delete
 
     belongs_to :board, Schemas.Board
 
@@ -62,10 +69,17 @@ defmodule Schemas.Runner do
       :version,
       :last_heartbeat
     ])
+    |> put_rate_limit(attrs)
     |> validate_required([:board_id, :name, :last_heartbeat])
     |> foreign_key_constraint(:board_id)
     |> unique_constraint([:board_id, :name], name: :runners_board_id_name_index)
   end
+
+  # RE320: an embed cannot go through `cast/3`, and it is never user input —
+  # `Relay.Runs.upsert_runner/2` passes an already-normalized `%Schemas.RunnerRateLimit{}` or nil.
+  # An absent key leaves the embed untouched.
+  defp put_rate_limit(changeset, %{rate_limit: rate_limit}), do: put_embed(changeset, :rate_limit, rate_limit)
+  defp put_rate_limit(changeset, _attrs), do: changeset
 
   # RE311 — the closed set of per-card worktree states a runner can declare it HOLDS,
   # defined exactly once on this side and mirrored in `./relay`'s HOLDING_STATES, which the
@@ -131,4 +145,53 @@ defmodule Schemas.Runner do
   end
 
   def active_held_refs(_held), do: []
+
+  # RE320 — the closed sets on a runner's self-reported usage pause, defined once here and
+  # mirrored in `./relay`'s RATE_LIMIT_WINDOWS / RATE_LIMIT_REASONS, which the runner contract
+  # fixture (`vocabulary.rate_limit_windows` / `vocabulary.rate_limit_reasons`) pins to these
+  # functions. Strings for the same reason as `@holding_states`: wire-only values.
+  @rate_limit_windows ["five_hour", "seven_day"]
+  @rate_limit_reason_limit "limit"
+  @rate_limit_reason_rejected "rejected"
+  @rate_limit_reasons [@rate_limit_reason_limit, @rate_limit_reason_rejected]
+
+  @doc "The Claude usage windows a runner can pause on."
+  def rate_limit_windows, do: @rate_limit_windows
+
+  @doc """
+  Why a runner paused: `limit` (a window reached its configured max) or `rejected` (Claude
+  refused a call outright, which pauses a runner even with no limit configured).
+  """
+  def rate_limit_reasons, do: @rate_limit_reasons
+
+  @doc "Whether a rate limit came from Claude refusing a call rather than a configured limit."
+  def rejected_rate_limit?(%{reason: reason}), do: reason == @rate_limit_reason_rejected
+
+  @doc """
+  The one normalizer for the heartbeat's `rate_limit` wire field:
+  `%{"window", "utilization", "max", "resets_at" (unix seconds), "reason"}` →
+  `%Schemas.RunnerRateLimit{}`, or `nil` for anything it does not recognise (including a
+  JSON null).
+
+  Total by construction, like `normalize_held/1`: the heartbeat is the runner's liveness path,
+  so an unknown window or reason from a newer runner degrades to "not paused" rather than 500ing.
+  """
+  def normalize_rate_limit(%{"window" => window, "reason" => reason, "resets_at" => resets_at} = wire) do
+    with true <- window in @rate_limit_windows,
+         true <- reason in @rate_limit_reasons,
+         true <- is_integer(resets_at) and resets_at > 0,
+         {:ok, at} <- DateTime.from_unix(resets_at),
+         {:ok, utilization} <- fraction(Map.get(wire, "utilization")),
+         {:ok, max} <- fraction(Map.get(wire, "max")) do
+      %RunnerRateLimit{window: window, utilization: utilization, max: max, resets_at: at, reason: reason}
+    else
+      _invalid -> nil
+    end
+  end
+
+  def normalize_rate_limit(_wire), do: nil
+
+  defp fraction(nil), do: {:ok, nil}
+  defp fraction(value) when is_number(value) and value >= 0, do: {:ok, value / 1}
+  defp fraction(_value), do: :error
 end

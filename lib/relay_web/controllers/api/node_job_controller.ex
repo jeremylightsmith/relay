@@ -12,6 +12,8 @@ defmodule RelayWeb.Api.NodeJobController do
   alias Relay.Talk
   alias Schemas.Runner
 
+  require Logger
+
   action_fallback RelayWeb.Api.FallbackController
 
   # ~25s sits safely under Fly's proxy idle timeout.
@@ -191,11 +193,28 @@ defmodule RelayWeb.Api.NodeJobController do
     end
   end
 
-  # The heartbeat is the ONE writer of the durable roster state (RE311).
+  # The heartbeat is the ONE writer of the durable roster state (RE311). RE320: `rate_limit` is
+  # always put — a JSON null (or a pre-RE320 runner that never sends the key) CLEARS the pause.
   defp heartbeat_attrs(params, exec_attrs) do
     exec_attrs
     |> Map.put("capacity", Map.get(params, "capacity"))
     |> Map.put("held", Map.get(params, "held"))
+    |> Map.put("rate_limit", rate_limit_attr(Map.get(params, "rate_limit")))
+  end
+
+  # A value the schema cannot normalize is dropped to nil and logged rather than refusing the
+  # beat — the heartbeat is the runner's liveness path.
+  defp rate_limit_attr(nil), do: nil
+
+  defp rate_limit_attr(wire) do
+    case Runner.normalize_rate_limit(wire) do
+      nil ->
+        Logger.warning("heartbeat: dropping unrecognised runner rate_limit #{inspect(wire)}")
+        nil
+
+      rate_limit ->
+        rate_limit
+    end
   end
 
   # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
