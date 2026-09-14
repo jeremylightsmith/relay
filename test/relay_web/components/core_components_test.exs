@@ -1513,6 +1513,155 @@ defmodule RelayWeb.CoreComponentsTest do
         refute class =~ "hover:"
       end
     end
+
+    defp unused_toggle_text(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-unused-toggle")
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp present?(html, selector) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.to_list() != []
+    end
+
+    test "RE282: both public fields empty collapse behind a dashed `2 unused fields` row" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: nil})
+        )
+
+      assert unused_toggle_text(html) == "2 unused fields"
+      refute present?(html, "#card-drawer-public-support")
+      refute present?(html, "#card-drawer-public-description")
+      refute present?(html, "#card-drawer-unused-public-support")
+      refute present?(html, "#add-public-desc")
+      refute "Public support" in rail_labels(html)
+
+      # Artboard: mono 11px/600, muted ink, 1px dashed border, 7px radius, 7px/9px padding, left-aligned,
+      # full rail width — plus a real hover (change 23).
+      class =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-unused-toggle")
+        |> LazyHTML.attribute("class")
+        |> List.first()
+
+      for token <-
+            ~w(w-full border border-dashed border-base-300 rounded-[7px] px-[9px] py-[7px] text-left font-mono text-[11px] font-semibold text-base-content/55 hover:bg-base-200) do
+        assert class =~ token
+      end
+    end
+
+    test "RE282: expanded, the unused fields show their hints and the toggle reads Hide unused fields" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: nil, unused_fields_open: true})
+        )
+
+      assert unused_toggle_text(html) == "Hide unused fields"
+
+      doc = LazyHTML.from_fragment(html)
+      support = LazyHTML.query(doc, "#card-drawer-unused-public-support")
+      description = LazyHTML.query(doc, "#card-drawer-unused-public-description")
+
+      assert LazyHTML.text(support) =~ "Public support"
+      assert LazyHTML.text(support) =~ "no supporters yet"
+      assert LazyHTML.text(description) =~ "Public description"
+      assert LazyHTML.text(description) =~ "not written"
+
+      add = LazyHTML.query(doc, "#card-drawer-unused-public-description #add-public-desc")
+      assert LazyHTML.text(add) =~ "+ Add a public description"
+      assert add |> LazyHTML.attribute("class") |> List.first() =~ "hover:bg-base-200"
+
+      # the expanded fields sit ABOVE the button (artboard order)
+      {support_at, _} = :binary.match(html, "card-drawer-unused-public-support")
+      {toggle_at, _} = :binary.match(html, "card-drawer-unused-toggle")
+      assert support_at < toggle_at
+    end
+
+    test "RE282: a written description renders as a normal section and the count drops to 1" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 0, public_description: "Ship the mobile app"})
+        )
+
+      assert unused_toggle_text(html) == "1 unused field"
+      assert List.last(rail_labels(html)) == "Public description"
+
+      section =
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-public-description")
+
+      assert LazyHTML.text(section) =~ "Ship the mobile app"
+      refute present?(html, "#card-drawer-unused-public-description")
+    end
+
+    test "RE282: both public fields filled render in place with no unused row" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{vote_count: 2, supporters: [], public_description: "Ship it"})
+        )
+
+      refute present?(html, "#card-drawer-unused-fields")
+      refute present?(html, "#card-drawer-unused-toggle")
+      assert Enum.take(rail_labels(html), -2) == ["Public support", "Public description"]
+    end
+
+    test "RE282: an open description editor stays visible outside the collapsed group" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{
+            vote_count: 0,
+            public_description: nil,
+            editing_public_desc: true,
+            public_desc_form: to_form(%{"public_description" => ""})
+          })
+        )
+
+      assert present?(html, "#card-drawer-public-description #public-desc-form")
+      assert unused_toggle_text(html) == "1 unused field"
+    end
+
+    test "RE282: the public fields use section_label and carry no inline styles" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{
+            vote_count: 1,
+            supporters: [],
+            public_description: nil,
+            editing_public_desc: true,
+            public_desc_form: to_form(%{"public_description" => ""})
+          })
+        )
+
+      refute html =~ "PUBLIC SUPPORT"
+      refute html =~ "PUBLIC DESCRIPTION"
+
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-public-description [style]",
+            "#card-drawer-public-description[style]",
+            "#card-drawer-unused-fields [style]"
+          ] do
+        assert doc |> LazyHTML.query(selector) |> Enum.to_list() == []
+      end
+
+      label =
+        doc
+        |> LazyHTML.query("#card-drawer-public-support > span:first-child")
+        |> LazyHTML.attribute("class")
+        |> List.first()
+
+      assert label =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+    end
   end
 
   describe "inline_field/1" do
@@ -1725,6 +1874,28 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "AI Result"
       assert html =~ "text-secondary"
       refute html =~ "text-base-content/60"
+    end
+  end
+
+  describe "rail_unused_fields/3 (RE282)" do
+    test "both public fields empty are both unused, support first" do
+      assert CoreComponents.rail_unused_fields(0, nil, false) == [:public_support, :public_description]
+    end
+
+    test "supporters make public support used" do
+      assert CoreComponents.rail_unused_fields(3, nil, false) == [:public_description]
+    end
+
+    test "a written description is used" do
+      assert CoreComponents.rail_unused_fields(0, "Ship it", false) == [:public_support]
+    end
+
+    test "an open description editor counts as in use" do
+      assert CoreComponents.rail_unused_fields(0, nil, true) == [:public_support]
+    end
+
+    test "both filled leaves nothing unused" do
+      assert CoreComponents.rail_unused_fields(2, "Ship it", false) == []
     end
   end
 

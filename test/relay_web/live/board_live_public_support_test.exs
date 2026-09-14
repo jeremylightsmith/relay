@@ -20,7 +20,7 @@ defmodule RelayWeb.BoardLivePublicSupportTest do
     assert has_element?(view, "article[data-ref='#{board.key}#{card.ref_number}'] .card-votes", "1")
   end
 
-  test "the drawer shows PUBLIC SUPPORT and the Add-a-public-description flow", %{
+  test "the drawer shows Public support and the Add-a-public-description flow", %{
     conn: conn,
     board: board,
     card: card
@@ -30,9 +30,13 @@ defmodule RelayWeb.BoardLivePublicSupportTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
     render_async(view)
 
-    assert render(view) =~ "PUBLIC SUPPORT"
-    assert has_element?(view, "#add-public-desc")
+    # RE282 — supporters make Public support a normal rail section; the empty description
+    # waits behind the `1 unused field` row until it is expanded.
+    assert has_element?(view, "#card-drawer-public-support", "Public support")
+    refute has_element?(view, "#add-public-desc")
+    assert has_element?(view, "#card-drawer-unused-toggle", "1 unused field")
 
+    view |> element("#card-drawer-unused-toggle") |> render_click()
     view |> element("#add-public-desc") |> render_click()
 
     view

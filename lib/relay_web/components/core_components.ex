@@ -1863,6 +1863,10 @@ defmodule RelayWeb.CoreComponents do
   to the target stage's bottom) when a "Move to…" target is picked,
   `"add_owner"` / `"remove_owner"` (phx-value
   `actor_type` + `user_id`) from the owners rail's controls,
+  `"toggle_reassign"` (open/close the owners Reassign picker), `"toggle_unused_fields"` (RE282:
+  expand/collapse the rail's unused-fields group), `"start_public_desc"` /
+  `"cancel_public_desc"` / `"save_public_desc"` (param `public_description`) for the public
+  description editor,
   `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
   from the Notes composer, and `"answer_input"` (form params
   `answer[body]`) from the needs-input panel's composer, and the MMF 15
@@ -1946,6 +1950,11 @@ defmodule RelayWeb.CoreComponents do
   attr :reassign_open, :boolean,
     default: false,
     doc: "whether the OWNERS reassign picker popover is open"
+
+  attr :unused_fields_open, :boolean,
+    default: false,
+    doc:
+      "RE282: whether the rail's unused-fields group (empty Public support / Public description) is expanded; BoardLive resets it on every card switch"
 
   attr :overflow_open, :boolean,
     default: false,
@@ -2143,6 +2152,10 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
+      |> assign(
+        :unused_fields,
+        rail_unused_fields(assigns.vote_count, assigns.public_description, assigns.editing_public_desc)
+      )
 
     ~H"""
     <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
@@ -3501,44 +3514,30 @@ defmodule RelayWeb.CoreComponents do
                 </div>
               </div>
 
-              <%!-- PUBLIC SUPPORT (RLY-69) --%>
-              <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
-                  PUBLIC SUPPORT
-                </span>
-                <.supporters_row
-                  :if={@vote_count > 0}
-                  supporters={supporter_faces(@supporters)}
-                  total={@vote_count}
-                />
-                <span
-                  :if={@vote_count == 0}
-                  style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
-                >
-                  No public supporters yet.
-                </span>
+              <%!-- PUBLIC SUPPORT (RLY-69) — a normal rail row once it has supporters; otherwise it
+                   waits in the unused-fields group below (RE282) --%>
+              <div
+                :if={:public_support not in @unused_fields}
+                id={"#{@id}-public-support"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public support</.section_label>
+                <.supporters_row supporters={supporter_faces(@supporters)} total={@vote_count} />
               </div>
 
-              <%!-- PUBLIC DESCRIPTION (RLY-69) --%>
-              <div style="display:flex;flex-direction:column;gap:8px;">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:'JetBrains Mono',ui-monospace,monospace;">
-                  PUBLIC DESCRIPTION
-                </span>
+              <%!-- PUBLIC DESCRIPTION (RLY-69) — a normal rail row once written or while its editor is open --%>
+              <div
+                :if={:public_description not in @unused_fields}
+                id={"#{@id}-public-description"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public description</.section_label>
                 <p
-                  :if={@public_description && !@editing_public_desc}
-                  style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin:0;white-space:pre-wrap;"
+                  :if={!@editing_public_desc}
+                  class="m-0 whitespace-pre-wrap text-[13px] leading-[1.55] text-base-content/80"
                 >
                   {@public_description}
                 </p>
-                <button
-                  :if={is_nil(@public_description) && !@editing_public_desc}
-                  id="add-public-desc"
-                  phx-click="start_public_desc"
-                  type="button"
-                  style="align-self:flex-start;background:transparent;border:none;padding:0;font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));cursor:pointer;"
-                >
-                  + Add a public description
-                </button>
                 <.form
                   :if={@editing_public_desc}
                   for={@public_desc_form}
@@ -3547,24 +3546,64 @@ defmodule RelayWeb.CoreComponents do
                 >
                   <textarea
                     name="public_description"
-                    style="width:100%;min-height:62px;border:1px solid var(--color-primary);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);outline:none;"
+                    class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
                   >{@public_description}</textarea>
-                  <div style="display:flex;gap:7px;margin-top:8px;">
-                    <button
-                      type="submit"
-                      style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:6px 13px;font-size:12px;font-weight:600;"
-                    >
+                  <div class="mt-2 flex gap-[7px]">
+                    <button type="submit" class="btn btn-primary btn-xs">
                       Save
                     </button>
                     <button
                       type="button"
                       phx-click="cancel_public_desc"
-                      style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;"
+                      class="btn btn-ghost btn-xs border border-base-300"
                     >
                       Cancel
                     </button>
                   </div>
                 </.form>
+              </div>
+
+              <%!-- UNUSED FIELDS (RE282 change 15) — empty public fields fold behind one dashed row;
+                   expanded, they render ABOVE the button (Relay Card Detail v5.dc.html). --%>
+              <div
+                :if={@unused_fields != []}
+                id={"#{@id}-unused-fields"}
+                class="flex flex-col gap-[9px]"
+              >
+                <div :if={@unused_fields_open} class="flex flex-col gap-3.5">
+                  <div
+                    :if={:public_support in @unused_fields}
+                    id={"#{@id}-unused-public-support"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public support</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">no supporters yet</span>
+                  </div>
+                  <div
+                    :if={:public_description in @unused_fields}
+                    id={"#{@id}-unused-public-description"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public description</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">not written</span>
+                    <button
+                      id="add-public-desc"
+                      type="button"
+                      phx-click="start_public_desc"
+                      class="cursor-pointer self-start rounded-md px-1 py-0.5 text-left text-xs font-semibold text-primary transition-colors hover:bg-base-200"
+                    >
+                      + Add a public description
+                    </button>
+                  </div>
+                </div>
+                <button
+                  id={"#{@id}-unused-toggle"}
+                  type="button"
+                  phx-click="toggle_unused_fields"
+                  class="w-full cursor-pointer rounded-[7px] border border-dashed border-base-300 px-[9px] py-[7px] text-left font-mono text-[11px] font-semibold text-base-content/55 transition-colors hover:border-base-content/30 hover:bg-base-200 hover:text-base-content/80"
+                >
+                  {unused_fields_label(@unused_fields, @unused_fields_open)}
+                </button>
               </div>
             </div>
           </div>
@@ -3578,6 +3617,24 @@ defmodule RelayWeb.CoreComponents do
   defp supporter_faces(users) do
     Enum.map(users, fn u -> %{name: u.name, email: u.email, src: u.avatar_url} end)
   end
+
+  @doc """
+  RE282 change 15 — which of the drawer's public fields are *unused*, in rail order, so they
+  fold behind the one dashed "N unused fields" row instead of each taking a slot to say "nothing
+  yet". Public support is unused with no votes; public description is unused when unwritten AND
+  its editor is closed — an open editor counts as in use, so the form never vanishes behind a
+  collapsed row mid-edit. This is the one definition of "unused"; the rail renders from it.
+  """
+  def rail_unused_fields(vote_count, public_description, editing_public_desc) do
+    Enum.filter(
+      [vote_count == 0 && :public_support, is_nil(public_description) && !editing_public_desc && :public_description],
+      & &1
+    )
+  end
+
+  defp unused_fields_label(_fields, true), do: "Hide unused fields"
+  defp unused_fields_label([_one], false), do: "1 unused field"
+  defp unused_fields_label(fields, false), do: "#{length(fields)} unused fields"
 
   attr :card, :any, required: true
   attr :question, :string, default: nil

@@ -518,6 +518,7 @@ defmodule RelayWeb.BoardLive do
         current_user_id={@current_scope.user.id}
         members={@members}
         reassign_open={@reassign_open}
+        unused_fields_open={@unused_fields_open}
         overflow_open={@overflow_open}
         stage_menu_open={@stage_menu_open}
         stage_filter={@stage_filter}
@@ -1032,6 +1033,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:compose_form, empty_compose_form())
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
+      |> assign(:unused_fields_open, false)
       |> assign(:overflow_open, false)
       |> assign(:stage_menu_open, false)
       |> assign(:stage_filter, "")
@@ -1694,9 +1696,12 @@ defmodule RelayWeb.BoardLive do
   def handle_event("save_card_description", _params, socket), do: {:noreply, socket}
 
   def handle_event("start_public_desc", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    # RE282 — opening the editor moves the description out of the unused-fields group (an open
+    # editor counts as in use), so the group collapses and reads its new, smaller count.
     {:noreply,
      socket
      |> assign(:editing_public_desc, true)
+     |> assign(:unused_fields_open, false)
      |> assign(:public_desc_form, to_form(%{"public_description" => card.public_description || ""}))}
   end
 
@@ -2110,6 +2115,11 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_reassign", _params, socket) do
     {:noreply, update(socket, :reassign_open, &(not &1))}
+  end
+
+  # RE282 — expand/collapse the drawer rail's unused-fields group (empty public fields).
+  def handle_event("toggle_unused_fields", _params, socket) do
+    {:noreply, update(socket, :unused_fields_open, &(not &1))}
   end
 
   # RE281 — the two header popovers are mutually exclusive: opening either closes the
@@ -4262,6 +4272,8 @@ defmodule RelayWeb.BoardLive do
           # `drawer_text_entry_open?/1` then reported a text surface open on every later card.
           |> assign(:editing_public_desc, false)
           |> assign(:public_desc_form, nil)
+          # RE282 — the unused-fields group is per-card: a switch always lands collapsed.
+          |> assign(:unused_fields_open, false)
           |> assign(:editing_acceptance_criteria, false)
           |> assign(:expanded_acceptance_criteria?, false)
           |> assign(:acceptance_criteria_form, nil)
@@ -4308,6 +4320,7 @@ defmodule RelayWeb.BoardLive do
           description_form: nil,
           editing_public_desc: false,
           public_desc_form: nil,
+          unused_fields_open: false,
           editing_acceptance_criteria: false,
           expanded_acceptance_criteria?: false,
           acceptance_criteria_form: nil,
