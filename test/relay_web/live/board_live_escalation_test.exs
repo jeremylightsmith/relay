@@ -154,4 +154,19 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     refute has_element?(view, "#run-needs-input-failure-detail")
     refute render(view) =~ "NODE FAILED"
   end
+
+  test "the blocked strip names an escalation as the node that failed (RE279)", ctx do
+    {card, _run} = park(ctx.board, ctx.flow, "Commit guard", :failed, @guard)
+    view = open(ctx.conn, ctx.board, card)
+
+    assert has_element?(view, "#card-drawer-blocked-strip-eyebrow", "BRAINSTORM FAILED — YOUR CALL")
+  end
+
+  test "the blocked strip names a genuine question as the node that asked and exited (RE279)", ctx do
+    {card, _run} = park(ctx.board, ctx.flow, "Real question", :needs_input, "Which auth model?")
+    view = open(ctx.conn, ctx.board, card)
+
+    assert has_element?(view, "#card-drawer-blocked-strip-eyebrow", "BRAINSTORM ASKED AND EXITED")
+    assert has_element?(view, "#card-drawer-blocked-strip-question", "Which auth model?")
+  end
 end

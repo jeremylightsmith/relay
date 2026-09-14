@@ -51,7 +51,9 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-question", "Billing timezone or the viewer's?")
-    assert has_element?(view, "#needs-input-waiting", "waiting")
+    # RE279 — the wait time lives only in the blocked strip now
+    refute has_element?(view, "#needs-input-waiting")
+    assert has_element?(view, "#card-drawer-blocked-strip-wait-label", "waiting on you")
 
     # the question renders markdown as HTML, not literal text
     {:ok, mdcard} = Cards.create_card(code, %{title: "Markdown ask"})
@@ -310,5 +312,166 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     # single-question block: Send is on the first (only) step
     assert has_element?(view, "#needs-input-send[style*='background:var(--color-warning)']")
+  end
+
+  describe "RE279 blocked strip" do
+    defp open_card(conn, board, card) do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+      view
+    end
+
+    # AC1's seed: a card parked on a `spec` node with a genuine question, blocked 47 minutes ago.
+    defp parked_on_spec(code, question) do
+      {:ok, card} = Cards.create_card(code, %{title: "Board search"})
+      {:ok, card} = Cards.request_input(card, question, :agent)
+
+      {:ok, card} =
+        card
+        |> Ecto.Changeset.change(
+          blocked_since: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -47 * 60, :second)
+        )
+        |> Relay.Repo.update()
+
+      run = insert(:run, card: card, flow_key: "spec", status: :parked, parked_reason: :needs_input, current_node: "spec")
+      insert(:node_execution, run: run, node: "spec", outcome: :needs_input, duration_s: 190)
+      card
+    end
+
+    test "one strip under the header, identical on Detail, Run, Talk and Activity (AC1)",
+         %{conn: conn, board: board, code: code} do
+      card = parked_on_spec(code, "Which scope should **board search** cover?")
+      view = open_card(conn, board, card)
+
+      for tab <- ~w(detail run talk activity) do
+        view |> element("#card-drawer-tab-#{tab}") |> render_click()
+
+        assert has_element?(view, "#card-drawer-tab-#{tab}[data-active='true']")
+        assert has_element?(view, "#card-drawer-blocked-strip-eyebrow", "SPEC ASKED AND EXITED")
+        assert has_element?(view, "#card-drawer-blocked-strip-question", "Which scope should board search cover?")
+        refute has_element?(view, "#card-drawer-blocked-strip-question", "**")
+        assert has_element?(view, "#card-drawer-blocked-strip-wait", "47m")
+        assert has_element?(view, "#card-drawer-blocked-strip-wait-label", "waiting on you")
+        assert has_element?(view, "#card-drawer-blocked-answer", "Answer")
+      end
+
+      # it is a direct child of the drawer panel, never inside a tab panel
+      assert has_element?(view, "#card-drawer-panel > #card-drawer-blocked-strip")
+      refute has_element?(view, "[id^='card-drawer-tab-panel-'] #card-drawer-blocked-strip")
+    end
+
+    test "a card set to needs_input by hand, with no run, reads NEEDS YOUR ANSWER (AC2)",
+         %{conn: conn, board: board, backlog: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Manual block"})
+      {:ok, card} = Cards.set_status(card, %{status: :needs_input})
+
+      view = open_card(conn, board, card)
+
+      assert has_element?(view, "#card-drawer-blocked-strip-eyebrow", "NEEDS YOUR ANSWER")
+      refute has_element?(view, "#card-drawer-blocked-strip-question")
+    end
+
+    test "no strip for a card that is not blocked, or for an archived blocked card",
+         %{conn: conn, board: board, code: code, user: user} do
+      {:ok, calm} = Cards.create_card(code, %{title: "Calm"})
+      refute has_element?(open_card(conn, board, calm), "#card-drawer-blocked-strip")
+
+      {:ok, asked} = Cards.create_card(code, %{title: "Archived ask"})
+      {:ok, asked} = Cards.request_input(asked, "Which bucket?")
+      {:ok, archived} = Cards.archive_card(asked, {:user, user.id})
+
+      view = open_card(conn, board, archived)
+      assert has_element?(view, "#card-archived-banner")
+      refute has_element?(view, "#card-drawer-blocked-strip")
+    end
+
+    test "a structured batch: the strip follows the stepper and counts N/M (AC4)",
+         %{conn: conn, board: board, code: code} do
+      questions = [
+        %{"prompt" => "Which **timezone**?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+        %{"prompt" => "Any `size` limit?", "options" => ["None", "10 MB"], "allow_text" => true},
+        %{"prompt" => "Archived cards too?", "options" => ["Yes", "No"], "allow_text" => false}
+      ]
+
+      {:ok, card} = Cards.create_card(code, %{title: "Batch"})
+      {:ok, card} = Cards.request_input(card, questions, :agent)
+      view = open_card(conn, board, card)
+
+      assert has_element?(view, "#card-drawer-blocked-strip-question", "Which timezone?")
+      refute has_element?(view, "#card-drawer-blocked-strip-question", "**")
+      assert has_element?(view, "#card-drawer-blocked-strip-counter", "1/3")
+
+      view |> element("#needs-input-option-0") |> render_click()
+      view |> element("#needs-input-next") |> render_click()
+
+      assert has_element?(view, "#card-drawer-blocked-strip-question", "Any size limit?")
+      refute has_element?(view, "#card-drawer-blocked-strip-question", "`")
+      assert has_element?(view, "#card-drawer-blocked-strip-counter", "2/3")
+
+      view |> element("#needs-input-back") |> render_click()
+      assert has_element?(view, "#card-drawer-blocked-strip-counter", "1/3")
+    end
+
+    test "a single structured question shows no counter", %{conn: conn, board: board, code: code} do
+      {:ok, card} = Cards.create_card(code, %{title: "Single"})
+      {:ok, card} = Cards.request_input(card, [%{"prompt" => "Only one?"}], :agent)
+      view = open_card(conn, board, card)
+
+      assert has_element?(view, "#card-drawer-blocked-strip-question", "Only one?")
+      refute has_element?(view, "#card-drawer-blocked-strip-counter")
+    end
+
+    test "Answer from the Run tab selects Detail and pushes focus-answer; again on Detail refocuses (AC5)",
+         %{conn: conn, board: board, code: code} do
+      card = parked_on_spec(code, "Which scope?")
+      view = open_card(conn, board, card)
+
+      # a parked run opens the drawer on the Run tab
+      assert has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+
+      view |> element("#card-drawer-blocked-answer") |> render_click()
+
+      refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+      assert has_element?(view, "#card-drawer-tab-panel-run.hidden")
+      assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+      assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel")
+      assert_push_event(view, "focus-answer", %{})
+
+      view |> element("#card-drawer-blocked-answer") |> render_click()
+
+      refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+      assert_push_event(view, "focus-answer", %{})
+    end
+
+    test "Answer from the Talk tab leaves Talk for Detail", %{conn: conn, board: board, code: code} do
+      card = parked_on_spec(code, "Which scope?")
+      view = open_card(conn, board, card)
+
+      view |> element("#card-drawer-tab-talk") |> render_click()
+      view |> element("#card-drawer-blocked-answer") |> render_click()
+
+      assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+      assert_push_event(view, "focus-answer", %{})
+    end
+
+    test "answer_jump is a no-op for a card that is not blocked", %{conn: conn, board: board, code: code} do
+      {:ok, calm} = Cards.create_card(code, %{title: "Calm"})
+      view = open_card(conn, board, calm)
+
+      render_click(view, "answer_jump", %{})
+      refute_push_event(view, "focus-answer", %{})
+    end
+
+    test "the strip is gone once the answer is submitted (AC6)", %{conn: conn, board: board, code: code} do
+      {:ok, card} = Cards.create_card(code, %{title: "Clears"})
+      {:ok, card} = Cards.request_input(card, "Which bucket?")
+      view = open_card(conn, board, card)
+      assert has_element?(view, "#card-drawer-blocked-strip")
+
+      view |> form("#needs-input-form", answer: %{body: "relay-exports"}) |> render_submit()
+
+      refute has_element?(view, "#card-drawer-blocked-strip")
+      refute has_element?(open_card(conn, board, card), "#card-drawer-blocked-strip")
+    end
   end
 end

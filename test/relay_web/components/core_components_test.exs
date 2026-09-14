@@ -1999,6 +1999,90 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "card_drawer/1 blocked strip (RE279)" do
+    defp blocked_drawer(card_overrides, extra) do
+      render_component(
+        &CoreComponents.card_drawer/1,
+        drawer_attrs(
+          Map.merge(
+            %{status: :needs_input, blocked_since: DateTime.add(DateTime.utc_now(), -47 * 60, :second)},
+            card_overrides
+          ),
+          Map.merge(%{answer_form: to_form(%{"body" => ""}, as: :answer)}, extra)
+        )
+      )
+    end
+
+    defp batch_questions do
+      [
+        %{"prompt" => "Which **timezone**?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+        %{"prompt" => "Any `size` limit?", "options" => ["None", "10 MB"], "allow_text" => true},
+        %{"prompt" => "Archived cards too?", "options" => ["Yes", "No"], "allow_text" => false}
+      ]
+    end
+
+    test "a needs_input card renders the strip between the header and the tab bar" do
+      html = blocked_drawer(%{}, %{question: "Use **UTC** or the `viewer` tz?"})
+
+      {header_end, _} = :binary.match(html, "</header>")
+      {strip_at, _} = :binary.match(html, ~s(id="card-drawer-blocked-strip"))
+      {nav_at, _} = :binary.match(html, ~s(id="card-drawer-tabs"))
+      assert header_end < strip_at
+      assert strip_at < nav_at
+
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-eyebrow") |> LazyHTML.text() |> String.trim() ==
+               "NEEDS YOUR ANSWER"
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-question") |> LazyHTML.attribute("title") ==
+               ["Use UTC or the viewer tz?"]
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-wait") |> LazyHTML.text() |> String.trim() == "47m"
+    end
+
+    test "the Detail answer panel has no waiting readout — the strip is the only wait display" do
+      refute blocked_drawer(%{}, %{question: "Which bucket?"}) =~ ~s(id="needs-input-waiting")
+    end
+
+    test "no strip for a card that is not blocked, or for an archived blocked card" do
+      ready = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{}))
+      refute ready =~ ~s(id="card-drawer-blocked-strip")
+
+      refute blocked_drawer(%{}, %{archived: true}) =~ ~s(id="card-drawer-blocked-strip")
+    end
+
+    test "embed mode keeps the strip" do
+      assert blocked_drawer(%{}, %{embed: true}) =~ ~s(id="card-drawer-blocked-strip")
+    end
+
+    test "a structured batch: the strip shows the current step's prompt as plain text and an N/M counter" do
+      doc =
+        %{}
+        |> blocked_drawer(%{answer_questions: batch_questions(), answer_step: 1})
+        |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-question") |> LazyHTML.text() |> String.trim() ==
+               "Any size limit?"
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-counter") |> LazyHTML.text() |> String.trim() == "2/3"
+    end
+
+    test "a single structured question shows no counter" do
+      html = blocked_drawer(%{}, %{answer_questions: [%{"prompt" => "Only one?", "options" => [], "allow_text" => true}]})
+
+      assert html =~ ~s(title="Only one?")
+      refute html =~ ~s(id="card-drawer-blocked-strip-counter")
+    end
+
+    test "while the body loads the strip shows a skeleton line instead of the question" do
+      html = render_component(&CoreComponents.card_drawer/1, loading_drawer_assigns())
+
+      assert html =~ ~s(id="card-drawer-blocked-strip-question-skeleton")
+      refute html =~ ~s(id="card-drawer-blocked-strip-question")
+    end
+  end
+
   # RE279 — the persistent needs-you strip. Every class/token below is pinned to
   # docs/designs/Relay Card Detail v5.dc.html, "persistent needs-you strip" (lines ~88–102),
   # with the artboard's oklch literals mapped to daisyUI warning tokens.

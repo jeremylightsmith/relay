@@ -2225,6 +2225,7 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
       |> assign(:parked_run, parked_run)
       |> assign(:park_kind, park_kind)
+      |> assign_blocked_state(parked_run, park_kind)
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
@@ -2482,6 +2483,22 @@ defmodule RelayWeb.CoreComponents do
               <.icon name="hero-x-mark" class="size-5" />
             </.link>
           </header>
+
+          <%!--
+            RE279 — the blocked state, hoisted out of the tabs: one amber strip on EVERY tab. It
+            uses the same predicate as the Detail needs_input_panel, so the two always appear and
+            disappear together, and the card-status guard clears it the moment an answer flips the
+            baton. Renders in `embed` too.
+          --%>
+          <.blocked_strip
+            :if={@card.status == :needs_input and !@archived}
+            eyebrow={@strip_eyebrow}
+            question={@strip_question}
+            loading?={@body_loading}
+            blocked_since={@card.blocked_since}
+            step={@answer_step + 1}
+            step_count={length(@answer_questions || [])}
+          />
 
           <nav
             id="card-drawer-tabs"
@@ -3926,20 +3943,14 @@ defmodule RelayWeb.CoreComponents do
       class="flex flex-col gap-4 rounded-[10px] p-5"
       style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
     >
+      <%!-- RE279: no wait readout here — the blocked strip above the tabs is the one place the wait
+      time shows. --%>
       <div class="flex items-center justify-between">
         <span
           class="font-mono text-[10px] font-semibold tracking-[0.05em]"
           style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
         >
           {panel_label(@park_kind)}
-        </span>
-        <span
-          :if={@card.blocked_since}
-          id={"#{@id_prefix}-waiting"}
-          class="font-mono text-[10px]"
-          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
-        >
-          {waiting_label(@card.blocked_since)}
         </span>
       </div>
       <%!-- RE253 (A4): the flow escalated a node failure to a human. Say which node, how many
@@ -4147,6 +4158,32 @@ defmodule RelayWeb.CoreComponents do
   defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
   defp attempt_label(_n), do: "1 attempt"
 
+  # RE279 — what the blocked strip shows, worked out ONCE from assigns the drawer already has.
+  # `park_kind` arrives with its nil → :question policy already applied (see card_drawer/1), and
+  # `parked_run` is nil/false or the parked run itself.
+  defp assign_blocked_state(assigns, parked_run, park_kind) do
+    node = assigns.latest_detail && assigns.latest_detail.current_node
+
+    assigns
+    |> assign(:strip_eyebrow, blocked_strip_eyebrow(parked_run not in [nil, false], park_kind, node))
+    |> assign(:strip_question, strip_question(assigns))
+  end
+
+  # RE279 — the strip's one-line question follows the stepper: the prompt of the step the human is
+  # on for a structured batch, else the plain question.
+  defp strip_question(%{answer_questions: [_ | _] = questions, answer_step: step}),
+    do: questions |> Enum.at(step, %{}) |> Map.get("prompt") |> plain_line()
+
+  defp strip_question(%{question: question}), do: plain_line(question)
+
+  # Blank flattens to nil, so the strip renders no empty question line.
+  defp plain_line(markdown) do
+    case Relay.Markdown.to_plain(markdown) do
+      "" -> nil
+      plain -> plain
+    end
+  end
+
   # ---------- RLY-137: Run tab helpers ----------
 
   # RLY-207: prior runs are terminal, so a `nil` flow is behavior-neutral — the
@@ -4333,10 +4370,6 @@ defmodule RelayWeb.CoreComponents do
   defp review_hint(nil), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
 
   defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
-
-  # The panel's aging hint ("waiting 3h"), derived from Card.blocked_since —
-  # the mockup's small amber mono text beside the panel label.
-  defp waiting_label(%DateTime{} = blocked_since), do: "waiting #{wait_duration(blocked_since)}"
 
   # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
   # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
