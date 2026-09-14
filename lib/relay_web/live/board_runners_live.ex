@@ -8,11 +8,14 @@ defmodule RelayWeb.BoardRunnersLive do
   `./relay start` start command.
 
   RLY-191: `OUTDATED` is a top-level `display_state` (precedence
-  `:gone > :stale > :outdated > :fresh`), replacing the FRESH pill/dot rather than sitting
-  beside it (RLY-184's additive badge) — a refusing runner must not read as healthy. This is
-  new design ground `docs/designs/Relay Runners.dc.html` does not cover (RLY-184 added the
+  `:gone > :stale > :outdated > :rate_limited > :fresh`), replacing the FRESH pill/dot rather than
+  sitting beside it (RLY-184's additive badge) — a refusing runner must not read as healthy. This
+  is new design ground `docs/designs/Relay Runners.dc.html` does not cover (RLY-184 added the
   version surface beyond the artboard; RLY-191 promotes it to a fourth freshness state) — filed
   back to the Design project as a follow-up, not blocking here.
+
+  RE320: `RATE LIMITED` (amber, `badge-warning`) is a beating runner paused at its Claude usage
+  limit; the row names the window, usage and resume time via `RunComponents.rate_limit_note/1`.
 
   RE307 adds a board-wide QUEUE section above the runner panels: every `queued` or `claimed`
   node job on the board from `Relay.Runs.list_queue/2`, both kinds (`:node` and `:talk`),
@@ -267,6 +270,16 @@ defmodule RelayWeb.BoardRunnersLive do
                   {@summary.stale} stale
                 </span>
                 <span
+                  :if={@summary.rate_limited > 0}
+                  id="summary-rate-limited"
+                  class="font-mono"
+                  style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:6px;padding:5px 10px;"
+                >
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--color-warning);">
+                  </span>
+                  {@summary.rate_limited} rate limited
+                </span>
+                <span
                   :if={@summary.gone > 0}
                   id="summary-gone"
                   class="font-mono"
@@ -314,6 +327,11 @@ defmodule RelayWeb.BoardRunnersLive do
                   >
                     {pill_label(runner.display_state)}
                   </span>
+                  <RunComponents.rate_limit_note
+                    :if={runner.rate_limit}
+                    id={"runner-#{dom_id(runner)}-rate-limit"}
+                    rate_limit={runner.rate_limit}
+                  />
                   <span style="flex:1;"></span>
                   <span
                     id={"runner-#{dom_id(runner)}-version"}
@@ -533,7 +551,8 @@ defmodule RelayWeb.BoardRunnersLive do
       fresh: counts[:fresh] || 0,
       stale: counts[:stale] || 0,
       gone: counts[:gone] || 0,
-      outdated: counts[:outdated] || 0
+      outdated: counts[:outdated] || 0,
+      rate_limited: counts[:rate_limited] || 0
     })
     |> assign(:ref_owner, for(runner <- runners, job <- runner.jobs, into: %{}, do: {job.ref, runner.name}))
     |> update(:logs, &Map.take(&1, names))
@@ -548,6 +567,10 @@ defmodule RelayWeb.BoardRunnersLive do
   # `:outdated` shares :gone's rose border — a refusing runner must not read as healthy,
   # even though (unlike :gone) it is genuinely beating.
   defp panel_style(:outdated), do: panel_style(:gone)
+
+  # RE320: a paused runner is beating but claiming nothing — amber like :stale, not rose like
+  # :outdated (it will resume on its own).
+  defp panel_style(:rate_limited), do: panel_style(:stale)
 
   defp panel_style(freshness) do
     border =
@@ -570,6 +593,7 @@ defmodule RelayWeb.BoardRunnersLive do
   defp fresh_color(:gone), do: @rose
   # RLY-191: rose, matching :gone's hue — no glow (fresh_dot_style/1 only glows for :fresh).
   defp fresh_color(:outdated), do: @rose
+  defp fresh_color(:rate_limited), do: @amber
 
   defp fresh_dot_style(freshness) do
     glow =
@@ -584,11 +608,13 @@ defmodule RelayWeb.BoardRunnersLive do
   defp pill_class(:stale), do: "badge-warning"
   defp pill_class(:gone), do: "badge-error"
   defp pill_class(:outdated), do: "badge-error"
+  defp pill_class(:rate_limited), do: "badge-warning"
 
   defp pill_label(:fresh), do: "FRESH"
   defp pill_label(:stale), do: "STALE"
   defp pill_label(:gone), do: "GONE"
   defp pill_label(:outdated), do: "OUTDATED"
+  defp pill_label(:rate_limited), do: "RATE LIMITED"
 
   # `v1 · requires v2` when outdated, plain `v1` otherwise — the mismatch legible without
   # hovering. "unversioned" rather than a bare `v`: a runner reporting nothing predates
@@ -603,6 +629,7 @@ defmodule RelayWeb.BoardRunnersLive do
   defp name_color(:fresh), do: "var(--color-base-content)"
   # beating → the dark fresh-name colour, not the muted stale/gone one.
   defp name_color(:outdated), do: "var(--color-base-content)"
+  defp name_color(:rate_limited), do: "var(--color-base-content)"
   defp name_color(_freshness), do: "color-mix(in oklab, var(--color-base-content) 70%, transparent)"
 
   defp ref_color(:gone), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"

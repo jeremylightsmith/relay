@@ -193,6 +193,67 @@ defmodule RelayWeb.BoardRunFaceTest do
     end
   end
 
+  describe "rate limited (RE320)" do
+    setup %{user: user} do
+      board = insert(:board, owner: user)
+      insert(:membership, board: board, user: user)
+      works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)
+      %{board: board, works: works, now: DateTime.truncate(DateTime.utc_now(), :second)}
+    end
+
+    # A live run whose current node-job has sat queued `age_s` seconds.
+    defp queued_run_card(works, now, age_s) do
+      at = DateTime.add(now, -age_s, :second)
+      card = insert(:card, stage: works, status: :working)
+      run = insert(:run, card: card, status: :running, current_node: "implement")
+      exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil, inserted_at: at)
+      insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil, inserted_at: at)
+      card
+    end
+
+    test "a queued job behind the only, paused runner shows the chip instead of stalled",
+         %{conn: conn, board: board, works: works, now: now} do
+      resets_at = DateTime.add(now, 3600, :second)
+
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      )
+
+      card = queued_run_card(works, now, 900)
+      ref = face_ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#card-#{ref}-run-face[data-rate-limited="true"]))
+      assert has_element?(view, ~s(#card-#{ref}-run-face[data-stalled="false"]))
+
+      assert has_element?(
+               view,
+               "#card-#{ref}-rate-limited",
+               "Rate limited · resumes #{Runs.resume_time_label(resets_at)}"
+             )
+
+      assert has_element?(view, "#stopped-work-banner", "paused at its Claude usage limit")
+    end
+
+    test "nothing is flagged when another connected runner is free",
+         %{conn: conn, board: board, works: works, now: now} do
+      insert(:runner, board: board, name: "paused", last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+      insert(:runner, board: board, name: "free", last_heartbeat: now)
+      card = queued_run_card(works, now, 900)
+      ref = face_ref(board, card)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#card-#{ref}-run-face[data-rate-limited="false"]))
+      refute has_element?(view, "#card-#{ref}-rate-limited")
+      refute has_element?(view, "#stopped-work-banner")
+    end
+  end
+
   # RLY-204: BoardLive coalesces run events behind a ~150ms debounce (mark_run_dirty/2 +
   # :flush_run_changes) rather than refetching on every broadcast — so a test that changes a
   # run and immediately asserts on the rendered face must first wait for that flush.
