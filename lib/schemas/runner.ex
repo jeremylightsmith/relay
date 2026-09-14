@@ -176,10 +176,9 @@ defmodule Schemas.Runner do
   Total by construction, like `normalize_held/1`: the heartbeat is the runner's liveness path,
   so an unknown window or reason from a newer runner degrades to "not paused" rather than 500ing.
   """
-  def normalize_rate_limit(%{"window" => window, "reason" => reason, "resets_at" => resets_at} = wire) do
-    with true <- window in @rate_limit_windows,
-         true <- reason in @rate_limit_reasons,
-         true <- is_integer(resets_at) and resets_at > 0,
+  def normalize_rate_limit(%{"window" => window, "reason" => reason, "resets_at" => resets_at} = wire)
+      when window in @rate_limit_windows and reason in @rate_limit_reasons do
+    with true <- is_integer(resets_at) and resets_at > 0,
          {:ok, at} <- DateTime.from_unix(resets_at),
          {:ok, utilization} <- fraction(Map.get(wire, "utilization")),
          {:ok, max} <- fraction(Map.get(wire, "max")) do

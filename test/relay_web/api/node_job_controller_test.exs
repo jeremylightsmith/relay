@@ -292,6 +292,81 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert runner.held == []
     end
 
+    test "RE320: a claim carrying a null rate_limit never un-pauses the stored roster row",
+         %{conn: conn, board: board} do
+      post(conn, ~p"/api/node-jobs/heartbeat", %{
+        "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "capacity" => %{"shared_clean" => 1},
+        "running" => [],
+        "rate_limit" => %{
+          "window" => "five_hour",
+          "utilization" => 0.95,
+          "max" => 0.9,
+          "resets_at" => 4_102_444_800,
+          "reason" => "limit"
+        }
+      })
+
+      post(
+        conn,
+        ~p"/api/node-jobs/claim",
+        Jason.encode!(%{
+          "runner" => %{
+            "name" => "fake",
+            "host" => "fake",
+            "interval" => 30,
+            "version" => Runs.min_talk_runner_version(),
+            "rate_limit" => nil
+          },
+          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+          "running" => [],
+          "wait" => "0"
+        })
+      )
+
+      assert %Schemas.RunnerRateLimit{} =
+               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").rate_limit
+    end
+
+    test "RE320: a claim carrying a garbage rate_limit shape never 500s and never touches the roster row",
+         %{conn: conn, board: board} do
+      post(conn, ~p"/api/node-jobs/heartbeat", %{
+        "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "capacity" => %{"shared_clean" => 1},
+        "running" => [],
+        "rate_limit" => %{
+          "window" => "five_hour",
+          "utilization" => 0.95,
+          "max" => 0.9,
+          "resets_at" => 4_102_444_800,
+          "reason" => "limit"
+        }
+      })
+
+      conn =
+        post(
+          conn,
+          ~p"/api/node-jobs/claim",
+          Jason.encode!(%{
+            "runner" => %{
+              "name" => "fake",
+              "host" => "fake",
+              "interval" => 30,
+              "version" => Runs.min_talk_runner_version(),
+              "rate_limit" => %{"window" => "five_hour"}
+            },
+            "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
+            "running" => [],
+            "wait" => "0"
+          })
+        )
+
+      refute conn.status == 500
+
+      assert %Schemas.RunnerRateLimit{} =
+               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").rate_limit
+    end
+
     test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
          %{conn: conn, board: board} do
       flow = exclusive_flow(board)

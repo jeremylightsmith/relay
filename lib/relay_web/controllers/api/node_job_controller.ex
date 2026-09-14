@@ -183,10 +183,15 @@ defmodule RelayWeb.Api.NodeJobController do
   # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
   # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
   # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
+  # RE320: `rate_limit` is dropped here too, whatever the client's `runner` object carries —
+  # `exec_attrs` feeds the claim's `Runs.upsert_runner/2` call directly (no `heartbeat_attrs/2`
+  # in between), so a client-supplied "rate_limit" key would otherwise reach the roster write
+  # unnormalized. Only `heartbeat_attrs/2` puts the (normalized) key back, from the top-level
+  # `rate_limit`, never from this nested one.
   defp runner_attrs(params) do
     case Map.get(params, "runner", %{}) do
       runner when is_map(runner) ->
-        {:ok, Map.put(runner, "capabilities", Map.get(params, "capabilities"))}
+        {:ok, runner |> Map.delete("rate_limit") |> Map.put("capabilities", Map.get(params, "capabilities"))}
 
       _ ->
         {:error, :invalid_runner}

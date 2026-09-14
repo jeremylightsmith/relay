@@ -54,6 +54,7 @@ defmodule Relay.Runs do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Runner
+  alias Schemas.RunnerRateLimit
   alias Schemas.Stage
   alias Schemas.SubTask
 
@@ -1196,11 +1197,16 @@ defmodule Relay.Runs do
 
   # RE320: unlike the optional fields above, `rate_limit` has a meaningful nil — "not paused" — so
   # the presence of the KEY decides whether the column is written. Only the heartbeat puts the
-  # key (already normalized by `Schemas.Runner.normalize_rate_limit/1`); a claim never does, so a
-  # claim cannot un-pause a runner's roster row.
+  # key (already normalized by `Schemas.Runner.normalize_rate_limit/1`); `runner_attrs/1` strips
+  # it from a claim before it ever reaches here. This still only trusts a value that is ALREADY
+  # the normalized shape — an already-normalized struct or nil — and drops (leaves untouched)
+  # anything else, so a caller that slips past that boundary degrades instead of crashing
+  # `put_embed/3` or clearing a real pause.
   defp put_rate_limit({params, replace}, attrs) do
     case Map.fetch(attrs, "rate_limit") do
-      {:ok, rate_limit} -> {Map.put(params, :rate_limit, rate_limit), [:rate_limit | replace]}
+      {:ok, %RunnerRateLimit{} = rate_limit} -> {Map.put(params, :rate_limit, rate_limit), [:rate_limit | replace]}
+      {:ok, nil} -> {Map.put(params, :rate_limit, nil), [:rate_limit | replace]}
+      {:ok, _other} -> {params, replace}
       :error -> {params, replace}
     end
   end
