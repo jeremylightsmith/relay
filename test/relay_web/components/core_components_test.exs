@@ -1089,11 +1089,14 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~
                "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto"
 
-      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer: (UNCHANGED).
+      # Properties rail: full-width top-border below 720px; side panel + own scroll at drawer:.
+      # RE282 — 224px wide, 20px/18px padding, 18px row gap (Relay Card Detail v5.dc.html rail).
       assert html =~ ~s(id="card-drawer-rail")
 
       assert html =~
-               "flex w-full shrink-0 flex-col gap-5 border-t border-base-300 bg-base-200/30 p-5 text-sm drawer:w-[220px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+               "flex w-full shrink-0 flex-col gap-[18px] border-t border-base-300 bg-base-200/30 px-[18px] py-5 text-sm drawer:w-[224px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0"
+
+      refute html =~ "drawer:w-[220px]"
 
       # Regression: the old lg/1024 stack point is fully gone from the drawer.
       refute html =~ "lg:flex-row"
@@ -1340,6 +1343,176 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="card-drawer-move-to-1")
       refute html =~ ~s(id="card-drawer-move-to-2")
     end
+
+    # RE282 — the rail's section labels, top to bottom. Every row is a direct-child
+    # `.rail-section` whose first child is the section_label span.
+    defp rail_labels(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-rail > .rail-section > span:first-child")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
+
+    defp rail_text(html) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail") |> LazyHTML.text()
+    end
+
+    defp rail_flow do
+      %Schemas.Flow{
+        key: "spec",
+        edges: [
+          %{from: "start", on: nil, to: "spec"},
+          %{from: "spec", on: :succeeded, to: "implement"},
+          %{from: "implement", on: :succeeded, to: "review"},
+          %{from: "review", on: :succeeded, to: "done"}
+        ]
+      }
+    end
+
+    test "RE282: rail rows follow the artboard order" do
+      attrs =
+        drawer_attrs(
+          %{tag: "search", branch: "re282-rail"},
+          %{
+            run_flow: rail_flow(),
+            dependents: [%{ref: "RLY-9", title: "Downstream"}]
+          }
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert rail_labels(html) ==
+               ["Status", "Blocked by", "Blocks", "Owners", "Tags", "Updated", "Flow", "Links"]
+    end
+
+    test "RE282: every rail row label uses the section_label recipe" do
+      attrs = drawer_attrs(%{branch: "re282-rail"}, %{run_flow: rail_flow()})
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      classes =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-rail > .rail-section > span:first-child")
+        |> LazyHTML.attribute("class")
+
+      assert classes != []
+
+      for class <- classes do
+        assert class =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+        assert class =~ "text-base-content/60"
+      end
+    end
+
+    test "RE282: Updated replaces Dates, formatted Mon DD · HH:MM, and Created is gone" do
+      attrs =
+        drawer_attrs(
+          %{inserted_at: ~U[2026-07-01 08:00:00Z], updated_at: ~U[2026-08-04 09:12:00Z]},
+          %{}
+        )
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      updated =
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-updated")
+
+      assert LazyHTML.text(updated) =~ "Aug 04 · 09:12"
+      assert updated |> LazyHTML.attribute("class") |> List.first() =~ "font-mono"
+      refute html =~ "rail-dates"
+      refute rail_text(html) =~ "Created"
+      refute rail_text(html) =~ "Dates"
+    end
+
+    test "RE282: Flow row shows the latest run's flow happy path as plain mono text" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: rail_flow()}))
+
+      flow = html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-flow")
+
+      assert flow |> LazyHTML.text() |> String.trim() == "spec → implement → review"
+      assert flow |> LazyHTML.attribute("class") |> List.first() =~ "font-mono"
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-rail .rail-flow a") |> Enum.to_list() == []
+    end
+
+    test "RE282: Flow row falls back to the queued flow" do
+      queued = %Schemas.Flow{
+        key: "code",
+        edges: [
+          %{from: "start", on: nil, to: "implement"},
+          %{from: "implement", on: :succeeded, to: "review"},
+          %{from: "review", on: :succeeded, to: "done"}
+        ]
+      }
+
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{run_flow: false, queued_flow: queued})
+        )
+
+      assert rail_text(html) =~ "implement → review"
+      assert "Flow" in rail_labels(html)
+    end
+
+    test "RE282: Flow row is hidden with no run flow and no queued flow" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{run_flow: false, queued_flow: nil})
+        )
+
+      refute html =~ "rail-flow"
+      refute "Flow" in rail_labels(html)
+    end
+
+    test "RE282: Flow row is hidden when the flow has no start edge (empty happy path)" do
+      no_start = %Schemas.Flow{key: "broken", edges: [%{from: "a", on: :succeeded, to: "done"}]}
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: no_start}))
+
+      refute html =~ "rail-flow"
+      refute "Flow" in rail_labels(html)
+    end
+
+    test "RE282 change 23: Reassign toggle and picker rows are token-classed with a real hover" do
+      member = %{
+        user_id: 7,
+        user: %Schemas.User{id: 7, name: "Ada Lovelace", email: "ada@example.com", avatar_url: nil}
+      }
+
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(%{}, %{reassign_open: true, members: [member]})
+        )
+
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-reassign-toggle",
+            "#card-drawer-assign-user-7",
+            "#card-drawer-assign-ai"
+          ] do
+        node = LazyHTML.query(doc, selector)
+        assert node |> LazyHTML.attribute("class") |> List.first() =~ "hover:bg-base-200"
+        assert LazyHTML.attribute(node, "style") == []
+      end
+
+      picker = LazyHTML.query(doc, "#card-drawer-reassign-picker")
+      assert picker |> LazyHTML.attribute("class") |> List.first() =~ "border-base-300"
+      assert LazyHTML.attribute(picker, "style") == []
+    end
+
+    test "RE282: non-interactive rail values carry no hover" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{run_flow: rail_flow()}))
+      doc = LazyHTML.from_fragment(html)
+
+      for selector <- [
+            "#card-drawer-rail .rail-status",
+            "#card-drawer-rail .rail-updated",
+            "#card-drawer-rail .rail-flow"
+          ] do
+        class = doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first()
+        refute class =~ "hover:"
+      end
+    end
   end
 
   describe "inline_field/1" do
@@ -1525,7 +1698,9 @@ defmodule RelayWeb.CoreComponentsTest do
   end
 
   describe "section_label/1" do
-    test "renders a mono uppercase label with the default muted token" do
+    # RE282 change 21 — the one micro-label recipe (Relay Card Detail v5.dc.html rail labels:
+    # JetBrains Mono 10px / 600 / letter-spacing 0.6px / uppercase / ink at 0.6 alpha).
+    test "renders the one micro-label recipe with the /60 muted token" do
       assigns = %{}
 
       html =
@@ -1534,9 +1709,9 @@ defmodule RelayWeb.CoreComponentsTest do
         """)
 
       assert html =~ "Owners"
-      assert html =~ "font-mono"
-      assert html =~ "uppercase"
-      assert html =~ "text-base-content/65"
+      assert html =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+      assert html =~ "text-base-content/60"
+      refute html =~ "text-base-content/65"
     end
 
     test "an accent class replaces the default muted token" do
@@ -1549,7 +1724,7 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ "AI Result"
       assert html =~ "text-secondary"
-      refute html =~ "text-base-content/65"
+      refute html =~ "text-base-content/60"
     end
   end
 

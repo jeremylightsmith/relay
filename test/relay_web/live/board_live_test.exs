@@ -744,18 +744,26 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-primary", "Backlog")
     end
 
-    test "the properties rail shows tags and dates", %{conn: conn, card: card, user: user} do
+    test "the properties rail shows tags and the updated time, and no created date", %{
+      conn: conn,
+      card: card,
+      user: user
+    } do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
       assert has_element?(view, "#card-drawer-rail .rail-tags", "spec")
 
+      updated_at = Repo.reload!(card).updated_at
+
       assert has_element?(
                view,
-               "#card-drawer-rail .rail-dates",
-               Calendar.strftime(card.inserted_at, "%b %d, %Y")
+               "#card-drawer-rail .rail-updated",
+               Calendar.strftime(updated_at, "%b %d · %H:%M")
              )
+
+      refute has_element?(view, "#card-drawer-rail", "Created")
     end
 
     test "renders description, spec, plan, and comments as markdown-rendered HTML",
