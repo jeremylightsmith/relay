@@ -14,9 +14,15 @@ defmodule Relay.Markdown do
   their content stripped before it reaches the page. The result is wrapped as a
   `Phoenix.HTML.safe` value for direct `{...}` interpolation in HEEx — templates
   never call `raw/1` on it.
+
+  On the card path, bare URLs are autolinked, every link carries its full URL as a `title`
+  tooltip, a bare GitHub PR/issue URL shows as `repo#number` (`Relay.Markdown.LinkLabel`), and
+  http(s) links open in a new tab (RE324). The docs path does none of this.
   """
 
   use Boundary, deps: []
+
+  alias Relay.Markdown.LinkLabel
 
   @doc """
   Render markdown to a sanitized `Phoenix.HTML.safe` value. `nil` renders to an
@@ -25,15 +31,58 @@ defmodule Relay.Markdown do
   @spec to_html(String.t() | nil) :: Phoenix.HTML.safe()
   def to_html(nil), do: {:safe, ""}
 
+  @card_extension [table: true, autolink: true]
+
   def to_html(markdown) when is_binary(markdown) do
     html =
-      MDEx.to_html!(markdown,
+      markdown
+      |> MDEx.parse_document!(extension: @card_extension)
+      |> MDEx.Document.update_nodes(MDEx.Link, &decorate_link/1)
+      |> MDEx.to_html!(
         render: [unsafe: true],
-        extension: [table: true],
+        extension: @card_extension,
         sanitize: MDEx.Document.default_sanitize_options()
       )
+      |> open_web_links_in_new_tab()
 
     {:safe, html}
+  end
+
+  @doc """
+  The GitHub tree URL for `branch` when `pr_url` is a GitHub pull request URL, else `nil`.
+  The card drawer links a card's branch with it (RE324); see `Relay.Markdown.LinkLabel`.
+  """
+  @spec github_branch_url(String.t() | nil, String.t() | nil) :: String.t() | nil
+  defdelegate github_branch_url(pr_url, branch), to: LinkLabel, as: :branch_url
+
+  # Every link carries its full URL as a native tooltip (`title` is already an allowed generic
+  # attribute in the default sanitizer). A link whose only text *is* its URL — a bare/`<url>`
+  # autolink, or a `www.` autolink whose text omits the scheme — shows GitHub's `repo#number`
+  # shorthand for a PR or issue. Written-out link text is never rewritten.
+  defp decorate_link(%MDEx.Link{url: url, nodes: nodes} = link) do
+    %{link | title: url, nodes: shorten_bare_url(nodes, url)}
+  end
+
+  defp shorten_bare_url([%MDEx.Text{literal: text} = node], url) do
+    label = LinkLabel.label(url)
+
+    if label && text in [url, String.replace(url, ~r{\Ahttps?://}i, "")] do
+      [%{node | literal: label}]
+    else
+      [node]
+    end
+  end
+
+  defp shorten_bare_url(nodes, _url), do: nodes
+
+  # http(s) links open in a new tab so the board stays open; mailto:, #anchor and relative links
+  # keep their behavior. The sanitizer has no per-URL attribute hook (a sanitizer-set `target`
+  # would land on every <a>), so it is added to the sanitized HTML. The match is unambiguous on
+  # ammonia's output: text nodes escape `<`, attribute values escape `"`, so `<a href="http…`
+  # can only be a real anchor whose first attribute is an http(s) href — and comrak always
+  # emits `href` first for a markdown link. The sanitizer already added rel="noopener noreferrer".
+  defp open_web_links_in_new_tab(html) do
+    Regex.replace(~r/<a href="(?=https?:\/\/)/i, html, ~s(<a target="_blank" href="))
   end
 
   # Inline containers join their children with no separator ("**bold**text" stays "boldtext");
@@ -75,7 +124,7 @@ defmodule Relay.Markdown do
   @doc """
   Render docs-site markdown to a sanitized `Phoenix.HTML.safe` value.
 
-  Unlike `to_html/1` (the card path, which must stay unchanged), this enables heading ids
+  Unlike `to_html/1` (the card path), this enables heading ids
   (so the TOC can anchor to them) and GitHub-style alert callouts, and widens the sanitizer
   just enough to keep the heading `id` and the alert-title class. `nil` renders to an empty
   (safe) string.

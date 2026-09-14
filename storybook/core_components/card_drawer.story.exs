@@ -339,7 +339,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           board_slug: "storybook-board",
           card: %{
             story_card()
-            | branch: "rly-12-wire-the-runner",
+            | branch: "rly-12-wire-the-runner-end-to-end-so-an-agent-can-pull-a-card-and-hand-it-back",
               acceptance_criteria:
                 "### 1. The drawer shows all three long fields\n1. Open the card\n2. Expect: Description, Acceptance Criteria, Spec, Plan — in that order\n\n### 2. Acceptance criteria carry the teal accent\n1. Look at the section header\n2. Expect: a teal bar, distinct from Spec's blue and Plan's violet",
               spec:

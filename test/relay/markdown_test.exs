@@ -59,6 +59,86 @@ defmodule Relay.MarkdownTest do
     end
   end
 
+  describe "to_html/1 links (RE324)" do
+    @pr "https://github.com/jeremylightsmith/relay/pull/230"
+
+    defp links(markdown) do
+      {:safe, html} = Markdown.to_html(markdown)
+      html |> LazyHTML.from_fragment() |> LazyHTML.query("a")
+    end
+
+    defp count(markdown, selector) do
+      {:safe, html} = Markdown.to_html(markdown)
+      html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.count()
+    end
+
+    test "a bare URL becomes a link with href, title, target=_blank and rel" do
+      url = "https://relayboard.fly.dev/attachments/e361bdd2/and/a/much/longer/path"
+
+      assert count(
+               "See #{url} now",
+               ~s(a[href="#{url}"][title="#{url}"][target="_blank"][rel="noopener noreferrer"])
+             ) == 1
+    end
+
+    test "a bare GitHub PR URL shows as repo#number with the full URL in the tooltip" do
+      a = links("PR is up: #{@pr}")
+
+      assert LazyHTML.text(a) == "relay#230"
+      assert LazyHTML.attribute(a, "href") == [@pr]
+      assert LazyHTML.attribute(a, "title") == [@pr]
+      assert LazyHTML.attribute(a, "target") == ["_blank"]
+    end
+
+    test "an angle-bracket autolink to a GitHub issue is shortened too" do
+      url = "https://github.com/jeremylightsmith/relay/issues/9#issuecomment-1"
+      assert "<#{url}>" |> links() |> LazyHTML.text() == "relay#9"
+    end
+
+    test "written-out link text is never rewritten, but still gets the tooltip and new tab" do
+      a = links("[my text](#{@pr})")
+
+      assert LazyHTML.text(a) == "my text"
+      assert LazyHTML.attribute(a, "title") == [@pr]
+      assert LazyHTML.attribute(a, "target") == ["_blank"]
+    end
+
+    test "a bare non-GitHub URL keeps its own text" do
+      url = "https://example.com/a/very/long/path"
+      assert url |> links() |> LazyHTML.text() == url
+    end
+
+    test "a www. autolink becomes an http link that opens in a new tab" do
+      a = links("go to www.example.com/x")
+
+      assert LazyHTML.text(a) == "www.example.com/x"
+      assert LazyHTML.attribute(a, "href") == ["http://www.example.com/x"]
+      assert LazyHTML.attribute(a, "target") == ["_blank"]
+    end
+
+    test "mailto, #anchor and relative links get a title but no target" do
+      md = "[mail](mailto:a@example.com) [top](#top) [shot](/attachments/1)"
+
+      assert count(md, "a") == 3
+      assert count(md, "a[title]") == 3
+      assert count(md, "a[target]") == 0
+    end
+
+    test "a URL inside inline code is not a link" do
+      assert count("`#{@pr}`", "a") == 0
+    end
+
+    test "the sanitizer still strips <script> next to a link, and a raw target is dropped" do
+      {:safe, html} =
+        Markdown.to_html(~s|#{@pr} <script>alert('xss')</script> <a href="/x" target="_top">raw</a>|)
+
+      refute html =~ "<script"
+      refute html =~ "alert('xss')"
+      refute html =~ "_top"
+      assert html =~ "relay#230"
+    end
+  end
+
   describe "to_docs_html/1" do
     test "adds heading id + anchor href so the TOC can link to it" do
       {:safe, html} = Markdown.to_docs_html("## Getting started")
