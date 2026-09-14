@@ -36,24 +36,24 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     def active_runs(_board_id), do: Agent.get(name(), & &1.runs)
 
     @impl true
-    def start_run(card_id, flow_key, executor_id) do
-      send(Agent.get(name(), & &1.test), {:start_run, card_id, flow_key, executor_id})
+    def start_run(card_id, flow_key, runner_id) do
+      send(Agent.get(name(), & &1.test), {:start_run, card_id, flow_key, runner_id})
       :ok
     end
 
     @impl true
-    def resume_run(run_id, executor_id) do
-      send(Agent.get(name(), & &1.test), {:resume_run, run_id, executor_id})
+    def resume_run(run_id, runner_id) do
+      send(Agent.get(name(), & &1.test), {:resume_run, run_id, runner_id})
       :ok
     end
   end
 
   setup do
     start_capacity!()
-    # Hardcoded executor ids would collide with a concurrent test's real Executor rows; these are
+    # Hardcoded runner ids would collide with a concurrent test's real Runner rows; these are
     # unique per test and live only in this test's capacity table. Sorted because
     # Scheduler.take_slot/3's greedy :any branch picks the LOWEST id — the pinned-debit test below
-    # pins the higher one so a greedy regression changes which executor the fresh pull lands on.
+    # pins the higher one so a greedy regression changes which runner the fresh pull lands on.
     [exec_a, exec_b] =
       Enum.sort([System.unique_integer([:positive]), System.unique_integer([:positive])])
 
@@ -134,7 +134,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert card_id == card.id
   end
 
-  test "a capacity-parked (:executor_gone) run resumes once its card is eligible, not re-pulled fresh (criterion 4, scoped to scheduler-owned parks)",
+  test "a capacity-parked (:runner_gone) run resumes once its card is eligible, not re-pulled fresh (criterion 4, scoped to scheduler-owned parks)",
        %{exec_a: exec_a} do
     %{board: board, works: works} = board_with_flow(:ready)
     resumed = insert(:card, stage: works, status: :working)
@@ -146,8 +146,8 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         status: :parked,
         flow_key: "spec",
         isolation: :shared_clean,
-        pinned_executor_id: nil,
-        parked_reason: :executor_gone
+        pinned_runner_id: nil,
+        parked_reason: :runner_gone
       }
     ])
 
@@ -170,7 +170,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         status: :parked,
         flow_key: "spec",
         isolation: :shared_clean,
-        pinned_executor_id: nil,
+        pinned_runner_id: nil,
         parked_reason: :needs_input
       }
     ])
@@ -187,9 +187,9 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     other_card = insert(:card, stage: pulls, status: :ready)
 
     # A running run (on some other card) already holds the board's only advertised
-    # shared_clean slot — the executor's next heartbeat hasn't caught up yet.
+    # shared_clean slot — the runner's next heartbeat hasn't caught up yet.
     start_engine([
-      %{id: 55, card_id: -1, status: :running, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+      %{id: 55, card_id: -1, status: :running, flow_key: "spec", isolation: :shared_clean, pinned_runner_id: nil}
     ])
 
     pid = start_server(board.id)
@@ -204,7 +204,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     %{board: board, card: card} = board_with_flow(:ready)
 
     start_engine([
-      %{id: 55, card_id: -1, status: :parked, flow_key: "spec", isolation: :shared_clean, pinned_executor_id: nil}
+      %{id: 55, card_id: -1, status: :parked, flow_key: "spec", isolation: :shared_clean, pinned_runner_id: nil}
     ])
 
     pid = start_server(board.id)
@@ -219,7 +219,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     %{board: board, pulls: pulls} = board_with_flow(:ready, :exclusive)
     other_card = insert(:card, stage: pulls, status: :ready)
 
-    # A pre-first-claim exclusive run carries no pin (pinned_executor_id nil), so it
+    # A pre-first-claim exclusive run carries no pin (pinned_runner_id nil), so it
     # still debits greedily against :any — the aggregate slot count is what matters.
     start_engine([
       %{
@@ -228,8 +228,8 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         status: :running,
         flow_key: "spec",
         isolation: :exclusive,
-        pinned_executor_id: nil,
-        pinned_executor_name: nil
+        pinned_runner_id: nil,
+        pinned_runner_name: nil
       }
     ])
 
@@ -241,12 +241,12 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert Repo.get!(Card, other_card.id).status == :queued
   end
 
-  test "an in-flight pinned :exclusive run debits its pinned executor, not the lowest-id one",
+  test "an in-flight pinned :exclusive run debits its pinned runner, not the lowest-id one",
        %{exec_a: exec_a, exec_b: exec_b} do
-    # Two executors advertise one exclusive slot each. The running run is pinned to the
-    # HIGHER-id executor (exec_b, since `setup` sorts the pair). A pin-targeted debit spends
+    # Two runners advertise one exclusive slot each. The running run is pinned to the
+    # HIGHER-id runner (exec_b, since `setup` sorts the pair). A pin-targeted debit spends
     # exec_b, so the fresh pull lands on exec_a. A greedy-:any debit would instead spend
-    # exec_a (the lowest id) and land the fresh pull on exec_b — so the executor the fresh card
+    # exec_a (the lowest id) and land the fresh pull on exec_b — so the runner the fresh card
     # lands on is what distinguishes the two behaviors.
     %{board: board, card: card} = board_with_flow(:ready, :exclusive)
 
@@ -257,8 +257,8 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         status: :running,
         flow_key: "spec",
         isolation: :exclusive,
-        pinned_executor_id: exec_b,
-        pinned_executor_name: "pinned"
+        pinned_runner_id: exec_b,
+        pinned_runner_name: "pinned"
       }
     ])
 
@@ -272,7 +272,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     assert card_id == card.id
   end
 
-  test "a pinned :exclusive run whose executor is gone falls back to debiting :any", %{exec_a: exec_a, exec_b: exec_b} do
+  test "a pinned :exclusive run whose runner is gone falls back to debiting :any", %{exec_a: exec_a, exec_b: exec_b} do
     # reserve_slot/2's `:none -> debit_any` branch: the run is pinned to exec_b, but exec_b
     # advertises no capacity (it went away). take_slot({:pinned, exec_b}) returns :none, so the
     # run falls back to a greedy :any debit and still consumes the one slot exec_a has — leaving
@@ -287,26 +287,26 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         status: :running,
         flow_key: "spec",
         isolation: :exclusive,
-        pinned_executor_id: exec_b,
-        pinned_executor_name: "pinned"
+        pinned_runner_id: exec_b,
+        pinned_runner_name: "pinned"
       }
     ])
 
     pid = start_server(board.id)
-    # Only exec_a advertises capacity; the pinned executor (exec_b) is absent from the map.
+    # Only exec_a advertises capacity; the pinned runner (exec_b) is absent from the map.
     :ok = Capacity.put(exec_a, %{shared_clean: 0, exclusive: 1})
     :ok = Server.reconcile_now(pid)
 
     # The pinned run debits exec_a via the :any fallback, so no exclusive slot remains for the
     # ready card — it stays queued rather than dispatching.
-    refute_receive {:start_run, _card_id, _flow, _executor}, 300
+    refute_receive {:start_run, _card_id, _flow, _runner}, 300
   end
 
   test "a :running run whose flow was deleted (isolation: nil) leaves capacity untouched", %{exec_a: exec_a} do
     %{board: board, card: card} = board_with_flow(:ready)
 
     start_engine([
-      %{id: 55, card_id: -1, status: :running, flow_key: "gone", isolation: nil, pinned_executor_id: nil}
+      %{id: 55, card_id: -1, status: :running, flow_key: "gone", isolation: nil, pinned_runner_id: nil}
     ])
 
     pid = start_server(board.id)

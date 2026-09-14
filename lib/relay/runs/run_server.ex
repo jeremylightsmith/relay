@@ -719,7 +719,7 @@ defmodule Relay.Runs.RunServer do
   # The scheduler skips `:failed` cards by rule, so a card whose last run died is
   # never silently re-pulled.
   #
-  # Unlike bin/relay's flag() (which wraps the detail in "[auto] stage failed: …
+  # Unlike ./relay's flag() (which wraps the detail in "[auto] stage failed: …
   # a human needs to look" framing), this posts the bare detail.
   #
   # `apply_decision({:fail, _})` already closed the run in this transaction and the caller

@@ -1,6 +1,6 @@
 defmodule RelayWeb.Api.NodeJobController do
   @moduledoc """
-  The server↔executor transport (ADR 0006 card 04): a remote executor claims
+  The server↔runner transport (ADR 0006 card 04): a remote runner claims
   node-jobs (long-poll) and reports their outcomes. Board-key auth, same as the
   rest of `/api`. Pure transport over `Relay.Runs` (W5) — no scheduling or
   dispatch policy lives here.
@@ -10,7 +10,7 @@ defmodule RelayWeb.Api.NodeJobController do
   alias Relay.Runs
   alias Relay.Runs.Capacity
   alias Relay.Talk
-  alias Schemas.Executor
+  alias Schemas.Runner
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -23,33 +23,40 @@ defmodule RelayWeb.Api.NodeJobController do
   @run_event_tags [:run_started, :node_started, :node_finished, :run_finished, :run_changed, :run_parked, :run_resumed]
 
   @doc """
-  Claims the next node-job for the advertising executor. Upserts the executor
+  Claims the next node-job for the advertising runner. Upserts the runner
   (claim doubles as a liveness touch), then atomically claims an eligible job.
   Long-polls up to ~25s on `board:<id>:runs` when nothing is immediately
   claimable; `?wait=0` degrades to short-poll (immediate 204).
 
-  RE311 — the claim's `capacity` is the executor's LIVE FREE count and its `held` is the set of
+  RE311 — the claim's `capacity` is the runner's LIVE FREE count and its `held` is the set of
   per-card worktrees it is holding right now. Both are request-scoped: they are normalized
   through the domain's one normalizer and passed to `Relay.Runs.claim_next_job/3` as arguments,
-  and NEITHER is written to the executor row. The heartbeat owns the durable roster state.
+  and NEITHER is written to the runner row. The heartbeat owns the durable roster state.
   """
   def claim(conn, params) do
-    board = conn.assigns.current_board
-
-    with {:ok, exec_attrs} <- executor_attrs(params),
-         {:ok, executor} <- Runs.upsert_executor(board, exec_attrs) do
-      free = Capacity.normalize(Map.get(params, "capacity"))
-      held = Executor.normalize_held(Map.get(params, "held"))
-      claim_for(conn, board, executor, params, free, held)
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> claim_current(conn, params)
     end
   end
 
-  defp claim_for(conn, board, executor, params, free, held) do
-    if Runs.executor_outdated?(executor) do
-      refuse_outdated(conn, executor)
+  defp claim_current(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, exec_attrs} <- runner_attrs(params),
+         {:ok, runner} <- Runs.upsert_runner(board, exec_attrs) do
+      free = Capacity.normalize(Map.get(params, "capacity"))
+      held = Runner.normalize_held(Map.get(params, "held"))
+      claim_for(conn, board, runner, params, free, held)
+    end
+  end
+
+  defp claim_for(conn, board, runner, params, free, held) do
+    if Runs.runner_outdated?(runner) do
+      refuse_outdated(conn, runner)
     else
-      case Runs.claim_next_job(executor, free, held) do
-        {:ok, nil} -> maybe_wait(conn, board, executor, params, free, held)
+      case Runs.claim_next_job(runner, free, held) do
+        {:ok, nil} -> maybe_wait(conn, board, runner, params, free, held)
         {:ok, job} -> json(conn, granted(job))
       end
     end
@@ -58,7 +65,7 @@ defmodule RelayWeb.Api.NodeJobController do
   # RE268 — a claim is where a talk turn becomes `:claimed`. It happens here rather than in
   # `Relay.Runs.claim_next_job/1` so the run lifecycle keeps no Talk knowledge: it claims a job,
   # and only `Relay.Talk` knows a job can carry a turn. A refusal (the turn was Stopped in the
-  # window before the executor noticed) is not an error the executor can act on — the revoke it
+  # window before the runner noticed) is not an error the runner can act on — the revoke it
   # collects on its next heartbeat is what ends the work.
   defp granted(%Schemas.NodeJob{kind: :talk} = job) do
     Talk.mark_claimed(job)
@@ -68,41 +75,41 @@ defmodule RelayWeb.Api.NodeJobController do
   defp granted(job), do: claim_payload(job)
 
   @doc """
-  The executor's periodic beat (RLY-164): advertises capacity and collects revokes.
+  The runner's periodic beat (RLY-164): advertises capacity and collects revokes.
 
-  This is the single place an executor announces itself. It does two jobs the pull model
+  This is the single place a runner announces itself. It does two jobs the pull model
   otherwise has no channel for:
 
     * **Capacity.** `Relay.Runs.Capacity` is what the scheduler reads to decide whether to
       dispatch at all, and it is deliberately lost on app restart. Before this route existed
-      it was fed only by `/api/board/heartbeat`, which `relay execute` never calls — so
-      starting an executor and enabling a flow dispatched nothing, and the cutover needed a
-      hand-run `curl`. The `capacity` here is the executor's *configured* total, never a live
+      it was fed only by `/api/board/heartbeat`, which `relay start` never calls — so
+      starting a runner and enabling a flow dispatched nothing, and the cutover needed a
+      hand-run `curl`. The `capacity` here is the runner's *configured* total, never a live
       free count: `Scheduler.Server.build_snapshot/1` debits in-flight `:running` runs itself,
       so a decremented count would double-debit every running run.
 
-      This route is also the SINGLE WRITER of `executors.capacity` (RE311): the claim's
+      This route is also the SINGLE WRITER of `runners.capacity` (RE311): the claim's
       `capacity` is a live free count with a different meaning, and one column carrying both is
       what made the roster flip-flop between 2 and 0 while the board sat deadlocked.
 
     * **Revokes.** Under the pull model `dispatcher().revoke/1` is a no-op, so taking the
       baton (ADR 0004, via `park_claimed/1`) or cancelling from the run panel could not stop a
-      running agent — the executor only found out on its next outcome POST, 20+ minutes for a
+      running agent — the runner only found out on its next outcome POST, 20+ minutes for a
       Code `implement` node. The beat reports the jobs it believes it is running; the reply
-      names those the server no longer considers live, and the executor kills them.
+      names those the server no longer considers live, and the runner kills them.
 
-    * **Capabilities.** The beat may carry `capabilities` — what this executor can resolve
+    * **Capabilities.** The beat may carry `capabilities` — what this runner can resolve
       by name (`%{"agents" => [...], "skills" => [...]}`) — which `Relay.Runs.preflight_flow/1`
       reads to answer "will this flow run here?" before a human enables it. It rides
       send-on-change, not every beat; the reply's `want_capabilities` asks for a resend when
       the server holds none.
 
-    * **Version.** The beat still succeeds for an outdated executor (RLY-184) — it is how that
+    * **Version.** The beat still succeeds for an outdated runner (RLY-184) — it is how that
       process stays visible on the roster and how revokes still reach it. The reply carries
-      `executor_outdated` / `required_version` so an executor idling with nothing to claim
-      still learns why. The reply also carries `latest_executor_version` (RE185) — the
-      `EXECUTOR_VERSION` of the `bin/relay` this app itself serves at `/api/scaffold` (RE304) —
-      which an executor with `auto_update` on uses to update itself.
+      `runner_outdated` / `required_version` so a runner idling with nothing to claim
+      still learns why. The reply also carries `latest_runner_version` (RE185) — the
+      `RUNNER_VERSION` of the `./relay` this app itself serves at `/api/scaffold` (RE304) —
+      which a runner with `auto_update` on uses to update itself.
 
     * **Liveness (RLY-226).** The same `running` list is a positive signal: each id maps to a
       card, and `Relay.Runs.refresh_running_card_liveness/2` stamps `agent_heartbeat_at` fresh on
@@ -114,20 +121,27 @@ defmodule RelayWeb.Api.NodeJobController do
       `:stopped` before staleness regardless.
 
   Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
-  board's executor can never be told to kill another's work.
+  board's runner can never be told to kill another's work.
   """
   def heartbeat(conn, params) do
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> heartbeat_current(conn, params)
+    end
+  end
+
+  defp heartbeat_current(conn, params) do
     board = conn.assigns.current_board
 
-    with {:ok, exec_attrs} <- executor_attrs(params),
-         {:ok, executor} <- Runs.upsert_executor(board, heartbeat_attrs(params, exec_attrs)) do
+    with {:ok, exec_attrs} <- runner_attrs(params),
+         {:ok, runner} <- Runs.upsert_runner(board, heartbeat_attrs(params, exec_attrs)) do
       running = Map.get(params, "running", [])
-      advertise_capacity(executor, Map.get(params, "capacity"))
-      # Recover the other direction too (RLY-170): a job this executor still HOLDS but is no
+      advertise_capacity(runner, Map.get(params, "capacity"))
+      # Recover the other direction too (RLY-170): a job this runner still HOLDS but is no
       # longer running — because it restarted and lost its in-process job state — is stranded
-      # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-executor
-      # reaper (this executor is alive). The absence of a job from `running` is the signal.
-      :ok = Runs.requeue_orphaned_jobs(board, executor, running)
+      # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-runner
+      # reaper (this runner is alive). The absence of a job from `running` is the signal.
+      :ok = Runs.requeue_orphaned_jobs(board, runner, running)
 
       # RLY-226: the positive complement of `revoked_among/2` in the reply below — stamp
       # `agent_heartbeat_at` fresh on the cards whose reported job is still active, so a
@@ -138,42 +152,42 @@ defmodule RelayWeb.Api.NodeJobController do
       json(conn, %{
         revoked: Runs.revoked_among(board, running),
         # RE311: the ref-keyed release channel, replacing RLY-218's run-id-keyed
-        # `bound_runs`/`release_runs`. The executor reports every per-card worktree it holds
+        # `bound_runs`/`release_runs`. The runner reports every per-card worktree it holds
         # (`held`), and this names the ones whose card's runs have all ended server-side, with
         # the status that chooses remove (done/cancelled) vs retain (failed). Run-id keying
         # structurally could not see a worktree recovered after a restart — its `run_id` is
         # unknown — which is precisely how a cancelled run's slot leaked forever.
-        release_held: Runs.releasable_held(board, Executor.normalize_held(Map.get(params, "held"))),
-        # RLY-182: `capabilities` is send-on-change, so an executor that already sent one
-        # never sends it again — but the row can lose it (recreated row, or an executor
+        release_held: Runs.releasable_held(board, Runner.normalize_held(Map.get(params, "held"))),
+        # RLY-182: `capabilities` is send-on-change, so a runner that already sent one
+        # never sends it again — but the row can lose it (recreated row, or a runner
         # predating this change), which would strand preflight on a permanent false
-        # "missing agents" alarm. `upsert_executor/2` returns the post-upsert row, so a
+        # "missing agents" alarm. `upsert_runner/2` returns the post-upsert row, so a
         # beat that DID carry capabilities has already stored them and this reads false.
-        want_capabilities: is_nil(executor.capabilities),
-        executor_outdated: Runs.executor_outdated?(executor),
-        required_version: Runs.min_executor_version(),
+        want_capabilities: is_nil(runner.capabilities),
+        runner_outdated: Runs.runner_outdated?(runner),
+        required_version: Runs.min_runner_version(),
         # RE185: the floor above says what is REFUSED; this says what can be FETCHED — the
-        # `EXECUTOR_VERSION` of the `bin/relay` this app serves at /api/scaffold (RE304), so it
-        # cannot lie. `nil` when the scaffold has not been built, which the executor reads as
+        # `RUNNER_VERSION` of the `./relay` this app serves at /api/scaffold (RE304), so it
+        # cannot lie. `nil` when the scaffold has not been built, which the runner reads as
         # "never auto-update".
-        latest_executor_version: Runs.latest_executor_version()
+        latest_runner_version: Runs.latest_runner_version()
       })
     end
   end
 
-  # RLY-162: `Map.get/3` returns whatever the client sent, so a non-map `executor` made
-  # `Map.put/3` raise BadMapError → a 500 on the executor's front door. Reject the shape
+  # RLY-162: `Map.get/3` returns whatever the client sent, so a non-map `runner` made
+  # `Map.put/3` raise BadMapError → a 500 on the runner's front door. Reject the shape
   # here (a request-shape concern) rather than in Runs, which normalizes permissively.
   # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
   # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
   # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
-  defp executor_attrs(params) do
-    case Map.get(params, "executor", %{}) do
-      executor when is_map(executor) ->
-        {:ok, Map.put(executor, "capabilities", Map.get(params, "capabilities"))}
+  defp runner_attrs(params) do
+    case Map.get(params, "runner", %{}) do
+      runner when is_map(runner) ->
+        {:ok, Map.put(runner, "capabilities", Map.get(params, "capabilities"))}
 
       _ ->
-        {:error, :invalid_executor}
+        {:error, :invalid_runner}
     end
   end
 
@@ -184,44 +198,64 @@ defmodule RelayWeb.Api.NodeJobController do
     |> Map.put("held", Map.get(params, "held"))
   end
 
-  # RLY-184. Rendered here rather than through FallbackController because the two version
-  # numbers are per-request data, not a static string — the executor logs both of them, and a
-  # message that cannot name the required version cannot tell anyone what to do about it.
-  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
-  defp refuse_outdated(conn, executor) do
-    required = Runs.min_executor_version()
-    running = executor.version || "none"
+  # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
+  # (`claim_refused.outdated`), because ./relay branches on it to tell a verdict from a job.
+  @outdated_code "runner_outdated"
 
+  # RE319 — the ONE deliberate mention of the retired wire name. The rename was a hard cut, so a
+  # body carrying no `runner` object but an `executor` object comes from a process started before
+  # it. It is never served: it gets the outdated refusal with a message that names the fix, so
+  # the reason shows up in that process's own log instead of as a bare 422. A body that carries
+  # `runner` is current whatever else it carries.
+  defp pre_rename(%{"runner" => _runner}), do: :current
+  defp pre_rename(%{"executor" => legacy}) when is_map(legacy), do: {:pre_rename, legacy["version"]}
+  defp pre_rename(_params), do: :current
+
+  defp refuse_pre_rename(conn, version) do
+    refuse(
+      conn,
+      version,
+      "this runner predates the executor→runner rename — install ./relay (relay update) and restart it with ./relay start"
+    )
+  end
+
+  # RLY-184. Rendered here rather than through FallbackController because the two version
+  # numbers are per-request data, not a static string — the runner logs both of them, and a
+  # message that cannot name the required version cannot tell anyone what to do about it.
+  defp refuse_outdated(conn, runner) do
+    required = Runs.min_runner_version()
+
+    refuse(
+      conn,
+      runner.version,
+      "runner version #{runner.version || "none"} is below the required minimum #{required} — " <>
+        "restart it to pick up current code"
+    )
+  end
+
+  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
+  defp refuse(conn, running, message) do
     conn
     |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "executor_outdated",
-        required: required,
-        running: executor.version,
-        message:
-          "executor version #{running} is below the required minimum #{required} — " <>
-            "restart it to pick up current code"
-      }
-    })
+    |> json(%{error: %{code: @outdated_code, required: Runs.min_runner_version(), running: running, message: message}})
   end
 
   # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/2
   # normalizes (unknown classes dropped, bad values zeroed) — the controller must not
   # shape capacity itself, and must never atomize request keys.
-  defp advertise_capacity(executor, capacity) when is_map(capacity) do
-    Capacity.put(executor.id, capacity)
+  defp advertise_capacity(runner, capacity) when is_map(capacity) do
+    Capacity.put(runner.id, capacity)
   end
 
-  defp advertise_capacity(_executor, _capacity), do: :ok
+  defp advertise_capacity(_runner, _capacity), do: :ok
 
   @doc """
   Reports a node-job outcome, completing the job and waking the engine to route
   it. `outcome` must be in the closed set (else 422 `unknown_outcome`); the job
   must still be held by a live claim (else 409 `conflict`). Replies with the
   run's post-outcome `run_state` (running|parked|done|failed|cancelled) so the
-  executor knows whether to keep or free an exclusive worktree slot bound to
-  this run (ExecutorPool.release, bin/relay). `no_changes` (RE310) is the
+  runner knows whether to keep or free an exclusive worktree slot bound to
+  this run (RunnerPool.release, ./relay). `no_changes` (RE310) is the
   node's assertion that its work was already committed; the engine honours it
   only when this node's own history proves it (see `Relay.Runs.RunServer`).
   """
@@ -251,9 +285,9 @@ defmodule RelayWeb.Api.NodeJobController do
       detail: params["detail"],
       git_sha: params["git_sha"],
       session_id: params["session_id"],
-      # RE310: the agent's assertion that no changes were needed. An executor predating the flag
+      # RE310: the agent's assertion that no changes were needed. A runner predating the flag
       # omits the key, which reads false — byte-identical to today's behaviour, which is why
-      # `@min_executor_version` is deliberately NOT raised for this change.
+      # `@min_runner_version` is deliberately NOT raised for this change.
       no_changes: params["no_changes"] == true
     }
 
@@ -276,7 +310,7 @@ defmodule RelayWeb.Api.NodeJobController do
 
   defp parse_outcome(_value), do: {:error, :unknown_outcome}
 
-  defp maybe_wait(conn, board, executor, params, free, held) do
+  defp maybe_wait(conn, board, runner, params, free, held) do
     running = List.wrap(params["running"])
 
     cond do
@@ -285,26 +319,26 @@ defmodule RelayWeb.Api.NodeJobController do
 
       # Nothing this request could ever be granted → a full 25s long-poll would be a wasted
       # connection. RE311: read from the REQUEST, not the row (the row now carries the
-      # configured total, which would make this always false), and only when the executor also
+      # configured total, which would make this always false), and only when the runner also
       # declares no held worktree — a job for a held ref is claimable at zero free capacity.
       nothing_claimable?(free, held) ->
         no_work(conn, board, running)
 
       true ->
         Runs.subscribe(board.id)
-        wait_loop(conn, board, executor, running, free, held, System.monotonic_time(:millisecond) + @long_poll_ms)
+        wait_loop(conn, board, runner, running, free, held, System.monotonic_time(:millisecond) + @long_poll_ms)
     end
   end
 
-  # RE268 — a revocation reaching the executor is what actually kills a running `claude -p`, and
+  # RE268 — a revocation reaching the runner is what actually kills a running `claude -p`, and
   # until now it only rode the 15s heartbeat: pressing Stop left output streaming for up to 15s
   # (measured ~13). The claim long-poll is already open and already woken by run events, so it
   # carries revocations too. `revoked` is the SAME key and the same `Runs.revoked_among/2` source
-  # the heartbeat reply uses — the executor applies both through one handler, so there is no
+  # the heartbeat reply uses — the runner applies both through one handler, so there is no
   # second notion of "what is dead".
   #
-  # Only the no-job reply carries it. A granted job's payload shape is pinned by the executor
-  # contract and left untouched; an executor being handed work is not the case Stop cares about.
+  # Only the no-job reply carries it. A granted job's payload shape is pinned by the runner
+  # contract and left untouched; a runner being handed work is not the case Stop cares about.
   defp no_work(conn, board, running) do
     case Runs.revoked_among(board, running) do
       [] -> send_resp(conn, 204, "")
@@ -313,12 +347,12 @@ defmodule RelayWeb.Api.NodeJobController do
   end
 
   defp nothing_claimable?(free, held) do
-    Enum.all?(free, fn {_class, n} -> not (is_integer(n) and n > 0) end) and Executor.active_held_refs(held) == []
+    Enum.all?(free, fn {_class, n} -> not (is_integer(n) and n > 0) end) and Runner.active_held_refs(held) == []
   end
 
   # Retry the atomic claim whenever a run event fires; anything else in the
   # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
-  defp wait_loop(conn, board, executor, running, free, held, deadline) do
+  defp wait_loop(conn, board, runner, running, free, held, deadline) do
     timeout = deadline - System.monotonic_time(:millisecond)
 
     if timeout <= 0 do
@@ -326,13 +360,13 @@ defmodule RelayWeb.Api.NodeJobController do
     else
       receive do
         run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
-          case Runs.claim_next_job(executor, free, held) do
+          case Runs.claim_next_job(runner, free, held) do
             # Woken with nothing to grant is the Stop case: `Talk.stop_turn/1` broadcasts a run
             # event precisely so this loop re-checks. Return as soon as something is revoked,
             # rather than sitting out the rest of the 25s with a kill order in hand.
             {:ok, nil} ->
               case Runs.revoked_among(board, running) do
-                [] -> wait_loop(conn, board, executor, running, free, held, deadline)
+                [] -> wait_loop(conn, board, runner, running, free, held, deadline)
                 revoked -> json(conn, %{revoked: revoked})
               end
 
@@ -345,8 +379,8 @@ defmodule RelayWeb.Api.NodeJobController do
     end
   end
 
-  # Never leaks worktree paths — those are executor-local. `kind` rides on BOTH shapes (RE268):
-  # the executor branches on it, and pinning it in the fixture is what makes a rename break CI
+  # Never leaks worktree paths — those are runner-local. `kind` rides on BOTH shapes (RE268):
+  # the runner branches on it, and pinning it in the fixture is what makes a rename break CI
   # rather than production.
   defp claim_payload(%Schemas.NodeJob{kind: :talk} = job) do
     payload = job.payload
@@ -365,7 +399,7 @@ defmodule RelayWeb.Api.NodeJobController do
   end
 
   # Serialises the payload W5 stored (raw run + resolved vars); {ref}/{branch} expansion stays
-  # executor-side.
+  # runner-side.
   defp claim_payload(job) do
     payload = job.payload
 

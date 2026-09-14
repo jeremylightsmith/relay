@@ -48,12 +48,12 @@ defmodule Relay.Runs.SchedulerTest do
       status: Keyword.get(opts, :status, :parked),
       flow_key: Keyword.get(opts, :flow_key, "f"),
       isolation: Keyword.get(opts, :isolation, :shared_clean),
-      pinned_executor_id: Keyword.get(opts, :pinned_executor_id),
-      parked_reason: Keyword.get(opts, :parked_reason, :executor_gone)
+      pinned_runner_id: Keyword.get(opts, :pinned_runner_id),
+      parked_reason: Keyword.get(opts, :parked_reason, :runner_gone)
     }
   end
 
-  # one executor with n free shared_clean and m free exclusive slots
+  # one runner with n free shared_clean and m free exclusive slots
   defp cap(entries), do: Map.new(entries)
   defp slots(shared, excl), do: %{shared_clean: shared, exclusive: excl}
 
@@ -67,7 +67,7 @@ defmodule Relay.Runs.SchedulerTest do
   end
 
   describe "fresh pulls" do
-    test "pulls a ready card onto a named executor, consuming its slot" do
+    test "pulls a ready card onto a named runner, consuming its slot" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
@@ -155,7 +155,7 @@ defmodule Relay.Runs.SchedulerTest do
 
   # RLY-138 / W12: the first time two flows are enabled at once. Spec and Plan are both
   # :shared_clean, so from the Plan cutover they draw from ONE per-isolation-class budget
-  # (Capacity keys executor_id => %{shared_clean: n, exclusive: n} — never per flow). Combined
+  # (Capacity keys runner_id => %{shared_clean: n, exclusive: n} — never per flow). Combined
   # with rightmost-works_in-first (scheduler.ex:38-45), Plan preempts Spec for shared slots.
   # That is intended WIP discipline — drain the right of the board first — and these cases pin
   # it as a decision rather than an emergent surprise on a scarce-capacity day.
@@ -241,7 +241,7 @@ defmodule Relay.Runs.SchedulerTest do
   end
 
   describe "resume rules" do
-    test "a parked :executor_gone run resumes once its card is eligible again (criterion 3, scoped to scheduler-owned parks)" do
+    test "a parked :runner_gone run resumes once its card is eligible again (criterion 3, scoped to scheduler-owned parks)" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
@@ -346,41 +346,41 @@ defmodule Relay.Runs.SchedulerTest do
     end
   end
 
-  describe "executor affinity (exclusive)" do
-    test "an exclusive resume parks when its pinned executor has no free exclusive slot" do
+  describe "runner affinity (exclusive)" do
+    test "an exclusive resume parks when its pinned runner has no free exclusive slot" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
           cards: [card(20, 2, status: :working)],
           flows: [flow("f", 1, 2, isolation: :exclusive)],
-          runs: [run(99, 20, isolation: :exclusive, pinned_executor_id: 5)],
-          # executor 5 is full on exclusive; executor 7 has room but is NOT the pin
+          runs: [run(99, 20, isolation: :exclusive, pinned_runner_id: 5)],
+          # runner 5 is full on exclusive; runner 7 has room but is NOT the pin
           capacity: cap([{5, slots(0, 0)}, {7, slots(0, 1)}])
         )
 
       assert %Plan{dispatches: []} = Scheduler.plan(s)
     end
 
-    test "an exclusive resume goes only to its pinned executor when it has a slot" do
+    test "an exclusive resume goes only to its pinned runner when it has a slot" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
           cards: [card(20, 2, status: :working)],
           flows: [flow("f", 1, 2, isolation: :exclusive)],
-          runs: [run(99, 20, isolation: :exclusive, pinned_executor_id: 5)],
+          runs: [run(99, 20, isolation: :exclusive, pinned_runner_id: 5)],
           capacity: cap([{5, slots(0, 1)}, {7, slots(0, 1)}])
         )
 
       assert %Plan{dispatches: [{:resume, 99, 5}]} = Scheduler.plan(s)
     end
 
-    test "fresh exclusive work is placed greedily on any executor with a free exclusive slot" do
+    test "fresh exclusive work is placed greedily on any runner with a free exclusive slot" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
           cards: [card(10, 1)],
           flows: [flow("f", 1, 2, isolation: :exclusive)],
-          # executor 5 exclusive-full, executor 7 has a slot → greedy lands on 7
+          # runner 5 exclusive-full, runner 7 has a slot → greedy lands on 7
           capacity: cap([{5, slots(9, 0)}, {7, slots(0, 1)}])
         )
 
@@ -436,7 +436,7 @@ defmodule Relay.Runs.SchedulerTest do
       assert %Plan{dispatches: [{:start, 10, "f", 7}], to_queue: [11]} = Scheduler.plan(s)
     end
 
-    test "greedy fresh placement spreads across executors in id order" do
+    test "greedy fresh placement spreads across runners in id order" do
       s =
         snap(
           stages: [stage(1), stage(2, position: 2)],
@@ -445,7 +445,7 @@ defmodule Relay.Runs.SchedulerTest do
           capacity: cap([{7, slots(1, 0)}, {3, slots(1, 0)}])
         )
 
-      # executor ids ascending: 3 fills first, then 7
+      # runner ids ascending: 3 fills first, then 7
       assert %Plan{dispatches: [{:start, 10, "f", 3}, {:start, 11, "f", 7}]} = Scheduler.plan(s)
     end
   end
@@ -502,7 +502,7 @@ defmodule Relay.Runs.SchedulerTest do
     end
   end
 
-  # RE297 fixture: a parked `:executor_gone` run sitting in flow "f"'s works-in lane (stage 2)
+  # RE297 fixture: a parked `:runner_gone` run sitting in flow "f"'s works-in lane (stage 2)
   # on an agent-held, non-blocked card — so `Policy.resumable?/2` says yes and the ONLY thing
   # that can stop the resume is `take_slot/3`. That is exactly the shape a refusal reports.
   defp refusal_snap(run_opts, capacity, opts \\ []) do
@@ -523,10 +523,10 @@ defmodule Relay.Runs.SchedulerTest do
                Scheduler.plan(s)
     end
 
-    test "an exclusive run with no executor pin is refused :pin_unresolved" do
+    test "an exclusive run with no runner pin is refused :pin_unresolved" do
       s =
         refusal_snap(
-          [isolation: :exclusive, pinned_executor_id: nil],
+          [isolation: :exclusive, pinned_runner_id: nil],
           cap([{7, slots(0, 1)}]),
           isolation: :exclusive
         )
@@ -534,22 +534,22 @@ defmodule Relay.Runs.SchedulerTest do
       assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :pin_unresolved}]} = Scheduler.plan(s)
     end
 
-    test "an exclusive run pinned to an executor absent from the capacity map is :pinned_executor_absent" do
+    test "an exclusive run pinned to a runner absent from the capacity map is :pinned_runner_absent" do
       s =
         refusal_snap(
-          [isolation: :exclusive, pinned_executor_id: 5],
+          [isolation: :exclusive, pinned_runner_id: 5],
           cap([{7, slots(0, 1)}]),
           isolation: :exclusive
         )
 
-      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :pinned_executor_absent}]} =
+      assert %Plan{dispatches: [], refusals: [%{run_id: 99, reason: :pinned_runner_absent}]} =
                Scheduler.plan(s)
     end
 
-    test "an exclusive run whose pinned executor is present but full is :no_free_slot, not absent" do
+    test "an exclusive run whose pinned runner is present but full is :no_free_slot, not absent" do
       s =
         refusal_snap(
-          [isolation: :exclusive, pinned_executor_id: 7],
+          [isolation: :exclusive, pinned_runner_id: 7],
           cap([{7, slots(3, 0)}]),
           isolation: :exclusive
         )

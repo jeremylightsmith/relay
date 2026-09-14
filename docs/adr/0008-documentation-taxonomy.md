@@ -50,7 +50,7 @@ current-state, de-dup rules, not this carve-out.)
 
 | Home | Reader — and *where they are* | Kind of content | Lifecycle | Published |
 | --- | --- | --- | --- | --- |
-| `relay.md` | a **driver agent in another repo's context** | how to drive a card via `bin/relay` | current; tiny; authored into a consuming repo by `/relay-onboard` | in every consuming repo |
+| `relay.md` | a **driver agent in another repo's context** | how to drive a card via `./relay` | current; tiny; authored into a consuming repo by `/relay-onboard` | in every consuming repo |
 | `priv/docs/*` | an integrator/operator **browsing a URL** | product + integration reference & onboarding | current | public site |
 | `docs/architecture/*` | a **contributor editing this repo** | how the system works **today** | current; freshness-gated | public (symlinked) |
 | `docs/adr/*` | anyone **weighing or reviewing a structural change** | a decision + its rationale (the *why*) | durable; immutable once Accepted | internal |
@@ -75,7 +75,7 @@ When these facts appear anywhere else, that other place links to the home and do
 - **REST endpoints** → `priv/docs/api.md`. **CLI commands** → `priv/docs/cli.md`.
 - **PubSub topics & supervised processes** → `docs/architecture/runtime.md`.
 - **"What Relay is" / the north star** → `docs/vision.md`.
-- **How work physically runs (dispatch, executor, worktrees)** → `docs/architecture/runner.md`.
+- **How work physically runs (dispatch, runner, worktrees)** → `docs/architecture/runner.md`.
 
 ### The placement test — "is this in the right home?"
 
@@ -140,7 +140,7 @@ from the canonical source.
 | `category` enum: prose `unstarted` vs API `started` | ✗ **drift** | reconcile prose to the schema's set |
 | `authentication.md` (~50% dup of getting-started + api) | ✓ dup allowed (site carve-out) | keep as a clear standalone page; only ensure the mint/bearer details don't drift from api.md |
 | `agent-integration.md` (thin over `runner.md`; stale board-runner warning) | ✗ stale + redundant | rescue its unique bits into `runner.md`, then retire; repoint links to `/docs/architecture-runner` |
-| `runner.md` (496 lines; contributor internals + executor-author contract) | ~ over the ~2-page cap, dual purpose | candidate split; heavily deep-linked, so move carefully |
+| `runner.md` (496 lines; contributor internals + runner-author contract) | ~ over the ~2-page cap, dual purpose | candidate split; heavily deep-linked, so move carefully |
 | Stale lines: `domain.md` "nothing executes yet", getting-started "RLY-177 planned", `runtime.md` "empty until W9" | ✗ stale | sweep |
 | No `docs/README.md` index; published-vs-internal implicit | ✗ missing | add a `docs/` map naming each home + the split |
 | ADR hygiene (mixed status headers; 0003 amended in place; `Draft`; no template) | ✗ convention drift | standardize per this ADR; add a template |
@@ -166,5 +166,5 @@ from the canonical source.
 2. **The site carve-out is a judgment call.** "A little duplication" across the `priv/docs/*`
    pages has no bright line; it relies on reviewers distinguishing *helpful restatement* from
    *drift*. If it's abused, tighten it.
-3. **`runner.md`'s dual audience** (contributor internals vs executor-author contract) may warrant
+3. **`runner.md`'s dual audience** (contributor internals vs runner-author contract) may warrant
    a real split; deferred because `relay.md` and other docs deep-link into it.

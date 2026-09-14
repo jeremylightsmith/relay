@@ -27,12 +27,12 @@ defmodule Storybook.DocsContent do
       <ol>
         <li>Mint a board API key.</li>
         <li>Point your shell at the board.</li>
-        <li>Run <code>bin/relay board</code> to confirm access.</li>
+        <li>Run <code>./relay board</code> to confirm access.</li>
       </ol>
 
       <h2 id="code">Code</h2>
       <pre><code class="language-bash">export RELAY_URL="https://your-relay-host"
-    bin/relay board</code></pre>
+    ./relay board</code></pre>
     </article>
     """
   end

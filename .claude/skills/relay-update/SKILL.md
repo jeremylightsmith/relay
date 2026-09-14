@@ -1,6 +1,6 @@
 ---
 name: relay-update
-description: Use when a project's Relay tooling may be stale — refreshing `bin/relay` and the `relay-*` skills from the board, after a Relay release, or when a run was refused with `executor_outdated`. Keywords: relay update, update bin/relay, refresh skills, scaffold, executor outdated, stale tooling.
+description: Use when a project's Relay tooling may be stale — refreshing `./relay` and the `relay-*` skills from the board, after a Relay release, or when a run was refused with `runner_outdated`. Keywords: relay update, update ./relay, refresh skills, scaffold, runner outdated, stale tooling.
 ---
 
 # Relay Update
@@ -11,7 +11,7 @@ Relay owns exactly six files in your project:
 
 | Item | Path |
 |---|---|
-| the executor | `bin/relay` |
+| the runner | `./relay` |
 | the agent guide | `relay.md` |
 | entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
 | updater skill | `.claude/skills/relay-update/SKILL.md` |
@@ -22,20 +22,20 @@ Your board serves them at `$RELAY_URL/api/scaffold`. They are **never user-edite
 update overwrites them unconditionally — there is nothing of yours to lose, and no diff to
 review. Everything else in `.claude/` is yours and this skill never touches it.
 
-`bin/relay update` owns the mechanism. This skill owns the judgment: whether to update, and
+`./relay update` owns the mechanism. This skill owns the judgment: whether to update, and
 what to do with the resulting diff. **No update policy lives in this prose** — if you want to
 know what would change, ask the command.
 
 ## When to Use
 
 - A Relay release shipped and this project has not picked it up.
-- A run was refused with `executor_outdated`, or the Runners view shows an `OUTDATED` badge.
+- A run was refused with `runner_outdated`, or the Runners view shows an `OUTDATED` badge.
 - One of the six files above is missing, was deleted, or was edited — `update` repairs all
   three the same way, because none of them is yours to change.
 
 **Never run this in the Relay app repo itself.** There these six files are the *source*, not
 installed copies, and because publishing is coupled to deploying (ADR 0010) the board serves
-whatever was last deployed — so an update reverts local work to it. `bin/relay update` refuses
+whatever was last deployed — so an update reverts local work to it. `./relay update` refuses
 there without `--force`; `--check` is still fine and still tells you the truth.
 - Any time someone asks "is our Relay tooling current?"
 
@@ -46,7 +46,7 @@ Do these in order. Do not skip step 3.
 ### 1. Check the version
 
 ```bash
-bin/relay update --check --json
+./relay update --check --json
 ```
 
 Read `current`. If it is `true`, say so — name the version — and **stop**. There is nothing to
@@ -57,12 +57,21 @@ If it is `false`, report the `changed` list by name before you write anything.
 ### 2. Pull the files
 
 ```bash
-bin/relay update --json
+./relay update --json
 ```
 
-Report `written` by name. If `bin/relay` is in that list, mention that a running
-`relay execute` keeps serving the old code until it restarts (it will pick this up itself at a
+Report `written` by name. If `./relay` is in that list, mention that a running
+`relay start` keeps serving the old code until it restarts (it will pick this up itself at a
 job boundary if `auto_update` is on).
+
+If the report's `removed` lists `bin/relay`, say so: the CLI moved to `./relay` (RE319) and the
+update deleted the old Relay-installed copy (and `bin/` if that left it empty) — include that
+deletion in the commit. A project whose update was run by an old `bin/relay` gets `./relay`
+installed **without the executable bit** and keeps the old file, because that old code
+predates both the new path and the cleanup. Fix it once with
+`chmod +x relay && ./relay update` — the update also removes the leftover — and make sure the
+commit records `relay` as mode 755 (`git ls-files -s relay` shows `100755`). A `bin/relay` that
+is not Relay's is never touched.
 
 ### 3. Confirm the commit, and explain why it matters
 
@@ -70,7 +79,7 @@ These are **shared tooling** files. Ask the human where to commit them, and give
 do not just ask:
 
 > I'd prefer to commit these to `main`. They're shared tooling: left on a feature branch, every
-> other worktree and every executor on this repo keeps running the stale copies, and the change
+> other worktree and every runner on this repo keeps running the stale copies, and the change
 > gets tangled into an unrelated PR's diff. Commit to `main`?
 
 Then **accept their answer.** Current branch, a different branch, or no commit at all are all

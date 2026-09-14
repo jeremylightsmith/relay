@@ -3,12 +3,12 @@ defmodule Relay.AgentIntegrationDocsTest do
 
   @doc_path Path.join(File.cwd!(), "relay.md")
 
-  test "relay.md documents every bin/relay subcommand" do
+  test "relay.md documents every ./relay subcommand" do
     doc = File.read!(@doc_path)
 
     for cmd <-
           ~w(board card comment move status describe criteria needs-input own release approve reject sub-tasks check uncheck result) do
-      assert doc =~ "bin/relay #{cmd}", "relay.md is missing `bin/relay #{cmd}`"
+      assert doc =~ "./relay #{cmd}", "relay.md is missing `./relay #{cmd}`"
     end
 
     assert doc =~ "RELAY_URL"

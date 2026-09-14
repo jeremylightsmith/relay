@@ -9,7 +9,7 @@ Accepted (2026-07-11)
 `docs/vision.md`). RLY-47 makes it **deterministic, server-side, and permanently
 recorded**: ownership is claimed when a card *moves*, and it records **who DID the work**,
 not merely who is doing it. Every mover (board drag, "Move to…", the REST
-`POST /api/cards/:ref/move`, `approve`/`reject`/`send_back`, and the `bin/relay` runner)
+`POST /api/cards/:ref/move`, `approve`/`reject`/`send_back`, and the `./relay` runner)
 flows through `Relay.Cards.move_card/4`, so the policy lives in exactly one seam.
 
 Ownership is derived against the RLY-46 stage model (ADR 0003), not a design-only "stage

@@ -19,7 +19,7 @@ defmodule Schemas do
       CardRejection,
       Comment,
       DeviceToken,
-      Executor,
+      Runner,
       Flow,
       Flow.Edge,
       Flow.Node,

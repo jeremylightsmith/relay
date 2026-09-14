@@ -6,7 +6,7 @@
 # restore and a shared read-only dep cache are deferred optimizations this hook can adopt later
 # with NO change to Relay core.
 #
-# Invoked by bin/relay right after `git worktree add`, cwd = the new worktree. Inputs arrive as
+# Invoked by ./relay right after `git worktree add`, cwd = the new worktree. Inputs arrive as
 # both argv and env. A nonzero exit FAILS the run (fail-fast) — a broken cache surfaces at once.
 #
 #   $1/$RELAY_WORKTREE   abs path of the new worktree (== cwd)
@@ -20,7 +20,7 @@ WORKTREE="${RELAY_WORKTREE:-$1}"
 CACHE_DIR="${RELAY_CACHE_DIR:-}"
 
 # The warm source: the configured cache dir if it holds the dirs, else the main checkout's own
-# already-warm dirs (the repo you ran `relay execute` from). git's common dir points at the main
+# already-warm dirs (the repo you ran `relay start` from). git's common dir points at the main
 # checkout's .git; its parent is that checkout's root.
 MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's#/\.git/*$##')"
 

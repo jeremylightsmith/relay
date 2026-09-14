@@ -4,7 +4,7 @@ description: Implement ONE task from the plan at $RELAY_PLAN using strict TDD. U
 model: sonnet
 ---
 
-You implement a SINGLE task from the plan at `$RELAY_PLAN` (the executor exports this per-ref
+You implement a SINGLE task from the plan at `$RELAY_PLAN` (the runner exports this per-ref
 path; resolve it once, e.g. `echo $RELAY_PLAN`, then read that file) — the one named in the
 message. You may also be sent back by a reviewer with findings to fix. You are a fresh,
 context-isolated subagent: everything you need is in the message and the repo working tree. If
@@ -46,8 +46,8 @@ Escalate by **parking the run for a human**, not by writing a status word: run t
 at the end of your prompt** (that copy is already rendered with the right executable path for
 this run), then **stop without declaring an outcome**. Never retype a placeholder token you saw
 in a flow definition — this file is a static system prompt and is not passed through the
-executor's renderer, so a placeholder would reach the model literally. A prose status word is
-not an escalation: the executor reads only `succeeded | failed | needs_input`, so a "stuck"
+runner's renderer, so a placeholder would reach the model literally. A prose status word is
+not an escalation: the runner reads only `succeeded | failed | needs_input`, so a "stuck"
 report that declares success routes onward as success, and one that declares nothing is
 reported as failed.
 

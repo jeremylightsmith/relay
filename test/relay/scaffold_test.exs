@@ -19,7 +19,7 @@ defmodule Relay.ScaffoldTest do
       File.write!(path, "contents of #{rel}\n")
     end
 
-    File.write!(Path.join(src, "bin/relay"), "#!/usr/bin/env python3\nEXECUTOR_VERSION = 77\n")
+    File.write!(Path.join(src, "relay"), "#!/usr/bin/env python3\nRUNNER_VERSION = 77\n")
 
     %{src: src, dest: Path.join(tmp_dir, "out")}
   end
@@ -90,27 +90,33 @@ defmodule Relay.ScaffoldTest do
     end
 
     test "fetch/1 returns the served bytes for a manifest path" do
-      assert {:ok, source} = Scaffold.fetch("bin/relay")
+      assert {:ok, source} = Scaffold.fetch("relay")
       assert String.starts_with?(source, "#!")
-      assert source =~ "EXECUTOR_VERSION"
+      assert source =~ "RUNNER_VERSION"
     end
 
     test "fetch/1 refuses anything outside the manifest, including traversal" do
       assert Scaffold.fetch("mix.exs") == :error
       assert Scaffold.fetch("../../mix.exs") == :error
-      assert Scaffold.fetch("bin/relay/../../mix.exs") == :error
+      assert Scaffold.fetch("relay/../../mix.exs") == :error
     end
 
-    test "executor_version/0 is what the served bin/relay declares" do
-      {:ok, source} = Scaffold.fetch("bin/relay")
+    test "runner_version/0 is what the served ./relay declares" do
+      {:ok, source} = Scaffold.fetch("relay")
 
-      assert is_integer(Scaffold.executor_version())
-      assert Scaffold.executor_version() == Scaffold.parse_executor_version(source)
+      assert is_integer(Scaffold.runner_version())
+      assert Scaffold.runner_version() == Scaffold.parse_runner_version(source)
     end
 
-    test "parse_executor_version/1 is nil for anything that declares nothing" do
-      assert Scaffold.parse_executor_version("#!/usr/bin/env python3\n") == nil
-      assert Scaffold.parse_executor_version("EXECUTOR_VERSION = 9\n") == 9
+    test "parse_runner_version/1 is nil for anything that declares nothing" do
+      assert Scaffold.parse_runner_version("#!/usr/bin/env python3\n") == nil
+      assert Scaffold.parse_runner_version("RUNNER_VERSION = 9\n") == 9
+    end
+
+    test "the CLI is served from the project root (RE319)" do
+      assert "relay" in Scaffold.items()
+      refute "bin/relay" in Scaffold.items()
+      assert Scaffold.items() == Enum.sort(Scaffold.items())
     end
   end
 end

@@ -47,7 +47,7 @@ use them.
   `test-driven-development` skill before any code. About to claim something works/passes →
   `verification-before-completion`.
 - **Editing the factory triggers `/relay-doctor`.** After you change a flow (or push one with
-  `./bin/relay flow-push`), or add, rename, or remove a `.claude/agents/*.md`,
+  `./relay flow-push`), or add, rename, or remove a `.claude/agents/*.md`,
   `.claude/skills/*/SKILL.md`, or `.claude/commands/*.md`, run `/relay-doctor` by hand in an
   interactive session — it asks questions, so never invoke it from a flow node. It checks
   that every flow node still resolves to a real step in this repo and walks you through each
@@ -66,15 +66,15 @@ use them.
 ## Project guidelines
 
 - Running `mix precommit` is REQUIRED on every development cycle and must pass before work is considered done. It runs compile (warnings as errors), `mix format` (with Styler), `mix credo --strict`, `mix sobelow`, `mix deps.audit`, and the full test suite (warnings as errors). Fix any failure before finishing — never commit work with a failing `mix precommit`.
-- **`bin/relay` carries `EXECUTOR_VERSION` — bump it on every change to that file.** A running
-  `relay execute` holds the version it started with in memory, so an unbumped fix reaches
-  nobody: the server compares the executor's declared version against
-  `Relay.Runs.min_executor_version/0` and **refuses work** to anything below it (409
-  `executor_outdated`), which is the only thing that turns "the fix was merged" into "the fix
-  is running". `bin/test_relay.py`'s `ExecutorFingerprintGuardTest` enforces this — it hashes
-  `bin/relay` with the two constant lines masked and fails with the exact fingerprint to paste
-  into `EXECUTOR_FINGERPRINT`. Raise `@min_executor_version` in `lib/relay/runs.ex` only when
-  running the old executor is genuinely worse than a stopped one.
+- **`./relay` carries `RUNNER_VERSION` — bump it on every change to that file.** A running
+  `relay start` holds the version it started with in memory, so an unbumped fix reaches
+  nobody: the server compares the runner's declared version against
+  `Relay.Runs.min_runner_version/0` and **refuses work** to anything below it (409
+  `runner_outdated`), which is the only thing that turns "the fix was merged" into "the fix
+  is running". `bin/test_relay.py`'s `RunnerFingerprintGuardTest` enforces this — it hashes
+  `./relay` with the two constant lines masked and fails with the exact fingerprint to paste
+  into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/relay/runs.ex` only when
+  running the old runner is genuinely worse than a stopped one.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - **The current-state architecture lives in [`docs/architecture/`](docs/architecture/README.md)** and staying current is a gate: if your branch adds or changes a **context, PubSub topic, API endpoint, or supervised process**, update the matching `docs/architecture/` page in the same branch. The whole-branch final review treats a stale page as a blocking finding.
 - **Architecture decisions live in [`docs/adr/`](docs/adr/README.md)** — read the index before changing cross-cutting structure. Notably [ADR 0001](docs/adr/0001-client-architecture.md) fixes the LiveView-first + thin-native-wrapper client strategy: keep UI and real-time logic in LiveView; do not stand up a parallel mobile client or API.
@@ -86,8 +86,8 @@ use them.
   calls it. Never re-type a list literal (`in [:running, :parked]`) or partition (active vs
   terminal) in a second module, the web layer, or a test when a source function exists; if none
   exists, add it where the concept lives and call it from both places. Anything mirrored across
-  the wire into `bin/relay` must be pinned by the executor contract fixture
-  (`test/fixtures/executor_contract.json`, RLY-176) so drift breaks CI instead of shipping.
+  the wire into `./relay` must be pinned by the runner contract fixture
+  (`test/fixtures/runner_contract.json`, RLY-176) so drift breaks CI instead of shipping.
   Nearly every recent engine bug reduced to "two copies of one fact disagreed" — reviews should
   treat a duplicated closed set the way they treat a failing test.
 - **No color literals in the web layer or in the app stylesheets.** `oklch(...)`, hex, `rgb()`

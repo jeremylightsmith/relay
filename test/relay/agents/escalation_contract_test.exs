@@ -84,11 +84,11 @@ defmodule Relay.Agents.EscalationContractTest do
     refute agent("final-reviewer") =~ "do not block the branch over it"
   end
 
-  test "the implementer declares only statuses the executor understands" do
+  test "the implementer declares only statuses the runner understands" do
     body = agent("plan-implementer")
 
     refute body =~ "BLOCKED",
-           "plan-implementer.md must not declare a BLOCKED status — the executor reads only " <>
+           "plan-implementer.md must not declare a BLOCKED status — the runner reads only " <>
              "succeeded | failed | needs_input"
 
     refute body =~ "NEEDS_CONTEXT",
@@ -116,11 +116,11 @@ defmodule Relay.Agents.EscalationContractTest do
 
   test "the escalation command the agent files point at renders a real ref" do
     contract =
-      "bin/relay"
+      "relay"
       |> File.read!()
       |> section("OUTCOME_CONTRACT = \"\"\"")
 
-    assert contract, "bin/relay must define OUTCOME_CONTRACT"
+    assert contract, "./relay must define OUTCOME_CONTRACT"
     [contract | _] = String.split(contract, "\"\"\"", parts: 2)
 
     assert contract =~ "needs-input {ref}",

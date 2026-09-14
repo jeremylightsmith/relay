@@ -52,26 +52,26 @@ defmodule Relay.Runs.PolicyTest do
   end
 
   describe "resumable?/2" do
-    # executor_gone park + agent-held + card not needs_input/failed.
-    test "true only for an executor_gone park on an agent-held, non-blocked card" do
-      run = %{status: :parked, parked_reason: :executor_gone}
+    # runner_gone park + agent-held + card not needs_input/failed.
+    test "true only for a runner_gone park on an agent-held, non-blocked card" do
+      run = %{status: :parked, parked_reason: :runner_gone}
 
       assert Policy.resumable?(run, %{active_owner: :ai, status: :working})
       assert Policy.resumable?(run, %{active_owner: nil, status: :ready})
     end
 
     test "false for a human-held card" do
-      run = %{status: :parked, parked_reason: :executor_gone}
+      run = %{status: :parked, parked_reason: :runner_gone}
       refute Policy.resumable?(run, %{active_owner: :human, status: :working})
     end
 
     test "false when the card is needs_input or failed" do
-      run = %{status: :parked, parked_reason: :executor_gone}
+      run = %{status: :parked, parked_reason: :runner_gone}
       refute Policy.resumable?(run, %{active_owner: :ai, status: :needs_input})
       refute Policy.resumable?(run, %{active_owner: :ai, status: :failed})
     end
 
-    test "false for a non-executor_gone park (listener's territory) or a non-parked run" do
+    test "false for a non-runner_gone park (listener's territory) or a non-parked run" do
       card = %{active_owner: :ai, status: :working}
       refute Policy.resumable?(%{status: :parked, parked_reason: :needs_input}, card)
       refute Policy.resumable?(%{status: :parked, parked_reason: :claimed}, card)

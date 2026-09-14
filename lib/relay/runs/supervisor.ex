@@ -20,9 +20,9 @@ defmodule Relay.Runs.Supervisor do
 
   use Supervisor
 
-  alias Relay.Runs.ExecutorReaper
   alias Relay.Runs.Instance
   alias Relay.Runs.Listener
+  alias Relay.Runs.RunnerReaper
 
   def start_link(opts), do: Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
@@ -37,7 +37,7 @@ defmodule Relay.Runs.Supervisor do
       {DynamicSupervisor, name: Keyword.get(opts, :run_supervisor, default.run_supervisor), strategy: :one_for_one},
       {Listener, name: Keyword.get(opts, :listener, Listener), callers: callers},
       Supervisor.child_spec({Task, &Relay.Runs.resume_all/0}, id: :runs_boot_resume, restart: :temporary),
-      {ExecutorReaper, name: Keyword.get(opts, :executor_reaper, ExecutorReaper), callers: callers}
+      {RunnerReaper, name: Keyword.get(opts, :runner_reaper, RunnerReaper), callers: callers}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

@@ -1,20 +1,20 @@
 # The runner: how work physically gets done
 
 **Today's system.** [ADR 0006](../adr/0006-workflow-orchestration.md) landed a server-side
-flow engine + thin executor for every stage — Spec (RLY-136), Plan (RLY-138), and Code
+flow engine + thin runner for every stage — Spec (RLY-136), Plan (RLY-138), and Code
 (RLY-139, this doc's most recent cutover). The legacy board-runner (`relay watch`,
 `relay_config.json`, `.claude/workflows/execute-plan.js`) is **deleted**; there is no
-fallback dispatcher to describe. The executor lives on a developer machine — it needs the
+fallback dispatcher to describe. The runner lives on a developer machine — it needs the
 checkout, git worktrees, and the `claude` CLI — and talks to the deployed app only through
 the board-key REST API.
 
-`bin/relay` (Python, single file) is two things:
+`./relay` (Python, single file) is two things:
 
 1. **A CLI** for every card operation an agent needs (`card`, `move`, `comment`,
    `needs-input`, `approve`, …) — the surface documented in
    [`../../relay.md`](../../relay.md).
-2. **`relay execute`** — the only runner mode: a poll loop that claims node-jobs from the
-   server and runs them (see "Executor mode" below).
+2. **`relay start`** — the only runner mode: a poll loop that claims node-jobs from the
+   server and runs them (see "Runner mode" below).
 
 ## Dispatch is server-side
 
@@ -50,14 +50,14 @@ route to the `rebaser` agent, which parks for a human on a semantic conflict.
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
 enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the
 node-job engine (`Relay.Runs`) — no per-stage config file, no board-runner poll loop.
-`relay execute` claims the resulting `NodeJob` rows over the node-job REST API (below) and
+`relay start` claims the resulting `NodeJob` rows over the node-job REST API (below) and
 runs whatever node it is handed; it knows nothing about stages, columns, or which flow a
 job belongs to. Board-specific facts (stages, prompts, per-node budgets) live entirely in
 `Flow`/`Flow.Node`/`Flow.Edge` rows, seeded from
 [`docs/designs/flows/`](../designs/flows/README.md) and editable in Settings › Flows.
 
 **Shared-budget arbitration: rightmost flow wins ties.** `Relay.Runs.Capacity` keys free
-slots `executor_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per
+slots `runner_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per
 flow** (`capacity.ex:5-7`), and `Relay.Runs.Scheduler.plan/1` threads one shared capacity
 accumulator through its fold, sorted rightmost `works_in` stage position first
 (`scheduler.ex:38-45`, rule documented at `scheduler.ex:9-13`). So when two flows share an
@@ -67,9 +67,9 @@ looks like the leftward flow is being starved. Pinned by
 `test/relay/runs/scheduler_test.exs` and exercised live over the REST API by
 `test/relay_web/api/plan_flow_e2e_test.exs` / `test/relay/runs/code_flow_e2e_test.exs`.
 
-Because that capacity is global **by executor** rather than board-scoped, a stale or contended
+Because that capacity is global **by runner** rather than board-scoped, a stale or contended
 view of it can over-assign — two boards' schedulers can both count the same free slot. The
-executor's own live capacity is the final backstop, so an over-assigned job waits there rather
+runner's own live capacity is the final backstop, so an over-assigned job waits there rather
 than double-booking (YAGNI: no multi-board reservation yet).
 
 ## Side channels
@@ -77,34 +77,34 @@ than double-booking (YAGNI: no multi-board reservation yet).
 - **Log mirror**: every feed line is queued to a background `LogForwarder` thread that
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
-- **Executor heartbeat**: `ExecutorHeartbeat` posts `{executor, capacity,
+- **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
   running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
-  release_held: [{ref, status}], want_capabilities, executor_outdated,
-  required_version, latest_executor_version}`. It terminates each revoked job's live subprocess
-  via its `JobControl` (see "Node-job transport" and "Executor mode" below). The advertised
-  `capacity` is the executor's configured per-class total **and this route is its single writer
+  release_held: [{ref, status}], want_capabilities, runner_outdated,
+  required_version, latest_runner_version}`. It terminates each revoked job's live subprocess
+  via its `JobControl` (see "Node-job transport" and "Runner mode" below). The advertised
+  `capacity` is the runner's configured per-class total **and this route is its single writer
   (RE311)** — the claim's `capacity` is a live FREE count, passed to `Relay.Runs.claim_next_job/3`
   as an argument and never persisted, because one column carrying both meanings made the roster
   flip-flop between the total and the free count while the board sat deadlocked. `running` is the
-  jobs the executor believes it holds, so the server can name the ones it no longer considers
-  live. `held` (RE311) is every per-card worktree the executor holds, each with a `state` from
-  `Schemas.Executor.holding_states/0` (`bound` | `retained` | `running` | `talk`); `release_held`
+  jobs the runner believes it holds, so the server can name the ones it no longer considers
+  live. `held` (RE311) is every per-card worktree the runner holds, each with a `state` from
+  `Schemas.Runner.holding_states/0` (`bound` | `retained` | `running` | `talk`); `release_held`
   is its ref-keyed analogue of `revoked` — the subset whose card's runs have all ended
   server-side, named with the status (`done`/`failed`/`cancelled`,
   `Relay.Runs.releasable_held/2`) that chooses remove vs retain. It **replaces** RLY-218's
   retired run-id-keyed release channel, which structurally could not see a worktree adopted
   by `recover()` after a restart — its `run_id` is unknown — so a run cancelled while the
-  executor was down leaked its exclusive slot permanently. The same
+  runner was down leaked its exclusive slot permanently. The same
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
-  in `Cards.health/1`. `latest_executor_version` (RE185/RE304) is the `EXECUTOR_VERSION` of the
-  `bin/relay` the app itself serves — `Relay.Runs.latest_executor_version/0`, delegating to
-  `Relay.Scaffold.executor_version/0`, read from `priv/scaffold/bin/relay` at runtime. Truthful
-  by construction. It is a **target**, distinct from `required_version`'s **floor**; an executor
+  in `Cards.health/1`. `latest_runner_version` (RE185/RE304) is the `RUNNER_VERSION` of the
+  `./relay` the app itself serves — `Relay.Runs.latest_runner_version/0`, delegating to
+  `Relay.Scaffold.runner_version/0`, read from `priv/scaffold/relay` at runtime. Truthful
+  by construction. It is a **target**, distinct from `required_version`'s **floor**; a runner
   with `auto_update` on updates itself against it.
-- **Run ids**: each executor worker tags its log lines with the claimed job's `run_id`
+- **Run ids**: each runner worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
 ## Observability surface (RLY-177)
@@ -124,14 +124,14 @@ never 403s):
   newest-first with `node_executions` preloaded, composing `Relay.Runs.list_runs_for_card/1`.
   `detail` and `failure_detail` are serialized **in full, never truncated** — the exact text
   a failing review's findings need to be readable for.
-- `GET /api/executors` (`RelayWeb.Api.ExecutorController.index/2`) — composes
-  `Relay.Runs.list_executor_status/2` (no second executor read): advertised capacity per
-  isolation class, last heartbeat, the tri-state `freshness` (`Relay.Runs.executor_freshness/2`;
+- `GET /api/runners` (`RelayWeb.Api.RunnerController.index/2`) — composes
+  `Relay.Runs.list_runner_status/2` (no second runner read): advertised capacity per
+  isolation class, last heartbeat, the tri-state `freshness` (`Relay.Runs.runner_freshness/2`;
   `stale?` is the `freshness != :fresh` convenience flag), `version`/`outdated`
-  (`Relay.Runs.executor_outdated?/1` — orthogonal to freshness, since a refused executor can
-  still be beating normally), and the jobs each executor currently holds.
+  (`Relay.Runs.runner_outdated?/1` — orthogonal to freshness, since a refused runner can
+  still be beating normally), and the jobs each runner currently holds.
 - **Web: the Runners view** (`/board/:slug/runners`, `RelayWeb.BoardRunnersLive`) — the same
-  `Relay.Runs.list_executor_status/2` roster rendered one panel per machine, plus (RE307) the
+  `Relay.Runs.list_runner_status/2` roster rendered one panel per machine, plus (RE307) the
   board-wide **active queue** from `Relay.Runs.list_queue/2`: every `queued` or `claimed` node
   job on the board, both kinds (`:node` and `:talk`), claimed or not, ordered as
   `Relay.Runs.claim_next_job/1` will hand them out, with `Relay.Runs.stopped_work/2`'s verdict
@@ -148,7 +148,7 @@ never 403s):
   (`"flow"` | `"card"`), the echoed `card` ref (`null` in flow scope), a `summary` stat band
   (`total_runs`, `completed`, `completed_pct`, `total_spend`, `median_end_to_end`,
   `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null`
-  until executors report spend — `duration_total`, `cost_total`, `attempts_mean`,
+  until runners report spend — `duration_total`, `cost_total`, `attempts_mean`,
   `verdict_split`, `loop_laps`). An optional `?card=<ref>` (RE235) scopes every figure to one
   card's node executions across ALL of its runs of that flow: `?window=` is then ignored, the
   four percentile keys and `median_end_to_end` come back `null` (a percentile over one card is
@@ -160,7 +160,7 @@ never 403s):
   `severity` / `check` / `flow_key` / `node_key` / `run_id` / `summary` / `evidence` / `fix`.
   Two checks today: `findings_dropped` (a foreach cursor advanced past a failed review) and
   `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`). The
-  other half of `relay audit` — CI parity — is computed in `bin/relay`, because the server has
+  other half of `relay audit` — CI parity — is computed in `./relay`, because the server has
   no checkout of any board's repo. Read-only, board-scoped, advisory.
 - `GET /api/flows` (`RelayWeb.Api.FlowController.index/2`) — every flow on the board, fully
   serialized in stable `key` order. One round trip is all `relay doctor` (RLY-240) needs.
@@ -175,9 +175,9 @@ never 403s):
   `201` on create, `200` on update. Refusals: `422 invalid_document` / `key_mismatch` /
   `unknown_stages` / `invalid`, and `409 stale_version` when the document carries a `version`
   that no longer matches (absent `version` = last-write-wins).
-- CLI: `bin/relay why REF` / `bin/relay runs REF` / `bin/relay executors` /
-  `bin/relay version` / `bin/relay flow-stats KEY` / `bin/relay flow [KEY]` /
-  `bin/relay flow-push KEY FILE` / `bin/relay audit [KEY]`, documented in
+- CLI: `./relay why REF` / `./relay runs REF` / `./relay runners` /
+  `./relay version` / `./relay flow-stats KEY` / `./relay flow [KEY]` /
+  `./relay flow-push KEY FILE` / `./relay audit [KEY]`, documented in
   [`../../relay.md`](../../relay.md).
 
 ## Bootstrap surface (RE304, ADR 0010)
@@ -191,14 +191,14 @@ alongside `/api/version`:
   else. `Relay.Scaffold.fetch/1` checks a **static allowlist**, so this is not a general file
   server and traversal is impossible by construction.
 
-Unauthenticated because `/relay-setup` downloads `bin/relay` before a project has minted a board
+Unauthenticated because `/relay-setup` downloads `./relay` before a project has minted a board
 key, and because these files were published openly regardless.
 
-**Exactly six files are Relay-owned** (`Relay.Scaffold.items/0`): `bin/relay`, the four
+**Exactly six files are Relay-owned** (`Relay.Scaffold.items/0`): `./relay`, the four
 `.claude/skills/relay-{setup,update,doctor,onboard}/SKILL.md`, and `relay.md`. They are never
-user-edited, which is what lets `bin/relay update` overwrite them unconditionally — no provenance
+user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
-`AGENTS.md`/`CLAUDE.md`, `.relay/executor.json`, flow documents) is out of scope and is never
+`AGENTS.md`/`CLAUDE.md`, `.relay/runner.json`, flow documents) is out of scope and is never
 written by this surface;
 wiring those is `/relay-onboard`'s job.
 
@@ -209,20 +209,33 @@ behind" is deliberately unsupported.
 
 `mix relay.build_scaffold` writes `priv/scaffold/` (a gitignored build artifact) — from `mix
 setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and before
-`mix release`, because a release ships `priv/` but ships neither `bin/` nor `.claude/`.
+`mix release`, because a release ships `priv/` but ships neither `relay` nor `.claude/`.
 
 **Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
 projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
 
-**`bin/relay update`** is the one mechanism for getting those files onto disk. **The work list is
+**`./relay update`** is the one mechanism for getting those files onto disk. **The work list is
 the verdict:** every item is hashed against the manifest on every run, and "current" means
 nothing needs writing — never a version comparison. That is what makes a deleted *or edited*
 file come back, and what keeps the RE185 steady state honest, since auto-update rewrites
-`bin/relay` in place without touching `.relay/scaffold.json`, so the marker legitimately lags the
+`./relay` in place without touching `.relay/scaffold.json`, so the marker legitimately lags the
 bytes. Applying with an empty work list reconciles the marker; `--check` reports and writes
-nothing, ever; `--json` on either. The executor rewrites itself through RE185's verified
-installer (`verify_executor_source` + `install_executor`'s atomic `os.replace` and write ledger),
+nothing, ever; `--json` on either. The runner rewrites itself through RE185's verified
+installer (`verify_runner_source` + `install_runner`'s atomic `os.replace` and write ledger),
 and every body is additionally checked against the manifest's sha256 before it touches disk.
+
+`relay update` also removes what an older layout left behind (RE319): a `bin/relay` that
+declares the pre-rename version constant is Relay's, so after installing `./relay` the update
+deletes it (and `bin/` when that leaves it empty) and reports it as `removed` (`--check`
+reports it as `obsolete` and writes nothing). A `bin/relay` without that line is someone else's
+and is never touched.
+
+An old `bin/relay` running the upgrade installs `./relay` **without the executable bit**: its
+installer gives mode 755 only to its own path and writes every other item at 644. The one-time
+step is `chmod +x relay && ./relay update`, which also removes the leftover, and the commit must
+carry `relay` as mode 755. From then on the new CLI keeps it that way: `scaffold_status` counts a
+`./relay` whose bytes match but which is not executable as `changed`, so `relay update` reinstalls
+it through `install_runner` and restores 0o755.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
@@ -231,50 +244,59 @@ The first slice of ADR 0006's target shape: a pure REST transport on top of the 
 that stays server-side.
 
 - `POST /api/node-jobs/claim` (`RelayWeb.Api.NodeJobController.claim/2`) — upserts the
-  advertising executor (a claim doubles as a liveness touch, via
-  `Relay.Runs.upsert_executor/2`) then atomically claims the oldest eligible `queued`
+  advertising runner (a claim doubles as a liveness touch, via
+  `Relay.Runs.upsert_runner/2`) then atomically claims the oldest eligible `queued`
   `NodeJob` (`Relay.Runs.claim_next_job/1`, `SELECT … FOR UPDATE SKIP LOCKED`). Long-polls
   up to ~25s on the `board:<id>:runs` topic when nothing is immediately claimable (`?wait=0`
   short-polls instead); serialises the raw `run` + resolved `vars` W5 already stored, never
   a worktree path. **Eligibility is three-way (ADR 0006 §5, RE311):** a job is offered when it
-  is *pinned* to the requesting executor (`executor_name` = its name), OR when that executor
+  is *pinned* to the requesting runner (`runner_name` = its name), OR when that runner
   declares it *holds that card's worktree* (the job is `exclusive` and its `vars.ref` appears in
-  the claim's `held` with a state in `Schemas.Executor.active_holding_states/0`), OR when it fits
+  the claim's `held` with a state in `Schemas.Runner.active_holding_states/0`), OR when it fits
   the *advertised free capacity* the claim carries. The middle clause exists because the pin is
   only a proxy for the holding and the proxy can go missing: `settle_retry_pin/3`'s `:readopted`
   branch releases a pin to a machine that is provably not answering (RE297), the job is inserted
   unpinned, and the machine then returns and adopts `<ns>-<ref>` — consuming the very slot the
   unpinned job needed to be offered through. The bypass is exclusive-only: a `shared_clean` job
   runs in the shared worktree and must still respect shared capacity.
-  Pinning is persisted on the run: `runs.pinned_executor_name` is set when an executor claims
-  an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through an
-  `:executor_gone` park (so the resume returns to the holder), and **cleared** by a human-baton
+  Pinning is persisted on the run: `runs.pinned_runner_name` is set when a runner claims
+  an `exclusive` run's job (`Relay.Runs.maybe_pin_run/2`), **kept** through a
+  `:runner_gone` park (so the resume returns to the holder), and **cleared** by a human-baton
   park (`Relay.Runs.park_claimed/1`, so the hand-back resume re-offers anywhere).
   `Relay.Runs.exclusive_holder/2` reads that column to pin each successive job, and
-  `Relay.Runs.active_runs/1` resolves it to the executor row id so the **scheduler** resumes a
-  parked exclusive run on its holder (RLY-199) — one column, two readers. **The executor's
-  `name` is therefore a durable, run-affecting key, not a label:** renaming a running executor
+  `Relay.Runs.active_runs/1` resolves it to the runner row id so the **scheduler** resumes a
+  parked exclusive run on its holder (RLY-199) — one column, two readers. **The runner's
+  `name` is therefore a durable, run-affecting key, not a label:** renaming a running runner
   strands every run pinned to the old name (the resume targets a row nothing beats again, and
-  `retry` refuses it as "not connected") because executor rows are never pruned. RE305 changed
+  `retry` refuses it as "not connected") because runner rows are never pruned. RE305 changed
   the *default* name from the bare hostname to `<checkout-dir>@<short-host>`, so a defaulted
-  executor warns loudly at startup and names the legacy identity — see the Config bullet below.
+  runner warns loudly at startup and names the legacy identity — see the Config bullet below.
   (A parked run whose
-  holder advertises `exclusive: 0` can still be handed its own resume — the executor keeps
-  polling while it holds bound slots via `ExecutorPool.has_bound_slots/0`.)
-- **Version negotiation (RLY-184).** Every claim and heartbeat carries `executor.version`, the
-  `EXECUTOR_VERSION` the running `bin/relay` declares. `claim/2` compares it against
-  `Relay.Runs.min_executor_version/0` and answers **409 `executor_outdated`** (with `required`
+  holder advertises `exclusive: 0` can still be handed its own resume — the runner keeps
+  polling while it holds bound slots via `RunnerPool.has_bound_slots/0`.)
+- **A process that predates the rename is refused, never served (RE319).** The wire's identity
+  key is `runner`, renamed as a hard cut with no alias. A claim or heartbeat whose body has no
+  `runner` object but carries the pre-rename identity key gets **409 `runner_outdated`** —
+  the same code a merely old runner gets, pinned in `test/fixtures/runner_contract.json`
+  (`claim_refused.outdated`) — with `required: Relay.Runs.min_runner_version/0` and a message
+  telling the operator to install `./relay` (`relay update`) and restart with `./relay start`.
+  Nothing is written for it. The check is one private function in
+  `RelayWeb.Api.NodeJobController`; a body that carries `runner` is current whatever else it
+  carries.
+- **Version negotiation (RLY-184).** Every claim and heartbeat carries `runner.version`, the
+  `RUNNER_VERSION` the running `./relay` declares. `claim/2` compares it against
+  `Relay.Runs.min_runner_version/0` and answers **409 `runner_outdated`** (with `required`
   and `running`) instead of handing out work — claim is the only call that dispenses jobs, so
-  that is the load-bearing check. `nil` counts as outdated: an executor sending no version
-  predates the card. `heartbeat/2` deliberately still **succeeds** for an outdated executor —
+  that is the load-bearing check. `nil` counts as outdated: a runner sending no version
+  predates the card. `heartbeat/2` deliberately still **succeeds** for an outdated runner —
   the beat is how it stays on the roster and how revokes still reach it — and its reply carries
-  `executor_outdated` / `required_version`. A refused executor stays alive, advertises
+  `runner_outdated` / `required_version`. A refused runner stays alive, advertises
   `{"shared_clean": 0, "exclusive": 0}` so nothing queues behind it, finishes in-flight work,
   and wears an `OUTDATED` badge on the runners view until a human restarts it. **Auto-update
-  (RE185).** The heartbeat reply also carries `latest_executor_version`, and an executor with
+  (RE185).** The heartbeat reply also carries `latest_runner_version`, and a runner with
   `auto_update` on downloads that version from the board's `/api/scaffold` (RE304) and re-execs
   at a job boundary, so being refused is normally self-healing. The fail-stop below is unchanged
-  and remains the floor: when auto-update is off, refused, or does not take, the executor still
+  and remains the floor: when auto-update is off, refused, or does not take, the runner still
   stops loudly.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped) returns a three-way result: a `claimed` job runs
@@ -286,7 +308,7 @@ that stays server-side.
   run and the card are tabulated in the [state reference](state.md).
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
-  executor can branch without a second endpoint. A `"talk"` claim carries exactly
+  runner can branch without a second endpoint. A `"talk"` claim carries exactly
   `{id, kind, ref, turn_id, prompt, author, branch, seed, resume_session}` —
   `RelayWeb.Api.NodeJobController.claim_payload/1`'s talk-only clause — never the flow shape's
   `run_id`/`node_id`/`vars`. A talk turn's outcome does **not** go through
@@ -297,45 +319,45 @@ that stays server-side.
   transcript lines (at-least-once — a replayed `client_seq` is accepted and stored once, per
   `Relay.Talk.append_events/2`) and `POST /api/talk/turns/:id/outcome` ends the turn
   (`done`/`stopped`/`failed`, 422 `unknown_status` on anything else) via `Relay.Talk.finish_turn/3`.
-- **The wire contract is pinned by a fixture.** `test/fixtures/executor_contract.json` is
+- **The wire contract is pinned by a fixture.** `test/fixtures/runner_contract.json` is
   generated from these routes by
-  `test/relay_web/controllers/api/executor_contract_test.exs` (never hand-edited) and read by
+  `test/relay_web/controllers/api/runner_contract_test.exs` (never hand-edited) and read by
   `bin/test_relay.py`, so both suites assert against one shape instead of each side's idea of
   the other (RLY-176). Renaming a claim field, or changing what the outcome/heartbeat bodies
   carry, breaks CI on the next run. Regenerate with
-  `RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/executor_contract_test.exs`,
+  `RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/runner_contract_test.exs`,
   which rewrites the file and still fails so the diff gets reviewed.
-- **Executor heartbeat superset.** `BoardController.heartbeat/2`'s `/api/board/heartbeat`
+- **Runner heartbeat superset.** `BoardController.heartbeat/2`'s `/api/board/heartbeat`
   route carries an independent, additive branch: a beat carrying `name` + `capacity` calls
-  `Relay.Runs.upsert_executor/2`, writing/refreshing a durable `Schemas.Executor` row
+  `Relay.Runs.upsert_runner/2`, writing/refreshing a durable `Schemas.Runner` row
   (`{board_id, name}`, capacity map, `last_heartbeat`) — the durable row is what feeds the
-  Runners view (RLY-167). A capacity-less beat never touches the `Executor` table.
-- **Capability inventory (RLY-182).** The executor heartbeat may carry an optional
+  Runners view (RLY-167). A capacity-less beat never touches the `Runner` table.
+- **Capability inventory (RLY-182).** The runner heartbeat may carry an optional
   `capabilities` payload — `{"agents": [...], "skills": [...]}`, the names this machine can
   actually resolve from its repo `.claude/`, the user-level `~/.claude/`, and the CLI's
-  built-in agents. `bin/relay`'s `collect_capabilities()` enumerates BOTH `skills/<name>/SKILL.md`
+  built-in agents. `./relay`'s `collect_capabilities()` enumerates BOTH `skills/<name>/SKILL.md`
   and `commands/<name>.md`, because a slash command can live in either (`/write-plan` lives
-  only in `commands/`). It rides **send-on-change, not every beat**: the executor hashes the
+  only in `commands/`). It rides **send-on-change, not every beat**: the runner hashes the
   inventory each beat and includes the key only when the hash differs from the last
   successfully-acknowledged send, so a failed POST retries on the next beat. The server
-  persists it on `executors.capabilities`, where **null means never reported** and is
+  persists it on `runners.capabilities`, where **null means never reported** and is
   deliberately distinct from `{}` (reported, and empty). Because a beat that omits the key
-  must never erase a stored value, `Relay.Runs.upsert_executor/2` builds its `on_conflict`
+  must never erase a stored value, `Relay.Runs.upsert_runner/2` builds its `on_conflict`
   replace list dynamically. For the case where the server genuinely has none (recreated row,
-  or an executor predating this change), the heartbeat **response** carries
-  `want_capabilities: true`; the executor clears its cached hash and resends on the next beat.
+  or a runner predating this change), the heartbeat **response** carries
+  `want_capabilities: true`; the runner clears its cached hash and resends on the next beat.
   `Relay.Runs.preflight_flow/1` reads the stored inventory.
-- **Executor liveness + reclaim.** `Relay.Runs.ExecutorReaper` (supervised, see
-  [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_executors/0`:
-  a stale executor's (`Relay.Runs.executor_stale?/2`) in-flight `shared_clean` jobs go back
+- **Runner liveness + reclaim.** `Relay.Runs.RunnerReaper` (supervised, see
+  [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_runners/0`:
+  a stale runner's (`Relay.Runs.runner_stale?/2`) in-flight `shared_clean` jobs go back
   to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
-  `parked_reason: :executor_gone`) rather than requeued, since exclusive runs are pinned to
-  one executor's worktree. A `:gone` executor's advertised capacity is also dropped from the
+  `parked_reason: :runner_gone`) rather than requeued, since exclusive runs are pinned to
+  one runner's worktree. A `:gone` runner's advertised capacity is also dropped from the
   scheduler snapshot (`Scheduler.Server.build_snapshot/2`), so the planner never resumes a
   pinned run onto a machine the reaper has given up on — without this a parked exclusive run
   oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
   The same reaper tick also calls `Relay.Runs.close_orphaned_runs/0` — a companion sweep, not
-  an executor-liveness check — closing any run still active while its card already sits in a
+  a runner-liveness check — closing any run still active while its card already sits in a
   terminal-type stage (RLY-233). This is safe to treat as an unambiguous leak because run
   dispatch (`Relay.Runs.start_run/3`) now moves the card into the flow's work lane and inserts
   the run row in one transaction: no committed state ever has an active run sitting on a
@@ -349,7 +371,7 @@ that stays server-side.
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Relay.AgentLog.stamp/1` → `Relay.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
-- The full outcome-file contract (`RELAY_NODE_OUTCOME`) executors must honor is
+- The full outcome-file contract (`RELAY_NODE_OUTCOME`) runners must honor is
   [Declaring an outcome](#declaring-an-outcome) below.
 
 ## The foreach cursor (RE252)
@@ -390,7 +412,7 @@ failure path never consults `done` at all.
 ## Run recovery surface (RLY-189)
 
 A terminally `failed` run can be re-entered by a human — the branch, worktree, execution
-history and executor pin all survive, because retry **revives the dead run in place** rather
+history and runner pin all survive, because retry **revives the dead run in place** rather
 than starting a new one. Re-entry (`RunServer.handle_continue({:reenter, _})`) never consults
 the flow's start edge, so the Code flow's destructive `branch` node is unreachable from a
 retry by construction, and finished commits cannot be thrown away.
@@ -402,9 +424,9 @@ flow working the card's stage was the dead end's last link. When `flow_id` is ni
 the enabled flow whose work lane is the card's current stage (`Relay.Flows.working_flow/1` — the
 same lookup rejection re-entry uses) and re-enters at **that flow's start node**, since the node
 this run died on need not exist in a replacement graph. Two things follow only in this case: the
-run's `flow_id`/`flow_key` are rewritten to the adopted flow, and a pin to a **dead** executor is
+run's `flow_id`/`flow_key` are rewritten to the adopted flow, and a pin to a **dead** runner is
 released rather than refused on (`settle_retry_pin/3`) — honouring it would revive the run straight
-back into `pinned_executor_absent`, refused every tick until the reaper failed it again. A pin whose
+back into `pinned_runner_absent`, refused every tick until the reaper failed it again. A pin whose
 machine is alive is kept: the worktree really is still there. `no_flow` survives for the genuinely
 unresolvable case — no enabled flow works the card's stage, so there is nothing to re-enter.
 
@@ -420,8 +442,8 @@ unresolvable case — no enabled flow works the card's stage, so there is nothin
 
 Success is `200 {"data": {"status": "ok", "run_id", "node", "retries"}}`. A refusal is
 `422 {"error": {"code", "message"}}` where `code` is one of `not_failed`, `awaiting_answer`,
-`active_run_exists`, `no_flow`, `unknown_node`, `executor_unavailable` — the message names the
-specific status, node key or executor that blocked it. An unknown run/card, another board's
+`active_run_exists`, `no_flow`, `unknown_node`, `runner_unavailable` — the message names the
+specific status, node key or runner that blocked it. An unknown run/card, another board's
 run, or a card that has never run is `404`. RLY-228 widened retry to an **escalation park** —
 a `:parked`/`needs_input` run that `Relay.Runs.park_kind/1` classifies `:escalation` (its latest
 execution reported something other than `:needs_input`, so a node failure was routed to a human,
@@ -433,10 +455,10 @@ A successful retry also clears the card's block: `revive_run/4` calls `clear_car
 card sitting `:failed` or `:needs_input` behind the retried run returns to its unblocked status
 and the board stops showing a blocked card whose run is already live again.
 
-The guard is split, because worktrees and branches are executor-side state Phoenix cannot
+The guard is split, because worktrees and branches are runner-side state Phoenix cannot
 see. Server-side, the endpoint refuses up front for the six reasons above — including an
-`exclusive` run whose pinned executor is absent or stale per `Relay.Runs.executor_stale?/2`,
-whose worktree is unreachable. Executor-side, branch existence stays with RLY-166's
+`exclusive` run whose pinned runner is absent or stale per `Relay.Runs.runner_stale?/2`,
+whose worktree is unreachable. Runner-side, branch existence stays with RLY-166's
 `check_branch_attached` and RLY-173's `reattach_branch`; a retried job whose branch was
 deleted fails there with a clear message. Neither half ever silently restarts from
 `origin/main`.
@@ -447,7 +469,7 @@ stderr and exits non-zero.
 ### Cancelling a run (RE309)
 
 The stop half of the same surface. `Relay.Runs.cancel_run/2` stops the run server, revokes
-any in-flight job (freeing the executor slot), transitions the run from
+any in-flight job (freeing the runner slot), transitions the run from
 `Relay.Schemas.Run.active_statuses/0` to `:cancelled`, logs an `:action` timeline entry and
 broadcasts `:run_finished`. Both `running` and `parked` runs cancel, with no extra flag —
 restricting it would leave a wedged `running` run needing a production console, which is
@@ -472,7 +494,7 @@ capped at `@max_cancel_reason` (200) characters; omitting it keeps the plain
 `run cancelled`. The `:actor` (`:agent | {:user, id}`) is logged with the entry, so
 "who killed this run?" is answerable: `BoardLive`'s confirm-move dialog passes the
 signed-in user, the board-key API passes `:agent`, and the run `Listener` and
-`ExecutorReaper` take the `:agent` default.
+`RunnerReaper` take the `:agent` default.
 
 **Cancelling never moves the card.** A caller that wants the card elsewhere follows with
 `POST /api/cards/:ref/move`, whose `409 would_strand_run` keeps meaning exactly what it
@@ -481,7 +503,7 @@ supported way to unstick a card whose run must die.
 
 CLI: `relay cancel <ref> [--reason TEXT] [--json]`. On a refusal it prints the server's
 message to stderr and exits non-zero. Self-cancel is permitted and documented, not guarded:
-a flow node cancelling its own ref revokes its own job, and the executor handles revocation
+a flow node cancelling its own ref revokes its own job, and the runner handles revocation
 gracefully.
 
 ### Advancing past an already-committed task (RE310)
@@ -501,7 +523,7 @@ task**, or — when that was the last one — at the flow's `when: :foreach_exha
 Eligibility is deliberately **wider** than retry's: a `:failed` run, or a `:parked` run with
 `parked_reason: :needs_input` — **either** park kind. RE306's actual state was a `:question` park,
 which retry refuses `awaiting_answer`, so reusing retry's rule would leave this hatch unable to
-open in the exact state it exists for. `:running`, `:parked/:executor_gone`, `:done` and
+open in the exact state it exists for. `:running`, `:parked/:runner_gone`, `:done` and
 `:cancelled` are refused. The refusal codes add `not_advanceable`, `no_foreach`,
 `no_exhausted_edge` and `not_bound` to retry's list, through the same
 `Relay.Runs.retry_refusal_code/1` pair; every refusal is checked before the check-off, so a
@@ -524,7 +546,7 @@ unconditional rule: a still-active run (`running`/`parked`, any `parked_reason`)
 its card already sits in a terminal-type stage (`Schemas.Stage.terminal_types/0`) — is closed via
 `Relay.Runs.cancel_run/2`, not resumed (RLY-233). This is what stops a parked `:needs_input`
 run from being resumed after its card reached Done — closing pre-empts the resume rules below.
-`Relay.Runs.ExecutorReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) is the companion
+`Relay.Runs.RunnerReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) is the companion
 catch-up for anything the event path missed. Run dispatch (`Relay.Runs.start_run/3`) moves the
 card into the flow's work lane and inserts the run row in one transaction, so no committed state
 pairs an active run with a terminal pull stage — and the leak itself is judged from a single
@@ -539,10 +561,10 @@ A parked run has exactly one process allowed to resume it, keyed off `Schemas.Ru
 | ----------------- | ------------------------ | -------------------------------------------- |
 | `:needs_input`    | `Relay.Runs.Listener`    | same node, WITH the stored session (`--resume`) |
 | `:claimed`        | `Relay.Runs.Listener`    | fresh (a human may have changed anything)     |
-| `:executor_gone`  | `Relay.Runs.Scheduler`   | capacity-driven re-dispatch                   |
+| `:runner_gone`  | `Relay.Runs.Scheduler`   | capacity-driven re-dispatch                   |
 | `nil` / unknown   | nobody                   | left untouched (mirrors the Listener's own fallback) |
 
-Resuming is not the only way a park can end. `Relay.Runs.ExecutorReaper` is the one process
+Resuming is not the only way a park can end. `Relay.Runs.RunnerReaper` is the one process
 allowed to end a park *without* resuming it: when the scheduler has refused to resume a run
 continuously for `Relay.Runs.unresumable_after_s/0` (30 minutes),
 `Relay.Runs.abandon_unresumable_runs/1` fails it (RE297). That give-up path is scoped to the
@@ -566,9 +588,9 @@ second silent write.
 arrived while the Listener was down is not lost — the scheduler is no longer a backstop for
 `:needs_input`/`:claimed` parks the way it was before this split.
 
-## Executor mode (`relay execute`) (RLY-135, ADR 0006 card 05)
+## Runner mode (`relay start`) (RLY-135, ADR 0006 card 05)
 
-`bin/relay execute` is **the only runner mode**: a thin, board-agnostic client of the
+`./relay start` is **the only runner mode**: a thin, board-agnostic client of the
 node-job transport above. It knows the Relay REST API and how to execute a node-job;
 nothing else — every board-specific fact lives server-side as flow data.
 
@@ -587,16 +609,16 @@ Agent steps run headless Claude, which uses whatever authentication the local Cl
 metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
 silently billed to the paid API.
 
-- **Config.** `.relay/executor.json` holds `name` (defaults to
+- **Config.** `.relay/runner.json` holds `name` (defaults to
   `<checkout-dir>@<short-host>`, e.g. `relay@Jeremys-MBP`; override per invocation with
-  `relay execute --name foo`). **Upgrading past RE305 changes that default**, and because the
+  `relay start --name foo`). **Upgrading past RE305 changes that default**, and because the
   name is the exclusive-affinity pin key (see Node-job transport above), runs pinned under the
-  old bare-hostname identity park `:executor_gone` instead of resuming. The hop happens
+  old bare-hostname identity park `:runner_gone` instead of resuming. The hop happens
   unattended — auto-update re-execs at a *job* boundary, which is "nothing in flight", not "no
-  run pinned to me" — so a defaulted executor prints a `WARNING:` at startup naming the
+  run pinned to me" — so a defaulted runner prints a `WARNING:` at startup naming the
   pre-RE305 identity. It is **gated on evidence the identity actually moved on this machine**:
   an identity lock file for the bare hostname (`acquire_singleton_lock` writes one and never
-  unlinks it), so a fresh install that never ran a pre-RE305 executor starts silent. Because
+  unlinks it), so a fresh install that never ran a pre-RE305 runner starts silent. Because
   that lock is never unlinked the gate stays true forever once it is true, so emitting also
   drops a `.re305-warned` marker beside the **new** identity's lock: the line is said **once**
   per (machine, board, *new* identity), not on every start and every re-exec. Keyed on the new
@@ -604,16 +626,16 @@ silently billed to the paid API.
   checkout to start would eat the only telling and leave the others (often the one actually
   holding the pins) silent. A `--dry-run` prints the line but does not spend it. To adopt those pins,
   restart the one checkout that owns them with `--name <hostname>` — per invocation, **not** as
-  a `"name"` key in `.relay/executor.json`, which is tracked in git and shared by every
+  a `"name"` key in `.relay/runner.json`, which is tracked in git and shared by every
   checkout, so a bare hostname there restores exactly the shared identity this default exists
   to split apart. Per run the recovery depends on where the run already is: while it is still
-  **running**, a human baton clears the pin (`Runs.park_claimed/1` nils `pinned_executor_name`,
+  **running**, a human baton clears the pin (`Runs.park_claimed/1` nils `pinned_runner_name`,
   and it transitions from `[:running]` only), so handing the baton back re-dispatches it
-  anywhere; once it has parked `:executor_gone` nothing clears the pin in place — the listener
-  leaves that shape untouched, the scheduler's resume still targets the gone executor, and
-  `relay retry` refuses `executor_unavailable` — so the way out is cancelling the run and
+  anywhere; once it has parked `:runner_gone` nothing clears the pin in place — the listener
+  leaves that shape untouched, the scheduler's resume still targets the gone runner, and
+  `relay retry` refuses `runner_unavailable` — so the way out is cancelling the run and
   letting the card dispatch fresh, losing that run's worktree state. The board already says
-  `Executor "X" is not currently connected.` on the parked run. Also `namespace`
+  `Runner "X" is not currently connected.` on the parked run. Also `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
@@ -636,12 +658,12 @@ silently billed to the paid API.
   > its own test database** (or equivalent) so parallel test suites don't truncate each other.
   > How you do that depends on your project's toolchain (the prepare hook below is where a
   > project wires per-worktree isolation).
-- **What the terminal tells you (RE305).** Startup prints ONE line naming the executor, its
+- **What the terminal tells you (RE305).** Startup prints ONE line naming the runner, its
   version, the **board** it reached (display name + key), the URL, and the capacity it
   advertises — so a key pointed at the wrong board is visible immediately instead of
   looking identical to a correct one. If the board cannot be reached at startup the line
   says `board UNREACHABLE`, a `WARNING:` line names the URL and the underlying error
-  (exactly the diagnostic for a wrong or expired `RELAY_API_KEY`), and the executor
+  (exactly the diagnostic for a wrong or expired `RELAY_API_KEY`), and the runner
   **keeps polling** — a transient outage at startup must not kill a long-running process.
 
   In the loop it prints `claimed <REF> · <node> (run <id>, <isolation>)` (or `claimed talk
@@ -650,32 +672,32 @@ silently billed to the paid API.
   latter naming what holds them (`RE291 retained` is a failed run's worktree kept for
   post-mortem, which holds its exclusive slot until reclaimed). Both are capped at one line
   per reason per `IDLE_LOG_INTERVAL` (300s, a module constant, deliberately not a config
-  key), and a claim re-arms them, so a quiet executor costs ~2 lines per 5 minutes.
-- **Single-process guarantee (RLY-193).** Exactly one `relay execute` may run per `{server,
-  name}` (the pair the server keys an `Executor` on, `name` defaulting to
+  key), and a claim re-arms them, so a quiet runner costs ~2 lines per 5 minutes.
+- **Single-process guarantee (RLY-193).** Exactly one `relay start` may run per `{server,
+  name}` (the pair the server keys a `Runner` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
   longer collide on identity, *provided their directories are named differently*) and per
-  worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
-  locks — an *identity* lock under `$RELAY_EXECUTOR_LOCK_DIR` or `~/.relay/locks` keyed on
+  worktree namespace. At startup `cmd_start` takes two exclusive, non-blocking `fcntl.flock`
+  locks — an *identity* lock under `$RELAY_RUNNER_LOCK_DIR` or `~/.relay/locks` keyed on
   `sha256(RELAY_URL + "\0" + name)` (since `name` embeds the checkout directory, two clones on
   one host **in differently-named directories** now hash to different lock paths — RE305;
-  `default_executor_name/0` uses the directory's BASENAME, so same-named directories still
+  `default_runner_name/0` uses the directory's BASENAME, so same-named directories still
   collide and the identity lock refuses the second one by name), and a *namespace* lock at
   `<ROOT>/.claude/worktrees/.<namespace>.lock`
   — held for the life of the process by keeping their fds open. A second process for a
   colliding identity or a shared worktree namespace refuses to start (`relay: already
-  running: …`, naming the holder's pid) rather than registering as the same executor. Because
-  `flock` is released by the kernel on process death, a crashed executor leaves no stale lock
+  running: …`, naming the holder's pid) rather than registering as the same runner. Because
+  `flock` is released by the kernel on process death, a crashed runner leaves no stale lock
   (this is why a flock and not a pidfile). This is what makes the RLY-170 orphan recovery above
-  sound: that recovery requeues a job the executor no longer reports running, which is only
+  sound: that recovery requeues a job the runner no longer reports running, which is only
   correct because a single identity can no longer be split across two live processes each
-  beating a partial `running` list. Two executors on one host **are** supported when they are
+  beating a partial `running` list. Two runners on one host **are** supported when they are
   different checkouts — a distinct name gives a distinct identity lock, and a distinct `ROOT`
-  gives a distinct namespace lock; what remains unsupported is two executors sharing one
+  gives a distinct namespace lock; what remains unsupported is two runners sharing one
   checkout and name.
-- `bin/relay update [--check] [--json]` — non-interactive, writes only the six
+- `./relay update [--check] [--json]` — non-interactive, writes only the six
   Relay-owned files, needs no TTY and no board key.
-- **Worktree namespace (RLY-231: one worktree per card).** `ExecutorPool` maps every job's
+- **Worktree namespace (RLY-231: one worktree per card).** `RunnerPool` maps every job's
   `isolation` onto worktrees under the `exec-*` namespace. `shared_clean` jobs share one
   reused `exec-clean` worktree (never reset per-job, only fast-forwarded to base when every
   shared slot is idle) — unchanged. `exclusive` jobs no longer draw from a fixed
@@ -684,15 +706,15 @@ silently billed to the paid API.
   reaches a terminal `run_state`. Since the worktree's identity is the card's branch,
   cross-contamination between two cards is impossible by construction, and the binding is
   derivable from `git worktree list` rather than an in-memory map, so a restart re-derives
-  it (`ExecutorPool.recover/0`) instead of losing it.
+  it (`RunnerPool.recover/0`) instead of losing it.
   - **Capacity is reinterpreted, not reshaped:** `capacity.exclusive` is `max_worktrees` —
-    the max number of concurrent *active* per-card worktrees an executor holds, not a fixed
+    the max number of concurrent *active* per-card worktrees a runner holds, not a fixed
     slot count. Advertised free `exclusive` = `max_worktrees − active_count`.
-    The runners view's `used` for the `exclusive` chip is now derived from the executor's
-    **declared holdings** (`executors.held`, RE311) rather than from its active jobs — which is
-    exactly `total − free` as `ExecutorPool.capacity()` computes it, so the two sides agree by
+    The runners view's `used` for the `exclusive` chip is now derived from the runner's
+    **declared holdings** (`runners.held`, RE311) rather than from its active jobs — which is
+    exactly `total − free` as `RunnerPool.capacity()` computes it, so the two sides agree by
     construction. Counting active jobs made a bound-but-idle, talk-attached or retained worktree
-    invisible, and that is what reported "runner available" while the executor had zero free
+    invisible, and that is what reported "runner available" while the runner had zero free
     exclusive slots.
   - **Two states.** *Active*: bound to a non-terminal run, counts toward `max_worktrees`,
     holds a `MIX_TEST_PARTITION` index. *Retained*: a `failed` run's leftover kept on disk
@@ -701,13 +723,13 @@ silently billed to the paid API.
     counted against capacity. `done`/`cancelled` remove the worktree immediately; a revoke
     (`run_state == nil`) touches nothing.
   - **Never-detach.** Once the run's `branch` node attaches `refs/heads/{branch}`, the
-    executor never re-detaches that worktree again — the old mid-run reset-on-revoke path
+    runner never re-detaches that worktree again — the old mid-run reset-on-revoke path
     (below) is gone. A revoked exclusive job now just stops its subprocess and leaves the
     worktree active and bound, ready for the pinned resume to continue in it.
   - **Prepare hook.** On a reset (first job of a card, or reclaiming a retained worktree for
-    a new run), `ExecutorPool.create_or_rebaseline/1` makes the worktree clean at base, then
+    a new run), `RunnerPool.create_or_rebaseline/1` makes the worktree clean at base, then
     `run_prepare_hook/3` warms it: it runs `.relay/prepare-worktree.sh` if present and
-    executable, else the `prepare` command from `executor.json`, else it is a no-op (a cold
+    executable, else the `prepare` command from `runner.json`, else it is a no-op (a cold
     build, not an error). The hook receives `[worktree, ref, branch, base, cache_dir]` as
     both argv and env (`RELAY_WORKTREE`/`RELAY_REF`/`RELAY_BRANCH`/`RELAY_BASE`/
     `RELAY_CACHE_DIR`) with `cwd` set to the new worktree; **a nonzero exit fails the run
@@ -722,8 +744,8 @@ silently billed to the paid API.
     `git fetch` (RLY-224 §6), since concurrent per-card creates/teardowns race on the one
     shared ref db.
 - **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
-  `RELAY_NODE_SCRATCH` (`scratch_path` in `bin/relay`): `tmp/<REF>/<node>.md` inside that same
-  worktree, keyed only on `(ref, node)` so a re-queued job after an executor restart resolves
+  `RELAY_NODE_SCRATCH` (`scratch_path` in `./relay`): `tmp/<REF>/<node>.md` inside that same
+  worktree, keyed only on `(ref, node)` so a re-queued job after a runner restart resolves
   the identical path. It sits under the checkout's own `.gitignore`, so it survives
   `reset_worktree`'s salvage/stash/clean untouched and never gets committed. See
   [`../../relay.md`](../../relay.md#the-relay_node_scratch-contract) for the
@@ -731,14 +753,14 @@ silently billed to the paid API.
 - **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
   apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL
   sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.
-  `ExecutorPool.partition_for(slot)` (`bin/relay`) derives `MIX_TEST_PARTITION` from a
+  `RunnerPool.partition_for(slot)` (`./relay`) derives `MIX_TEST_PARTITION` from a
   free-list index held by the worktree's registry record at the single point where a node's
   command launches (both `_stream_shell` and `_stream_claude_job`), so every step of a run —
   including the `precommit` gate — sees the same database: each active per-card worktree
   (e.g. `exec-RLY-231`) holds its own index for the run's lifetime, recycled on teardown; the
   shared `exec-clean` is always partition `0`. `config/test.exs` already keys the database
   name off `MIX_TEST_PARTITION`.
-- **The claim/execute/report loop (`cmd_execute`).** Each iteration: advertise current free
+- **The claim/execute/report loop (`cmd_start`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
   "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
   free slots; the worker resets the slot if needed, runs the step (shell/gate via
@@ -747,21 +769,21 @@ silently billed to the paid API.
   `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
-- **Heartbeat-borne revoke.** `ExecutorHeartbeat` POSTs `{executor, capacity,
+- **Heartbeat-borne revoke.** `RunnerHeartbeat` POSTs `{runner, capacity,
   running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s and reads `{revoked: [job-ids],
-  release_held: [{ref, status}], latest_executor_version}` back (RLY-164, ref keying RE311),
+  release_held: [{ref, status}], latest_runner_version}` back (RLY-164, ref keying RE311),
   terminating each revoked job's live subprocess via its `JobControl`. `release_held` is the
-  ref-scoped analogue of `revoked`: the executor advertises every per-card worktree it holds
+  ref-scoped analogue of `revoked`: the runner advertises every per-card worktree it holds
   (`held`), and the server names the subset whose card has at least one run and no run left in
   `Schemas.Run.active_statuses/0` — with the status needed to choose remove vs retain
-  (`Relay.Runs.releasable_held/2`) — so `ExecutorPool.release_held/2` disposes of them within one
+  (`Relay.Runs.releasable_held/2`) — so `RunnerPool.release_held/2` disposes of them within one
   heartbeat. A card with **zero** runs is a talk-only worktree and is never named (ADR 0009 §2:
   a talk session's tree spans runs and must outlive them), and a `retained` tree is the human's
-  post-mortem, the executor's own to evict. This is how taking the baton (ADR 0004, via
+  post-mortem, the runner's own to evict. This is how taking the baton (ADR 0004, via
   `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on its
   next outcome POST — and, unlike the retired run-id-keyed channel, it also reaches a worktree
-  the executor re-derived from disk after a restart. **Never-detach (RLY-231):** a revoked job of either isolation class
+  the runner re-derived from disk after a restart. **Never-detach (RLY-231):** a revoked job of either isolation class
   leaves its worktree exactly as it was — an exclusive worktree is bound 1:1 to its card and
   stays active + attached to the branch for the pinned resume to continue in, and a revoked
   `shared_clean` job already left `exec-clean` untouched (it's shared by other concurrently
@@ -769,30 +791,30 @@ silently billed to the paid API.
   reset-on-revoke for exclusive jobs is gone: no reset is ever needed mid-run now that a
   worktree's identity is the card itself. Either way, no outcome is reported for a revoked
   job — the server already knows a revoked job never finished.
-- **Auto-update (RE185).** When the beat's `latest_executor_version` exceeds the running
-  `EXECUTOR_VERSION`, `maybe_auto_update` fires from the claim loop — but only at a **job
+- **Auto-update (RE185).** When the beat's `latest_runner_version` exceeds the running
+  `RUNNER_VERSION`, `maybe_auto_update` fires from the claim loop — but only at a **job
   boundary** (nothing in flight), never under `--once`, and never more often than
   `auto_update_min_interval`, and never again after three *failed* updates in one process's
-  life (a refused download or a failed install — a successful one never counts, so an executor
+  life (a refused download or a failed install — a successful one never counts, so a runner
   that has been up for months and picked up ten releases is unaffected). It downloads
-  `bin/relay` from the board's scaffold endpoint (`$RELAY_URL/api/scaffold/bin/relay`) through
-  `download_executor`, which shares `verify_executor_source` with `relay update` — HTTPS, UTF-8,
-  a leading `#!`, an `EXECUTOR_VERSION` parsed **from the downloaded bytes** (authoritative — a
+  `./relay` from the board's scaffold endpoint (`$RELAY_URL/api/scaffold/relay`) through
+  `download_runner`, which shares `verify_runner_source` with `relay update` — HTTPS, UTF-8,
+  a leading `#!`, a `RUNNER_VERSION` parsed **from the downloaded bytes** (authoritative — a
   board ahead of what it serves is then harmless, not a chase), a `compile()` syntax check, and
   (for auto-update only) strictly newer. Verification is deliberately HTTPS + parse only: no
   checksum, no signature. Any rejection logs why and the running version keeps serving; a bad
-  update can never leave a machine with a broken executor.
+  update can never leave a machine with a broken runner.
 
-  The install writes the **tracked** `bin/relay` in place (`os.replace`, so a concurrent
-  `bin/relay card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
+  The install writes the **tracked** `./relay` in place (`os.replace`, so a concurrent
+  `./relay card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
   tolerable: untracked or not-a-repo is fine, tracked-and-clean is fine, and tracked-and-dirty is
   allowed **only** when the file's sha256 matches a write recorded in `~/.relay/auto-update.json`
   — otherwise the dirt is a human's uncommitted edit and the update is skipped with a one-time
   log line. That ledger is not a nicety: after the first auto-update the file is permanently
   dirty against HEAD, so a clean-only rule would wedge every later update. The accepted cost is
-  that `bin/relay` shows as modified in `git status` on the machine running the executor.
+  that `./relay` shows as modified in `git status` on the machine running the runner.
 
-  The restart stops the heartbeat and the log forwarder, calls `release_executor_locks()` —
+  The restart stops the heartbeat and the log forwarder, calls `release_runner_locks()` —
   **required**, because RLY-193's flocks belong to open file descriptions that survive `execv`
   while the re-exec'd image opens new descriptors and would die "already running" — then
   `os.execv`s with `RELAY_UPDATED_FROM`/`RELAY_UPDATE_ATTEMPTS` set. On the way back up
@@ -811,7 +833,7 @@ claim/execute/report loop, one more branch.
 
 - **Worktree.** A talk turn always runs in the card's own exclusive per-card worktree
   `<ns>-<ref>` — **never** the shared `<ns>-clean` tree, which other cards' jobs are using.
-  `ExecutorPool.assign_talk/1` attaches to a live worktree a node job already holds (dirty
+  `RunnerPool.assign_talk/1` attaches to a live worktree a node job already holds (dirty
   reads are the point — the tree may be mid-edit, and that is often exactly what is being asked
   about), reuses a retained failed one as-is (post-mortem is what people ask about), or creates
   one on demand for a card the flow engine would never itself dispatch.
@@ -819,11 +841,11 @@ claim/execute/report loop, one more branch.
   A node job and a talk turn can occupy the SAME worktree record at once, so occupancy is
   tracked **per occupant**: `live` for the node job, and a `talk_users` **count** for talk
   turns — a count, not a flag, because two turns can legitimately overlap on one tree: Stop
-  finalises a turn server-side at once, but the executor only learns of the revoke on its next
+  finalises a turn server-side at once, but the runner only learns of the revoke on its next
   heartbeat (15s), so a person who hits Stop and immediately retypes has turn 1 still running
   when turn 2 is claimed into the same tree. A flag did not count the second occupant, and
   turn 1's release then stashed and force-removed the tree turn 2 was answering in.
-  `ExecutorPool.assign_talk/1` and `release_talk/1` only ever touch `talk_users`, never `live` —
+  `RunnerPool.assign_talk/1` and `release_talk/1` only ever touch `talk_users`, never `live` —
   an earlier version shared one `live` flag between both occupants, which let either tear the
   tree down (or believe it idle) out from under the other: a node job's `release()` finishing
   while a talk turn was still streaming would run `git worktree remove --force` mid-answer and
@@ -853,7 +875,7 @@ claim/execute/report loop, one more branch.
   `talk` marker. Retiring on `run_id` alone mistook a recovered worktree for talk-only and
   retired (stashed + hard-reset) it out from under its resuming job.
 
-  `ExecutorPool.assign/1` (the node-job path) likewise refuses to reclaim a **retained** tree a
+  `RunnerPool.assign/1` (the node-job path) likewise refuses to reclaim a **retained** tree a
   talk turn has reattached to (`talk_users > 0`) rather than re-baselining it out from under that
   turn's still-reading claude process — the same "refuse rather than steal a live
   worktree" precedent it already applies to a tree bound to a different live run.
@@ -864,7 +886,7 @@ claim/execute/report loop, one more branch.
   which ADR 0009 §2 otherwise forbids. The exposure is narrow — an idle talk-only tree has
   already been `retained` by `_retire_talk_only_locked`, and `retained` IS disk-marked and
   survives — so it takes a talk turn that was live at crash time, whose `claude` process died
-  with the executor anyway; teardown stashes any dirty edits (`_teardown` salvages via
+  with the runner anyway; teardown stashes any dirty edits (`_teardown` salvages via
   `git stash push -u`) rather than discarding them. Marking `talk` on disk the way
   `RETAINED_MARKER` is would close it, but the marker would have to be written after the tree is
   created (in the talk worker, not `assign_talk/1`) and CLEARED the moment a run adopts the tree
@@ -889,7 +911,7 @@ claim/execute/report loop, one more branch.
   tree's identity is the card's branch. See "Adopting the card's own tree" below.) That refusal used to be reported as a
   **failed job**, so someone asking "why did this fail?" during a retry failed the retry. The
   claim loop now retries placement for a bounded window (`PLACEMENT_ATTEMPTS` ×
-  `PLACEMENT_RETRY_S`, ~10s, `bin/relay`) before rejecting, which covers one talk turn handing
+  `PLACEMENT_RETRY_S`, ~10s, `./relay`) before rejecting, which covers one talk turn handing
   the tree back; only a persistent miss is treated as genuine capacity exhaustion. See
   [failures.md](failures.md) E2t.
 
@@ -907,7 +929,7 @@ claim/execute/report loop, one more branch.
 - **Prompt.** `talk_prompt(job)` is built in **product code**, not a `.claude/agents/*.md`
   definition — a recorded exception to ADR 0006 (ADR 0009 §5): Talk is a property of Relay
   itself and must behave identically on every connected repo. It is the preamble (names the
-  pane, the read-only rule, and `bin/relay why`/`runs`/`card`) + the card's seed fields + the
+  pane, the read-only rule, and `./relay why`/`runs`/`card`) + the card's seed fields + the
   human's text, spliced in **verbatim and last** — never passed through `render()`, so a
   person's `{ref}`-shaped typing can never reach into the var namespace.
 - **Event mapping.** `_stream_claude_job` gained an `on_event=None` callback, invoked with each
@@ -946,25 +968,25 @@ claim/execute/report loop, one more branch.
   `enqueue` also flushes whatever is already pending once it has
   waited `flush_interval` (default 1s), checked *before* the new line joins it, so a slow
   trickle of events posts as it arrives instead of all landing in one batch together.
-- **Stop.** Arrives as an ordinary revoke on the existing heartbeat — `ExecutorHeartbeat`
+- **Stop.** Arrives as an ordinary revoke on the existing heartbeat — `RunnerHeartbeat`
   already terminates a revoked job's subprocess via its `JobControl`; `run_talk_job` checks
   `control.cancelled()` after the process exits and reports `stopped` (not `failed`) with
   whatever partial output was already delivered. No talk-specific channel was added.
 
-`EXECUTOR_VERSION` 33 → 39 for this change (34 shipped the initial worker, 35 the occupancy/
+`RUNNER_VERSION` 33 → 39 for this change (34 shipped the initial worker, 35 the occupancy/
 retirement/attribution hardening above, 36 the recovery/retained-tree/streaming/branch fixes
 from a follow-up review, 37 the branch-checkout non-destructiveness fix above, 38 the
 failure-line-into-the-transcript fix from the whole-branch review, 39 the `talk_users`
 occupancy count, the bounded placement retry, and the rejected-turn transcript line).
 
-**Two version floors.** `Relay.Runs.min_executor_version/0` was **not** raised for Talk (it was
-21 at the time; RE311 has since raised it to 57 for the reshaped release channel) — an executor
+**Two version floors.** `Relay.Runs.min_runner_version/0` was **not** raised for Talk (it was
+21 at the time; RE311 has since raised it to 57 for the reshaped release channel) — a runner
 without Talk is not worse than a stopped one for the flow work it still does correctly. Talk gets
-its own, higher floor instead: `Relay.Runs.min_talk_executor_version/0` (38 then; it now returns
-`max(@min_talk_executor_version, min_executor_version/0)`, so raising the base floor carries it
+its own, higher floor instead: `Relay.Runs.min_talk_runner_version/0` (38 then; it now returns
+`max(@min_talk_runner_version, min_runner_version/0)`, so raising the base floor carries it
 along), applied by
 `talk_capable?/1` inside `claim_next_job/1`, which narrows the claim to `NodeJob.flow_kinds()`
-for anything below it. Without that second floor a pre-Talk executor would happily claim the
+for anything below it. Without that second floor a pre-Talk runner would happily claim the
 first (deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key
 a talk payload does not carry, and reject it to the flow-only outcome route — a 404 that leaves
 the turn `claimed` forever and wedges Talk for the whole board ([failures.md](failures.md) D4t).
@@ -977,7 +999,7 @@ An agent node **must declare its verdict** before it exits, by running:
 relay outcome <outcome> [--detail TEXT|@file]
 ```
 
-`bin/relay` writes the JSON to `$RELAY_NODE_OUTCOME` (set per node; the verb refuses to run
+`./relay` writes the JSON to `$RELAY_NODE_OUTCOME` (set per node; the verb refuses to run
 outside a node), so a `detail` containing quotes or newlines cannot corrupt the file. `detail`
 becomes the context handed to the next node. Which outcomes exist and what each one does to the
 run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
@@ -1013,7 +1035,7 @@ unambiguous verdict.
 
 ### What an agent node's prompt is made of
 
-`bin/relay` composes an agent node's prompt from up to three parts, in this order
+`./relay` composes an agent node's prompt from up to three parts, in this order
 (`compose_node_prompt`):
 
 1. **the node's own `run`**, rendered — `{ref}`, `{branch}`, `{relay}` and the rest substituted
@@ -1031,7 +1053,7 @@ transition, and the ORIGINATING findings plus this attempt's failure detail on a
 (`RunServer.apply_decision/4`). Substitution alone was never enough to deliver it: it only fires
 for placeholders a template contains, and no shipped flow node contains `{findings}`, so every fix
 node in the system was told to fix findings it was never handed. Appending the block in the
-executor makes it universal — every agent node, every flow, every repo, and nothing for a flow
+runner makes it universal — every agent node, every flow, every repo, and nothing for a flow
 author to remember.
 
 The block states that this is a loop-back and the findings are the subject of the run, carries the
@@ -1048,7 +1070,7 @@ must never be able to reach into the var namespace. The static wrapper carries n
 
 A flow node of type `agent` may name an `agent` (e.g. `plan-implementer`). The server
 carries it in the job payload (`Relay.Runs.build_payload/4` → the claim response's
-`agent`), and `bin/relay`'s `_stream_claude_job` appends `--agent <name>` to the
+`agent`), and `./relay`'s `_stream_claude_job` appends `--agent <name>` to the
 `claude -p` invocation: the agent file supplies the system prompt, the node's `run`
 string stays the user prompt. An unknown name makes the CLI fail loudly rather than
 silently fall back to the default agent (verified against CLI 2.1.214), which is the
@@ -1073,7 +1095,7 @@ it to build something it can see is wrong.
 This needed **no engine change**. `needs_input` is decided before any edge is consulted
 (`Relay.Runs.Engine`), so it consumes no `max_loops` budget, does not increment the visit count,
 and is not degraded to `:failed`. The command itself reaches every agent node for free —
-`bin/relay` appends its outcome contract, already rendered, to every agent prompt (see
+`./relay` appends its outcome contract, already rendered, to every agent prompt (see
 [What an agent node's prompt is made of](#what-an-agent-nodes-prompt-is-made-of)).
 
 **The human's answer, not the plan, is authoritative for the remainder of the run.** This is a
@@ -1121,7 +1143,7 @@ each other's work:
 1. **One agent per working directory at a time.** A `git checkout` (or branch/file edit) is
    global to the directory — two agents on two branches in one directory overwrite each other.
    Serialize (one card at a time), or give each agent its own clone or `git worktree`. Don't run
-   the executor and an interactive session in the same working tree at once.
+   the runner and an interactive session in the same working tree at once.
 2. **State lives on the board, never in the working tree.** Many cards are in flight, moving back
    and forth between stages; a card may be specced now and planned days later while others pass
    through. Nothing durable may depend on what's currently checked out or on a shared repo-root
@@ -1136,15 +1158,15 @@ each other's work:
 
 Readiness, ordering, WIP and failure routing are **not** on this list: they are decided
 server-side by the scheduler and the engine (see "Dispatch is server-side" above,
-[state.md](state.md) and [failures.md](failures.md)). An executor that tries to decide them
+[state.md](state.md) and [failures.md](failures.md)). A runner that tries to decide them
 locally will disagree with the server.
 
 ---
-*Sources of truth: `bin/relay`, `.relay/executor.json`, `bin/test_relay.py`,
+*Sources of truth: `./relay`, `.relay/runner.json`, `bin/test_relay.py`,
 `lib/relay_web/controllers/api/node_job_controller.ex`, `lib/relay/runs.ex`,
 `lib/relay_web/controllers/api/board_controller.ex`,
 `lib/relay_web/controllers/api/run_controller.ex`,
-`lib/relay_web/controllers/api/executor_controller.ex`,
+`lib/relay_web/controllers/api/runner_controller.ex`,
 `lib/relay_web/controllers/api/flow_metrics_controller.ex`,
 `lib/relay_web/controllers/api/flow_controller.ex`,
 `lib/relay_web/controllers/api/talk_controller.ex`, `lib/relay/talk.ex`,

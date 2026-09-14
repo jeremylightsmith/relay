@@ -87,7 +87,7 @@ sharing behavior.
   rework nodes sit in a second column, and backward edges pack into right-hand gutter lanes —
   no stored coordinates, no dragging).
   **Requirements (RLY-182):** `Flows.node_requirements/1` is a pure graph read — the agent
-  and skill names a flow's nodes name, with no executor knowledge. It lives here rather than
+  and skill names a flow's nodes name, with no runner knowledge. It lives here rather than
   in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);
   `Runs` reads it to answer whether anyone can actually satisfy it.
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
@@ -106,7 +106,7 @@ sharing behavior.
   vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
   **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour, resolved through `Relay.Runs.Instance` (`config :relay, :runs_dispatcher` in production, a per-test instance under test — RE298 / ADR 0009).
   Card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
-  Run/node/job statuses are in [state.md](state.md); dispatch, the executor, worktrees and the
+  Run/node/job statuses are in [state.md](state.md); dispatch, the runner, worktrees and the
   transport in [runner.md](runner.md); the failure grid in [failures.md](failures.md). Why:
   [ADR 0006](../adr/0006-workflow-orchestration.md), [ADR 0007](../adr/0007-card-lifecycle-and-failure-states.md); per-function detail in the `Relay.Runs` `@moduledoc`.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
@@ -125,7 +125,7 @@ sharing behavior.
   the raw error.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
-  `bin/relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
+  `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
   an active run (`Relay.Runs.active_run/1`) with **409 `active_run`** and writes nothing; that
   guard lives in `RelayWeb.Api.CardController`, **not** in `Cards.archive_card/2`, so the board
   UI's Archive button stays unguarded as shipped. Both are idempotent through the domain
@@ -137,7 +137,7 @@ sharing behavior.
   authorization check `get_card_by_ref/2` is), Done included, archived opt-in via `:archived`,
   capped by `:limit`, and carrying `list_cards/1`'s trimmed projection. Three surfaces call it and
   none re-implements it: `GET /api/cards?q=` (with `limit`/`archived`; **no `q` leaves that
-  listing exactly as it was**), `bin/relay search`, and the board header's results popover.
+  listing exactly as it was**), `./relay search`, and the board header's results popover.
 - **Members** — board membership; who can see and act on a board.
 - **Presence** (`Relay.Presence`) — who is looking at a board's **story map** right now, and
   where their pointer is (RE257); the app's first `Phoenix.Presence` context, supervised
@@ -303,28 +303,28 @@ sharing behavior.
   a person-driven execution lane, orthogonal to the flow engine: a person types in a card's
   terminal pane, one turn becomes a `node_jobs` row with `kind: :talk` and no run, claimed
   through the same long-poll every flow node uses. Three tables: `Schemas.TalkSession` (one per
-  card — `claude_session_id`, `pinned_executor_name`, the seed, `last_event_seq` /
+  card — `claude_session_id`, `pinned_runner_name`, the seed, `last_event_seq` /
   `cleared_through_seq`), `Schemas.TalkTurn` (one per human message, `queued → claimed → done |
   stopped | failed`; `queued → claimed` is written by the claim endpoint via
   `Talk.mark_claimed/1`, so the claim path itself needs no knowledge of *turns* — `Relay.Runs`
   knows only that a job can carry `kind: :talk`, via `insert_talk_job!/3`, `revoke_talk_job/1`,
   `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
   `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
-  pin**: `finish_turn/3` records the claiming executor's name onto the session **on `:done`
+  pin**: `finish_turn/3` records the claiming runner's name onto the session **on `:done`
   only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id
   or the holder, and leaves both unset; `post_message/3`
-  copies it onto the next job's `executor_name`, so `Runs.claim_next_job/1` needs no Talk
+  copies it onto the next job's `runner_name`, so `Runs.claim_next_job/1` needs no Talk
   knowledge — the pin rides the same column an exclusive run's pin already uses. **Ordering is
   `seq`, never a timestamp** — `append_events/2` assigns it inside one transaction locking the
   session row, so two concurrent batches can't collide; delivery is at-least-once and
   `(talk_turn_id, client_seq)` is unique, so a replayed batch stores and broadcasts nothing new.
   `clear/1` hides scrollback by bumping `cleared_through_seq`; it deletes no row. Broadcasts on
   `card:<card_id>:talk`: `{:talk_event, event}` and `{:talk_turn_changed, turn}`. **Known step-1
-  limitation**: a turn whose executor dies stays `claimed` — the orphan reaper deliberately
+  limitation**: a turn whose runner dies stays `claimed` — the orphan reaper deliberately
   ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
-  here in step 1: receipts, `awaiting` turns, the write lease, card-level executor pinning — a
+  here in step 1: receipts, `awaiting` turns, the write lease, card-level runner pinning — a
   talk turn never moves the card's baton.
-- **Scaffold** — the five Relay-owned files (`bin/relay` + the four `relay-*` skills) the board
+- **Scaffold** — the five Relay-owned files (`./relay` + the four `relay-*` skills) the board
   serves at `/api/scaffold`, built into `priv/scaffold/` by `mix relay.build_scaffold`
   (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
 - **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
@@ -352,7 +352,7 @@ erDiagram
     Flow |o--o{ Run : "live definition (nilified on delete)"
     Run ||--o{ NodeExecution : "per-attempt history"
     NodeExecution ||--o| NodeJob : "dispatch unit"
-    Board ||--o{ Executor : "registered executors"
+    Board ||--o{ Runner : "registered runners"
     Board ||--o{ Membership : has
     Board ||--o{ StoryActivity : "story map activities"
     Board ||--o{ StoryTask : "story map tasks"

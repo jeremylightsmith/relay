@@ -25,7 +25,7 @@ defmodule Relay.SetupSkillTest do
     [_, step3] = String.split(doc, "## Step 3", parts: 2)
     [step3, _] = String.split(step3, "## Step 4", parts: 2)
 
-    assert step3 =~ "bin/relay update --json"
+    assert step3 =~ "./relay update --json"
     refute String.replace(step3, ~r/\s+/, " ") =~ "Invoke **`/relay-update`** (via the `Skill` tool)"
   end
 
@@ -34,5 +34,14 @@ defmodule Relay.SetupSkillTest do
 
     assert step4 =~ "Restart Claude Code"
     assert step4 =~ "/relay-onboard"
+  end
+
+  test "downloads the CLI to ./relay at the project root, with no bin/ directory (RE319)", %{doc: doc} do
+    [_, step2] = String.split(doc, "## Step 2", parts: 2)
+    [step2, _] = String.split(step2, "## Step 3", parts: 2)
+
+    assert step2 =~ "Download the runner"
+    assert step2 =~ ~s(curl -fsSL "$RELAY_URL/api/scaffold/relay" -o relay && chmod +x relay)
+    refute step2 =~ "mkdir -p bin"
   end
 end

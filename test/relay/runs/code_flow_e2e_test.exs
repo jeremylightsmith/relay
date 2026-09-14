@@ -2,14 +2,14 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   @moduledoc """
   RLY-139 / W13 — the Code flow, proved end to end over the real REST API with no
   `claude` invocation: a card in *Plan:Done* is dispatched by the server-side
-  scheduler, its plan is parsed into sub_tasks, and a scripted executor walks the
+  scheduler, its plan is parsed into sub_tasks, and a scripted runner walks the
   whole graph (branch → N × (implement → spec_review → quality_review) → precommit →
   final_review → smoke → acceptance → post → merge) claiming over
   `POST /api/node-jobs/claim` and reporting over `POST /api/node-jobs/:id/outcome`.
 
   Modelled on `test/relay_web/api/plan_flow_e2e_test.exs` (W12) and
   `test/relay_web/api/spec_flow_e2e_test.exs` (W11); uses W11's
-  `Relay.Runs.Scheduler.ScriptedExecutor` harness for the HTTP calls.
+  `Relay.Runs.Scheduler.ScriptedRunner` harness for the HTTP calls.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -20,13 +20,13 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
-  alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
+  alias Relay.Runs.Scheduler.ScriptedRunner, as: Exec
   alias Relay.Runs.Scheduler.Server
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.SubTask
 
-  @executor_name "code-e2e-executor"
+  @runner_name "code-e2e-runner"
   @capacity %{"shared_clean" => 0, "exclusive" => 1}
 
   # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
@@ -56,13 +56,13 @@ defmodule Relay.Runs.CodeFlowE2ETest do
     |> Enum.map_join("\n\n", fn {title, n} -> "### Task #{n}: #{title}\n\n- [ ] do it" end)
   end
 
-  # The scripted executor runs no real commands, so the Code flow's declared card writes
+  # The scripted runner runs no real commands, so the Code flow's declared card writes
   # (branch → `branch`, post → `ai_result`, merge → `pr_url`, RE244) are pre-filled here.
   # The run-time guard asks only that a declared field is non-blank when the node ends; a blank
   # one rewrites that node's `succeeded` to `failed`. Pre-filling `branch` does change the
   # dispatched `{branch}` var — `Runs.build_payload/4` prefers `card.branch` over
   # `default_branch/2`'s derived `<board-key>-<ref>-<slug>` — but nothing here asserts on it,
-  # and that derivation stays pinned by `test/fixtures/executor_contract.json`.
+  # and that derivation stays pinned by `test/fixtures/runner_contract.json`.
   defp code_card(board, titles) do
     {:ok, card} = Cards.create_card(stage(board, "Plan:Done"), %{title: "Ship the thing"})
 
@@ -78,10 +78,10 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   end
 
   defp announce(conn, board) do
-    assert Exec.claim(conn, @executor_name, @capacity) == nil
-    executor = Repo.get_by!(Schemas.Executor, board_id: board.id, name: @executor_name)
-    :ok = Capacity.put(executor.id, %{shared_clean: 0, exclusive: 1})
-    executor
+    assert Exec.claim(conn, @runner_name, @capacity) == nil
+    runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: @runner_name)
+    :ok = Capacity.put(runner.id, %{shared_clean: 0, exclusive: 1})
+    runner
   end
 
   defp start_scheduler(board) do
@@ -120,7 +120,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   # of {outcome, detail} to hand back; an exhausted or absent queue means
   # {"succeeded", "ok"}. Returns every claimed payload, in order.
   defp drive(conn, script, acc \\ []) do
-    case Exec.claim(conn, @executor_name, @capacity) do
+    case Exec.claim(conn, @runner_name, @capacity) do
       nil ->
         Enum.reverse(acc)
 
@@ -228,17 +228,17 @@ defmodule Relay.Runs.CodeFlowE2ETest do
          %{conn: conn, board: board} do
       %{card: card, run: run, server: server} = launch(conn, board, ["Alpha"])
 
-      assert %{"node_id" => "branch"} = branch = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "branch"} = branch = Exec.claim(conn, @runner_name, @capacity)
       Exec.outcome(conn, branch["id"], %{"outcome" => "succeeded", "detail" => "ok"})
 
-      assert %{"node_id" => "implement"} = impl = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "implement"} = impl = Exec.claim(conn, @runner_name, @capacity)
       Exec.outcome(conn, impl["id"], %{"outcome" => "succeeded", "detail" => "ok"})
 
-      assert %{"node_id" => "spec_review"} = review = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "spec_review"} = review = Exec.claim(conn, @runner_name, @capacity)
       Exec.outcome(conn, review["id"], %{"outcome" => "failed", "detail" => "the second assertion is missing"})
 
       # The refusal routes straight back to implement, carrying the findings.
-      assert %{"node_id" => "implement"} = again = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "implement"} = again = Exec.claim(conn, @runner_name, @capacity)
       assert again["vars"]["findings"] == "the second assertion is missing"
       assert again["vars"]["sub_task"] == "Alpha"
 
@@ -326,16 +326,16 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       # Walk the single iteration by hand up to the gate, so the assertion below
       # happens WHILE precommit is red rather than after final_fix has healed it.
       for node <- ["branch", "implement", "spec_review", "quality_review", "sync"] do
-        body = Exec.claim(conn, @executor_name, @capacity)
+        body = Exec.claim(conn, @runner_name, @capacity)
         assert body["node_id"] == node
         Exec.outcome(conn, body["id"], %{"outcome" => "succeeded", "detail" => "ok"})
       end
 
-      assert %{"node_id" => "precommit"} = gate = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "precommit"} = gate = Exec.claim(conn, @runner_name, @capacity)
       Exec.outcome(conn, gate["id"], %{"outcome" => "failed", "detail" => "3 tests failing"})
 
       # The red gate routes to final_fix, and no merge job exists for this run.
-      assert %{"node_id" => "final_fix"} = fix = Exec.claim(conn, @executor_name, @capacity)
+      assert %{"node_id" => "final_fix"} = fix = Exec.claim(conn, @runner_name, @capacity)
       refute Repo.exists?(from j in NodeJob, where: j.run_id == ^run.id and j.node_key == "merge")
       assert fix["vars"]["findings"] == "3 tests failing"
 

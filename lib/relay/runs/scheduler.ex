@@ -1,7 +1,7 @@
 defmodule Relay.Runs.Scheduler do
   @moduledoc """
   The pure dispatch core (ADR 0006 / RLY-133) — the server-side heir to
-  `bin/relay`'s `find_all_ready`. `plan/1` takes a `Snapshot` and returns a
+  `./relay`'s `find_all_ready`. `plan/1` takes a `Snapshot` and returns a
   `Plan`: an ordered list of `{:resume, ...}` / `{:start, ...}` decisions plus
   the `ready ↔ queued` reconciliation. No processes, no DB — every ported rule
   unit-tests directly.
@@ -12,12 +12,12 @@ defmodule Relay.Runs.Scheduler do
   sub-lanes**; `:needs_input` and `:failed` cards are skipped (a dead run is
   never silently restarted — recovery is a human's call, RLY-179); human-owned
   cards are off-limits (ADR 0004); a parked run resumes through the scheduler
-  only when its `parked_reason` is `:executor_gone` — `:needs_input` and
+  only when its `parked_reason` is `:runner_gone` — `:needs_input` and
   `:claimed` parks are the run `Listener`'s territory and are left untouched
   here (RLY-200, one authority per parked_reason); capacity and WIP are
   consumed as decisions are made, so a single pass never over-dispatches. Extensions: every decision
-  names an executor (capacity consumed on that executor's isolation class);
-  `exclusive` runs are pinned to their affine executor (absolute — never
+  names a runner (capacity consumed on that runner's isolation class);
+  `exclusive` runs are pinned to their affine runner (absolute — never
   reassigned mid-run); a resume the capacity map cannot satisfy is REPORTED as a `refusals`
   entry rather than silently skipped (RE297), so a permanently-unplaceable run can be aged out
   instead of waiting forever.
@@ -93,26 +93,26 @@ defmodule Relay.Runs.Scheduler do
   end
 
   defp maybe_resume(acc, run) do
-    case take_slot(acc.capacity, run.isolation, executor_target(run)) do
+    case take_slot(acc.capacity, run.isolation, runner_target(run)) do
       # RE297: a refused resume used to be dropped on the floor, so the engine could not tell
       # "waiting, legitimately" from "waiting forever". Report it instead; `Relay.Runs` turns
       # the report into a clock and the reaper eventually gives up on it.
       :none ->
         %{acc | refusals: acc.refusals ++ [refusal(run, acc.capacity)]}
 
-      {executor_id, capacity} ->
+      {runner_id, capacity} ->
         %{
           acc
           | capacity: capacity,
             decided: MapSet.put(acc.decided, run.card_id),
-            dispatches: acc.dispatches ++ [{:resume, run.id, executor_id}]
+            dispatches: acc.dispatches ++ [{:resume, run.id, runner_id}]
         }
     end
   end
 
   # exclusive resumes are pinned; every other placement is greedy.
-  defp executor_target(%{isolation: :exclusive, pinned_executor_id: eid}), do: {:pinned, eid}
-  defp executor_target(_run), do: :any
+  defp runner_target(%{isolation: :exclusive, pinned_runner_id: eid}), do: {:pinned, eid}
+  defp runner_target(_run), do: :any
 
   defp refusal(run, capacity), do: %{run_id: run.id, card_id: run.card_id, reason: refusal_reason(run, capacity)}
 
@@ -120,10 +120,10 @@ defmodule Relay.Runs.Scheduler do
   # `Schemas.Run.resume_refusal_reasons/0`, which is the one definition of the set.
   defp refusal_reason(%{isolation: nil}, _capacity), do: :no_isolation
 
-  defp refusal_reason(%{isolation: :exclusive, pinned_executor_id: nil}, _capacity), do: :pin_unresolved
+  defp refusal_reason(%{isolation: :exclusive, pinned_runner_id: nil}, _capacity), do: :pin_unresolved
 
-  defp refusal_reason(%{isolation: :exclusive, pinned_executor_id: eid}, capacity) do
-    if Map.has_key?(capacity, eid), do: :no_free_slot, else: :pinned_executor_absent
+  defp refusal_reason(%{isolation: :exclusive, pinned_runner_id: eid}, capacity) do
+    if Map.has_key?(capacity, eid), do: :no_free_slot, else: :pinned_runner_absent
   end
 
   defp refusal_reason(_run, _capacity), do: :no_free_slot
@@ -159,13 +159,13 @@ defmodule Relay.Runs.Scheduler do
         # WIP had room but no capacity → queue, keep scanning (do NOT consume WIP).
         %{acc | to_queue: acc.to_queue ++ [card.id]}
 
-      {executor_id, capacity} ->
+      {runner_id, capacity} ->
         %{
           acc
           | capacity: capacity,
             decided: MapSet.put(acc.decided, card.id),
             wip_extra: Map.update(acc.wip_extra, works_in, 1, &(&1 + 1)),
-            dispatches: acc.dispatches ++ [{:start, card.id, flow.key, executor_id}]
+            dispatches: acc.dispatches ++ [{:start, card.id, flow.key, runner_id}]
         }
     end
   end
@@ -176,7 +176,7 @@ defmodule Relay.Runs.Scheduler do
       not MapSet.member?(decided, card.id)
   end
 
-  # --- WIP accounting (column + sub-lanes, mirrors `used/1` in bin/relay) ---
+  # --- WIP accounting (column + sub-lanes, mirrors `used/1` in ./relay) ---
 
   defp lane_ids(stage_id, children), do: [stage_id | Map.get(children, stage_id, [])]
 
@@ -200,9 +200,9 @@ defmodule Relay.Runs.Scheduler do
   # --- capacity consumption ---
 
   @doc """
-  Greedy slot placement: finds an executor with a free slot of `class` (the
-  lowest-id executor first for `:any`; the affine executor only for
-  `{:pinned, executor_id}`) and decrements it. Returns `{executor_id, updated_capacity}`
+  Greedy slot placement: finds a runner with a free slot of `class` (the
+  lowest-id runner first for `:any`; the affine runner only for
+  `{:pinned, runner_id}`) and decrements it. Returns `{runner_id, updated_capacity}`
   or `:none` when nothing is free. Public because `Relay.Runs.Scheduler.Server`
   reuses this exact arithmetic to debit capacity for in-flight `:running` runs
   (the B3 accounting fix) — the two calculations must never diverge, since the
@@ -218,25 +218,25 @@ defmodule Relay.Runs.Scheduler do
     |> consume(capacity, class)
   end
 
-  def take_slot(capacity, class, {:pinned, executor_id}) do
-    if free?(capacity, executor_id, class),
-      do: consume(executor_id, capacity, class),
+  def take_slot(capacity, class, {:pinned, runner_id}) do
+    if free?(capacity, runner_id, class),
+      do: consume(runner_id, capacity, class),
       else: :none
   end
 
   defp consume(nil, _capacity, _class), do: :none
 
-  defp consume(executor_id, capacity, class) do
+  defp consume(runner_id, capacity, class) do
     updated =
-      Map.update!(capacity, executor_id, fn slots ->
+      Map.update!(capacity, runner_id, fn slots ->
         Map.update(slots, class, 0, &(&1 - 1))
       end)
 
-    {executor_id, updated}
+    {runner_id, updated}
   end
 
-  defp free?(capacity, executor_id, class) do
-    case Map.get(capacity, executor_id) do
+  defp free?(capacity, runner_id, class) do
+    case Map.get(capacity, runner_id) do
       nil -> false
       slots -> Map.get(slots, class, 0) > 0
     end
@@ -259,10 +259,10 @@ defmodule Relay.Runs.Scheduler do
     card_by_run = Map.new(run_by_card, fn {card_id, run} -> {run.id, card_id} end)
 
     Enum.reduce(dispatches, MapSet.new(), fn
-      {:start, card_id, _flow_key, _executor_id}, acc ->
+      {:start, card_id, _flow_key, _runner_id}, acc ->
         MapSet.put(acc, card_id)
 
-      {:resume, run_id, _executor_id}, acc ->
+      {:resume, run_id, _runner_id}, acc ->
         case Map.get(card_by_run, run_id) do
           nil -> acc
           card_id -> MapSet.put(acc, card_id)
@@ -371,27 +371,27 @@ defmodule Relay.Runs.Scheduler do
     evidence = Map.merge(evidence, bits)
 
     case reason do
-      :executor_outdated ->
+      :runner_outdated ->
         verdict(
-          :executor_outdated,
-          "every connected executor is running old code and is being refused — " <>
+          :runner_outdated,
+          "every connected runner is running old code and is being refused — " <>
             "#{running_versions_phrase(bits)}, requires v#{bits.required_version}. " <>
             "Restart it to pick up current code.",
           evidence
         )
 
-      reason when reason in [:no_executor, :executor_gone] ->
+      reason when reason in [:no_runner, :runner_gone] ->
         verdict(
-          :no_executor,
-          "no executor is connected — nothing is running node-jobs for this board.",
+          :no_runner,
+          "no runner is connected — nothing is running node-jobs for this board.",
           evidence
         )
 
       :awaiting_capacity ->
         verdict(
           :awaiting_capacity,
-          "The #{flow.key} flow would dispatch this card, but no executor is advertising a free " <>
-            "#{flow.isolation} slot — every connected executor is busy.",
+          "The #{flow.key} flow would dispatch this card, but no runner is advertising a free " <>
+            "#{flow.isolation} slot — every connected runner is busy.",
           evidence
         )
     end
@@ -411,30 +411,30 @@ defmodule Relay.Runs.Scheduler do
 
   defp run_verdict(run, nil, evidence), do: run_verdict(run, evidence)
 
-  defp pin_phrase(%{pinned_executor_name: name}) when is_binary(name),
-    do: ~s[ Its worktree lives on executor "#{name}" (exclusive affinity).]
+  defp pin_phrase(%{pinned_runner_name: name}) when is_binary(name),
+    do: ~s[ Its worktree lives on runner "#{name}" (exclusive affinity).]
 
   defp pin_phrase(_run), do: ""
 
-  defp put_pin_name(evidence, %{pinned_executor_name: name}) when is_binary(name),
-    do: Map.put(evidence, :pinned_executor_name, name)
+  defp put_pin_name(evidence, %{pinned_runner_name: name}) when is_binary(name),
+    do: Map.put(evidence, :pinned_runner_name, name)
 
   defp put_pin_name(evidence, _run), do: evidence
 
-  defp run_verdict(%{status: :parked, parked_reason: :executor_gone, pinned_executor_name: name} = run, evidence)
+  defp run_verdict(%{status: :parked, parked_reason: :runner_gone, pinned_runner_name: name} = run, evidence)
        when is_binary(name) do
     verdict(
       :awaiting_capacity,
-      ~s(Run #{run.id} is parked waiting for executor "#{name}" to return ) <>
+      ~s(Run #{run.id} is parked waiting for runner "#{name}" to return ) <>
         "(exclusive affinity — its worktree lives there).",
-      Map.put(evidence, :pinned_executor_name, name)
+      Map.put(evidence, :pinned_runner_name, name)
     )
   end
 
-  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:executor_gone, nil] do
+  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:runner_gone, nil] do
     verdict(
       :awaiting_capacity,
-      "Run #{run.id} is parked and waiting for an executor with a free #{run.isolation} slot.",
+      "Run #{run.id} is parked and waiting for a runner with a free #{run.isolation} slot.",
       evidence
     )
   end
@@ -456,8 +456,8 @@ defmodule Relay.Runs.Scheduler do
     run_ids = for r <- snapshot.runs, r.card_id == card.id, do: r.id
 
     Enum.any?(plan.dispatches, fn
-      {:start, card_id, _flow_key, _executor_id} -> card_id == card.id
-      {:resume, run_id, _executor_id} -> run_id in run_ids
+      {:start, card_id, _flow_key, _runner_id} -> card_id == card.id
+      {:resume, run_id, _runner_id} -> run_id in run_ids
     end)
   end
 
@@ -483,7 +483,7 @@ defmodule Relay.Runs.Scheduler do
       run_status: run && run.status,
       # RE297: exactly the fields that could not be checked from outside when this card was
       # written — the runs JSON projection exposes none of them.
-      pinned_executor_id: run && run.pinned_executor_id,
+      pinned_runner_id: run && run.pinned_runner_id,
       resume_refused_reason: nil,
       # Filled in by Relay.Runs.diagnose/3 — the Snapshot's run maps carry no
       # current_node (snapshot.ex:44-51); only the DB row has it. `resume_refused_since` is
@@ -515,32 +515,32 @@ defmodule Relay.Runs.Scheduler do
   why`, and `GET /api/cards/:ref/diagnosis` all speak one diagnosis. `plan/1` never calls this;
   it reads only `capacity`, so the plan/explain agreement property is untouched.
 
-    * `:no_executor` — the roster is empty.
-    * `:executor_gone` — the roster is non-empty but every executor has gone silent.
-    * `:executor_outdated` — every live (non-`:gone`) executor is running refused old code.
-    * `:awaiting_capacity` — at least one live, current executor exists; it is simply out of
+    * `:no_runner` — the roster is empty.
+    * `:runner_gone` — the roster is non-empty but every runner has gone silent.
+    * `:runner_outdated` — every live (non-`:gone`) runner is running refused old code.
+    * `:awaiting_capacity` — at least one live, current runner exists; it is simply out of
       free slots.
 
-  The evidence carries the required version and one `%{name, version}` per live executor, so
+  The evidence carries the required version and one `%{name, version}` per live runner, so
   every consumer names the mismatch without a second query.
   """
   @spec capacity_diagnosis(Snapshot.t()) ::
-          {:executor_outdated | :no_executor | :executor_gone | :awaiting_capacity,
+          {:runner_outdated | :no_runner | :runner_gone | :awaiting_capacity,
            %{required_version: integer() | nil, running_versions: [%{name: String.t(), version: integer() | nil}]}}
-  def capacity_diagnosis(%Snapshot{executors: executors}) do
-    live = for {_id, e} <- executors, e.freshness != :gone, do: e
+  def capacity_diagnosis(%Snapshot{runners: runners}) do
+    live = for {_id, e} <- runners, e.freshness != :gone, do: e
 
     cond do
-      map_size(executors) == 0 -> {:no_executor, version_evidence([])}
-      live == [] -> {:executor_gone, version_evidence([])}
-      Enum.all?(live, & &1.outdated) -> {:executor_outdated, version_evidence(live)}
+      map_size(runners) == 0 -> {:no_runner, version_evidence([])}
+      live == [] -> {:runner_gone, version_evidence([])}
+      Enum.all?(live, & &1.outdated) -> {:runner_outdated, version_evidence(live)}
       true -> {:awaiting_capacity, version_evidence([])}
     end
   end
 
   defp version_evidence(live) do
     %{
-      required_version: Relay.Runs.min_executor_version(),
+      required_version: Relay.Runs.min_runner_version(),
       running_versions: Enum.map(live, &%{name: &1.name, version: &1.version})
     }
   end
@@ -568,11 +568,11 @@ defmodule Relay.Runs.Scheduler do
   def resume_refusal_sentence(:no_isolation), do: "its flow row no longer exists, so it has no isolation class to place"
 
   def resume_refusal_sentence(:pin_unresolved),
-    do: "it is an exclusive run whose executor pin cannot be resolved, so no machine can be chosen for it"
+    do: "it is an exclusive run whose runner pin cannot be resolved, so no machine can be chosen for it"
 
-  def resume_refusal_sentence(:pinned_executor_absent), do: "the executor it is pinned to is not advertising any capacity"
+  def resume_refusal_sentence(:pinned_runner_absent), do: "the runner it is pinned to is not advertising any capacity"
 
-  def resume_refusal_sentence(:no_free_slot), do: "no executor has a free slot of its isolation class"
+  def resume_refusal_sentence(:no_free_slot), do: "no runner has a free slot of its isolation class"
 
   # --- misc ---
 

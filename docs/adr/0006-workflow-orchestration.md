@@ -66,7 +66,7 @@ flowchart LR
         engine -- "PubSub run events" --> board
     end
     subgraph dev["Developer machine (or future cloud sandbox)"]
-        exec["bin/relay executor<br/>(thin: claim job, run, report)"]
+        exec["./relay runner<br/>(thin: claim job, run, report)"]
         agent["claude -p<br/>one agent node"]
         repo["project checkout + worktrees<br/>CLAUDE.md · .claude/skills · MCP<br/>(developer-owned)"]
         exec --> agent
@@ -85,22 +85,22 @@ flowchart LR
    `Relay.Runs`, per ADR 0002 boundaries) holds flow definitions, executes runs as
    supervised state machines, persists every node's outcome/cost/duration in Postgres, and
    broadcasts progress on PubSub — so LiveView renders run state natively (requirement 1)
-   and interrupted runs resume from durable state (requirement 3). The executor speaks the
+   and interrupted runs resume from durable state (requirement 3). The runner speaks the
    same authenticated REST surface agents already use, extended with node-job endpoints —
    a deeper agent API, not a parallel client, consistent with ADR 0001.
 
-3. **`bin/relay` shrinks to a thin local executor.** It claims node-jobs from the server,
+3. **`./relay` shrinks to a thin local runner.** It claims node-jobs from the server,
    runs `claude -p <prompt>` or a shell step in the named worktree, streams output up, and
    reports a typed outcome. Dispatch logic (`find_all_ready`, WIP counting, pool budgets)
    and the pipeline definition move server-side — eliminating the duplication where
    `relay_config.json` mirrors board columns. Python remains the right language for what is
    now a small, dumb program (requirement 5). Worktree pools and concurrency are
-   **executor-local**: a flow declares only the *isolation requirement* a node needs
-   (`shared_clean` read-only vs `exclusive` writable); each executor maps requirements onto
+   **runner-local**: a flow declares only the *isolation requirement* a node needs
+   (`shared_clean` read-only vs `exclusive` writable); each runner maps requirements onto
    its own worktrees and advertises its capacity — the server never knows any machine's
-   filesystem layout. **Exclusive runs have executor affinity**: every node-job of a run
+   filesystem layout. **Exclusive runs have runner affinity**: every node-job of a run
    goes to the machine holding its worktree; if that machine disappears, the run parks
-   until it returns. A cloud-sandbox executor later is a second implementation of the
+   until it returns. A cloud-sandbox runner later is a second implementation of the
    same protocol, not a redesign.
 
 4. **Flows are declarative graph data, not DOT and not code.** Typed nodes (`agent`,
@@ -197,7 +197,7 @@ below are cut over)
 {
   "key": "spec",
   "trigger": { "from": "Next up", "stage": "Spec", "done": "Spec:Review" },
-  "isolation": "shared_clean",   // requirement only — worktrees/concurrency are executor-local
+  "isolation": "shared_clean",   // requirement only — worktrees/concurrency are runner-local
   "nodes": {
     "brainstorm": { "type": "agent", "run": "/brainstorm {ref}", "max_retries": 1 }
   },
@@ -276,8 +276,8 @@ this is the developer-owned layer):
 
 | Artifact | Today | Tomorrow | Who customizes it |
 | --- | --- | --- | --- |
-| `bin/relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + executor (`relay execute`); `relay init` scaffolds a new project (lands with RLY-135) | nobody — it's generic |
-| `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone (RLY-139)** — deleted; executor keeps `.relay/executor.json` | developer (capacity only) |
+| `./relay` | 995-line CLI + watcher, copied by hand | same file, smaller: CLI + runner (`relay start`); `relay init` scaffolds a new project (lands with RLY-135) | nobody — it's generic |
+| `relay_config.json` | 42 lines: pipeline (stages/prompts) + pools + poll interval | **gone (RLY-139)** — deleted; runner keeps `.relay/runner.json` | developer (capacity only) |
 | `.claude/skills/` (brainstorm, systematic-debugging, TDD, verification…) | node behavior + process discipline | **unchanged** — agent nodes run in the checkout, so these keep working | developer, freely |
 | `.claude/commands/` (write-plan, exec-plan, finish, worktree) | stage entry points the runner prompts into | write-plan/finish/worktree stay; **exec-plan deleted (RLY-139)** | developer |
 | `.claude/workflows/execute-plan.js` | 485 lines — the entire Code orchestration | **gone (RLY-139)** — deleted; its orchestration is [`code.json`](../designs/flows/code.json)'s nodes + edges | — |
@@ -297,20 +297,20 @@ and literal example rows: see the
 | `Flow.Edge` (embedded) | `from`, `to`, `on` (outcome), `max_loops` | e.g. `quality_review --failed→ implement, max_loops 3` |
 | `Run` | `card_id`, flow key + version snapshot, `status` (running \| parked \| done \| failed \| cancelled), `current_node`, timestamps | one per card per flow traversal; `parked` = today's `needs_input` wait |
 | `NodeExecution` | `run_id`, `node_id`, `attempt`, `outcome`, `detail`, `git_sha`, `session_id`, duration, cost | the per-node history RLY-137 renders; `session_id` powers `--resume` re-entry |
-| `Executor` | `name`/host, `last_heartbeat`, capacity per isolation class, status | e.g. `jeremy-mbp: {shared_clean: 3, exclusive: 1}` — replaces the pools block of `relay_config.json` |
-| `NodeJob` | `run_id`, `node_id`, state (queued \| claimed \| running \| done \| revoked), `executor_id`, payload (rendered `run`, isolation, vars) | the unit the executor claims; `revoked` = human took the baton |
+| `Runner` | `name`/host, `last_heartbeat`, capacity per isolation class, status | e.g. `jeremy-mbp: {shared_clean: 3, exclusive: 1}` — replaces the pools block of `relay_config.json` |
+| `NodeJob` | `run_id`, `node_id`, state (queued \| claimed \| running \| done \| revoked), `runner_id`, payload (rendered `run`, isolation, vars) | the unit the runner claims; `revoked` = human took the baton |
 
 **3. Everything else** (one-time or per-machine setup):
 
 | Item | Today | Tomorrow |
 | --- | --- | --- |
 | Board stages (Next up, Spec ± Review/Done, Plan ± Done, Code, Review, Done; `ai_enabled`, WIP limits, reject-to) | configured in board settings | unchanged — triggers validate against them |
-| Board API key + `RELAY_URL` env | required for CLI + runner | unchanged (executor uses the same credential) |
+| Board API key + `RELAY_URL` env | required for CLI + runner | unchanged (runner uses the same credential) |
 | Fly deploy | app has no workflow knowledge | migrations + default flows seeded per board + per-flow enable flags |
-| Runner/executor process on a dev machine | `bin/relay watch` in a terminal | `relay execute` in a terminal (or launchd); registers itself, advertises capacity |
-| Worktrees | `.claude/worktrees/{clean,work-N}` per config | executor-owned namespace (`exec-*`), auto-created |
-| `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every executor machine |
-| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **kept** — still needed by long agent nodes on the executor path |
+| Runner process on a dev machine | the legacy board-runner, `bin/relay watch`, in a terminal (deleted) | `./relay start` in a terminal (or launchd); registers itself, advertises capacity |
+| Worktrees | `.claude/worktrees/{clean,work-N}` per config | runner-owned namespace (`exec-*`), auto-created |
+| `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every runner machine |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **kept** — still needed by long agent nodes on the runner path |
 
 Maintenance story in one line: **developers edit files in their repo (table 1); Relay
 maintains the objects (table 2); machines need table 3 once.**
@@ -326,7 +326,7 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
 
 - **Session resume on needs-input re-entry.** Fabro's human-question tool blocks
   *inside* the agent session, so the agent continues with full working context. We can't
-  hold a process open across days, but we get the same effect: the executor records the
+  hold a process open across days, but we get the same effect: the runner records the
   `claude -p` session id in the node-job, and re-entry after an answer resumes that
   session (`claude -p --resume`) instead of starting cold. (Cards 04/05.)
 - **Failure-signature circuit breaker + per-node visit caps.** Fabro tracks failure
@@ -359,12 +359,12 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
   not inherit the implementer's rationalizations); `--resume` is used only when a node
   re-enters itself after needs-input.
 - **Distributed by design.** Fabro is server + subprocess workers on one box; our engine
-  (Fly) and executors (dev machines) are split by necessity, which is why the node-job
+  (Fly) and runners (dev machines) are split by necessity, which is why the node-job
   protocol, heartbeats, and job reclaim exist at all. Accepted cost, already carded.
 - **No `skipped` outcome yet — but parallel's design is settled (Fabro's, adopted).**
   When `parallel` arrives it works by **fork-and-join on git**: commit the run worktree
   (`parallel_base`), fork N *ephemeral* worktrees at that SHA (scratch, not pool slots;
-  bounded by `max_parallel` and a per-machine scratch budget; all on the run's executor
+  bounded by `max_parallel` and a per-machine scratch budget; all on the run's runner
   per affinity), each child commits, then join by policy — **map** (disjoint work:
   merge all; conflicts route to a rebase agent) or **ensemble** (N attempts at one
   thing: pick a winner, fast-forward to its SHA, losers recorded as `skipped` with
@@ -385,12 +385,12 @@ activity/health spec, RLY-148). Decisions and corrections out of the pass:
 
 - **Placement**: Runners lives under board settings › *Engine*, not the board header.
   The run panel is a drawer tab (*Detail | Run | Activity*).
-- **New card state**: *queued* — flow enabled, waiting for executor capacity.
+- **New card state**: *queued* — flow enabled, waiting for runner capacity.
 - **Session-resume discrepancy**: the run panel shows the implement session resumed on a
   review-failed loop; the ADR rule stands — fresh session per attempt, `--resume` only
   for needs-input re-entry (a refuted implementation shouldn't re-inherit its own
   rationalizations). Mockup copy to fix, not the rule.
-- **Requeue nuance** (Runners artboard copy to sharpen): a stale executor's
+- **Requeue nuance** (Runners artboard copy to sharpen): a stale runner's
   `shared_clean` jobs requeue elsewhere; `exclusive` runs park — affinity is absolute.
 - **Mockup stage names are exemplary, not canonical** ("In progress", "Deploy",
   "Complete"). On a real board, triggers pull from *Done* substages — a flow pulling
@@ -409,7 +409,7 @@ activity/health spec, RLY-148). Decisions and corrections out of the pass:
 
 - Run state is data in Relay's own database: live per-node visibility, cost/duration per
   node, resume after a crash, and gates enforced by the engine rather than by prompts.
-- New projects get the full pipeline by registering a repo and running the executor;
+- New projects get the full pipeline by registering a repo and running the runner;
   workflow fixes ship to all projects at once.
 - The local footprint gets *smaller* than today's runner — less to set up and less to go
   wrong on each machine.
@@ -423,18 +423,18 @@ activity/health spec, RLY-148). Decisions and corrections out of the pass:
   definitions plus engine features, and give up the Claude Workflow engine's internal
   journal/caching/StructuredOutput machinery. Per-node structured output becomes our own
   outcome contract. This is the bulk of the build cost (weeks, not days).
-- A server↔executor protocol (job dispatch, log streaming, heartbeat) must be designed and
-  maintained — though `bin/relay` already has primitive versions of all three, so this is
+- A server↔runner protocol (job dispatch, log streaming, heartbeat) must be designed and
+  maintained — though `./relay` already has primitive versions of all three, so this is
   consolidation, not greenfield.
 - Declarative flows are less expressive than `execute-plan.js`. Accepted: the lesson of
   execute-plan is that flows need loops, fan-out, and outcome routing — not
   Turing-completeness. `shell` nodes are the escape hatch.
 - While agents run on developer machines, a run pauses when that machine sleeps. Accepted
-  today; a cloud executor is the documented remedy if it starts to hurt.
+  today; a cloud runner is the documented remedy if it starts to hurt.
 
 **Sequencing (to de-risk)**
 
-1. Engine + executor protocol with the **Spec** flow only (a single agent node), Code
+1. Engine + runner protocol with the **Spec** flow only (a single agent node), Code
    staying a black box.
 2. Move **Plan**.
 3. Decompose **Code** node-by-node last — it holds all the complexity, and the old path
@@ -446,7 +446,7 @@ activity/health spec, RLY-148). Decisions and corrections out of the pass:
   plugin (or user-level skills) solves cross-project sharing with near-zero work — but does
   nothing for visibility, typed gates, or the harness quirks. Worth doing as an interim
   measure; insufficient as the destination.
-- **Grow `bin/relay` (Python) into the engine.** Cheapest next step and it validates the
+- **Grow `./relay` (Python) into the engine.** Cheapest next step and it validates the
   node contract, but it builds the engine outside the product — invisible to the board
   except through log forwarding, per-machine instead of shared — and would be rewritten in
   Elixir the moment run state should render on cards. Building the engine twice is the real
@@ -462,5 +462,5 @@ activity/health spec, RLY-148). Decisions and corrections out of the pass:
   but it *is* the per-project setup and drift burden requirement 2 eliminates. Rejected as
   the default; repo skills remain the sanctioned way to customize node behavior.
 - **Rust/Go single-binary engine.** Fabro's zero-dependency distribution matters when
-  shipping to strangers; Relay's executor ships to its own users and stays trivial in
+  shipping to strangers; Relay's runner ships to its own users and stays trivial in
   Python. Rejected for now.

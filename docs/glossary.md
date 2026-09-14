@@ -44,6 +44,10 @@ the MMF design specs).
 - **Baton / ownership** — who holds the card: **Human = blue** (`--color-primary`), **AI = violet**
   (`--color-secondary`). An **unowned** card claims an owner when it *enters* a work/planning
   stage (the mover decides); an already-owned card keeps its owners through every move.
+- **Runner** — the process on a developer machine that claims node-jobs from the board and runs
+  them (`./relay start`; `Schemas.Runner`, one row per machine per board; the Runners view at
+  `/board/:slug/runners`). Formerly *executor* — renamed in RE319; older mockups still use that word.
+  Not the legacy board-runner (`relay watch`), which is deleted.
 - **Review gate** — the Approve / Request-changes decision shown for a card whose stage is
   `:review`-type (main or substage). **Approve advances the card to the next stage or substage;**
   **Request changes** sends it back to a derived destination.

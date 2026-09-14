@@ -25,7 +25,7 @@ defmodule RelayWeb.Api.DiagnosisControllerTest do
     assert body["evidence"]["flow_key"] == nil
   end
 
-  test "an enabled flow with nothing connected diagnoses as no_executor", %{
+  test "an enabled flow with nothing connected diagnoses as no_runner", %{
     conn: conn,
     board: board,
     queue: queue,
@@ -36,7 +36,7 @@ defmodule RelayWeb.Api.DiagnosisControllerTest do
 
     body = conn |> get(~p"/api/cards/#{ref(board, card)}/diagnosis") |> json_response(200) |> Map.fetch!("data")
 
-    assert body["verdict"] == "no_executor"
+    assert body["verdict"] == "no_runner"
     assert body["evidence"]["flow_key"] == "code"
   end
 

@@ -131,15 +131,15 @@ defmodule RelayWeb.BoardLiveEscalationTest do
   end
 
   # `park_kind/1` returns nil for any park that is neither A1 nor A4 — reachable when the agent
-  # calls `relay needs-input` (card blocks, run parks :needs_input) and the executor then dies
-  # before reporting, so the reaper re-parks the run :executor_gone. The card is still
+  # calls `relay needs-input` (card blocks, run parks :needs_input) and the runner then dies
+  # before reporting, so the reaper re-parks the run :runner_gone. The card is still
   # :needs_input, so the drawer still renders the panel; every call site must degrade that nil to
   # the question face rather than pass nil through.
   test "a park neither A1 nor A4 degrades to the question face in the panel and the strip", ctx do
-    {card, run} = park(ctx.board, ctx.flow, "Executor died", :needs_input, "Which auth model?")
+    {card, run} = park(ctx.board, ctx.flow, "Runner died", :needs_input, "Which auth model?")
 
     run
-    |> Ecto.Changeset.change(parked_reason: :executor_gone)
+    |> Ecto.Changeset.change(parked_reason: :runner_gone)
     |> Relay.Repo.update!()
 
     assert is_nil(Runs.park_kind(Runs.get_run!(run.id)))

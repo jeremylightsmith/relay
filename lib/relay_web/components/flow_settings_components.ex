@@ -491,7 +491,7 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp preflight_rows(flow, preflight) do
     [
       stages_row(flow, preflight),
-      executor_row(flow, preflight)
+      runner_row(flow, preflight)
     ] ++
       capacity_rows(flow, preflight) ++
       [
@@ -510,20 +510,20 @@ defmodule RelayWeb.FlowSettingsComponents do
     row(flow, "stages", false, "Missing trigger stage: #{names}. The flow can't dispatch until it's set.")
   end
 
-  defp executor_row(flow, %{executors: :none_connected}),
-    do: row(flow, "executor", false, "No runner is connected. Cards will queue with nothing to pick them up.")
+  defp runner_row(flow, %{runners: :none_connected}),
+    do: row(flow, "runner", false, "No runner is connected. Cards will queue with nothing to pick them up.")
 
-  defp executor_row(flow, %{executors: {:ok, name}}), do: row(flow, "executor", true, "Runner #{name} can run this flow.")
+  defp runner_row(flow, %{runners: {:ok, name}}), do: row(flow, "runner", true, "Runner #{name} can run this flow.")
 
-  defp executor_row(flow, %{executors: {:no_candidate, details}}) do
-    # Per-executor, never a union: a run goes to ONE machine, so "between them they'd
+  defp runner_row(flow, %{runners: {:no_candidate, details}}) do
+    # Per-runner, never a union: a run goes to ONE machine, so "between them they'd
     # manage it" is not readiness.
-    row(flow, "executor", false, "#{count(details, "runner")} connected, but none satisfies this flow on its own.")
+    row(flow, "runner", false, "#{count(details, "runner")} connected, but none satisfies this flow on its own.")
   end
 
-  # No runner at all is one warning (the executor row above), not two — a capacity row here
+  # No runner at all is one warning (the runner row above), not two — a capacity row here
   # would only restate it for a different, misleading reason.
-  defp capacity_rows(_flow, %{executors: :none_connected}), do: []
+  defp capacity_rows(_flow, %{runners: :none_connected}), do: []
   defp capacity_rows(flow, preflight), do: [capacity_row(flow, preflight)]
 
   defp capacity_row(flow, preflight) do
@@ -539,12 +539,12 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp iso_label(:shared_clean), do: "shared-clean"
   defp iso_label(:exclusive), do: "exclusive"
 
-  defp capacity_anywhere?(%{executors: {:ok, _name}}), do: true
-  defp capacity_anywhere?(%{executors: {:no_candidate, details}}), do: Enum.any?(details, & &1.capacity_ok?)
+  defp capacity_anywhere?(%{runners: {:ok, _name}}), do: true
+  defp capacity_anywhere?(%{runners: {:no_candidate, details}}), do: Enum.any?(details, & &1.capacity_ok?)
 
   # Nothing connected means agents/skills are unchecked, not resolved — a green "OK" here
   # would be the exact false alarm (in reverse) this feature exists to avoid.
-  defp names_row(flow, %{executors: :none_connected} = preflight, kind) do
+  defp names_row(flow, %{runners: :none_connected} = preflight, kind) do
     label = if kind == :agents, do: "agent", else: "skill"
     required = Map.fetch!(preflight.requires, kind)
 
@@ -570,9 +570,9 @@ defmodule RelayWeb.FlowSettingsComponents do
     row(flow, kind, missing == [], text)
   end
 
-  # Union across executors HERE, deliberately and only for display: with no single
+  # Union across runners HERE, deliberately and only for display: with no single
   # candidate, what the developer wants is the full list of names to go install.
-  defp missing_names(%{executors: {:no_candidate, details}}, kind) do
+  defp missing_names(%{runners: {:no_candidate, details}}, kind) do
     key = if kind == :agents, do: :missing_agents, else: :missing_skills
 
     details |> Enum.flat_map(&Map.fetch!(&1, key)) |> Enum.uniq() |> Enum.sort()
@@ -580,7 +580,7 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   defp missing_names(_preflight, _kind), do: []
 
-  # Unknown ≠ missing (RLY-182): an executor that has never reported its inventory is not
+  # Unknown ≠ missing (RLY-182): a runner that has never reported its inventory is not
   # accused of lacking anything — it gets its own caveat line instead.
   defp unreported_rows(_flow, %{unreported: []}), do: []
 

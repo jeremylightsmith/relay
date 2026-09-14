@@ -24,7 +24,7 @@ defmodule Relay.Runs.Transitions do
   # from, to, meaning (meaning feeds the generated state.md table — Part 3).
   # `done` and `cancelled` are terminal; `failed` is terminal-except-retry.
   @transitions [
-    {:running, :parked, "park (reason: `needs_input` \\| `claimed` \\| `executor_gone`)"},
+    {:running, :parked, "park (reason: `needs_input` \\| `claimed` \\| `runner_gone`)"},
     {:running, :done, "flow reached its `done` target"},
     {:running, :failed, "engine gave up (no route / caps / breaker)"},
     {:running, :cancelled, "human cancelled a live run"},

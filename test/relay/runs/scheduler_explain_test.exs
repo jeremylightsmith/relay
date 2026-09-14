@@ -46,8 +46,8 @@ defmodule Relay.Runs.SchedulerExplainTest do
       status: Keyword.get(opts, :status, :parked),
       flow_key: Keyword.get(opts, :flow_key, "f"),
       isolation: Keyword.get(opts, :isolation, :shared_clean),
-      pinned_executor_id: Keyword.get(opts, :pinned_executor_id),
-      pinned_executor_name: Keyword.get(opts, :pinned_executor_name),
+      pinned_runner_id: Keyword.get(opts, :pinned_runner_id),
+      pinned_runner_name: Keyword.get(opts, :pinned_runner_name),
       parked_reason: Keyword.get(opts, :parked_reason)
     }
   end
@@ -88,11 +88,11 @@ defmodule Relay.Runs.SchedulerExplainTest do
     assert evidence.flow_key == nil
   end
 
-  test "a flow that would pull but no executor at all is no_executor" do
+  test "a flow that would pull but no runner at all is no_runner" do
     s = base(cards: [card(10, 1)], flows: [flow("code", 1, 2)], capacity: %{})
 
-    assert %{verdict: :no_executor, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
-    assert detail =~ "no executor"
+    assert %{verdict: :no_runner, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ "no runner"
     assert evidence.flow_key == "code"
     assert evidence.capacity == %{}
   end
@@ -143,12 +143,12 @@ defmodule Relay.Runs.SchedulerExplainTest do
     assert %{verdict: :run_active, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
   end
 
-  test "a parked :executor_gone run the planner cannot place is :resume_refused" do
+  test "a parked :runner_gone run the planner cannot place is :resume_refused" do
     s =
       base(
         cards: [card(10, 2)],
         flows: [flow("code", 1, 2)],
-        runs: [run(5, 10, status: :parked, parked_reason: :executor_gone)],
+        runs: [run(5, 10, status: :parked, parked_reason: :runner_gone)],
         # zero capacity: with a free slot advertised the run would actually resume on plan/1's
         # next pass, making explain/2 correctly answer :dispatchable instead.
         capacity: %{}
@@ -156,11 +156,11 @@ defmodule Relay.Runs.SchedulerExplainTest do
 
     assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
     assert detail =~ "refusing to resume it on every tick"
-    assert detail =~ "no executor has a free slot"
+    assert detail =~ "no runner has a free slot"
     assert evidence.run_id == 5
     assert evidence.resume_refused_reason == :no_free_slot
     assert evidence.isolation == :shared_clean
-    assert evidence.pinned_executor_id == nil
+    assert evidence.pinned_runner_id == nil
   end
 
   test "a refused exclusive run still names the machine holding its worktree" do
@@ -171,22 +171,22 @@ defmodule Relay.Runs.SchedulerExplainTest do
         runs: [
           run(5, 10,
             status: :parked,
-            parked_reason: :executor_gone,
+            parked_reason: :runner_gone,
             isolation: :exclusive,
-            pinned_executor_id: 42,
-            pinned_executor_name: "exec-a"
+            pinned_runner_id: 42,
+            pinned_runner_name: "exec-a"
           )
         ],
         capacity: %{}
       )
 
     assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
-    assert detail =~ ~s(executor "exec-a")
+    assert detail =~ ~s(runner "exec-a")
     assert detail =~ "exclusive affinity"
-    assert evidence.pinned_executor_name == "exec-a"
-    assert evidence.pinned_executor_id == 42
+    assert evidence.pinned_runner_name == "exec-a"
+    assert evidence.pinned_runner_id == 42
     assert evidence.isolation == :exclusive
-    assert evidence.resume_refused_reason == :pinned_executor_absent
+    assert evidence.resume_refused_reason == :pinned_runner_absent
   end
 
   test "a parked :needs_input run (already answered) is awaiting_listener_resume, not awaiting_capacity" do
@@ -223,30 +223,30 @@ defmodule Relay.Runs.SchedulerExplainTest do
   describe "the terminal capacity branch (RLY-191)" do
     # A card a flow would pull, but no free slot — the branch that used to be one
     # undifferentiated :awaiting_capacity now splits on the roster.
-    defp blocked(executors) do
+    defp blocked(runners) do
       snap(
         stages: [stage(1, position: 1), stage(2, position: 2)],
         cards: [card(10, 1)],
         flows: [flow("code", 1, 2)],
         capacity: %{},
-        executors: executors
+        runners: runners
       )
     end
 
-    test "an empty roster is :no_executor, not :awaiting_capacity" do
-      assert %{verdict: :no_executor, detail: detail} = Scheduler.explain(blocked(%{}), 10)
-      assert detail =~ "no executor is connected"
+    test "an empty roster is :no_runner, not :awaiting_capacity" do
+      assert %{verdict: :no_runner, detail: detail} = Scheduler.explain(blocked(%{}), 10)
+      assert detail =~ "no runner is connected"
     end
 
-    test "every live executor outdated is :executor_outdated with the version pair" do
+    test "every live runner outdated is :runner_outdated with the version pair" do
       execs = Map.new([exec(1, outdated: true, version: nil), exec(2, outdated: true, version: 0)])
 
-      assert %{verdict: :executor_outdated, detail: detail, evidence: evidence} =
+      assert %{verdict: :runner_outdated, detail: detail, evidence: evidence} =
                Scheduler.explain(blocked(execs), 10)
 
       assert detail =~ "running old code"
-      assert detail =~ "requires v#{Runs.min_executor_version()}"
-      assert evidence.required_version == Runs.min_executor_version()
+      assert detail =~ "requires v#{Runs.min_runner_version()}"
+      assert evidence.required_version == Runs.min_runner_version()
       assert %{name: _, version: nil} = Enum.find(evidence.running_versions, &(&1.version == nil))
       assert Enum.any?(evidence.running_versions, &(&1.version == 0))
     end
@@ -258,28 +258,28 @@ defmodule Relay.Runs.SchedulerExplainTest do
       assert detail =~ "busy"
     end
 
-    test "a roster whose only executor has gone silent is :no_executor" do
+    test "a roster whose only runner has gone silent is :no_runner" do
       execs = Map.new([exec(1, freshness: :gone)])
 
-      assert %{verdict: :no_executor} = Scheduler.explain(blocked(execs), 10)
+      assert %{verdict: :no_runner} = Scheduler.explain(blocked(execs), 10)
     end
   end
 
   describe "capacity_diagnosis/1" do
     test "returns the reason atom and the version evidence" do
       execs = Map.new([exec(1, outdated: true, version: 2)])
-      s = snap(cards: [], executors: execs)
+      s = snap(cards: [], runners: execs)
 
-      assert {:executor_outdated, %{required_version: required, running_versions: [%{version: 2}]}} =
+      assert {:runner_outdated, %{required_version: required, running_versions: [%{version: 2}]}} =
                Scheduler.capacity_diagnosis(s)
 
-      assert required == Runs.min_executor_version()
-      assert {:no_executor, _} = Scheduler.capacity_diagnosis(snap(cards: [], executors: %{}))
+      assert required == Runs.min_runner_version()
+      assert {:no_runner, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: %{}))
 
-      assert {:executor_gone, _} =
-               Scheduler.capacity_diagnosis(snap(cards: [], executors: Map.new([exec(1, freshness: :gone)])))
+      assert {:runner_gone, _} =
+               Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1, freshness: :gone)])))
 
-      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], executors: Map.new([exec(1)])))
+      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1)])))
     end
   end
 
@@ -297,7 +297,7 @@ defmodule Relay.Runs.SchedulerExplainTest do
           runs <- [
             [],
             [run(5, 11, status: :running)],
-            [run(5, 11, status: :parked, parked_reason: :executor_gone)],
+            [run(5, 11, status: :parked, parked_reason: :runner_gone)],
             [run(5, 11, status: :parked, parked_reason: :needs_input)]
           ] do
         snap(
@@ -316,10 +316,10 @@ defmodule Relay.Runs.SchedulerExplainTest do
 
         dispatched? =
           Enum.any?(plan.dispatches, fn
-            {:start, card_id, _flow_key, _executor_id} ->
+            {:start, card_id, _flow_key, _runner_id} ->
               card_id == card.id
 
-            {:resume, run_id, _executor_id} ->
+            {:resume, run_id, _runner_id} ->
               Enum.any?(s.runs, &(&1.id == run_id and &1.card_id == card.id))
           end)
 

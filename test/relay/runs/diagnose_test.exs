@@ -19,26 +19,26 @@ defmodule Relay.Runs.DiagnoseTest do
     assert detail =~ "no enabled flow"
   end
 
-  test "a flow with no connected executor is no_executor", %{board: board, queue: queue, works: works} do
+  test "a flow with no connected runner is no_runner", %{board: board, queue: queue, works: works} do
     insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
     card = insert(:card, stage: queue, status: :ready)
 
-    assert %{verdict: :no_executor, evidence: %{flow_key: "code"}} = Runs.diagnose(board, card)
+    assert %{verdict: :no_runner, evidence: %{flow_key: "code"}} = Runs.diagnose(board, card)
   end
 
-  test "an outdated-only roster surfaces :executor_outdated through diagnose", %{board: board, queue: queue, works: works} do
+  test "an outdated-only roster surfaces :runner_outdated through diagnose", %{board: board, queue: queue, works: works} do
     insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
-    insert(:executor, board: board, name: "old", version: 0)
+    insert(:runner, board: board, name: "old", version: 0)
     card = insert(:card, stage: queue, status: :ready)
 
-    assert %{verdict: :executor_outdated, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
-    assert detail =~ "requires v#{Runs.min_executor_version()}"
-    assert evidence.required_version == Runs.min_executor_version()
+    assert %{verdict: :runner_outdated, detail: detail, evidence: evidence} = Runs.diagnose(board, card)
+    assert detail =~ "requires v#{Runs.min_runner_version()}"
+    assert evidence.required_version == Runs.min_runner_version()
   end
 
-  test ":job_stranded still overrides :executor_outdated", %{board: board, works: works} do
+  test ":job_stranded still overrides :runner_outdated", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
-    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: DateTime.add(now, -3600, :second))
+    insert(:runner, board: board, name: "old", version: 0, last_heartbeat: DateTime.add(now, -3600, :second))
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
@@ -46,38 +46,38 @@ defmodule Relay.Runs.DiagnoseTest do
     insert(:node_job,
       node_execution: execution,
       state: :claimed,
-      executor_name: "old",
+      runner_name: "old",
       claimed_at: DateTime.add(now, -3600, :second)
     )
 
     assert %{verdict: :job_stranded} = Runs.diagnose(board, card, now)
   end
 
-  test "a live run whose job is stuck behind an outdated executor diagnoses as :executor_outdated",
+  test "a live run whose job is stuck behind an outdated runner diagnoses as :runner_outdated",
        %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
-    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: now)
+    insert(:runner, board: board, name: "old", version: 0, last_heartbeat: now)
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: exec, state: :queued, executor_name: nil, claimed_at: nil)
+    insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil)
 
-    assert %{verdict: :executor_outdated, detail: detail} = Runs.diagnose(board, card, now)
-    assert detail =~ "requires v#{Runs.min_executor_version()}"
+    assert %{verdict: :runner_outdated, detail: detail} = Runs.diagnose(board, card, now)
+    assert detail =~ "requires v#{Runs.min_runner_version()}"
   end
 
-  # The other side of that branch: once the outdated executor has actually CLAIMED the job it is
+  # The other side of that branch: once the outdated runner has actually CLAIMED the job it is
   # working it, so the roster-blocked correction must not clobber :run_active with
-  # :executor_outdated. The OUTDATED badge on the runners view is the separate, correct signal.
+  # :runner_outdated. The OUTDATED badge on the runners view is the separate, correct signal.
   # Pins job_working?/3's true path, which nothing else exercises (RE255).
-  test "a live run whose job is claimed by an outdated-but-beating executor stays run_active",
+  test "a live run whose job is claimed by an outdated-but-beating runner stays run_active",
        %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
-    insert(:executor, board: board, name: "old", version: 0, last_heartbeat: now)
+    insert(:runner, board: board, name: "old", version: 0, last_heartbeat: now)
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     exec = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: exec, state: :claimed, executor_name: "old", claimed_at: now)
+    insert(:node_job, node_execution: exec, state: :claimed, runner_name: "old", claimed_at: now)
 
     assert %{verdict: :run_active} = Runs.diagnose(board, card, now)
   end
@@ -95,7 +95,7 @@ defmodule Relay.Runs.DiagnoseTest do
     assert evidence.last_execution.detail == detail
   end
 
-  test "a claimed job past the grace with a dead executor is stranded", %{board: board, works: works} do
+  test "a claimed job past the grace with a dead runner is stranded", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
@@ -104,23 +104,23 @@ defmodule Relay.Runs.DiagnoseTest do
     insert(:node_job,
       node_execution: execution,
       state: :claimed,
-      executor_name: "ghost",
+      runner_name: "ghost",
       claimed_at: DateTime.add(now, -3600, :second)
     )
 
-    insert(:executor, board: board, name: "ghost", last_heartbeat: DateTime.add(now, -3600, :second))
+    insert(:runner, board: board, name: "ghost", last_heartbeat: DateTime.add(now, -3600, :second))
 
     assert %{verdict: :job_stranded, detail: detail, evidence: %{job: job}} = Runs.diagnose(board, card, now)
     assert detail =~ "ghost"
     assert job.state == :claimed
   end
 
-  test "an aged job with an EMPTY roster diagnoses :no_executor, not :job_stranded",
+  test "an aged job with an EMPTY roster diagnoses :no_runner, not :job_stranded",
        %{board: board, works: works} do
     # RE311: "nothing was ever holding this job" is a more fundamental fact than "whatever held
-    # it went quiet", and it is the one an operator can act on (start an executor). `stranded?`
+    # it went quiet", and it is the one an operator can act on (start a runner). `stranded?`
     # alone cannot tell an empty roster from a roster of stale rows — `really_stranded?/5` is
-    # what defers to the more specific verdict. Every other stranded test inserts an executor
+    # what defers to the more specific verdict. Every other stranded test inserts a runner
     # row, so this is the branch nothing else covers.
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)
@@ -130,64 +130,64 @@ defmodule Relay.Runs.DiagnoseTest do
     insert(:node_job,
       node_execution: execution,
       state: :queued,
-      executor_name: nil,
+      runner_name: nil,
       claimed_at: nil,
       inserted_at: DateTime.add(now, -3600, :second)
     )
 
-    assert %{verdict: :no_executor} = Runs.diagnose(board, card, now)
+    assert %{verdict: :no_runner} = Runs.diagnose(board, card, now)
   end
 
-  test "a live run with a fresh executor stays run_active", %{board: board, works: works} do
+  test "a live run with a fresh runner stays run_active", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :running, current_node: "implement")
     execution = insert(:node_execution, run: run, node_key: "implement", outcome: nil, finished_at: nil)
-    insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac", claimed_at: now)
-    insert(:executor, board: board, name: "mac", last_heartbeat: now)
+    insert(:node_job, node_execution: execution, state: :claimed, runner_name: "mac", claimed_at: now)
+    insert(:runner, board: board, name: "mac", last_heartbeat: now)
 
     assert %{verdict: :run_active, evidence: %{current_node: "implement"}} = Runs.diagnose(board, card, now)
   end
 
   # A parked run (run != nil) short-circuits explain/2 to run_verdict before the flow
-  # lookup matters, so these tests need no flow — just the run + its pinned executor row.
-  test "a parked pinned run names the executor and its freshness", %{board: board, works: works} do
+  # lookup matters, so these tests need no flow — just the run + its pinned runner row.
+  test "a parked pinned run names the runner and its freshness", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)
 
     insert(:run,
       card: card,
       status: :parked,
-      parked_reason: :executor_gone,
+      parked_reason: :runner_gone,
       current_node: nil,
-      pinned_executor_name: "exec-a"
+      pinned_runner_name: "exec-a"
     )
 
     # exec-a's row exists but its last beat is long past the stale threshold → gone.
-    insert(:executor, board: board, name: "exec-a", last_heartbeat: DateTime.add(now, -3600, :second))
+    insert(:runner, board: board, name: "exec-a", last_heartbeat: DateTime.add(now, -3600, :second))
 
     assert %{verdict: :awaiting_capacity, detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
-    assert detail =~ ~s(executor "exec-a")
+    assert detail =~ ~s(runner "exec-a")
     assert detail =~ "gone"
-    assert evidence.pinned_executor_name == "exec-a"
-    assert evidence.pinned_executor_freshness == :gone
+    assert evidence.pinned_runner_name == "exec-a"
+    assert evidence.pinned_runner_freshness == :gone
   end
 
-  test "a parked pinned run whose executor row is absent says so", %{board: board, works: works} do
+  test "a parked pinned run whose runner row is absent says so", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works, status: :working)
 
     insert(:run,
       card: card,
       status: :parked,
-      parked_reason: :executor_gone,
+      parked_reason: :runner_gone,
       current_node: nil,
-      pinned_executor_name: "exec-ghost"
+      pinned_runner_name: "exec-ghost"
     )
 
     assert %{detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
     assert detail =~ "not currently connected"
-    assert evidence.pinned_executor_freshness == :absent
+    assert evidence.pinned_runner_freshness == :absent
   end
 
   test "a refused parked run is :resume_refused and carries the RE297 evidence", %{board: board, works: works} do
@@ -195,7 +195,7 @@ defmodule Relay.Runs.DiagnoseTest do
     insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
 
     card = insert(:card, stage: works, status: :working)
-    run = insert(:run, card: card, status: :parked, parked_reason: :executor_gone, current_node: nil)
+    run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone, current_node: nil)
     since = DateTime.utc_now() |> DateTime.add(-20 * 60, :second) |> DateTime.truncate(:second)
     :ok = Runs.record_resume_refusals(board.id, [%{run_id: run.id, card_id: card.id, reason: :no_isolation}], since)
 
@@ -205,7 +205,7 @@ defmodule Relay.Runs.DiagnoseTest do
     assert evidence.resume_refused_reason == :no_isolation
     assert evidence.resume_refused_since == since
     assert evidence.isolation == nil
-    assert Map.has_key?(evidence, :pinned_executor_id)
+    assert Map.has_key?(evidence, :pinned_runner_id)
   end
 
   describe "job_awaiting_slot (RE311)" do
@@ -222,7 +222,7 @@ defmodule Relay.Runs.DiagnoseTest do
         insert(:node_job,
           node_execution: execution,
           state: :queued,
-          executor_name: nil,
+          runner_name: nil,
           claimed_at: nil,
           inserted_at: at,
           payload: %{"isolation" => "exclusive", "vars" => %{"ref" => Relay.Cards.ref(board, card)}}
@@ -238,7 +238,7 @@ defmodule Relay.Runs.DiagnoseTest do
       now = DateTime.truncate(DateTime.utc_now(), :second)
       {card, job} = awaiting_card(board, works, now, 5_460)
 
-      insert(:executor,
+      insert(:runner,
         board: board,
         name: "Jeremy's lappy",
         last_heartbeat: now,
@@ -257,14 +257,14 @@ defmodule Relay.Runs.DiagnoseTest do
       assert detail =~ "TH56 bound, TH77 bound"
       assert evidence.queued_age_s >= 5_460
       assert evidence.isolation == "exclusive"
-      assert [%{name: "Jeremy's lappy", used: 2, total: 2}] = evidence.executors
+      assert [%{name: "Jeremy's lappy", used: 2, total: 2}] = evidence.runners
     end
 
     test "under the grace window the verdict is unchanged", %{board: board, works: works} do
       now = DateTime.truncate(DateTime.utc_now(), :second)
       {card, _job} = awaiting_card(board, works, now, 60)
 
-      insert(:executor,
+      insert(:runner,
         board: board,
         name: "lappy",
         last_heartbeat: now,
@@ -279,7 +279,7 @@ defmodule Relay.Runs.DiagnoseTest do
       now = DateTime.truncate(DateTime.utc_now(), :second)
       {card, _job} = awaiting_card(board, works, now, 5_460)
 
-      insert(:executor,
+      insert(:runner,
         board: board,
         name: "lappy",
         last_heartbeat: now,
@@ -290,22 +290,22 @@ defmodule Relay.Runs.DiagnoseTest do
       assert %{verdict: :run_active} = Runs.diagnose(board, card, now)
     end
 
-    test "with no executor connected the roster verdict still wins", %{board: board, works: works} do
-      # `:no_executor` is the more specific, more actionable answer; this layer must not
+    test "with no runner connected the roster verdict still wins", %{board: board, works: works} do
+      # `:no_runner` is the more specific, more actionable answer; this layer must not
       # generalise it into "everyone is busy".
       now = DateTime.truncate(DateTime.utc_now(), :second)
       {card, _job} = awaiting_card(board, works, now, 5_460)
 
-      assert %{verdict: :no_executor} = Runs.diagnose(board, card, now)
+      assert %{verdict: :no_runner} = Runs.diagnose(board, card, now)
     end
 
-    test "an outdated-only roster still diagnoses :executor_outdated", %{board: board, works: works} do
-      # A refused executor claims nothing whatever its free slots say, so "no free slot" would be
+    test "an outdated-only roster still diagnoses :runner_outdated", %{board: board, works: works} do
+      # A refused runner claims nothing whatever its free slots say, so "no free slot" would be
       # the wrong diagnosis even when it is also full.
       now = DateTime.truncate(DateTime.utc_now(), :second)
       {card, _job} = awaiting_card(board, works, now, 5_460)
 
-      insert(:executor,
+      insert(:runner,
         board: board,
         name: "old",
         version: 0,
@@ -314,7 +314,7 @@ defmodule Relay.Runs.DiagnoseTest do
         held: [%{"ref" => "TH1", "state" => "bound"}]
       )
 
-      assert %{verdict: :executor_outdated} = Runs.diagnose(board, card, now)
+      assert %{verdict: :runner_outdated} = Runs.diagnose(board, card, now)
     end
 
     test "a parked run keeps its own specific verdict, even behind an old queued job and a full roster",
@@ -330,7 +330,7 @@ defmodule Relay.Runs.DiagnoseTest do
       {1, _} =
         Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :parked, parked_reason: :needs_input])
 
-      insert(:executor,
+      insert(:runner,
         board: board,
         name: "lappy",
         last_heartbeat: now,

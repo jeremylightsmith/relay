@@ -15,7 +15,7 @@ the doctor, repeat — until it reports **zero errors**. That is the whole metho
 Three legitimate paths, and the human picks one:
 
 - **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
-  names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `bin/relay`
+  names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `./relay`
   and the four `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
 - **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
 - **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
@@ -31,7 +31,7 @@ Restating a check here would be a second copy of it, and the copy would drift. T
 **Never run this from a flow node.** It asks questions and confirms every mutation; a runner has
 nobody to ask.
 
-**Blast radius:** `.claude/` files, `.relay/executor.json`, and flow documents.
+**Blast radius:** `.claude/` files, `.relay/runner.json`, and flow documents.
 **Never** app code, git branches, commits, or cards.
 
 **Idempotent and resumable.** Every run starts by running the doctor and does only what is
@@ -50,48 +50,48 @@ Already wired and one node broke? That is `/relay-doctor`, not this.
 ## Phase 0 — Floor check
 
 Two independent floors. The credential floor is always a **stop** — a skill cannot mint a key.
-The scaffold floor stops only when `bin/relay` itself is missing; a stale `relay-*` skill
-self-heals via `bin/relay update` instead.
+The scaffold floor stops only when `./relay` itself is missing; a stale `relay-*` skill
+self-heals via `./relay update` instead.
 
-1. **Scaffold floor** — `bin/relay` and the four `relay-*` skills must be installed. If
-   `bin/relay` is missing, stop and hand the human the entry point:
+1. **Scaffold floor** — `./relay` and the four `relay-*` skills must be installed. If
+   `./relay` is missing, stop and hand the human the entry point:
 
    ```
    /relay-setup
    ```
 
-   If `bin/relay` is present but any `relay-*` skill is missing or stale, refresh them with the
+   If `./relay` is present but any `relay-*` skill is missing or stale, refresh them with the
    **command**, not the skill — the missing one may *be* `/relay-update`, and the `Skill` tool
    cannot resolve a name that is not installed:
 
    ```bash
-   bin/relay update --json
+   ./relay update --json
    ```
 
    Report the `written` list. A skill file written mid-session is not discoverable until Claude
    Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
    and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
 
-   `.relay/executor.json` is **not** part of that floor — it is not a Relay-owned served file,
+   `.relay/runner.json` is **not** part of that floor — it is not a Relay-owned served file,
    and authoring it for this repo is part of onboarding's own work below. `relay.md` **is**
    served, so `update` installs it and you never author one.
 
-2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./bin/relay board` must
+2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./relay board` must
    succeed. If not, stop with the checklist: mint a board key at
    `$RELAY_URL/board/<slug>/settings` → **API keys** (shown once), export both variables, re-run
-   `./bin/relay board`. The doctor cannot run without a reachable board, and a skill cannot mint a
+   `./relay board`. The doctor cannot run without a reachable board, and a skill cannot mint a
    key.
 
 ## Phase 1 — Detect
 
 Run `/relay-doctor` (via the `Skill` tool) for the full starting diagnosis. Gather the repo's
-inventory with the executor's own resolver — import it, never re-derive it:
+inventory with the runner's own resolver — import it, never re-derive it:
 
 ```bash
 python3 -c "
 import importlib.machinery, importlib.util, json
-loader = importlib.machinery.SourceFileLoader('relay_runner', 'bin/relay')
-spec = importlib.util.spec_from_file_location('relay_runner', 'bin/relay', loader=loader)
+loader = importlib.machinery.SourceFileLoader('relay_runner', 'relay')
+spec = importlib.util.spec_from_file_location('relay_runner', 'relay', loader=loader)
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 print(json.dumps(mod.collect_capabilities()))
 "
@@ -119,7 +119,7 @@ is a repo-side job plus a gate adjustment, not "author a flow from nothing".
 
 Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
 
-- files to create or modify, each with its diff — including: if `.relay/executor.json` is
+- files to create or modify, each with its diff — including: if `.relay/runner.json` is
   missing, author it for this repo as part of the shown plan (it is already inside this skill's
   declared blast radius, and nothing else installs it);
 - flow changes as a **node-level** diff (node key → what changes);
@@ -128,7 +128,7 @@ Show the **whole** plan before mutating anything, and get sign-off on it as a un
 **The verify command.** Ask: *"what one command proves this repo is green?"* Propose a detected
 candidate as the default — a `precommit` alias in `mix.exs`, a `check` or `test` target in a
 `Makefile`, a `package.json` script — and let the human override it. Then pull each flow
-(`./bin/relay flow <key> --json`) and replace **every** occurrence of the default's
+(`./relay flow <key> --json`) and replace **every** occurrence of the default's
 `mix precommit` in the nodes' `run` strings: the shell gates that run it *and* the agent prompts
 that name it. Search the pulled document for the literal rather than working from a memorised node
 list — the list changes with the flow. Leave the flow's **shape** alone.
@@ -157,7 +157,7 @@ Apply **one** step, re-run `/relay-doctor`, show the delta (`6 errors → 3`), r
   reduce the error count, and say plainly what is left and why: a stall is a report, not a retry
   loop.
 - **Warnings are reported, not chased.** They go in the closing summary as a human checklist
-  ("start `bin/relay execute`", "this agent file is named by no enabled flow").
+  ("start `./relay start`", "this agent file is named by no enabled flow").
 
 ## Phase 5 — Enable
 
@@ -167,8 +167,8 @@ Show the trigger stages it will pull from, work in, and land on, and say plainly
 means the board starts pulling real cards into this repo. Then push it:
 
 ```bash
-./bin/relay flow <key> --json > /tmp/<key>.json    # edit: "enabled": true
-./bin/relay flow-push <key> /tmp/<key>.json
+./relay flow <key> --json > /tmp/<key>.json    # edit: "enabled": true
+./relay flow-push <key> /tmp/<key>.json
 ```
 
 **Never offer to enable a flow that still has errors.** Declining is a first-class outcome — the
@@ -189,7 +189,7 @@ Close with a summary: what changed, what the doctor now reports, and the remaini
 - **Restarting from scratch on a resumed session** — run the doctor first and do only what is
   missing.
 - **Running this from a flow node** — it is interactive by design.
-- **Touching app code or git** — the blast radius is `.claude/`, `.relay/executor.json`, and
+- **Touching app code or git** — the blast radius is `.claude/`, `.relay/runner.json`, and
   flow documents.
 - **Adding a sibling file to this skill's directory** — `Relay.Scaffold.items/0` names `SKILL.md`
   only, so a reference file would silently vanish from every scaffolded repo.

@@ -29,7 +29,7 @@ defmodule Relay.RunsTest do
     flow
   end
 
-  # The scripted/fake executors here run no real skill, so a card fed to a SHIPPED flow arrives
+  # The scripted/fake runners here run no real skill, so a card fed to a SHIPPED flow arrives
   # already carrying the fields those flows declare they write (RE244) — otherwise every
   # `succeeded` is rewritten to `failed` by the missing-writes guard. The guard asks only that
   # the field is non-blank when the node ends, never that the node changed it. The seeded plan
@@ -175,7 +175,7 @@ defmodule Relay.RunsTest do
       assert card.status == :working
       assert Relay.Cards.active_owner_type(card) == :ai
 
-      # The queued job carries the executor contract.
+      # The queued job carries the runner contract.
       assert %NodeJob{state: :queued} = found = Runs.active_job(run)
       assert found.id == job.id
       assert found.payload["run"] == "/brainstorm {ref}"
@@ -329,7 +329,7 @@ defmodule Relay.RunsTest do
       {:ok, _run} = Runs.start_run(card, flow)
       assert_receive {:dispatched, job}
 
-      # A real executor can report an empty-string detail (bin/relay: `detail = "" if ok
+      # A real runner can report an empty-string detail (./relay: `detail = "" if ok
       # else ...`). "" is truthy in Elixir, so a naive `|| ` fallback chain never reaches
       # the default message, request_input's Comment changeset rejects the blank body,
       # and the hard `{:ok, _card} = ...` match in card_fail_effects/2 must not raise.
@@ -408,7 +408,7 @@ defmodule Relay.RunsTest do
       {:ok, _run} = Runs.start_run(card, flow)
       assert_receive {:dispatched, job}
 
-      assert {:ok, %NodeJob{state: :claimed, executor_name: "mac-1"} = claimed} = Runs.claim_job(job, "mac-1")
+      assert {:ok, %NodeJob{state: :claimed, runner_name: "mac-1"} = claimed} = Runs.claim_job(job, "mac-1")
       assert claimed.claimed_at
       assert Runs.claim_job(job, "mac-2") == {:error, :job_not_active}
     end
@@ -584,12 +584,12 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "upsert_executor/2" do
+  describe "upsert_runner/2" do
     setup %{board: board}, do: %{board: board}
 
     test "inserts then updates the durable row keyed {board_id, name}", %{board: board} do
       {:ok, e1} =
-        Runs.upsert_executor(board, %{
+        Runs.upsert_runner(board, %{
           "name" => "jeremy-mbp",
           "host" => "jeremy-mbp.local",
           "interval" => 30,
@@ -602,46 +602,46 @@ defmodule Relay.RunsTest do
       assert %DateTime{} = e1.last_heartbeat
 
       {:ok, e2} =
-        Runs.upsert_executor(board, %{"name" => "jeremy-mbp", "capacity" => %{"shared_clean" => 1}})
+        Runs.upsert_runner(board, %{"name" => "jeremy-mbp", "capacity" => %{"shared_clean" => 1}})
 
       assert e2.id == e1.id
       # RLY-201: missing classes are stored explicitly as 0 — the row now holds the
       # canonical closed-set map, same as the ETS store.
       assert e2.capacity == %{"shared_clean" => 1, "exclusive" => 0}
-      assert Relay.Repo.aggregate(Schemas.Executor, :count) == 1
+      assert Relay.Repo.aggregate(Schemas.Runner, :count) == 1
     end
 
-    test "upsert_executor/2 drops an unknown capacity class instead of storing it", %{board: board} do
-      {:ok, executor} =
-        Runs.upsert_executor(board, %{
+    test "upsert_runner/2 drops an unknown capacity class instead of storing it", %{board: board} do
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{
           "name" => "junk-cap",
           "capacity" => %{"gpu" => 2, "shared_clean" => "lots", "exclusive" => 2}
         })
 
-      assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+      assert runner.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
 
     test "a beat's held is normalized and persisted, junk entries dropped", %{board: board} do
       # RE311: `held` must actually reach the column through the SAME normalizer the claim
       # bypass and release reconciliation read — this is the write side of that guarantee, not
       # just the normalizer's own unit tests.
-      {:ok, executor} =
-        Runs.upsert_executor(board, %{
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{
           "name" => "holder",
           "held" => [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "junk"}]
         })
 
-      assert executor.held == [%{"ref" => "TH77", "state" => "bound"}]
+      assert runner.held == [%{"ref" => "TH77", "state" => "bound"}]
     end
 
     test "a later call without held leaves the stored value untouched", %{board: board} do
       {:ok, e1} =
-        Runs.upsert_executor(board, %{
+        Runs.upsert_runner(board, %{
           "name" => "holder",
           "held" => [%{"ref" => "TH77", "state" => "bound"}]
         })
 
-      {:ok, e2} = Runs.upsert_executor(board, %{"name" => "holder"})
+      {:ok, e2} = Runs.upsert_runner(board, %{"name" => "holder"})
 
       assert e2.id == e1.id
       assert e2.held == [%{"ref" => "TH77", "state" => "bound"}]
@@ -649,36 +649,36 @@ defmodule Relay.RunsTest do
   end
 
   describe "claim_next_job/1" do
-    test "atomically claims the oldest queued job the executor has capacity for", %{board: board} do
+    test "atomically claims the oldest queued job the runner has capacity for", %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
       {:ok, run} = Runs.start_run(card, flow)
       queued = Runs.active_job(run)
 
-      {:ok, executor} =
-        Runs.upsert_executor(board, %{"name" => "e1", "capacity" => %{"shared_clean" => 1, "exclusive" => 1}})
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{"name" => "e1", "capacity" => %{"shared_clean" => 1, "exclusive" => 1}})
 
-      assert {:ok, claimed} = Runs.claim_next_job(executor)
+      assert {:ok, claimed} = Runs.claim_next_job(runner)
       assert claimed.id == queued.id
       assert claimed.state == :claimed
-      assert claimed.executor_name == "e1"
+      assert claimed.runner_name == "e1"
       assert %DateTime{} = claimed.claimed_at
 
       # Nothing left to claim → {:ok, nil}
-      assert {:ok, nil} = Runs.claim_next_job(executor)
+      assert {:ok, nil} = Runs.claim_next_job(runner)
     end
 
-    test "skips a class the executor has no capacity for", %{board: board} do
+    test "skips a class the runner has no capacity for", %{board: board} do
       flow = enabled_spec_flow(board)
       {:ok, _run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e2", "capacity" => %{"exclusive" => 1}})
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "e2", "capacity" => %{"exclusive" => 1}})
 
-      # The spec flow is shared_clean; an exclusive-only executor claims nothing.
-      assert {:ok, nil} = Runs.claim_next_job(executor)
+      # The spec flow is shared_clean; an exclusive-only runner claims nothing.
+      assert {:ok, nil} = Runs.claim_next_job(runner)
     end
 
-    test "never claims another board's job, even with the globally-older id and a colliding executor name",
+    test "never claims another board's job, even with the globally-older id and a colliding runner name",
          %{board: board_a, user: user} do
       flow_a = enabled_spec_flow(board_a)
       {:ok, run_a} = Runs.start_run(card_in(board_a, "Next up"), flow_a)
@@ -689,12 +689,12 @@ defmodule Relay.RunsTest do
       {:ok, run_b} = Runs.start_run(card_in(board_b, "Next up"), flow_b)
       queued_b = Runs.active_job(run_b)
 
-      # board_a's job was created first (lower id) and both executors share a
+      # board_a's job was created first (lower id) and both runners share a
       # name, so an unscoped claim would find board_a's job first.
-      {:ok, executor_b} =
-        Runs.upsert_executor(board_b, %{"name" => "shared-hostname", "capacity" => %{"shared_clean" => 1}})
+      {:ok, runner_b} =
+        Runs.upsert_runner(board_b, %{"name" => "shared-hostname", "capacity" => %{"shared_clean" => 1}})
 
-      assert {:ok, claimed} = Runs.claim_next_job(executor_b)
+      assert {:ok, claimed} = Runs.claim_next_job(runner_b)
       assert claimed.id == queued_b.id
       refute claimed.id == queued_a.id
 
@@ -704,123 +704,123 @@ defmodule Relay.RunsTest do
       assert still_queued.state == :queued
     end
 
-    test "claims a job pinned to this executor even when it advertises no free capacity for the class",
+    test "claims a job pinned to this runner even when it advertises no free capacity for the class",
          %{board: board} do
-      # The exclusive-affinity deadlock (ADR 0006 §5): an executor holding a
+      # The exclusive-affinity deadlock (ADR 0006 §5): a runner holding a
       # parked exclusive run advertises exclusive: 0 (its one slot is bound to
       # that run), so a capacity-only filter would never hand it the run's own
       # resume/next job — pinned to it — and the run could never resume. A job
-      # pinned to this executor must claim regardless of advertised capacity.
+      # pinned to this runner must claim regardless of advertised capacity.
       flow = exclusive_flow(board, "excl-pin")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [executor_name: "holder"])
+      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
-      {:ok, holder} = Runs.upsert_executor(board, %{"name" => "holder", "capacity" => %{"exclusive" => 0}})
+      {:ok, holder} = Runs.upsert_runner(board, %{"name" => "holder", "capacity" => %{"exclusive" => 0}})
 
       assert {:ok, claimed} = Runs.claim_next_job(holder)
       assert claimed.id == job.id
-      assert claimed.executor_name == "holder"
+      assert claimed.runner_name == "holder"
     end
 
-    test "a job pinned to another executor is never claimed, even with spare capacity", %{board: board} do
+    test "a job pinned to another runner is never claimed, even with spare capacity", %{board: board} do
       flow = exclusive_flow(board, "excl-pin2")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [executor_name: "holder"])
+      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
-      {:ok, other} = Runs.upsert_executor(board, %{"name" => "other", "capacity" => %{"exclusive" => 3}})
+      {:ok, other} = Runs.upsert_runner(board, %{"name" => "other", "capacity" => %{"exclusive" => 3}})
 
       assert {:ok, nil} = Runs.claim_next_job(other)
     end
   end
 
-  describe "exclusive executor affinity via pinned_executor_name" do
-    test "an exclusive claim pins the run to the claiming executor", %{board: board} do
+  describe "exclusive runner affinity via pinned_runner_name" do
+    test "an exclusive claim pins the run to the claiming runner", %{board: board} do
       flow = exclusive_flow(board, "excl-set")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      # The first job is unpinned, so any exclusive executor may start the run.
-      assert Runs.get_run!(run.id).pinned_executor_name == nil
+      # The first job is unpinned, so any exclusive runner may start the run.
+      assert Runs.get_run!(run.id).pinned_runner_name == nil
 
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
-      assert Runs.get_run!(run.id).pinned_executor_name == "e"
+      assert Runs.get_run!(run.id).pinned_runner_name == "e"
     end
 
     test "a shared_clean claim never pins the run", %{board: board} do
       flow = enabled_spec_flow(board)
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
-      assert Runs.get_run!(run.id).pinned_executor_name == nil
+      assert Runs.get_run!(run.id).pinned_runner_name == nil
     end
 
     test "a subsequent exclusive job pins to the holder read off the column", %{board: board} do
       flow = exclusive_flow(board, "excl-affinity")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
       execution = Runs.insert_execution!(run, "work", 1, 2)
       next_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
 
-      assert next_job.executor_name == "e"
+      assert next_job.runner_name == "e"
     end
 
     test "leaves a shared_clean run's job unpinned", %{board: board} do
       flow = enabled_spec_flow(board)
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
       execution = Runs.insert_execution!(run, "brainstorm", 1, 2)
       next_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "brainstorm", []))
 
-      assert next_job.executor_name == nil
+      assert next_job.runner_name == nil
     end
 
     test "park_for_reclaim/1 KEEPS the pin, so the resume job returns to the holder", %{board: board} do
-      # The headline fix: an executor_gone park must not void affinity. The reaper
-      # revokes the active job, but the run's pinned_executor_name survives, so the
+      # The headline fix: a runner_gone park must not void affinity. The reaper
+      # revokes the active job, but the run's pinned_runner_name survives, so the
       # resume job pins back to the same machine (which reclaims it via the pinned
       # capacity-bypass in claim_next_job/1).
       flow = exclusive_flow(board, "excl-gone")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
       :ok = Runs.park_for_reclaim(Runs.get_run!(run.id))
-      assert Runs.get_run!(run.id).pinned_executor_name == "e"
+      assert Runs.get_run!(run.id).pinned_runner_name == "e"
 
       execution = Runs.insert_execution!(run, "work", 1, 2)
       resume_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
 
-      assert resume_job.executor_name == "e"
+      assert resume_job.runner_name == "e"
     end
 
     test "park_claimed/1 CLEARS the pin, so the resume re-offers anywhere", %{board: board} do
       # Human baton: the worktree is reset and the hand-back resume must be claimable
-      # by any free executor — so the pin is nilled alongside the revoke.
+      # by any free runner — so the pin is nilled alongside the revoke.
       flow = exclusive_flow(board, "excl-baton")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
-      {:ok, e} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
+      {:ok, e} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"exclusive" => 1}})
       {:ok, _claimed} = Runs.claim_next_job(e)
 
       :ok = Runs.park_claimed(Runs.get_run!(run.id))
-      assert Runs.get_run!(run.id).pinned_executor_name == nil
+      assert Runs.get_run!(run.id).pinned_runner_name == nil
 
       execution = Runs.insert_execution!(run, "work", 1, 2)
       resume_job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, "work", []))
 
-      assert resume_job.executor_name == nil
+      assert resume_job.runner_name == nil
     end
   end
 
@@ -833,8 +833,8 @@ defmodule Relay.RunsTest do
       # queued (not held) → conflict
       assert {:error, :conflict} = Runs.get_claimed_job(board, job.id)
 
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
-      {:ok, claimed} = Runs.claim_next_job(executor)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "e", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(runner)
 
       assert {:ok, held} = Runs.get_claimed_job(board, claimed.id)
       assert held.id == claimed.id
@@ -857,34 +857,34 @@ defmodule Relay.RunsTest do
     end
   end
 
-  describe "reclaim_stale_executors/0" do
-    test "requeues a stale executor's shared_clean job for another executor", %{board: board} do
+  describe "reclaim_stale_runners/0" do
+    test "requeues a stale runner's shared_clean job for another runner", %{board: board} do
       flow = enabled_spec_flow(board)
       {:ok, _run} = Runs.start_run(card_in(board, "Next up"), flow)
 
       {:ok, gone} =
-        Runs.upsert_executor(board, %{"name" => "gone", "interval" => 30, "capacity" => %{"shared_clean" => 1}})
+        Runs.upsert_runner(board, %{"name" => "gone", "interval" => 30, "capacity" => %{"shared_clean" => 1}})
 
       {:ok, claimed} = Runs.claim_next_job(gone)
       assert claimed.state == :claimed
 
-      # Backdate past 2 × interval so the executor reads stale.
+      # Backdate past 2 × interval so the runner reads stale.
       stale_at = DateTime.add(DateTime.utc_now(), -1000, :second)
 
-      Relay.Repo.update_all(from(e in Schemas.Executor, where: e.id == ^gone.id),
+      Relay.Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
         set: [last_heartbeat: DateTime.truncate(stale_at, :second)]
       )
 
-      :ok = Runs.reclaim_stale_executors()
+      :ok = Runs.reclaim_stale_runners()
 
       requeued = Relay.Repo.get!(NodeJob, claimed.id)
       assert requeued.state == :queued
-      assert requeued.executor_name == nil
+      assert requeued.runner_name == nil
 
-      {:ok, other} = Runs.upsert_executor(board, %{"name" => "other", "capacity" => %{"shared_clean" => 1}})
+      {:ok, other} = Runs.upsert_runner(board, %{"name" => "other", "capacity" => %{"shared_clean" => 1}})
       assert {:ok, reclaimed} = Runs.claim_next_job(other)
       assert reclaimed.id == claimed.id
-      assert reclaimed.executor_name == "other"
+      assert reclaimed.runner_name == "other"
     end
 
     test "parks an exclusive run instead of requeuing", %{board: board} do
@@ -908,18 +908,18 @@ defmodule Relay.RunsTest do
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
       {:ok, gone} =
-        Runs.upsert_executor(board, %{"name" => "gone2", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+        Runs.upsert_runner(board, %{"name" => "gone2", "interval" => 30, "capacity" => %{"exclusive" => 1}})
 
       {:ok, claimed} = Runs.claim_next_job(gone)
 
-      Relay.Repo.update_all(from(e in Schemas.Executor, where: e.id == ^gone.id),
+      Relay.Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
         set: [last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -1000, :second), :second)]
       )
 
-      :ok = Runs.reclaim_stale_executors()
+      :ok = Runs.reclaim_stale_runners()
 
       assert Runs.get_run!(run.id).status == :parked
-      assert Runs.get_run!(run.id).parked_reason == :executor_gone
+      assert Runs.get_run!(run.id).parked_reason == :runner_gone
       assert Relay.Repo.get!(NodeJob, claimed.id).state == :revoked
     end
 
@@ -942,7 +942,7 @@ defmodule Relay.RunsTest do
       {:ok, flow} = Relay.Flows.enable_flow(flow)
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
 
-      {:ok, gone} = Runs.upsert_executor(board, %{"name" => "gone3", "capacity" => %{"exclusive" => 1}})
+      {:ok, gone} = Runs.upsert_runner(board, %{"name" => "gone3", "capacity" => %{"exclusive" => 1}})
       {:ok, claimed} = Runs.claim_next_job(gone)
 
       # Simulate the run having moved on (e.g. cancelled via a concurrent
@@ -958,25 +958,25 @@ defmodule Relay.RunsTest do
       assert Runs.get_run!(run.id).status == :cancelled
     end
 
-    test "executor_stale?/2 is the pure threshold — max(60s, 2 × interval)" do
+    test "runner_stale?/2 is the pure threshold — max(60s, 2 × interval)" do
       now = ~U[2026-07-17 12:00:00Z]
-      fresh = %Schemas.Executor{interval: 30, last_heartbeat: DateTime.add(now, -59, :second)}
-      stale = %Schemas.Executor{interval: 30, last_heartbeat: DateTime.add(now, -61, :second)}
+      fresh = %Schemas.Runner{interval: 30, last_heartbeat: DateTime.add(now, -59, :second)}
+      stale = %Schemas.Runner{interval: 30, last_heartbeat: DateTime.add(now, -61, :second)}
       # floor: a tiny interval still gets a 60s grace.
-      tiny_fresh = %Schemas.Executor{interval: 1, last_heartbeat: DateTime.add(now, -59, :second)}
+      tiny_fresh = %Schemas.Runner{interval: 1, last_heartbeat: DateTime.add(now, -59, :second)}
 
-      refute Runs.executor_stale?(fresh, now)
-      assert Runs.executor_stale?(stale, now)
-      refute Runs.executor_stale?(tiny_fresh, now)
+      refute Runs.runner_stale?(fresh, now)
+      assert Runs.runner_stale?(stale, now)
+      refute Runs.runner_stale?(tiny_fresh, now)
     end
   end
 
-  describe "ExecutorReaper" do
+  describe "RunnerReaper" do
     test "sweeps on its interval" do
       # This file's setup already starts a `Relay.Runs.Supervisor` (with its
       # own default-named reaper), so give this one a distinct name to avoid
       # clobbering that global registration.
-      pid = start_supervised!({Relay.Runs.ExecutorReaper, interval_ms: 20, name: :test_executor_reaper})
+      pid = start_supervised!({Relay.Runs.RunnerReaper, interval_ms: 20, name: :test_runner_reaper})
       # It's alive and clocked; the reclaim behaviour itself is covered above.
       assert Process.alive?(pid)
       _ = :sys.get_state(pid)
@@ -1203,19 +1203,19 @@ defmodule Relay.RunsTest do
   end
 
   describe "requeue_orphaned_jobs/3 (RLY-170)" do
-    # An executor that restarts loses its in-flight job state (it lives in-process). The job
+    # A runner that restarts loses its in-flight job state (it lives in-process). The job
     # stays :claimed server-side, and NEITHER recovery path can see it: claim_next_job only
-    # offers :queued jobs, and reclaim_stale_executors only touches STALE executors — this one
+    # offers :queued jobs, and reclaim_stale_runners only touches STALE runners — this one
     # is alive and beating. The drill left a job stranded for an hour; it would have sat there
-    # forever. The heartbeat already reports which jobs the executor IS running, so the absence
+    # forever. The heartbeat already reports which jobs the runner IS running, so the absence
     # of a job from that list is the signal.
     defp orphan_setup(board, flow_kind) do
       flow = if flow_kind == :exclusive, do: exclusive_flow(board, "orph"), else: enabled_spec_flow(board)
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       cap = if flow_kind == :exclusive, do: %{"exclusive" => 1}, else: %{"shared_clean" => 1}
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "e1", "capacity" => cap})
-      {:ok, claimed} = Runs.claim_next_job(executor)
-      %{run: run, executor: executor, job: claimed}
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "e1", "capacity" => cap})
+      {:ok, claimed} = Runs.claim_next_job(runner)
+      %{run: run, runner: runner, job: claimed}
     end
 
     defp backdate_claim(job, seconds) do
@@ -1223,22 +1223,22 @@ defmodule Relay.RunsTest do
       Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [claimed_at: at])
     end
 
-    test "requeues a job the executor no longer reports running", %{board: board} do
-      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+    test "requeues a job the runner no longer reports running", %{board: board} do
+      %{runner: runner, job: job} = orphan_setup(board, :shared_clean)
       backdate_claim(job, 600)
 
-      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [])
 
       requeued = Relay.Repo.get!(NodeJob, job.id)
       assert requeued.state == :queued
       assert requeued.claimed_at == nil
     end
 
-    test "leaves a job the executor still reports running", %{board: board} do
-      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+    test "leaves a job the runner still reports running", %{board: board} do
+      %{runner: runner, job: job} = orphan_setup(board, :shared_clean)
       backdate_claim(job, 600)
 
-      :ok = Runs.requeue_orphaned_jobs(board, executor, [job.id])
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [job.id])
 
       assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
     end
@@ -1246,32 +1246,32 @@ defmodule Relay.RunsTest do
     test "leaves a job claimed inside the grace window — the just-claimed race", %{board: board} do
       # A job claimed microseconds before a beat is legitimately not in `running` yet.
       # Requeuing it would double-dispatch LIVE work, which is worse than the bug being fixed.
-      %{executor: executor, job: job} = orphan_setup(board, :shared_clean)
+      %{runner: runner, job: job} = orphan_setup(board, :shared_clean)
 
-      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [])
 
       assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
     end
 
-    test "never touches another executor's job", %{board: board} do
+    test "never touches another runner's job", %{board: board} do
       %{job: job} = orphan_setup(board, :shared_clean)
       backdate_claim(job, 600)
-      {:ok, other} = Runs.upsert_executor(board, %{"name" => "e2", "capacity" => %{"shared_clean" => 1}})
+      {:ok, other} = Runs.upsert_runner(board, %{"name" => "e2", "capacity" => %{"shared_clean" => 1}})
 
       :ok = Runs.requeue_orphaned_jobs(board, other, [])
 
       assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
     end
 
-    test "an exclusive orphan stays PINNED to its executor; a shared_clean one is unpinned",
+    test "an exclusive orphan stays PINNED to its runner; a shared_clean one is unpinned",
          %{board: board} do
       # Exclusive affinity is what makes recovery correct rather than destructive: the run's
-      # commits live in THAT machine's worktree, so the job must go back to the same executor.
+      # commits live in THAT machine's worktree, so the job must go back to the same runner.
       # RLY-135's pinned-claim path (which bypasses the capacity filter) is what re-delivers it.
-      %{executor: executor, job: excl} = orphan_setup(board, :exclusive)
+      %{runner: runner, job: excl} = orphan_setup(board, :exclusive)
       backdate_claim(excl, 600)
-      :ok = Runs.requeue_orphaned_jobs(board, executor, [])
-      assert %{state: :queued, executor_name: "e1"} = Relay.Repo.get!(NodeJob, excl.id)
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [])
+      assert %{state: :queued, runner_name: "e1"} = Relay.Repo.get!(NodeJob, excl.id)
     end
   end
 
@@ -1288,7 +1288,7 @@ defmodule Relay.RunsTest do
       assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
-    test "names a failed run's ref as failed, so the executor RETAINS rather than removes", %{board: board} do
+    test "names a failed run's ref as failed, so the runner RETAINS rather than removes", %{board: board} do
       flow = retry_flow(board)
       card = card_in(board, "Next up", "failed card")
       {:ok, run} = Runs.start_run(card, flow)
@@ -1318,7 +1318,7 @@ defmodule Relay.RunsTest do
       assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "talk")]) == []
     end
 
-    test "never names a ref declared RETAINED — that tree is the executor's own to evict", %{board: board} do
+    test "never names a ref declared RETAINED — that tree is the runner's own to evict", %{board: board} do
       flow = retry_flow(board)
       card = card_in(board, "Next up", "retained card")
       {:ok, run} = Runs.start_run(card, flow)
@@ -1345,7 +1345,7 @@ defmodule Relay.RunsTest do
       # RE311: `releasable_held/2` is CARD-scoped, not run-scoped. Cancel R1, hit Retry inside
       # the ~15s before the release channel fires, and the card carries a cancelled run and a
       # running one — the tree belongs to the live run, so the ref must not be named. The
-      # executor is what makes that safe: `assign` adopts the card's own idle tree for R2
+      # runner is what makes that safe: `assign` adopts the card's own idle tree for R2
       # instead of refusing it (bin/test_relay.py's
       # `test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run`).
       flow = retry_flow(board)
@@ -1362,7 +1362,7 @@ defmodule Relay.RunsTest do
     test "a colliding ref_number resolves against the REQUESTING board, never the other one",
          %{board: board} do
       # Board keys are not unique (every board defaults to "RLY"), so `<key>-5` can name a card
-      # on two boards. The executor is bound to ONE board by its API key, so its declared refs
+      # on two boards. The runner is bound to ONE board by its API key, so its declared refs
       # are read as that board's — a terminal run on the OTHER board's card 5 must not become a
       # teardown order here.
       {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311 collide"})
@@ -1401,12 +1401,12 @@ defmodule Relay.RunsTest do
 
   describe "held vocabulary (RE311)" do
     test "the four holding states are defined once, and the active three are a subset" do
-      assert Schemas.Executor.holding_states() == ["bound", "retained", "running", "talk"]
-      assert Schemas.Executor.active_holding_states() == ["bound", "running", "talk"]
+      assert Schemas.Runner.holding_states() == ["bound", "retained", "running", "talk"]
+      assert Schemas.Runner.active_holding_states() == ["bound", "running", "talk"]
 
       # `retained` is the one state that does NOT occupy an exclusive partition — a failed run's
-      # leftover the executor may evict itself.
-      assert Schemas.Executor.holding_states() -- Schemas.Executor.active_holding_states() == ["retained"]
+      # leftover the runner may evict itself.
+      assert Schemas.Runner.holding_states() -- Schemas.Runner.active_holding_states() == ["retained"]
     end
 
     test "normalize_held/1 keeps well-formed entries and drops everything else" do
@@ -1418,21 +1418,21 @@ defmodule Relay.RunsTest do
         "junk"
       ]
 
-      assert Schemas.Executor.normalize_held(held) == [%{"ref" => "RLY-1", "state" => "bound"}]
+      assert Schemas.Runner.normalize_held(held) == [%{"ref" => "RLY-1", "state" => "bound"}]
     end
 
     test "normalize_held/1 truncates a beat past held_limit/0" do
-      # An executor holds a handful of worktrees; an unbounded list would buy an unbounded
+      # A runner holds a handful of worktrees; an unbounded list would buy an unbounded
       # query on the heartbeat's hot path.
-      held = for n <- 1..(Schemas.Executor.held_limit() + 50), do: %{"ref" => "RLY-#{n}", "state" => "bound"}
+      held = for n <- 1..(Schemas.Runner.held_limit() + 50), do: %{"ref" => "RLY-#{n}", "state" => "bound"}
 
-      assert length(Schemas.Executor.normalize_held(held)) == Schemas.Executor.held_limit()
+      assert length(Schemas.Runner.normalize_held(held)) == Schemas.Runner.held_limit()
     end
 
     test "normalize_held/1 degrades a non-list to an empty list rather than raising" do
       # A heartbeat must never 500 on a malformed beat.
-      assert Schemas.Executor.normalize_held(nil) == []
-      assert Schemas.Executor.normalize_held("nope") == []
+      assert Schemas.Runner.normalize_held(nil) == []
+      assert Schemas.Runner.normalize_held("nope") == []
     end
 
     test "active_held_refs/1 keeps the three states that occupy a partition" do
@@ -1443,56 +1443,56 @@ defmodule Relay.RunsTest do
         %{"ref" => "A4", "state" => "retained"}
       ]
 
-      assert Schemas.Executor.active_held_refs(held) == ["A1", "A2", "A3"]
+      assert Schemas.Runner.active_held_refs(held) == ["A1", "A2", "A3"]
     end
   end
 
-  describe "upsert_executor/2 capacity ownership (RE311)" do
+  describe "upsert_runner/2 capacity ownership (RE311)" do
     test "an upsert with no capacity leaves a previously-written one untouched", %{board: board} do
       {:ok, _beat} =
-        Runs.upsert_executor(board, %{
+        Runs.upsert_runner(board, %{
           "name" => "mac",
           "host" => "mac.local",
           "interval" => 30,
-          "version" => Runs.min_executor_version(),
+          "version" => Runs.min_runner_version(),
           "capacity" => %{"shared_clean" => 3, "exclusive" => 2}
         })
 
       # The claim's attrs carry NO capacity now — the free count rides as an argument instead.
       {:ok, after_claim} =
-        Runs.upsert_executor(board, %{
+        Runs.upsert_runner(board, %{
           "name" => "mac",
           "host" => "mac.local",
           "interval" => 30,
-          "version" => Runs.min_executor_version()
+          "version" => Runs.min_runner_version()
         })
 
       assert after_claim.capacity == %{"shared_clean" => 3, "exclusive" => 2}
     end
 
     test "an upsert with no capacity creates the row with an empty capacity", %{board: board} do
-      {:ok, executor} =
-        Runs.upsert_executor(board, %{
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{
           "name" => "fresh",
           "host" => "h",
           "interval" => 30,
-          "version" => Runs.min_executor_version()
+          "version" => Runs.min_runner_version()
         })
 
-      assert executor.capacity == %{}
+      assert runner.capacity == %{}
     end
 
     test "a malformed capacity leaves the stored one alone rather than zeroing it", %{board: board} do
-      {:ok, _beat} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
-      {:ok, after_junk} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => "junk"})
+      {:ok, _beat} = Runs.upsert_runner(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, after_junk} = Runs.upsert_runner(board, %{"name" => "mac", "capacity" => "junk"})
 
-      # Zeroing here would knock a working executor off dispatch on one bad beat.
+      # Zeroing here would knock a working runner off dispatch on one bad beat.
       assert after_junk.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
 
     test "a heartbeat still overwrites capacity with its configured total", %{board: board} do
-      {:ok, _first} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
-      {:ok, second} = Runs.upsert_executor(board, %{"name" => "mac", "capacity" => %{"exclusive" => 1}})
+      {:ok, _first} = Runs.upsert_runner(board, %{"name" => "mac", "capacity" => %{"exclusive" => 2}})
+      {:ok, second} = Runs.upsert_runner(board, %{"name" => "mac", "capacity" => %{"exclusive" => 1}})
 
       assert second.capacity == %{"shared_clean" => 0, "exclusive" => 1}
     end
@@ -1500,10 +1500,10 @@ defmodule Relay.RunsTest do
 
   describe "claim_next_job/3 held-ref bypass (RE311)" do
     # The exact incident: the retry released the pin (settle_retry_pin's :readopted branch, with
-    # no executor alive), the job was inserted UNPINNED, the machine came back and adopted
+    # no runner alive), the job was inserted UNPINNED, the machine came back and adopted
     # `<ns>-<ref>` as active — consuming the very slot the unpinned job needed to be offered
-    # through. The escape hatch was keyed on the pin; it should be keyed on "this executor holds
-    # that card's worktree", and now the executor says so.
+    # through. The escape hatch was keyed on the pin; it should be keyed on "this runner holds
+    # that card's worktree", and now the runner says so.
     #
     # The payload is built the way `Runs.build_payload/4` builds it — `vars.ref` is the field the
     # new eligibility disjunct reads, so a test payload without it would pass against a broken
@@ -1518,31 +1518,31 @@ defmodule Relay.RunsTest do
       })
     end
 
-    defp full_executor(board) do
-      insert(:executor, board: board, name: "holder", capacity: %{"shared_clean" => 0, "exclusive" => 0})
+    defp full_runner(board) do
+      insert(:runner, board: board, name: "holder", capacity: %{"shared_clean" => 0, "exclusive" => 0})
     end
 
     test "an unpinned exclusive job for a BOUND held ref is claimed at zero free capacity", %{board: board} do
       card = card_in(board, "Spec", "held card")
       job = queued_job_for(board, card, "exclusive")
-      executor = full_executor(board)
+      runner = full_runner(board)
       ref = Relay.Cards.ref(board, card)
 
       free = %{shared_clean: 0, exclusive: 0}
       held = [%{"ref" => ref, "state" => "bound"}]
 
-      assert {:ok, claimed} = Runs.claim_next_job(executor, free, held)
+      assert {:ok, claimed} = Runs.claim_next_job(runner, free, held)
       assert claimed.id == job.id
     end
 
     test "a RETAINED held ref does not bypass — assign() would reject that job", %{board: board} do
       card = card_in(board, "Spec", "retained card")
       _job = queued_job_for(board, card, "exclusive")
-      executor = full_executor(board)
+      runner = full_runner(board)
       ref = Relay.Cards.ref(board, card)
 
       assert {:ok, nil} =
-               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+               Runs.claim_next_job(runner, %{shared_clean: 0, exclusive: 0}, [
                  %{"ref" => ref, "state" => "retained"}
                ])
     end
@@ -1550,13 +1550,13 @@ defmodule Relay.RunsTest do
     test "a shared_clean job for a held ref still respects shared capacity", %{board: board} do
       card = card_in(board, "Spec", "shared card")
       _job = queued_job_for(board, card, "shared_clean")
-      executor = full_executor(board)
+      runner = full_runner(board)
       ref = Relay.Cards.ref(board, card)
 
       # The bypass is exclusive-only: a shared_clean job runs in the SHARED worktree, so
       # offering it on the strength of a per-card holding would oversubscribe the shared pool.
       assert {:ok, nil} =
-               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+               Runs.claim_next_job(runner, %{shared_clean: 0, exclusive: 0}, [
                  %{"ref" => ref, "state" => "bound"}
                ])
     end
@@ -1565,10 +1565,10 @@ defmodule Relay.RunsTest do
       {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other RE311"})
       other_card = card_in(other, "Spec", "elsewhere")
       _job = queued_job_for(other, other_card, "exclusive")
-      executor = full_executor(board)
+      runner = full_runner(board)
 
       assert {:ok, nil} =
-               Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [
+               Runs.claim_next_job(runner, %{shared_clean: 0, exclusive: 0}, [
                  %{"ref" => Relay.Cards.ref(other, other_card), "state" => "bound"}
                ])
     end
@@ -1577,10 +1577,10 @@ defmodule Relay.RunsTest do
       card = card_in(board, "Spec", "capacity arg")
       job = queued_job_for(board, card, "exclusive")
       # The row says the CONFIGURED total (what a heartbeat wrote); the claim says what is FREE.
-      executor = insert(:executor, board: board, name: "roomy", capacity: %{"exclusive" => 4})
+      runner = insert(:runner, board: board, name: "roomy", capacity: %{"exclusive" => 4})
 
-      assert {:ok, nil} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 0}, [])
-      assert {:ok, claimed} = Runs.claim_next_job(executor, %{shared_clean: 0, exclusive: 1}, [])
+      assert {:ok, nil} = Runs.claim_next_job(runner, %{shared_clean: 0, exclusive: 0}, [])
+      assert {:ok, claimed} = Runs.claim_next_job(runner, %{shared_clean: 0, exclusive: 1}, [])
       assert claimed.id == job.id
     end
   end
@@ -1704,7 +1704,7 @@ defmodule Relay.RunsTest do
       card = insert(:card, stage: stage)
       run = insert(:run, card: card)
       execution = insert(:node_execution, run: run, node_key: "implement")
-      job = insert(:node_job, node_execution: execution, state: :claimed, executor_name: "mac")
+      job = insert(:node_job, node_execution: execution, state: :claimed, runner_name: "mac")
 
       # Write the legacy value past the enum, exactly as a pre-migration row holds it.
       Relay.Repo.query!("UPDATE node_jobs SET state = 'running' WHERE id = $1", [job.id])

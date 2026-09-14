@@ -7,7 +7,7 @@ defmodule Schemas.NodeExecution do
   abandoned/revoked attempt — caps count outcomes, not rows.
   `failure_signature` (SHA-1 of normalized `detail`) powers the circuit
   breaker; `git_sha` anchors engine state to code state; `session_id`
-  powers `--resume` on needs-input re-entry; `cost` is executor-reported
+  powers `--resume` on needs-input re-entry; `cost` is runner-reported
   (04/05; schema-ready now). All fields programmatic, never cast.
 
   `sub_task_id` binds the execution to one `foreach` ITERATION (nil outside a
@@ -46,7 +46,7 @@ defmodule Schemas.NodeExecution do
     timestamps(type: :utc_datetime)
   end
 
-  @doc "The closed set of node outcomes an executor may report."
+  @doc "The closed set of node outcomes a runner may report."
   def outcomes, do: Ecto.Enum.values(__MODULE__, :outcome)
 
   @doc "Validates a programmatically-built execution row."

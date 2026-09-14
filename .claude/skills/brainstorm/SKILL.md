@@ -9,7 +9,7 @@ Turn an idea into a fully-formed design through collaborative dialogue.
 
 This skill takes an **optional card ref** as its first argument (`$ARGUMENTS`), e.g.
 `/brainstorm RLY-42`. The **card is the home for this unit of work** — its `spec` field, read
-and written with `./bin/relay`, is where the approved design lives, never a shared repo file.
+and written with `./relay`, is where the approved design lives, never a shared repo file.
 
 <HARD-GATE>
 Do NOT write code, scaffold, run a plan, or take any implementation action until a design is
@@ -23,14 +23,14 @@ cause the most wasted effort. The design can be a few sentences, but you MUST pr
 get approval before moving on.
 
 ## Which card?
-- **Ref given** (`/brainstorm RLY-42`) → read that card first (`./bin/relay card <ref>`) for
-  context and brainstorm against it. If `./bin/relay card <ref>` shows a **CHANGES REQUESTED**
+- **Ref given** (`/brainstorm RLY-42`) → read that card first (`./relay card <ref>`) for
+  context and brainstorm against it. If `./relay card <ref>` shows a **CHANGES REQUESTED**
   block, treat resolving that feedback as this pass's primary goal. On approval, write the
   spec back to that card.
 - **No ref given** → first confirm with the user that the goal is to **create a new card**. On
   confirmation, create it in **Backlog** and capture its ref:
 
-      ./bin/relay create "<title>" --stage Backlog --json
+      ./relay create "<title>" --stage Backlog --json
 
   New cards are **intake**: they land in Backlog for a human to triage and prioritize later —
   never drop a fresh card straight into a planning column (Spec/Plan/Code). Brainstorm as
@@ -81,14 +81,14 @@ get approval before moving on.
 ## After approval
 - Write the approved spec to the **card**, not a shared repo file. Save it to a temp file and:
 
-      ./bin/relay spec <ref> @<tmpfile>
+      ./relay spec <ref> @<tmpfile>
 
   Do **NOT** write or commit a spec file under a shared `docs/…` specs directory — that home is
   retired; work travels with the card.
 - Write the card's **acceptance criteria** in this same step — they are a required output of
   the Spec stage, not an optional extra. Save them to a temp file and:
 
-      ./bin/relay criteria <ref> @<tmpfile>
+      ./relay criteria <ref> @<tmpfile>
 
   They are the human's Approve checklist first and the robot's script second: at the Code
   stage the `acceptance-tester` reads this field off the card and actually runs them.
@@ -168,10 +168,10 @@ changes only *how* you deliver them, not *whether* you ask.
   timeline; the runner stops working it until the human answers.
 
 - **On re-entry** (the card comes back after the human answers): the answers are in the card
-  timeline — `./bin/relay card <ref>` shows your question comment and the human's answer
+  timeline — `./relay card <ref>` shows your question comment and the human's answer
   comment (also honor any CHANGES REQUESTED block). Read them, incorporate, then write **both**
-  the spec and the acceptance criteria to the card (`./bin/relay spec <ref> @<tmpfile>` and
-  `./bin/relay criteria <ref> @<tmpfile>`, exactly as **After approval** describes) and stop —
+  the spec and the acceptance criteria to the card (`./relay spec <ref> @<tmpfile>` and
+  `./relay criteria <ref> @<tmpfile>`, exactly as **After approval** describes) and stop —
   or send one more batched `needs-input` only if something is genuinely still ambiguous.
   Writing only the spec fails the node: the Spec flow declares
   `"writes": ["spec", "acceptance_criteria"]`, and a declared field left blank rewrites this

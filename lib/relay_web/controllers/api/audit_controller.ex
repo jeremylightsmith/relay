@@ -1,7 +1,7 @@
 defmodule RelayWeb.Api.AuditController do
   @moduledoc """
   Read-only per-flow run-history audit findings (RE249) — the half of `relay audit` whose data
-  lives only here. CI parity is computed in `bin/relay`, because the server has no checkout of
+  lives only here. CI parity is computed in `./relay`, because the server has no checkout of
   any board's repo.
   """
   use RelayWeb, :controller

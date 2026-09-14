@@ -1,8 +1,8 @@
-defmodule RelayWeb.Api.ExecutorContractTest do
+defmodule RelayWeb.Api.RunnerContractTest do
   @moduledoc """
-  The server↔executor contract (RLY-176).
+  The server↔runner contract (RLY-176).
 
-  This test is the ONLY writer of `test/fixtures/executor_contract.json`. It drives the real
+  This test is the ONLY writer of `test/fixtures/runner_contract.json`. It drives the real
   `/api/node-jobs/*` routes, captures what they actually send and accept, and asserts the
   committed fixture still matches. `bin/test_relay.py` builds every job dict from that same
   file, so a field renamed here breaks the Python suite on the next run — which is the whole
@@ -11,7 +11,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   No payload literal is typed into this file. Regenerate with:
 
-      RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/executor_contract_test.exs
+      RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/runner_contract_test.exs
 
   which rewrites the fixture AND still fails, so a regenerated fixture cannot slip through
   unreviewed in the same run.
@@ -21,7 +21,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
 
-  @fixture_path "test/fixtures/executor_contract.json"
+  @fixture_path "test/fixtures/runner_contract.json"
 
   setup do
     FakeDispatcher.register(self())
@@ -36,10 +36,10 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     exclusive = board_with_flow(user, "Contract B", "CB", :exclusive, shell_node())
 
     # The heartbeat MUST run before anything is claimed: RLY-170's orphan recovery reads the
-    # absence of a job from `running` as "this executor restarted and lost it" and requeues it,
+    # absence of a job from `running` as "this runner restarted and lost it" and requeues it,
     # which would yank the job out from under the claims below.
     heartbeat_request = %{
-      "executor" => executor_ident(),
+      "runner" => runner_ident(),
       "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
       # RLY-182: optional, send-on-change. Present here so the fixture records the key
       # and its shape for bin/test_relay.py to build against.
@@ -58,7 +58,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     #    have caught the RLY-166 guard.
     {run, shared_clean_agent} = claim_one(shared, %{"shared_clean" => 1})
 
-    # 2. The outcome the executor POSTs, at the real controller. `needs_input` parks the run,
+    # 2. The outcome the runner POSTs, at the real controller. `needs_input` parks the run,
     #    which is also how we reach the resumed case below.
     outcome_request = %{
       "outcome" => "needs_input",
@@ -114,14 +114,30 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       |> post(~p"/api/talk/turns/#{talk_turn.id}/outcome", Jason.encode!(talk_outcome_request))
       |> json_response(200)
 
-    # RE304: /api/scaffold is app↔executor wire now (`bin/relay update` reads it), so it is
+    # RE319 — the outdated refusal is wire too: ./relay branches on its `code` to tell a verdict
+    # from a job, and a pre-rename process is answered with the same code. Captured off the real
+    # claim route from a runner one below the floor, under its own name so the rows above are
+    # untouched.
+    outdated_body =
+      put_in(claim_body(%{"shared_clean" => 1}), ["runner"], %{
+        runner_ident()
+        | "name" => "fixture-outdated",
+          "version" => Runs.min_runner_version() - 1
+      })
+
+    outdated_refusal =
+      shared.conn
+      |> post(~p"/api/node-jobs/claim?wait=0", Jason.encode!(outdated_body))
+      |> json_response(409)
+
+    # RE304: /api/scaffold is app↔runner wire now (`./relay update` reads it), so it is
     # pinned here like every other transport — a renamed key breaks CI instead of breaking a
-    # project's bootstrap. Captured off the real route, unauthenticated like the executor's own
+    # project's bootstrap. Captured off the real route, unauthenticated like the runner's own
     # first call.
     scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
 
     document = %{
-      "version" => 5,
+      "version" => 6,
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -131,22 +147,22 @@ defmodule RelayWeb.Api.ExecutorContractTest do
         "audit_severities" => stringify(Relay.Runs.Audit.severities()),
         "isolation" => stringify(Schemas.Flow.isolation_classes()),
         "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())},
-        # RE268 — `bin/relay` types "done"/"stopped"/"failed" and "error" as literals on the
+        # RE268 — `./relay` types "done"/"stopped"/"failed" and "error" as literals on the
         # talk wire, and a drift is silent in the worst direction: a renamed status 422s BOTH
         # the primary and the crash-path outcome POST (stranding the turn `:claimed` forever),
         # and a renamed event kind makes `normalize_event/1` degrade error lines to ordinary
-        # output, undetectably. AGENTS.md: anything mirrored into bin/relay is pinned here.
+        # output, undetectably. AGENTS.md: anything mirrored into ./relay is pinned here.
         "talk_turn_statuses" => %{
           "active" => stringify(Schemas.TalkTurn.active_statuses()),
           "reportable" => stringify(Schemas.TalkTurn.reportable_statuses())
         },
         "talk_event_kinds" => stringify(Schemas.TalkEvent.kinds()),
-        # RE311 — `bin/relay` derives these four labels itself (`ExecutorPool._holding_state`)
+        # RE311 — `./relay` derives these four labels itself (`RunnerPool._holding_state`)
         # and the server SKIPS any it does not recognise, so a drift leaks an exclusive slot
         # silently rather than erroring. Pinned here like every other mirrored vocabulary.
         # Already strings on both sides (the field only ever exists on the wire), so no
         # `stringify/1`.
-        "holding_states" => Schemas.Executor.holding_states()
+        "holding_states" => Schemas.Runner.holding_states()
       },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
@@ -154,6 +170,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
         "exclusive_shell" => normalize(exclusive_shell),
         "resumed_agent" => normalize(resumed_agent)
       },
+      "claim_refused" => %{"outdated" => normalize_refusal(outdated_refusal)},
       "outcome" => %{
         "request" => normalize(outcome_request),
         "response" => normalize(outcome_response)
@@ -167,7 +184,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
       "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)},
       "scaffold" => %{
         "manifest_path" => "/api/scaffold",
-        "file_path_example" => "/api/scaffold/bin/relay",
+        "file_path_example" => "/api/scaffold/relay",
         "manifest" => scaffold_placeholders(scaffold_manifest)
       }
     }
@@ -175,19 +192,19 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     assert_matches_fixture!(document)
   end
 
-  # One place builds the `executor` dict for both claim and heartbeat, mirroring bin/relay's
-  # executor_ident (RLY-184). The version tracks the server's own minimum so the fixture always
-  # depicts a CURRENT executor — a literal would start 409ing the moment the minimum moves. It
+  # One place builds the `runner` dict for both claim and heartbeat, mirroring ./relay's
+  # runner_ident (RLY-184). The version tracks the server's own minimum so the fixture always
+  # depicts a CURRENT runner — a literal would start 409ing the moment the minimum moves. It
   # is the TALK minimum (the higher of the two floors, RE268) because this fixture also claims a
-  # talk job, which `Relay.Runs.talk_capable?/1` hides from an executor below it.
-  defp executor_ident do
-    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_talk_executor_version()}
+  # talk job, which `Relay.Runs.talk_capable?/1` hides from a runner below it.
+  defp runner_ident do
+    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_talk_runner_version()}
   end
 
   # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.
-  # `held` (RE311) is what lets a job for a card this executor already holds the worktree for be
+  # `held` (RE311) is what lets a job for a card this runner already holds the worktree for be
   # offered at zero free capacity.
-  defp claim_body(capacity), do: %{"executor" => executor_ident(), "capacity" => capacity, "running" => [], "held" => []}
+  defp claim_body(capacity), do: %{"runner" => runner_ident(), "capacity" => capacity, "running" => [], "held" => []}
 
   defp stringify(atoms), do: Enum.map(atoms, &Atom.to_string/1)
 
@@ -255,10 +272,10 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     "resume_session" => "<session-id>",
     "session_id" => "<session-id>",
     "turn_id" => "<talk-turn-id>",
-    # RE185: the VALUE moves on every deploy that changes `bin/relay`, but the contract is the
+    # RE185: the VALUE moves on every deploy that changes `./relay`, but the contract is the
     # key and its presence — a literal would make this fixture churn (and fail) every time the
-    # served scaffold's `EXECUTOR_VERSION` moves, which is not a transport change.
-    "latest_executor_version" => "<latest-executor-version>"
+    # served scaffold's `RUNNER_VERSION` moves, which is not a transport change.
+    "latest_runner_version" => "<latest-runner-version>"
   }
 
   defp normalize(map) when is_map(map) do
@@ -276,7 +293,16 @@ defmodule RelayWeb.Api.ExecutorContractTest do
 
   # The manifest's VALUES move whenever any served file changes; the contract is the key set
   # and the item paths. Placeholdered here rather than through @placeholders because `version`
-  # is also a key on the executor dict, where the real integer IS the contract.
+  # is also a key on the runner dict, where the real integer IS the contract.
+  # The refusal's numbers move whenever the floor does, and its message is prose; the contract is
+  # the code and the key set.
+  defp normalize_refusal(%{"error" => error}) do
+    %{
+      "error" =>
+        Map.merge(error, %{"required" => "<required-version>", "running" => "<running-version>", "message" => "<message>"})
+    }
+  end
+
   defp scaffold_placeholders(manifest) do
     %{
       "version" => "<scaffold-version>",
@@ -306,7 +332,7 @@ defmodule RelayWeb.Api.ExecutorContractTest do
     bin/test_relay.py builds every job dict from that file, so this is the seam guard, not a
     snapshot nit. If the change is intended, regenerate and review the diff:
 
-        RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/executor_contract_test.exs
+        RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/relay_web/controllers/api/runner_contract_test.exs
     """
   end
 

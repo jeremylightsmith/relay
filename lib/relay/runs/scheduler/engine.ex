@@ -15,12 +15,12 @@ defmodule Relay.Runs.Scheduler.Engine do
 
     * `active_runs/1` — the active runs (`status in Schemas.Run.active_statuses()`) for a
       board, each as a `Snapshot.run` map.
-    * `start_run/3` — start a run for `card_id` under `flow_key` on `executor_id`
+    * `start_run/3` — start a run for `card_id` under `flow_key` on `runner_id`
       (engine moves the card to works-in and sets `:working`).
-    * `resume_run/2` — re-enter parked `run_id` on `executor_id`.
+    * `resume_run/2` — re-enter parked `run_id` on `runner_id`.
   """
 
   @callback active_runs(board_id :: term()) :: [map()]
-  @callback start_run(card_id :: term(), flow_key :: String.t(), executor_id :: term()) :: :ok
-  @callback resume_run(run_id :: term(), executor_id :: term()) :: :ok
+  @callback start_run(card_id :: term(), flow_key :: String.t(), runner_id :: term()) :: :ok
+  @callback resume_run(run_id :: term(), runner_id :: term()) :: :ok
 end

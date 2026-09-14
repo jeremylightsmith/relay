@@ -90,7 +90,7 @@ while a `:ready` card in a mid-board Done sub-lane is merely parked. `:done` rem
 
 RLY-48 collapsed `:queued` into `:ready`; RLY-133 re-introduces it with a **narrower, new
 meaning**: the scheduler (`Relay.Runs.Scheduler`) sets a pulls-from card to `:queued` when an
-enabled flow *would* pull it but no executor capacity is free, and back to `:ready` when it no
+enabled flow *would* pull it but no runner capacity is free, and back to `:ready` when it no
 longer would (flow disabled, WIP filled, human-claimed). It is therefore valid **only** in the
 stages a flow pulls from — a `:queue` stage (Next up) and `:done` sub-lanes (Spec:Done,
 Plan:Done) — and is **never an entry status** (`default_status/1` is unchanged; only the

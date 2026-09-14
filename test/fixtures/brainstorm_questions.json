@@ -12,7 +12,7 @@
     "prompt": "**Where should the end-to-end test start?** Nothing today covers the seam from a brainstorm-shaped `--questions @file` all the way to a rendered stepper.",
     "options": [
       "One shared fixture JSON, pinned from both sides — RECOMMENDED",
-      "Full stack: a Playwright test that shells out to the real bin/relay"
+      "Full stack: a Playwright test that shells out to the real ./relay"
     ],
     "allow_text": false
   },

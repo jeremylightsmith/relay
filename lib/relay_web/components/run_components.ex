@@ -647,7 +647,7 @@ defmodule RelayWeb.RunComponents do
 
   @doc ~S"""
   `Relay.Runs.stopped_work/2`'s board-level verdict as one line. ONE copy of the
-  reason→severity mapping — `:executor_outdated` is the warning tint (the machines are there and
+  reason→severity mapping — `:runner_outdated` is the warning tint (the machines are there and
   beating, they are just being refused), every other reason is the error tint (nothing is going
   to pick the work up at all) — so the board and the Runners view can never drift.
 
@@ -675,7 +675,7 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
-  defp stopped_work_style(:executor_outdated),
+  defp stopped_work_style(:runner_outdated),
     do:
       "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
 

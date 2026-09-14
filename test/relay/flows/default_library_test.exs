@@ -221,14 +221,14 @@ defmodule Relay.Flows.DefaultLibraryTest do
       refute branch.run =~ "plan.md", "no bare worktree-root plan.md may remain in the branch command"
     end
 
-    test "the executor floor is raised to refuse any pre-RELAY_PLAN executor (RLY-223)" do
-      # The new branch command requires the executor to export RELAY_PLAN; any executor built
+    test "the runner floor is raised to refuse any pre-RELAY_PLAN runner (RLY-223)" do
+      # The new branch command requires the runner to export RELAY_PLAN; any runner built
       # before that (the last such build was v17) would expand $RELAY_PLAN to empty and break
       # every Code run, so it must be refused — the AGENTS.md floor-raise rule ("worse than a
       # stopped one"). Pinned by behavior, not an exact literal, so a later unrelated bump that
       # leaves the floor alone won't break it.
-      assert Relay.Runs.min_executor_version() >= 18
-      assert Relay.Runs.executor_outdated?(%Schemas.Executor{version: 17})
+      assert Relay.Runs.min_runner_version() >= 18
+      assert Relay.Runs.runner_outdated?(%Schemas.Runner{version: 17})
     end
   end
 
@@ -291,7 +291,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
     post = Enum.find(flow.nodes, &(&1.key == "post"))
 
     assert post.run =~ "{relay} result {ref}"
-    # `bin/relay result` does json.loads(text) — the argument must be a JSON object, not prose.
+    # `./relay result` does json.loads(text) — the argument must be a JSON object, not prose.
     assert post.run =~ "JSON object"
   end
 

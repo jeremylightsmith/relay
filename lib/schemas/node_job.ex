@@ -1,18 +1,18 @@
 defmodule Schemas.NodeJob do
   @moduledoc """
   The dispatch unit (ADR 0006 card 02): the durable record of "this node
-  attempt is available to an executor" — queued | claimed | done | revoked.
+  attempt is available to a runner" — queued | claimed | done | revoked.
   One job per `NodeExecution` attempt. Persisted so cancel/revoke and
   restart-resume read from durable state; card 04 adds only the REST
   claim/report transport on top of these rows.
-  `executor_name` stays a plain string until the Executor table (04).
-  `payload` is the executor's whole contract:
+  `runner_name` stays a plain string until the Runner table (04).
+  `payload` is the runner's whole contract:
   `%{"run" => raw run string, "node_type" => ..., "isolation" => ...,
   "resume_session" => sid | nil, "vars" => %{...}}` — placeholder
-  expansion stays executor-side (see `Schemas.Flow.Node`). `inserted_at`
+  expansion stays runner-side (see `Schemas.Flow.Node`). `inserted_at`
   is queued-at. All fields programmatic, never cast.
 
-  There is deliberately no `:running`: an executor claims a job and starts
+  There is deliberately no `:running`: a runner claims a job and starts
   its worker in the same loop iteration, so `:claimed` IS running (RE255).
   """
 
@@ -25,7 +25,7 @@ defmodule Schemas.NodeJob do
   schema "node_jobs" do
     field :node_key, :string
     field :state, Ecto.Enum, values: [:queued, :claimed, :done, :revoked]
-    field :executor_name, :string
+    field :runner_name, :string
     field :payload, :map, default: %{}
     field :claimed_at, :utc_datetime
     field :finished_at, :utc_datetime
@@ -44,7 +44,7 @@ defmodule Schemas.NodeJob do
   @doc ~S"""
   Job states held by a LIVE claim — excludes `:queued`, which nobody holds. Deliberately distinct
   from `active_states/0` even though only `:claimed` currently satisfies it: `active_states/0`
-  means "not finished," while this means "an executor is holding and working it," which is what
+  means "not finished," while this means "a runner is holding and working it," which is what
   `Relay.Runs.get_claimed_job/2` and the board's `working_run_ids/2` need. A future consumer must
   not reach for `active_states/0` when it means held — `:queued` is active but worked by nobody.
   """

@@ -147,7 +147,7 @@ empirically: the child's `$callers` contains the *supervisor's* pid, not the cal
 passes `callers: Relay.Runs.Instance.callers()` into the child spec and `RunServer.init/1` calls
 `Relay.Runs.Instance.adopt_callers/1`. The same treatment applies to
 `Relay.Runs.SchedulerSupervisor.ensure_started/2` → `Relay.Runs.Scheduler.Server`, and to
-`Relay.Runs.Supervisor`'s own `Listener`, `ExecutorReaper` and boot-resume `Task` children.
+`Relay.Runs.Supervisor`'s own `Listener`, `RunnerReaper` and boot-resume `Task` children.
 
 The same `$callers` walk also routes *which engine instance* a process belongs to
 (`Relay.Runs.Instance.current/0`), so a test can `start_engine!/0` its own tree under unique names
@@ -182,7 +182,7 @@ and every process the engine spawns on its behalf finds it. With nothing registe
   carry this; they are green on the measured seed matrix because their cards are unique per test and
   a reconcile for a foreign card is a no-op, but it is a latent cross-test coupling, not an isolated
   one. Two modules provably lost that bet and stay `async: false` with in-file blocker comments —
-  `test/relay/runs/executor_reaper_test.exs` and
+  `test/relay/runs/runner_reaper_test.exs` and
   `test/relay_web/live/board_settings_flow_preflight_test.exs` — which is why this ADR's async
   conversion is **partially unmet**: those two were flipped, raced, and reverted. Closing it needs
   either a per-instance firehose topic or a `start_engine!(listener: false)` option; both are
@@ -195,7 +195,7 @@ and every process the engine spawns on its behalf finds it. With nothing registe
     point; the remaining spread between 19.9s and 21.6s across runs is machine noise, not signal.
   - The 0.1s sync tail is six modules, each carrying its own ADR-0009-sanctioned reason comment:
     `test/support/data_case_test.exs` (reaches `Sandbox.allow/3`'s `:not_found` branch on purpose),
-    `test/relay/runs/executor_reaper_test.exs` and
+    `test/relay/runs/runner_reaper_test.exs` and
     `test/relay_web/live/board_settings_flow_preflight_test.exs` (the still-open
     global-firehose-vs-per-instance-`Listener` gap), `test/relay_web/api/board_logs_test.exs` (the
     app-wide `LogSink` singleton, see the `Sandbox.allow/3` bullet above), and the two

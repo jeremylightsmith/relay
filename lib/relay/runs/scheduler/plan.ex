@@ -3,9 +3,9 @@ defmodule Relay.Runs.Scheduler.Plan do
   The pure output of `Relay.Runs.Scheduler.plan/1`.
 
     * `dispatches` — ordered highest-priority first; each is
-      `{:resume, run_id, executor_id}` or `{:start, card_id, flow_key, executor_id}`.
+      `{:resume, run_id, runner_id}` or `{:start, card_id, flow_key, runner_id}`.
       The equivalent of today's `find_all_ready` `chosen` list, now carrying a
-      **named executor** per decision.
+      **named runner** per decision.
     * `to_queue` — `ready`/`queued` cards an enabled flow would pull but for which
       no capacity is free → the shell flips them to `:queued`.
     * `to_unqueue` — currently `:queued` cards no longer capacity-blocked (flow
@@ -20,8 +20,8 @@ defmodule Relay.Runs.Scheduler.Plan do
   """
 
   @type dispatch ::
-          {:resume, run_id :: term(), executor_id :: term()}
-          | {:start, card_id :: term(), flow_key :: String.t(), executor_id :: term()}
+          {:resume, run_id :: term(), runner_id :: term()}
+          | {:start, card_id :: term(), flow_key :: String.t(), runner_id :: term()}
 
   @type refusal :: %{run_id: term(), card_id: term(), reason: atom()}
 

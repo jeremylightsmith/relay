@@ -10,34 +10,34 @@ defmodule Storybook.RunComponents.StoppedWorkBanner do
   def variations do
     [
       %Variation{
-        id: :no_executor,
+        id: :no_runner,
         attributes: %{
-          id: "stopped-work-no-executor",
+          id: "stopped-work-no-runner",
           verdict: %{
-            reason: :no_executor,
-            detail: "No jobs claimed in 3m · no executor is connected to run this board's work."
+            reason: :no_runner,
+            detail: "No jobs claimed in 3m · no runner is connected to run this board's work."
           }
         }
       },
       %Variation{
-        id: :executor_gone,
+        id: :runner_gone,
         attributes: %{
-          id: "stopped-work-executor-gone",
+          id: "stopped-work-runner-gone",
           verdict: %{
-            reason: :executor_gone,
-            detail: "No jobs claimed in 12m · no executor is connected to run this board's work."
+            reason: :runner_gone,
+            detail: "No jobs claimed in 12m · no runner is connected to run this board's work."
           }
         }
       },
       %Variation{
-        id: :executor_outdated,
+        id: :runner_outdated,
         attributes: %{
-          id: "stopped-work-executor-outdated",
+          id: "stopped-work-runner-outdated",
           verdict: %{
-            reason: :executor_outdated,
+            reason: :runner_outdated,
             detail:
-              "No jobs claimed in 7m · every connected executor is running old code and is being " <>
-                "refused — running v0/unversioned, requires v#{Relay.Runs.min_executor_version()}. " <>
+              "No jobs claimed in 7m · every connected runner is running old code and is being " <>
+                "refused — running v0/unversioned, requires v#{Relay.Runs.min_runner_version()}. " <>
                 "Restart it to pick up current code."
           }
         }

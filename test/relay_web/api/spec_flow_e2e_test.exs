@@ -6,7 +6,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
   alias Relay.Accounts
   alias Relay.Cards
   alias Relay.Runs
-  alias Relay.Runs.Scheduler.ScriptedExecutor, as: Exec
+  alias Relay.Runs.Scheduler.ScriptedRunner, as: Exec
   alias Relay.Runs.SchedulerSupervisor
   alias Schemas.Card
 
@@ -75,7 +75,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
 
   test "a card in Next up runs the Spec flow end to end: claim -> logs -> needs_input -> answer -> resume -> Spec:Review",
        %{board: board, exec: exec, human: human, next_up: next_up} do
-    # The scripted executor here runs no real skill, so the card arrives already carrying the
+    # The scripted runner here runs no real skill, so the card arrives already carrying the
     # fields the shipped spec flow declares it writes (RE244) — otherwise the brainstorm node's
     # `succeeded` below is rewritten to `failed` by the missing-writes guard.
     {:ok, card} =
@@ -102,7 +102,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     assert first_execution.node_key == "brainstorm"
     assert first_execution.attempt == 1
 
-    # 4. The executor claims it - raw, unexpanded run string; resume_session nil.
+    # 4. The runner claims it - raw, unexpanded run string; resume_session nil.
     job = Exec.claim(exec, "exec-1", %{"shared_clean" => 1})
     assert job["node_id"] == "brainstorm"
     assert job["node_type"] == "agent"
@@ -146,7 +146,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     resume_job = Runs.active_job(Runs.get_run!(run.id))
     assert resume_job.payload["resume_session"] == "sess_e2e_1"
 
-    # 10-11. The executor claims the resume job and succeeds -> run :done, card at Spec:Review.
+    # 10-11. The runner claims the resume job and succeeds -> run :done, card at Spec:Review.
     job2 = Exec.claim(exec, "exec-1", %{"shared_clean" => 1})
     assert job2["node_id"] == "brainstorm"
     assert job2["resume_session"] == "sess_e2e_1"

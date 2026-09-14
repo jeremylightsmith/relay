@@ -716,7 +716,7 @@ defmodule RelayWeb.BoardLive do
             has a {@pending_move.status} run
             (<span class="font-medium">{@pending_move.node}</span>, {@pending_move.flow_key} flow).
             Moving it to <span class="font-medium">{@pending_move.target_stage_name}</span>
-            will cancel that run and free its executor slot.
+            will cancel that run and free its runner slot.
           </p>
           <div class="modal-action">
             <button
@@ -1469,7 +1469,7 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
-  # RLY-217 — the user confirmed a stranding move: cancel the run (frees its executor slot via the
+  # RLY-217 — the user confirmed a stranding move: cancel the run (frees its runner slot via the
   # existing revoke/release path) THEN apply the now-safe move. After cancel the run is terminal,
   # so move_card no longer refuses. cancel_run/2 logs the "run cancelled" timeline entry,
   # credited to the human who confirmed it (RE309) rather than to the agent.
@@ -2381,7 +2381,7 @@ defmodule RelayWeb.BoardLive do
 
   # RE247 — one row's Restart. The ref is resolved through THIS board (never a client-supplied
   # run id), then revived through retry_run/2 — the identical path the drawer's retry and the
-  # API's bulk sweep use, so its guards (active run, executor liveness, genuine-question
+  # API's bulk sweep use, so its guards (active run, runner liveness, genuine-question
   # refusal) still apply and refuse by name. An unknown ref, or a card with no run at all, is
   # a silent no-op like move_card. revive_run's {:run_resumed, _} broadcast refreshes every
   # other session; this socket recomputes synchronously so the row leaves the list in the same
@@ -4228,7 +4228,7 @@ defmodule RelayWeb.BoardLive do
       # A blank draft and "one turn in flight at a time" are both silent no-ops: the composer
       # already prevents the empty case, and while a turn is live the composer is REMOVED (Stop
       # renders in its place) and the prompt chips are hidden, so nothing a person can click
-      # reaches here. What remains is a race against the executor's own claim.
+      # reaches here. What remains is a race against the runner's own claim.
       {:error, _reason} ->
         socket
     end

@@ -91,7 +91,7 @@ of that shape, already rendered for this run. Do not reconstruct the payload fro
 Then run the `needs-input <ref> --questions @"$escalation_file"` command **exactly as it
 appears in the outcome contract at the end of your prompt** — that copy is already rendered with
 the right executable path for this run. Never retype a placeholder token you saw in a flow
-definition: this file is a static system prompt and is not passed through the executor's
+definition: this file is a static system prompt and is not passed through the runner's
 renderer, so a placeholder would reach the model literally. After posting the question, **stop
 without declaring an outcome** — that is what parks the run.
 

@@ -30,7 +30,7 @@ third column: same job, their vocabulary.
 | Code node behaviors | `.claude/agents/*.md` (implementer, reviewers, smoke, acceptance…) | inline `prompt=` attrs + `@prompts/*.md` files | `run` prompts in `code.json`, overridable per repo (W11) |
 | Merge/PR mechanics | 4 shell steps in `relay_config.json` + `tmp/exec-plan-status` gate | `project.toml` `[run.pull_request]` | the `merge` node — unreachable unless every gate passed |
 | Model assignment | `execute-plan.js` `meta.phases[].model` | `model_stylesheet` (CSS-like) + per-node `model=` | per-node `model` attr |
-| Isolation / env | worktree pools in `relay_config.json` | Daytona cloud sandbox (`project.toml [environments]`) | `isolation` requirement; executor owns the mapping |
+| Isolation / env | worktree pools in `relay_config.json` | Daytona cloud sandbox (`project.toml [environments]`) | `isolation` requirement; runner owns the mapping |
 
 ## Spec and Plan — one agent node each
 
@@ -122,7 +122,7 @@ became comment-free JSON (RLY-241). Keyed by node.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's sub_tasks. The `next_task` grep-gate is **gone** —
   "which task is next" is derived server-side, and `{sub_task}` names it in the prompt.
-- **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the executor appends
+- **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the runner appends
   `--agent <name>` to `claude -p`, so the file supplies the system prompt while `run` stays the
   user prompt. `smoke_fix` / `acceptance_fix` / `post` have no agent file and keep bare prompts.
 - **`sync` / `sync_fix`, `resync` / `resync_fix` / `reverify`** — RLY-192's two rebase sync

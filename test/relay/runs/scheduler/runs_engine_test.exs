@@ -99,12 +99,12 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
     assert got.status == :running
     assert got.flow_key == "spec"
     assert got.isolation == :shared_clean
-    assert got.pinned_executor_id == nil
+    assert got.pinned_runner_id == nil
     assert got.parked_reason == nil
-    assert got.pinned_executor_name == nil
+    assert got.pinned_runner_name == nil
   end
 
-  test "active_runs/1 resolves pinned_executor_name to that board's executor id",
+  test "active_runs/1 resolves pinned_runner_name to that board's runner id",
        %{board: board, next_up: next_up, flow: spec_flow} do
     # The setup block already enables "spec" pulling from "Next up" — disable it first so
     # this test's own exclusive flow (also pulling from "Next up") doesn't collide with the
@@ -126,14 +126,14 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
     {:ok, card} = Relay.Cards.create_card(next_up, %{title: "Exclusive card"})
     {:ok, run} = Runs.start_run(card, flow)
 
-    {:ok, exec} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"exclusive" => 1}})
+    {:ok, exec} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"exclusive" => 1}})
     {:ok, _claimed} = Runs.claim_next_job(exec)
 
     assert [got] = RunsEngine.active_runs(board.id)
     assert got.id == run.id
     assert got.isolation == :exclusive
-    assert got.pinned_executor_name == "exec-a"
-    assert got.pinned_executor_id == exec.id
+    assert got.pinned_runner_name == "exec-a"
+    assert got.pinned_runner_id == exec.id
   end
 
   test "resume_run/2 resumes a parked run and is a no-op on a non-parked run",

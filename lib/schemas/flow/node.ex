@@ -3,7 +3,7 @@ defmodule Schemas.Flow.Node do
   One node of a flow's embedded graph (ADR 0006). `type` is the closed
   behavior set; `run` is the node's command/prompt (skill invocation, shell
   line, or agent prompt — `{ref}`/`{branch}`/`{relay}` placeholders are the
-  executor's to expand). `model`/`effort` nil means inherit the executor
+  runner's to expand). `model`/`effort` nil means inherit the runner
   default. `human`/`parallel` carry no type-specific attrs yet (nothing
   executes before card 02).
 
@@ -12,7 +12,7 @@ defmodule Schemas.Flow.Node do
   sub_tasks. `"card.sub_tasks"` is the only source W13 accepts.
 
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
-  executor appends `--agent <name>` to its `claude -p` call, so the file supplies
+  runner appends `--agent <name>` to its `claude -p` call, so the file supplies
   the system prompt while `run` stays the user prompt. nil = today's invocation.
 
   `expects_commits` (agent nodes only, default `false`, RLY-194) marks a node
@@ -80,7 +80,7 @@ defmodule Schemas.Flow.Node do
   def types, do: @types
 
   @doc ~S"""
-  The subset of node `type`s an executor actually runs (RLY-139). A strict subset of `types/0` —
+  The subset of node `type`s a runner actually runs (RLY-139). A strict subset of `types/0` —
   `:parallel` and `:human` are valid node types that do not dispatch — so this is guarded as a
   subset, not a partition.
   """
@@ -99,7 +99,7 @@ defmodule Schemas.Flow.Node do
     |> validate_expects_commits_only_on_agent_nodes()
   end
 
-  # `agent` names a `.claude/agents/<name>.md` definition the executor passes to
+  # `agent` names a `.claude/agents/<name>.md` definition the runner passes to
   # `claude -p --agent`. It is meaningless on a shell/gate/human node, so say so
   # loudly rather than silently ignoring it.
   defp validate_agent_only_on_agent_nodes(changeset) do

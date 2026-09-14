@@ -1,8 +1,8 @@
-defmodule Relay.Runs.ExecutorReaper do
+defmodule Relay.Runs.RunnerReaper do
   @moduledoc """
   The run-lifecycle clock (ADR 0006 card 04): a supervised GenServer whose periodic (30s) sweep
-  runs the DB-only run-lifecycle policies on `Relay.Runs` — executor liveness
-  (`reclaim_stale_executors/0`: returns a dead executor's in-flight `shared_clean` jobs to the
+  runs the DB-only run-lifecycle policies on `Relay.Runs` — runner liveness
+  (`reclaim_stale_runners/0`: returns a dead runner's in-flight `shared_clean` jobs to the
   queue and parks its `exclusive` runs), orphaned-run closure
   (`close_orphaned_runs/0`: closes any run still active while its card sits in a terminal stage,
   RLY-233), and unresumable-run ageing (`abandon_unresumable_runs/0`: fails a parked run whose
@@ -32,7 +32,7 @@ defmodule Relay.Runs.ExecutorReaper do
 
   @impl true
   def handle_info(:sweep, state) do
-    Relay.Runs.reclaim_stale_executors()
+    Relay.Runs.reclaim_stale_runners()
     Relay.Runs.close_orphaned_runs()
     Relay.Runs.abandon_unresumable_runs()
     Process.send_after(self(), :sweep, state.interval)

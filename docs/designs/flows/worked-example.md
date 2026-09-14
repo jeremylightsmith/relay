@@ -10,8 +10,8 @@ after the W-cards land.
 ```text
 TODAY — repo files that make the flow      HISTORICAL — deleted in the cutover
 ─────────────────────────────────────      ─────────────────────────────────────────
-bin/relay                   1135 lines     relay_config.json           42 (RLY-139)
-.relay/executor.json           6 lines     .claude/workflows/
+./relay                   1135 lines     relay_config.json           42 (RLY-139)
+.relay/runner.json           6 lines     .claude/workflows/
 .claude/agents/                              execute-plan.js          485 (RLY-139)
   plan-implementer.md         57           .claude/commands/
   spec-reviewer.md            67             exec-plan.md             119 (RLY-139)
@@ -22,7 +22,7 @@ bin/relay                   1135 lines     relay_config.json           42 (RLY-1
   acceptance-tester.md        82           pointed at directly by a flow node's `agent`
   rebaser.md                  39           field, rendered as `claude -p --agent <name>`.
 ─────────────────────────────────────      ─────────────────────────────────────────
-repo-side: bin/relay + 8 agent            server-side data:      3 Flow rows
+repo-side: ./relay + 8 agent            server-side data:      3 Flow rows
 files = 1,668 lines                       (spec.json 13 + plan.json 13 +
                                            code.json 157 = 183 lines of data)
 UNCHANGED THROUGHOUT: .claude/skills/* (brainstorm, TDD, debugging, …),
@@ -176,7 +176,7 @@ and the `tmp/exec-plan-status` gate become the `merge` node + routing.
 
 ## Tomorrow's repo files, in full
 
-**`.relay/executor.jsonc`** — the only *new* required repo file; replaces
+**`.relay/runner.jsonc`** — the only *new* required repo file; replaces
 `relay_config.json`'s `pools` block (its `pipeline` block has no successor — that's the
 point):
 
@@ -215,8 +215,8 @@ erDiagram
     Run ||--o{ NodeExecution : "history, one per node attempt"
     Run ||--o{ NodeJob : "work in flight"
     SubTask ||--o{ NodeExecution : "binds one foreach iteration"
-    Executor ||--o{ NodeJob : claims
-    Board ||--o{ Executor : "registered machines"
+    Runner ||--o{ NodeJob : claims
+    Board ||--o{ Runner : "registered machines"
 
     Flow {
         string key "spec | plan | code"
@@ -245,7 +245,7 @@ erDiagram
         string state "queued | claimed | running | done | revoked"
         json payload "rendered run, isolation, vars, agent"
     }
-    Executor {
+    Runner {
         string name
         json capacity "per isolation class"
         datetime last_heartbeat
@@ -264,7 +264,7 @@ Every row involved (abridged JSON; timestamps trimmed):
   "isolation": "exclusive",
   "trigger": { "from_stage_id": 41, "stage_id": 47, "done_stage_id": 51 } }
 
-// Executor — one registered machine (was: relay_config.json's pools block)
+// Runner — one registered machine (was: relay_config.json's pools block)
 { "id": 3, "name": "jeremy-mbp", "board_id": 1,
   "capacity": { "shared_clean": 3, "exclusive": 1 },
   "last_heartbeat": "…T18:42:07Z", "status": "online" }
@@ -295,7 +295,7 @@ Every row involved (abridged JSON; timestamps trimmed):
 // bound to sub_task 502; carrying the finding; session resumes so the implementer
 // keeps its context)
 { "id": "nj_c88", "run": "run_7f3a", "node": "implement", "state": "claimed",
-  "executor_id": 3, "claimed_at": "…T18:41:55Z",
+  "runner_id": 3, "claimed_at": "…T18:41:55Z",
   "payload": { "isolation": "exclusive", "resume_session": "s_a41…", "agent": "plan-implementer",
                "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one.",
                "vars": { "ref": "RLY-150", "branch": "rly-150-csv-export",
@@ -303,7 +303,7 @@ Every row involved (abridged JSON; timestamps trimmed):
                          "findings": "export test asserts on private struct internals; …" } } }
 ```
 
-That's the entire state: **3 Flow rows per board (written once), 1 Executor row per
+That's the entire state: **3 Flow rows per board (written once), 1 Runner row per
 machine, and ~1 Run + ~2 SubTask + ~15 NodeExecution rows + transient NodeJobs per card
 worked.**
 
@@ -311,11 +311,11 @@ worked.**
 
 | | Today | Tomorrow |
 | --- | --- | --- |
-| Repo-side flow machinery | 2,174 lines across 12 files | ~610 lines across 2 files (executor + its config) |
+| Repo-side flow machinery | 2,174 lines across 12 files | ~610 lines across 2 files (runner + its config) |
 | Orchestration logic | `execute-plan.js` (485 lines of JS) + `bin/relay watch` dispatch (~400 of the 995) | engine code in `Relay.Flows`/`Relay.Runs` (new, W2–W4 — the cost moved here, written once for every project) |
 | Flow *definitions* | implicit in JS + config + 8 agent files | 130 lines of data, 3 files, renderable as graphs |
-| Per-project setup | copy 12 files, keep them in sync by hand | `relay init` + one executor config |
-| State when idle | none (stateless watcher) | 3 Flow rows + 1 Executor row |
+| Per-project setup | copy 12 files, keep them in sync by hand | `relay init` + one runner config |
+| State when idle | none (stateless watcher) | 3 Flow rows + 1 Runner row |
 | State per worked card | scattered: card timeline + runner stdout | 1 Run + ~15 NodeExecution rows, queryable |
 
 The honest reading: total complexity doesn't vanish — the 485 lines of `execute-plan.js`

@@ -88,11 +88,11 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       conn,
       ~p"/api/node-jobs/claim",
       Jason.encode!(%{
-        "executor" => %{
+        "runner" => %{
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          "version" => Runs.min_talk_executor_version()
+          "version" => Runs.min_talk_runner_version()
         },
         "capacity" => capacity,
         "running" => running
@@ -134,7 +134,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           conn,
           ~p"/api/node-jobs/claim?wait=0",
           Jason.encode!(%{
-            "executor" => %{"name" => "idle", "version" => Runs.min_talk_executor_version()},
+            "runner" => %{"name" => "idle", "version" => Runs.min_talk_runner_version()},
             "capacity" => %{"shared_clean" => 1}
           })
         )
@@ -142,14 +142,14 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert response(conn, 204)
     end
 
-    test "204 immediately (no long-poll) when the executor advertises zero capacity", %{conn: conn} do
+    test "204 immediately (no long-poll) when the runner advertises zero capacity", %{conn: conn} do
       {micros, conn} =
         :timer.tc(fn ->
           post(
             conn,
             ~p"/api/node-jobs/claim",
             Jason.encode!(%{
-              "executor" => %{"name" => "zero-capacity", "version" => Runs.min_talk_executor_version()},
+              "runner" => %{"name" => "zero-capacity", "version" => Runs.min_talk_runner_version()},
               "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
             })
           )
@@ -160,26 +160,26 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert micros < 5_000_000
     end
 
-    test "a non-map executor is a 422, not a 500", %{conn: conn} do
+    test "a non-map runner is a 422, not a 500", %{conn: conn} do
       # RLY-162: Map.put/3 on a string raised BadMapError → 500 + a stack trace, so a
-      # slightly-wrong client looked like a server outage on the executor's front door.
+      # slightly-wrong client looked like a server outage on the runner's front door.
       body =
         conn
         |> post(
           ~p"/api/node-jobs/claim",
           Jason.encode!(%{
-            "executor" => "not-a-map",
+            "runner" => "not-a-map",
             "capacity" => %{"shared_clean" => 1}
           })
         )
         |> json_response(422)
 
-      assert body["error"]["code"] == "invalid_executor"
-      assert body["error"]["message"] =~ "executor"
+      assert body["error"]["code"] == "invalid_runner"
+      assert body["error"]["message"] =~ "runner"
     end
 
-    test "an absent executor still renders the changeset 400, not the 422", %{conn: conn} do
-      # Behavior held constant: absent defaults to %{}, the Executor changeset rejects the
+    test "an absent runner still renders the changeset 400, not the 422", %{conn: conn} do
+      # Behavior held constant: absent defaults to %{}, the Runner changeset rejects the
       # blank name, and the fallback's existing `invalid` 400 answers.
       body =
         conn
@@ -203,10 +203,10 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert_received :some_unrelated_message
     end
 
-    test "409 executor_outdated when the executor reports no version", %{conn: conn, board: board} do
+    test "409 runner_outdated when the runner reports no version", %{conn: conn, board: board} do
       # The load-bearing half of RLY-184: claim is the only call that hands out work, so an
-      # outdated executor cannot get a job even if every other check is missed. A version-less
-      # executor is running pre-RLY-184 code by definition.
+      # outdated runner cannot get a job even if every other check is missed. A version-less
+      # runner is running pre-RLY-184 code by definition.
       flow = four_outcome_flow(board)
       start_queued_job(board, flow)
 
@@ -215,19 +215,19 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/claim",
           Jason.encode!(%{
-            "executor" => %{"name" => "ancient", "host" => "old"},
+            "runner" => %{"name" => "ancient", "host" => "old"},
             "capacity" => %{"shared_clean" => 1}
           })
         )
         |> json_response(409)
 
-      assert body["error"]["code"] == "executor_outdated"
-      assert body["error"]["required"] == Runs.min_executor_version()
+      assert body["error"]["code"] == "runner_outdated"
+      assert body["error"]["required"] == Runs.min_runner_version()
       assert body["error"]["running"] == nil
       assert body["error"]["message"] =~ "restart"
     end
 
-    test "a current executor still claims normally", %{conn: conn, board: board} do
+    test "a current runner still claims normally", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       start_queued_job(board, flow)
 
@@ -251,35 +251,35 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Relay.Talk.get_turn(turn.id).status == :claimed
     end
 
-    test "a claim never writes the executor's capacity column", %{conn: conn, board: board} do
+    test "a claim never writes the runner's capacity column", %{conn: conn, board: board} do
       # The incident's Bug 1: the claim wrote the FREE count and the heartbeat wrote the
-      # CONFIGURED total into one column, so `relay executors` and the runners page read
+      # CONFIGURED total into one column, so `relay runners` and the runners page read
       # whichever landed last.
       post(conn, ~p"/api/node-jobs/heartbeat", %{
-        "executor" => %{"name" => "fake", "host" => "fake", "interval" => 30},
+        "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30},
         "capacity" => %{"shared_clean" => 3, "exclusive" => 2},
         "running" => []
       })
 
       claim(conn, %{"shared_clean" => 0, "exclusive" => 0})
 
-      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
-      assert executor.capacity == %{"shared_clean" => 3, "exclusive" => 2}
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake")
+      assert runner.capacity == %{"shared_clean" => 3, "exclusive" => 2}
     end
 
-    test "a claim carrying held never writes the executor's held column", %{conn: conn, board: board} do
-      # The single-writer thesis (RE311): `executor_attrs/1` never puts "held" on a claim's
+    test "a claim carrying held never writes the runner's held column", %{conn: conn, board: board} do
+      # The single-writer thesis (RE311): `runner_attrs/1` never puts "held" on a claim's
       # upsert attrs, only `heartbeat_attrs/2` does — this is the request-shaped proof of it,
       # not just a reading of the controller source.
       post(
         conn,
         ~p"/api/node-jobs/claim",
         Jason.encode!(%{
-          "executor" => %{
+          "runner" => %{
             "name" => "fake",
             "host" => "fake",
             "interval" => 30,
-            "version" => Runs.min_talk_executor_version()
+            "version" => Runs.min_talk_runner_version()
           },
           "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
           "running" => [],
@@ -288,8 +288,8 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         })
       )
 
-      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "fake")
-      assert executor.held == []
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake")
+      assert runner.held == []
     end
 
     test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
@@ -304,11 +304,11 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/claim",
           Jason.encode!(%{
-            "executor" => %{
+            "runner" => %{
               "name" => "fake",
               "host" => "fake",
               "interval" => 30,
-              "version" => Runs.min_talk_executor_version()
+              "version" => Runs.min_talk_runner_version()
             },
             "capacity" => %{"shared_clean" => 0, "exclusive" => 0},
             "running" => [],
@@ -331,11 +331,11 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         conn,
         ~p"/api/node-jobs/claim",
         Jason.encode!(%{
-          "executor" => %{
+          "runner" => %{
             "name" => "fake",
             "host" => "fake",
             "interval" => 30,
-            "version" => Runs.min_talk_executor_version()
+            "version" => Runs.min_talk_runner_version()
           },
           "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
           "running" => running,
@@ -344,7 +344,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       )
     end
 
-    test "a no-job claim carries the revoked ids among what the executor reports running", ctx do
+    test "a no-job claim carries the revoked ids among what the runner reports running", ctx do
       %{conn: conn, board: board} = ctx
       flow = four_outcome_flow(board)
       {run, job} = start_queued_job(board, flow)
@@ -354,13 +354,13 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       body = conn |> claim_now([job.id]) |> json_response(200)
 
-      # This is what makes Stop land in well under a second: without it the executor would not
+      # This is what makes Stop land in well under a second: without it the runner would not
       # learn the job was killed until its next 15s heartbeat, and `claude` would keep streaming.
       assert body["revoked"] == [job.id]
       refute Map.has_key?(body, "id")
     end
 
-    test "still 204 when nothing this executor reports running has been revoked", ctx do
+    test "still 204 when nothing this runner reports running has been revoked", ctx do
       assert ctx.conn |> claim_now([]) |> response(204)
     end
   end
@@ -432,7 +432,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       # Simulate reclaim: the job goes back to queued (no longer held).
       Relay.Repo.update_all(
         from(j in Schemas.NodeJob, where: j.id == ^id),
-        set: [state: :queued, executor_name: nil]
+        set: [state: :queued, runner_name: nil]
       )
 
       body =
@@ -497,52 +497,52 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
   end
 
   describe "POST /api/node-jobs/heartbeat (RLY-164)" do
-    test "advertises the executor's CONFIGURED capacity into the scheduler's store", %{conn: conn, board: board} do
+    test "advertises the runner's CONFIGURED capacity into the scheduler's store", %{conn: conn, board: board} do
       # Before this route existed, Capacity was fed only by /api/board/heartbeat, which
-      # `relay execute` never calls — so starting an executor and enabling a flow dispatched
+      # `relay start` never calls — so starting a runner and enabling a flow dispatched
       # nothing at all, and the first live cutover needed a hand-run curl.
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a", "host" => "box"},
+          "runner" => %{"name" => "exec-a", "host" => "box"},
           "capacity" => %{"shared_clean" => 3, "exclusive" => 1},
           "running" => []
         })
 
       assert %{"revoked" => []} = json_response(conn, 200)
 
-      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-a")
-      assert Capacity.snapshot()[executor.id] == %{shared_clean: 3, exclusive: 1}
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-a")
+      assert Capacity.snapshot()[runner.id] == %{shared_clean: 3, exclusive: 1}
     end
 
     test "a beat with an unknown class and a garbage value degrades instead of 500ing",
          %{conn: conn, board: board} do
       # RLY-201: atomize_capacity/1 called String.to_existing_atom/1 on client keys, so
-      # {"gpu": 1} raised ArgumentError → 500 on the executor's liveness path.
+      # {"gpu": 1} raised ArgumentError → 500 on the runner's liveness path.
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-junk", "host" => "box"},
+          "runner" => %{"name" => "exec-junk", "host" => "box"},
           "capacity" => %{"gpu" => 1, "shared_clean" => "lots", "exclusive" => 2},
           "running" => []
         })
 
       assert %{"revoked" => []} = json_response(conn, 200)
 
-      executor = Relay.Repo.get_by!(Schemas.Executor, board_id: board.id, name: "exec-junk")
-      assert Capacity.snapshot()[executor.id] == %{shared_clean: 0, exclusive: 2}
-      assert executor.capacity == %{"shared_clean" => 0, "exclusive" => 2}
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-junk")
+      assert Capacity.snapshot()[runner.id] == %{shared_clean: 0, exclusive: 2}
+      assert runner.capacity == %{"shared_clean" => 0, "exclusive" => 2}
     end
 
-    test "a job the executor still holds is NOT revoked", %{conn: conn, board: board} do
+    test "a job the runner still holds is NOT revoked", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
-      {:ok, claimed} = Runs.claim_next_job(executor)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(runner)
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"shared_clean" => 1},
           "running" => [claimed.id]
         })
@@ -551,22 +551,22 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Runs.get_run!(run.id).status == :running
     end
 
-    test "a job revoked server-side comes back in the response so the executor can kill it",
+    test "a job revoked server-side comes back in the response so the runner can kill it",
          %{conn: conn, board: board} do
       # This is what makes the baton (ADR 0004) and the run panel's cancel actually stop an
-      # agent. Without it the executor only learns on its next outcome POST — 20+ minutes for
+      # agent. Without it the runner only learns on its next outcome POST — 20+ minutes for
       # a Code implement/smoke node.
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
-      {:ok, claimed} = Runs.claim_next_job(executor)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(runner)
 
       # A human takes the baton: the run parks and its live jobs are revoked.
       :ok = Runs.revoke_active_jobs(run)
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"shared_clean" => 1},
           "running" => [claimed.id]
         })
@@ -582,17 +582,17 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"shared_clean" => 1},
           "running" => [job.id]
         })
 
-      # The id is unknown on THIS board; a cross-board leak would let one board's executor be
+      # The id is unknown on THIS board; a cross-board leak would let one board's runner be
       # told to kill another's work.
       assert %{"revoked" => []} = json_response(conn, 200)
     end
 
-    test "a cancelled held ref comes back in release_held so the executor frees its slot",
+    test "a cancelled held ref comes back in release_held so the runner frees its slot",
          %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
@@ -601,7 +601,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
           "held" => [%{"ref" => ref, "state" => "bound"}]
@@ -618,7 +618,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
           "held" => [%{"ref" => ref, "state" => "bound"}]
@@ -636,7 +636,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"exclusive" => 1},
           "running" => [],
           "held" => [%{"ref" => ref, "state" => "bound"}]
@@ -645,92 +645,92 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert %{"release_held" => []} = json_response(conn, 200)
     end
 
-    test "a non-map executor is a 422, not a 500", %{conn: conn} do
-      # `relay execute` beats every ~30s, so leaving heartbeat unfixed would rediscover
+    test "a non-map runner is a 422, not a 500", %{conn: conn} do
+      # `relay start` beats every ~30s, so leaving heartbeat unfixed would rediscover
       # RLY-162 twelve times an hour.
       body =
         conn
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => "not-a-map",
+            "runner" => "not-a-map",
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
         )
         |> json_response(422)
 
-      assert body["error"]["code"] == "invalid_executor"
-      assert body["error"]["message"] =~ "executor"
+      assert body["error"]["code"] == "invalid_runner"
+      assert body["error"]["message"] =~ "runner"
     end
 
-    test "the beat still succeeds for an outdated executor and tells it so", %{conn: conn} do
-      # The beat is how a refused executor stays visible on the roster and how revokes still
+    test "the beat still succeeds for an outdated runner and tells it so", %{conn: conn} do
+      # The beat is how a refused runner stays visible on the roster and how revokes still
       # reach it — refusing it here would make it vanish, which is the opposite of the point.
       body =
         conn
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "ancient", "host" => "old"},
+            "runner" => %{"name" => "ancient", "host" => "old"},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
         )
         |> json_response(200)
 
-      assert body["executor_outdated"] == true
-      assert body["required_version"] == Runs.min_executor_version()
+      assert body["runner_outdated"] == true
+      assert body["required_version"] == Runs.min_runner_version()
       assert body["revoked"] == []
     end
 
-    test "a current executor's beat reports it is not outdated", %{conn: conn} do
+    test "a current runner's beat reports it is not outdated", %{conn: conn} do
       body =
         conn
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "current", "host" => "new", "version" => Runs.min_talk_executor_version()},
+            "runner" => %{"name" => "current", "host" => "new", "version" => Runs.min_talk_runner_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
         )
         |> json_response(200)
 
-      assert body["executor_outdated"] == false
+      assert body["runner_outdated"] == false
     end
 
-    test "the beat names the newest fetchable executor version (RE185)", %{conn: conn} do
-      # The floor (`required_version`) and the target (`latest_executor_version`) are different
-      # numbers answering different questions; an executor auto-updates against the target.
+    test "the beat names the newest fetchable runner version (RE185)", %{conn: conn} do
+      # The floor (`required_version`) and the target (`latest_runner_version`) are different
+      # numbers answering different questions; a runner auto-updates against the target.
       body =
         conn
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "executor" => %{"name" => "box", "host" => "h", "version" => Runs.min_talk_executor_version()},
+            "runner" => %{"name" => "box", "host" => "h", "version" => Runs.min_talk_runner_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
         )
         |> json_response(200)
 
-      assert Map.has_key?(body, "latest_executor_version")
-      assert body["latest_executor_version"] == Runs.latest_executor_version()
+      assert Map.has_key?(body, "latest_runner_version")
+      assert body["latest_runner_version"] == Runs.latest_runner_version()
     end
 
     test "a beat listing a running job refreshes that card's liveness", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
-      {:ok, claimed} = Runs.claim_next_job(executor)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(runner)
 
       card_before = Relay.Repo.get!(Schemas.Card, run.card_id)
       assert card_before.agent_heartbeat_at == nil
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"shared_clean" => 1},
           "running" => [claimed.id]
         })
@@ -743,12 +743,12 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     test "a beat that omits a running job does not refresh that card's liveness", %{conn: conn, board: board} do
       flow = four_outcome_flow(board)
       {run, _job} = start_queued_job(board, flow)
-      {:ok, executor} = Runs.upsert_executor(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
-      {:ok, _claimed} = Runs.claim_next_job(executor)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, _claimed} = Runs.claim_next_job(runner)
 
       conn =
         post(conn, ~p"/api/node-jobs/heartbeat", %{
-          "executor" => %{"name" => "exec-a"},
+          "runner" => %{"name" => "exec-a"},
           "capacity" => %{"shared_clean" => 1},
           "running" => []
         })

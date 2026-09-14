@@ -65,8 +65,8 @@ config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
 config :relay, Relay.Push, adapter: Relay.Push.Delivery.Log, async: true
 
 # Runs engine (ADR 0006 card 02 / RLY-132): runaway-protection knobs and the
-# dispatch behaviour implementation ("give this node-job to an executor").
-# NoopDispatcher = jobs sit :queued for the pull model (04's executors poll).
+# dispatch behaviour implementation ("give this node-job to a runner").
+# NoopDispatcher = jobs sit :queued for the pull model (04's runners poll).
 config :relay, Relay.Runs, breaker_threshold: 3, visit_cap: 20
 
 # Configure the endpoint

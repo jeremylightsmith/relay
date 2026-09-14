@@ -25,7 +25,7 @@ conflict — or abort cleanly and escalate. **Never commit a guessed resolution.
 ## Escalation guardrail (prefer halting over guessing)
 Resolve ordinary textual conflicts by preserving both intents. But some conflicts are semantic,
 not textual — e.g. both sides independently added a constant for one concept (RLY-181:
-`EXECUTOR_VERSION` vs `VERSION`), where the correct fix is to delete one and repoint its call
+`RUNNER_VERSION` vs `VERSION`), where the correct fix is to delete one and repoint its call
 sites, not to keep both hunks. When the resolution needs a human judgement, OR you cannot make
 `mix precommit` green after the rebase, do NOT guess:
 
@@ -44,7 +44,7 @@ sites, not to keep both hunks. When the resolution needs a human judgement, OR y
    Then run the `needs-input <ref> --questions @"$questions_file"` command **exactly as it
    appears in the outcome contract at the end of your prompt** — that copy is already rendered
    with the right executable path for this run. Never retype a placeholder token you saw in a
-   flow definition: this file is a static system prompt and is not passed through the executor's
+   flow definition: this file is a static system prompt and is not passed through the runner's
    renderer, so a placeholder would reach the model literally. After posting the question,
    **stop without declaring an outcome** — that is what parks the run. The engine resumes THIS
    node with your Claude session intact when the human answers, so you come back with full

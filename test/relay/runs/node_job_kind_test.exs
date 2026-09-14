@@ -16,15 +16,15 @@ defmodule Relay.Runs.NodeJobKindTest do
     stage = insert(:stage, board: board)
     card = insert(:card, board: board, stage: stage)
 
-    executor =
-      insert(:executor,
+    runner =
+      insert(:runner,
         board: board,
         name: "mac-1",
         capacity: %{"shared_clean" => 1, "exclusive" => 1},
-        version: Runs.min_talk_executor_version()
+        version: Runs.min_talk_runner_version()
       )
 
-    %{board: board, card: card, executor: executor}
+    %{board: board, card: card, runner: runner}
   end
 
   test "the kinds are a closed set with the flow partition named once" do
@@ -43,7 +43,7 @@ defmodule Relay.Runs.NodeJobKindTest do
     assert job.card_id == ctx.card.id
   end
 
-  test "a talk job carries no run and is claimable by any talk-capable executor", ctx do
+  test "a talk job carries no run and is claimable by any talk-capable runner", ctx do
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "prompt" => "why is this stuck?"}, nil)
 
     assert job.kind == :talk
@@ -51,25 +51,25 @@ defmodule Relay.Runs.NodeJobKindTest do
     assert is_nil(job.node_execution_id)
     assert job.card_id == ctx.card.id
 
-    assert {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, claimed} = Runs.claim_next_job(ctx.runner)
     assert claimed.id == job.id
     assert claimed.state == :claimed
-    assert claimed.executor_name == "mac-1"
+    assert claimed.runner_name == "mac-1"
   end
 
-  test "a talk job pinned to another executor is never offered here", ctx do
+  test "a talk job pinned to another runner is never offered here", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, "other-box")
 
-    assert {:ok, nil} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, nil} = Runs.claim_next_job(ctx.runner)
   end
 
   test "a talk job is claimable even when no isolation capacity is advertised", ctx do
     idle =
-      insert(:executor,
+      insert(:runner,
         board: ctx.board,
         name: "mac-2",
         capacity: %{"shared_clean" => 0, "exclusive" => 0},
-        version: Runs.min_talk_executor_version()
+        version: Runs.min_talk_runner_version()
       )
 
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
@@ -79,16 +79,16 @@ defmodule Relay.Runs.NodeJobKindTest do
   end
 
   # RE268 round 2 — the capacity exemption above is exactly what made this dangerous: an
-  # unpinned talk job was visible to EVERY executor the version floor let claim at all,
+  # unpinned talk job was visible to EVERY runner the version floor let claim at all,
   # including pre-Talk ones that KeyError on the missing `isolation` and then 404 on the
   # flow-only outcome route, stranding the turn `:claimed` and wedging the whole board.
-  test "an executor below the talk floor never sees a talk job, but still claims flow work", ctx do
+  test "a runner below the talk floor never sees a talk job, but still claims flow work", ctx do
     old =
-      insert(:executor,
+      insert(:runner,
         board: ctx.board,
         name: "old-box",
         capacity: %{"shared_clean" => 1, "exclusive" => 1},
-        version: Runs.min_talk_executor_version() - 1
+        version: Runs.min_talk_runner_version() - 1
       )
 
     talk_job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
@@ -102,27 +102,27 @@ defmodule Relay.Runs.NodeJobKindTest do
     assert {:ok, claimed} = Runs.claim_next_job(old)
     assert claimed.id == flow_job.id
 
-    assert {:ok, talk_claimed} = Runs.claim_next_job(ctx.executor)
+    assert {:ok, talk_claimed} = Runs.claim_next_job(ctx.runner)
     assert talk_claimed.id == talk_job.id
   end
 
-  test "an executor that reports no version at all is not talk-capable" do
-    refute Runs.talk_capable?(%Schemas.Executor{version: nil})
-    refute Runs.talk_capable?(%Schemas.Executor{version: Runs.min_talk_executor_version() - 1})
-    assert Runs.talk_capable?(%Schemas.Executor{version: Runs.min_talk_executor_version()})
+  test "a runner that reports no version at all is not talk-capable" do
+    refute Runs.talk_capable?(%Schemas.Runner{version: nil})
+    refute Runs.talk_capable?(%Schemas.Runner{version: Runs.min_talk_runner_version() - 1})
+    assert Runs.talk_capable?(%Schemas.Runner{version: Runs.min_talk_runner_version()})
   end
 
   test "a talk job is never reported through the flow outcome path", ctx do
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
-    {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, claimed} = Runs.claim_next_job(ctx.runner)
 
     assert {:error, :not_found} = Runs.get_claimed_job(ctx.board, claimed.id)
     assert Runs.get_job(job.id).kind == :talk
   end
 
-  test "revoking a talk job makes the heartbeat name it for this executor", ctx do
+  test "revoking a talk job makes the heartbeat name it for this runner", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
-    {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, claimed} = Runs.claim_next_job(ctx.runner)
 
     assert Runs.revoked_among(ctx.board, [claimed.id]) == []
     assert :ok = Runs.revoke_talk_job(claimed)
@@ -140,26 +140,26 @@ defmodule Relay.Runs.NodeJobKindTest do
 
   test "a talk job never refreshes the card's agent heartbeat", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
-    {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, claimed} = Runs.claim_next_job(ctx.runner)
 
     assert {0, _} = Runs.refresh_running_card_liveness(ctx.board, [claimed.id])
   end
 
   test "a talk job is never requeued by the orphan reaper", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
-    {:ok, claimed} = Runs.claim_next_job(ctx.executor)
-    # Past the executor's grace window, so a flow job in this same state WOULD be requeued —
+    {:ok, claimed} = Runs.claim_next_job(ctx.runner)
+    # Past the runner's grace window, so a flow job in this same state WOULD be requeued —
     # this proves the `kind` filter is what spares the talk job, not the grace-window clause.
     backdate_claim(claimed, 600)
 
-    :ok = Runs.requeue_orphaned_jobs(ctx.board, ctx.executor, [])
+    :ok = Runs.requeue_orphaned_jobs(ctx.board, ctx.runner, [])
 
     assert Runs.get_job(claimed.id).state == :claimed
   end
 
   test "finishing a talk job is terminal", ctx do
     Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
-    {:ok, claimed} = Runs.claim_next_job(ctx.executor)
+    {:ok, claimed} = Runs.claim_next_job(ctx.runner)
 
     finished = Runs.finish_talk_job!(claimed)
     assert finished.state == :done

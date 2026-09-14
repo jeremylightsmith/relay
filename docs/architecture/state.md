@@ -17,8 +17,8 @@ what each term *means*; the sections below say what each value *does*.
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
-| Run parked reason | `needs_input` · `claimed` · `executor_gone` | `Schemas.Run.parked_reasons/0` |
-| Run resume-refusal reason | `no_isolation` · `pin_unresolved` · `pinned_executor_absent` · `no_free_slot` | `Schemas.Run.resume_refusal_reasons/0` |
+| Run parked reason | `needs_input` · `claimed` · `runner_gone` | `Schemas.Run.parked_reasons/0` |
+| Run resume-refusal reason | `no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot` | `Schemas.Run.resume_refusal_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
 | Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
@@ -96,7 +96,7 @@ stateDiagram-v2
 
     [*] --> ready
 
-    ready --> queued: no executor slot
+    ready --> queued: no runner slot
     queued --> ready: pull withdrawn
     ready --> working: run starts
     queued --> working: run starts
@@ -164,7 +164,7 @@ mark-done, the scheduler's capacity marking (`ready ↔ queued`), a manual drag 
 | Status | Meaning | Typical transition into it |
 | --- | --- | --- |
 | `ready` | Nothing is running; the card is available. | A run finishes, or a human drops the card on a queue stage. |
-| `queued` | Capacity-blocked: the scheduler would start a run but no executor has a free isolation slot. Still pullable — the moment a slot frees it dispatches to `working`. | The scheduler finds the card eligible with WIP room but no free executor slot (`Scheduler.place_fresh/4`). A WIP-full column leaves the card `ready`, not `queued`. |
+| `queued` | Capacity-blocked: the scheduler would start a run but no runner has a free isolation slot. Still pullable — the moment a slot frees it dispatches to `working`. | The scheduler finds the card eligible with WIP room but no free runner slot (`Scheduler.place_fresh/4`). A WIP-full column leaves the card `ready`, not `queued`. |
 | `working` | A run is executing a node against this card. | The run starts, or resumes after a park. |
 | `needs_input` | Blocked on a human. The card shows in the "needs you" rollup. | A node reports the `needs_input` outcome. |
 | `in_review` | Waiting at a review gate for a human to approve or reject. | The card lands on a `review` stage. |
@@ -181,7 +181,7 @@ A run is one traversal of a flow for one card.
 | Status | Meaning | Leaves it by |
 | --- | --- | --- |
 | `running` | A node is executing, or the next one is about to be dispatched. | Any of the four below. |
-| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, an executor claims, an executor returns — or the reaper giving up on an unresumable refusal (`Relay.Runs.abandon_unresumable_runs/1`, RE297), which fails it. |
+| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, a runner claims, a runner returns — or the reaper giving up on an unresumable refusal (`Relay.Runs.abandon_unresumable_runs/1`, RE297), which fails it. |
 | `done` | The flow reached its `done` target. Terminal. | — |
 | `failed` | The engine decided the run cannot continue. | A human retry (`Relay.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
 | `cancelled` | A human stopped the run, or it was closed as a leak. Terminal. | — |
@@ -194,7 +194,7 @@ stay append-only and "it failed here, then a human retried" is fully reconstruct
 A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
 stage (`Schemas.Stage.terminal_types/0`) while the run is still active (`running`/`parked`,
 RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
-and the `Relay.Runs.ExecutorReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) catches
+and the `Relay.Runs.RunnerReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) catches
 anything the event path missed. A legitimately completed run is already `:done` before its card
 moves off the stage, so it is never selected by either path and never relabelled. Run dispatch
 (`Relay.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
@@ -220,7 +220,7 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | `running` | `cancelled` | human cancelled a live run |
 | `running` | `done` | flow reached its `done` target |
 | `running` | `failed` | engine gave up (no route / caps / breaker) |
-| `running` | `parked` | park (reason: `needs_input` \| `claimed` \| `executor_gone`) |
+| `running` | `parked` | park (reason: `needs_input` \| `claimed` \| `runner_gone`) |
 <!-- END generated: run-transitions -->
 
 `parked_reason` says *why* a parked run is waiting:
@@ -228,26 +228,26 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | `parked_reason` | Waiting on |
 | --- | --- |
 | `needs_input` | A human to answer the node's question in the card drawer. |
-| `claimed` | An executor that has claimed the node-job to report its outcome. |
-| `executor_gone` | An executor that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost — and fails it if the resume stays refused past `Relay.Runs.unresumable_after_s/0` (RE297). |
+| `claimed` | A runner that has claimed the node-job to report its outcome. |
+| `runner_gone` | A runner that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost — and fails it if the resume stays refused past `Relay.Runs.unresumable_after_s/0` (RE297). |
 
 Whether an agent may work a card at all — the human-baton gate, the fresh-pull gate, and the
-`:executor_gone` resume gate — is decided by `Relay.Runs.Policy` (`agent_may_hold?/1`,
+`:runner_gone` resume gate — is decided by `Relay.Runs.Policy` (`agent_may_hold?/1`,
 `pullable?/1`, `resumable?/2`), one shared definition the scheduler, the run listener, and the
 board card face all call. It is a set of predicates, not a closed data table, so there is nothing
 to generate; the drift protection there is the shared-predicate test suite.
 
 ## Node-job state
 
-A node-job is one unit of work handed to an executor. The engine writes the job; an executor
+A node-job is one unit of work handed to a runner. The engine writes the job; a runner
 claims it, runs it, and reports back.
 
 | State | Meaning | Next |
 | --- | --- | --- |
-| `queued` | Written by the engine; no executor holds it. | `claimed` (an executor takes it) or `revoked`. |
-| `claimed` | An executor holds the job and is executing the node — it claims and starts its worker in one step, so there is no separate started state (RE255). | `done` or `revoked`. |
-| `done` | The executor reported a typed outcome. Terminal. | — |
-| `revoked` | Withdrawn — the run was cancelled, or the executor stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
+| `queued` | Written by the engine; no runner holds it. | `claimed` (a runner takes it) or `revoked`. |
+| `claimed` | A runner holds the job and is executing the node — it claims and starts its worker in one step, so there is no separate started state (RE255). | `done` or `revoked`. |
+| `done` | The runner reported a typed outcome. Terminal. | — |
+| `revoked` | Withdrawn — the run was cancelled, or the runner stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
 
 A revoked job never produces an outcome; the engine re-queues the node instead.
 
@@ -265,21 +265,21 @@ is the one board-scoping join both kinds share, the same deliberate denormalisat
 
 A talk job never refreshes the card's `agent_heartbeat_at` (a talk turn is not the agent
 working the card — the baton does not move) and is never requeued by the orphan reaper (a
-resumed `claude` session must land back on the executor that holds it, never a different
+resumed `claude` session must land back on the runner that holds it, never a different
 machine); it ends only when a human presses Stop or it reports an outcome.
 
 ## Talk turn status
 
 A talk turn is one human message and the work it caused (RE268 / ADR 0009), tracked separately
-from the `node_jobs` row that carries it to an executor.
+from the `node_jobs` row that carries it to a runner.
 
 | Status | Meaning | Next |
 | --- | --- | --- |
-| `queued` | Written when the person hits Enter; no executor holds the turn's job yet. | `claimed` (an executor takes it) or `stopped` (the person hits Stop before it is claimed). |
-| `claimed` | An executor is running `claude -p --resume` for this turn. | `done`, `stopped` or `failed`. |
-| `done` | The turn finished normally; the executor's `claude_session_id` is persisted so the next turn resumes it. Terminal. | — |
+| `queued` | Written when the person hits Enter; no runner holds the turn's job yet. | `claimed` (a runner takes it) or `stopped` (the person hits Stop before it is claimed). |
+| `claimed` | A runner is running `claude -p --resume` for this turn. | `done`, `stopped` or `failed`. |
+| `done` | The turn finished normally; the runner's `claude_session_id` is persisted so the next turn resumes it. Terminal. | — |
 | `stopped` | The person hit Stop. A normal, **non-error** end state — the job is revoked and the turn's partial output stays in the transcript. Terminal. | — |
-| `failed` | The executor reported an error. Terminal. | — |
+| `failed` | The runner reported an error. Terminal. | — |
 
 `queued` and `claimed` are the turn's *active* statuses (`Schemas.TalkTurn.active_statuses/0`):
 the pane shows Stop **in place of** the composer, which is removed while a turn is live, and a
@@ -341,5 +341,5 @@ flowchart LR
 - A revoked node-job produces no outcome at all, so the run's history stays clean and the
   node is simply re-dispatched.
 
-See also: [Runner](runner.md) for how node-jobs reach an executor, and
+See also: [Runner](runner.md) for how node-jobs reach a runner, and
 [Domain model](domain.md) for the schemas these fields live on.

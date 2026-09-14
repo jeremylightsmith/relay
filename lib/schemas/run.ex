@@ -25,8 +25,8 @@ defmodule Schemas.Run do
   schema "runs" do
     field :flow_key, :string
     field :status, Ecto.Enum, values: [:running, :parked, :done, :failed, :cancelled]
-    field :parked_reason, Ecto.Enum, values: [:needs_input, :claimed, :executor_gone]
-    field :pinned_executor_name, :string
+    field :parked_reason, Ecto.Enum, values: [:needs_input, :claimed, :runner_gone]
+    field :pinned_runner_name, :string
     field :current_node, :string
     field :context, :map, default: %{}
     field :failure_detail, :string
@@ -35,7 +35,7 @@ defmodule Schemas.Run do
     field :resume_refused_since, :utc_datetime
 
     field :resume_refused_reason, Ecto.Enum,
-      values: [:no_isolation, :pin_unresolved, :pinned_executor_absent, :no_free_slot]
+      values: [:no_isolation, :pin_unresolved, :pinned_runner_absent, :no_free_slot]
 
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
@@ -66,8 +66,8 @@ defmodule Schemas.Run do
   The closed set of reasons the scheduler refused to resume a parked run (RE297).
 
     * `:no_isolation` — the run's flow row is gone, so it has no isolation class to place.
-    * `:pin_unresolved` — an `:exclusive` run with no resolvable executor pin.
-    * `:pinned_executor_absent` — the pinned executor is not in the capacity map (`:gone`, or
+    * `:pin_unresolved` — an `:exclusive` run with no resolvable runner pin.
+    * `:pinned_runner_absent` — the pinned runner is not in the capacity map (`:gone`, or
       it never advertised).
     * `:no_free_slot` — everything resolved; the class simply has no free slot right now.
 
@@ -76,12 +76,12 @@ defmodule Schemas.Run do
   def resume_refusal_reasons, do: Ecto.Enum.values(__MODULE__, :resume_refused_reason)
 
   @doc """
-  The partition of `resume_refusal_reasons/0` that PROVES a run's executor pin can never be
+  The partition of `resume_refusal_reasons/0` that PROVES a run's runner pin can never be
   honoured, so `Relay.Runs.abandon_unresumable_runs/1` clears it when it gives up. The other
   reasons mean the machine is alive and the run's worktree really is still on it, so the pin
   is kept and a retry must land back there.
   """
-  def pin_unhonourable_refusal_reasons, do: [:pin_unresolved, :pinned_executor_absent]
+  def pin_unhonourable_refusal_reasons, do: [:pin_unresolved, :pinned_runner_absent]
 
   @doc """
   Validates a programmatically-built run. The partial unique index

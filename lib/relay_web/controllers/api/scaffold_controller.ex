@@ -1,7 +1,7 @@
 defmodule RelayWeb.Api.ScaffoldController do
   @moduledoc """
   `GET /api/scaffold` and `GET /api/scaffold/*path` (RE304, ADR 0010) — the five Relay-owned
-  files a project installs with `bin/relay update`.
+  files a project installs with `./relay update`.
 
   **Unauthenticated on purpose**, on the same `:api` pipeline as `/api/version`: `/relay-setup`
   runs before a project has a board key, and these files were published openly regardless. The

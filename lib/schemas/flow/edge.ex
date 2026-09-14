@@ -19,7 +19,7 @@ defmodule Schemas.Flow.Edge do
 
   @fields [:from, :to, :on, :max_loops, :when]
   @when_values [:foreach_remaining, :foreach_exhausted]
-  # The `on` vocabulary is the executor's outcome set, defined once on Schemas.NodeExecution.
+  # The `on` vocabulary is the runner's outcome set, defined once on Schemas.NodeExecution.
   @outcomes Schemas.NodeExecution.outcomes()
 
   @primary_key false

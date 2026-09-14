@@ -8,7 +8,7 @@ defmodule Relay.DocsContentTest do
     {"boards-and-stages.md", "# Boards & stages"},
     {"cards-and-handoffs.md", "# Cards & handoffs"},
     {"authentication.md", "# Authentication & API access"},
-    {"cli.md", "# CLI (`bin/relay`)"},
+    {"cli.md", "# CLI (`./relay`)"},
     {"api.md", "# REST API reference"}
   ]
 
@@ -24,10 +24,10 @@ defmodule Relay.DocsContentTest do
     assert html =~ "markdown-alert-note"
   end
 
-  test "the CLI page documents the bin/relay command table" do
+  test "the CLI page documents the ./relay command table" do
     html = read("cli.md")
 
-    for cmd <- ["bin/relay board", "bin/relay card", "bin/relay move", "bin/relay needs-input", "bin/relay search"] do
+    for cmd <- ["./relay board", "./relay card", "./relay move", "./relay needs-input", "./relay search"] do
       assert html =~ cmd, "cli.md should mention `#{cmd}`"
     end
   end
@@ -40,10 +40,10 @@ defmodule Relay.DocsContentTest do
     # The card exists to close this hole — the line that named it must not survive.
     refute relay_md =~ "known gap"
 
-    assert relay_md =~ "bin/relay search"
-    assert api =~ "bin/relay search"
+    assert relay_md =~ "./relay search"
+    assert api =~ "./relay search"
     assert api =~ "q=<text>"
-    assert domain =~ "bin/relay search"
+    assert domain =~ "./relay search"
     assert domain =~ "Cards.search/3"
   end
 
@@ -59,11 +59,11 @@ defmodule Relay.DocsContentTest do
     runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
     cli = read("cli.md")
 
-    assert runner =~ "bin/relay execute"
+    assert runner =~ "./relay start"
     assert runner =~ "is **deleted**", "runner.md must still record that the legacy runner is gone"
 
-    refute cli =~ "bin/relay pull"
-    refute cli =~ "bin/relay layout"
+    refute cli =~ "./relay pull"
+    refute cli =~ "./relay layout"
   end
 
   test "the runner page carries the four current operating invariants and none of the retired ones" do
@@ -97,7 +97,7 @@ defmodule Relay.DocsContentTest do
     for path <- [
           "GET /api/cards/:ref/diagnosis",
           "GET /api/cards/:ref/runs",
-          "GET /api/executors",
+          "GET /api/runners",
           "GET /api/version"
         ] do
       assert api =~ path, "api.md should document `#{path}`"
@@ -107,8 +107,8 @@ defmodule Relay.DocsContentTest do
     # is an operator staring at a word with no meaning.
     for verdict <- ~w(dispatchable blocked_by_dependencies no_enabled_flow awaiting_capacity
                       resume_refused wip_full owned_by_human blocked_on_input run_active
-                      not_eligible run_failed job_stranded job_awaiting_slot executor_outdated
-                      no_executor) do
+                      not_eligible run_failed job_stranded job_awaiting_slot runner_outdated
+                      no_runner) do
       assert api =~ verdict, "api.md should document the `#{verdict}` verdict"
     end
   end
@@ -121,7 +121,7 @@ defmodule Relay.DocsContentTest do
     api = read("api.md")
 
     for doc <- [relay_md, cli] do
-      assert doc =~ "bin/relay depends"
+      assert doc =~ "./relay depends"
       assert doc =~ "--depends-on"
     end
 
@@ -133,7 +133,7 @@ defmodule Relay.DocsContentTest do
   test "cli.md lists every CLI verb RLY-177 added" do
     cli = read("cli.md")
 
-    for verb <- ["bin/relay why", "bin/relay runs", "bin/relay executors", "bin/relay version", "--field"] do
+    for verb <- ["./relay why", "./relay runs", "./relay runners", "./relay version", "--field"] do
       assert cli =~ verb, "cli.md should mention `#{verb}`"
     end
   end
@@ -155,7 +155,7 @@ defmodule Relay.DocsContentTest do
     relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
     cli = read("cli.md")
 
-    for doc <- [relay_md, cli], verb <- ["bin/relay title", "bin/relay archive", "unarchive"] do
+    for doc <- [relay_md, cli], verb <- ["./relay title", "./relay archive", "unarchive"] do
       assert doc =~ verb, "expected `#{verb}` to be documented"
     end
 
@@ -163,7 +163,24 @@ defmodule Relay.DocsContentTest do
       assert doc =~ "cancel", "the archive row should say a live run must be cancelled first"
     end
 
-    refute relay_md =~ "bin/relay rename"
-    refute cli =~ "bin/relay rename"
+    refute relay_md =~ "./relay rename"
+    refute cli =~ "./relay rename"
+  end
+
+  test "the glossary defines Runner and notes that older mockups use the old word (RE319)" do
+    glossary = File.read!(Path.join(File.cwd!(), "docs/glossary.md"))
+
+    assert glossary =~ "- **Runner** —"
+    assert glossary =~ "older mockups still use that word"
+  end
+
+  test "the runner page documents the hard cut's refusal and the renamed roster route (RE319)" do
+    runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
+    api = read("api.md")
+
+    assert runner =~ "predates the rename"
+    assert runner =~ "`GET /api/runners`"
+    assert api =~ "### GET /api/runners"
+    assert api =~ "runner_outdated"
   end
 end

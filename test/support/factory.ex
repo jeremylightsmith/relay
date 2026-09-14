@@ -236,22 +236,22 @@ defmodule Relay.Factory do
 
   # Full-control factory: `board` (when overridden) must be persisted. `last_heartbeat`
   # defaults to now, so the row reads :fresh — backdate it to exercise :stale / :gone.
-  # `version` is the HIGHER of the two floors (RE268): the default executor is a fully current
-  # one, able to claim talk jobs as well as flow jobs. Override it to exercise an old executor.
-  def executor_factory(attrs) do
+  # `version` is the HIGHER of the two floors (RE268): the default runner is a fully current
+  # one, able to claim talk jobs as well as flow jobs. Override it to exercise an old runner.
+  def runner_factory(attrs) do
     {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
 
-    executor = %Schemas.Executor{
+    runner = %Schemas.Runner{
       board_id: board.id,
-      name: sequence(:executor_name, &"mac-#{&1}"),
+      name: sequence(:runner_name, &"mac-#{&1}"),
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
-      version: Relay.Runs.min_talk_executor_version(),
+      version: Relay.Runs.min_talk_runner_version(),
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 
-    executor |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+    runner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
   # Full-control factory: `node_execution` (when overridden) must be persisted — the job's
@@ -269,7 +269,7 @@ defmodule Relay.Factory do
       kind: :node,
       node_key: node_execution.node_key,
       state: :claimed,
-      executor_name: "mac-1",
+      runner_name: "mac-1",
       payload: %{"isolation" => "shared_clean"},
       claimed_at: DateTime.truncate(DateTime.utc_now(), :second)
     }

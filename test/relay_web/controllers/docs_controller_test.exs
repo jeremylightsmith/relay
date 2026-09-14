@@ -25,7 +25,7 @@ defmodule RelayWeb.DocsControllerTest do
           "RELAY_URL",
           "RELAY_API_KEY",
           "/relay-setup",
-          "relay execute",
+          "relay start",
           "Settings",
           "Next up"
         ] do
@@ -44,7 +44,7 @@ defmodule RelayWeb.DocsControllerTest do
       "1. Create a board",
       "2. Get a board API key",
       "3. Get the CLI and scaffold your project",
-      "4. Start the executor",
+      "4. Start the runner",
       "5. Enable a flow",
       "6. Move a card into",
       "7. When a card does not move"
@@ -71,15 +71,15 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "/relay-setup"
     refute html =~ "relay-config"
     refute html =~ "install.sh"
-    refute html =~ "bin/relay init"
+    refute html =~ "./relay init"
   end
 
   test "the CLI page documents update and has retired init", %{conn: conn} do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
-    assert html =~ "bin/relay update"
+    assert html =~ "./relay update"
     assert html =~ "--check"
-    refute html =~ "bin/relay init"
+    refute html =~ "./relay init"
     refute html =~ "relay-config"
     refute html =~ "publish_config"
   end
@@ -110,7 +110,7 @@ defmodule RelayWeb.DocsControllerTest do
       {"/docs/boards-and-stages", "Boards &amp; stages"},
       {"/docs/cards-and-handoffs", "Cards &amp; handoffs"},
       {"/docs/statuses-and-outcomes", "Statuses &amp; outcomes"},
-      {"/docs/cli", "bin/relay"},
+      {"/docs/cli", "relay"},
       {"/docs/api", "REST API reference"},
       {"/docs/authentication", "Authentication &amp; API access"},
       {"/docs/runbook-flow-cutover", "Enabling a flow safely"}
@@ -195,13 +195,13 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "except"
   end
 
-  test "the getting-started page says /relay-onboard authors relay.md and executor.json (RE304)",
+  test "the getting-started page says /relay-onboard authors relay.md and runner.json (RE304)",
        %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
     assert html =~ "authors"
     assert html =~ "relay.md"
-    assert html =~ ".relay/executor.json"
+    assert html =~ ".relay/runner.json"
   end
 
   test "an unknown slug is a 404", %{conn: conn} do
@@ -328,7 +328,7 @@ defmodule RelayWeb.DocsControllerTest do
           "Boards &amp; stages",
           "Cards &amp; handoffs",
           "Statuses &amp; outcomes",
-          "CLI (bin/relay)",
+          "CLI (./relay)",
           "REST API reference",
           "Authentication &amp; API access",
           "Enabling a flow safely"
