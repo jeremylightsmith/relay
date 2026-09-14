@@ -1503,7 +1503,22 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#card-plan-view li", "do the thing")
     end
 
-    test "a card with a branch renders the branch chip in the rail",
+    test "a card with a branch renders it on one truncated line with its full name as a tooltip",
+         %{conn: conn, card: card, user: user} do
+      branch = "re-324-fix-long-links-including-prs-and-this-is-a-very-long-branch-name"
+      {:ok, _card} = Cards.update_card(card, %{branch: branch})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-rail #card-branch-row #card-branch", branch)
+      assert has_element?(view, "#card-branch.font-mono.truncate[title='#{branch}']")
+      assert has_element?(view, "#card-branch-row #card-branch-copy[data-copy-text='#{branch}']")
+      assert has_element?(view, "#card-branch-copy[aria-label='Copy branch name']")
+    end
+
+    test "without a pr_url the branch is plain text, not a link",
          %{conn: conn, card: card, user: user} do
       {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-card-branch-plan"})
 
@@ -1511,8 +1526,46 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      assert has_element?(view, "#card-drawer-rail #card-branch", "rly-21-card-branch-plan")
-      assert has_element?(view, "#card-branch.font-mono")
+      assert has_element?(view, "span#card-branch", "rly-21-card-branch-plan")
+      refute has_element?(view, "a#card-branch")
+    end
+
+    test "with a GitHub PR url the branch links to its tree on GitHub in a new tab",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} =
+        Cards.update_card(card, %{
+          branch: "rly-21-card-branch-plan",
+          pr_url: "https://github.com/acme/relay/pull/42"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(
+               view,
+               "a#card-branch[href='https://github.com/acme/relay/tree/rly-21-card-branch-plan'][target='_blank'][rel='noopener noreferrer']",
+               "rly-21-card-branch-plan"
+             )
+
+      assert has_element?(view, "#card-branch-copy[data-copy-text='rly-21-card-branch-plan']")
+      assert has_element?(view, "#card-drawer-rail #card-pr[href='https://github.com/acme/relay/pull/42']")
+    end
+
+    test "with a non-GitHub PR url the branch stays plain text",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} =
+        Cards.update_card(card, %{
+          branch: "rly-21-card-branch-plan",
+          pr_url: "https://gitlab.com/acme/relay/-/merge_requests/4"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "span#card-branch", "rly-21-card-branch-plan")
+      refute has_element?(view, "a#card-branch")
     end
 
     test "a card with neither branch nor plan renders neither", %{conn: conn, user: user} do
@@ -1524,6 +1577,7 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-plan-view")
       assert has_element?(view, "#card-plan-display", "Add a plan")
       refute has_element?(view, "#card-branch")
+      refute has_element?(view, "#card-branch-copy")
     end
 
     test "a card with a pr_url renders the PR link in the rail",

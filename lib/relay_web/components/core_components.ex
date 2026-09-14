@@ -1727,6 +1727,36 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  # RE324 — the drawer rail's branch name: one truncated mono line with the full name in `title`;
+  # a new-tab link to the branch on GitHub when `href` could be derived from the card's PR URL,
+  # otherwise plain, selectable text.
+  attr :branch, :string, required: true
+  attr :href, :string, default: nil
+
+  defp branch_name(assigns) do
+    ~H"""
+    <.link
+      :if={@href}
+      id="card-branch"
+      href={@href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={@branch}
+      class="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80 hover:text-primary hover:underline"
+    >
+      {@branch}
+    </.link>
+    <span
+      :if={!@href}
+      id="card-branch"
+      title={@branch}
+      class="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80"
+    >
+      {@branch}
+    </span>
+    """
+  end
+
   @doc """
   The drawer's dependency rail list (RE93): one ghost chip per card — mono ref + truncated
   title, a success tick and a struck-through ref when the blocker is satisfied, and a ✕ when
@@ -3620,18 +3650,25 @@ defmodule RelayWeb.CoreComponents do
                 </span>
               </div>
 
-              <%!-- LINKS: Branch chip + PR link under one label; nothing when both absent --%>
+              <%!-- LINKS: the branch on its own full-width line, then the PR chip; nothing when both
+                   absent. RE324 — a long branch used to wrap inside the fixed-height badge and overlap;
+                   now it is one truncated line (full name in the tooltip) with a copy control, and it
+                   links to GitHub's tree only when the PR URL names the repo. --%>
               <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-1.5">
                 <.section_label>Links</.section_label>
-                <div class="rail-links flex flex-wrap items-center gap-2">
-                  <span
+                <div class="rail-links flex min-w-0 flex-col items-start gap-1.5">
+                  <div
                     :if={@card.branch}
-                    id="card-branch"
-                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                    id="card-branch-row"
+                    class="flex w-full min-w-0 items-center gap-1.5"
                   >
-                    <.icon name="hero-share" class="size-3" />
-                    {@card.branch}
-                  </span>
+                    <.icon name="hero-share" class="size-3 shrink-0 text-base-content/60" />
+                    <.branch_name
+                      branch={@card.branch}
+                      href={Relay.Markdown.github_branch_url(@card.pr_url, @card.branch)}
+                    />
+                    <.copy_button id="card-branch-copy" text={@card.branch} label="Copy branch name" />
+                  </div>
                   <.link
                     :if={@card.pr_url}
                     id="card-pr"
