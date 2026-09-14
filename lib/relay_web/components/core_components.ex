@@ -1801,16 +1801,18 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  The full-size image viewer (RLY-157).
+  The full-size image viewer (RLY-157) — since RE322 a carousel over the clicked image's group.
 
   A single native `<dialog>` rendered **once** in the root layout, shared by every image
-  on the page. `showModal()` is driven client-side by `assets/js/image_lightbox.js`, which
-  delegates a `click` listener on `document` — markdown content re-renders constantly, so
-  per-image listeners would not survive a LiveView patch.
+  on the page. `showModal()`, stepping, and the caption/counter are driven client-side by
+  `assets/js/image_lightbox.js`, which delegates a `click` listener on `document` — markdown
+  content re-renders constantly, so per-image listeners would not survive a LiveView patch.
+  The chrome inside is `image_lightbox_viewer/1`, rendered empty here for the JS to fill in.
 
-  Native `<dialog>` is deliberate: Esc-to-close, focus trapping and backdrop rendering all
-  come from the platform, and the `<form method="dialog">` backdrop is
-  click-outside-to-close with no JS. Takes no attributes.
+  Native `<dialog>` is deliberate: focus trapping and backdrop rendering come from the platform,
+  and the `<form method="dialog">` backdrop is click-outside-to-close with no JS. Esc is closed by
+  the JS (RE322), which is what keeps the key from also closing the card drawer behind the viewer.
+  Takes no attributes.
 
   ## Examples
 
@@ -1820,18 +1822,92 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <dialog id="image-lightbox" class="modal">
       <div class="modal-box max-w-[90vw] max-h-[90vh] bg-transparent p-0 shadow-none">
-        <img
-          id="image-lightbox-img"
-          src=""
-          alt=""
-          class="max-h-[90vh] max-w-full rounded object-contain"
-        />
+        <.image_lightbox_viewer id="image-lightbox" />
       </div>
       <form method="dialog" class="modal-backdrop">
         <button aria-label="Close">close</button>
       </form>
     </dialog>
     """
+  end
+
+  @doc """
+  The image viewer's chrome (RE322): the image with Previous/Next `btn btn-circle`s on its left and
+  right edges, and a caption chip plus an `N / M` position counter beneath it.
+
+  `image_lightbox/1` renders it empty — a lone image with nothing to caption — and
+  `assets/js/image_lightbox.js` fills it in and flips these same `hidden` attributes as the viewer
+  steps, so the server-rendered state and every JS state are one markup. The buttons and the
+  counter share one switch, `counter`: a single-image group shows none of them and looks exactly
+  like the pre-carousel viewer. Storybook renders it with values to show a state.
+
+  ## Examples
+
+      <.image_lightbox_viewer id="image-lightbox" />
+      <.image_lightbox_viewer id="preview" src="/images/a.png" caption="Review drawer" counter="2 / 5" />
+  """
+  attr :id, :string, required: true, doc: "prefix of the -img/-prev/-next/-caption/-counter element ids"
+  attr :src, :string, default: ""
+  attr :alt, :string, default: ""
+  attr :caption, :string, default: nil, doc: "nil hides the caption chip"
+
+  attr :counter, :string,
+    default: nil,
+    doc: ~s(the position, e.g. "2 / 5"; nil hides the counter and both buttons)
+
+  def image_lightbox_viewer(assigns) do
+    ~H"""
+    <div class="flex flex-col items-center gap-2">
+      <div class="relative flex min-w-64 justify-center">
+        <img
+          id={"#{@id}-img"}
+          src={@src}
+          alt={@alt}
+          class="max-h-[80vh] max-w-full rounded object-contain"
+        />
+        <button
+          id={"#{@id}-prev"}
+          type="button"
+          hidden={is_nil(@counter)}
+          aria-label="Previous image"
+          class={["left-2", lightbox_nav_class()]}
+        >
+          <.icon name="hero-chevron-left" class="size-5" />
+        </button>
+        <button
+          id={"#{@id}-next"}
+          type="button"
+          hidden={is_nil(@counter)}
+          aria-label="Next image"
+          class={["right-2", lightbox_nav_class()]}
+        >
+          <.icon name="hero-chevron-right" class="size-5" />
+        </button>
+      </div>
+      <div class="flex max-w-full items-center gap-2">
+        <span
+          id={"#{@id}-caption"}
+          hidden={is_nil(@caption)}
+          class="truncate rounded bg-base-100/85 px-2.5 py-1 text-sm text-base-content shadow-sm"
+        >
+          {@caption}
+        </span>
+        <span
+          id={"#{@id}-counter"}
+          hidden={is_nil(@counter)}
+          class="shrink-0 rounded bg-base-200/85 px-2 py-1 font-mono text-xs tabular-nums text-base-content/70 shadow-sm"
+        >
+          {@counter}
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  # RE322 — translucent so Previous/Next stay readable over any screenshot, on theme tokens so they
+  # flip with data-theme.
+  defp lightbox_nav_class do
+    "btn btn-circle absolute top-1/2 -translate-y-1/2 border-base-300 bg-base-100/80 text-base-content shadow-md backdrop-blur-sm hover:bg-base-100"
   end
 
   @doc """

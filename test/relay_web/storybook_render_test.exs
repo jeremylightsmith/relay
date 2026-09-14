@@ -32,4 +32,20 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "2 ok · 1 fail"
     assert html =~ "92% ok · 5% fail"
   end
+
+  test "GET /storybook/core_components/image_lightbox shows the RE322 single and multi-image viewer states",
+       %{conn: conn} do
+    html = conn |> get("/storybook/core_components/image_lightbox") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    # Multi-image: Previous/Next, a 2 / 5 counter and a caption, all visible.
+    assert doc |> LazyHTML.query("#image-lightbox-story-multi-prev:not([hidden])") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("#image-lightbox-story-multi-next:not([hidden])") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("#image-lightbox-story-multi-counter") |> LazyHTML.text() |> String.trim() == "2 / 5"
+    assert doc |> LazyHTML.query("#image-lightbox-story-multi-caption:not([hidden])") |> Enum.count() == 1
+
+    # Single image: no nav, no counter.
+    assert doc |> LazyHTML.query("#image-lightbox-story-single-prev[hidden]") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("#image-lightbox-story-single-counter[hidden]") |> Enum.count() == 1
+  end
 end

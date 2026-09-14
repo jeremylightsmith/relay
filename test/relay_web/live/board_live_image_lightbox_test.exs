@@ -35,6 +35,16 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
       assert html =~ ~s(id="image-lightbox")
       assert html =~ ~s(id="image-lightbox-img")
     end
+
+    test "the root-layout dialog carries the RE322 carousel controls", %{conn: conn, board: board} do
+      # Root layout, outside the LiveView's tracked subtree — assert on the mount HTML (see above).
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
+      doc = LazyHTML.from_document(html)
+
+      for id <- ~w(image-lightbox-prev image-lightbox-next image-lightbox-counter image-lightbox-caption) do
+        assert doc |> LazyHTML.query("dialog#image-lightbox ##{id}") |> Enum.count() == 1, "missing ##{id}"
+      end
+    end
   end
 
   describe "AI Result screens strip" do
