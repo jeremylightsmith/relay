@@ -43,6 +43,7 @@ flight at once; a card may be specced now and planned days later while others pa
 | **acceptance criteria** | `criteria` |
 | **plan** + **sub-task checklist** | `plan`, `sub-tasks` / `check` / `uncheck` |
 | **branch**, **PR url**, **result** blob | `branch`, `pr`, `result` |
+| **blockers** — the cards this one waits on | `depends` |
 
 **Stages and substages.** Cards move left→right through stages. A stage may have two substages:
 `*:Review` is a **human checkpoint** (an AI stage finishes here and stops for a human to
@@ -104,6 +105,19 @@ Full table with every flag: `$RELAY_URL/docs/cli`.
 **Create & place a card.** `create` drops it in `--stage` (default Backlog). Placement is
 positional: put it left of where the work starts; it becomes pullable when an AI column sits to
 its right. Add a `--tag` to group it.
+
+**Depend one card on another.** Dependencies exist to head off *parallel implementations of the
+same thing*, which land as bad merges. Two shapes make one:
+
+1. **Producer → consumer.** Card A creates a thing; card B uses it. `./relay depends B A`.
+2. **Co-creation.** Two cards both need a thing that doesn't exist yet. Left alone, each builds its
+   own version and the merge is a fight over which one is real. Fix: name one card the producer and
+   point the other at it — or split the thing into its own card and depend both on it.
+
+Touching the same file with no shared new thing is **not** a dependency; leave those parallel. A
+blocked card is undispatchable until every blocker reaches a top-level Done column, so link only
+what you mean. Set them at creation with `--depends-on`, or later with `depends` (which *replaces*
+the whole blocker set; no refs clears it).
 
 **Dig / find / reorganize.** `./relay search "words"` finds a card by ref or title: a ref or a
 bare number (`RLY-12`, `12`) is an exact hit ranked first, otherwise every whitespace-separated
