@@ -213,7 +213,19 @@
 .md li { margin: 0.2em 0; }
 .md li::marker { color: color-mix(in oklch, var(--color-base-content) 45%, transparent); }
 .md li > ul, .md li > ol { margin: 0.2em 0; }
-.md a { color: var(--color-primary); text-decoration: underline; }
+/* RE324 — a long URL or long link text stays on one line and ends in an ellipsis instead of
+   breaking at every `/`; the full URL is the link's `title` tooltip (Relay.Markdown.to_html/1).
+   `max-width: 100%` bounds it to its (min-w-0) column so the column never scrolls sideways. */
+.md a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 .md strong { font-weight: 700; color: var(--color-base-content); }
 .md em { font-style: italic; }
 .md code {

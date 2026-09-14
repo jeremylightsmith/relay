@@ -1910,15 +1910,18 @@ defmodule RelayWeb.CoreComponentsTest do
       # disc bullets with a muted marker
       assert @app_css =~ ".md ul { list-style: disc; }"
       assert @app_css =~ ".md li::marker"
-      # links use the primary token, underlined
-      assert @app_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      # links use the primary token, underlined (one-line/ellipsized rule is RE324's own test:
+      # test/relay_web/markdown_link_css_test.exs)
+      assert @app_css =~ ~r/\.md a \{[^}]*color:\s*var\(--color-primary\)/
+      assert @app_css =~ ~r/\.md a \{[^}]*text-decoration:\s*underline/
       # headings are a strong label, not oversized
       assert @app_css =~ ~r/\.md h1[^\n]*\{[^}]*font-weight:\s*700/
     end
 
     test "storybook.css mirrors the .md block (RLY-58 gap closed)" do
       assert @storybook_css =~ ".md ul { list-style: disc; }"
-      assert @storybook_css =~ ".md a { color: var(--color-primary); text-decoration: underline; }"
+      assert @storybook_css =~ ~r/\.md a \{[^}]*color:\s*var\(--color-primary\)/
+      assert @storybook_css =~ ~r/\.md a \{[^}]*text-decoration:\s*underline/
       assert @storybook_css =~ ".md li::marker"
     end
   end
