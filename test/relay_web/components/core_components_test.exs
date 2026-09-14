@@ -1999,6 +1999,163 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  # RE279 — the persistent needs-you strip. Every class/token below is pinned to
+  # docs/designs/Relay Card Detail v5.dc.html, "persistent needs-you strip" (lines ~88–102),
+  # with the artboard's oklch literals mapped to daisyUI warning tokens.
+  describe "blocked_strip/1 (RE279)" do
+    defp blocked_strip_html(extra \\ %{}) do
+      base = %{eyebrow: "SPEC ASKED AND EXITED", question: "Which scope should board search cover?"}
+      html = render_component(&CoreComponents.blocked_strip/1, Map.merge(base, extra))
+      {html, LazyHTML.from_fragment(html)}
+    end
+
+    defp strip_classes(doc, selector) do
+      doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> Enum.flat_map(&String.split/1)
+    end
+
+    defp strip_style(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style") |> Enum.join()
+
+    defp strip_text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+
+    defp assert_classes(doc, selector, expected) do
+      actual = strip_classes(doc, selector)
+      for class <- expected, do: assert(class in actual, "#{selector} is missing class #{class}")
+    end
+
+    test "matches the artboard's row, accent bar, text column, wait column and Answer button" do
+      {_html, doc} = blocked_strip_html(%{blocked_since: DateTime.add(DateTime.utc_now(), -47 * 60, :second)})
+
+      assert_classes(doc, "#card-drawer-blocked-strip", ~w(flex flex-none items-center gap-[14px] px-5 py-3))
+      root_style = strip_style(doc, "#card-drawer-blocked-strip")
+      assert root_style =~ "background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100))"
+      assert root_style =~ "border-top:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100))"
+      assert root_style =~ "border-bottom:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100))"
+
+      assert_classes(doc, "#card-drawer-blocked-strip-accent", ~w(w-[3px] flex-none self-stretch rounded-[2px]))
+      assert strip_style(doc, "#card-drawer-blocked-strip-accent") =~ "background:var(--color-warning)"
+
+      assert_classes(doc, "#card-drawer-blocked-strip-text", ~w(flex min-w-0 flex-1 flex-col gap-0.5))
+
+      assert_classes(
+        doc,
+        "#card-drawer-blocked-strip-eyebrow",
+        ~w(font-mono text-[10px] font-semibold uppercase tracking-[0.6px])
+      )
+
+      assert strip_style(doc, "#card-drawer-blocked-strip-eyebrow") =~
+               "color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+
+      assert_classes(doc, "#card-drawer-blocked-strip-question", ~w(truncate text-[13.5px] font-semibold leading-[1.4]))
+
+      assert strip_style(doc, "#card-drawer-blocked-strip-question") =~
+               "color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content))"
+
+      assert_classes(doc, "#card-drawer-blocked-strip-meta", ~w(flex flex-none flex-col items-end))
+
+      assert_classes(
+        doc,
+        "#card-drawer-blocked-strip-wait",
+        ~w(font-mono text-[21px] font-semibold leading-none tracking-[-0.02em] tabular-nums)
+      )
+
+      assert_classes(
+        doc,
+        "#card-drawer-blocked-strip-wait-label",
+        ~w(font-mono text-[9.5px] font-semibold tracking-[0.5px] mt-0.5)
+      )
+
+      assert_classes(
+        doc,
+        "#card-drawer-blocked-answer",
+        ~w(h-[30px] flex-none whitespace-nowrap rounded-[7px] border-none px-[13px] text-[12px] font-semibold text-warning-content)
+      )
+
+      assert strip_style(doc, "#card-drawer-blocked-answer") =~ "background:var(--color-warning)"
+    end
+
+    test "renders the eyebrow, the one-line question with its full text as title, and Answer" do
+      {_html, doc} = blocked_strip_html()
+
+      assert strip_text(doc, "#card-drawer-blocked-strip-eyebrow") == "SPEC ASKED AND EXITED"
+      assert strip_text(doc, "#card-drawer-blocked-strip-question") == "Which scope should board search cover?"
+
+      assert doc |> LazyHTML.query("#card-drawer-blocked-strip-question") |> LazyHTML.attribute("title") ==
+               ["Which scope should board search cover?"]
+
+      assert strip_text(doc, "#card-drawer-blocked-answer") == "Answer"
+      assert doc |> LazyHTML.query("#card-drawer-blocked-answer") |> LazyHTML.attribute("phx-click") == ["answer_jump"]
+      assert [hook] = doc |> LazyHTML.query("#card-drawer-blocked-strip") |> LazyHTML.attribute("phx-hook")
+      assert hook =~ "BlockedStrip"
+    end
+
+    test "shows the compact wait since blocked_since above 'waiting on you', clamped at zero" do
+      now = DateTime.utc_now()
+
+      for {seconds_ago, expected} <- [{47 * 60, "47m"}, {3 * 3600 + 120, "3h"}, {2 * 86_400 + 60, "2d"}, {-120, "0m"}] do
+        {_html, doc} = blocked_strip_html(%{blocked_since: DateTime.add(now, -seconds_ago, :second)})
+        assert strip_text(doc, "#card-drawer-blocked-strip-wait") == expected
+        assert strip_text(doc, "#card-drawer-blocked-strip-wait-label") == "waiting on you"
+      end
+    end
+
+    test "omits the wait value and its sub-label when blocked_since is nil" do
+      {html, _doc} = blocked_strip_html(%{blocked_since: nil})
+
+      refute html =~ ~s(id="card-drawer-blocked-strip-wait")
+      refute html =~ ~s(id="card-drawer-blocked-strip-wait-label")
+      refute html =~ "waiting on you"
+      refute html =~ ~s(id="card-drawer-blocked-strip-meta")
+    end
+
+    test "shows the N/M counter only for a batch of more than one question" do
+      {_html, doc} = blocked_strip_html(%{step: 2, step_count: 3})
+      assert strip_text(doc, "#card-drawer-blocked-strip-counter") == "2/3"
+      assert_classes(doc, "#card-drawer-blocked-strip-counter", ~w(font-mono tabular-nums))
+
+      {single, _doc} = blocked_strip_html(%{step: 1, step_count: 1})
+      refute single =~ ~s(id="card-drawer-blocked-strip-counter")
+    end
+
+    test "the counter still renders when there is no blocked_since" do
+      {_html, doc} = blocked_strip_html(%{step: 1, step_count: 3, blocked_since: nil})
+      assert strip_text(doc, "#card-drawer-blocked-strip-counter") == "1/3"
+    end
+
+    test "shows a one-line skeleton in place of the question while loading" do
+      {html, doc} = blocked_strip_html(%{loading?: true})
+
+      assert "skeleton" in strip_classes(doc, "#card-drawer-blocked-strip-question-skeleton")
+      refute html =~ ~s(id="card-drawer-blocked-strip-question")
+    end
+
+    test "a nil question renders no question line" do
+      {html, _doc} = blocked_strip_html(%{question: nil})
+      refute html =~ ~s(id="card-drawer-blocked-strip-question")
+    end
+  end
+
+  describe "blocked_strip_eyebrow/3 (RE279)" do
+    test "a parked question names the node that asked and exited" do
+      assert CoreComponents.blocked_strip_eyebrow(true, :question, "spec") == "SPEC ASKED AND EXITED"
+    end
+
+    test "a parked escalation names the node that failed" do
+      assert CoreComponents.blocked_strip_eyebrow(true, :escalation, "spec") == "SPEC FAILED — YOUR CALL"
+    end
+
+    test "no parked run, or no node key, reads NEEDS YOUR ANSWER" do
+      assert CoreComponents.blocked_strip_eyebrow(false, :question, nil) == "NEEDS YOUR ANSWER"
+      assert CoreComponents.blocked_strip_eyebrow(false, :question, "spec") == "NEEDS YOUR ANSWER"
+      assert CoreComponents.blocked_strip_eyebrow(true, :question, nil) == "NEEDS YOUR ANSWER"
+      assert CoreComponents.blocked_strip_eyebrow(true, :escalation, nil) == "NEEDS YOUR ANSWER"
+    end
+
+    test "the node key is upcased as-is, with no other rewriting" do
+      assert CoreComponents.blocked_strip_eyebrow(true, :question, "quality_review") ==
+               "QUALITY_REVIEW ASKED AND EXITED"
+    end
+  end
+
   describe "needs_input_panel/1" do
     defp panel(extra) do
       base = %{

@@ -3713,6 +3713,159 @@ defmodule RelayWeb.CoreComponents do
   defp unused_fields_label([_one], false), do: "1 unused field"
   defp unused_fields_label(fields, false), do: "#{length(fields)} unused fields"
 
+  attr :eyebrow, :string, required: true, doc: "RE279: what asked and exited — build it with `blocked_strip_eyebrow/3`"
+
+  attr :question, :string,
+    default: nil,
+    doc: "RE279: the question as ONE line of plain text (`Relay.Markdown.to_plain/1`); nil renders no line"
+
+  attr :loading?, :boolean,
+    default: false,
+    doc: "RE279: RLY-68 optimistic drawer — a one-line skeleton stands in for the question"
+
+  attr :blocked_since, :any,
+    default: nil,
+    doc: "RE279: `Card.blocked_since` (a DateTime); nil omits the wait value and its sub-label"
+
+  attr :step, :integer, default: 1, doc: "RE279: 1-based index of the question the stepper is on"
+
+  attr :step_count, :integer,
+    default: 1,
+    doc: "RE279: questions in the batch — the `N/M` counter renders only when this is > 1"
+
+  @doc """
+  RE279 — the blocked state hoisted out of the tabs: ONE amber strip under the card drawer's
+  header, above the tab bar, visible on every tab. An eyebrow naming what asked and exited, the
+  question on one ellipsis-truncated line, the wait time at 21px mono, and an **Answer** button.
+
+  Presentation only — no card or run reasoning lives here; `card_drawer/1` derives every attr
+  (`blocked_strip_eyebrow/3`, `Relay.Markdown.to_plain/1`). Matches the "persistent needs-you strip"
+  in `docs/designs/Relay Card Detail v5.dc.html` (lines ~88–102), with its literals mapped to the
+  daisyUI warning tokens so dark mode flips.
+
+  **Answer** pushes `answer_jump`. The LiveView selects the Detail tab and pushes `focus-answer`,
+  which the colocated `.BlockedStrip` hook turns into focus on the first answer control inside
+  `#needs-input-panel` — after the patch, so the panel is no longer hidden. A pure client
+  `JS.focus` chain cannot do this: the Detail panel is still hidden until the server re-renders.
+  """
+  def blocked_strip(assigns) do
+    ~H"""
+    <section
+      id="card-drawer-blocked-strip"
+      phx-hook=".BlockedStrip"
+      aria-label="Waiting on you"
+      class="flex flex-none items-center gap-[14px] px-5 py-3"
+      style="background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100));border-top:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));border-bottom:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));"
+    >
+      <span
+        id="card-drawer-blocked-strip-accent"
+        class="w-[3px] flex-none self-stretch rounded-[2px]"
+        style="background:var(--color-warning);"
+      >
+      </span>
+      <div id="card-drawer-blocked-strip-text" class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          id="card-drawer-blocked-strip-eyebrow"
+          class="font-mono text-[10px] font-semibold uppercase tracking-[0.6px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+        >
+          {@eyebrow}
+        </span>
+        <div
+          :if={@loading?}
+          id="card-drawer-blocked-strip-question-skeleton"
+          class="skeleton h-[19px] w-3/4 rounded"
+        >
+        </div>
+        <span
+          :if={!@loading? and @question != nil}
+          id="card-drawer-blocked-strip-question"
+          title={@question}
+          class="truncate text-[13.5px] font-semibold leading-[1.4]"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          {@question}
+        </span>
+      </div>
+      <div
+        :if={@blocked_since != nil or @step_count > 1}
+        id="card-drawer-blocked-strip-meta"
+        class="flex flex-none flex-col items-end"
+      >
+        <div class="flex items-baseline gap-2">
+          <span
+            :if={@step_count > 1}
+            id="card-drawer-blocked-strip-counter"
+            class="font-mono text-[11px] font-semibold tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {@step}/{@step_count}
+          </span>
+          <span
+            :if={@blocked_since != nil}
+            id="card-drawer-blocked-strip-wait"
+            class="font-mono text-[21px] font-semibold leading-none tracking-[-0.02em] tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {wait_duration(@blocked_since)}
+          </span>
+        </div>
+        <span
+          :if={@blocked_since != nil}
+          id="card-drawer-blocked-strip-wait-label"
+          class="mt-0.5 font-mono text-[9.5px] font-semibold tracking-[0.5px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));opacity:0.8;"
+        >
+          waiting on you
+        </span>
+      </div>
+      <button
+        type="button"
+        id="card-drawer-blocked-answer"
+        phx-click="answer_jump"
+        class="h-[30px] flex-none whitespace-nowrap rounded-[7px] border-none px-[13px] text-[12px] font-semibold text-warning-content"
+        style="background:var(--color-warning);"
+      >
+        Answer
+      </button>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".BlockedStrip">
+        export default {
+          mounted() {
+            this.handleEvent("focus-answer", () => {
+              requestAnimationFrame(() => {
+                const panel = document.getElementById("needs-input-panel")
+                const target = panel && panel.querySelector("button:not([disabled]), textarea")
+                if (!target) return
+                target.focus({preventScroll: true})
+                target.scrollIntoView({block: "nearest"})
+              })
+            })
+          }
+        }
+      </script>
+    </section>
+    """
+  end
+
+  @doc """
+  RE279 — the blocked strip's eyebrow, and the ONE place its wording is decided.
+
+  `parked?` is whether the card has a parked run. `park_kind` is the drawer's already-classified
+  kind (`Relay.Runs.park_kind/1`, with its nil → `:question` policy applied once in `card_drawer/1`)
+  — never classify again here. `node` is the run's current node key, upcased as-is. With no parked
+  run, or no node key (e.g. a human set the block by hand), the eyebrow is `NEEDS YOUR ANSWER`.
+
+  Public only so its three rows are unit-testable without a database.
+  """
+  @spec blocked_strip_eyebrow(boolean(), :question | :escalation, String.t() | nil) :: String.t()
+  def blocked_strip_eyebrow(true, :question, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} ASKED AND EXITED"
+
+  def blocked_strip_eyebrow(true, :escalation, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} FAILED — YOUR CALL"
+
+  def blocked_strip_eyebrow(_parked?, _park_kind, _node), do: "NEEDS YOUR ANSWER"
+
   attr :card, :any, required: true
   attr :question, :string, default: nil
   attr :answer_questions, :list, default: nil
@@ -4183,13 +4336,17 @@ defmodule RelayWeb.CoreComponents do
 
   # The panel's aging hint ("waiting 3h"), derived from Card.blocked_since —
   # the mockup's small amber mono text beside the panel label.
-  defp waiting_label(%DateTime{} = blocked_since) do
+  defp waiting_label(%DateTime{} = blocked_since), do: "waiting #{wait_duration(blocked_since)}"
+
+  # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
+  # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
+  defp wait_duration(%DateTime{} = blocked_since) do
     minutes = max(DateTime.diff(DateTime.utc_now(), blocked_since, :minute), 0)
 
     cond do
-      minutes < 60 -> "waiting #{minutes}m"
-      minutes < 1440 -> "waiting #{div(minutes, 60)}h"
-      true -> "waiting #{div(minutes, 1440)}d"
+      minutes < 60 -> "#{minutes}m"
+      minutes < 1440 -> "#{div(minutes, 60)}h"
+      true -> "#{div(minutes, 1440)}d"
     end
   end
 

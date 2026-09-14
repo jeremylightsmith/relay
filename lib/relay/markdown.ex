@@ -36,6 +36,40 @@ defmodule Relay.Markdown do
     {:safe, html}
   end
 
+  # Inline containers join their children with no separator ("**bold**text" stays "boldtext");
+  # every other container is a block, padded with spaces so adjacent blocks never fuse.
+  @plain_inline_containers [MDEx.Emph, MDEx.Strong, MDEx.Link, MDEx.Image, MDEx.Strikethrough]
+
+  @doc """
+  Flatten markdown to ONE line of plain text: no tags, no `**`/backticks, and every run of
+  whitespace (newlines included) collapsed to a single space. Raw HTML tags are dropped. For
+  single-line surfaces that truncate with CSS — the card drawer's blocked strip (RE279). `nil`
+  flattens to `""`.
+  """
+  @spec to_plain(String.t() | nil) :: String.t()
+  def to_plain(nil), do: ""
+
+  def to_plain(markdown) when is_binary(markdown) do
+    markdown
+    |> MDEx.parse_document!(extension: [table: true, strikethrough: true])
+    |> plain_text([])
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+    |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  defp plain_text(%type{}, acc) when type in [MDEx.HtmlInline, MDEx.HtmlBlock], do: acc
+  defp plain_text(%type{}, acc) when type in [MDEx.SoftBreak, MDEx.LineBreak], do: [" " | acc]
+  defp plain_text(%MDEx.CodeBlock{literal: literal}, acc), do: [" ", literal, " " | acc]
+
+  defp plain_text(%type{nodes: nodes}, acc) when type in @plain_inline_containers,
+    do: Enum.reduce(nodes, acc, &plain_text/2)
+
+  defp plain_text(%{literal: literal}, acc) when is_binary(literal), do: [literal | acc]
+  defp plain_text(%{nodes: nodes}, acc), do: [" " | Enum.reduce(nodes, [" " | acc], &plain_text/2)]
+  defp plain_text(_node, acc), do: acc
+
   @docs_extension [table: true, header_id_prefix: "", alerts: true]
 
   @doc """

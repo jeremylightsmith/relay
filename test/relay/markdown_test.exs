@@ -221,4 +221,40 @@ defmodule Relay.MarkdownTest do
                Markdown.to_docs_html(markdown, [])
     end
   end
+
+  describe "to_plain/1 (RE279)" do
+    test "strips emphasis and inline code markers" do
+      assert Markdown.to_plain("**Which scope** should `board` search cover?") ==
+               "Which scope should board search cover?"
+    end
+
+    test "joins inline runs without inventing spaces" do
+      assert Markdown.to_plain("**bold**text") == "boldtext"
+    end
+
+    test "keeps a link's text and drops its url" do
+      assert Markdown.to_plain("See [the docs](https://example.com) now") == "See the docs now"
+    end
+
+    test "flattens a list and multiple paragraphs onto one line" do
+      assert Markdown.to_plain("- one\n- two") == "one two"
+      assert Markdown.to_plain("line one\nline two\n\npara two") == "line one line two para two"
+      assert Markdown.to_plain("# Heading\nbody") == "Heading body"
+    end
+
+    test "keeps fenced code text without its fence" do
+      assert Markdown.to_plain("intro\n```\ncode block\n```\nafter") == "intro code block after"
+    end
+
+    test "drops raw html tags and decodes entities" do
+      assert Markdown.to_plain("a <b>bold</b> end") == "a bold end"
+      assert Markdown.to_plain("Use `mix precommit` &amp; go") == "Use mix precommit & go"
+    end
+
+    test "nil and blank flatten to an empty string" do
+      assert Markdown.to_plain(nil) == ""
+      assert Markdown.to_plain("") == ""
+      assert Markdown.to_plain("   \n  ") == ""
+    end
+  end
 end
