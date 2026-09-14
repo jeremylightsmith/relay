@@ -5166,6 +5166,16 @@ class ClaimOutdatedTest(unittest.TestCase):
         relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
         self.assertTrue(seen["soft_conflict"])
 
+    def test_the_contract_refusal_becomes_an_outdated_marker(self):
+        # RE319: the 409 body is pinned in the fixture (claim_refused.outdated), so a renamed code
+        # on either side breaks here instead of in production.
+        body = copy.deepcopy(CONTRACT["claim_refused"]["outdated"])
+        body["error"]["required"] = 7
+        relay.api = lambda *a, **k: body
+        result = relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertTrue(result["runner_outdated"])
+        self.assertEqual(result["required"], 7)
+
 
 class FakeHeartbeat:
     """Stand-in for RunnerHeartbeat that records the capacity of every beat, so a test can
@@ -5707,6 +5717,73 @@ class UpdateTest(unittest.TestCase):
             self.write_local(rel, content)
         self.write_local(".relay/scaffold.json",
                          json.dumps({"version": self.manifest()["version"]}))
+
+    # ---- RE319: the CLI moved from bin/relay to ./relay ----
+
+    MARKED_BIN_RELAY = "#!/usr/bin/env python3\nEXECUTOR_VERSION = 62\nprint('old relay')\n"
+
+    def test_update_removes_a_relay_owned_bin_relay_and_its_emptied_bin_dir(self):
+        self.write_local("bin/relay", self.MARKED_BIN_RELAY)
+
+        out = capture(relay.cmd_update, self.args())
+
+        self.assertFalse(os.path.exists(self.path("bin/relay")))
+        self.assertFalse(os.path.exists(self.path("bin")))
+        self.assertTrue(os.path.exists(self.path(relay.RUNNER_REL)))
+        self.assertIn("removed bin/relay (moved to ./relay)", out)
+
+    def test_the_json_report_names_the_removal(self):
+        self.write_local("bin/relay", self.MARKED_BIN_RELAY)
+        args = self.args()
+        args.json = True
+
+        report = json.loads(capture(relay.cmd_update, args))
+
+        self.assertEqual(report["obsolete"], ["bin/relay"])
+        self.assertEqual(report["removed"], ["bin/relay"])
+
+    def test_a_bin_dir_holding_anything_else_is_kept(self):
+        self.write_local("bin/relay", self.MARKED_BIN_RELAY)
+        self.write_local("bin/other-tool", "#!/bin/sh\n")
+
+        capture_ret(relay.cmd_update, self.args())
+
+        self.assertFalse(os.path.exists(self.path("bin/relay")))
+        self.assertTrue(os.path.exists(self.path("bin/other-tool")))
+
+    def test_a_bin_relay_without_the_marker_is_left_alone(self):
+        self.write_local("bin/relay", "#!/bin/sh\necho someone else's relay\n")
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertTrue(os.path.exists(self.path("bin/relay")))
+        self.assertEqual(report["obsolete"], [])
+        self.assertEqual(report["removed"], [])
+
+    def test_check_reports_the_pending_removal_and_writes_nothing(self):
+        self.make_current()
+        self.write_local("bin/relay", self.MARKED_BIN_RELAY)
+
+        out = capture(relay.cmd_update, self.args(check=True))
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertTrue(os.path.exists(self.path("bin/relay")))
+        self.assertIn("would remove bin/relay (moved to ./relay)", out)
+        self.assertFalse(report["current"])
+        self.assertEqual(report["obsolete"], ["bin/relay"])
+        self.assertEqual(report["removed"], [])
+
+    def test_a_current_project_is_current_again_once_the_leftover_is_gone(self):
+        self.make_current()
+        self.write_local("bin/relay", self.MARKED_BIN_RELAY)
+
+        first = capture_ret(relay.cmd_update, self.args())
+        second = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(first["written"], [])
+        self.assertEqual(first["removed"], ["bin/relay"])
+        self.assertTrue(second["current"])
+        self.assertEqual(second["removed"], [])
 
     # ---- apply ----
 

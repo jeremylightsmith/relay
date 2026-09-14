@@ -34,6 +34,13 @@ defmodule RelayWeb.Api.NodeJobController do
   and NEITHER is written to the runner row. The heartbeat owns the durable roster state.
   """
   def claim(conn, params) do
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> claim_current(conn, params)
+    end
+  end
+
+  defp claim_current(conn, params) do
     board = conn.assigns.current_board
 
     with {:ok, exec_attrs} <- runner_attrs(params),
@@ -117,6 +124,13 @@ defmodule RelayWeb.Api.NodeJobController do
   board's runner can never be told to kill another's work.
   """
   def heartbeat(conn, params) do
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> heartbeat_current(conn, params)
+    end
+  end
+
+  defp heartbeat_current(conn, params) do
     board = conn.assigns.current_board
 
     with {:ok, exec_attrs} <- runner_attrs(params),
@@ -184,26 +198,46 @@ defmodule RelayWeb.Api.NodeJobController do
     |> Map.put("held", Map.get(params, "held"))
   end
 
+  # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
+  # (`claim_refused.outdated`), because ./relay branches on it to tell a verdict from a job.
+  @outdated_code "runner_outdated"
+
+  # RE319 — the ONE deliberate mention of the retired wire name. The rename was a hard cut, so a
+  # body carrying no `runner` object but an `executor` object comes from a process started before
+  # it. It is never served: it gets the outdated refusal with a message that names the fix, so
+  # the reason shows up in that process's own log instead of as a bare 422. A body that carries
+  # `runner` is current whatever else it carries.
+  defp pre_rename(%{"runner" => _runner}), do: :current
+  defp pre_rename(%{"executor" => legacy}) when is_map(legacy), do: {:pre_rename, legacy["version"]}
+  defp pre_rename(_params), do: :current
+
+  defp refuse_pre_rename(conn, version) do
+    refuse(
+      conn,
+      version,
+      "this runner predates the executor→runner rename — install ./relay (relay update) and restart it with ./relay start"
+    )
+  end
+
   # RLY-184. Rendered here rather than through FallbackController because the two version
   # numbers are per-request data, not a static string — the runner logs both of them, and a
   # message that cannot name the required version cannot tell anyone what to do about it.
-  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
   defp refuse_outdated(conn, runner) do
     required = Runs.min_runner_version()
-    running = runner.version || "none"
 
+    refuse(
+      conn,
+      runner.version,
+      "runner version #{runner.version || "none"} is below the required minimum #{required} — " <>
+        "restart it to pick up current code"
+    )
+  end
+
+  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
+  defp refuse(conn, running, message) do
     conn
     |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "runner_outdated",
-        required: required,
-        running: runner.version,
-        message:
-          "runner version #{running} is below the required minimum #{required} — " <>
-            "restart it to pick up current code"
-      }
-    })
+    |> json(%{error: %{code: @outdated_code, required: Runs.min_runner_version(), running: running, message: message}})
   end
 
   # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/2

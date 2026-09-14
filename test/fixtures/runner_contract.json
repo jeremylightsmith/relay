@@ -58,6 +58,16 @@
       }
     }
   },
+  "claim_refused": {
+    "outdated": {
+      "error": {
+        "code": "runner_outdated",
+        "message": "<message>",
+        "required": "<required-version>",
+        "running": "<running-version>"
+      }
+    }
+  },
   "claim_request": {
     "capacity": {
       "shared_clean": 1

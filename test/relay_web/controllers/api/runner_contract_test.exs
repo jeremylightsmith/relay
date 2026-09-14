@@ -114,6 +114,22 @@ defmodule RelayWeb.Api.RunnerContractTest do
       |> post(~p"/api/talk/turns/#{talk_turn.id}/outcome", Jason.encode!(talk_outcome_request))
       |> json_response(200)
 
+    # RE319 — the outdated refusal is wire too: ./relay branches on its `code` to tell a verdict
+    # from a job, and a pre-rename process is answered with the same code. Captured off the real
+    # claim route from a runner one below the floor, under its own name so the rows above are
+    # untouched.
+    outdated_body =
+      put_in(claim_body(%{"shared_clean" => 1}), ["runner"], %{
+        runner_ident()
+        | "name" => "fixture-outdated",
+          "version" => Runs.min_runner_version() - 1
+      })
+
+    outdated_refusal =
+      shared.conn
+      |> post(~p"/api/node-jobs/claim?wait=0", Jason.encode!(outdated_body))
+      |> json_response(409)
+
     # RE304: /api/scaffold is app↔runner wire now (`./relay update` reads it), so it is
     # pinned here like every other transport — a renamed key breaks CI instead of breaking a
     # project's bootstrap. Captured off the real route, unauthenticated like the runner's own
@@ -154,6 +170,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "exclusive_shell" => normalize(exclusive_shell),
         "resumed_agent" => normalize(resumed_agent)
       },
+      "claim_refused" => %{"outdated" => normalize_refusal(outdated_refusal)},
       "outcome" => %{
         "request" => normalize(outcome_request),
         "response" => normalize(outcome_response)
@@ -277,6 +294,15 @@ defmodule RelayWeb.Api.RunnerContractTest do
   # The manifest's VALUES move whenever any served file changes; the contract is the key set
   # and the item paths. Placeholdered here rather than through @placeholders because `version`
   # is also a key on the runner dict, where the real integer IS the contract.
+  # The refusal's numbers move whenever the floor does, and its message is prose; the contract is
+  # the code and the key set.
+  defp normalize_refusal(%{"error" => error}) do
+    %{
+      "error" =>
+        Map.merge(error, %{"required" => "<required-version>", "running" => "<running-version>", "message" => "<message>"})
+    }
+  end
+
   defp scaffold_placeholders(manifest) do
     %{
       "version" => "<scaffold-version>",

@@ -76,7 +76,7 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 63
-RUNNER_FINGERPRINT = "e26c88b15e243455f55197f6de9ff3c2fa94b6f4ac87d57e5f4bc78b148320e9"
+RUNNER_FINGERPRINT = "4259aedee131fb737a2c5f5eef68bd7e62887664bee9b0fb8bfa0eb5b0685801"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -4157,6 +4157,38 @@ def in_relay_app_repo():
     return os.path.isfile(os.path.join(ROOT, "lib", "relay", "scaffold.ex"))
 
 
+# RE319 — the CLI moved from bin/relay to ./relay. `relay update` deletes the file an older
+# layout left behind, but only when it is provably Relay's: every Relay-installed bin/relay
+# declares this line, and a bin/relay without it is someone else's and is never touched. This
+# marker is the one place the CLI still spells its old identity.
+LEGACY_CLI_REL = "bin/relay"
+LEGACY_CLI_MARKER = re.compile(r"(?m)^EXECUTOR_VERSION\s*=")
+
+
+def obsolete_scaffold():
+    """Relay-owned files an older layout installed that this one no longer serves — today only a
+    marked bin/relay. Project-relative paths, like `changed`."""
+    try:
+        with open(_safe_path(LEGACY_CLI_REL), encoding="utf-8") as f:
+            source = f.read()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [LEGACY_CLI_REL] if LEGACY_CLI_MARKER.search(source) else []
+
+
+def remove_obsolete(paths):
+    """Delete each obsolete file, then its directory when that leaves it empty. Returns the paths
+    removed."""
+    removed = []
+    for rel in paths:
+        path = _safe_path(rel)
+        os.remove(path)
+        with contextlib.suppress(OSError):      # not empty (or already gone): leave it
+            os.rmdir(os.path.dirname(path))
+        removed.append(rel)
+    return removed
+
+
 def scaffold_status():
     """The ONE comparison behind both `--check` and apply.
 
@@ -4234,8 +4266,12 @@ def format_scaffold(report):
         return "\n".join(lines)
     verb = "updated" if report["applied"] else "would change"
     paths = report["written"] if report["applied"] else report["changed"]
-    lines.append(f"  {verb} ({len(paths)}):")
-    lines += [f"    {p}" for p in paths]
+    if paths:
+        lines.append(f"  {verb} ({len(paths)}):")
+        lines += [f"    {p}" for p in paths]
+    removals = report["removed"] if report["applied"] else report["obsolete"]
+    removal_verb = "removed" if report["applied"] else "would remove"
+    lines += [f"  {removal_verb} {p} (moved to ./{RUNNER_REL})" for p in removals]
     if not report["applied"]:
         lines.append("  nothing written (--check). Run `./relay update` to apply.")
     return "\n".join(lines)
@@ -4257,9 +4293,13 @@ def cmd_update(args):
     revert the very work in progress, skills first and `./relay` last. RE185's auto-update
     already guards this same file with `_safe_to_overwrite`; this path shares its installer, so
     it must not be the one that answers differently. `--check` is always allowed: it writes
-    nothing, and "what would change?" is a fair question to ask anywhere."""
+    nothing, and "what would change?" is a fair question to ask anywhere.
+
+    It also removes a leftover Relay-owned bin/relay (RE319) after installing; `--check` reports
+    it as `obsolete` and removes nothing."""
     status = scaffold_status()
-    written = []
+    obsolete = obsolete_scaffold()
+    written, removed = [], []
     if not args.check:
         if status["changed"] and in_relay_app_repo() and not args.force:
             die("refusing to install into the Relay app repo: these six files are the SOURCE "
@@ -4271,13 +4311,16 @@ def cmd_update(args):
             written = install_scaffold(status)
         elif status["local_version"] != status["served_version"]:
             write_scaffold_state(status["served_version"])
+        removed = remove_obsolete(obsolete)
     report = {"served_version": status["served_version"],
               "local_version": status["local_version"],
-              "current": status["current"],
+              "current": status["current"] and not obsolete,
               "missing": status["missing"],
               "changed": status["changed"],
+              "obsolete": obsolete,
               "applied": not args.check,
-              "written": written}
+              "written": written,
+              "removed": removed}
     emit(args, report, lambda: print(format_scaffold(report)))
     return report
 
