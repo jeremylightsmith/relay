@@ -215,6 +215,8 @@ defmodule RelayWeb.Router do
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
     post "/cards/:ref/move", CardController, :move
+    post "/cards/:ref/archive", CardController, :archive
+    post "/cards/:ref/unarchive", CardController, :unarchive
     post "/cards/:ref/comments", CardController, :comments
     post "/cards/:ref/attachments", CardController, :attachments
     post "/cards/:ref/needs-input", CardController, :needs_input

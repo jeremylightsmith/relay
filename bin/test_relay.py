@@ -666,6 +666,132 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(self._args(["search", "words"]).limit, 20)
 
 
+class TitleArchiveCommandsTest(unittest.TestCase):
+    """RE318 — relay title / archive / unarchive: the right method, path and body, and the
+    ` (archived)` suffix from the ONE `archived_line` helper that `search` also uses."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        self.card = {"ref": "RE12", "title": "Old title", "status": "ready",
+                     "active_owner": None, "archived": False}
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or {"data": self.card}
+        )
+
+    def _run(self, argv):
+        args = relay.build_parser().parse_args(argv)
+        return capture(args.func, args)
+
+    def test_title_patches_the_title(self):
+        self._run(["title", "RE12", "New title"])
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE12", {"title": "New title"})])
+
+    def test_title_reads_an_at_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("From a file")
+        self.addCleanup(os.unlink, f.name)
+        self._run(["title", "RE12", "@" + f.name])
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE12", {"title": "From a file"})])
+
+    def test_title_prints_the_card_line(self):
+        self.card = dict(self.card, title="New title")
+        self.assertEqual(self._run(["title", "RE12", "New title"]).strip(),
+                         "RE12 [ready/-] New title")
+
+    def test_there_is_no_rename_alias(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            relay.build_parser().parse_args(["rename", "RE12", "x"])
+
+    def test_archive_posts_an_empty_body_to_the_archive_route(self):
+        self._run(["archive", "RE12"])
+        self.assertEqual(self.sent, [("POST", "/api/cards/RE12/archive", {})])
+
+    def test_unarchive_posts_an_empty_body_to_the_unarchive_route(self):
+        self._run(["unarchive", "RE12"])
+        self.assertEqual(self.sent, [("POST", "/api/cards/RE12/unarchive", {})])
+
+    def test_archive_human_output_ends_in_archived(self):
+        self.card = dict(self.card, archived=True)
+        self.assertEqual(self._run(["archive", "RE12"]).strip(),
+                         "RE12 [ready/-] Old title (archived)")
+
+    def test_unarchive_human_output_is_the_plain_line(self):
+        self.assertEqual(self._run(["unarchive", "RE12"]).strip(), "RE12 [ready/-] Old title")
+
+    def test_archive_json_and_field_are_available(self):
+        self.card = dict(self.card, archived=True)
+        self.assertTrue(json.loads(self._run(["archive", "RE12", "--json"]))["archived"])
+        self.card = dict(self.card, archived=False)
+        self.assertEqual(self._run(["unarchive", "RE12", "--field", "archived"]).strip(), "false")
+
+    def test_archived_line_is_the_one_suffix(self):
+        self.assertEqual(relay.archived_line(dict(self.card, archived=True)),
+                         relay.card_line(self.card) + " (archived)")
+        self.assertEqual(relay.archived_line(self.card), relay.card_line(self.card))
+
+    def test_search_marks_archived_rows_through_archived_line(self):
+        rows = [dict(self.card, archived=True)]
+        self.assertEqual(relay.format_search("old", rows, 20), relay.archived_line(rows[0]))
+
+    def test_other_simple_commands_still_print_the_plain_line(self):
+        # `_simple`'s new `line` parameter defaults to card_line: an archived card retagged
+        # prints exactly what it did before RE318.
+        self.card = dict(self.card, archived=True)
+        self.assertEqual(self._run(["tag", "RE12", "infra"]).strip(), "RE12 [ready/-] Old title")
+
+    def test_a_409_refusal_prints_the_server_message_and_exits_non_zero(self):
+        # Through the real api()/urlopen transport: a fake api() could never surface a die().
+        # A 409 here is a refusal, not a verdict — NOT soft_conflict.
+        relay.api = self._api
+
+        def refuse(*_a, **_k):
+            raise urllib.error.HTTPError(
+                "http://x/api/cards/RE12/archive", 409, "Conflict", {},
+                io.BytesIO(json.dumps({"error": {
+                    "code": "active_run",
+                    "message": "This card has a live run — cancel it (`relay cancel RE12`) "
+                               "before archiving"}}).encode()),
+            )
+
+        import urllib.request
+        real_urlopen = urllib.request.urlopen
+        self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
+        urllib.request.urlopen = refuse
+        os.environ.setdefault("RELAY_URL", "http://x")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self._run(["archive", "RE12"])
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("relay cancel RE12", err.getvalue())
+
+    def test_a_404_on_title_exits_non_zero_without_a_traceback(self):
+        relay.api = self._api
+
+        def missing(*_a, **_k):
+            raise urllib.error.HTTPError(
+                "http://x/api/cards/NOPE99999", 404, "Not Found", {},
+                io.BytesIO(json.dumps({"error": {"code": "not_found",
+                                                 "message": "Not found"}}).encode()),
+            )
+
+        import urllib.request
+        real_urlopen = urllib.request.urlopen
+        self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
+        urllib.request.urlopen = missing
+        os.environ.setdefault("RELAY_URL", "http://x")
+        os.environ.setdefault("RELAY_API_KEY", "k")
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self._run(["title", "NOPE99999", "x"])
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("API 404: Not found", err.getvalue())
+
+
 class NeedsInputBodyTest(unittest.TestCase):
     """needs_input_body builds the POST body: plain question vs. structured --questions JSON."""
 

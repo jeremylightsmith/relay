@@ -5,6 +5,7 @@ defmodule RelayWeb.Api.CardController do
   alias Relay.Attachments
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Runs
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -189,6 +190,56 @@ defmodule RelayWeb.Api.CardController do
       nil -> {:error, :not_found}
       {:error, changeset} -> {:error, changeset}
       :error -> {:error, :invalid_request}
+    end
+  end
+
+  # RE318 — the live-run guard lives HERE, at the API layer, and deliberately NOT in
+  # Cards.archive_card/2: the recorded decision covers API callers only, and the board's Archive
+  # button (which calls the domain function directly) must keep archiving a card with a live run
+  # exactly as it shipped. Idempotency is the domain's: re-archiving re-stamps `archived_at` and
+  # logs nothing new.
+  def archive(conn, %{"ref" => ref}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         :ok <- refuse_active_run(card),
+         {:ok, card} <- Cards.archive_card(card, :agent) do
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # RE318 — no guard: restoring a card cannot strand anything. Unarchiving an active card is the
+  # domain's no-op.
+  def unarchive(conn, %{"ref" => ref}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.unarchive_card(card, :agent) do
+      render(conn, :show,
+        board: board,
+        card: card,
+        stages: Boards.list_stages(board),
+        timeline: Activity.list_timeline(card)
+      )
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  # Runs.active_run/1 reads Schemas.Run.active_statuses/0 — the one definition of "active" — so
+  # no status list is copied here.
+  defp refuse_active_run(card) do
+    case Runs.active_run(card) do
+      nil -> :ok
+      %Schemas.Run{} -> {:error, :active_run}
     end
   end
 

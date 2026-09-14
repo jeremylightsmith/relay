@@ -162,6 +162,18 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
+  # RE318 — the API archive's refusal. Same shape as would_strand_run: a live run is a
+  # consequential thing to walk away from, so the caller cancels it first, explicitly.
+  def call(conn, {:error, :active_run}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "active_run",
+      message: "This card has a live run — cancel it (`relay cancel #{conn.path_params["ref"]}`) before archiving"
+    )
+  end
+
   def call(conn, {:error, :unknown_outcome}) do
     conn
     |> put_status(:unprocessable_entity)

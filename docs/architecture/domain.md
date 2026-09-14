@@ -123,6 +123,13 @@ sharing behavior.
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
+  Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
+  board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
+  `bin/relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
+  an active run (`Relay.Runs.active_run/1`) with **409 `active_run`** and writes nothing; that
+  guard lives in `RelayWeb.Api.CardController`, **not** in `Cards.archive_card/2`, so the board
+  UI's Archive button stays unguarded as shipped. Both are idempotent through the domain
+  functions (a repeat logs nothing), and neither is on the `/api/all` user-token scope.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard

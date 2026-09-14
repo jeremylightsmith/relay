@@ -226,6 +226,38 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
   -d '{"note":"needs a test","to":"Plan"}' https://relay.example/api/cards/RLY-12/reject
 ```
 
+### POST /api/cards/:ref/archive
+
+Archive a card: it leaves the board (open boards drop it live), an `archived` timeline entry is
+recorded against Relay AI, and any dependency rows that name it as a blocker are removed. Body
+`{}`. Returns the single-card shape with `"archived": true`. Archiving an already-archived card
+is a `200` that records nothing new.
+
+A card with a live run is refused with **`409 active_run`** and nothing is written — cancel the
+run first (`POST /api/cards/:ref/cancel`, or `bin/relay cancel REF`), then archive. The board's
+own Archive button is not guarded this way.
+
+```
+curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+  -d '{}' https://relay.example/api/cards/RLY-12/archive
+```
+
+```json
+{ "error": { "code": "active_run", "message": "This card has a live run — cancel it (`relay cancel RLY-12`) before archiving" } }
+```
+
+### POST /api/cards/:ref/unarchive
+
+Restore an archived card to its stage (open boards re-insert it live) and record an `unarchived`
+timeline entry against Relay AI. Body `{}`. Returns the single-card shape with
+`"archived": false`. Unarchiving a card that is not archived is a `200` no-op. There is no
+live-run guard. Blockers removed when the card was archived are not restored.
+
+```
+curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+  -d '{}' https://relay.example/api/cards/RLY-12/unarchive
+```
+
 ### GET /api/cards/:ref/diagnosis
 
 **Why isn't this card moving?** — one call, one plain-language verdict, plus the evidence

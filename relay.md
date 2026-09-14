@@ -82,6 +82,8 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `bin/relay update [--check]` | Install or refresh the five Relay-owned files (`bin/relay` + the four `relay-*` skills) from the board's `/api/scaffold`. `--check` reports and writes nothing. Prefer `/relay-update`, which wraps it. |
 | `bin/relay create "Fix login" --stage Backlog` | Create a card (`--stage`/`--description`/`--tag`/`--depends-on`) |
 | `bin/relay move RLY-12 Code` | Move to a stage (by name, e.g. `"Code:Review"`) |
+| `bin/relay title RLY-12 "New title"` | Retitle the card |
+| `bin/relay archive` · `bin/relay unarchive RLY-12` | Take the card off the board / put it back in its stage. A card with a live run refuses `archive` (409 `active_run`) — `cancel` it first |
 | `bin/relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
 | `bin/relay describe` · `bin/relay spec` · `bin/relay criteria` · `bin/relay plan` · `bin/relay sub-tasks RLY-12 @file` | Set description / spec / criteria / plan / checklist — `describe` and `spec` are **separate fields**, not synonyms |
 | `bin/relay check` · `bin/relay uncheck RLY-12 42` | Toggle one sub-task done by id |
@@ -109,8 +111,9 @@ word must appear in the title, in any order. Done cards are included — finishe
 what the board's bounded Done column hides. `--archived` widens it to archived cards (marked
 `(archived)`), `--limit N` caps it (default 20), and no match is a plain message on stdout with
 exit 0. For everything else query with `--json`: `bin/relay board --json` for the whole board,
-`bin/relay card RLY-12 --json --field plan` for one field. Reorganize with `move` (stage), `tag`,
-and `comment`.
+`bin/relay card RLY-12 --json --field plan` for one field. Reorganize with `move` (stage), `title`,
+`tag`, and `comment`; `archive` takes a finished or abandoned card off the board and `unarchive`
+brings it back. `archive` refuses a card with a live run — `bin/relay cancel RLY-12` first.
 
 **Diagnose a stuck card.** Start with `bin/relay why RLY-12` — it names the cause in a sentence.
 Then `runs` for the untruncated failure, `executors` to see what's connected, `version` for the

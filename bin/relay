@@ -20,6 +20,8 @@ Executor-local config: .relay/executor.json (worktree namespace + capacity)
   relay version [--json]      # the git SHA the deployed app was built from — no RELAY_API_KEY needed
   relay comment REF TEXT      relay move REF STAGE        relay status REF STATUS
   relay create TITLE [--stage N]  relay describe REF TEXT   relay needs-input REF [Q] [--questions @file]
+  relay title REF TEXT        # retitle the card
+  relay archive REF / unarchive REF   # take the card off the board / put it back (a live run refuses archive — cancel it first)
   relay own REF / release REF relay approve REF           relay reject REF NOTE
   relay sub-tasks REF @file   relay check REF ID / uncheck REF ID   relay result REF @file
   relay criteria REF @file    # acceptance criteria (numbered, authored at Spec)
@@ -73,8 +75,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (executor mode, RL
 #
 # Bump EXECUTOR_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's ExecutorFingerprintGuardTest enforces it and prints the value to paste.
-EXECUTOR_VERSION = 61
-EXECUTOR_FINGERPRINT = "c4e6c1424a35c158265f691054bcc358a52cce8bf76b0e099f284e62619a3a66"
+EXECUTOR_VERSION = 62
+EXECUTOR_FINGERPRINT = "81afe9c3550e07b132adf279919fe9ea247148d7f2ca5ede0d02b2582b43318f"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -488,6 +490,10 @@ def set_status(ref, status):
     return api("PATCH", f"/api/cards/{ref}", {"status": status})["data"]
 
 
+def set_title(ref, text):
+    return api("PATCH", f"/api/cards/{ref}", {"title": text})["data"]
+
+
 def set_description(ref, text):
     return api("PATCH", f"/api/cards/{ref}", {"description": text})["data"]
 
@@ -553,6 +559,17 @@ def move(ref, stage_name):
     return api("POST", f"/api/cards/{ref}/move", {"stage": resolve_stage_id(stage_name)})["data"]
 
 
+def archive_card(ref):
+    """RE318 — take the card off the board. A card with a live run is refused 409 active_run;
+    that is a refusal, so it goes through api()'s die() (not soft_conflict)."""
+    return api("POST", f"/api/cards/{ref}/archive", {})["data"]
+
+
+def unarchive_card(ref):
+    """RE318 — put an archived card back in its stage. No guard; a no-op on a live card."""
+    return api("POST", f"/api/cards/{ref}/unarchive", {})["data"]
+
+
 def create_card(title, stage_name=None, description=None, tag=None, depends_on=None):
     body = {"title": title}
     if stage_name is not None:
@@ -605,6 +622,12 @@ def needs_input(ref, question=None, questions_raw=None):
 
 def card_line(c):
     return f'{c["ref"]} [{c.get("status", "?")}/{c.get("active_owner") or "-"}] {c["title"]}'
+
+
+def archived_line(c):
+    """`card_line` plus ` (archived)` for an archived card — the ONE place that suffix is
+    spelled, shared by `relay search`, `relay archive` and `relay unarchive`."""
+    return card_line(c) + (" (archived)" if c.get("archived") else "")
 
 
 def dependency_lines(c):
@@ -727,7 +750,7 @@ def format_search(query, cards, limit):
     valid answer printed on stdout, not an error."""
     if not cards:
         return f'No cards match "{query}".'
-    lines = [card_line(c) + (" (archived)" if c.get("archived") else "") for c in cards]
+    lines = [archived_line(c) for c in cards]
     if limit and len(cards) >= limit:
         lines.append(f"(showing the first {limit} — narrow the query or pass --limit)")
     return "\n".join(lines)
@@ -1226,11 +1249,11 @@ def cmd_depends(args):
     emit(args, card, lambda: print("\n".join([card["ref"]] + lines)))
 
 
-def _simple(fn):
-    """Wrap a mutation returning a card into a CLI handler that prints it."""
+def _simple(fn, line=card_line):
+    """Wrap a mutation returning a card into a CLI handler that prints it (`line` renders it)."""
     def run(args):
         card = fn(args)
-        emit(args, card, card_line(card))
+        emit(args, card, line(card))
     return run
 
 
@@ -4314,8 +4337,11 @@ def build_parser():
     c.add_argument("--depends-on", metavar="REF[,REF...]",
                    help="blocker refs this card waits on (full replace)")
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
+    add("archive", _simple(lambda a: archive_card(a.ref), line=archived_line), "ref", json_flag=True)
+    add("unarchive", _simple(lambda a: unarchive_card(a.ref), line=archived_line), "ref", json_flag=True)
     add("status", _simple(lambda a: set_status(a.ref, a.status)), "ref", "status", json_flag=True)
     add("describe", _simple(lambda a: set_description(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
+    add("title", _simple(lambda a: set_title(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("criteria", _simple(lambda a: set_acceptance_criteria(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("spec", _simple(lambda a: set_spec(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("plan", _simple(lambda a: set_plan(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
