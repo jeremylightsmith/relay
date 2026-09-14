@@ -4996,7 +4996,7 @@ class RunnerSingletonLockTest(unittest.TestCase):
 
 
 class RunnerFingerprintGuardTest(unittest.TestCase):
-    """RLY-184: any edit to ./relay must come with an RUNNER_VERSION bump.
+    """RLY-184: any edit to ./relay must come with a RUNNER_VERSION bump.
 
     A doc line asking contributors to remember is not a rule; this is. `./relay` is loaded
     into memory at process start, so a long-running `relay start` serves whatever version it

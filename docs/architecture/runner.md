@@ -667,7 +667,7 @@ silently billed to the paid API.
   per reason per `IDLE_LOG_INTERVAL` (300s, a module constant, deliberately not a config
   key), and a claim re-arms them, so a quiet runner costs ~2 lines per 5 minutes.
 - **Single-process guarantee (RLY-193).** Exactly one `relay start` may run per `{server,
-  name}` (the pair the server keys an `Runner` on, `name` defaulting to
+  name}` (the pair the server keys a `Runner` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
   longer collide on identity, *provided their directories are named differently*) and per
   worktree namespace. At startup `cmd_execute` takes two exclusive, non-blocking `fcntl.flock`
@@ -792,7 +792,7 @@ silently billed to the paid API.
   that has been up for months and picked up ten releases is unaffected). It downloads
   `./relay` from the board's scaffold endpoint (`$RELAY_URL/api/scaffold/relay`) through
   `download_runner`, which shares `verify_runner_source` with `relay update` — HTTPS, UTF-8,
-  a leading `#!`, an `RUNNER_VERSION` parsed **from the downloaded bytes** (authoritative — a
+  a leading `#!`, a `RUNNER_VERSION` parsed **from the downloaded bytes** (authoritative — a
   board ahead of what it serves is then harmless, not a chase), a `compile()` syntax check, and
   (for auto-update only) strictly newer. Verification is deliberately HTTPS + parse only: no
   checksum, no signature. Any rejection logs why and the running version keeps serving; a bad

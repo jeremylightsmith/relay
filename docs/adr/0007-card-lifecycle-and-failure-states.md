@@ -157,7 +157,7 @@ self-healing reconciliation if they drift (`state.md:140`). A run reaching `fail
 (`failed`/`parked → running`), never a new one, and raises every engine cap by one — buying exactly
 one more move, not a reset (`runs.ex:1886`). `retry_run` is deliberately narrow: it accepts a clean
 `:failed` run or a *died-agent* `needs_input` park (latest node outcome was `failed` — the RLY-179
-"masquerade"), and **refuses** a genuine question, an `runner_gone` park, or a `:running` run
+"masquerade"), and **refuses** a genuine question, a `runner_gone` park, or a `:running` run
 (`restartable?/1`, `runs.ex:1797`).
 
 ## Consequences

@@ -3325,7 +3325,7 @@ defmodule Relay.Runs do
   # Exclusive runs have absolute runner affinity (ADR 0006 §5): the machine that
   # claims a run's first job is persisted as the run's `pinned_runner_name`
   # (`maybe_pin_run/2`), and every later job — the next node after an advance, a
-  # needs-input re-entry, or an `runner_gone` resume — is pinned to that same column,
+  # needs-input re-entry, or a `runner_gone` resume — is pinned to that same column,
   # so it lands on the machine holding the run's worktree. The first job of a fresh run
   # reads nil (unpinned → any exclusive runner may start it). `park_claimed/1` (human
   # baton) nils the column, so a baton resume re-offers to any free runner with a
