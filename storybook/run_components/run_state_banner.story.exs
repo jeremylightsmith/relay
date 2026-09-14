@@ -89,46 +89,6 @@ defmodule Storybook.RunComponents.RunStateBanner do
               ]
             )
         }
-      },
-      %Variation{
-        id: :parked,
-        attributes: %{
-          variant: :parked,
-          detail:
-            detail(
-              %{
-                status: :parked,
-                flow_key: "spec",
-                current_node: "brainstorm",
-                started_at: DateTime.add(DateTime.utc_now(), -720, :second)
-              },
-              []
-            )
-        },
-        slots: [
-          "<div>stepper renders here</div>"
-        ]
-      },
-      # RE253 — the escalation face: same amber frame, but the slot's panel owns the heading.
-      %Variation{
-        id: :parked_escalation,
-        attributes: %{
-          variant: :parked,
-          park_kind: :escalation,
-          detail:
-            detail(
-              %{
-                status: :parked,
-                flow_key: "code",
-                current_node: "implement",
-                started_at: DateTime.add(DateTime.utc_now(), -1500, :second)
-              },
-              [ne("implement", 3, :failed, %{detail: "✗ commit guard: the working tree is dirty"})]
-            )
-        },
-        slots: [
-          "<div>escalation panel renders here</div>"
-        ]
       }
     ]
   end

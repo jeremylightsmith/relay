@@ -2327,38 +2327,52 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "2 of 5 tasks left unimplemented"
     end
 
-    test "id_prefix namespaces every DOM id, so the panel is legal to render twice" do
-      html =
-        panel(%{
-          id_prefix: "run-needs-input",
-          park_kind: :escalation,
-          node: "implement",
-          attempt: 2,
-          failure_detail: "boom"
-        })
+    test "renders once, with every DOM id under needs-input- (RE279)" do
+      html = panel(%{park_kind: :escalation, node: "implement", attempt: 2, failure_detail: "boom"})
 
       for suffix <- ~w(panel escalation failure-detail form answer send retry) do
-        assert html =~ ~s(id="run-needs-input-#{suffix}"), "missing run-needs-input-#{suffix}"
-        refute html =~ ~s(id="needs-input-#{suffix}"), "leaked unprefixed needs-input-#{suffix}"
+        assert html =~ ~s(id="needs-input-#{suffix}"), "missing needs-input-#{suffix}"
       end
+
+      refute html =~ "run-needs-input"
     end
 
-    test "the RLY-71 stepper branch is untouched, only namespaced" do
+    test "the RLY-71 stepper branch keeps its needs-input ids" do
       html =
         panel(%{
-          id_prefix: "run-needs-input",
           answer_questions: [
             %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true}
           ]
         })
 
-      assert html =~ ~s(id="run-needs-input-stepper")
-      assert html =~ ~s(id="run-needs-input-progress")
-      assert html =~ ~s(id="run-needs-input-question")
-      assert html =~ ~s(id="run-needs-input-option-0")
-      assert html =~ ~s(id="run-needs-input-text-form")
-      assert html =~ ~s(id="run-needs-input-send")
+      for suffix <- ~w(stepper progress question option-0 text-form text send) do
+        assert html =~ ~s(id="needs-input-#{suffix}"), "missing needs-input-#{suffix}"
+      end
+
       assert html =~ "Question 1 of 1"
+    end
+
+    test "carries the RE310 advance control last, only when available (RE279)" do
+      html =
+        panel(%{
+          park_kind: :escalation,
+          node: "impl",
+          attempt: 1,
+          failure_detail: "already committed",
+          advance_available?: true
+        })
+
+      assert html =~ ~s(id="needs-input-advance")
+      assert html =~ ~s(id="run-advance")
+      assert html =~ "Task already done — continue"
+
+      # last in DOM order, so the strip's Answer focuses an answer control, never this
+      {send_at, _} = :binary.match(html, ~s(id="needs-input-send"))
+      {advance_at, _} = :binary.match(html, ~s(id="run-advance"))
+      assert send_at < advance_at
+
+      refute panel(%{}) =~ ~s(id="run-advance")
+      refute panel(%{}) =~ ~s(id="needs-input-advance")
     end
   end
 

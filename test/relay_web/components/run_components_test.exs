@@ -1,7 +1,6 @@
 defmodule RelayWeb.RunComponentsTest do
   use ExUnit.Case, async: true
 
-  import Phoenix.Component
   import Phoenix.LiveViewTest
 
   alias Relay.Runs
@@ -249,64 +248,6 @@ defmodule RelayWeb.RunComponentsTest do
       refute html =~ "CIRCUIT BREAKER"
     end
 
-    test "parked variant frames the slot in amber with the paused-node row" do
-      assigns = %{detail: detail(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}, [])}
-
-      html =
-        rendered_to_string(~H"""
-        <RunComponents.run_state_banner variant={:parked} detail={@detail}>
-          <div id="embedded-stepper">stepper goes here</div>
-        </RunComponents.run_state_banner>
-        """)
-
-      assert html =~ "RELAY AI NEEDS YOUR INPUT"
-      assert html =~ "paused at brainstorm"
-      assert html =~ "attempt 1"
-      assert html =~ ~s(id="embedded-stepper")
-      assert html =~ "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
-    end
-
-    test "parked variant's attempt count reflects the paused node's actual attempt, not always 1" do
-      assigns = %{
-        detail:
-          detail(%{status: :parked, flow_key: "spec", current_node: "brainstorm"}, [
-            ne("brainstorm", 1, :failed, %{detail: "first try"}),
-            ne("brainstorm", 2, :failed, %{detail: "second try"}),
-            ne("brainstorm", 3, :needs_input, %{detail: nil})
-          ])
-      }
-
-      html =
-        rendered_to_string(~H"""
-        <RunComponents.run_state_banner variant={:parked} detail={@detail}>
-          <div id="embedded-stepper">stepper goes here</div>
-        </RunComponents.run_state_banner>
-        """)
-
-      assert html =~ "paused at brainstorm"
-      assert html =~ "attempt 3"
-      refute html =~ "attempt 1"
-    end
-
-    # RE253 — for an escalation the panel supplies its own mono label and sentence, so the banner
-    # must not double it up. The amber frame, baton chip and Parked footer stay.
-    test "parked variant omits its own heading for an escalation park" do
-      assigns = %{detail: detail(%{status: :parked, flow_key: "code", current_node: "implement"}, [])}
-
-      html =
-        rendered_to_string(~H"""
-        <RunComponents.run_state_banner variant={:parked} park_kind={:escalation} detail={@detail}>
-          <div id="embedded-panel">panel goes here</div>
-        </RunComponents.run_state_banner>
-        """)
-
-      refute html =~ "RELAY AI NEEDS YOUR INPUT"
-      refute html =~ "paused at implement"
-      assert html =~ ~s(id="embedded-panel")
-      assert html =~ "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
-      assert html =~ "Parked"
-    end
-
     test "reentry and revoked variants carry their copy" do
       rejection = %{
         note: "stream it",
@@ -545,6 +486,23 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert breaker =~ "CIRCUIT BREAKER"
       refute plain =~ "CIRCUIT BREAKER"
+    end
+  end
+
+  describe "advance_button/1 (RE279: public, rendered by the Detail needs-input panel)" do
+    test "renders #run-advance only when available" do
+      html = render_component(&RunComponents.advance_button/1, available?: true)
+      assert html =~ ~s(id="run-advance")
+      assert html =~ ~s(phx-click="advance_run")
+      assert html =~ "Task already done — continue"
+
+      refute render_component(&RunComponents.advance_button/1, available?: false) =~ "run-advance"
+    end
+
+    test "run_state_banner no longer has a :parked variant" do
+      assert_raise FunctionClauseError, fn ->
+        render_component(&RunComponents.run_state_banner/1, variant: :parked, detail: detail(%{status: :parked}, []))
+      end
     end
   end
 end
