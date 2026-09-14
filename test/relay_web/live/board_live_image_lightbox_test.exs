@@ -35,6 +35,16 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
       assert html =~ ~s(id="image-lightbox")
       assert html =~ ~s(id="image-lightbox-img")
     end
+
+    test "the root-layout dialog carries the RE322 carousel controls", %{conn: conn, board: board} do
+      # Root layout, outside the LiveView's tracked subtree — assert on the mount HTML (see above).
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
+      doc = LazyHTML.from_document(html)
+
+      for id <- ~w(image-lightbox-prev image-lightbox-next image-lightbox-counter image-lightbox-caption) do
+        assert doc |> LazyHTML.query("dialog#image-lightbox ##{id}") |> Enum.count() == 1, "missing ##{id}"
+      end
+    end
   end
 
   describe "AI Result screens strip" do
@@ -55,6 +65,24 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
       view |> element("#ai-result-show-more") |> render_click()
 
       assert has_element?(view, "#ai-result-screens img.cursor-zoom-in")
+    end
+
+    test "a screenshot uploaded with relay attach renders as the image, not the placeholder (RE322)",
+         %{conn: conn, board: board, code: code} do
+      {:ok, card} = Cards.create_card(code, %{title: "Attached it"})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, _card} =
+        Cards.update_ai_result(card, %{
+          "summary" => "Done",
+          "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Board"}]
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+      view |> element("#ai-result-show-more") |> render_click()
+
+      assert has_element?(view, ~s(#ai-result-screens img[src="/attachments/#{uuid}"][data-caption="Board"]))
     end
   end
 end

@@ -31,6 +31,9 @@ defmodule RelayWeb.Api.AttachmentIngestTest do
     assert is_binary(data["id"])
     assert data["url"] == "/attachments/#{data["id"]}"
     assert data["markdown"] == "![screen.png](/attachments/#{data["id"]})"
+    # RE322 — both come from the one definition the drawer's screenshots strip also recognises.
+    assert data["url"] == RelayWeb.attachment_path(data["id"])
+    assert RelayWeb.attachment_path?(data["url"])
   end
 
   test "a filename containing markdown-special characters produces valid markdown", %{

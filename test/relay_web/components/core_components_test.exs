@@ -2569,6 +2569,89 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert html =~ ~s(aria-label="Close")
     end
+
+    defp lightbox_query(html, selector), do: html |> LazyHTML.from_fragment() |> LazyHTML.query(selector)
+
+    defp lightbox_count(html, selector), do: html |> lightbox_query(selector) |> Enum.count()
+
+    test "renders the RE322 carousel chrome with the stable ids assets/js/image_lightbox.js drives" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      for id <-
+            ~w(image-lightbox-img image-lightbox-prev image-lightbox-next image-lightbox-caption image-lightbox-counter) do
+        assert lightbox_count(html, "dialog#image-lightbox ##{id}") == 1, "missing ##{id} inside the dialog"
+      end
+    end
+
+    test "Previous/Next are labelled daisyUI circle buttons with hero chevrons" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      assert lightbox_count(
+               html,
+               ~s(button#image-lightbox-prev.btn.btn-circle[type="button"][aria-label="Previous image"] .hero-chevron-left)
+             ) == 1
+
+      assert lightbox_count(
+               html,
+               ~s(button#image-lightbox-next.btn.btn-circle[type="button"][aria-label="Next image"] .hero-chevron-right)
+             ) == 1
+    end
+
+    test "a freshly rendered viewer is a single-image viewer: nav, counter and caption start hidden" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      for id <- ~w(image-lightbox-prev image-lightbox-next image-lightbox-counter image-lightbox-caption) do
+        assert lightbox_count(html, "##{id}[hidden]") == 1, "##{id} should start hidden"
+      end
+    end
+
+    # Artboard decision: no mockup — the design system. Translucent theme-token surfaces so the
+    # chrome stays readable over any screenshot and flips with data-theme (theme_tokens_test.exs
+    # separately forbids literals).
+    test "the buttons, caption and counter sit on translucent theme-token surfaces" do
+      html = render_component(&CoreComponents.image_lightbox/1, [])
+
+      [prev_class] = html |> lightbox_query("#image-lightbox-prev") |> LazyHTML.attribute("class")
+      [caption_class] = html |> lightbox_query("#image-lightbox-caption") |> LazyHTML.attribute("class")
+      [counter_class] = html |> lightbox_query("#image-lightbox-counter") |> LazyHTML.attribute("class")
+
+      assert prev_class =~ "bg-base-100/80"
+      assert prev_class =~ "text-base-content"
+      assert caption_class =~ "bg-base-100/85"
+      assert caption_class =~ "text-base-content"
+      assert counter_class =~ "bg-base-200/85"
+      assert counter_class =~ "text-base-content/70"
+    end
+  end
+
+  describe "image_lightbox_viewer/1" do
+    test "with a counter and caption it shows the nav, the counter and the caption" do
+      html =
+        render_component(&CoreComponents.image_lightbox_viewer/1,
+          id: "v",
+          src: "/images/logo_light_128.png",
+          alt: "shot",
+          caption: "Review drawer",
+          counter: "2 / 5"
+        )
+
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query(~s(#v-img[src="/images/logo_light_128.png"][alt="shot"])) |> Enum.count() == 1
+      assert doc |> LazyHTML.query("[hidden]") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#v-counter") |> LazyHTML.text() |> String.trim() == "2 / 5"
+      assert doc |> LazyHTML.query("#v-caption") |> LazyHTML.text() |> String.trim() == "Review drawer"
+    end
+
+    test "a captioned lone image shows the caption but no nav or counter" do
+      html = render_component(&CoreComponents.image_lightbox_viewer/1, id: "v", src: "/x.png", caption: "solo")
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#v-caption[hidden]") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#v-prev[hidden]") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#v-next[hidden]") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#v-counter[hidden]") |> Enum.count() == 1
+    end
   end
 
   describe "card_drawer/1 ai_result changes rendering" do
@@ -2695,6 +2778,64 @@ defmodule RelayWeb.CoreComponentsTest do
 
       refute html =~ ~s(src="tmp/smoke/a.png")
       assert html =~ "a.png"
+    end
+
+    # RE322 — `relay attach` returns `/attachments/<uuid>`, which agents write into `screens`. It is
+    # a router route, not a static path, so the TH95 fetchability check drew every uploaded
+    # screenshot as the placeholder.
+    test "an uploaded attachment url renders as the image, in both the map and bare-string shapes" do
+      uuid = "0b9f3c5e-8a1d-4e2f-9c7b-3d6a1e5f2b40"
+
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Shot"}, "/attachments/#{uuid}"]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+
+      imgs = html |> LazyHTML.from_fragment() |> LazyHTML.query(~s(#ai-result-screens img[src="/attachments/#{uuid}"]))
+      assert Enum.count(imgs) == 2
+    end
+
+    test "paths that only look like attachments, and agent-local paths, still fall back to the placeholder" do
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [
+          "/attachments",
+          %{"url" => "/attachments/"},
+          "/Users/me/tmp/smoke/12-review.png",
+          %{"url" => "tmp/smoke/a.png"}
+        ]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#ai-result-screens figure") |> Enum.count() == 4
+      assert doc |> LazyHTML.query("#ai-result-screens img") |> Enum.count() == 0
+      assert html =~ "12-review.png"
+      assert html =~ "a.png"
+    end
+
+    # RE322 D3 — the carousel captions a screenshot with its figcaption; the <img> mirrors it so the
+    # JS never walks the figure. Blank (not absent) when there is no caption: the img's `alt` falls
+    # back to a generic "Screenshot", which must not become the viewer's caption.
+    test "a screenshot img carries its caption as data-caption, blank when it has none" do
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [%{"url" => "https://example.com/a.png", "caption" => "The drawer"}, "https://example.com/b.png"]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc
+             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/a.png"][data-caption="The drawer"]))
+             |> Enum.count() == 1
+
+      assert doc
+             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/b.png"][data-caption=""]))
+             |> Enum.count() == 1
     end
   end
 

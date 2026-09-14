@@ -78,11 +78,13 @@ defmodule RelayWeb.Api.CardJSON do
   end
 
   def attachment(%{attachment: attachment}) do
+    path = RelayWeb.attachment_path(attachment.id)
+
     %{
       data: %{
         id: attachment.id,
-        url: "/attachments/#{attachment.id}",
-        markdown: "![#{escape_markdown_text(attachment.filename)}](/attachments/#{attachment.id})"
+        url: path,
+        markdown: "![#{escape_markdown_text(attachment.filename)}](#{path})"
       }
     }
   end
