@@ -26,7 +26,10 @@ exits non-zero.
 | `bin/relay depends RLY-12 RLY-13 RLY-14` | **Replace the card's blocker set** — the card stays undispatchable until every blocker reaches a top-level Done column (`bin/relay why` reports `blocked_by_dependencies`). Passing no BLOCKERs clears the set. Refs may be separate arguments or comma-separated. A ref this board does not have, or an edge that would close a cycle, is refused and nothing is written |
 | `bin/relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `bin/relay move RLY-12 Code` | Move to a stage by name |
+| `bin/relay archive RLY-12` | **Archive the card** — it leaves the board and the timeline records it against Relay AI. Prints the card line ending in `(archived)`. A card with a live run is refused (`409 active_run`) and nothing is written: `bin/relay cancel RLY-12` first. Archiving an archived card is harmless |
+| `bin/relay unarchive RLY-12` | **Restore an archived card** to its stage. Harmless on a card that is not archived |
 | `bin/relay status RLY-12 working` | Set status (any card status, e.g. `working` — see [Statuses & outcomes](/docs/statuses-and-outcomes); it snaps to one the stage allows) |
+| `bin/relay title RLY-12 "New title"` | Retitle the card (accepts `-` / `@file` like other text arguments). A blank title is refused |
 | `bin/relay describe RLY-12 @description.md` | Set the card's description — the ask as stated. **Not** the same field as `spec` |
 | `bin/relay spec RLY-12 @spec.md` | Set the card's spec — the design spec authored at the Spec stage |
 | `bin/relay criteria RLY-12 @criteria.md` | Set the card's acceptance criteria (numbered; read at the review gate) |

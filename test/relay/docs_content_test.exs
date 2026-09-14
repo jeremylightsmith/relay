@@ -149,4 +149,21 @@ defmodule Relay.DocsContentTest do
       assert domain =~ token, "domain.md should document `#{token}`"
     end
   end
+
+  # RE318 — an agent reads relay.md and /docs/cli; a verb documented nowhere it looks ships dark.
+  test "title, archive and unarchive are documented everywhere an agent reads (RE318)" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    cli = read("cli.md")
+
+    for doc <- [relay_md, cli], verb <- ["bin/relay title", "bin/relay archive", "unarchive"] do
+      assert doc =~ verb, "expected `#{verb}` to be documented"
+    end
+
+    for doc <- [relay_md, cli] do
+      assert doc =~ "cancel", "the archive row should say a live run must be cancelled first"
+    end
+
+    refute relay_md =~ "bin/relay rename"
+    refute cli =~ "bin/relay rename"
+  end
 end
