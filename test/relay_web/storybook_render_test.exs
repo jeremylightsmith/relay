@@ -48,4 +48,11 @@ defmodule RelayWeb.StorybookRenderTest do
     assert doc |> LazyHTML.query("#image-lightbox-story-single-prev[hidden]") |> Enum.count() == 1
     assert doc |> LazyHTML.query("#image-lightbox-story-single-counter[hidden]") |> Enum.count() == 1
   end
+
+  test "GET /storybook/core_components/copy_button renders the copy button story (RE324)", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/copy_button") |> html_response(200)
+
+    assert html =~ "Copy branch name"
+    assert html =~ "re-324-fix-long-links-including-prs-and-this-is-a-very-long-branch-name"
+  end
 end

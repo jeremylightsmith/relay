@@ -1671,6 +1671,63 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  An icon button that copies `text` to the clipboard (RE324), then flips to a success check for
+  ~1.6s before reverting. The one shared copy control — use it instead of hand-writing another
+  clipboard hook. The copied state is a `data-copied="true"` attribute the colocated hook sets,
+  styled with `data-[copied=true]:` / `group-data-[copied=true]:` variants, so it uses theme
+  tokens only.
+
+  ## Examples
+
+      <.copy_button id="card-branch-copy" text={@card.branch} label="Copy branch name" />
+  """
+  attr :id, :string, required: true
+  attr :text, :string, required: true, doc: "the exact string written to the clipboard"
+  attr :label, :string, default: "Copy", doc: "the accessible name (aria-label and title)"
+  attr :class, :any, default: nil
+
+  def copy_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={@id}
+      phx-hook=".CopyButton"
+      data-copy-text={@text}
+      aria-label={@label}
+      title={@label}
+      class={[
+        "group btn btn-ghost btn-xs btn-square shrink-0 text-base-content/60 hover:text-base-content data-[copied=true]:text-success",
+        @class
+      ]}
+    >
+      <span class="copy-button-idle inline-flex group-data-[copied=true]:hidden">
+        <.icon name="hero-clipboard-document" class="size-3.5" />
+      </span>
+      <span class="copy-button-done hidden group-data-[copied=true]:inline-flex">
+        <.icon name="hero-check" class="size-3.5" />
+        <span class="sr-only">Copied</span>
+      </span>
+    </button>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyButton">
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => {
+            navigator.clipboard.writeText(this.el.dataset.copyText).then(() => {
+              this.el.dataset.copied = "true"
+              clearTimeout(this.timer)
+              this.timer = setTimeout(() => { delete this.el.dataset.copied }, 1600)
+            })
+          })
+        },
+        destroyed() {
+          clearTimeout(this.timer)
+        }
+      }
+    </script>
+    """
+  end
+
+  @doc """
   The drawer's dependency rail list (RE93): one ghost chip per card — mono ref + truncated
   title, a success tick and a struck-through ref when the blocker is satisfied, and a ✕ when
   the list is editable.

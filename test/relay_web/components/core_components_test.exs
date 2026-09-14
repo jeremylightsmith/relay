@@ -26,6 +26,47 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "copy_button/1 (RE324)" do
+    test "renders an icon button carrying the exact text to copy and an accessible name" do
+      html =
+        render_component(&CoreComponents.copy_button/1,
+          id: "copy-x",
+          text: "re-324-a/very#long-branch",
+          label: "Copy branch name"
+        )
+
+      button = html |> LazyHTML.from_fragment() |> LazyHTML.query("button#copy-x")
+
+      assert Enum.count(button) == 1
+      assert LazyHTML.attribute(button, "type") == ["button"]
+      assert LazyHTML.attribute(button, "data-copy-text") == ["re-324-a/very#long-branch"]
+      assert LazyHTML.attribute(button, "aria-label") == ["Copy branch name"]
+      assert LazyHTML.attribute(button, "title") == ["Copy branch name"]
+      assert [hook] = LazyHTML.attribute(button, "phx-hook")
+      assert hook =~ "CopyButton"
+    end
+
+    test "shows a clipboard icon at rest and a success check in the copied state" do
+      html = render_component(&CoreComponents.copy_button/1, id: "copy-y", text: "x")
+      doc = LazyHTML.from_fragment(html)
+
+      assert [class] = doc |> LazyHTML.query("button#copy-y") |> LazyHTML.attribute("class")
+      assert class =~ "btn btn-ghost btn-xs btn-square"
+      assert class =~ "group"
+      assert class =~ "data-[copied=true]:text-success"
+
+      assert doc |> LazyHTML.query(".copy-button-idle .hero-clipboard-document") |> Enum.count() == 1
+      assert doc |> LazyHTML.query(".copy-button-done.hidden .hero-check") |> Enum.count() == 1
+      assert [done] = doc |> LazyHTML.query(".copy-button-done") |> LazyHTML.attribute("class")
+      assert done =~ "group-data-[copied=true]:inline-flex"
+    end
+
+    test "defaults its accessible name to Copy" do
+      html = render_component(&CoreComponents.copy_button/1, id: "copy-z", text: "x")
+      assert html =~ ~s(aria-label="Copy")
+    end
+  end
+
   describe "member_stack/1" do
     test "renders one 24px ringed circle per member up to the limit" do
       members = [
