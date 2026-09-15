@@ -1081,7 +1081,10 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def handle_params(params, _uri, socket) do
     ref = card_ref(socket.assigns.live_action, params)
-    {:noreply, socket |> maybe_clear_search(ref) |> assign_selected_card(ref)}
+    previous_ref = selected_ref(socket)
+    socket = socket |> maybe_clear_search(ref) |> assign_selected_card(ref)
+
+    {:noreply, maybe_push_card_focus(socket, previous_ref, selected_ref(socket))}
   end
 
   # Card mode selects from the path (/cards/:ref); board mode from ?card=<ref>. In card mode
@@ -1094,6 +1097,36 @@ defmodule RelayWeb.BoardLive do
   # through handle_params/3.
   defp maybe_clear_search(socket, nil), do: socket
   defp maybe_clear_search(socket, _ref), do: assign_search(socket, "")
+
+  # RE326 — the ref of the card the drawer is showing, or nil when it is closed. It reads the
+  # resolved @selected_card rather than the raw URL param, so `?card=my2` and `?card=MY2` are the
+  # same card and an unknown ref reads as a close. Before the first handle_params/3 there is no
+  # :selected_card assign at all, which is a closed drawer too.
+  defp selected_ref(%{assigns: %{selected_card: %Card{} = card, board: board}}), do: Cards.ref(board, card)
+  defp selected_ref(_socket), do: nil
+
+  # RE326 — board focus follows the drawer. Every open, switch and close is a URL change that
+  # lands in handle_params/3 (chevron, ←/→, scrim, Esc/✕, archive, browser back/forward), so the
+  # rule lives here once, as a table of the selection before → after:
+  #
+  #   embed / card mode  never, because there is no board in the DOM
+  #   nil → A            no push: a click already focused A, and a search result or deep link
+  #                      must not steal focus or scroll the board
+  #   A → A              no push
+  #   A → nil (close)    focus A, so Tab carries on from the last card viewed
+  #   A → B (switch)     focus B, which the hook scrolls into view (block: "nearest")
+  #
+  # BoardDnD and StoryMapDnD both no-op when the ref isn't rendered (just archived, filtered out).
+  defp maybe_push_card_focus(%{assigns: %{embed: true}} = socket, _previous_ref, _ref), do: socket
+  defp maybe_push_card_focus(%{assigns: %{live_action: :card}} = socket, _previous_ref, _ref), do: socket
+  defp maybe_push_card_focus(socket, nil, _ref), do: socket
+  defp maybe_push_card_focus(socket, ref, ref), do: socket
+  defp maybe_push_card_focus(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
+  defp maybe_push_card_focus(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+
+  # The one place the `focus_card` hook event is named: create_card and the drawer focus rule
+  # above both push it.
+  defp push_card_focus(socket, ref), do: push_event(socket, "focus_card", %{ref: ref})
 
   # RLY-68 — the async heavy-body fetch kicked off by
   # maybe_start_body_load/4. Compares the result's card id against the
@@ -1209,7 +1242,7 @@ defmodule RelayWeb.BoardLive do
          |> stream_insert(stream_name(stage.id), card, at: 0)
          |> update(:stage_counts, &Map.update!(&1, stage.id, fn count -> count + 1 end))
          |> assign(:compose_form, empty_compose_form())
-         |> push_event("focus_card", %{ref: Cards.ref(socket.assigns.board, card)})}
+         |> push_card_focus(Cards.ref(socket.assigns.board, card))}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :compose_form, to_form(changeset))}

@@ -86,6 +86,18 @@ const StoryMapDnD = {
         })
       }
     })
+
+    // RE326 — BoardLive pushes `focus_card` when the drawer closes (and on a URL-driven switch
+    // between two ?card= URLs), so keyboard focus lands back on the card you were viewing. It
+    // mirrors BoardDnD's handler against this hook's own selector (RE262: the hooks stay split). A
+    // card the map isn't rendering (filtered out, in a collapsed activity, outside focus mode, or in
+    // a closed tray) is simply not found and nothing happens. Never un-hide it.
+    this.handleEvent("focus_card", ({ref}) => {
+      const card = this.el.querySelector(`${CARD_SELECTOR}[data-ref="${ref}"]`)
+      if (!card) return
+      card.scrollIntoView({block: "nearest"})
+      card.focus()
+    })
   },
 
   startDrag(e, el, dragged, payload) {
