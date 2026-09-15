@@ -19,6 +19,7 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
   alias Relay.Accounts
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.StoryMap
 
   @moduletag :playwright
 
@@ -100,6 +101,32 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> assert_drawer_shows(target)
     |> assert_focused(target)
     |> assert_in_viewport(target)
+  end
+
+  test "the story map drawer hands focus back to its card on close, with card nav still off", ctx do
+    {:ok, board} = Boards.create_board(ctx.user, %{name: "Focus map"})
+    {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
+    {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+    [mvp | _later] = StoryMap.list_releases(board)
+
+    board = Boards.get_board!(ctx.user, board.slug)
+    [backlog | _rest] = board.stages
+    {:ok, card} = Cards.create_card(backlog, %{title: "Add SSO"})
+    {:ok, _placed} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: mvp.id})
+    ref = Cards.ref(board, card)
+
+    ctx.conn
+    |> visit_board("/board/#{board.slug}/story-map")
+    |> assert_has("#story-map-grid")
+    |> click("#story-map-card-#{ref}")
+    |> assert_drawer_shows(ref)
+    # RE264 — card nav stays off on the story map. This card doesn't turn it on.
+    |> refute_has("#card-drawer-nav")
+    # Pressed on the drawer's Detail tab, so focus is inside the drawer as it goes away. The map
+    # card only has focus afterwards if StoryMapDnD acted on the close's focus_card push.
+    |> press_in_drawer("Escape")
+    |> refute_has("#card-drawer-panel")
+    |> assert_focused(ref)
   end
 
   # Creates `count` cards in `stage` and returns their refs in the order the board renders the
