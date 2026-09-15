@@ -187,6 +187,19 @@ defmodule Schemas.Card do
   def archived?(%__MODULE__{archived_at: nil}), do: false
   def archived?(%__MODULE__{}), do: true
 
+  @doc """
+  True when the card is blocked on a human answer that can still be given: `:needs_input` and not
+  archived (RE325). The ONE definition of "the answer surface is shown" — the drawer's blocked strip
+  and its Detail `needs_input_panel` gate on it, and `BoardLive` opens such a card on the Detail tab.
+  """
+  def awaiting_answer?(%__MODULE__{status: status} = card), do: awaiting_answer?(status, archived?(card))
+
+  @doc """
+  `awaiting_answer?/1` for callers holding the status and the archived flag separately — the drawer
+  component, whose `card` attr is any card-shaped map and whose archived state is its own attr.
+  """
+  def awaiting_answer?(status, archived) when is_boolean(archived), do: status == :needs_input and not archived
+
   @doc "The closed set of card statuses — the one definition; the docs generate from it (RE239)."
   def statuses, do: Ecto.Enum.values(__MODULE__, :status)
 

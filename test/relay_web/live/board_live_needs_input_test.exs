@@ -426,7 +426,8 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
       card = parked_on_spec(code, "Which scope?")
       view = open_card(conn, board, card)
 
-      # a parked run opens the drawer on the Run tab
+      # RE325 — a blocked card opens on Detail, so move to the Run tab first
+      view |> element("#card-drawer-tab-run") |> render_click()
       assert has_element?(view, "#card-drawer-tab-panel-detail.hidden")
 
       view |> element("#card-drawer-blocked-answer") |> render_click()
@@ -472,6 +473,48 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
       refute has_element?(view, "#card-drawer-blocked-strip")
       refute has_element?(open_card(conn, board, card), "#card-drawer-blocked-strip")
+    end
+  end
+
+  describe "RE325 default drawer tab" do
+    test "a blocked card with a parked run opens on Detail with the answer surface visible (AC1)",
+         %{conn: conn, board: board, code: code} do
+      card = parked_on_spec(code, "Which scope?")
+      view = open_card(conn, board, card)
+
+      assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+      refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+      assert has_element?(view, "#card-drawer-tab-panel-run.hidden")
+      assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel")
+
+      # opening does not steal focus (no keyboard pop on mobile) — only the Answer button focuses
+      refute_push_event(view, "focus-answer", %{})
+    end
+
+    test "a card with a running run that is not blocked still opens on Run (AC3)",
+         %{conn: conn, board: board, code: code} do
+      {:ok, card} = Cards.create_card(code, %{title: "Mid flight"})
+      {:ok, card} = Cards.assign_ai(card)
+      {:ok, card} = Cards.set_status(card, %{status: :working})
+      insert(:run, card: card, status: :running, current_node: "implement")
+
+      view = open_card(conn, board, card)
+
+      assert has_element?(view, "#card-drawer-tab-run[data-active='true']")
+      assert has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+      refute has_element?(view, "#needs-input-panel")
+    end
+
+    test "an archived blocked card with a parked run keeps opening on Run — no answer surface renders",
+         %{conn: conn, board: board, code: code, user: user} do
+      card = parked_on_spec(code, "Which scope?")
+      {:ok, archived} = Cards.archive_card(card, {:user, user.id})
+
+      view = open_card(conn, board, archived)
+
+      assert has_element?(view, "#card-archived-banner")
+      assert has_element?(view, "#card-drawer-tab-run[data-active='true']")
+      refute has_element?(view, "#needs-input-panel")
     end
   end
 end

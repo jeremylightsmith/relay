@@ -37,6 +37,7 @@ defmodule RelayWeb.CoreComponents do
   alias RelayWeb.TalkComponents
   alias RelayWeb.TimeAgo
   alias Schemas.Activity
+  alias Schemas.Card
 
   @doc """
   Renders flash notices.
@@ -2584,12 +2585,13 @@ defmodule RelayWeb.CoreComponents do
 
           <%!--
             RE279 — the blocked state, hoisted out of the tabs: one amber strip on EVERY tab. It
-            uses the same predicate as the Detail needs_input_panel, so the two always appear and
-            disappear together, and the card-status guard clears it the moment an answer flips the
-            baton. Renders in `embed` too.
+            uses the same predicate as the Detail needs_input_panel (`Card.awaiting_answer?/2`,
+            which BoardLive also uses to open such a card on Detail — RE325), so the two always
+            appear and disappear together, and the card-status guard clears it the moment an
+            answer flips the baton. Renders in `embed` too.
           --%>
           <.blocked_strip
-            :if={@card.status == :needs_input and !@archived}
+            :if={Card.awaiting_answer?(@card.status, @archived)}
             eyebrow={@strip_eyebrow}
             question={@strip_question}
             loading?={@body_loading}
@@ -2713,7 +2715,7 @@ defmodule RelayWeb.CoreComponents do
                   </div>
                 </section>
                 <.needs_input_panel
-                  :if={@card.status == :needs_input and !@archived}
+                  :if={Card.awaiting_answer?(@card.status, @archived)}
                   card={@card}
                   question={@question}
                   answer_questions={@answer_questions}

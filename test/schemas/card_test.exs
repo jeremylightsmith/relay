@@ -140,4 +140,23 @@ defmodule Schemas.CardTest do
       assert get_field(changeset, :archived_at) == nil
     end
   end
+
+  describe "awaiting_answer?/1 and /2" do
+    test "true only for a needs_input card that is not archived" do
+      assert Card.awaiting_answer?(%Card{status: :needs_input, archived_at: nil})
+      refute Card.awaiting_answer?(%Card{status: :needs_input, archived_at: DateTime.utc_now()})
+    end
+
+    test "no other status awaits an answer" do
+      for status <- Card.statuses() -- [:needs_input] do
+        refute Card.awaiting_answer?(%Card{status: status, archived_at: nil})
+      end
+    end
+
+    test "the /2 form takes the status and the archived flag the drawer component is given" do
+      assert Card.awaiting_answer?(:needs_input, false)
+      refute Card.awaiting_answer?(:needs_input, true)
+      refute Card.awaiting_answer?(:in_review, false)
+    end
+  end
 end
