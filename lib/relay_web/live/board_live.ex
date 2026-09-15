@@ -1108,7 +1108,7 @@ defmodule RelayWeb.BoardLive do
       %Card{id: ^card_id} ->
         runs = Runs.list_runs_for_card(card)
         latest = List.first(runs)
-        default_tab = if latest && latest.status in Run.active_statuses(), do: :run, else: :detail
+        default_tab = default_drawer_tab(card, latest)
         {supporters, vote_count} = Votes.supporters(card, 5)
 
         {:noreply,
@@ -4176,6 +4176,18 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp select_drawer_tab(socket, tab), do: assign(socket, :drawer_tab, tab)
+
+  # RE325 — the tab a card opens on, chosen once when its body loads (never re-chosen while the
+  # drawer is open, so a tab the human picked is kept). A card awaiting an answer opens on Detail,
+  # where its needs_input_panel lives — `Card.awaiting_answer?` is the same predicate that renders
+  # that panel, so the two cannot disagree. Otherwise an active run opens on Run; otherwise Detail.
+  defp default_drawer_tab(%Card{} = card, latest_run) do
+    cond do
+      Card.awaiting_answer?(card) -> :detail
+      latest_run && latest_run.status in Run.active_statuses() -> :run
+      true -> :detail
+    end
+  end
 
   # RE306 round 2 — the drawer's text-entry surfaces, named once, because `TypingKeyGuard` cannot
   # see them. The hook only answers "is focus in a text field at this instant", and there are two

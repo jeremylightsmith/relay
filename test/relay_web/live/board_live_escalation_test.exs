@@ -91,11 +91,18 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     refute render(view) =~ "AGENT STOPPED"
   end
 
-  test "the Run tab no longer duplicates the answer surface (RE279)", ctx do
+  test "a parked escalation opens on Detail; the Run tab keeps its readout without duplicating the answer surface (RE279, RE325)",
+       ctx do
     {card, _run} = park(ctx.board, ctx.flow, "Commit guard", :failed, @guard)
     view = open(ctx.conn, ctx.board, card)
 
-    # a parked run still opens on the Run tab, which keeps its status readout
+    # RE325 — a blocked card opens on Detail, where the escalation panel lives
+    assert has_element?(view, "#card-drawer-tab-detail[data-active='true']")
+    refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+    assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-panel", "NODE FAILED · YOUR CALL")
+
+    # the Run tab is one click away and keeps its status readout
+    view |> element("#card-drawer-tab-run") |> render_click()
     refute has_element?(view, "#card-drawer-tab-panel-run.hidden")
     assert has_element?(view, "#card-drawer-tab-panel-run", "Parked — waiting on your answer")
 

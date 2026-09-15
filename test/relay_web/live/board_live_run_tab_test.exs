@@ -169,6 +169,10 @@ defmodule RelayWeb.BoardLiveRunTabTest do
 
     view = open(ctx.conn, ctx.board, ref)
 
+    # RE325 — a blocked card opens on Detail; the Run tab is a click away
+    refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+    view |> element("#card-drawer-tab-run") |> render_click()
+
     refute has_element?(view, "#card-drawer-tab-panel-run.hidden")
     assert has_element?(view, "#card-drawer-tab-panel-run", "Parked — waiting on your answer")
     refute has_element?(view, ".run-banner-parked")
