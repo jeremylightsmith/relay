@@ -380,6 +380,15 @@ defmodule Relay.Runs.Scheduler do
           evidence
         )
 
+      :runner_rate_limited ->
+        verdict(
+          :runner_rate_limited,
+          "every connected runner is paused at its Claude usage limit " <>
+            "(#{Relay.Runs.roster_rate_limit_phrase(bits)}) — resumes " <>
+            "#{Relay.Runs.resume_time_label(bits.resumes_at)}.",
+          evidence
+        )
+
       reason when reason in [:no_runner, :runner_gone] ->
         verdict(
           :no_runner,
@@ -509,6 +518,14 @@ defmodule Relay.Runs.Scheduler do
 
   defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
 
+  # The capacity_diagnosis/1 reasons that blame the ROSTER — nothing connected will claim queued
+  # work — as opposed to `:awaiting_capacity`, a legitimately busy board. Defined once (RE320):
+  # `Relay.Runs.stopped_work/2` and the live-run diagnosis both gate on it.
+  @roster_blocking_reasons [:runner_outdated, :no_runner, :runner_gone, :runner_rate_limited]
+
+  @doc "The `capacity_diagnosis/1` reasons that mean no connected runner will claim queued work."
+  def roster_blocking_reasons, do: @roster_blocking_reasons
+
   @doc """
   The roster-level reason no node-job is being claimed on this snapshot, shared by
   `explain/2`'s terminal branch and `Relay.Runs.stopped_work/2` so the board banner, `relay
@@ -518,22 +535,27 @@ defmodule Relay.Runs.Scheduler do
     * `:no_runner` — the roster is empty.
     * `:runner_gone` — the roster is non-empty but every runner has gone silent.
     * `:runner_outdated` — every live (non-`:gone`) runner is running refused old code.
-    * `:awaiting_capacity` — at least one live, current runner exists; it is simply out of
-      free slots.
+    * `:runner_rate_limited` — at least one live runner is current, and every live, current
+      runner has paused itself at its Claude usage limit (RE320). The evidence adds `resumes_at`
+      (the EARLIEST `resets_at` among them — when the first one claims again) and
+      `rate_limited_runners`, one `%{name, window, utilization, max, resets_at, reason}` each.
+    * `:awaiting_capacity` — at least one live, current, unpaused runner exists; it is simply out
+      of free slots.
 
   The evidence carries the required version and one `%{name, version}` per live runner, so
   every consumer names the mismatch without a second query.
   """
   @spec capacity_diagnosis(Snapshot.t()) ::
-          {:runner_outdated | :no_runner | :runner_gone | :awaiting_capacity,
-           %{required_version: integer() | nil, running_versions: [%{name: String.t(), version: integer() | nil}]}}
+          {:runner_outdated | :no_runner | :runner_gone | :runner_rate_limited | :awaiting_capacity, map()}
   def capacity_diagnosis(%Snapshot{runners: runners}) do
     live = for {_id, e} <- runners, e.freshness != :gone, do: e
+    current = Enum.reject(live, & &1.outdated)
 
     cond do
       map_size(runners) == 0 -> {:no_runner, version_evidence([])}
       live == [] -> {:runner_gone, version_evidence([])}
-      Enum.all?(live, & &1.outdated) -> {:runner_outdated, version_evidence(live)}
+      current == [] -> {:runner_outdated, version_evidence(live)}
+      Enum.all?(current, &(&1.rate_limit != nil)) -> {:runner_rate_limited, rate_limit_evidence(current)}
       true -> {:awaiting_capacity, version_evidence([])}
     end
   end
@@ -543,6 +565,13 @@ defmodule Relay.Runs.Scheduler do
       required_version: Relay.Runs.min_runner_version(),
       running_versions: Enum.map(live, &%{name: &1.name, version: &1.version})
     }
+  end
+
+  defp rate_limit_evidence(paused) do
+    Map.merge(version_evidence([]), %{
+      resumes_at: paused |> Enum.map(& &1.rate_limit.resets_at) |> Enum.min(DateTime),
+      rate_limited_runners: Enum.map(paused, &Map.put(&1.rate_limit, :name, &1.name))
+    })
   end
 
   @doc false

@@ -150,21 +150,13 @@ defmodule Relay.Runs.Scheduler.Server do
 
   # Reuses Relay.Runs.runner_outdated?/1 and runner_freshness/2 — the same truth the
   # runners view and the reaper read — so the scheduler's "outdated" can never disagree with
-  # the roster's. `now` is read once for a consistent freshness pass.
+  # the roster's, and its live rate limit (RE320). `now` is read once for a consistent pass.
   defp runner_snap(board_id) do
     now = DateTime.utc_now()
 
     board_id
     |> Relay.Runs.list_board_runners()
-    |> Map.new(fn e ->
-      {e.id,
-       %{
-         name: e.name,
-         version: e.version,
-         outdated: Relay.Runs.runner_outdated?(e),
-         freshness: Relay.Runs.runner_freshness(e, now)
-       }}
-    end)
+    |> Map.new(&{&1.id, Relay.Runs.runner_snapshot_entry(&1, now)})
   end
 
   @doc "The app's configured engine — for callers with no injected one (e.g. `Runs.diagnose/3`)."

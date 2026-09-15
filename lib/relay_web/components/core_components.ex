@@ -1238,6 +1238,10 @@ defmodule RelayWeb.CoreComponents do
   attr :progress_at, :any, default: nil, doc: "RLY-191 last-progress timestamp for the run face age"
   attr :stalled?, :boolean, default: false, doc: "RLY-191 run face amber-stalls when its job is stuck"
 
+  attr :rate_limited, :map,
+    default: nil,
+    doc: "RE320 %{resumes_at} when the run's queued job waits on a roster paused at its Claude usage limit"
+
   attr :vote_count, :integer,
     default: 0,
     doc: "RLY-69 public-vote count — the ↑ N badge shows in the meta row for unstarted cards with votes"
@@ -1293,6 +1297,7 @@ defmodule RelayWeb.CoreComponents do
         ref={@ref}
         progress_at={@progress_at}
         stalled?={@stalled?}
+        rate_limited={@rate_limited}
       />
       <div
         :if={@status == :working and @progress != nil and is_nil(@run)}
@@ -1595,9 +1600,10 @@ defmodule RelayWeb.CoreComponents do
   defp entry_text(%Activity{text: text}) when is_binary(text) and text != "", do: text
   defp entry_text(%Activity{} = entry), do: activity_phrase(entry)
 
-  # RLY-191: %{card_id => %{progress_at:, stalled?:}} -> board_card/1's two run-face attrs.
+  # RLY-191 / RE320: %{card_id => %{progress_at:, stalled?:, rate_limited:}} -> board_card/1's run-face attrs.
   defp run_meta_at(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:progress_at)
   defp run_meta_stalled?(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:stalled?, false)
+  defp run_meta_rate_limited(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:rate_limited)
 
   defp sublane_width(%{collapsed: true}), do: 34
   defp sublane_width(_sub), do: 178
@@ -2234,6 +2240,11 @@ defmodule RelayWeb.CoreComponents do
   attr :advance_available?, :boolean,
     default: false,
     doc: "RE310: whether `Relay.Runs.advance_foreach_available?/1` holds for the card's latest run"
+
+  attr :rate_limited, :map,
+    default: nil,
+    doc:
+      "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its Claude usage limit — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
 
   attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
 
@@ -3273,6 +3284,11 @@ defmodule RelayWeb.CoreComponents do
                       View in flow metrics →
                     </.link>
                     <RunComponents.run_state_banner
+                      :if={@rate_limited && @latest_detail.status == :running}
+                      variant={:rate_limited}
+                      rate_limited={@rate_limited}
+                    />
+                    <RunComponents.run_state_banner
                       :if={@card.rejection && @latest_detail.status == :running}
                       variant={:reentry}
                       card={@card}
@@ -3376,7 +3392,11 @@ defmodule RelayWeb.CoreComponents do
                       class="text-[11.5px]"
                       style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
                     >
-                      {health_chip_label(@health)}
+                      <%!-- RE320: a quiet card whose runners are paused at their Claude usage
+                            limit is waiting on purpose, not gone quiet. --%>
+                      {if @rate_limited && @health == :stale,
+                        do: RunComponents.rate_limited_label(@rate_limited),
+                        else: health_chip_label(@health)}
                     </span>
                     <button
                       :if={@health == :stopped and !@archived}
@@ -4581,7 +4601,7 @@ defmodule RelayWeb.CoreComponents do
 
   attr :run_meta, :map,
     default: %{},
-    doc: "RLY-191 card_id => %{progress_at:, stalled?:}, from BoardLive's :run_face_meta assign"
+    doc: "RLY-191/RE320 card_id => %{progress_at:, stalled?:, rate_limited:}, from BoardLive's :run_face_meta assign"
 
   attr :vote_counts, :map,
     default: %{},
@@ -4824,6 +4844,7 @@ defmodule RelayWeb.CoreComponents do
                       run={Map.get(@runs, card.id)}
                       progress_at={run_meta_at(@run_meta, card.id)}
                       stalled?={run_meta_stalled?(@run_meta, card.id)}
+                      rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                       vote_count={Map.get(@vote_counts, card.id, 0)}
                       blocked_count={length(Map.get(@blocked_by, card.id, []))}
                     />
@@ -4938,6 +4959,7 @@ defmodule RelayWeb.CoreComponents do
                   run={Map.get(@runs, card.id)}
                   progress_at={run_meta_at(@run_meta, card.id)}
                   stalled?={run_meta_stalled?(@run_meta, card.id)}
+                  rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                   vote_count={Map.get(@vote_counts, card.id, 0)}
                   blocked_count={length(Map.get(@blocked_by, card.id, []))}
                 />

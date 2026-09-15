@@ -545,6 +545,7 @@ defmodule RelayWeb.BoardLive do
         runs={@card_runs}
         run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
         advance_available?={@card_runs != [] and Runs.advance_foreach_available?(hd(@card_runs))}
+        rate_limited={@run_face_meta |> Map.get(@selected_card.id, %{}) |> Map.get(:rate_limited)}
         queued_flow={
           Runs.queued_flow(
             @selected_card,
@@ -2873,18 +2874,25 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-191: the two board-level diagnostics recomputed on every :health_tick — the run-face
   # age/stall map (keyed by card_id for the template) and the stopped-work banner. Both read
-  # the one diagnosis path in Relay.Runs; no re-derivation here.
+  # the one diagnosis path in Relay.Runs; no re-derivation here. RE320 adds the run face's
+  # "Rate limited" chip: one roster read per tick, and the queued-run query only when the whole
+  # roster is paused — never a snapshot per card.
   defp assign_run_diagnostics(socket, board, run_summaries) do
     now = DateTime.utc_now()
     progress = Runs.last_progress_by_run(board)
     working = Runs.working_run_ids(board, now)
+    roster_rate_limit = Runs.roster_rate_limit(board, now)
+    queued = if roster_rate_limit, do: Runs.queued_run_ids(board), else: MapSet.new()
 
     meta =
       for {card_id, s} <- run_summaries, s.status in Run.active_statuses(), into: %{} do
         progress_at = Map.get(progress, s.run_id) || s.started_at
+        rate_limited = if MapSet.member?(queued, s.run_id), do: roster_rate_limit
 
-        {card_id,
-         %{progress_at: progress_at, stalled?: Runs.run_stalled?(progress_at, MapSet.member?(working, s.run_id), now)}}
+        stalled? =
+          is_nil(rate_limited) and Runs.run_stalled?(progress_at, MapSet.member?(working, s.run_id), now)
+
+        {card_id, %{progress_at: progress_at, stalled?: stalled?, rate_limited: rate_limited}}
       end
 
     socket

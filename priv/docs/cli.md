@@ -93,3 +93,20 @@ Publishing is now **coupled to deploying**: the scaffold is built into the app's
 skill or CLI fix reaches projects when the app ships, and there is nothing to publish by hand.
 
 For the autonomous runner and its operating rules, see [the runner](/docs/architecture-runner).
+
+## Usage limits
+
+`./relay start` reads Claude subscription usage from the jobs it already runs. When usage passes a
+configured fraction of a window, it stops claiming. Jobs in flight finish. The runner reports
+itself **RATE LIMITED** to the board and resumes when the window resets. It also resumes earlier
+if a probe every 15 minutes shows usage has dropped. If Claude refuses a call outright, the
+runner pauses until the reset even with no limits configured.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `limits.max_five_hour` | none (no limit) | Fraction (0–1) of the five-hour window at which to stop claiming. |
+| `limits.max_seven_day` | none (no limit) | Fraction (0–1) of the seven-day window at which to stop claiming. |
+
+Any other key inside `limits`, or a value outside 0–1, makes `relay start` refuse to start and
+name the key.
+

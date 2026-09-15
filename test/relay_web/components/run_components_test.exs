@@ -326,6 +326,17 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "mx-4"
       assert html =~ "sm:mx-5"
     end
+
+    test "RE320: a rate-limited roster shares the outdated roster's warning tint" do
+      html =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "b3",
+          verdict: %{reason: :runner_rate_limited, detail: "every connected runner is paused at its Claude usage limit."}
+        )
+
+      assert html =~ "var(--color-warning)"
+      refute html =~ "var(--color-error)"
+    end
   end
 
   describe "run_history/1" do
@@ -503,6 +514,71 @@ defmodule RelayWeb.RunComponentsTest do
       assert_raise FunctionClauseError, fn ->
         render_component(&RunComponents.run_state_banner/1, variant: :parked, detail: detail(%{status: :parked}, []))
       end
+    end
+  end
+
+  describe "run_face/1 rate limited (RE320)" do
+    @running {:run, %{status: :running, node_index: 2, node_count: 4, current_node: "implement", flow_key: "code"}}
+
+    test "renders the amber rate-limited note, which outranks stalled" do
+      html =
+        render_component(&RunComponents.run_face/1,
+          run: @running,
+          ref: "RLY-20",
+          stalled?: true,
+          rate_limited: %{resumes_at: ~U[2026-09-14 15:40:00Z]}
+        )
+
+      assert html =~ ~s(data-rate-limited="true")
+      assert html =~ ~s(data-stalled="false")
+      assert html =~ ~s(id="card-RLY-20-rate-limited")
+      assert html =~ "Rate limited · resumes 3:40 PM UTC"
+      assert html =~ "var(--color-warning)"
+      refute html =~ "Quiet for a while"
+    end
+
+    test "without a rate limit the face is unchanged" do
+      html = render_component(&RunComponents.run_face/1, run: @running, ref: "RLY-21")
+
+      assert html =~ ~s(data-rate-limited="false")
+      refute html =~ "Rate limited"
+      refute html =~ "var(--color-warning)"
+    end
+  end
+
+  describe "rate_limit_note/1 (RE320)" do
+    test "a configured limit names the window, usage, max and resume time" do
+      html =
+        render_component(&RunComponents.rate_limit_note/1,
+          id: "note",
+          rate_limit: %{
+            window: "five_hour",
+            utilization: 0.95,
+            max: 0.9,
+            reason: "limit",
+            resets_at: ~U[2026-09-14 15:40:00Z]
+          }
+        )
+
+      assert html =~ ~s(id="note")
+      assert html =~ "five_hour 95% / 90% · resumes 3:40 PM UTC"
+      assert html =~ "var(--color-warning)"
+    end
+
+    test "a refusal says Claude refused" do
+      html =
+        render_component(&RunComponents.rate_limit_note/1,
+          id: "note",
+          rate_limit: %{
+            window: "five_hour",
+            utilization: nil,
+            max: nil,
+            reason: "rejected",
+            resets_at: ~U[2026-09-14 15:40:00Z]
+          }
+        )
+
+      assert html =~ "Claude refused (five_hour) · resumes 3:40 PM UTC"
     end
   end
 end

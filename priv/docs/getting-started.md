@@ -118,6 +118,11 @@ created at and reset to, and it defaults to `origin/main`:
 Note that `base` governs *worktrees*, not branches: where a card's branch starts is written into
 the flow's `branch` node, and changing it is a flow edit.
 
+**Usage limits.** Add `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` to the same file
+to stop the runner claiming new work once Claude usage passes 90% of the five-hour or seven-day
+window. Jobs already running finish, the Runners view marks the machine **RATE LIMITED**, and it
+resumes on its own when the window resets. Leave a key out for no limit on that window.
+
 ## 5. Enable a flow
 
 Flows are seeded **disabled**, so nothing dispatches until you turn one on. Open

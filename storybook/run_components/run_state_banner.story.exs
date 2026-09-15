@@ -46,6 +46,10 @@ defmodule Storybook.RunComponents.RunStateBanner do
         }
       },
       %Variation{
+        id: :rate_limited,
+        attributes: %{variant: :rate_limited, rate_limited: %{resumes_at: ~U[2026-09-14 15:40:00Z]}}
+      },
+      %Variation{
         id: :revoked,
         attributes: %{
           variant: :revoked,

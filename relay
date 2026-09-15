@@ -43,6 +43,7 @@ DRY = False
 FORWARDER = None
 RUN_IDS = {}   # ref -> run_id of the run currently working it (RLY-112)
 NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-135)
+USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None outside it
 
 # ---- runner version (RLY-184) ----
 #
@@ -54,8 +55,8 @@ NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 63
-RUNNER_FINGERPRINT = "1dd531413ae507c3ac6332d0d354afe67cb04fd9ad2c939bb4115358aa37287b"
+RUNNER_VERSION = 64
+RUNNER_FINGERPRINT = "4da3e651226bc96ff01902ceb9a76b3238c72dd69b70ef8355eba94781b873a1"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -313,13 +314,16 @@ class RunnerHeartbeat:
         startup and whenever the inventory changes (never on every beat). It is what
         Relay.Runs.preflight_flow/1 reads to tell a human whether enabling a flow will
         actually work, before the first card moves.
+      * `rate_limit` (RE320) — the runner's own Claude usage pause, or null; sent on EVERY
+        beat so the board sees a paused runner as paused (and a resumed one as not) within one
+        interval.
 
     Best-effort by construction: swallows api()'s die() (SystemExit) and any other error, so a
     heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for a
     runner pointed at an older server, but the route now exists."""
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None):
+                 held_fn=None, on_release_held=None, rate_limit_fn=None):
         self.runner = runner
         self.running_fn = running_fn
         self.on_revoke = on_revoke
@@ -329,6 +333,7 @@ class RunnerHeartbeat:
         # no-ops so a heartbeat constructed without them still beats.
         self.held_fn = held_fn or (lambda: [])
         self.on_release_held = on_release_held or (lambda _ref, _status=None: None)
+        self.rate_limit_fn = rate_limit_fn or (lambda: None)
         self.interval = interval
         self.capacity = capacity or {}
         # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
@@ -357,7 +362,7 @@ class RunnerHeartbeat:
         try:
             resp = api("POST", "/api/node-jobs/heartbeat",
                        heartbeat_body(self.runner, self.capacity, self.running_fn(),
-                                      self.held_fn(), send),
+                                      self.held_fn(), send, self.rate_limit_fn()),
                        soft_404=True) or {}
             # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
             # alone so the next beat retries.
@@ -697,9 +702,13 @@ def format_runners(runners):
         # outdated is orthogonal to staleness (RLY-184): a beating-normally runner can
         # still be refused work for running old code, so it gets its own flag rather than
         # folding into STALE.
+        rate_limit = e.get("rate_limit")
         flags = "".join([
             "  STALE" if e.get("stale?") else "",
             "  OUTDATED" if e.get("outdated") else "",
+            # RE320: paused at its Claude usage limit — beating, but claiming nothing.
+            (f"  RATE LIMITED ({rate_limit.get('window', '?')}, "
+             f"resumes {rate_limit.get('resets_at', '?')})") if isinstance(rate_limit, dict) else "",
         ])
         out.append(f'{e.get("name", "?")} @ {e.get("host") or "?"}  {caps}  '
                    f'heartbeat: {e.get("last_heartbeat") or "never"}{flags}')
@@ -1435,6 +1444,8 @@ def load_runner_config():
         "poll_timeout": 25,
         "heartbeat_interval": 15,
         "max_retained_failed": 3,
+        # RE320: no Claude usage limit unless configured
+        "limits": {},
         # RE185: auto-update is ON by default (a repo-less project has no other way to move
         # forward); opt out with "auto_update": false. The interval floors how often a
         # runner may ATTEMPT an update, so a flapping board cannot make it thrash.
@@ -1450,6 +1461,7 @@ def load_runner_config():
         die(f"{RUNNER_CONFIG_PATH} is not valid JSON: {e}")
     merged = {**defaults, **cfg}
     merged["capacity"] = {**defaults["capacity"], **(cfg.get("capacity") or {})}
+    merged["limits"] = validate_limits(cfg.get("limits"))
     return merged
 
 
@@ -2338,6 +2350,211 @@ def fmt_capacity(cap):
     return " ".join(f"{k}={v}" for k, v in cap.items())
 
 
+# ---- Claude usage limits (RE320) ----
+#
+# `claude -p --output-format stream-json` emits a `rate_limit_event` on EVERY call — verified on
+# Claude Code 2.1.270 at 2% five-hour usage — so usage is read off the jobs the runner already
+# runs, and a probe that yields no event proves nothing. Fields are nested under
+# `rate_limit_info`: `status`, `rateLimitType`, `resetsAt`, and
+# `unifiedWindows.<window>.{utilization, resetsAt}`. Its `overageStatus` is unrelated to `status`.
+RATE_LIMIT_WINDOWS = ("five_hour", "seven_day")   # pinned: vocabulary.rate_limit_windows
+RATE_LIMIT_REASONS = ("limit", "rejected")        # pinned: vocabulary.rate_limit_reasons
+RATE_LIMIT_REASON_LIMIT, RATE_LIMIT_REASON_REJECTED = RATE_LIMIT_REASONS
+CLAUDE_STATUS_REJECTED = "rejected"   # rate_limit_info.status when Claude refused the call
+# How long a paused runner goes without any usage reading before it probes. One constant, not a
+# runner.json key: AGENTS.md's "a policy number is defined exactly once".
+RATE_LIMIT_PROBE_INTERVAL_S = 900
+RATE_LIMIT_PROBE_TIMEOUT_S = 60
+RATE_LIMIT_PROBE_MODEL = "haiku"   # the cheapest model — a probe exists only to read the event
+RATE_LIMIT_PAUSE_SLICE_S = 5       # short, so shutdown, revokes and resume stay prompt
+RATE_LIMIT_RESUME_LINE = "▶ Claude usage back under limits — claiming again"
+
+
+def limit_key(window):
+    """`five_hour` → `max_five_hour`: the ONE spelling of a `limits` key in .relay/runner.json."""
+    return f"max_{window}"
+
+
+def usage_clock():
+    """Wall-clock seconds for usage limits. `resetsAt` is a unix epoch, so this is time.time()
+    rather than the monotonic clock. A named seam so the claim-loop tests can fake it."""
+    return time.time()
+
+
+def validate_limits(limits):
+    """`.relay/runner.json`'s `limits` block → {"max_<window>": float}. A missing block or key is
+    no limit for that window; an unknown key or a value outside 0–1 refuses to start, naming
+    the key, exactly as invalid JSON does."""
+    if limits is None:
+        return {}
+    allowed = [limit_key(w) for w in RATE_LIMIT_WINDOWS]
+    if not isinstance(limits, dict):
+        die(f'{RUNNER_CONFIG_PATH}: "limits" must be an object like '
+            f'{{"{allowed[0]}": 0.9}}, got {limits!r}')
+    checked = {}
+    for key, value in limits.items():
+        if key not in allowed:
+            die(f'{RUNNER_CONFIG_PATH}: unknown key "limits.{key}" — expected '
+                f'{" or ".join(allowed)}')
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            die(f'{RUNNER_CONFIG_PATH}: "limits.{key}" must be a number in the range 0–1 '
+                f'(a fraction of the usage window, e.g. 0.9), got {value!r}')
+        checked[key] = float(value)
+    return checked
+
+
+def _epoch(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return int(value)
+
+
+def _window_reading(raw):
+    if not isinstance(raw, dict):
+        return None
+    utilization, resets_at = raw.get("utilization"), _epoch(raw.get("resetsAt"))
+    if isinstance(utilization, bool) or not isinstance(utilization, (int, float)) or resets_at is None:
+        return None
+    return {"utilization": float(utilization), "resets_at": resets_at}
+
+
+class UsageLimiter:
+    """The runner's Claude usage state (RE320): fed every stream-json event, it answers whether
+    claiming is paused. Thread-safe (agent and talk workers observe concurrently while the claim
+    loop and the heartbeat thread read) and pure with respect to the clock — every method takes
+    `now` — so bin/test_relay.py needs no sleeps. No I/O.
+
+    A window trips at `utilization >= max`. A `status: "rejected"` event trips the window named by
+    `rateLimitType` whatever the config says. A tripped window clears at its `resets_at`, and its
+    reading is discarded then so stale numbers cannot re-trip it."""
+
+    def __init__(self, limits=None):
+        self.limits = dict(limits or {})
+        self._lock = threading.Lock()
+        self._windows = {}          # window -> {"utilization", "resets_at"}
+        self._rejected = None       # {"window", "resets_at"} while Claude's last word is a refusal
+        self._last_event_at = None
+        self._last_probe_at = None
+
+    def observe(self, event, now):
+        """Feed one parsed stream-json event; True when it was a usable rate_limit_event. Total:
+        any other event, an unknown shape or a garbage value is ignored and never raises into
+        the job that streamed it."""
+        if not isinstance(event, dict) or event.get("type") != "rate_limit_event":
+            return False
+        info = event.get("rate_limit_info", event)
+        if not isinstance(info, dict):
+            return False
+        windows = info.get("unifiedWindows")
+        readings = {}
+        if isinstance(windows, dict):
+            for window in RATE_LIMIT_WINDOWS:
+                reading = _window_reading(windows.get(window))
+                if reading:
+                    readings[window] = reading
+        status = info.get("status")
+        if not readings and not isinstance(status, str):
+            return False
+        with self._lock:
+            self._windows.update(readings)
+            if status == CLAUDE_STATUS_REJECTED:
+                window = info.get("rateLimitType")
+                if isinstance(window, str) and window in RATE_LIMIT_WINDOWS:
+                    resets_at = (_epoch(info.get("resetsAt"))
+                                 or (readings.get(window) or {}).get("resets_at"))
+                    if resets_at:
+                        self._rejected = {"window": window, "resets_at": resets_at}
+            elif isinstance(status, str):
+                self._rejected = None
+            self._last_event_at = now
+        return True
+
+    def paused(self, now):
+        """None while claiming is allowed; else the tripped window as the heartbeat sends it —
+        {window, utilization, max, resets_at, reason}. With several tripped, the one with the
+        LATEST reset, since that is when claiming can actually resume."""
+        with self._lock:
+            self._expire(now)
+            trips = []
+            for window, reading in self._windows.items():
+                cap = self.limits.get(limit_key(window))
+                if cap is not None and reading["utilization"] >= cap:
+                    trips.append({"window": window, "utilization": reading["utilization"],
+                                  "max": cap, "resets_at": reading["resets_at"],
+                                  "reason": RATE_LIMIT_REASON_LIMIT})
+            if self._rejected:
+                window = self._rejected["window"]
+                trips.append({"window": window,
+                              "utilization": (self._windows.get(window) or {}).get("utilization"),
+                              "max": self.limits.get(limit_key(window)),
+                              "resets_at": self._rejected["resets_at"],
+                              "reason": RATE_LIMIT_REASON_REJECTED})
+        if not trips:
+            return None
+        return max(trips, key=lambda t: (t["resets_at"], t["reason"] == RATE_LIMIT_REASON_REJECTED))
+
+    def wire(self, now):
+        """The heartbeat's `rate_limit` value: `paused(now)`, null when claiming."""
+        return self.paused(now)
+
+    def probe_due(self, now):
+        """True when neither a job's stream nor a probe has produced a reading within
+        RATE_LIMIT_PROBE_INTERVAL_S. The caller only asks while paused."""
+        with self._lock:
+            heard = [t for t in (self._last_event_at, self._last_probe_at) if t is not None]
+        return not heard or now - max(heard) >= RATE_LIMIT_PROBE_INTERVAL_S
+
+    def mark_probed(self, now):
+        with self._lock:
+            self._last_probe_at = now
+
+    def _expire(self, now):
+        for window in [w for w, r in self._windows.items() if now >= r["resets_at"]]:
+            del self._windows[window]
+        if self._rejected and now >= self._rejected["resets_at"]:
+            self._rejected = None
+
+
+def probe_claude_usage(limiter):
+    """Ask Claude for a fresh usage reading while paused (RE320): the cheapest `claude -p` there
+    is, one turn from a neutral cwd (never a worktree, never counted against capacity), its
+    stream-json fed to `limiter`. Returns None when it produced a reading, else a short reason
+    for the caller to log. It never un-pauses anything by itself — only an observed event can."""
+    cmd = ["claude", "-p", "ok", "--verbose", "--output-format", "stream-json",
+           "--model", RATE_LIMIT_PROBE_MODEL, "--max-turns", "1"]
+    try:
+        proc = subprocess.run(cmd, cwd=tempfile.gettempdir(), capture_output=True, text=True,
+                              timeout=RATE_LIMIT_PROBE_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"could not run claude: {e}"
+    observed = False
+    for line in (proc.stdout or "").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        observed = limiter.observe(event, usage_clock()) or observed
+    if observed:
+        return None
+    return f"claude exited {proc.returncode} with no rate_limit_event"
+
+
+def _usage_pct(fraction):
+    return f"{round(fraction * 100)}%"
+
+
+def rate_limit_pause_line(pause):
+    """The one line a runner logs on entering a pause, e.g.
+    `⏸ rate limited: five_hour 92% ≥ 90% limit · resumes 15:40 · probing every 15m`."""
+    resumes = time.strftime("%H:%M", time.localtime(pause["resets_at"]))
+    if pause["reason"] == RATE_LIMIT_REASON_REJECTED:
+        why = f"Claude refused ({pause['window']})"
+    else:
+        why = f"{pause['window']} {_usage_pct(pause['utilization'])} ≥ {_usage_pct(pause['max'])} limit"
+    return (f"⏸ rate limited: {why} · resumes {resumes} · "
+            f"probing every {RATE_LIMIT_PROBE_INTERVAL_S // 60}m")
+
+
 IDLE_LOG_INTERVAL = 300   # seconds between repeats of one "nothing is happening" line
 
 
@@ -2458,7 +2675,7 @@ def claim_body(runner, capacity, running=(), held=()):
             "held": list(held)}
 
 
-def heartbeat_body(runner, capacity, running, held, capabilities=None):
+def heartbeat_body(runner, capacity, running, held, capabilities=None, rate_limit=None):
     """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164 / RE311).
 
     Pure for the same reason as outcome_body: it is pinned against the fixture's
@@ -2467,9 +2684,11 @@ def heartbeat_body(runner, capacity, running, held, capabilities=None):
     card's runs have all ended, which the runner disposes of. It REPLACES RLY-218's
     run-id-keyed `bound_runs`: a worktree recovered after a restart has no known run-id, so the
     old key could not name the case that leaked slots. `capabilities` is OPTIONAL and rides
-    send-on-change (RLY-182): omitted on a beat where nothing changed."""
+    send-on-change (RLY-182): omitted on a beat where nothing changed. `rate_limit` (RE320) is
+    ALWAYS sent: null while claiming, `UsageLimiter.wire()` while paused — the server clears the
+    pause on null, so omitting it would leave a resumed runner marked rate limited."""
     body = {"runner": runner, "capacity": capacity, "running": running,
-            "held": held}
+            "held": held, "rate_limit": rate_limit}
     if capabilities is not None:
         body["capabilities"] = capabilities
     return body
@@ -2537,6 +2756,8 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
             ev = json.loads(line)
             captured = ev.get("session_id") or captured
             _print_claude_event(ev, tag, mirror=mirror)
+            if USAGE_LIMITER is not None:
+                USAGE_LIMITER.observe(ev, usage_clock())    # RE320: total; never raises
             if on_event:
                 on_event(ev)
         except Exception:
@@ -3713,7 +3934,7 @@ def maybe_auto_update(cfg, hb, state, config_url):
 def cmd_start(args):
     """The runner mode (ADR 0006): claim node-jobs from the server, run each in a runner
     worktree, and report a typed outcome."""
-    global DRY, FORWARDER
+    global DRY, FORWARDER, USAGE_LIMITER
     DRY = args.dry_run
     cfg = load_runner_config()
     if args.name is not None:
@@ -3731,6 +3952,10 @@ def cmd_start(args):
     acquire_runner_locks(cfg)   # RLY-193: refuse a colliding second runner before any work
     runner = runner_ident(cfg)
     pool = RunnerPool(cfg)
+    # RE320: every agent/talk stream feeds this; the loop pauses claiming on it and the
+    # heartbeat reports it.
+    limiter = UsageLimiter(cfg.get("limits"))
+    USAGE_LIMITER = limiter
     # RE305: fetched here — after the locks (a refused second runner should do no network
     # work) and before the forwarder/heartbeat threads exist (see board_identity).
     board_desc, board_error = board_identity()
@@ -3790,6 +4015,8 @@ def cmd_start(args):
     outdated = False        # RLY-184: one-way — nothing in-process can pick up new code
     required_version = None
     idle_log = IdleLog()    # RE305: throttles the two "nothing is happening" lines
+    pause_logged = False            # RE320: one line entering a pause, one leaving it
+    probe_failure_logged = False
 
     hb = None
     if not DRY:
@@ -3797,7 +4024,8 @@ def cmd_start(args):
                                interval=cfg["heartbeat_interval"],
                                capacity=cfg["capacity"],
                                held_fn=pool.holdings,
-                               on_release_held=pool.release_held)
+                               on_release_held=pool.release_held,
+                               rate_limit_fn=lambda: limiter.wire(usage_clock()))
         # Beat once up front: Relay.Runs.Capacity is empty on a fresh server (it is lost on
         # every restart by design), and until it is fed the scheduler plans zero dispatches.
         # Waiting a full interval here would make "start the runner" look broken.
@@ -3861,6 +4089,32 @@ def cmd_start(args):
             wake.wait(poll_timeout)
             wake.clear()
             continue
+        # RE320: a runner paused at its Claude usage limit claims NOTHING — node, gate or talk —
+        # but keeps beating (with its `rate_limit`) and lets in-flight jobs finish. A claim
+        # already in flight when the limit tripped is honoured; that is accepted, not worked around.
+        now = usage_clock()
+        pause = limiter.paused(now)
+        if pause:
+            if not pause_logged:
+                log(rate_limit_pause_line(pause))
+                pause_logged = True
+            if limiter.probe_due(now):
+                limiter.mark_probed(now)
+                failure = probe_claude_usage(limiter)
+                if failure and not probe_failure_logged:
+                    log(f"rate-limit probe failed ({failure}) — waiting for the reset", kind="error")
+                    probe_failure_logged = True
+                pause = limiter.paused(usage_clock())
+        if pause:
+            if args.once:
+                break
+            wake.wait(RATE_LIMIT_PAUSE_SLICE_S)
+            wake.clear()
+            continue
+        if pause_logged:
+            log(RATE_LIMIT_RESUME_LINE)
+            pause_logged = False
+            probe_failure_logged = False
         cap = pool.capacity()
         # No free slots → idle, UNLESS an exclusive slot is bound to a run: that
         # run's pinned resume/next job is claimable regardless of advertised

@@ -21,6 +21,7 @@ defmodule RelayWeb.RunComponents do
 
   use Phoenix.Component
 
+  alias Relay.Runs
   alias RelayWeb.RunStatus
   alias RelayWeb.TimeAgo
 
@@ -465,8 +466,9 @@ defmodule RelayWeb.RunComponents do
 
   # RE279: no :parked variant — a parked run's answer surface lives once, on the drawer's Detail
   # tab, and the blocked strip above the tabs carries the blocked state.
-  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed]
+  attr :variant, :atom, required: true, values: [:reentry, :revoked, :circuit, :failed, :rate_limited]
   attr :detail, :map, default: nil
+  attr :rate_limited, :map, default: nil, doc: "RE320 %{resumes_at} for the :rate_limited variant"
   attr :card, :any, default: nil
   attr :claimer, :string, default: nil
 
@@ -562,6 +564,26 @@ defmodule RelayWeb.RunComponents do
   # The honest banner for every failure mode that ISN'T a tripped breaker. Same red
   # frame, no invented cause: it leads with `runs.failure_detail` — the engine's
   # human-first sentence, which the Run tab surfaced nowhere before RLY-179.
+  # RE320 — a live run whose queued job waits on a roster paused at its Claude usage limit. The
+  # sentence is `Relay.Runs.rate_limited_run_detail/1`, the same copy `relay why` prints; the
+  # warning tokens match the run face's "Rate limited" chip (no artboard covers rate limiting).
+  def run_state_banner(%{variant: :rate_limited} = assigns) do
+    ~H"""
+    <div
+      id="run-banner-rate-limited"
+      class="run-banner run-banner-rate-limited"
+      style="border-left:3px solid var(--color-warning);background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
+    >
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));margin-bottom:6px;">
+        ⏸ RATE LIMITED
+      </div>
+      <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);margin:0;">
+        {Runs.rate_limited_run_detail(@rate_limited.resumes_at)}
+      </p>
+    </div>
+    """
+  end
+
   def run_state_banner(%{variant: :failed} = assigns) do
     assigns =
       assigns
@@ -647,9 +669,10 @@ defmodule RelayWeb.RunComponents do
 
   @doc ~S"""
   `Relay.Runs.stopped_work/2`'s board-level verdict as one line. ONE copy of the
-  reason→severity mapping — `:runner_outdated` is the warning tint (the machines are there and
-  beating, they are just being refused), every other reason is the error tint (nothing is going
-  to pick the work up at all) — so the board and the Runners view can never drift.
+  reason→severity mapping — `:runner_outdated` and `:runner_rate_limited` are the warning tint
+  (the machines are there and beating, they are just refused or paused at their Claude usage
+  limit), every other reason is the error tint (nothing is going to pick the work up at all) —
+  so the board and the Runners view can never drift.
 
   The copy is `verdict.detail`, which is already a complete sentence; never re-derive it. The
   caller owns layout margins via `class` and the DOM `id`, since the same verdict renders on two
@@ -679,9 +702,35 @@ defmodule RelayWeb.RunComponents do
     do:
       "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
 
+  defp stopped_work_style(:runner_rate_limited), do: stopped_work_style(:runner_outdated)
+
   defp stopped_work_style(_reason),
     do:
       "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));"
+
+  # ---------- rate_limit_note ----------
+
+  @doc ~S"""
+  A runner's Claude usage pause as one amber line (RE320): `five_hour 95% / 90% · resumes 3:40 PM
+  UTC`, or `Claude refused (five_hour) · resumes …`. Takes the plain map
+  `Relay.Runs.active_rate_limit/2` returns; the copy is `Relay.Runs.rate_limit_phrase/1` and
+  `Relay.Runs.resume_time_label/1`, never re-derived here. No artboard covers rate limiting, so it
+  borrows the stalled run face's warning tokens.
+  """
+  attr :id, :string, required: true
+  attr :rate_limit, :map, required: true
+
+  def rate_limit_note(assigns) do
+    ~H"""
+    <span
+      id={@id}
+      class="run-rate-limit-note font-mono"
+      style="font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));"
+    >
+      {Runs.rate_limit_phrase(@rate_limit)} · resumes {Runs.resume_time_label(@rate_limit.resets_at)}
+    </span>
+    """
+  end
 
   attr :totals, :map, required: true
 
@@ -794,6 +843,13 @@ defmodule RelayWeb.RunComponents do
   defp history_duration_color(:failed), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
   defp history_duration_color(_status), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"
 
+  @doc ~S"""
+  The short rate-limited label (RE320): `Rate limited · resumes 3:40 PM UTC`. Takes
+  `Relay.Runs.roster_rate_limit/2`'s `%{resumes_at}`; ONE copy for the run face chip and the
+  card drawer's Activity chip.
+  """
+  def rate_limited_label(%{resumes_at: resumes_at}), do: "Rate limited · resumes #{Runs.resume_time_label(resumes_at)}"
+
   # ---------- run_face (board card) ----------
 
   attr :run, :any, required: true
@@ -801,8 +857,16 @@ defmodule RelayWeb.RunComponents do
   attr :progress_at, :any, default: nil
   attr :stalled?, :boolean, default: false
 
+  attr :rate_limited, :map,
+    default: nil,
+    doc: "RE320 %{resumes_at} when this run's queued job waits on a roster paused at its usage limit"
+
   def run_face(assigns) do
-    assigns = assign(assigns, :state, face_state(assigns.run))
+    # A reported pause is the more specific fact than an inferred stall — never show both.
+    assigns =
+      assigns
+      |> assign(:state, face_state(assigns.run))
+      |> assign(:stalled?, assigns.stalled? and is_nil(assigns.rate_limited))
 
     ~H"""
     <div
@@ -810,6 +874,7 @@ defmodule RelayWeb.RunComponents do
       class="run-face"
       data-run-state={@state}
       data-stalled={to_string(@stalled?)}
+      data-rate-limited={to_string(@rate_limited != nil)}
     >
       <.face_running
         :if={@state == :running}
@@ -817,6 +882,7 @@ defmodule RelayWeb.RunComponents do
         ref={@ref}
         progress_at={@progress_at}
         stalled?={@stalled?}
+        rate_limited={@rate_limited}
       />
       <.face_parked :if={@state == :parked} summary={run_summary(@run)} />
       <.face_failed :if={@state == :failed} summary={run_summary(@run)} />
@@ -841,14 +907,23 @@ defmodule RelayWeb.RunComponents do
   attr :ref, :string, required: true
   attr :progress_at, :any, default: nil
   attr :stalled?, :boolean, default: false
+  attr :rate_limited, :map, default: nil
 
   defp face_running(assigns) do
+    # RE320: rate limited wears the stalled treatment's amber tokens (no artboard covers it), but
+    # it is a REPORTED state, so it shows without the stall threshold.
+    assigns = assign(assigns, :amber?, assigns.stalled? or assigns.rate_limited != nil)
+
     ~H"""
     <div
-      class={["run-face-running", @stalled? && "run-face-stalled"]}
+      class={[
+        "run-face-running",
+        @stalled? && "run-face-stalled",
+        @rate_limited && "run-face-rate-limited"
+      ]}
       style={
         "display:flex;flex-direction:column;gap:6px;" <>
-          if(@stalled?,
+          if(@amber?,
             do:
               "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));border-radius:8px;padding:8px 10px;",
             else: ""
@@ -861,10 +936,10 @@ defmodule RelayWeb.RunComponents do
           style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"}
         />
       </div>
-      <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@stalled?, do: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))", else: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))")};"}>
-        <span style={"width:6px;height:6px;border-radius:50%;background:#{if(@stalled?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @stalled?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
+      <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@amber?, do: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))", else: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))")};"}>
+        <span style={"width:6px;height:6px;border-radius:50%;background:#{if(@amber?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @amber?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
         <span
-          :if={not @stalled?}
+          :if={not @amber?}
           style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;"
         /> node {@summary.node_index} of {@summary.node_count}
         <span style="flex:1;"></span>
@@ -883,6 +958,14 @@ defmodule RelayWeb.RunComponents do
         style="font-family:var(--font-mono);font-size:10.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));"
       >
         Quiet for a while — may be stuck
+      </div>
+      <div
+        :if={@rate_limited}
+        id={"card-#{@ref}-rate-limited"}
+        class="run-face-rate-limited-note"
+        style="font-family:var(--font-mono);font-size:10.5px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));"
+      >
+        {rate_limited_label(@rate_limited)}
       </div>
     </div>
     """

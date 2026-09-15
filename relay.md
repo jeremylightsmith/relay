@@ -29,6 +29,13 @@ runner config file. `./relay` knows the REST API and nothing about any board's c
    then offers to enable the flows.
    (Already wired and one node broke? Reach for `/relay-doctor` directly.)
 
+**Usage limits.** `.relay/runner.json` can carry `"limits": {"max_five_hour": 0.9,
+"max_seven_day": 0.9}`. Once Claude usage passes that fraction of the five-hour or seven-day
+window, `relay start` stops claiming new work (running jobs finish), shows as **RATE LIMITED** on
+the Runners view, and resumes on its own at the reset, or earlier if a probe shows usage has
+dropped. A missing key means no limit. A card waiting only on paused runners shows an amber
+`Rate limited · resumes …` chip.
+
 Full reference for any of the below: `$RELAY_URL/docs` (CLI, API, auth, statuses).
 
 ## Mental model — where state lives, where it drops

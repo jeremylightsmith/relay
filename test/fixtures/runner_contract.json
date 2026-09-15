@@ -96,6 +96,13 @@
         "shared_clean": 1
       },
       "held": [],
+      "rate_limit": {
+        "max": 0.9,
+        "reason": "limit",
+        "resets_at": 4102444800,
+        "utilization": 0.95,
+        "window": "five_hour"
+      },
       "runner": {
         "host": "fixture-host",
         "interval": 30,
@@ -255,6 +262,14 @@
       "failed",
       "partial",
       "needs_input"
+    ],
+    "rate_limit_reasons": [
+      "limit",
+      "rejected"
+    ],
+    "rate_limit_windows": [
+      "five_hour",
+      "seven_day"
     ],
     "run_states": {
       "active": [

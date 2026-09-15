@@ -46,6 +46,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
+  alias Relay.Runs.Scheduler.Snapshot
   alias Relay.Runs.Transitions
   alias Schemas.Board
   alias Schemas.Card
@@ -54,6 +55,7 @@ defmodule Relay.Runs do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Runner
+  alias Schemas.RunnerRateLimit
   alias Schemas.Stage
   alias Schemas.SubTask
 
@@ -612,6 +614,26 @@ defmodule Relay.Runs do
     end)
   end
 
+  @doc """
+  Run ids whose current node-job is queued and unclaimed (flow jobs only). BoardLive intersects
+  this with `roster_rate_limit/2` for the run-face "Rate limited" chip (RE320); it only runs when
+  the roster is rate limited, so a healthy board never pays for it.
+  """
+  @spec queued_run_ids(Board.t()) :: MapSet.t()
+  def queued_run_ids(%Board{} = board) do
+    from(j in NodeJob,
+      join: r in Run,
+      on: r.id == j.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^board.id and j.state == :queued,
+      where: j.kind in ^NodeJob.flow_kinds(),
+      select: j.run_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
   @doc "Whether a run face should show the amber stalled treatment: not currently working AND its last progress is older than `@run_stale_after_s`. The single home of the 5-minute policy."
   @spec run_stalled?(DateTime.t() | nil, boolean(), DateTime.t()) :: boolean()
   def run_stalled?(nil, _working?, _now), do: false
@@ -1150,11 +1172,96 @@ defmodule Relay.Runs do
   def runner_outdated?(%Runner{}), do: true
 
   @doc """
+  Whether `runner` is paused at its Claude usage limit at `now` (RE320): it reported a
+  `rate_limit` on its last heartbeat and that window has not reset. A stored value whose
+  `resets_at` has passed reads as NOT rate limited even before the next beat clears it — the
+  runner resumes claiming at that moment, so the board must stop saying otherwise. The single
+  home of that predicate.
+  """
+  @spec runner_rate_limited?(Runner.t(), DateTime.t()) :: boolean()
+  def runner_rate_limited?(%Runner{rate_limit: %RunnerRateLimit{resets_at: %DateTime{} = at}}, %DateTime{} = now),
+    do: DateTime.after?(at, now)
+
+  def runner_rate_limited?(%Runner{}, _now), do: false
+
+  @doc """
+  The runner's live usage pause at `now` as a plain map — `%{window, utilization, max,
+  resets_at, reason}` — or nil when `runner_rate_limited?/2` is false. Plain so the scheduler
+  snapshot, the roster view and the JSON API carry no Ecto struct.
+  """
+  def active_rate_limit(%Runner{} = runner, %DateTime{} = now) do
+    if runner_rate_limited?(runner, now), do: Map.from_struct(runner.rate_limit)
+  end
+
+  @doc """
+  One runner as `Scheduler.Snapshot.runners` carries it. Built here, once, for both
+  `Scheduler.Server.build_snapshot/2` and `roster_rate_limit/2`, so the run-face chip and the
+  scheduler's diagnosis read the same facts.
+  """
+  def runner_snapshot_entry(%Runner{} = runner, %DateTime{} = now) do
+    %{
+      name: runner.name,
+      version: runner.version,
+      outdated: runner_outdated?(runner),
+      freshness: runner_freshness(runner, now),
+      rate_limit: active_rate_limit(runner, now)
+    }
+  end
+
+  @doc """
+  `%{resumes_at: DateTime}` when the board's roster diagnosis at `now` is `:runner_rate_limited`
+  — every live, current runner is paused at its Claude usage limit — else nil. One runners query
+  through the same `Scheduler.capacity_diagnosis/1` every other surface reads, without the
+  card/stage/flow reads a full snapshot costs: BoardLive calls this once per health tick.
+  """
+  @spec roster_rate_limit(Board.t(), DateTime.t()) :: %{resumes_at: DateTime.t()} | nil
+  def roster_rate_limit(%Board{} = board, %DateTime{} = now) do
+    runners = board.id |> list_board_runners() |> Map.new(&{&1.id, runner_snapshot_entry(&1, now)})
+
+    case Scheduler.capacity_diagnosis(%Snapshot{runners: runners}) do
+      {:runner_rate_limited, %{resumes_at: resumes_at}} -> %{resumes_at: resumes_at}
+      _other -> nil
+    end
+  end
+
+  @doc ~S"""
+  One runner's usage pause as the board prints it: `five_hour 95% / 90%` for a configured limit,
+  `Claude refused (five_hour)` for a refusal. The ONE rendering — the stopped-work banner, the
+  run diagnosis and the Runners page all call it.
+  """
+  def rate_limit_phrase(%{window: window} = rate_limit) do
+    if Runner.rejected_rate_limit?(rate_limit),
+      do: "Claude refused (#{window})",
+      else: "#{window} #{usage_percent(rate_limit.utilization)} / #{usage_percent(rate_limit.max)}"
+  end
+
+  @doc "Every paused runner in `capacity_diagnosis/1`'s `:runner_rate_limited` evidence, phrased and de-duplicated."
+  def roster_rate_limit_phrase(%{rate_limited_runners: paused}),
+    do: paused |> Enum.map(&rate_limit_phrase/1) |> Enum.uniq() |> Enum.join(", ")
+
+  defp usage_percent(nil), do: "?"
+  defp usage_percent(fraction), do: "#{round(fraction * 100)}%"
+
+  @doc """
+  The `:runner_rate_limited` run diagnosis sentence — ONE copy for `diagnose/3` (`relay why`, the
+  API) and the card drawer's Run tab, which reads `roster_rate_limit/2`'s `resumes_at` per tick
+  rather than paying for a full snapshot.
+  """
+  @spec rate_limited_run_detail(DateTime.t()) :: String.t()
+  def rate_limited_run_detail(%DateTime{} = resumes_at) do
+    "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
+      "Resumes #{resume_time_label(resumes_at)}."
+  end
+
+  @doc ~S(When a paused runner resumes, as the board prints it: `3:40 PM UTC`.)
+  def resume_time_label(%DateTime{} = at), do: Calendar.strftime(at, "%-I:%M %p UTC")
+
+  @doc """
   Upserts the durable runner row keyed `{board_id, name}`, refreshing host,
   interval, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
   STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
-  `"capacity"` / `"capabilities"`).
+  `"capacity"` / `"capabilities"` / `"held"` / `"rate_limit"`).
 
   **Optional fields are absent-means-untouched.** `capabilities` rides send-on-change
   (RLY-182) and `capacity` now rides the HEARTBEAT ONLY (RE311) — the claim's `capacity` is a
@@ -1178,6 +1285,7 @@ defmodule Relay.Runs do
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, normalize_held_attr(attrs["held"]))
+      |> put_rate_limit(attrs)
 
     %Runner{}
     |> Runner.changeset(params)
@@ -1192,6 +1300,22 @@ defmodule Relay.Runs do
   # column untouched. The one place that discipline is expressed, for every optional field.
   defp put_reported({params, replace}, _field, nil), do: {params, replace}
   defp put_reported({params, replace}, field, value), do: {Map.put(params, field, value), [field | replace]}
+
+  # RE320: unlike the optional fields above, `rate_limit` has a meaningful nil — "not paused" — so
+  # the presence of the KEY decides whether the column is written. Only the heartbeat puts the
+  # key (already normalized by `Schemas.Runner.normalize_rate_limit/1`); `runner_attrs/1` strips
+  # it from a claim before it ever reaches here. This still only trusts a value that is ALREADY
+  # the normalized shape — an already-normalized struct or nil — and drops (leaves untouched)
+  # anything else, so a caller that slips past that boundary degrades instead of crashing
+  # `put_embed/3` or clearing a real pause.
+  defp put_rate_limit({params, replace}, attrs) do
+    case Map.fetch(attrs, "rate_limit") do
+      {:ok, %RunnerRateLimit{} = rate_limit} -> {Map.put(params, :rate_limit, rate_limit), [:rate_limit | replace]}
+      {:ok, nil} -> {Map.put(params, :rate_limit, nil), [:rate_limit | replace]}
+      {:ok, _other} -> {params, replace}
+      :error -> {params, replace}
+    end
+  end
 
   defp normalize_interval(i) when is_integer(i) and i > 0, do: i
   defp normalize_interval(_i), do: 30
@@ -1618,6 +1742,7 @@ defmodule Relay.Runs do
       jobs = Map.get(jobs_by_runner, runner.name, [])
       freshness = runner_freshness(runner, now)
       outdated = runner_outdated?(runner)
+      rate_limit = active_rate_limit(runner, now)
 
       %{
         id: runner.id,
@@ -1630,10 +1755,13 @@ defmodule Relay.Runs do
         # Orthogonal to `freshness` on purpose (RLY-184): a refused runner is perfectly
         # healthy and beating normally — it is just running old code.
         outdated: outdated,
+        # RE320: the live usage pause, nil once it resets
+        rate_limit: rate_limit,
         # RLY-191: the single presentation state the runners view renders from. Precedence
-        # :gone > :stale > :outdated > :fresh — a silent runner's silence is the more urgent
-        # fact than its version. Derived, never stored; `freshness` keeps heartbeat truth.
-        display_state: display_state(freshness, outdated),
+        # :gone > :stale > :outdated > :rate_limited > :fresh — a silent runner's silence is the
+        # more urgent fact than its version. Derived, never stored; `freshness` keeps heartbeat
+        # truth.
+        display_state: display_state(freshness, outdated, rate_limit != nil),
         # RE311: what this runner declares it holds — the chip's `used` is derived from it,
         # and the runners view names each entry in the chip's tooltip.
         held: List.wrap(runner.held),
@@ -1643,10 +1771,11 @@ defmodule Relay.Runs do
     end)
   end
 
-  defp display_state(:gone, _outdated), do: :gone
-  defp display_state(:stale, _outdated), do: :stale
-  defp display_state(:fresh, true), do: :outdated
-  defp display_state(:fresh, false), do: :fresh
+  defp display_state(:gone, _outdated, _rate_limited), do: :gone
+  defp display_state(:stale, _outdated, _rate_limited), do: :stale
+  defp display_state(:fresh, true, _rate_limited), do: :outdated
+  defp display_state(:fresh, false, true), do: :rate_limited
+  defp display_state(:fresh, false, false), do: :fresh
 
   @doc ~S"""
   The board's **active queue** at `now` — every `queued` or `claimed` node job on the board, both
@@ -1892,12 +2021,13 @@ defmodule Relay.Runs do
   The board-level "work has stopped" verdict, or `nil` when the board is quiet. Non-`nil` only
   when: at least one node-job is queued and unclaimed, the oldest has waited past
   `@stopped_work_after_s`, AND the shared `Scheduler.capacity_diagnosis/1` blames the roster
-  (outdated / no runner / all gone) rather than a legitimately busy board. `now` is injectable.
+  (outdated / no runner / all gone / all paused at a usage limit) rather than a legitimately
+  busy board. `now` is injectable.
   """
   @spec stopped_work(Board.t(), DateTime.t() | nil) ::
           nil
           | %{
-              reason: :runner_outdated | :no_runner | :runner_gone,
+              reason: :runner_outdated | :no_runner | :runner_gone | :runner_rate_limited,
               detail: String.t(),
               queued_count: pos_integer(),
               oldest_queued_age_s: pos_integer(),
@@ -1926,7 +2056,7 @@ defmodule Relay.Runs do
     {snapshot, _cards_by_id} = SchedulerServer.build_snapshot(board.id, SchedulerServer.configured_engine())
     {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
 
-    if reason in [:runner_outdated, :no_runner, :runner_gone] do
+    if reason in Scheduler.roster_blocking_reasons() do
       %{
         reason: reason,
         detail: stopped_work_detail(reason, bits, age),
@@ -1967,6 +2097,11 @@ defmodule Relay.Runs do
 
   defp stopped_work_detail(reason, _bits, age) when reason in [:no_runner, :runner_gone] do
     "No jobs claimed in #{div(age, 60)}m · no runner is connected to run this board's work."
+  end
+
+  defp stopped_work_detail(:runner_rate_limited, bits, age) do
+    "No jobs claimed in #{div(age, 60)}m · every connected runner is paused at its Claude usage limit " <>
+      "(#{roster_rate_limit_phrase(bits)}) · resumes #{resume_time_label(bits.resumes_at)}."
   end
 
   @doc """
@@ -2096,7 +2231,7 @@ defmodule Relay.Runs do
   defp roster_blocked?(%{status: :parked}, _job, _board, _now, _capacity), do: false
 
   defp roster_blocked?(_run, job, board, now, {reason, _bits}) do
-    reason in [:runner_outdated, :no_runner, :runner_gone] and not job_working?(job, board, now)
+    reason in Scheduler.roster_blocking_reasons() and not job_working?(job, board, now)
   end
 
   defp job_working?(%NodeJob{state: state, runner_name: name}, board, now) when is_binary(name) do
@@ -2127,6 +2262,15 @@ defmodule Relay.Runs do
       base
       | verdict: :no_runner,
         detail: "This run's node-job is queued but no runner is connected to claim it.",
+        evidence: Map.merge(base.evidence, bits)
+    }
+  end
+
+  defp roster_blocked_verdict(base, {:runner_rate_limited, bits}) do
+    %{
+      base
+      | verdict: :runner_rate_limited,
+        detail: rate_limited_run_detail(bits.resumes_at),
         evidence: Map.merge(base.evidence, bits)
     }
   end
@@ -2221,11 +2365,13 @@ defmodule Relay.Runs do
   # verdict can never disagree with what an operator is looking at while they run `relay why`.
   # OUTDATED rows are excluded: a refused runner claims nothing whatever its free slots say,
   # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
-  # the more specific `:runner_outdated` from roster_blocked?/5 keeps winning.
+  # the more specific `:runner_outdated` from roster_blocked?/5 keeps winning. RE320: paused
+  # runners are excluded for the same reason — a runner paused at its usage limit claims nothing
+  # when a slot frees, so an all-paused roster falls through to `:runner_rate_limited`.
   defp connected_runners(board, now) do
     board
     |> list_runner_status(now)
-    |> Enum.filter(&(&1.freshness == :fresh and not &1.outdated))
+    |> Enum.filter(&(&1.freshness == :fresh and not &1.outdated and is_nil(&1.rate_limit)))
   end
 
   defp free_slot?(runner, isolation) do

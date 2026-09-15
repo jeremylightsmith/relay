@@ -12,6 +12,8 @@ defmodule RelayWeb.Api.NodeJobController do
   alias Relay.Talk
   alias Schemas.Runner
 
+  require Logger
+
   action_fallback RelayWeb.Api.FallbackController
 
   # ~25s sits safely under Fly's proxy idle timeout.
@@ -181,21 +183,43 @@ defmodule RelayWeb.Api.NodeJobController do
   # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
   # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
   # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
+  # RE320: `rate_limit` is dropped here too, whatever the client's `runner` object carries —
+  # `exec_attrs` feeds the claim's `Runs.upsert_runner/2` call directly (no `heartbeat_attrs/2`
+  # in between), so a client-supplied "rate_limit" key would otherwise reach the roster write
+  # unnormalized. Only `heartbeat_attrs/2` puts the (normalized) key back, from the top-level
+  # `rate_limit`, never from this nested one.
   defp runner_attrs(params) do
     case Map.get(params, "runner", %{}) do
       runner when is_map(runner) ->
-        {:ok, Map.put(runner, "capabilities", Map.get(params, "capabilities"))}
+        {:ok, runner |> Map.delete("rate_limit") |> Map.put("capabilities", Map.get(params, "capabilities"))}
 
       _ ->
         {:error, :invalid_runner}
     end
   end
 
-  # The heartbeat is the ONE writer of the durable roster state (RE311).
+  # The heartbeat is the ONE writer of the durable roster state (RE311). RE320: `rate_limit` is
+  # always put — a JSON null (or a pre-RE320 runner that never sends the key) CLEARS the pause.
   defp heartbeat_attrs(params, exec_attrs) do
     exec_attrs
     |> Map.put("capacity", Map.get(params, "capacity"))
     |> Map.put("held", Map.get(params, "held"))
+    |> Map.put("rate_limit", rate_limit_attr(Map.get(params, "rate_limit")))
+  end
+
+  # A value the schema cannot normalize is dropped to nil and logged rather than refusing the
+  # beat — the heartbeat is the runner's liveness path.
+  defp rate_limit_attr(nil), do: nil
+
+  defp rate_limit_attr(wire) do
+    case Runner.normalize_rate_limit(wire) do
+      nil ->
+        Logger.warning("heartbeat: dropping unrecognised runner rate_limit #{inspect(wire)}")
+        nil
+
+      rate_limit ->
+        rate_limit
+    end
   end
 
   # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`

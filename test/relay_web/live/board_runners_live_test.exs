@@ -448,4 +448,46 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       refute has_element?(view, "#queue-diagnosis")
     end
   end
+
+  describe "a rate-limited runner (RE320)" do
+    test "renders the amber RATE LIMITED pill with its usage and resume time, and a summary count",
+         %{conn: conn, board: board} do
+      resets_at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
+      runner(board, "paused", rate_limit: build(:runner_rate_limit, resets_at: resets_at))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-paused .badge-warning", "RATE LIMITED")
+      refute has_element?(view, "#runner-paused .badge-success")
+
+      assert has_element?(
+               view,
+               "#runner-paused-rate-limit",
+               "five_hour 95% / 90% · resumes #{Relay.Runs.resume_time_label(resets_at)}"
+             )
+
+      assert has_element?(view, "#summary-rate-limited", "1 rate limited")
+    end
+
+    test "a refusal reads Claude refused", %{conn: conn, board: board} do
+      runner(board, "refused", rate_limit: build(:runner_rate_limit, reason: "rejected", max: nil))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-refused-rate-limit", "Claude refused (five_hour)")
+    end
+
+    test "the paused row still shows while a free peer keeps the banner away",
+         %{conn: conn, board: board, stage: stage} do
+      runner(board, "paused", rate_limit: build(:runner_rate_limit))
+      runner(board, "free")
+      queued_job(stage, age_s: 600)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-paused .badge-warning", "RATE LIMITED")
+      assert has_element?(view, "#runner-free .badge-success", "FRESH")
+      refute has_element?(view, "#queue-diagnosis")
+    end
+  end
 end
