@@ -184,6 +184,37 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       # instead of hand-tuning three numbers against an app-level scale they cannot see.
       assert has_element?(view, "#story-map-viewport[style*=\"isolation:isolate\"]")
     end
+
+    # RE326 — the story map has no ‹ › / ←/→ (RE264), but close and a URL-driven switch reach
+    # the same handle_params/3 focus rule as the kanban board.
+    test "RE326 — closing the drawer hands focus back to the card it showed", %{conn: conn} = ctx do
+      ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{ref}")
+
+      view |> element("#card-drawer-close") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map")
+      assert_push_event(view, "focus_card", %{ref: ^ref})
+    end
+
+    test "RE326 — a URL-driven switch between two cards pushes the new card's focus", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      bulk_ref = Cards.ref(ctx.board, ctx.bulk)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+
+      render_patch(view, ~p"/board/#{ctx.board.slug}/story-map?card=#{bulk_ref}")
+
+      assert_push_event(view, "focus_card", %{ref: ^bulk_ref})
+    end
+
+    test "RE326 — opening a card from the map pushes no focus", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("##{card_dom_id(ctx.board, ctx.sso)}") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map?card=#{Cards.ref(ctx.board, ctx.sso)}")
+      refute_push_event(view, "focus_card", %{})
+    end
   end
 
   describe "realtime" do

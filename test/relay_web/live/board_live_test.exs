@@ -2635,6 +2635,99 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "RE326 — board focus follows the drawer's card" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "the › chevron pushes focus_card for the card it switches to", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+    end
+
+    test "ArrowLeft pushes focus_card for the previous card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "focus_card", %{ref: "MY1"})
+    end
+
+    test "Escape closes the drawer and hands focus back to the card it showed", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+    end
+
+    # The scrim link and browser back/forward reach handle_params/3 as a bare patch.
+    test "patching ?card= away hands focus back to the card it showed", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#card-drawer")
+      assert_push_event(view, "focus_card", %{ref: "MY3"})
+    end
+
+    test "a deep link opens the drawer without pushing focus", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "opening a card with the drawer closed pushes no focus — the click already focused it",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY1"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "re-patching the card that is already open pushes nothing", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "next_card at the end of the column neither switches nor pushes", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_hook(view, "next_card", %{})
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY3")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "card mode (/cards/:ref) never pushes focus, even across a patch", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      refute_push_event(view, "focus_card", %{})
+    end
+  end
+
   defp expand_stage(view, stage) do
     view |> element("#stage-strip-#{stage.id}") |> render_click()
   end
