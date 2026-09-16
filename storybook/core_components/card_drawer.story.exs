@@ -399,7 +399,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       %Variation{
         id: :sub_tasks_and_result,
         description:
-          "RE316 — AI Result leads the body, collapsed by default: the full summary, the deploy link and Show more (changes + screenshots hidden).",
+          "RE316 — AI Result leads the body, collapsed by default: the full summary and Show more (changes + screenshots hidden).",
         attributes: %{
           id: "story-drawer-9",
           ref: "RLY-18",
@@ -580,8 +580,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         "Added PATCH /api/cards/:ref/sub-tasks/:id",
         "Rendered the drawer panels"
       ],
-      "screens" => [%{"url" => nil, "caption" => "Drawer — sub-tasks complete"}],
-      "deploy_url" => "https://relayboard.fly.dev/board?card=RLY-18"
+      "screens" => [%{"url" => nil, "caption" => "Drawer — sub-tasks complete"}]
     }
   end
 

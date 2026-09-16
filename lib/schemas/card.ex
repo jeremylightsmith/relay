@@ -16,7 +16,7 @@ defmodule Schemas.Card do
   `archived_at` (RLY-4) soft-hides the card from the
   board; nullable, never cast — set programmatically like `archived_at` on
   boards. `ai_result` (RLY-18) carries the agent's structured result blob
-  (summary/changes/screens/deploy_url), nullable, cast like `spec`;
+  (summary/changes/screens), nullable, cast like `spec`;
   `sub_tasks` is the card's ordered checklist (RLY-18), written via
   `Relay.Cards.set_sub_tasks/2`, never cast here. `public_description`
   (RLY-69) is the optional public-board copy, distinct from the internal
