@@ -68,15 +68,15 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
       Cards.update_ai_result(card, %{
         "summary" => "Did the thing",
         "changes" => ["changed A"],
-        "screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}],
-        "deploy_url" => "https://example.com"
+        "screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}]
       })
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
     assert has_element?(view, "#ai-result-summary", "Did the thing")
-    assert has_element?(view, "#ai-result-deploy")
+    # RE327 — the deployment link is gone from the box for good.
+    refute has_element?(view, "#ai-result-deploy")
     assert has_element?(view, "#ai-result-show-more", "Show more")
     refute has_element?(view, "#ai-result-changes")
     refute has_element?(view, "#ai-result-screens")

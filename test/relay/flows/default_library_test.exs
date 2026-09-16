@@ -306,4 +306,15 @@ defmodule Relay.Flows.DefaultLibraryTest do
     assert post.run =~ "product owner"
     assert post.run =~ "verb phrases"
   end
+
+  # RE327 — the deployment link is gone from the drawer, so a deployment URL an agent writes is
+  # never rendered. Leaving the prompt asking for it is the "two copies of one fact disagreed"
+  # failure AGENTS.md warns about: the flow would request a key nothing draws.
+  test "the post node asks only for the result keys the drawer actually renders" do
+    flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    post = Enum.find(flow.nodes, &(&1.key == "post"))
+
+    assert post.run =~ "`summary`, `changes` and `screens`"
+    refute Enum.any?(DefaultLibrary.all(), fn f -> Enum.any?(f.nodes, &String.contains?(&1.run || "", "deploy")) end)
+  end
 end

@@ -3146,12 +3146,13 @@ defmodule RelayWeb.CoreComponentsTest do
       ai_result = %{
         "summary" => %{"text" => "a map, not a string"},
         "changes" => "one change, not a list",
-        "screens" => "one screen, not a list",
-        "deploy_url" => %{"href" => "nope"}
+        "screens" => "one screen, not a list"
       }
 
       html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
 
+      # RE327 — the non-binary summary makes `ai_result_renderable?/1` fall through to
+      # `changes`, which coerces to a one-element list, so the box still renders.
       assert html =~ ~s(id="ai-result")
       assert html =~ "one change, not a list"
     end
@@ -3201,8 +3202,7 @@ defmodule RelayWeb.CoreComponentsTest do
       %{
         "summary" => "Did the thing",
         "changes" => ["changed A"],
-        "screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}],
-        "deploy_url" => "https://example.com"
+        "screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}]
       }
     end
 
@@ -3212,14 +3212,13 @@ defmodule RelayWeb.CoreComponentsTest do
 
     defp ai_count(html, selector), do: html |> ai_query(selector) |> Enum.count()
 
-    test "collapsed (default) shows the full summary, the deploy link and Show more, but not changes or screens" do
+    test "collapsed (default) shows the full summary and Show more, but not changes or screens" do
       long_summary = String.duplicate("Did the thing. ", 40)
       ai_result = Map.put(full_ai_result(), "summary", long_summary)
 
       html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       assert ai_text(html, "#ai-result #ai-result-summary") == String.trim(long_summary)
-      assert ai_count(html, "#ai-result #ai-result-deploy") == 1
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show more"
       assert ai_count(html, "#ai-result-show-more.commit-field-showmore") == 1
       assert ai_count(html, "#ai-result-show-more[phx-click=toggle_ai_result]") == 1
@@ -3246,7 +3245,6 @@ defmodule RelayWeb.CoreComponentsTest do
       assert ai_count(html, "#ai-result-screens img.cursor-zoom-in") == 1
 
       assert ai_count(html, "#ai-result #ai-result-summary") == 1
-      assert ai_count(html, "#ai-result #ai-result-deploy") == 1
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show less"
     end
 
@@ -3284,6 +3282,59 @@ defmodule RelayWeb.CoreComponentsTest do
       assert ai_count(html, "#ai-result") == 1
       assert ai_count(html, "#ai-result-summary") == 0
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show more"
+    end
+  end
+
+  describe "card_drawer/1 AI Result deployment link removal (RE327)" do
+    # Relay has no preview-deployment story, so the box must never draw a link to one — not for
+    # any blob, however populated. The id selector is the durable pin: the element is gone.
+    test "no deploy link renders, collapsed or expanded, for a fully populated result" do
+      for expanded <- [false, true] do
+        html =
+          render_component(
+            &CoreComponents.card_drawer/1,
+            Map.put(drawer_assigns(full_ai_result()), :expanded_ai_result, expanded)
+          )
+
+        assert ai_count(html, "#ai-result") == 1
+        assert ai_count(html, "#ai-result-deploy") == 0
+      end
+    end
+
+    # RE327 — the realistic legacy blob holds only the removed link's key, but acceptance
+    # criterion 6 greps `test/` for that literal and expects zero hits. The guard never looks
+    # at the key name, so any unrenderable key exercises the same path. Do NOT reintroduce the
+    # literal here.
+    test "a blob with nothing renderable draws no empty violet box" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(%{"legacy_key" => "https://example.com"}))
+
+      refute html =~ ~s(id="ai-result")
+      refute html =~ "AI Result"
+      assert ai_count(html, "#ai-result-deploy") == 0
+    end
+
+    test "a summary-only result still renders the box (the guard does not over-fire)" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(%{"summary" => "Did the thing"}))
+
+      assert ai_count(html, "#ai-result") == 1
+      assert ai_text(html, "#ai-result-summary") == "Did the thing"
+    end
+
+    test "a changes-only and a screens-only result each still render the box" do
+      for ai_result <- [
+            %{"changes" => ["changed A"]},
+            %{"screens" => [%{"url" => "https://placehold.co/320x180", "caption" => "home"}]}
+          ] do
+        html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+        assert ai_count(html, "#ai-result") == 1
+      end
+    end
+
+    # An unrenderable blob that is nevertheless non-blank must not draw the box, but it also
+    # must not change what `writes` enforcement thinks (RE244): those are different questions.
+    test "a non-blank but unrenderable blob is still non-blank for the writes contract" do
+      refute Relay.Cards.ai_result_blank?(%{"legacy_key" => "https://example.com"})
     end
   end
 

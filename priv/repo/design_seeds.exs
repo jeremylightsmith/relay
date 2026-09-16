@@ -399,8 +399,7 @@ review =
     "screens" => [
       %{"caption" => "Drawer with the shortcut hint row"},
       %{"caption" => "Focus trapped in the comment box — no shortcut fires"}
-    ],
-    "deploy_url" => "https://relay-pr-338.fly.dev"
+    ]
   })
 
 review = say.(review, :agent, :comment, "Branch is green: `mix precommit` passes, 6 new tests.", 40)
@@ -539,8 +538,7 @@ done =
     "screens" => [
       %{"caption" => "Settings list mid-drag"},
       %{"caption" => "Board following the new order live"}
-    ],
-    "deploy_url" => "https://relay-pr-301.fly.dev"
+    ]
   })
 
 done = say.(done, :agent, :comment, "Merged to main. `mix precommit` green, 9 new tests.", 300)

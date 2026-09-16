@@ -2097,7 +2097,7 @@ defmodule RelayWeb.CoreComponents do
   attr :expanded_ai_result, :boolean,
     default: false,
     doc:
-      "RE316: whether the AI Result box is expanded (Show more) to reveal its Changes and Screenshots; collapsed shows just the summary and the deploy link"
+      "RE316: whether the AI Result box is expanded (Show more) to reveal its Changes and Screenshots; collapsed shows just the summary"
 
   attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
@@ -2851,9 +2851,11 @@ defmodule RelayWeb.CoreComponents do
                   <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
                 </section>
                 <%!-- RE316 — the AI's hand-back is the first thing a reviewer reads, so it leads the
-                body. `nil` and `%{}` both mean "not given" (Cards.ai_result_blank?/1): no empty box. --%>
+                body. RE327 — gated on there being something to DRAW, not merely on the field being
+                written: a legacy blob left over from the removed deployment link is non-blank and
+                would otherwise paint an empty violet box. --%>
                 <section
-                  :if={!@body_loading and !Cards.ai_result_blank?(@card.ai_result)}
+                  :if={!@body_loading and ai_result_renderable?(@card.ai_result)}
                   id="ai-result"
                   class="space-y-2"
                 >
@@ -2869,7 +2871,7 @@ defmodule RelayWeb.CoreComponents do
                     >
                       {Relay.Markdown.to_html(ai_text(@card.ai_result["summary"]))}
                     </div>
-                    <%!-- RE316 — collapsed shows just the summary (in full) and the deploy link;
+                    <%!-- RE316 — collapsed shows just the summary, in full;
                     the changes and screenshots are the detail behind Show more. --%>
                     <div
                       :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "changes")}
@@ -2918,17 +2920,8 @@ defmodule RelayWeb.CoreComponents do
                         </figure>
                       </div>
                     </div>
-                    <a
-                      :if={ai_text(@card.ai_result["deploy_url"])}
-                      id="ai-result-deploy"
-                      href={ai_text(@card.ai_result["deploy_url"])}
-                      target="_blank"
-                      rel="noopener"
-                      class="inline-flex items-center gap-1 text-xs font-medium text-secondary"
-                    >
-                      View deployment ↗
-                    </a>
-                    <%!-- `block` keeps the link-style button on its own line below an inline deploy link. --%>
+                    <%!-- `block` keeps the link-style button on its own line; a button element
+                    is inline-block by default and would otherwise ride up beside the summary. --%>
                     <button
                       :if={ai_result_more?(@card.ai_result)}
                       type="button"
@@ -5457,6 +5450,15 @@ defmodule RelayWeb.CoreComponents do
   # RE316 — whether one of `ai_result`'s list keys ("changes", "screens") has anything to show.
   # Coerced through `ai_list/1` so Show more and the group `:if`s agree with what renders.
   defp ai_result_has?(ai_result, key), do: ai_list(ai_result[key]) != []
+
+  # RE327 — whether the blob has anything the drawer can actually draw. Deliberately NOT
+  # `Cards.ai_result_blank?/1`, which answers "was the field written" for the `writes` contract
+  # (RE244) and is shared with `blank_contract_field?/2`: a blob can be non-blank — a legacy key
+  # left over from the removed deployment link — and still render nothing but an empty box.
+  defp ai_result_renderable?(ai_result) do
+    ai_text(ai_result["summary"]) != nil or ai_result_has?(ai_result, "changes") or
+      ai_result_has?(ai_result, "screens")
+  end
 
   # RE316 — the AI Result box offers Show more only when there is detail behind it.
   defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes") or ai_result_has?(ai_result, "screens")
