@@ -174,6 +174,28 @@ defmodule Relay.DocsContentTest do
     assert glossary =~ "older mockups still use that word"
   end
 
+  # The `ai_result` shape used to live only in the drawer's private helpers, so agents invented
+  # their own spelling, the strip rendered empty, and nobody found out. It is now refused at the
+  # write — which only helps if the shape is written down everywhere the author looks.
+  test "the AI result blob's shape and its refusal are documented everywhere an agent reads" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    cli = read("cli.md")
+    api = read("api.md")
+
+    for doc <- [relay_md, cli, api], key <- ~w(summary changes screens caption) do
+      assert doc =~ key, "the ai_result key `#{key}` should be documented"
+    end
+
+    # `url` is the image, not the page it was taken on — the mistake that started this.
+    for doc <- [relay_md, cli, api] do
+      assert doc =~ "/attachments/", "the docs should show where a screen's url comes from"
+      assert doc =~ "./relay attach", "`attach` is how a screenshot becomes a url"
+    end
+
+    assert relay_md =~ "invalid_ai_result"
+    assert api =~ "invalid_ai_result"
+  end
+
   test "the runner page documents the hard cut's refusal and the renamed roster route (RE319)" do
     runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
     api = read("api.md")

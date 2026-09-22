@@ -846,10 +846,134 @@ defmodule Relay.Cards do
   @doc """
   Sets the card's `ai_result` blob (a string-keyed map) via `update_card/2` (which
   broadcasts). Plan/Code write the summary + changes + screens.
+
+  The blob is validated against the one documented shape first — see
+  `validate_ai_result/1`.
   """
   def update_ai_result(%Card{} = card, ai_result) when is_map(ai_result) do
-    update_card(card, %{ai_result: ai_result})
+    with :ok <- validate_ai_result(ai_result) do
+      update_card(card, %{ai_result: ai_result})
+    end
   end
+
+  # The `ai_result` blob's vocabulary, spelled once (relay.md § "The AI result blob" quotes
+  # these, and the drawer reads exactly these). RE322/TH153: an agent that invented its own
+  # spelling — the screenshot under `screens[].image`, the deployed page under `url` — uploaded
+  # every attachment fine and then rendered twelve broken images, and nobody found out for days.
+  @ai_result_keys ~w(summary changes screens)
+  @ai_result_screen_keys ~w(url caption)
+
+  @doc "The keys an `ai_result` blob may carry."
+  def ai_result_keys, do: @ai_result_keys
+
+  @doc "The keys one entry of `ai_result[\"screens\"]` may carry."
+  def ai_result_screen_keys, do: @ai_result_screen_keys
+
+  @doc """
+  Whether a blob matches the documented `ai_result` shape:
+
+      %{"summary" => "…", "changes" => ["…"], "screens" => [%{"url" => "…", "caption" => "…"}]}
+
+  Every key is optional; anything not in `ai_result_keys/0` (or, inside a screen, not in
+  `ai_result_screen_keys/0`) is refused. `{:error, {:invalid_ai_result, message}}` carries a
+  sentence that names the offending key and the ones that exist, because the reader is the
+  agent that just wrote the file.
+  """
+  def validate_ai_result(ai_result) when is_map(ai_result) do
+    with :ok <- validate_ai_result_keys(ai_result),
+         :ok <- validate_ai_summary(Map.get(ai_result, "summary")),
+         :ok <- validate_ai_changes(Map.get(ai_result, "changes")) do
+      validate_ai_screens(Map.get(ai_result, "screens"))
+    end
+  end
+
+  defp validate_ai_result_keys(ai_result) do
+    case Map.keys(ai_result) -- @ai_result_keys do
+      [] ->
+        :ok
+
+      unknown ->
+        invalid_ai_result(
+          "unknown #{key_word(unknown)} #{quoted(unknown)} — the blob takes only #{quoted(@ai_result_keys)}"
+        )
+    end
+  end
+
+  defp validate_ai_summary(nil), do: :ok
+  defp validate_ai_summary(summary) when is_binary(summary), do: :ok
+  defp validate_ai_summary(_summary), do: invalid_ai_result(~s("summary" must be a string — a markdown bullet list))
+
+  defp validate_ai_changes(nil), do: :ok
+
+  defp validate_ai_changes(changes) when is_list(changes) do
+    case Enum.find_index(changes, &(not is_binary(&1))) do
+      nil -> :ok
+      index -> invalid_ai_result(~s(changes[#{index}] must be a string — "changes" is a list of short verb phrases))
+    end
+  end
+
+  defp validate_ai_changes(_changes), do: invalid_ai_result(~s("changes" must be a list of strings))
+
+  defp validate_ai_screens(nil), do: :ok
+
+  defp validate_ai_screens(screens) when is_list(screens) do
+    screens
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {screen, index}, :ok ->
+      case validate_ai_screen(screen, index) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_ai_screens(_screens),
+    do: invalid_ai_result(~s("screens" must be a list of objects, each #{quoted(@ai_result_screen_keys)}))
+
+  defp validate_ai_screen(screen, index) when is_map(screen) do
+    with :ok <- validate_ai_screen_keys(screen, index),
+         :ok <- validate_ai_screen_url(Map.get(screen, "url"), index) do
+      validate_ai_screen_caption(Map.get(screen, "caption"), index)
+    end
+  end
+
+  defp validate_ai_screen(_screen, index),
+    do: invalid_ai_result(~s(screens[#{index}] must be an object with #{quoted(@ai_result_screen_keys)}))
+
+  defp validate_ai_screen_keys(screen, index) do
+    case Map.keys(screen) -- @ai_result_screen_keys do
+      [] ->
+        :ok
+
+      unknown ->
+        invalid_ai_result(
+          "screens[#{index}]: unknown #{key_word(unknown)} #{quoted(unknown)} — a screen takes only #{quoted(@ai_result_screen_keys)}"
+        )
+    end
+  end
+
+  # `url` is the image itself, not the page it was taken on: `relay attach` uploads the file and
+  # prints the `/attachments/<id>` path to put here.
+  defp validate_ai_screen_url(url, _index) when is_binary(url) and url != "", do: :ok
+
+  defp validate_ai_screen_url(_url, index),
+    do:
+      invalid_ai_result(
+        ~s(screens[#{index}]: "url" is required and must be the image itself — upload it with `relay attach` and use the /attachments/… path it prints)
+      )
+
+  defp validate_ai_screen_caption(nil, _index), do: :ok
+  defp validate_ai_screen_caption(caption, _index) when is_binary(caption), do: :ok
+
+  defp validate_ai_screen_caption(_caption, index),
+    do: invalid_ai_result(~s(screens[#{index}]: "caption" must be a string))
+
+  defp invalid_ai_result(message), do: {:error, {:invalid_ai_result, message}}
+
+  defp key_word([_one]), do: "key"
+  defp key_word(_many), do: "keys"
+
+  defp quoted(keys), do: Enum.map_join(keys, ", ", &~s("#{&1}"))
 
   @doc """
   Pure helper: `%{done: d, total: t}` from a map with a **loaded** `sub_tasks` list

@@ -38,10 +38,41 @@ exits non-zero.
 | `./relay pr RLY-12 <url>` | Record the card's PR URL |
 | `./relay sub-tasks RLY-12 @tasks.md` | Set the sub-task checklist |
 | `./relay check RLY-12 42` / `uncheck RLY-12 42` | Toggle one sub-task done/undone by id |
-| `./relay result RLY-12 @result.json` | Set the card's AI result blob |
+| `./relay result RLY-12 @result.json` | Set the card's AI result blob — one fixed shape, see [The AI result blob](#the-ai-result-blob) |
+| `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` prints the `/attachments/<id>` path alone |
 | `./relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `./relay own RLY-12` / `release RLY-12` | Claim for the AI / hand back |
 | `./relay approve RLY-12` / `reject RLY-12 "note"` | Gate: advance / send back |
+
+## The AI result blob
+
+`./relay result` takes a JSON object with three optional keys, and **nothing else** — the card
+drawer renders exactly these:
+
+```json
+{
+  "summary": "- **One door** for everyone…",
+  "changes": ["Adds a summary to the card drawer"],
+  "screens": [
+    { "url": "/attachments/135e5539-e4e9-4fd6-aa7a-5863ec683e4c",
+      "caption": "Sign in — one email field" }
+  ]
+}
+```
+
+`summary` is markdown; `changes` is a list of **strings** (short verb phrases); `screens` is a
+list of objects with `url` and an optional `caption`.
+
+A screen's **`url` is the image itself, not the page it was taken on.** Upload the screenshot
+and use the path `attach` prints:
+
+```bash
+url=$(./relay attach RLY-12 tmp/smoke/01-door.png --field url)   # → /attachments/<uuid>
+```
+
+Any other key — `deploy_url` at the top level, `image` / `shot` / `path` / `name` inside a
+screen — is refused with `422 invalid_ai_result` naming what you wrote and what exists. The
+refusal is the point: a blob the drawer can't read renders an empty Screenshots strip, silently.
 
 ## Long arguments
 

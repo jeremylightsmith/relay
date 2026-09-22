@@ -95,7 +95,8 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `./relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
 | `./relay describe` · `./relay spec` · `./relay criteria` · `./relay plan` · `./relay sub-tasks RLY-12 @file` | Set description / spec / criteria / plan / checklist — `describe` and `spec` are **separate fields**, not synonyms |
 | `./relay check` · `./relay uncheck RLY-12 42` | Toggle one sub-task done by id |
-| `./relay branch` · `./relay pr` · `./relay result RLY-12 …` | Record branch / PR url / AI result blob |
+| `./relay branch` · `./relay pr` · `./relay result RLY-12 …` | Record branch / PR url / AI result blob — the blob has one shape, below |
+| `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` gives the `/attachments/…` path for a `screens` entry |
 | `./relay depends RLY-12 RLY-13 RLY-14` | Replace the card's blocker set — it stays undispatchable until every blocker reaches a top-level Done column. No BLOCKERs clears it. Refs may be separate args or comma-separated; `./relay create --depends-on RE12,RE13` sets them at creation |
 | `./relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
 | `./relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
@@ -171,6 +172,44 @@ inside the node's own worktree. It is **one file per card per node** — the pat
 
 The full node/outcome/`RELAY_PLAN` contract, the runner, and the operating invariants live at
 `$RELAY_URL/docs/architecture-runner`.
+
+### The AI result blob (`./relay result`)
+
+`./relay result RLY-12 @result.json` sets the card's **AI result** — the box a human reads in
+the card drawer. It has **one shape**, and the drawer renders exactly these keys:
+
+```json
+{
+  "summary": "- **One door** for everyone…\n- …",
+  "changes": ["Adds a summary to the card drawer", "Emails a 6-digit code instead of a link"],
+  "screens": [
+    { "url": "/attachments/135e5539-e4e9-4fd6-aa7a-5863ec683e4c",
+      "caption": "Sign in — one email field, \"Email me a code\"" }
+  ]
+}
+```
+
+- **`summary`** — a string, rendered as markdown. A short bullet list for a product owner.
+- **`changes`** — a list of **strings**, each a short verb phrase ("Adds…", "Removes…"). Not
+  objects: `{"change": …, "file": …}` is refused.
+- **`screens`** — a list of objects with **`url`** (required) and **`caption`** (optional).
+  Nothing else.
+
+**`url` is the image itself, not the page it was taken on.** Upload each screenshot first and
+use the path `attach` gives back:
+
+```bash
+url=$(./relay attach RLY-12 tmp/smoke/01-door.png --field url)   # → /attachments/<uuid>
+```
+
+An `http(s)` image URL works too; a path on your machine (`tmp/smoke/01-door.png`) does not —
+the browser can't fetch it, and the tile renders as a blank placeholder.
+
+Every key is optional (a summary-only result is fine), but **anything else is refused**: an
+unrecognised key — `deploy_url` at the top level, `image` / `shot` / `path` / `name` inside a
+screen — comes back `422 invalid_ai_result` naming the key you used and the ones that exist.
+That refusal is deliberate. A blob that merely *looks* plausible renders an empty Screenshots
+strip and nobody finds out for days.
 
 ## Customizing a board's flows
 

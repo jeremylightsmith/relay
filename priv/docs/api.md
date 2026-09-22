@@ -181,6 +181,30 @@ curl -X PATCH -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: applicatio
   -d '{"status":"working","progress":40}' https://relay.example/api/cards/RLY-12
 ```
 
+`ai_result` is also set here (this is what `./relay result` calls), and it is the one field
+whose **shape is enforced**. Three optional keys, nothing else:
+
+```json
+{ "ai_result": {
+    "summary": "- **One door** for everyone…",
+    "changes": ["Adds a summary to the card drawer"],
+    "screens": [{ "url": "/attachments/135e5539-…", "caption": "Sign in" }]
+} }
+```
+
+`summary` is a markdown string, `changes` a list of strings, `screens` a list of objects with
+`url` (required) and an optional `caption`. A screen's `url` is **the image**, not the page it
+shows — upload the file to `POST /api/cards/:ref/attachments` (`./relay attach`) and use the
+`/attachments/<id>` path it returns. Any other key, at either level, is refused with
+`422 invalid_ai_result` and a message naming the key you used and the keys that exist; nothing
+is written.
+
+### POST /api/cards/:ref/attachments
+
+Upload a file to the card. Requires `filename`, `content_type` and `data_base64`. Returns `201`
+with `{"data": {"id": …, "url": "/attachments/<id>", "markdown": "![…](/attachments/<id>)"}}` —
+that `url` is what a screenshot's `screens[].url` should be.
+
 ### POST /api/cards/:ref/move
 
 Move a card. `stage` is a stage **id or name**; `position` is **1-based** (omit to
