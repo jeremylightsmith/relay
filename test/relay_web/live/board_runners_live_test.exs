@@ -231,8 +231,15 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     # verbatim, so a formatter-wrapped row rendered as a blank line plus two indented lines.
     # Asserting on the markup is the honest level, and this is the regression guard against a
     # future `mix format` re-breaking the row (which `phx-no-format` prevents).
+    #
+    # The separator space must live *inside* the timestamp span, not as a standalone inter-tag
+    # text node: `render/1` calls `TreeDOM.to_html/1`, which asks LazyHTML for
+    # `skip_whitespace_nodes: true` and that drops any text node that is pure whitespace — so a
+    # bare space between `</span>` and `<span>` never reaches this assertion at all, even though
+    # it would survive a real page render. Hence asserting `" </span><span"` (space before the
+    # closing tag), not `"</span> <span"` (space between the tags).
     refute html =~ "\n"
-    assert html =~ ~r/\d\d:\d\d:\d\d <\/span><span/
+    assert html =~ " </span><span"
     assert html =~ "[#{ref(board, card)}] hello a"
   end
 

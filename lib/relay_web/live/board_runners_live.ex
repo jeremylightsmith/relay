@@ -463,10 +463,17 @@ defmodule RelayWeb.BoardRunnersLive do
                     >
                       <%!-- RE328: one source line + `phx-no-format` is load-bearing. HEEx emits the
                       whitespace between these spans verbatim, so a formatter-wrapped row rendered as a
-                      blank line plus two indented lines. The single space after the timestamp (inside its span, since
-                      LiveViewTest/DOM parsing drops a whitespace-only node between tags) is the
-                      artboard's separator (Relay Runners.dc.html line 125) and must survive. `overflow-wrap:anywhere` replaces `white-space:pre-wrap` — log_text/1
-                      already normalizes the text, so there is no whitespace left worth preserving. --%>
+                      blank line plus two indented lines. The single space after the timestamp lives
+                      inside its span (not as a standalone inter-tag text node) because
+                      `Phoenix.LiveViewTest.render/1` calls `TreeDOM.to_html/1`, which asks
+                      `LazyHTML.Tree.to_html/2` for `skip_whitespace_nodes: true` — that option drops
+                      any text node that is pure whitespace, so a literal space sitting alone between
+                      `</span>` and `<span>` is discarded by the very test helper the specs here use
+                      (`render(element(view, ".log-line"))`), even though it survives a real page
+                      render. Keeping the space inside the span sidesteps that. It is still the
+                      artboard's separator (Relay Runners.dc.html line 125). `overflow-wrap:anywhere`
+                      replaces `white-space:pre-wrap` — log_text/1 already normalizes the text, so
+                      there is no whitespace left worth preserving. --%>
                       <div
                         :for={entry <- Enum.reverse(Map.get(@logs, runner.name, []))}
                         class="log-line"
