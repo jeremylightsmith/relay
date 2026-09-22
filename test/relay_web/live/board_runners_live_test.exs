@@ -214,6 +214,60 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     refute html =~ "board-level line"
   end
 
+  test "a log entry renders as one line with no leading whitespace",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    %{card: card} = active_job(stage, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [%{"ref" => ref(board, card), "kind" => "claude", "text" => "hello a"}])
+
+    # Scoped to this one runner's panel so exactly one `.log-line` matches —
+    # `render(element/2)` raises on multiple matches.
+    html = render(element(view, "#runner-mac-a-log .log-line"))
+
+    # RE328 — the defect IS markup whitespace: HEEx emits the whitespace between sibling tags
+    # verbatim, so a formatter-wrapped row rendered as a blank line plus two indented lines.
+    # Asserting on the markup is the honest level, and this is the regression guard against a
+    # future `mix format` re-breaking the row (which `phx-no-format` prevents).
+    refute html =~ "\n"
+    assert html =~ ~r/\d\d:\d\d:\d\d <\/span><span/
+    assert html =~ "[#{ref(board, card)}] hello a"
+  end
+
+  test "a multi-paragraph agent line collapses to one line",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    %{card: card} = active_job(stage, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [
+      %{"ref" => ref(board, card), "kind" => "claude", "text" => "first para\n\nsecond para"}
+    ])
+
+    html = render(element(view, "#runner-mac-a-log .log-line"))
+
+    assert html =~ "first para second para"
+    refute html =~ "\n"
+  end
+
+  test "the log tail panel is dense and flush-left", %{conn: conn, board: board} do
+    runner(board, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    html = render(element(view, "#runner-mac-a-log"))
+
+    # RE328 — deliberate divergence from `docs/designs/Relay Runners.dc.html` lines 123/125
+    # (`line-height:1.7`, `padding:11px 13px`): the human asked for a denser panel whose lines
+    # start closer to the left edge. The header's horizontal padding moves with the body's so
+    # the status dot and the LOG TAIL caption stay left-aligned with the log lines.
+    assert html =~ "padding:8px;font-size:11px;line-height:1.35;"
+    assert html =~ "gap:7px;padding:9px 8px;"
+  end
+
   test "a host with dots gets a CSS-safe dom id", %{conn: conn, board: board} do
     runner(board, "mac.mini.local")
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
