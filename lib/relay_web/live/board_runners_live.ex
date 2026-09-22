@@ -444,7 +444,7 @@ defmodule RelayWeb.BoardRunnersLive do
                     id={"runner-#{dom_id(runner)}-log"}
                     style={"flex:1.15;min-width:0;background:var(--color-neutral);display:flex;flex-direction:column;#{if runner.freshness != :fresh, do: "opacity:0.75;"}"}
                   >
-                    <div style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-bottom:1px solid color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));">
+                    <div style="display:flex;align-items:center;gap:7px;padding:9px 8px;border-bottom:1px solid color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));">
                       <span
                         class={["inline-block", streaming?(runner) && "animate-pulse"]}
                         style={"width:7px;height:7px;border-radius:50%;background:#{log_dot_color(runner.freshness)};"}
@@ -459,19 +459,27 @@ defmodule RelayWeb.BoardRunnersLive do
                     </div>
                     <div
                       class="font-mono"
-                      style="flex:1;padding:11px 13px;font-size:11px;line-height:1.7;overflow:hidden;"
+                      style="flex:1;padding:8px;font-size:11px;line-height:1.35;overflow:hidden;"
                     >
+                      <%!-- RE328: one source line + `phx-no-format` is load-bearing. HEEx emits the
+                      whitespace between these spans verbatim, so a formatter-wrapped row rendered as a
+                      blank line plus two indented lines. The single space after the timestamp lives
+                      inside its span (not as a standalone inter-tag text node) because
+                      `Phoenix.LiveViewTest.render/1` calls `TreeDOM.to_html/1`, which asks
+                      `LazyHTML.Tree.to_html/2` for `skip_whitespace_nodes: true` — that option drops
+                      any text node that is pure whitespace, so a literal space sitting alone between
+                      `</span>` and `<span>` is discarded by the very test helper the specs here use
+                      (`render(element(view, ".log-line"))`), even though it survives a real page
+                      render. Keeping the space inside the span sidesteps that. It is still the
+                      artboard's separator (Relay Runners.dc.html line 125). `overflow-wrap:anywhere`
+                      replaces `white-space:pre-wrap` — log_text/1 already normalizes the text, so
+                      there is no whitespace left worth preserving. --%>
                       <div
                         :for={entry <- Enum.reverse(Map.get(@logs, runner.name, []))}
-                        style="white-space:pre-wrap;"
-                      >
-                        <span style="color:color-mix(in oklab, var(--color-neutral-content) 45%, transparent);">
-                          {Calendar.strftime(entry.ts, "%H:%M:%S")}
-                        </span>
-                        <span style={"color:#{log_color(entry.kind)};"}>
-                          [{entry.ref}] {entry.text}
-                        </span>
-                      </div>
+                        class="log-line"
+                        phx-no-format
+                        style="overflow-wrap:anywhere;"
+                      ><span style="color:color-mix(in oklab, var(--color-neutral-content) 45%, transparent);">{Calendar.strftime(entry.ts, "%H:%M:%S")} </span><span style={"color:#{log_color(entry.kind)};"}>[{entry.ref}] {log_text(entry.text)}</span></div>
                       <span
                         :if={streaming?(runner)}
                         id={"runner-#{dom_id(runner)}-cursor"}
@@ -744,6 +752,10 @@ defmodule RelayWeb.BoardRunnersLive do
   defp log_color(:claude), do: "color-mix(in oklab, var(--color-secondary) 75%, var(--color-neutral-content))"
   defp log_color(:error), do: "color-mix(in oklab, var(--color-error) 85%, var(--color-neutral-content))"
   defp log_color(_kind), do: "color-mix(in oklab, var(--color-neutral-content) 75%, transparent)"
+
+  # RE328 — a forwarded agent line can itself be a multi-paragraph markdown block; rendered
+  # verbatim it puts blank lines inside a single tail entry. One entry is one line.
+  defp log_text(text), do: text |> to_string() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
   defp last_seen_label(runner, now), do: "last beat " <> beat_age(runner, now) <> " ago"
 
