@@ -384,35 +384,17 @@ defmodule RelayWeb.FlowEditorLive do
 
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.flows(@board)}>
+      <:title>
+        <span id="flow-title" class="truncate" title={humanize(@flow.key)}>
+          {humanize(@flow.key)}
+        </span>
+      </:title>
       <%!-- RLY-143 fix-up: `wide` puts this below Layouts.app's 53px chrome header (see
       board_live.ex's `h-[calc(100dvh_-_53px)]` for the sibling full-page pattern); without
       subtracting it here the editor overshoots the viewport by 53px. --%>
       <div class="flex flex-col" style="height:calc(100vh - 53px);">
         <%!-- Top bar --%>
         <div style="height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-100);">
-          <nav style="font-size:13px;display:flex;align-items:center;gap:7px;">
-            <.link
-              navigate={~p"/board/#{@board.slug}"}
-              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
-            >
-              {@board.name}
-            </.link>
-            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
-              /
-            </span>
-            <.link
-              navigate={~p"/board/#{@board.slug}/settings?section=flows"}
-              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-weight:600;"
-            >
-              Flows
-            </.link>
-            <span style="color:color-mix(in oklab, var(--color-base-content) 30%, transparent);">
-              /
-            </span>
-            <span style="color:color-mix(in oklab, var(--color-base-content) 95%, transparent);font-weight:600;">
-              {humanize(@flow.key)}
-            </span>
-          </nav>
           <FlowEditorComponents.flow_tabs
             board_slug={@board.slug}
             flow_key={@flow.key}
