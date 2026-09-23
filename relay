@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 64
-RUNNER_FINGERPRINT = "4da3e651226bc96ff01902ceb9a76b3238c72dd69b70ef8355eba94781b873a1"
+RUNNER_VERSION = 66
+RUNNER_FINGERPRINT = "b49e8cf8ac58866d6ef1c81657d05b627ced7b4927084f020a9973cad40184b1"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -83,9 +83,20 @@ def runner_ident(cfg):
     return {"name": cfg["name"], "host": socket.gethostname(), "version": RUNNER_VERSION}
 
 
+class Died(SystemExit):
+    """What die() raises (RE336): a SystemExit with exit status 1, so every existing
+    `except SystemExit` still catches it and `relay <cmd>` still exits 1, that ALSO carries the
+    message. A caller that swallows it (the heartbeat) can then say what failed instead of
+    logging a bare `SystemExit: 1`."""
+
+    def __init__(self, msg):
+        super().__init__(1)
+        self.msg = msg
+
+
 def die(msg):
     print(f"relay: {msg}", file=sys.stderr)
-    sys.exit(1)
+    raise Died(msg)
 
 
 def log(msg, *, ref=None, kind="lifecycle"):
@@ -102,6 +113,12 @@ def env(name):
 
 API_MAX_ATTEMPTS = 3  # one initial try + up to two retries
 
+# RE336: the read timeout every API call gets unless its caller passes its own. A bare urlopen
+# blocks FOREVER on a half-open connection, and one heartbeat POST caught that way by a server
+# restart wedged a runner's heartbeat thread for days: no release_held, no revoke, no
+# capability refresh, no auto-update, all silently. Generous next to any real response time.
+API_TIMEOUT_S = 30
+
 
 def _api_backoff(attempt):
     """Sleep before retry `attempt` (1-based): 0.5s, then 1s. Isolated in a named
@@ -116,9 +133,13 @@ def _retryable(method, err, idempotent=False):
     can't double-apply — safe for any method. HTTPError 5xx: retry idempotent methods
     (GET, PATCH), never a plain POST (could double-apply a mutation) — but an
     explicitly `idempotent` POST retries too (RLY-202: the outcome POST, which the
-    server answers 200 on a duplicate finalize). 4xx: never."""
+    server answers 200 on a duplicate finalize). A READ timeout (RE336) is treated like a
+    5xx, not like a URLError: the request reached the server and may have been processed,
+    so only a safe or `idempotent` call retries. 4xx: never."""
     if isinstance(err, urllib.error.HTTPError):
         return err.code >= 500 and (method in ("GET", "PATCH") or idempotent)
+    if isinstance(err, socket.timeout):
+        return method in ("GET", "PATCH") or idempotent
     return isinstance(err, urllib.error.URLError)
 
 
@@ -130,16 +151,25 @@ def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=No
         req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
     if data is not None:
         req.add_header("Content-Type", "application/json")
-    # Pass a read timeout only when asked (the long-poll claim): a bare urlopen keeps the
-    # prior global-default behavior for every existing call, byte for byte.
-    open_kwargs = {} if timeout is None else {"timeout": timeout}
+    # A caller-supplied timeout (the long-poll claim, the startup board fetch) owns its read
+    # timeout: it is re-raised for that caller to interpret. Every other call gets
+    # API_TIMEOUT_S and treats a read timeout as one more transient failure (RE336).
+    caller_timeout = timeout is not None
+    open_kwargs = {"timeout": timeout if caller_timeout else API_TIMEOUT_S}
     for attempt in range(1, API_MAX_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, **open_kwargs) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
-        except socket.timeout:
-            raise   # long-poll read timeout — the claim caller treats it as 'no work'
+        except socket.timeout as e:
+            if caller_timeout:
+                raise   # long-poll read timeout — the claim caller treats it as 'no work'
+            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
+                log(f"request timed out after {API_TIMEOUT_S}s on {method} {path}, retrying "
+                    f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
+                _api_backoff(attempt)
+                continue
+            die(f"request timed out after {API_TIMEOUT_S}s on {method} {path}")
         except urllib.error.HTTPError as e:
             # An HTTPError IS the response — an open file object, like the `resp` the success
             # path closes with `with`. Every exit below (swallow, retry, die) walks away from
@@ -318,12 +348,15 @@ class RunnerHeartbeat:
         beat so the board sees a paused runner as paused (and a resumed one as not) within one
         interval.
 
-    Best-effort by construction: swallows api()'s die() (SystemExit) and any other error, so a
-    heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for a
-    runner pointed at an older server, but the route now exists."""
+    Best-effort by construction: `_beat` swallows api()'s die() (`Died`, a SystemExit) and any
+    other error, so a heartbeat can never stall or raise into a job, and every API call it makes
+    carries API_TIMEOUT_S, so it can never block forever either (RE336). A failing beat is
+    logged, throttled to one line per IDLE_LOG_INTERVAL, with one "restored" line when it
+    recovers. soft_404 is kept as belt-and-braces for a runner pointed at an older server, but
+    the route now exists."""
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None, rate_limit_fn=None):
+                 held_fn=None, on_release_held=None, rate_limit_fn=None, clock=time.monotonic):
         self.runner = runner
         self.running_fn = running_fn
         self.on_revoke = on_revoke
@@ -344,6 +377,14 @@ class RunnerHeartbeat:
         # send the key, a board whose scaffold was never built, or a beat that has not landed —
         # reads as "never auto-update", which is the safe answer.
         self.latest_version = None
+        # RE336: a failing heartbeat must be visible, not silent. `last_ok` is the clock() of
+        # the last beat that landed; `_failing_since` is the clock() of the first failure of
+        # the current failing streak (None while beats land); `_fail_logged_at` throttles the
+        # repeat line to one per IDLE_LOG_INTERVAL.
+        self.clock = clock
+        self.last_ok = None
+        self._failing_since = None
+        self._fail_logged_at = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -354,16 +395,25 @@ class RunnerHeartbeat:
         self._stop.set()
 
     def _beat(self):
-        # A handful of listdir calls at the 15s interval — negligible, and it means a skill
-        # or agent added mid-session is reported without restarting the runner.
-        capabilities = collect_capabilities()
-        digest = capabilities_hash(capabilities)
-        send = capabilities if digest != self._caps_hash else None
+        """One beat. NOTHING in here may raise (RE336): an exception out of the capability
+        scan or `held_fn` used to escape the old try and end the heartbeat thread for good.
+        Whether the POST landed is recorded (`_beat_ok`/`_beat_failed`) BEFORE the reply is
+        acted on, so a raising handler can't make a landed beat look like a failed one."""
         try:
+            # A handful of listdir calls at the 15s interval — negligible, and it means a skill
+            # or agent added mid-session is reported without restarting the runner.
+            capabilities = collect_capabilities()
+            digest = capabilities_hash(capabilities)
+            send = capabilities if digest != self._caps_hash else None
             resp = api("POST", "/api/node-jobs/heartbeat",
                        heartbeat_body(self.runner, self.capacity, self.running_fn(),
                                       self.held_fn(), send, self.rate_limit_fn()),
                        soft_404=True) or {}
+        except (Exception, SystemExit) as e:      # api() die()s on HTTP/network error
+            self._beat_failed(e)
+            return
+        self._beat_ok()
+        try:
             # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
             # alone so the next beat retries.
             if send is not None:
@@ -382,14 +432,35 @@ class RunnerHeartbeat:
                 # entry is a server we do not understand and is ignored rather than guessed at.
                 if isinstance(item, dict):
                     self.on_release_held(item.get("ref"), item.get("status"))
-        except SystemExit:      # api() die()s on HTTP/network error
+        except (Exception, SystemExit):
             pass
-        except Exception:
-            pass
+
+    def _beat_ok(self):
+        now = self.clock()
+        if self._failing_since is not None:
+            log(f"✓ heartbeat restored after {int(now - self._failing_since)}s")
+            self._failing_since = self._fail_logged_at = None
+        self.last_ok = now
+
+    def _beat_failed(self, err):
+        """Log the first failure of a streak at once, then at most once per IDLE_LOG_INTERVAL
+        (RE336). `Died` carries die()'s message; anything else is named by its type."""
+        now = self.clock()
+        why = getattr(err, "msg", None) or f"{type(err).__name__}: {err}"
+        if self._failing_since is None:
+            self._failing_since = self._fail_logged_at = now
+            log(f"⚠ heartbeat failed: {why} (retrying every {self.interval}s)", kind="error")
+        elif now - self._fail_logged_at >= IDLE_LOG_INTERVAL:
+            self._fail_logged_at = now
+            log(f"⚠ heartbeat still failing after {int(now - self._failing_since)}s: {why}",
+                kind="error")
 
     def _run(self):
         while not self._stop.wait(self.interval):
-            self._beat()
+            try:
+                self._beat()
+            except (Exception, SystemExit):     # belt and braces: _beat guards itself (RE336)
+                pass
 
 
 def read_arg(text):
@@ -1691,15 +1762,23 @@ class RunnerPool:
         self.shared_name = f"{self.ns}-clean"
         self.shared_used = 0
         # name -> {"ref", "run_id", "state": "active"|"retained", "live": bool,
-        #          "partition": str|None}
+        #          "partition": str|None, "teardown_failed": bool (RE336, optional)}
         self.wts = {}
         # free MIX_TEST_PARTITION indices for active worktrees (RLY-213); "0" is shared_clean's.
         self.free_partitions = [str(i) for i in range(1, self.max_worktrees + 1)]
         self.lock = threading.Lock()
+        # Throttles the per-ref "teardown failed" line (RE336). An attribute, not a parameter,
+        # so every existing `RunnerPool(cfg)` call is unchanged; tests overwrite it.
+        self.clock = time.monotonic
 
     # ---- names ----------------------------------------------------------
     def wt_name(self, ref):
         return f"{self.ns}-{_sanitize_ref(ref)}"
+
+    def _ref_of(self, slot):
+        """The card ref a per-card slot belongs to, for log attribution: the record's own ref,
+        else the name's suffix (a recovered or test-built record)."""
+        return (self.wts.get(slot) or {}).get("ref") or slot[len(self.ns) + 1:]
 
     def _retired_pool_slot(self, name):
         """True if `name` is a `<ns>-work-N` worktree from the RETIRED fixed pool (RLY-231).
@@ -1803,6 +1882,17 @@ class RunnerPool:
             name = self.wt_name(job["vars"]["ref"])
             rec = self.wts.get(name)
 
+            # RE336: a worktree whose removal FAILED is still held, so `release_held` keeps
+            # retrying it, but it may be half-deleted. Never reuse it as-is: the card's next run
+            # re-baselines it (create_or_rebaseline rebuilds a tree whose `.git` link is gone).
+            if (rec and rec["state"] == "active" and rec.get("teardown_failed")
+                    and not rec.get("live") and not rec.get("pending_finish")):
+                rec.pop("teardown_failed", None)
+                rec.pop("teardown_logged_at", None)
+                rec["run_id"] = run_id
+                rec["live"] = True
+                return name, True
+
             # Reuse an active worktree already bound to this run (a later node), one recovered
             # from disk with an unknown binding (run_id None), or an IDLE one still bound to an
             # EARLIER run of the same card (RE311): a worktree's identity is the card's branch,
@@ -1833,6 +1923,10 @@ class RunnerPool:
                     return None
                 if rec.get("partition") is None:
                     rec["partition"] = self._take_partition()
+                # A failed eviction (RE336) marked it; this re-baseline supersedes that, and a
+                # stale mark would re-baseline the run's NEXT node too, mid-run.
+                rec.pop("teardown_failed", None)
+                rec.pop("teardown_logged_at", None)
                 rec.update(run_id=run_id, state="active", live=True,
                            ref=rec.get("ref") or job["vars"]["ref"])
                 return name, True
@@ -1910,6 +2004,17 @@ class RunnerPool:
         name = self.wt_name(ref)
         with self.lock:
             rec = self.wts.get(name)
+            # RE336: a tree whose removal FAILED may have lost its `.git` link, and a talk agent's
+            # git commands inside it would walk UP into the main checkout. Re-baseline it when
+            # nothing occupies it (create_or_rebaseline rebuilds a `.git`-less tree); otherwise
+            # return None so placement retries.
+            if rec is not None and rec.get("teardown_failed"):
+                if rec["live"] or rec.get("talk_users", 0) or rec.get("pending_finish"):
+                    return None
+                rec.pop("teardown_failed", None)
+                rec.pop("teardown_logged_at", None)
+                rec["talk_users"] = 1
+                return name, True
             if rec is not None:
                 rec["talk_users"] = rec.get("talk_users", 0) + 1
                 return name, False
@@ -1988,16 +2093,47 @@ class RunnerPool:
             self._finish_locked(name, rec, status or "done")
 
     def _finish_locked(self, slot, rec, run_state):
-        """Terminal disposition of an active worktree. Caller holds self.lock."""
-        self._release_partition(rec)
+        """Terminal disposition of an active worktree. Caller holds self.lock.
+
+        done/cancelled pop the record and free its partition only once the tree is actually
+        GONE (RE336). Popping first meant a failed removal left the tree on disk but out of
+        `holdings()`, so the server could never name it in `release_held` and the slot leaked
+        until a restart. A record whose removal failed stays `active`, `live=False`, bound to
+        its run and holding its partition: an honest occupant, since it still occupies disk and
+        its checkout. `holdings()` reports it `bound`, and every heartbeat's `release_held`
+        retries it."""
         if run_state == "failed":
+            self._release_partition(rec)
+            rec.pop("teardown_failed", None)
+            rec.pop("teardown_logged_at", None)
             rec["state"] = "retained"
             rec["run_id"] = None
             self._teardown(slot, retain=True)
             self._evict_retained_over_cap_locked()
-        else:  # done | cancelled
+            return
+        if self._remove_locked(slot, rec):
+            self._release_partition(rec)
             self.wts.pop(slot, None)
-            self._teardown(slot, retain=False)
+
+    def _remove_locked(self, slot, rec):
+        """Remove `slot`'s tree; True once it is gone. A failure is forwarded with the card's
+        ref (first one at once, then at most once per IDLE_LOG_INTERVAL while retries keep
+        failing) and marks the record `teardown_failed`; a later success says so once (RE336).
+        Caller holds self.lock."""
+        ref = self._ref_of(slot)
+        err = self._teardown(slot, retain=False)
+        if err is None:
+            if rec.pop("teardown_failed", False):
+                rec.pop("teardown_logged_at", None)
+                log(f"✓ {ref}: worktree teardown succeeded on retry", ref=ref)
+            return True
+        now = self.clock()
+        last = rec.get("teardown_logged_at")
+        if last is None or now - last >= IDLE_LOG_INTERVAL:
+            rec["teardown_logged_at"] = now
+            log(f"⚠ {ref}: worktree teardown failed, will retry: {err}", ref=ref, kind="error")
+        rec["teardown_failed"] = True
+        return False
 
     def _retire_talk_only_locked(self, slot, rec):
         """An idle talk-only worktree (never bound to a real run) is no longer worth an
@@ -2025,8 +2161,10 @@ class RunnerPool:
         # Oldest-first by the worktree dir's mtime (survives restarts; no in-memory clock).
         retained.sort(key=lambda n: _worktree_mtime(worktree_path(n)))
         for name in retained[:len(retained) - self.max_retained_failed]:
-            self.wts.pop(name, None)
-            self._teardown(name, retain=False)
+            # Pop only once the tree is really gone (RE336); a failed removal stays retained
+            # and is retried the next time eviction runs.
+            if self._remove_locked(name, self.wts[name]):
+                self.wts.pop(name, None)
 
     # ---- git plumbing (worktree lifecycle) ------------------------------
     def create_or_rebaseline(self, slot):
@@ -2035,14 +2173,32 @@ class RunnerPool:
         stash, per reset_worktree) and clear its retained marker. It is fine to sit DETACHED at
         base here: the flow's first node (`branch`) runs `git checkout -B {branch} origin/main`,
         attaching the branch before any commit (the check_branch_attached/reattach exception for
-        "checkout -B" covers it)."""
+        "checkout -B" covers it).
+
+        A tree HALF-deleted by a failed teardown (RE336) has lost its `.git` link. reset_worktree's
+        git commands would then walk UP into the main checkout, so it is deleted and re-added
+        instead. `prune` precedes `add` because a half-removed path can still be registered, and
+        git refuses to `add` a registered path.
+
+        If that delete leaves the directory behind (a process still writing into it, a
+        permission error), the processes inside are stopped and the delete retried once; a tree
+        still there dies rather than fall through to reset_worktree, whose stash/reset/clean
+        would land on the main checkout."""
         path = worktree_path(slot)
+        if os.path.isdir(path) and not _worktree_link_intact(path):
+            shutil.rmtree(path, ignore_errors=True)
+            if os.path.isdir(path):
+                _stop_processes_in(path, ref=self._ref_of(slot))
+                shutil.rmtree(path, ignore_errors=True)
+            if os.path.isdir(path):
+                die(f"half-deleted worktree {slot} could not be cleared: {path}")
         if os.path.isdir(path):
             reset_worktree(path, self.base)
             _clear_retained_marker(path)
             return
         if not git_fetch_with_retry(ROOT):
             die("git fetch failed while creating a per-card worktree")
+        git_worktree_with_retry(["prune"])
         if not git_worktree_with_retry(["add", "--detach", path, self.base]):
             die(f"git worktree add failed for {slot}")
 
@@ -2050,20 +2206,45 @@ class RunnerPool:
         """Remove (done/cancelled) or retain (failed) a per-card worktree. Salvages any dirty
         edits via `git stash` first (preserving today's safety). Retained worktrees stay on disk
         with RETAINED_MARKER so a restart classifies them; removal routes through the shared-.git
-        retry discipline (RLY-224/§6)."""
+        retry discipline (RLY-224/§6).
+
+        Returns None when the disposition took effect, or the failure text when the tree is
+        still on disk after a removal attempt (RE336); `_remove_locked` keeps the record on a
+        failure so `release_held` retries it. None-means-success is deliberate: it is also what
+        every stubbed no-op `_teardown` in the test suite returns.
+
+        A tree a previous failed removal HALF-deleted has lost its `.git` link. Git no longer
+        recognises it, and a git command run inside it would walk UP into the main checkout
+        (stashing the wrong tree), so such a tree skips the salvage and is deleted directly.
+
+        Before a REMOVAL (never a retain) it stops any process still running inside the tree
+        (_stop_processes_in, RE336), which would otherwise make git fail with 'Directory not
+        empty'."""
         path = worktree_path(slot)
         if not os.path.isdir(path):
-            return
-        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
-                               capture_output=True, text=True).stdout.strip()
-        if dirty:
-            subprocess.run(["git", "stash", "push", "-u", "-m", f"auto-salvage {slot}"],
-                           cwd=path, check=False)
+            return None
+        if not retain:
+            # Removal path only: a retained tree is a post-mortem and is left exactly as it is.
+            _stop_processes_in(path, ref=self._ref_of(slot))
+        intact = _worktree_link_intact(path)
+        if intact:
+            dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
+                                   capture_output=True, text=True).stdout.strip()
+            if dirty:
+                subprocess.run(["git", "stash", "push", "-u", "-m", f"auto-salvage {slot}"],
+                               cwd=path, check=False)
         if retain:
             _write_retained_marker(path)
-            return
-        git_worktree_with_retry(["remove", "--force", path])
+            return None
+        if intact:
+            _ok, err = _git_worktree_attempts(["remove", "--force", path])
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+            err = ""
         git_worktree_with_retry(["prune"])
+        if os.path.isdir(path):
+            return err.strip() or f"{path} is still on disk after removal"
+        return None
 
     def run_prepare_hook(self, slot_path, ref, branch):
         """Warm a freshly created/re-baselined worktree via the project's prepare hook (§4).
@@ -2133,22 +2314,154 @@ class RunnerPool:
                 refresh_worktree(self.shared_name, self.base)
 
 
-def git_worktree_with_retry(args):
+def _git_worktree_attempts(args):
     """`git worktree <args...>` (add/remove/prune) in ROOT, retried on the shared-ref-db race
     (RLY-224 extended to worktree mutations, §6). Per-card worktrees share one `.git`, so two
-    concurrent creates/teardowns race on the worktree list + ref db. Returns True on success;
-    on final failure prints the captured stderr and returns False."""
+    concurrent creates/teardowns race on the worktree list + ref db. Returns
+    (ok, stderr_of_the_last_attempt), so a caller that must REPORT a failure (`_teardown`,
+    RE336) can, rather than having it land only on the runner's own terminal."""
     last_err = ""
     for attempt in range(1, GIT_FETCH_MAX_ATTEMPTS + 1):
         proc = subprocess.run(["git", "worktree", *args], cwd=ROOT,
                               capture_output=True, text=True)
         if proc.returncode == 0:
-            return True
+            return True, ""
         last_err = proc.stderr or proc.stdout or ""
         if attempt < GIT_FETCH_MAX_ATTEMPTS:
             _fetch_backoff(attempt)
-    sys.stderr.write(last_err)
-    return False
+    return False, last_err
+
+
+def git_worktree_with_retry(args):
+    """`_git_worktree_attempts` for callers that only need success: True on success; on final
+    failure prints the captured stderr and returns False."""
+    ok, err = _git_worktree_attempts(args)
+    if not ok:
+        sys.stderr.write(err)
+    return ok
+
+
+# RE336: how long a process left running inside a worktree being REMOVED gets to exit on
+# SIGTERM before the runner SIGKILLs it. Short: the tree is about to be deleted either way.
+TEARDOWN_KILL_GRACE_S = 5
+
+
+def _self_and_ancestor_pids():
+    """This runner's pid and every ancestor's. Never a teardown target, even if one of them
+    happens to be sitting in the tree."""
+    pids, pid = {1}, os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        try:
+            pid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                     text=True, timeout=5).stdout.strip())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            break
+    return pids
+
+
+def _process_cwds():
+    """[(pid, command, cwd)] for every process this user can see: `/proc/*/cwd` on Linux,
+    `lsof -a -d cwd -Fpcn` elsewhere (macOS). Raises when discovery itself fails; callers go
+    through `_processes_in`, which makes that best-effort."""
+    found = []
+    if os.path.isdir("/proc/self"):
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{entry}/cwd")
+                with open(f"/proc/{entry}/comm", encoding="utf-8") as f:
+                    cmd = f.read().strip()
+            except OSError:
+                continue            # exited mid-scan, or another user's process
+            found.append((int(entry), cmd, cwd))
+        return found
+    # lsof exits nonzero when some processes are unreadable but still prints the rest, so its
+    # stdout is parsed whatever the exit status. -F output: `p<pid>`, `c<command>`, then per
+    # file `f<fd>` and `n<path>`.
+    out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpcn"], capture_output=True, text=True,
+                         timeout=30).stdout
+    pid = cmd = None
+    for line in out.splitlines():
+        tag, val = line[:1], line[1:]
+        if tag == "p":
+            pid, cmd = int(val), ""
+        elif tag == "c":
+            cmd = val
+        elif tag == "n" and pid is not None:
+            found.append((pid, cmd, val))
+    return found
+
+
+def _processes_in(path):
+    """[(pid, command)] of every process whose current working directory is `path` or inside
+    it, excluding this runner and its ancestors (RE336). Best-effort: [] when discovery is
+    unavailable or errors, and the teardown's retry-and-log covers a removal it could not help."""
+    root = os.path.realpath(path)
+    prefix = root.rstrip(os.sep) + os.sep
+    try:
+        procs = _process_cwds()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    mine = _self_and_ancestor_pids()
+    return [(pid, cmd) for pid, cmd, cwd in procs
+            if pid not in mine and (cwd == root or cwd.startswith(prefix))]
+
+
+def _signal_pid(pid, sig):
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _pid_alive(pid):
+    """True while `pid` is running. Reaps it first if it is this process's own exited child,
+    since an unreaped zombie still answers signal 0."""
+    try:
+        done, _status = os.waitpid(pid, os.WNOHANG)
+        if done == pid:
+            return False
+    except ChildProcessError:
+        pass                        # not our child: the signal-0 probe below decides
+    except OSError:
+        pass
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stop_processes_in(path, ref=None):
+    """Stop every process left running inside a worktree the runner is about to REMOVE
+    (RE336): SIGTERM, up to TEARDOWN_KILL_GRACE_S to exit, then SIGKILL. Each one is logged
+    with the card's ref so a person can see what the runner killed and why. By cwd, not by
+    process group: a server a smoke/acceptance node started with `nohup`/`&` has escaped the
+    node's group but not its directory, and it is exactly what made `git worktree remove
+    --force` fail with 'Directory not empty'. Returns the pids signalled."""
+    procs = _processes_in(path)
+    for pid, cmd in procs:
+        log(f"⚠ {ref or path}: stopping pid {pid} ({cmd or '?'}) left running in the worktree "
+            f"before teardown", ref=ref)
+        _signal_pid(pid, signal.SIGTERM)
+    pending = [pid for pid, _cmd in procs]
+    deadline = time.monotonic() + TEARDOWN_KILL_GRACE_S
+    while pending and time.monotonic() < deadline:
+        time.sleep(0.1)
+        pending = [pid for pid in pending if _pid_alive(pid)]
+    for pid in pending:
+        log(f"⚠ {ref or path}: pid {pid} ignored SIGTERM for {TEARDOWN_KILL_GRACE_S}s, killing",
+            ref=ref)
+        _signal_pid(pid, signal.SIGKILL)
+    deadline = time.monotonic() + 1
+    while pending and time.monotonic() < deadline:
+        time.sleep(0.05)
+        pending = [pid for pid in pending if _pid_alive(pid)]
+    return [pid for pid, _cmd in procs]
 
 
 def _list_worktree_paths():
@@ -2159,6 +2472,25 @@ def _list_worktree_paths():
         return []
     return [line[len("worktree "):] for line in proc.stdout.splitlines()
             if line.startswith("worktree ")]
+
+
+def _worktree_link_intact(path):
+    """True if the worktree at `path` still has a working `.git` link: a `.git` directory, or a
+    `.git` file whose `gitdir:` target still exists. A failed `git worktree remove` can delete
+    either half — the tree's `.git` file, or the admin dir `.git/worktrees/<slot>` it points at
+    (which also drops the registration) — depending on directory iteration order. Both leave a
+    tree git no longer recognises, so both must take the half-deleted path (RE336)."""
+    link = os.path.join(path, ".git")
+    if os.path.isdir(link):
+        return True
+    try:
+        with open(link) as f:
+            head = f.readline().strip()
+    except OSError:
+        return False
+    if not head.startswith("gitdir:"):
+        return False
+    return os.path.isdir(os.path.join(path, head[len("gitdir:"):].strip()))
 
 
 def _worktree_mtime(path):

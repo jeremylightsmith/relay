@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1995,6 +1996,341 @@ class RunnerPoolRecoverTest(unittest.TestCase):
         self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
 
 
+class RunnerPoolTeardownRetryTest(unittest.TestCase):
+    """RE336: `_finish_locked` used to pop a done/cancelled worktree from `self.wts` BEFORE
+    removing it, so a removal that failed (a leftover `phx.server` holding the tree) left the
+    tree on disk, out of `holdings()`, unnameable by the server's `release_held`, and leaked an
+    exclusive slot until a runner restart. Now the record is kept, still `bound`, still holding
+    its partition, until a removal actually succeeds, and `release_held` retries it every beat."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
+    ERR = "fatal: failed to delete '/x/exec-RLY-1': Directory not empty"
+
+    def setUp(self):
+        for name in ("create_or_rebaseline", "_teardown"):
+            orig = getattr(relay.RunnerPool, name)
+            self.addCleanup(setattr, relay.RunnerPool, name, orig)
+            setattr(relay.RunnerPool, name, lambda self, *a, **k: None)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+        self.now = 1000.0
+
+    def pool(self):
+        p = relay.RunnerPool(self.CFG)
+        p.clock = lambda: self.now
+        return p
+
+    def excl(self, run_id, ref="RLY-1"):
+        return {"isolation": "exclusive", "run_id": run_id, "vars": {"ref": ref}}
+
+    def failing(self, p):
+        p._teardown = lambda slot, retain: None if retain else self.ERR
+
+    def errors_for(self, ref):
+        return [m for m, k in self.lines if k.get("kind") == "error" and k.get("ref") == ref]
+
+    def done_with_failing_removal(self, p):
+        slot, _ = p.assign(self.excl("r1"))
+        self.failing(p)
+        p.release(self.excl("r1"), slot, "done")
+        return slot
+
+    def test_a_failed_removal_keeps_the_worktree_held_and_bound(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1"))
+        part = p.wts[slot]["partition"]
+        self.failing(p)
+        p.release(self.excl("r1"), slot, "done")
+        rec = p.wts[slot]
+        self.assertEqual((rec["state"], rec["live"], rec["run_id"], rec["partition"]),
+                         ("active", False, "r1", part))
+        self.assertTrue(rec["teardown_failed"])
+        self.assertNotIn(part, p.free_partitions)
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "bound"}])
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        (line,) = self.errors_for("RLY-1")
+        self.assertIn("Directory not empty", line)
+
+    def test_release_held_retries_and_frees_the_partition_once_removal_succeeds(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        part = p.wts[slot]["partition"]
+        p._teardown = lambda slot, retain: None           # whatever held the tree is gone now
+        p.release_held("RLY-1", "done")
+        self.assertEqual(p.holdings(), [])
+        self.assertIn(part, p.free_partitions)
+        self.assertTrue(any("succeeded on retry" in m and k.get("ref") == "RLY-1"
+                            for m, k in self.lines))
+
+    def test_repeated_failures_are_logged_at_most_once_per_interval_per_ref(self):
+        p = self.pool()
+        self.done_with_failing_removal(p)                   # first failure: logged
+        self.now += 15
+        p.release_held("RLY-1", "done")                     # inside the interval: silent
+        self.assertEqual(len(self.errors_for("RLY-1")), 1)
+        self.now += relay.IDLE_LOG_INTERVAL
+        p.release_held("RLY-1", "done")                     # past it: one repeat
+        self.assertEqual(len(self.errors_for("RLY-1")), 2)
+        self.assertIn("exec-RLY-1", p.wts)                 # still held throughout
+
+    def test_a_new_run_of_a_card_whose_teardown_failed_re_baselines(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        self.assertEqual(p.assign(self.excl("r2")), (slot, True))
+        rec = p.wts[slot]
+        self.assertEqual((rec["run_id"], rec["live"]), ("r2", True))
+        self.assertNotIn("teardown_failed", rec)
+        self.assertNotIn("teardown_logged_at", rec)
+
+    def test_eviction_keeps_a_retained_record_whose_removal_fails(self):
+        p = self.pool()
+        p.wts = {f"exec-F{i}": {"ref": f"F{i}", "run_id": None, "state": "retained",
+                                "live": False, "partition": None} for i in range(4)}
+        self.failing(p)
+        with p.lock:
+            p._evict_retained_over_cap_locked()
+        self.assertEqual(len(p.wts), 4)
+        self.assertEqual(sum(1 for r in p.wts.values() if r.get("teardown_failed")), 1)
+
+    def test_reclaiming_a_retained_tree_whose_eviction_failed_does_not_reset_mid_run(self):
+        # A failed eviction marks the RETAINED record teardown_failed; reclaiming it for a new
+        # run must clear that mark, or the run's second node would match the teardown-failed
+        # re-baseline branch and hard-reset the tree out from under the run.
+        p = self.pool()
+        p.wts = {f"exec-F{i}": {"ref": f"F{i}", "run_id": None, "state": "retained",
+                                "live": False, "partition": None} for i in range(4)}
+        self.failing(p)
+        with p.lock:
+            p._evict_retained_over_cap_locked()
+        (name,) = [n for n, r in p.wts.items() if r.get("teardown_failed")]
+        ref = p.wts[name]["ref"]
+        job = self.excl("r2", ref=ref)
+        self.assertEqual(p.assign(job), (name, True))
+        self.assertNotIn("teardown_failed", p.wts[name])
+        self.assertNotIn("teardown_logged_at", p.wts[name])
+        p.release(job, name, "running")
+        self.assertEqual(p.assign(job), (name, False))
+
+    def test_a_talk_turn_on_a_card_whose_teardown_failed_re_baselines(self):
+        # The failed removal may have deleted the tree's `.git` link; attaching as-is would run
+        # the talk agent's git commands in the MAIN checkout (git walks up).
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        self.assertEqual(p.assign_talk("RLY-1"), (slot, True))
+        rec = p.wts[slot]
+        self.assertEqual(rec["talk_users"], 1)
+        self.assertNotIn("teardown_failed", rec)
+        self.assertNotIn("teardown_logged_at", rec)
+
+    def test_a_talk_turn_waits_when_a_teardown_failed_tree_is_occupied(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        p.wts[slot]["talk_users"] = 1                       # someone is still in it
+        self.assertIsNone(p.assign_talk("RLY-1"))
+        self.assertEqual(p.wts[slot]["talk_users"], 1)
+        self.assertTrue(p.wts[slot]["teardown_failed"])
+
+
+class RunnerPoolRealTeardownTest(unittest.TestCase):
+    """RE336, against a REAL git repo (the RealGitWorktreeTest discipline): the worktrees dir
+    sits INSIDE the repo, gitignored, exactly like `.claude/worktrees`, so a git command run in
+    a broken tree would really walk up into the main checkout."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
+
+    def setUp(self):
+        self.base = os.path.realpath(tempfile.mkdtemp(prefix="relay-teardown-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+        _git(self.repo, "init", "-q", "-b", "main")
+        _write(os.path.join(self.repo, ".gitignore"), ".claude/worktrees\n")
+        _write(os.path.join(self.repo, "seed.txt"), "seed")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "seed")
+        self.wts_dir = os.path.join(self.repo, ".claude", "worktrees")
+        os.makedirs(self.wts_dir)
+        for name in ("ROOT", "worktree_path", "log", "_fetch_backoff"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.ROOT = self.repo
+        relay.worktree_path = lambda name: os.path.join(self.wts_dir, name)
+        relay._fetch_backoff = lambda attempt: None
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+        self.pool = relay.RunnerPool(self.CFG)
+        self.slot = "exec-RLY-9"
+        self.tree = relay.worktree_path(self.slot)
+        _git(self.repo, "worktree", "add", "-q", "--detach", self.tree, "main")
+        self.pool.wts[self.slot] = {"ref": "RLY-9", "run_id": "r1", "state": "active",
+                                    "live": False, "partition": self.pool._take_partition()}
+
+    def git_out(self, *args):
+        return subprocess.run(["git", *args], cwd=self.repo, capture_output=True,
+                              text=True).stdout
+
+    def test_done_removes_the_tree_unregisters_it_and_frees_the_partition(self):
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertEqual(self.pool.free_partitions, ["1", "2"])
+
+    def test_a_half_deleted_tree_is_removed_without_touching_the_main_checkout(self):
+        os.remove(os.path.join(self.tree, ".git"))   # what a failed `git worktree remove` leaves
+        _write(os.path.join(self.tree, "straggler.txt"), "x")
+        _write(os.path.join(self.repo, "main-edit.txt"), "uncommitted work in the main checkout")
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
+        self.assertEqual(self.git_out("stash", "list"), "")
+
+    def test_a_tree_whose_gitdir_is_gone_is_removed_without_touching_the_main_checkout(self):
+        """The other half-deleted shape: git removed the admin dir `.git/worktrees/<slot>` and
+        `prune` dropped the registration, but the tree kept its `.git` FILE, now pointing at
+        nothing. Counting that file as intact sent every retry to `git worktree remove`, which
+        fails with "is not a working tree" forever (smoke, RE336)."""
+        shutil.rmtree(os.path.join(self.repo, ".git", "worktrees", self.slot))
+        _git(self.repo, "worktree", "prune")
+        _write(os.path.join(self.tree, "straggler.txt"), "x")
+        _write(os.path.join(self.repo, "main-edit.txt"), "uncommitted work in the main checkout")
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
+        self.assertEqual(self.git_out("stash", "list"), "")
+
+    @unittest.skipUnless(hasattr(os, "chflags") and hasattr(stat, "UF_IMMUTABLE"),
+                         "no immutable-file flag on this host")
+    def test_a_removal_that_failed_partway_succeeds_once_the_blocker_is_cleared(self):
+        """The smoke repro: an immutable file makes `git worktree remove --force` fail partway.
+        Whichever of `.git` / the admin dir survives, the first retry after the blocker clears
+        removes the tree and frees the partition."""
+        blocked = os.path.join(self.tree, "blocked.txt")
+        _write(blocked, "x")
+        os.chflags(blocked, stat.UF_IMMUTABLE)
+        self.addCleanup(lambda: os.path.exists(blocked) and os.chflags(blocked, 0))
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertIn(self.slot, self.pool.wts)
+        os.chflags(blocked, 0)
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertEqual(self.pool.free_partitions, ["1", "2"])
+
+    def spawn(self, cwd, argv):
+        p = subprocess.Popen(list(argv), cwd=cwd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.addCleanup(_reap, p)
+        return p
+
+    @unittest.skipUnless(os.path.isdir("/proc/self") or shutil.which("lsof"),
+                         "no process-cwd discovery on this host")
+    def test_done_stops_processes_left_in_the_tree_then_removes_it(self):
+        """The observed trigger: a smoke node's `phx.server` kept running inside the tree, and
+        `git worktree remove --force` failed with 'Directory not empty'."""
+        inside = self.spawn(self.tree, ["sleep", "60"])
+        writer = self.spawn(self.tree, ["sh", "-c",
+                                        "i=0; while :; do i=$((i+1)); : > w$i; sleep 0.01; done"])
+        outside = self.spawn(self.base, ["sleep", "60"])
+        relay.time.sleep(0.2)                      # let the writer start littering the tree
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        inside.wait(timeout=10)
+        writer.wait(timeout=10)
+        self.assertIsNone(outside.poll(), "a process outside the tree must survive")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertTrue(any(str(inside.pid) in m and k.get("ref") == "RLY-9"
+                            for m, k in self.lines), self.lines)
+
+    def test_failed_retains_the_tree_and_leaves_its_processes_running(self):
+        """A retained tree is a post-mortem: left exactly as it is, processes included."""
+        inside = self.spawn(self.tree, ["sleep", "60"])
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "failed")
+        self.assertIsNone(inside.poll())
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, relay.RETAINED_MARKER)))
+        self.assertEqual(self.pool.wts[self.slot]["state"], "retained")
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self") or shutil.which("lsof"),
+                     "no process-cwd discovery on this host")
+class StopProcessesInTest(unittest.TestCase):
+    """RE336: before removing a tree the runner stops every process whose cwd is inside it
+    (SIGTERM, then SIGKILL after TEARDOWN_KILL_GRACE_S). This catches a server a node started
+    with `nohup`/`&` that escaped the node's process group. By cwd, never by name; never the
+    runner itself; never a process merely sharing a path prefix."""
+
+    def setUp(self):
+        self.dir = os.path.realpath(tempfile.mkdtemp(prefix="relay-procs-"))
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.tree = os.path.join(self.dir, "tree")
+        self.inside = os.path.join(self.tree, "sub")
+        os.makedirs(self.inside)
+        self.outside = os.path.join(self.dir, "elsewhere")
+        os.makedirs(self.outside)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+
+    def spawn(self, cwd, argv=("sleep", "60")):
+        p = subprocess.Popen(list(argv), cwd=cwd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.addCleanup(_reap, p)
+        return p
+
+    def test_a_process_inside_the_tree_is_stopped_and_one_outside_survives(self):
+        inside = self.spawn(self.inside)
+        outside = self.spawn(self.outside)
+        self.assertIn(inside.pid, relay._stop_processes_in(self.tree, ref="RLY-9"))
+        inside.wait(timeout=10)
+        self.assertIsNone(outside.poll())
+        (msg, kw), = [(m, k) for m, k in self.lines if str(inside.pid) in m]
+        self.assertEqual(kw.get("ref"), "RLY-9")
+        self.assertIn("sleep", msg)
+
+    def test_a_process_that_ignores_sigterm_is_killed_after_the_grace(self):
+        self.addCleanup(setattr, relay, "TEARDOWN_KILL_GRACE_S", relay.TEARDOWN_KILL_GRACE_S)
+        relay.TEARDOWN_KILL_GRACE_S = 0.3
+        stubborn = self.spawn(self.inside,
+                              ("sh", "-c", 'trap "" TERM; while :; do sleep 0.1; done'))
+        relay.time.sleep(0.2)                      # let the shell install its trap
+        relay._stop_processes_in(self.tree, ref="RLY-9")
+        stubborn.wait(timeout=10)
+
+    def test_the_runner_itself_is_never_a_target(self):
+        prev = os.getcwd()
+        os.chdir(self.inside)
+        try:
+            pids = [pid for pid, _cmd in relay._processes_in(self.tree)]
+        finally:
+            os.chdir(prev)
+        self.assertNotIn(os.getpid(), pids)
+
+    def test_a_sibling_that_only_shares_the_path_prefix_is_not_inside(self):
+        sibling = self.tree + "-2"
+        os.makedirs(sibling)
+        p = self.spawn(sibling)
+        self.assertNotIn(p.pid, [pid for pid, _cmd in relay._processes_in(self.tree)])
+
+    def test_a_discovery_failure_is_never_fatal(self):
+        self.addCleanup(setattr, relay, "_process_cwds", relay._process_cwds)
+
+        def broken():
+            raise OSError("lsof: not found")
+
+        relay._process_cwds = broken
+        self.assertEqual(relay._processes_in(self.tree), [])
+        self.assertEqual(relay._stop_processes_in(self.tree, ref="RLY-9"), [])
+
+
 class RunnerPoolBaseTest(unittest.TestCase):
     """The ref every worktree is baselined to is `base` from runner.json, not a hardcoded
     `origin/main`. A repo whose trunk is `master` (or a fork tracking `upstream/main`) had no
@@ -2053,6 +2389,61 @@ class RunnerPoolBaseTest(unittest.TestCase):
 
         with open(out) as f:
             self.assertEqual(f.read(), "origin/master origin/master")
+
+    def test_a_half_deleted_tree_is_rebuilt_not_reset(self):
+        """RE336: a failed `git worktree remove` can delete the tree's `.git` link and stop.
+        reset_worktree's git commands would then walk UP into the main checkout, so such a tree
+        is deleted and re-added instead. `prune` precedes `add` because the half-deleted path is
+        still registered, and git refuses to `add` a registered path."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(setattr, relay, "worktree_path", relay.worktree_path)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)
+        _write(os.path.join(path, "leftover.txt"), "x")      # no `.git` link
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertFalse(os.path.exists(os.path.join(path, "leftover.txt")))
+        self.assertFalse([c for c in self.calls if c[0] == "reset"])
+        self.assertEqual([c for c in self.calls if c[0] == "wt"],
+                         [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])
+
+    def test_a_tree_whose_gitdir_is_gone_is_rebuilt_not_reset(self):
+        """RE336 smoke: a failed removal can keep the tree's `.git` FILE while git deletes the
+        admin dir it points at. That link is dangling, so the tree is half-deleted all the
+        same and must not reach reset_worktree."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(setattr, relay, "worktree_path", relay.worktree_path)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)
+        _write(os.path.join(path, ".git"), f"gitdir: {tmp}/gone/.git/worktrees/exec-RLY-1\n")
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertFalse(os.path.exists(os.path.join(path, ".git")))
+        self.assertFalse([c for c in self.calls if c[0] == "reset"])
+        self.assertEqual([c for c in self.calls if c[0] == "wt"],
+                         [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])
+
+    def test_a_half_deleted_tree_that_cannot_be_cleared_is_never_reset(self):
+        """RE336: if the rmtree of a `.git`-less tree fails (a process still writing into it, a
+        permission error), falling through to reset_worktree would stash, hard-reset and clean
+        the MAIN checkout. It stops what is running there, retries once, then dies."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for name in ("worktree_path", "_stop_processes_in"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.addCleanup(setattr, relay.shutil, "rmtree", relay.shutil.rmtree)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        stopped = []
+        relay._stop_processes_in = lambda path, ref=None: stopped.append((path, ref)) or []
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)                                    # no `.git` link
+        relay.shutil.rmtree = lambda *a, **k: None           # removal leaves it in place
+        with self.assertRaises(SystemExit):
+            relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertEqual(stopped, [(path, "RLY-1")])
+        self.assertFalse([c for c in self.calls if c[0] in ("reset", "wt")])
 
 
 class RunnerConfigCommittedFileTest(unittest.TestCase):
@@ -2312,12 +2703,14 @@ class ApiTimeoutPassthroughTest(unittest.TestCase):
         relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
         self.assertEqual(seen.get("timeout"), 25)
 
-    def test_default_call_passes_no_timeout_kwarg(self):
+    def test_default_call_gets_the_named_api_timeout(self):
+        """RE336: a bare urlopen blocks FOREVER on a half-open connection, which is how one
+        heartbeat POST caught by a server restart wedged a runner's heartbeat thread for days."""
         seen = {}
         relay.urllib.request.urlopen = lambda req, *a, **k: (
             seen.update(kwargs=dict(k)) or _FakeResp(b"{}"))
         relay.api("GET", "/api/board")
-        self.assertEqual(seen["kwargs"], {})   # unchanged: no timeout kwarg
+        self.assertEqual(seen["kwargs"], {"timeout": relay.API_TIMEOUT_S})
 
     def test_socket_timeout_is_reraised_not_died(self):
         def boom(req, *a, **k):
@@ -2325,6 +2718,84 @@ class ApiTimeoutPassthroughTest(unittest.TestCase):
         relay.urllib.request.urlopen = boom
         with self.assertRaises(relay.socket.timeout):
             relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+
+
+class DieTest(unittest.TestCase):
+    """RE336: die() raises `Died`, a SystemExit that remembers its message, so a caller that
+    swallows it (the heartbeat) can say WHAT failed instead of logging a bare `SystemExit: 1`."""
+
+    def test_die_exits_1_and_carries_its_message(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                relay.die("boom")
+        self.assertIsInstance(cm.exception, relay.Died)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(cm.exception.msg, "boom")
+        self.assertEqual(err.getvalue(), "relay: boom\n")
+
+
+class ApiDefaultTimeoutTest(unittest.TestCase):
+    """RE336: every API call without its own timeout gets API_TIMEOUT_S, and a read timeout on
+    such a call follows the retry discipline (safe methods and `idempotent` retry, a plain POST
+    fails the call). A caller-supplied timeout (the long-poll claim) is untouched: still
+    forwarded and still re-raised (see ApiTimeoutPassthroughTest)."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        self.calls = []
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def _script(self, outcomes):
+        seq = list(outcomes)
+
+        def fake(req, *a, **k):
+            self.calls.append(k)
+            outcome = seq.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        relay.urllib.request.urlopen = fake
+
+    def test_the_heartbeat_post_gets_the_default_timeout(self):
+        self._script([_FakeResp(b"{}")])
+        relay.api("POST", "/api/node-jobs/heartbeat", {"x": 1}, soft_404=True)
+        self.assertEqual(self.calls, [{"timeout": relay.API_TIMEOUT_S}])
+
+    def test_the_claim_keeps_its_own_long_poll_timeout(self):
+        self._script([_FakeResp(b"{}")])
+        relay.claim_node_job({"name": "b", "host": "h", "version": 1}, {}, 25)
+        self.assertEqual(self.calls, [{"timeout": 25}])
+
+    def test_a_timed_out_get_is_retried(self):
+        self._script([relay.socket.timeout("timed out"), _FakeResp(b'{"ok": 1}')])
+        self.assertEqual(relay.api("GET", "/api/board"), {"ok": 1})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_timed_out_idempotent_post_is_retried(self):
+        self._script([relay.socket.timeout("timed out"), _FakeResp(b'{"run_state": "done"}')])
+        self.assertEqual(
+            relay.api("POST", "/api/node-jobs/1/outcome", {"outcome": "succeeded"},
+                      idempotent=True),
+            {"run_state": "done"})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_timed_out_plain_post_fails_the_call_without_retrying(self):
+        self._script([relay.socket.timeout("timed out")])
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                relay.api("POST", "/api/node-jobs/heartbeat", {"x": 1})
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("timed out", cm.exception.msg)
 
 
 class StreamClaudeJobTest(unittest.TestCase):
@@ -3416,6 +3887,16 @@ def isolate_relay_state(test):
     return statedir
 
 
+def _reap(proc):
+    """Cleanup for a test-spawned process: kill it if still running, then reap it."""
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _write(path, text):
     with open(path, "w") as f:
         f.write(text)
@@ -3428,6 +3909,98 @@ def _git(cwd, *args):
 
 
 VALID_STUB = "#!/usr/bin/env python3\nRUNNER_VERSION = {}\nprint('hi')\n"
+
+
+class RunnerHeartbeatResilienceTest(unittest.TestCase):
+    """RE336: the heartbeat is the ONLY channel for release_held, revoke, capability refresh,
+    rate_limit and auto-update, and it died silently on a runner for days. Nothing a beat does
+    may escape it, the loop keeps beating whatever happens, and a failing beat is visible in the
+    runner feed: one error line on the first failure, at most one per IDLE_LOG_INTERVAL while it
+    keeps failing, and one "restored" line when a beat lands again."""
+
+    def setUp(self):
+        self.now = 1000.0
+        self.lines = []
+        for name in ("api", "log", "collect_capabilities"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.log = lambda msg, **k: self.lines.append((msg, k.get("kind", "lifecycle")))
+        relay.collect_capabilities = lambda: {"agents": [], "skills": []}
+        self.outcomes = []
+
+        def fake_api(*a, **k):
+            outcome = self.outcomes.pop(0) if self.outcomes else {}
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        relay.api = fake_api
+
+    def hb(self, **kw):
+        return relay.RunnerHeartbeat({"name": "b", "host": "h"}, lambda: [], lambda jid: None,
+                                     interval=15, clock=lambda: self.now, **kw)
+
+    def errors(self):
+        return [m for m, kind in self.lines if kind == "error"]
+
+    def test_a_raising_capability_scan_does_not_escape_the_beat(self):
+        relay.collect_capabilities = lambda: 1 / 0
+        self.hb()._beat()                      # must not raise
+        (line,) = self.errors()
+        self.assertIn("ZeroDivisionError", line)
+
+    def test_a_raising_held_fn_does_not_escape_the_beat(self):
+        self.hb(held_fn=lambda: 1 / 0)._beat()
+        self.assertEqual(len(self.errors()), 1)
+
+    def test_a_timed_out_post_is_logged_and_the_next_beat_still_lands(self):
+        self.outcomes = [relay.Died("request timed out after 30s on POST /api/node-jobs/heartbeat"),
+                         {"latest_runner_version": 70}]
+        hb = self.hb()
+        hb._beat()
+        self.now += 15
+        hb._beat()
+        self.assertEqual(hb.latest_version, 70)
+        self.assertIn("timed out", self.errors()[0])
+
+    def test_failure_logging_is_throttled_and_recovery_is_announced_once(self):
+        self.outcomes = [relay.Died("boom"), relay.Died("boom"), relay.Died("boom"), {}]
+        hb = self.hb()
+        hb._beat()                                         # first failure: one error line
+        self.now += 15
+        hb._beat()                                         # inside the interval: silent
+        self.assertEqual(len(self.errors()), 1)
+        self.now += relay.IDLE_LOG_INTERVAL
+        hb._beat()                                         # past the interval: one repeat
+        self.assertEqual(len(self.errors()), 2)
+        self.now += 15
+        hb._beat()                                         # lands: one "restored" line
+        restored = [m for m, _kind in self.lines if "restored" in m]
+        self.assertEqual(len(restored), 1)
+        self.assertIn(f"after {int(15 + relay.IDLE_LOG_INTERVAL + 15)}s", restored[0])
+        self.assertEqual(hb.last_ok, self.now)
+        self.assertIn("boom", self.errors()[0])
+
+    def test_healthy_beats_log_nothing(self):
+        hb = self.hb()
+        hb._beat()
+        hb._beat()
+        self.assertEqual(self.lines, [])
+
+    def test_run_keeps_beating_after_a_beat_raises(self):
+        hb = self.hb()
+        hb.interval = 0
+        calls = []
+
+        def beat():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("escaped")
+            if len(calls) == 3:
+                hb.stop()
+
+        hb._beat = beat
+        hb._run()
+        self.assertEqual(len(calls), 3)
 
 
 class AutoUpdateDownloadTest(unittest.TestCase):
