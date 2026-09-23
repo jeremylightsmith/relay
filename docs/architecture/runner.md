@@ -795,6 +795,20 @@ silently billed to the paid API.
   `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
   for in-flight workers to finish.
+- **The heartbeat cannot wedge, and a failing one is visible (RE336).** Every `api()` call gets
+  a finite read timeout, `API_TIMEOUT_S` (30s), unless its caller passes its own. The long-poll
+  claim and the startup board fetch pass their own and still get the `socket.timeout`
+  re-raised. On a default call, a read timeout retries only for GET/PATCH or an `idempotent`
+  POST. Anything else fails the call, since the server may already have processed it. Before
+  this change a bare `urlopen` blocked forever on a half-open connection. One heartbeat POST
+  caught that way by a server restart silently killed the runner's heartbeat for days, and with
+  it `release_held`, revoke, capability refresh, `rate_limit`, auto-update and capacity
+  advertisement. The roster still showed the runner fresh, because claims also stamp
+  `last_heartbeat`. `RunnerHeartbeat._beat` now guards everything it does (capability scan,
+  `held_fn`, the POST, the reply handlers), and `_run` guards the loop body as well. A failing
+  beat forwards one `error` line naming the cause (`die()` raises `Died`, a `SystemExit` that
+  carries its message), repeats at most once per `IDLE_LOG_INTERVAL` while failures continue,
+  and logs one "heartbeat restored after Ns" line when a beat lands again.
 - **Heartbeat-borne revoke.** `RunnerHeartbeat` POSTs `{runner, capacity,
   running: [job-ids], held: [{ref, state}]}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s and reads `{revoked: [job-ids],

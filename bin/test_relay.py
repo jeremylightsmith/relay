@@ -2312,12 +2312,14 @@ class ApiTimeoutPassthroughTest(unittest.TestCase):
         relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
         self.assertEqual(seen.get("timeout"), 25)
 
-    def test_default_call_passes_no_timeout_kwarg(self):
+    def test_default_call_gets_the_named_api_timeout(self):
+        """RE336: a bare urlopen blocks FOREVER on a half-open connection, which is how one
+        heartbeat POST caught by a server restart wedged a runner's heartbeat thread for days."""
         seen = {}
         relay.urllib.request.urlopen = lambda req, *a, **k: (
             seen.update(kwargs=dict(k)) or _FakeResp(b"{}"))
         relay.api("GET", "/api/board")
-        self.assertEqual(seen["kwargs"], {})   # unchanged: no timeout kwarg
+        self.assertEqual(seen["kwargs"], {"timeout": relay.API_TIMEOUT_S})
 
     def test_socket_timeout_is_reraised_not_died(self):
         def boom(req, *a, **k):
@@ -2325,6 +2327,84 @@ class ApiTimeoutPassthroughTest(unittest.TestCase):
         relay.urllib.request.urlopen = boom
         with self.assertRaises(relay.socket.timeout):
             relay.api("POST", "/api/node-jobs/claim", {"x": 1}, timeout=25)
+
+
+class DieTest(unittest.TestCase):
+    """RE336: die() raises `Died`, a SystemExit that remembers its message, so a caller that
+    swallows it (the heartbeat) can say WHAT failed instead of logging a bare `SystemExit: 1`."""
+
+    def test_die_exits_1_and_carries_its_message(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                relay.die("boom")
+        self.assertIsInstance(cm.exception, relay.Died)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(cm.exception.msg, "boom")
+        self.assertEqual(err.getvalue(), "relay: boom\n")
+
+
+class ApiDefaultTimeoutTest(unittest.TestCase):
+    """RE336: every API call without its own timeout gets API_TIMEOUT_S, and a read timeout on
+    such a call follows the retry discipline (safe methods and `idempotent` retry, a plain POST
+    fails the call). A caller-supplied timeout (the long-poll claim) is untouched: still
+    forwarded and still re-raised (see ApiTimeoutPassthroughTest)."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None
+        relay.log = lambda *a, **k: None
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        self.calls = []
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(relay, k, v)
+
+    def _script(self, outcomes):
+        seq = list(outcomes)
+
+        def fake(req, *a, **k):
+            self.calls.append(k)
+            outcome = seq.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        relay.urllib.request.urlopen = fake
+
+    def test_the_heartbeat_post_gets_the_default_timeout(self):
+        self._script([_FakeResp(b"{}")])
+        relay.api("POST", "/api/node-jobs/heartbeat", {"x": 1}, soft_404=True)
+        self.assertEqual(self.calls, [{"timeout": relay.API_TIMEOUT_S}])
+
+    def test_the_claim_keeps_its_own_long_poll_timeout(self):
+        self._script([_FakeResp(b"{}")])
+        relay.claim_node_job({"name": "b", "host": "h", "version": 1}, {}, 25)
+        self.assertEqual(self.calls, [{"timeout": 25}])
+
+    def test_a_timed_out_get_is_retried(self):
+        self._script([relay.socket.timeout("timed out"), _FakeResp(b'{"ok": 1}')])
+        self.assertEqual(relay.api("GET", "/api/board"), {"ok": 1})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_timed_out_idempotent_post_is_retried(self):
+        self._script([relay.socket.timeout("timed out"), _FakeResp(b'{"run_state": "done"}')])
+        self.assertEqual(
+            relay.api("POST", "/api/node-jobs/1/outcome", {"outcome": "succeeded"},
+                      idempotent=True),
+            {"run_state": "done"})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_timed_out_plain_post_fails_the_call_without_retrying(self):
+        self._script([relay.socket.timeout("timed out")])
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                relay.api("POST", "/api/node-jobs/heartbeat", {"x": 1})
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("timed out", cm.exception.msg)
 
 
 class StreamClaudeJobTest(unittest.TestCase):
@@ -3428,6 +3508,98 @@ def _git(cwd, *args):
 
 
 VALID_STUB = "#!/usr/bin/env python3\nRUNNER_VERSION = {}\nprint('hi')\n"
+
+
+class RunnerHeartbeatResilienceTest(unittest.TestCase):
+    """RE336: the heartbeat is the ONLY channel for release_held, revoke, capability refresh,
+    rate_limit and auto-update, and it died silently on a runner for days. Nothing a beat does
+    may escape it, the loop keeps beating whatever happens, and a failing beat is visible in the
+    runner feed: one error line on the first failure, at most one per IDLE_LOG_INTERVAL while it
+    keeps failing, and one "restored" line when a beat lands again."""
+
+    def setUp(self):
+        self.now = 1000.0
+        self.lines = []
+        for name in ("api", "log", "collect_capabilities"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.log = lambda msg, **k: self.lines.append((msg, k.get("kind", "lifecycle")))
+        relay.collect_capabilities = lambda: {"agents": [], "skills": []}
+        self.outcomes = []
+
+        def fake_api(*a, **k):
+            outcome = self.outcomes.pop(0) if self.outcomes else {}
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        relay.api = fake_api
+
+    def hb(self, **kw):
+        return relay.RunnerHeartbeat({"name": "b", "host": "h"}, lambda: [], lambda jid: None,
+                                     interval=15, clock=lambda: self.now, **kw)
+
+    def errors(self):
+        return [m for m, kind in self.lines if kind == "error"]
+
+    def test_a_raising_capability_scan_does_not_escape_the_beat(self):
+        relay.collect_capabilities = lambda: 1 / 0
+        self.hb()._beat()                      # must not raise
+        (line,) = self.errors()
+        self.assertIn("ZeroDivisionError", line)
+
+    def test_a_raising_held_fn_does_not_escape_the_beat(self):
+        self.hb(held_fn=lambda: 1 / 0)._beat()
+        self.assertEqual(len(self.errors()), 1)
+
+    def test_a_timed_out_post_is_logged_and_the_next_beat_still_lands(self):
+        self.outcomes = [relay.Died("request timed out after 30s on POST /api/node-jobs/heartbeat"),
+                         {"latest_runner_version": 70}]
+        hb = self.hb()
+        hb._beat()
+        self.now += 15
+        hb._beat()
+        self.assertEqual(hb.latest_version, 70)
+        self.assertIn("timed out", self.errors()[0])
+
+    def test_failure_logging_is_throttled_and_recovery_is_announced_once(self):
+        self.outcomes = [relay.Died("boom"), relay.Died("boom"), relay.Died("boom"), {}]
+        hb = self.hb()
+        hb._beat()                                         # first failure: one error line
+        self.now += 15
+        hb._beat()                                         # inside the interval: silent
+        self.assertEqual(len(self.errors()), 1)
+        self.now += relay.IDLE_LOG_INTERVAL
+        hb._beat()                                         # past the interval: one repeat
+        self.assertEqual(len(self.errors()), 2)
+        self.now += 15
+        hb._beat()                                         # lands: one "restored" line
+        restored = [m for m, _kind in self.lines if "restored" in m]
+        self.assertEqual(len(restored), 1)
+        self.assertIn(f"after {int(15 + relay.IDLE_LOG_INTERVAL + 15)}s", restored[0])
+        self.assertEqual(hb.last_ok, self.now)
+        self.assertIn("boom", self.errors()[0])
+
+    def test_healthy_beats_log_nothing(self):
+        hb = self.hb()
+        hb._beat()
+        hb._beat()
+        self.assertEqual(self.lines, [])
+
+    def test_run_keeps_beating_after_a_beat_raises(self):
+        hb = self.hb()
+        hb.interval = 0
+        calls = []
+
+        def beat():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("escaped")
+            if len(calls) == 3:
+                hb.stop()
+
+        hb._beat = beat
+        hb._run()
+        self.assertEqual(len(calls), 3)
 
 
 class AutoUpdateDownloadTest(unittest.TestCase):

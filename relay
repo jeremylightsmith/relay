@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 64
-RUNNER_FINGERPRINT = "4da3e651226bc96ff01902ceb9a76b3238c72dd69b70ef8355eba94781b873a1"
+RUNNER_VERSION = 65
+RUNNER_FINGERPRINT = "59f3e79daf75701181296a13bc64356e0e399e35b83551f106d3b953573ef1b0"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -83,9 +83,20 @@ def runner_ident(cfg):
     return {"name": cfg["name"], "host": socket.gethostname(), "version": RUNNER_VERSION}
 
 
+class Died(SystemExit):
+    """What die() raises (RE336): a SystemExit with exit status 1, so every existing
+    `except SystemExit` still catches it and `relay <cmd>` still exits 1, that ALSO carries the
+    message. A caller that swallows it (the heartbeat) can then say what failed instead of
+    logging a bare `SystemExit: 1`."""
+
+    def __init__(self, msg):
+        super().__init__(1)
+        self.msg = msg
+
+
 def die(msg):
     print(f"relay: {msg}", file=sys.stderr)
-    sys.exit(1)
+    raise Died(msg)
 
 
 def log(msg, *, ref=None, kind="lifecycle"):
@@ -102,6 +113,12 @@ def env(name):
 
 API_MAX_ATTEMPTS = 3  # one initial try + up to two retries
 
+# RE336: the read timeout every API call gets unless its caller passes its own. A bare urlopen
+# blocks FOREVER on a half-open connection, and one heartbeat POST caught that way by a server
+# restart wedged a runner's heartbeat thread for days: no release_held, no revoke, no
+# capability refresh, no auto-update, all silently. Generous next to any real response time.
+API_TIMEOUT_S = 30
+
 
 def _api_backoff(attempt):
     """Sleep before retry `attempt` (1-based): 0.5s, then 1s. Isolated in a named
@@ -116,9 +133,13 @@ def _retryable(method, err, idempotent=False):
     can't double-apply — safe for any method. HTTPError 5xx: retry idempotent methods
     (GET, PATCH), never a plain POST (could double-apply a mutation) — but an
     explicitly `idempotent` POST retries too (RLY-202: the outcome POST, which the
-    server answers 200 on a duplicate finalize). 4xx: never."""
+    server answers 200 on a duplicate finalize). A READ timeout (RE336) is treated like a
+    5xx, not like a URLError: the request reached the server and may have been processed,
+    so only a safe or `idempotent` call retries. 4xx: never."""
     if isinstance(err, urllib.error.HTTPError):
         return err.code >= 500 and (method in ("GET", "PATCH") or idempotent)
+    if isinstance(err, socket.timeout):
+        return method in ("GET", "PATCH") or idempotent
     return isinstance(err, urllib.error.URLError)
 
 
@@ -130,16 +151,25 @@ def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=No
         req.add_header("Authorization", f"Bearer {env('RELAY_API_KEY')}")
     if data is not None:
         req.add_header("Content-Type", "application/json")
-    # Pass a read timeout only when asked (the long-poll claim): a bare urlopen keeps the
-    # prior global-default behavior for every existing call, byte for byte.
-    open_kwargs = {} if timeout is None else {"timeout": timeout}
+    # A caller-supplied timeout (the long-poll claim, the startup board fetch) owns its read
+    # timeout: it is re-raised for that caller to interpret. Every other call gets
+    # API_TIMEOUT_S and treats a read timeout as one more transient failure (RE336).
+    caller_timeout = timeout is not None
+    open_kwargs = {"timeout": timeout if caller_timeout else API_TIMEOUT_S}
     for attempt in range(1, API_MAX_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, **open_kwargs) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
-        except socket.timeout:
-            raise   # long-poll read timeout — the claim caller treats it as 'no work'
+        except socket.timeout as e:
+            if caller_timeout:
+                raise   # long-poll read timeout — the claim caller treats it as 'no work'
+            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
+                log(f"request timed out after {API_TIMEOUT_S}s on {method} {path}, retrying "
+                    f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
+                _api_backoff(attempt)
+                continue
+            die(f"request timed out after {API_TIMEOUT_S}s on {method} {path}")
         except urllib.error.HTTPError as e:
             # An HTTPError IS the response — an open file object, like the `resp` the success
             # path closes with `with`. Every exit below (swallow, retry, die) walks away from
@@ -318,12 +348,15 @@ class RunnerHeartbeat:
         beat so the board sees a paused runner as paused (and a resumed one as not) within one
         interval.
 
-    Best-effort by construction: swallows api()'s die() (SystemExit) and any other error, so a
-    heartbeat can never stall or raise into a job. soft_404 is kept as belt-and-braces for a
-    runner pointed at an older server, but the route now exists."""
+    Best-effort by construction: `_beat` swallows api()'s die() (`Died`, a SystemExit) and any
+    other error, so a heartbeat can never stall or raise into a job, and every API call it makes
+    carries API_TIMEOUT_S, so it can never block forever either (RE336). A failing beat is
+    logged, throttled to one line per IDLE_LOG_INTERVAL, with one "restored" line when it
+    recovers. soft_404 is kept as belt-and-braces for a runner pointed at an older server, but
+    the route now exists."""
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None, rate_limit_fn=None):
+                 held_fn=None, on_release_held=None, rate_limit_fn=None, clock=time.monotonic):
         self.runner = runner
         self.running_fn = running_fn
         self.on_revoke = on_revoke
@@ -344,6 +377,14 @@ class RunnerHeartbeat:
         # send the key, a board whose scaffold was never built, or a beat that has not landed —
         # reads as "never auto-update", which is the safe answer.
         self.latest_version = None
+        # RE336: a failing heartbeat must be visible, not silent. `last_ok` is the clock() of
+        # the last beat that landed; `_failing_since` is the clock() of the first failure of
+        # the current failing streak (None while beats land); `_fail_logged_at` throttles the
+        # repeat line to one per IDLE_LOG_INTERVAL.
+        self.clock = clock
+        self.last_ok = None
+        self._failing_since = None
+        self._fail_logged_at = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -354,16 +395,25 @@ class RunnerHeartbeat:
         self._stop.set()
 
     def _beat(self):
-        # A handful of listdir calls at the 15s interval — negligible, and it means a skill
-        # or agent added mid-session is reported without restarting the runner.
-        capabilities = collect_capabilities()
-        digest = capabilities_hash(capabilities)
-        send = capabilities if digest != self._caps_hash else None
+        """One beat. NOTHING in here may raise (RE336): an exception out of the capability
+        scan or `held_fn` used to escape the old try and end the heartbeat thread for good.
+        Whether the POST landed is recorded (`_beat_ok`/`_beat_failed`) BEFORE the reply is
+        acted on, so a raising handler can't make a landed beat look like a failed one."""
         try:
+            # A handful of listdir calls at the 15s interval — negligible, and it means a skill
+            # or agent added mid-session is reported without restarting the runner.
+            capabilities = collect_capabilities()
+            digest = capabilities_hash(capabilities)
+            send = capabilities if digest != self._caps_hash else None
             resp = api("POST", "/api/node-jobs/heartbeat",
                        heartbeat_body(self.runner, self.capacity, self.running_fn(),
                                       self.held_fn(), send, self.rate_limit_fn()),
                        soft_404=True) or {}
+        except (Exception, SystemExit) as e:      # api() die()s on HTTP/network error
+            self._beat_failed(e)
+            return
+        self._beat_ok()
+        try:
             # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
             # alone so the next beat retries.
             if send is not None:
@@ -382,14 +432,35 @@ class RunnerHeartbeat:
                 # entry is a server we do not understand and is ignored rather than guessed at.
                 if isinstance(item, dict):
                     self.on_release_held(item.get("ref"), item.get("status"))
-        except SystemExit:      # api() die()s on HTTP/network error
+        except (Exception, SystemExit):
             pass
-        except Exception:
-            pass
+
+    def _beat_ok(self):
+        now = self.clock()
+        if self._failing_since is not None:
+            log(f"✓ heartbeat restored after {int(now - self._failing_since)}s")
+            self._failing_since = self._fail_logged_at = None
+        self.last_ok = now
+
+    def _beat_failed(self, err):
+        """Log the first failure of a streak at once, then at most once per IDLE_LOG_INTERVAL
+        (RE336). `Died` carries die()'s message; anything else is named by its type."""
+        now = self.clock()
+        why = getattr(err, "msg", None) or f"{type(err).__name__}: {err}"
+        if self._failing_since is None:
+            self._failing_since = self._fail_logged_at = now
+            log(f"⚠ heartbeat failed: {why} (retrying every {self.interval}s)", kind="error")
+        elif now - self._fail_logged_at >= IDLE_LOG_INTERVAL:
+            self._fail_logged_at = now
+            log(f"⚠ heartbeat still failing after {int(now - self._failing_since)}s: {why}",
+                kind="error")
 
     def _run(self):
         while not self._stop.wait(self.interval):
-            self._beat()
+            try:
+                self._beat()
+            except (Exception, SystemExit):     # belt and braces: _beat guards itself (RE336)
+                pass
 
 
 def read_arg(text):
