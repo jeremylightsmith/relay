@@ -81,6 +81,11 @@ defmodule Relay.MixProject do
       # --- Architecture: enforced context/web boundaries (see lib/relay.ex) ---
       {:boundary, "~> 0.10"},
 
+      # --- Layered graph layout for the flow diagram (RE332). Vendored, dependency-free and
+      # bound for extraction as its own hex package: vendor/dagre_ex is a separate mix project
+      # with its own tests and precommit, which the `precommit` alias below runs. ---
+      {:dagre_ex, path: "vendor/dagre_ex"},
+
       # --- Push: ES256 JWS for the APNs provider token (RLY-81). A small
       # pure-Erlang crypto helper, not a push framework — we hand-roll the one
       # APNs call over Req/Finch rather than pull in pigeon/FCM. Approved at
@@ -153,6 +158,7 @@ defmodule Relay.MixProject do
         "relay.gen_state --check",
         "relay.gen_vocab --check",
         "relay.deps_graph --check",
+        "cmd --cd vendor/dagre_ex env MIX_ENV=test mix do deps.get + precommit",
         "test",
         "cmd python3 bin/test_relay.py"
       ]

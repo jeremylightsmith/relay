@@ -12,6 +12,7 @@ flowchart LR
     App --> Domain["Relay"]
     Web --> Domain
     Web --> Schemas
+    Web --> Dagre["dagre_ex (vendored OTP app)"]
     Domain --> Schemas["Schemas (peer)"]
     Storybook["Storybook"] --> Web
 ```
@@ -87,6 +88,20 @@ flowchart LR
 | `phoenix_live_dashboard`, `telemetry_*` | ops visibility |
 | `credo`, `styler`, `sobelow`, `mix_audit` | the `mix precommit` gate |
 
+## Vendored libraries
+
+| Library | Path | Why we have it |
+| --- | --- | --- |
+| `dagre_ex` (`Dagre`) | `vendor/dagre_ex` | Layered (Sugiyama) graph layout — a dependency-free Elixir port of [dagre](https://github.com/dagrejs/dagre). Consumed only by `RelayWeb`, for the flow diagram's layout (`FlowLayout`, wired in RE333). |
+
+`dagre_ex` is a **separate OTP app**, not a context: its own `mix.exs`, `LICENSE`, tests,
+`.formatter.exs` and `precommit` alias, which the root `mix precommit` runs
+(`cmd --cd vendor/dagre_ex env MIX_ENV=test mix do deps.get + precommit`). It is **dependency-free and bound for
+extraction** as a hex package, so it must never reference a Relay module or concept. It sits
+outside the `boundary` graph — `boundary` governs modules inside this project — so it has no
+`use Boundary` and is not in `Relay`'s exports. If `boundary` ever flags a `RelayWeb` call into
+`Dagre`, the fix is a `deps` entry on `RelayWeb`, not a change to the library.
+
 ## External services
 
 | Service | Role | Notes |
@@ -99,5 +114,5 @@ flowchart LR
 | Anthropic (`claude` CLI) | every agent node | runs on the developer machine, not on Fly |
 
 ---
-*Sources of truth: `mix.exs`, `lib/relay.ex` / `lib/relay_web.ex` / `lib/schemas.ex`
+*Sources of truth: `mix.exs`, `vendor/dagre_ex/mix.exs`, `lib/relay.ex` / `lib/relay_web.ex` / `lib/schemas.ex`
 (`use Boundary` declarations), `fly.toml`, `assets/css/app.css`.*
