@@ -24,11 +24,12 @@ defmodule Storybook.FlowGraph do
       %Variation{
         id: :default_code_flow,
         description:
-          "The shipped Code flow: 14 nodes on a vertical spine, three fix nodes beside it, " <>
-            "back-edges in the right-hand gutter, dashed failed edges, max-N loop badges. " <>
-            "Agent nodes stack their binding — subagent · model · effort (e.g. " <>
-            "plan-implementer · sonnet · high); a generic agent node with no subagent reads " <>
-            "just model · effort.",
+          "The shipped Code flow: a vertical spine, fix nodes beside it, back-edges in the " <>
+            "right-hand gutter, dashed failed edges, max-N loop badges. Every node that can " <>
+            "park on a human (an edge into needs_input) carries a warning pause badge at its " <>
+            "top-right corner instead of a drawn edge. Agent nodes stack their binding — " <>
+            "subagent · model · effort (e.g. plan-implementer · sonnet · high); a generic agent " <>
+            "node with no subagent reads just model · effort.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
