@@ -2204,6 +2204,11 @@ defmodule RelayWeb.CoreComponents do
     doc:
       "whether the open card itself is archived (RLY-4): shows the read-only archived banner + Restore and suppresses the edit/status/move affordances"
 
+  attr :active_run?, :boolean,
+    default: false,
+    doc:
+      "RE335: whether the card holds an active run (`Schemas.Run.active?/1`) — the ⋯ menu's Archive confirm then warns that archiving cancels it"
+
   attr :done, :boolean,
     default: false,
     doc: "derived Done (Relay.Cards.done?/2): shows a Done pill in the header; no banner below"
@@ -2565,7 +2570,7 @@ defmodule RelayWeb.CoreComponents do
                   role="menuitem"
                   phx-click="archive_card"
                   phx-value-ref={@ref}
-                  data-confirm="Archive this card? You can restore it from Archived."
+                  data-confirm={archive_confirm(@active_run?)}
                   class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
                 >
                   Archive
@@ -4327,6 +4332,13 @@ defmodule RelayWeb.CoreComponents do
   # owns "which stages exist and which one is current"; this owns "which of them the filter
   # box is showing", so neither has to re-derive the other's answer. Matching is a
   # case-insensitive substring on the DISPLAYED name, so "rev" finds "Code · Review".
+  # RE335 D5 — archiving from the board cancels the card's active run (the runs Listener closes
+  # it on {:card_archived, _}), so the native confirm says so. Otherwise the copy is unchanged.
+  defp archive_confirm(true),
+    do: "Archive this card? Its active run will be cancelled. You can restore the card from Archived."
+
+  defp archive_confirm(false), do: "Archive this card? You can restore it from Archived."
+
   defp filter_stages(stages, filter) do
     case filter |> to_string() |> String.trim() |> String.downcase() do
       "" -> stages
