@@ -4,7 +4,9 @@ defmodule RelayWeb.FlowLayout do
   Derives the shape from graph structure alone: the `:succeeded` spine runs straight down a
   single column, off-spine rework nodes sit in a second column on their partner's row, anything
   unreachable is parked below, and every backward edge (loop or failure) is packed into a
-  right-hand gutter lane so they stop piling on top of each other.
+  right-hand gutter lane so they stop piling on top of each other. Edges into the `needs_input`
+  park are not routed at all; their source nodes are returned in `parks` for the renderer to
+  badge (RE330).
 
   Consumed by the flow editor (`RelayWeb.FlowEditorLive`) and the storybook story. It is NOT
   reused by the run panel today.
