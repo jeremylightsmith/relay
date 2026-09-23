@@ -2150,6 +2150,113 @@ class RunnerPoolRealTeardownTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
         self.assertEqual(self.git_out("stash", "list"), "")
 
+    def spawn(self, cwd, argv):
+        p = subprocess.Popen(list(argv), cwd=cwd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.addCleanup(_reap, p)
+        return p
+
+    @unittest.skipUnless(os.path.isdir("/proc/self") or shutil.which("lsof"),
+                         "no process-cwd discovery on this host")
+    def test_done_stops_processes_left_in_the_tree_then_removes_it(self):
+        """The observed trigger: a smoke node's `phx.server` kept running inside the tree, and
+        `git worktree remove --force` failed with 'Directory not empty'."""
+        inside = self.spawn(self.tree, ["sleep", "60"])
+        writer = self.spawn(self.tree, ["sh", "-c",
+                                        "i=0; while :; do i=$((i+1)); : > w$i; sleep 0.01; done"])
+        outside = self.spawn(self.base, ["sleep", "60"])
+        relay.time.sleep(0.2)                      # let the writer start littering the tree
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        inside.wait(timeout=10)
+        writer.wait(timeout=10)
+        self.assertIsNone(outside.poll(), "a process outside the tree must survive")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertTrue(any(str(inside.pid) in m and k.get("ref") == "RLY-9"
+                            for m, k in self.lines), self.lines)
+
+    def test_failed_retains_the_tree_and_leaves_its_processes_running(self):
+        """A retained tree is a post-mortem: left exactly as it is, processes included."""
+        inside = self.spawn(self.tree, ["sleep", "60"])
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "failed")
+        self.assertIsNone(inside.poll())
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, relay.RETAINED_MARKER)))
+        self.assertEqual(self.pool.wts[self.slot]["state"], "retained")
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self") or shutil.which("lsof"),
+                     "no process-cwd discovery on this host")
+class StopProcessesInTest(unittest.TestCase):
+    """RE336: before removing a tree the runner stops every process whose cwd is inside it
+    (SIGTERM, then SIGKILL after TEARDOWN_KILL_GRACE_S). This catches a server a node started
+    with `nohup`/`&` that escaped the node's process group. By cwd, never by name; never the
+    runner itself; never a process merely sharing a path prefix."""
+
+    def setUp(self):
+        self.dir = os.path.realpath(tempfile.mkdtemp(prefix="relay-procs-"))
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.tree = os.path.join(self.dir, "tree")
+        self.inside = os.path.join(self.tree, "sub")
+        os.makedirs(self.inside)
+        self.outside = os.path.join(self.dir, "elsewhere")
+        os.makedirs(self.outside)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+
+    def spawn(self, cwd, argv=("sleep", "60")):
+        p = subprocess.Popen(list(argv), cwd=cwd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.addCleanup(_reap, p)
+        return p
+
+    def test_a_process_inside_the_tree_is_stopped_and_one_outside_survives(self):
+        inside = self.spawn(self.inside)
+        outside = self.spawn(self.outside)
+        self.assertIn(inside.pid, relay._stop_processes_in(self.tree, ref="RLY-9"))
+        inside.wait(timeout=10)
+        self.assertIsNone(outside.poll())
+        (msg, kw), = [(m, k) for m, k in self.lines if str(inside.pid) in m]
+        self.assertEqual(kw.get("ref"), "RLY-9")
+        self.assertIn("sleep", msg)
+
+    def test_a_process_that_ignores_sigterm_is_killed_after_the_grace(self):
+        self.addCleanup(setattr, relay, "TEARDOWN_KILL_GRACE_S", relay.TEARDOWN_KILL_GRACE_S)
+        relay.TEARDOWN_KILL_GRACE_S = 0.3
+        stubborn = self.spawn(self.inside,
+                              ("sh", "-c", 'trap "" TERM; while :; do sleep 0.1; done'))
+        relay.time.sleep(0.2)                      # let the shell install its trap
+        relay._stop_processes_in(self.tree, ref="RLY-9")
+        stubborn.wait(timeout=10)
+
+    def test_the_runner_itself_is_never_a_target(self):
+        prev = os.getcwd()
+        os.chdir(self.inside)
+        try:
+            pids = [pid for pid, _cmd in relay._processes_in(self.tree)]
+        finally:
+            os.chdir(prev)
+        self.assertNotIn(os.getpid(), pids)
+
+    def test_a_sibling_that_only_shares_the_path_prefix_is_not_inside(self):
+        sibling = self.tree + "-2"
+        os.makedirs(sibling)
+        p = self.spawn(sibling)
+        self.assertNotIn(p.pid, [pid for pid, _cmd in relay._processes_in(self.tree)])
+
+    def test_a_discovery_failure_is_never_fatal(self):
+        self.addCleanup(setattr, relay, "_process_cwds", relay._process_cwds)
+
+        def broken():
+            raise OSError("lsof: not found")
+
+        relay._process_cwds = broken
+        self.assertEqual(relay._processes_in(self.tree), [])
+        self.assertEqual(relay._stop_processes_in(self.tree, ref="RLY-9"), [])
+
 
 class RunnerPoolBaseTest(unittest.TestCase):
     """The ref every worktree is baselined to is `base` from runner.json, not a hardcoded
@@ -3668,6 +3775,16 @@ def isolate_relay_state(test):
     test.addCleanup(lambda: os.environ.__setitem__("RELAY_STATE_DIR", prev)
                     if prev is not None else os.environ.pop("RELAY_STATE_DIR", None))
     return statedir
+
+
+def _reap(proc):
+    """Cleanup for a test-spawned process: kill it if still running, then reap it."""
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _write(path, text):

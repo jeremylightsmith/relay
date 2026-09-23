@@ -783,6 +783,18 @@ silently billed to the paid API.
     one rather than running git inside it, since git would walk up into the main checkout.
     Previously the record was popped *before* removal, so a failed removal left the tree on disk
     but invisible to `release_held` until a runner restart (`recover()`) rediscovered it.
+  - **In-tree processes are stopped before removal (RE336).** Before `git worktree remove`
+    (on the removal path only, never for a retained `failed` tree, which is a post-mortem left
+    as is), `_stop_processes_in` finds every process whose current working directory is the
+    worktree or inside it. It uses `/proc/*/cwd` on Linux and `lsof -a -d cwd -Fpcn`
+    elsewhere, and excludes the runner and its ancestors. It sends each one SIGTERM, waits up
+    to `TEARDOWN_KILL_GRACE_S` (5s), then SIGKILLs any survivors, and forwards one line per
+    process (pid, command, card ref). It kills by cwd rather than by process group so that a
+    server a smoke/acceptance node started with `nohup`/`&`, which escaped the node's group, is
+    still caught. That was the observed trigger: a leftover `phx.server` made
+    `git worktree remove --force` fail with "Directory not empty". Discovery is best-effort:
+    if the tool is missing or errors, the step is skipped and the retry-and-log above covers
+    the failure.
 - **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
   `RELAY_NODE_SCRATCH` (`scratch_path` in `./relay`): `tmp/<REF>/<node>.md` inside that same
   worktree, keyed only on `(ref, node)` so a re-queued job after a runner restart resolves

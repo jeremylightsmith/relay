@@ -56,7 +56,7 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 65
-RUNNER_FINGERPRINT = "c1bc1a07eb3dbbdaa59c567d1f3a47ca82ca2219c40a04e41c06a00594b5ca9e"
+RUNNER_FINGERPRINT = "396f05ff2562652c393f99f5fe961ab1fa1634c141091a9aaf64b27e322508d1"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2190,10 +2190,17 @@ class RunnerPool:
 
         A tree a previous failed removal HALF-deleted has lost its `.git` link. Git no longer
         recognises it, and a git command run inside it would walk UP into the main checkout
-        (stashing the wrong tree), so such a tree skips the salvage and is deleted directly."""
+        (stashing the wrong tree), so such a tree skips the salvage and is deleted directly.
+
+        Before a REMOVAL (never a retain) it stops any process still running inside the tree
+        (_stop_processes_in, RE336), which would otherwise make git fail with 'Directory not
+        empty'."""
         path = worktree_path(slot)
         if not os.path.isdir(path):
             return None
+        if not retain:
+            # Removal path only: a retained tree is a post-mortem and is left exactly as it is.
+            _stop_processes_in(path, ref=self._ref_of(slot))
         intact = os.path.exists(os.path.join(path, ".git"))
         if intact:
             dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
@@ -2307,6 +2314,129 @@ def git_worktree_with_retry(args):
     if not ok:
         sys.stderr.write(err)
     return ok
+
+
+# RE336: how long a process left running inside a worktree being REMOVED gets to exit on
+# SIGTERM before the runner SIGKILLs it. Short: the tree is about to be deleted either way.
+TEARDOWN_KILL_GRACE_S = 5
+
+
+def _self_and_ancestor_pids():
+    """This runner's pid and every ancestor's. Never a teardown target, even if one of them
+    happens to be sitting in the tree."""
+    pids, pid = {1}, os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        try:
+            pid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                     text=True, timeout=5).stdout.strip())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            break
+    return pids
+
+
+def _process_cwds():
+    """[(pid, command, cwd)] for every process this user can see: `/proc/*/cwd` on Linux,
+    `lsof -a -d cwd -Fpcn` elsewhere (macOS). Raises when discovery itself fails; callers go
+    through `_processes_in`, which makes that best-effort."""
+    found = []
+    if os.path.isdir("/proc/self"):
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{entry}/cwd")
+                with open(f"/proc/{entry}/comm", encoding="utf-8") as f:
+                    cmd = f.read().strip()
+            except OSError:
+                continue            # exited mid-scan, or another user's process
+            found.append((int(entry), cmd, cwd))
+        return found
+    # lsof exits nonzero when some processes are unreadable but still prints the rest, so its
+    # stdout is parsed whatever the exit status. -F output: `p<pid>`, `c<command>`, then per
+    # file `f<fd>` and `n<path>`.
+    out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpcn"], capture_output=True, text=True,
+                         timeout=30).stdout
+    pid = cmd = None
+    for line in out.splitlines():
+        tag, val = line[:1], line[1:]
+        if tag == "p":
+            pid, cmd = int(val), ""
+        elif tag == "c":
+            cmd = val
+        elif tag == "n" and pid is not None:
+            found.append((pid, cmd, val))
+    return found
+
+
+def _processes_in(path):
+    """[(pid, command)] of every process whose current working directory is `path` or inside
+    it, excluding this runner and its ancestors (RE336). Best-effort: [] when discovery is
+    unavailable or errors, and the teardown's retry-and-log covers a removal it could not help."""
+    root = os.path.realpath(path)
+    prefix = root.rstrip(os.sep) + os.sep
+    try:
+        procs = _process_cwds()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    mine = _self_and_ancestor_pids()
+    return [(pid, cmd) for pid, cmd, cwd in procs
+            if pid not in mine and (cwd == root or cwd.startswith(prefix))]
+
+
+def _signal_pid(pid, sig):
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _pid_alive(pid):
+    """True while `pid` is running. Reaps it first if it is this process's own exited child,
+    since an unreaped zombie still answers signal 0."""
+    try:
+        done, _status = os.waitpid(pid, os.WNOHANG)
+        if done == pid:
+            return False
+    except ChildProcessError:
+        pass                        # not our child: the signal-0 probe below decides
+    except OSError:
+        pass
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stop_processes_in(path, ref=None):
+    """Stop every process left running inside a worktree the runner is about to REMOVE
+    (RE336): SIGTERM, up to TEARDOWN_KILL_GRACE_S to exit, then SIGKILL. Each one is logged
+    with the card's ref so a person can see what the runner killed and why. By cwd, not by
+    process group: a server a smoke/acceptance node started with `nohup`/`&` has escaped the
+    node's group but not its directory, and it is exactly what made `git worktree remove
+    --force` fail with 'Directory not empty'. Returns the pids signalled."""
+    procs = _processes_in(path)
+    for pid, cmd in procs:
+        log(f"⚠ {ref or path}: stopping pid {pid} ({cmd or '?'}) left running in the worktree "
+            f"before teardown", ref=ref)
+        _signal_pid(pid, signal.SIGTERM)
+    pending = [pid for pid, _cmd in procs]
+    deadline = time.monotonic() + TEARDOWN_KILL_GRACE_S
+    while pending and time.monotonic() < deadline:
+        time.sleep(0.1)
+        pending = [pid for pid in pending if _pid_alive(pid)]
+    for pid in pending:
+        log(f"⚠ {ref or path}: pid {pid} ignored SIGTERM for {TEARDOWN_KILL_GRACE_S}s, killing",
+            ref=ref)
+        _signal_pid(pid, signal.SIGKILL)
+    deadline = time.monotonic() + 1
+    while pending and time.monotonic() < deadline:
+        time.sleep(0.05)
+        pending = [pid for pid in pending if _pid_alive(pid)]
+    return [pid for pid, _cmd in procs]
 
 
 def _list_worktree_paths():
