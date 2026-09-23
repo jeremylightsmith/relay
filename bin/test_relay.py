@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2188,6 +2189,40 @@ class RunnerPoolRealTeardownTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
         self.assertEqual(self.git_out("stash", "list"), "")
 
+    def test_a_tree_whose_gitdir_is_gone_is_removed_without_touching_the_main_checkout(self):
+        """The other half-deleted shape: git removed the admin dir `.git/worktrees/<slot>` and
+        `prune` dropped the registration, but the tree kept its `.git` FILE, now pointing at
+        nothing. Counting that file as intact sent every retry to `git worktree remove`, which
+        fails with "is not a working tree" forever (smoke, RE336)."""
+        shutil.rmtree(os.path.join(self.repo, ".git", "worktrees", self.slot))
+        _git(self.repo, "worktree", "prune")
+        _write(os.path.join(self.tree, "straggler.txt"), "x")
+        _write(os.path.join(self.repo, "main-edit.txt"), "uncommitted work in the main checkout")
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
+        self.assertEqual(self.git_out("stash", "list"), "")
+
+    @unittest.skipUnless(hasattr(os, "chflags") and hasattr(stat, "UF_IMMUTABLE"),
+                         "no immutable-file flag on this host")
+    def test_a_removal_that_failed_partway_succeeds_once_the_blocker_is_cleared(self):
+        """The smoke repro: an immutable file makes `git worktree remove --force` fail partway.
+        Whichever of `.git` / the admin dir survives, the first retry after the blocker clears
+        removes the tree and frees the partition."""
+        blocked = os.path.join(self.tree, "blocked.txt")
+        _write(blocked, "x")
+        os.chflags(blocked, stat.UF_IMMUTABLE)
+        self.addCleanup(lambda: os.path.exists(blocked) and os.chflags(blocked, 0))
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertIn(self.slot, self.pool.wts)
+        os.chflags(blocked, 0)
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertEqual(self.pool.free_partitions, ["1", "2"])
+
     def spawn(self, cwd, argv):
         p = subprocess.Popen(list(argv), cwd=cwd, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
@@ -2369,6 +2404,23 @@ class RunnerPoolBaseTest(unittest.TestCase):
         _write(os.path.join(path, "leftover.txt"), "x")      # no `.git` link
         relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
         self.assertFalse(os.path.exists(os.path.join(path, "leftover.txt")))
+        self.assertFalse([c for c in self.calls if c[0] == "reset"])
+        self.assertEqual([c for c in self.calls if c[0] == "wt"],
+                         [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])
+
+    def test_a_tree_whose_gitdir_is_gone_is_rebuilt_not_reset(self):
+        """RE336 smoke: a failed removal can keep the tree's `.git` FILE while git deletes the
+        admin dir it points at. That link is dangling, so the tree is half-deleted all the
+        same and must not reach reset_worktree."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(setattr, relay, "worktree_path", relay.worktree_path)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)
+        _write(os.path.join(path, ".git"), f"gitdir: {tmp}/gone/.git/worktrees/exec-RLY-1\n")
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertFalse(os.path.exists(os.path.join(path, ".git")))
         self.assertFalse([c for c in self.calls if c[0] == "reset"])
         self.assertEqual([c for c in self.calls if c[0] == "wt"],
                          [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])

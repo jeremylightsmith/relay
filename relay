@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 65
-RUNNER_FINGERPRINT = "905f76e77cc0a88a7b584dcd42dc06f946e784e207df9baebfc6abb29e92c80b"
+RUNNER_VERSION = 66
+RUNNER_FINGERPRINT = "b49e8cf8ac58866d6ef1c81657d05b627ced7b4927084f020a9973cad40184b1"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2185,7 +2185,7 @@ class RunnerPool:
         still there dies rather than fall through to reset_worktree, whose stash/reset/clean
         would land on the main checkout."""
         path = worktree_path(slot)
-        if os.path.isdir(path) and not os.path.exists(os.path.join(path, ".git")):
+        if os.path.isdir(path) and not _worktree_link_intact(path):
             shutil.rmtree(path, ignore_errors=True)
             if os.path.isdir(path):
                 _stop_processes_in(path, ref=self._ref_of(slot))
@@ -2226,7 +2226,7 @@ class RunnerPool:
         if not retain:
             # Removal path only: a retained tree is a post-mortem and is left exactly as it is.
             _stop_processes_in(path, ref=self._ref_of(slot))
-        intact = os.path.exists(os.path.join(path, ".git"))
+        intact = _worktree_link_intact(path)
         if intact:
             dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
                                    capture_output=True, text=True).stdout.strip()
@@ -2472,6 +2472,25 @@ def _list_worktree_paths():
         return []
     return [line[len("worktree "):] for line in proc.stdout.splitlines()
             if line.startswith("worktree ")]
+
+
+def _worktree_link_intact(path):
+    """True if the worktree at `path` still has a working `.git` link: a `.git` directory, or a
+    `.git` file whose `gitdir:` target still exists. A failed `git worktree remove` can delete
+    either half — the tree's `.git` file, or the admin dir `.git/worktrees/<slot>` it points at
+    (which also drops the registration) — depending on directory iteration order. Both leave a
+    tree git no longer recognises, so both must take the half-deleted path (RE336)."""
+    link = os.path.join(path, ".git")
+    if os.path.isdir(link):
+        return True
+    try:
+        with open(link) as f:
+            head = f.readline().strip()
+    except OSError:
+        return False
+    if not head.startswith("gitdir:"):
+        return False
+    return os.path.isdir(os.path.join(path, head[len("gitdir:"):].strip()))
 
 
 def _worktree_mtime(path):
