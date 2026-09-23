@@ -57,6 +57,7 @@ defmodule RelayWeb.BoardRunnersLive do
   alias Relay.Boards
   alias Relay.Runs
   alias RelayWeb.BoardCrumbs
+  alias RelayWeb.BoardSettingsLive
   alias RelayWeb.RunComponents
 
   @tick_every to_timeout(second: 10)
@@ -79,7 +80,7 @@ defmodule RelayWeb.BoardRunnersLive do
       crumbs={BoardCrumbs.settings_section(@board)}
     >
       <:title>
-        <span id="runners-title">Runners</span>
+        <span id="runners-title" class="truncate">{BoardSettingsLive.section_label(:runners)}</span>
       </:title>
       <:actions>
         <.link

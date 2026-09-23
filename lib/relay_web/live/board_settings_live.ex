@@ -26,6 +26,8 @@ defmodule RelayWeb.BoardSettingsLive do
 
   use RelayWeb, :live_view
 
+  import RelayWeb.CoreComponents, except: [section_label: 1]
+
   alias Relay.ApiKeys
   alias Relay.Boards
   alias Relay.Cards
@@ -52,7 +54,9 @@ defmodule RelayWeb.BoardSettingsLive do
       crumbs={BoardCrumbs.settings_section(@board)}
     >
       <:title>
-        <span id="settings-title">Board settings</span>
+        <span id="settings-title" class="truncate" title={section_label(@section)}>
+          {section_label(@section)}
+        </span>
       </:title>
       <:actions>
         <.link
@@ -82,49 +86,49 @@ defmodule RelayWeb.BoardSettingsLive do
             id="settings-tab-general"
             style={tab_style(@section == :general)}
           >
-            General
+            {section_label(:general)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=stages"}
             id="settings-tab-stages"
             style={tab_style(@section == :stages)}
           >
-            Stages
+            {section_label(:stages)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=public"}
             id="settings-tab-public"
             style={tab_style(@section == :public)}
           >
-            Public board
+            {section_label(:public)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=flows"}
             id="settings-tab-flows"
             style={tab_style(@section == :flows)}
           >
-            Flows
+            {section_label(:flows)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
             id="settings-tab-members"
             style={tab_style(@section == :members)}
           >
-            Members
+            {section_label(:members)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=keys"}
             id="settings-tab-keys"
             style={tab_style(@section == :keys)}
           >
-            API keys
+            {section_label(:keys)}
           </.link>
           <.link
             navigate={~p"/board/#{@board.slug}/runners"}
             id="settings-tab-runners"
             style={tab_style(false)}
           >
-            Runners
+            {section_label(:runners)}
           </.link>
         </nav>
 
@@ -145,42 +149,42 @@ defmodule RelayWeb.BoardSettingsLive do
             id="settings-nav-general"
             style={nav_style(@section == :general)}
           >
-            General
+            {section_label(:general)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=stages"}
             id="settings-nav-stages"
             style={nav_style(@section == :stages)}
           >
-            Stages
+            {section_label(:stages)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=public"}
             id="settings-nav-public"
             style={nav_style(@section == :public)}
           >
-            Public board
+            {section_label(:public)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=flows"}
             id="settings-nav-flows"
             style={nav_style(@section == :flows)}
           >
-            Flows
+            {section_label(:flows)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
             id="settings-nav-members"
             style={nav_style(@section == :members)}
           >
-            Members
+            {section_label(:members)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=keys"}
             id="settings-nav-keys"
             style={nav_style(@section == :keys)}
           >
-            API keys
+            {section_label(:keys)}
           </.link>
 
           <div
@@ -194,7 +198,7 @@ defmodule RelayWeb.BoardSettingsLive do
             id="settings-nav-runners"
             style={nav_style(false)}
           >
-            Runners
+            {section_label(:runners)}
           </.link>
         </nav>
 

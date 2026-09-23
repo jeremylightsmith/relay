@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
 
   alias Relay.AgentLog
   alias Relay.Boards
+  alias RelayWeb.BoardSettingsLive
 
   setup :register_and_log_in_user
 
@@ -62,6 +63,17 @@ defmodule RelayWeb.BoardRunnersLiveTest do
   end
 
   defp ref(board, card), do: "#{board.key}#{card.ref_number}"
+
+  test "the top bar reads Boards / <board> / Settings / Runners (RE334)", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+    assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
+    assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
+    refute has_element?(view, "#top-bar-crumb-flows")
+    assert has_element?(view, "#runners-title", BoardSettingsLive.section_label(:runners))
+    assert has_element?(view, ~s(#runners-back[href="/board/#{board.slug}"]))
+  end
 
   test "a heartbeating runner renders by name with its capacity chips and FRESH pill",
        %{conn: conn, board: board} do
