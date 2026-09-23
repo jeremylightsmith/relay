@@ -774,66 +774,82 @@ defmodule RelayWeb.RunComponents do
     <div
       id={@id}
       class="held-worktree-row"
-      style={runner_row_style() <> if(@holding.release == :hidden, do: "opacity:0.6;", else: "")}
+      style={
+        runner_row_style() <>
+          "flex-wrap:wrap;row-gap:6px;" <>
+          if(@holding.release == :hidden, do: "opacity:0.6;", else: "")
+      }
     >
-      <span
-        class={["badge badge-sm font-mono font-bold", holding_badge_class(@holding.release)]}
-        style="font-size:9.5px;letter-spacing:0.06em;"
+      <%!-- Two wrap groups, so a narrow runner column drops the status + actions onto their own
+           line instead of squeezing the title to 0px and pushing the buttons out of the frame. --%>
+      <div
+        class="held-worktree-identity"
+        style="display:flex;align-items:center;gap:10px;flex:1 1 220px;min-width:0;"
       >
-        {@holding.state}
-      </span>
-      <.link
-        navigate={@href}
-        class="font-mono"
-        style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+        <span
+          class={["badge badge-sm font-mono font-bold", holding_badge_class(@holding.release)]}
+          style="font-size:9.5px;letter-spacing:0.06em;flex-shrink:0;"
+        >
+          {@holding.state}
+        </span>
+        <.link
+          navigate={@href}
+          class="font-mono"
+          style="font-size:12px;font-weight:600;flex-shrink:0;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+        >
+          {@holding.ref}
+        </.link>
+        <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          {@holding.title || "—"}
+        </span>
+      </div>
+      <div
+        class="held-worktree-actions"
+        style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;max-width:100%;"
       >
-        {@holding.ref}
-      </.link>
-      <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        {@holding.title || "—"}
-      </span>
-      <span
-        id={"#{@id}-status"}
-        class="font-mono"
-        style="font-size:11px;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
-      >
-        {holding_status_label(@holding)}
-      </span>
-      <span
-        :if={@holding.release == :releasing}
-        id={"#{@id}-releasing"}
-        class="badge badge-sm badge-ghost font-mono"
-      >
-        releasing…
-      </span>
-      <button
-        :if={@holding.release == :enabled}
-        id={"#{@id}-release"}
-        type="button"
-        class="btn btn-xs"
-        phx-click="release_worktree"
-        phx-value-runner={@runner}
-        phx-value-ref={@holding.ref}
-        data-confirm={release_confirm(@holding.ref, @runner)}
-      >
-        Release worktree
-      </button>
-      <span :if={@disabled_reason} class="tooltip tooltip-left" data-tip={@disabled_reason}>
-        <button id={"#{@id}-release"} type="button" class="btn btn-xs" disabled>
+        <span
+          id={"#{@id}-status"}
+          class="font-mono"
+          style="font-size:11px;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+        >
+          {holding_status_label(@holding)}
+        </span>
+        <span
+          :if={@holding.release == :releasing}
+          id={"#{@id}-releasing"}
+          class="badge badge-sm badge-ghost font-mono"
+        >
+          releasing…
+        </span>
+        <button
+          :if={@holding.release == :enabled}
+          id={"#{@id}-release"}
+          type="button"
+          class="btn btn-xs"
+          phx-click="release_worktree"
+          phx-value-runner={@runner}
+          phx-value-ref={@holding.ref}
+          data-confirm={release_confirm(@holding.ref, @runner)}
+        >
           Release worktree
         </button>
-      </span>
-      <button
-        :if={@holding.cancellable}
-        id={"#{@id}-cancel"}
-        type="button"
-        class="btn btn-xs btn-outline btn-error"
-        phx-click="cancel_held_run"
-        phx-value-ref={@holding.ref}
-        data-confirm={"Cancel #{@holding.ref}'s run? It ends now and its worktree is released on the runner's next heartbeat."}
-      >
-        Cancel run
-      </button>
+        <span :if={@disabled_reason} class="tooltip tooltip-left" data-tip={@disabled_reason}>
+          <button id={"#{@id}-release"} type="button" class="btn btn-xs" disabled>
+            Release worktree
+          </button>
+        </span>
+        <button
+          :if={@holding.cancellable}
+          id={"#{@id}-cancel"}
+          type="button"
+          class="btn btn-xs btn-outline btn-error"
+          phx-click="cancel_held_run"
+          phx-value-ref={@holding.ref}
+          data-confirm={"Cancel #{@holding.ref}'s run? It ends now and its worktree is released on the runner's next heartbeat."}
+        >
+          Cancel run
+        </button>
+      </div>
     </div>
     """
   end
