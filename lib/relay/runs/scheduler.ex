@@ -548,7 +548,7 @@ defmodule Relay.Runs.Scheduler do
   @spec capacity_diagnosis(Snapshot.t()) ::
           {:runner_outdated | :no_runner | :runner_gone | :runner_rate_limited | :awaiting_capacity, map()}
   def capacity_diagnosis(%Snapshot{runners: runners}) do
-    live = for {_id, e} <- runners, e.freshness != :gone, do: e
+    live = for {_id, e} <- runners, Relay.Runs.counting_runner?(e), do: e
     current = Enum.reject(live, & &1.outdated)
 
     cond do

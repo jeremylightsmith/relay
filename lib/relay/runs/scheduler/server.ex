@@ -127,24 +127,35 @@ defmodule Relay.Runs.Scheduler.Server do
       cards: Enum.map(cards, &card_snap(&1, board, blocked_by)),
       flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
       runs: runs,
-      capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> drop_gone_capacity(runners),
+      capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> counting_capacity(runners),
       runners: runners
     }
 
     {snapshot, Map.new(cards, &{&1.id, &1})}
   end
 
-  # A `:gone` runner's advertised capacity is void — its slots died with the machine, and the
-  # reaper has already requeued/parked its in-flight work. Drop it here (AFTER reserve_active_runs,
-  # so a not-yet-reaped :running run still debits the machine it's stuck on before the machine
-  # leaves the map) so the pure planner never resumes or starts onto a runner it can't reach.
-  # Without this, an exclusive run pinned to a dead machine oscillates forever — the scheduler
-  # keeps resuming it onto the lingering capacity and the reaper keeps re-parking it (RLY-199) —
-  # and `explain/2` reports "dispatchable" instead of naming the awaited machine. `:gone` is the
-  # reaper's own predicate (`runner_stale?/2`), so this is exactly the roster it has given up on.
-  defp drop_gone_capacity(capacity, runners) do
-    Map.reject(capacity, fn {runner_id, _slots} ->
-      match?(%{freshness: :gone}, Map.get(runners, runner_id))
+  # Keep ONLY capacity entries whose runner is a counting (`Relay.Runs.counting_runner?/1` —
+  # not `:gone`) runner of THIS board (RE338). An allow-list, not a deny-list: `Capacity` is a
+  # global ETS store keyed by runner id across every board and never evicted, so an id this
+  # board's `runners` map does not name — another board's runner, or an entry whose row is
+  # gone — is dropped rather than passed through. Before this, another board's runner's free
+  # slots reached `relay why`'s evidence AND `take_slot/3`, so the planner started runs no
+  # runner on this board had room for. Every capacity key is therefore a runner the roster
+  # (`Relay.Runs.list_runner_status/2`) names.
+  #
+  # A `:gone` runner's advertised capacity is void too — its slots died with the machine, and
+  # the reaper has already requeued/parked its in-flight work. Applied AFTER
+  # reserve_active_runs, so a not-yet-reaped :running run still debits the machine it's stuck
+  # on before the machine leaves the map. Without this, an exclusive run pinned to a dead
+  # machine oscillates forever — the scheduler keeps resuming it onto the lingering capacity
+  # and the reaper keeps re-parking it (RLY-199) — and `explain/2` reports "dispatchable"
+  # instead of naming the awaited machine.
+  defp counting_capacity(capacity, runners) do
+    Map.filter(capacity, fn {runner_id, _slots} ->
+      case Map.fetch(runners, runner_id) do
+        {:ok, entry} -> Relay.Runs.counting_runner?(entry)
+        :error -> false
+      end
     end)
   end
 
@@ -172,9 +183,10 @@ defmodule Relay.Runs.Scheduler.Server do
   #
   # NOTE (board-scoped vs. global): `runs` here is this board's active runs only
   # (`state.engine.active_runs(state.board_id)`), but `Capacity.snapshot/0` is
-  # global — a runner shared across boards has its capacity debited only by
-  # the runs each board's own scheduler knows about. Two boards dispatching to
-  # the same runner at once can each believe a slot is free. Tracked as a
+  # global — `counting_capacity/2` later narrows it to this board's runners (RE338), but one
+  # physical machine registered on two boards is two runner rows advertising the same slots,
+  # each debited only by the runs its own board's scheduler knows about. Two boards
+  # dispatching to the same machine at once can each believe a slot is free. Tracked as a
   # follow-up; not a regression introduced here (there was no accounting at all
   # before this change).
   defp reserve_active_runs(capacity, runs) do

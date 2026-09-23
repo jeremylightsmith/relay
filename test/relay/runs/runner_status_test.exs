@@ -336,4 +336,21 @@ defmodule Relay.Runs.RunnerStatusTest do
                "Claude refused (seven_day)"
     end
   end
+
+  describe "counting_runner?/1 (RE338)" do
+    test "a fresh or stale runner counts; a gone one never does" do
+      assert Runs.counting_runner?(%{freshness: :fresh})
+      assert Runs.counting_runner?(%{freshness: :stale})
+      refute Runs.counting_runner?(%{freshness: :gone})
+    end
+
+    test "reads a list_runner_status/2 row directly", %{board: board} do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      insert(:runner, board: board, name: "live", last_heartbeat: now)
+      insert(:runner, board: board, name: "silent", last_heartbeat: DateTime.add(now, -600, :second))
+
+      counting = for r <- Runs.list_runner_status(board, now), Runs.counting_runner?(r), do: r.name
+      assert counting == ["live"]
+    end
+  end
 end
