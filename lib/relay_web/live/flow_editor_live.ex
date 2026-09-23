@@ -713,6 +713,11 @@ defmodule RelayWeb.FlowEditorLive do
   end
 
   defp selected_node(working, {:node, key}), do: Enum.find(working.nodes, &(&1.key == key))
-  defp outgoing_edges(working, {:node, key}), do: Enum.filter(working.edges, &(&1.from == key))
+  # Each outgoing edge paired with its index in `working.edges`, so an inspector row can
+  # `select_edge` it — the only way to reach an undrawn needs_input edge (RE330).
+  defp outgoing_edges(working, {:node, key}) do
+    working.edges |> Enum.with_index() |> Enum.filter(fn {e, _i} -> e.from == key end)
+  end
+
   defp selected_edge(working, {:edge, i}), do: Enum.at(working.edges, i)
 end

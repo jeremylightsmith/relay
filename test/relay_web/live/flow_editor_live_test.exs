@@ -371,6 +371,29 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert count_edges(render(view)) == count_before - 1
   end
 
+  test "a needs_input edge is selectable from the node inspector's OUTGOING EDGES row and deletable (RE330)",
+       %{conn: conn, board: board} do
+    # needs_input edges are not drawn on the canvas (they render as a non-interactive park
+    # badge), so the inspector row is the only way to reach one in the edge inspector.
+    code = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+
+    idx =
+      Enum.find_index(code.edges, &(&1.from == "implement" and &1.to == "needs_input"))
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+    view |> element("#inspector-out-edge-#{idx}") |> render_click()
+
+    assert has_element?(view, "#inspector-edge-from", "implement")
+    assert has_element?(view, "#inspector-edge-to", "needs_input")
+
+    view |> element("#inspector-delete-edge") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element(~s([data-node="implement"])) |> render_click()
+    refute has_element?(view, ~s(#flow-inspector [data-out-edge-to="needs_input"]))
+  end
+
   test "Connect edge: selecting two nodes creates a new succeeded edge", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     count_before = count_edges(render(view))
