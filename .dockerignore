@@ -35,6 +35,9 @@
 /_build/
 /deps/
 *.ez
+# Build artifacts of vendored path dependencies (each vendor/* is its own mix project)
+/vendor/*/_build/
+/vendor/*/deps/
 
 # Generated on crash by the VM
 erl_crash.dump
