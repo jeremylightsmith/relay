@@ -13,8 +13,10 @@ defmodule Relay.Runs.Listener do
   — the scheduler is no longer a backstop for `:needs_input`/`:claimed` parks (RLY-200).
 
   Rules, in order:
-    * card in a terminal-type stage (`Stage.terminal_types/0`) + active run → cancel the run
-      (RLY-233); first, so a parked run whose card reached Done is closed, not resumed.
+    * card in a terminal-type stage (`Stage.terminal_types/0`) **or archived** + active run →
+      cancel the run with `Relay.Runs.leak_reason/1` (RLY-233, RE335); first, so a parked run
+      whose card reached Done or was archived is closed, not resumed. `{:card_archived, card}`
+      is one of the events that triggers a reconcile.
     * active `:running` run + human owner present → revoke the active job
       and park the run `:claimed` at its last checkpoint (the card is not
       touched).
@@ -30,6 +32,8 @@ defmodule Relay.Runs.Listener do
       (not the prior run's) lets a reject after a failed run re-enter while a genuine
       `:failed` card is never auto-restarted (RLY-156/RLY-216) — mirroring the
       scheduler's own `:failed` exclusion.
+    * an archived card with no active run → nothing (RE335): an archived card never starts or
+      resumes a run from here.
   """
 
   use GenServer
@@ -85,6 +89,7 @@ defmodule Relay.Runs.Listener do
 
   defp card_id_of({:card_upserted, %Card{id: id}}), do: id
   defp card_id_of({:card_moved, %Card{id: id}, _from_stage_id}), do: id
+  defp card_id_of({:card_archived, %Card{id: id}}), do: id
   defp card_id_of({:timeline_appended, card_id, _entry}), do: card_id
   defp card_id_of(_event), do: nil
 
@@ -97,25 +102,34 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_card(card), do: reconcile_card(card, Runs.active_run(card))
 
-  defp reconcile_card(card, nil), do: maybe_reenter_after_rejection(card)
+  # RE335 D7 — an archived card never starts a run: the only rule an archived card may trigger
+  # is the leak close below. Without this, an archived :ready card with an open rejection would
+  # be re-entered here and pin a fresh run on a card nobody can see.
+  defp reconcile_card(card, nil) do
+    if Card.archived?(card), do: :ok, else: maybe_reenter_after_rejection(card)
+  end
 
-  # RLY-233: FIRST active-run rule. A card that has genuinely reached a terminal-type stage must
-  # not keep an active run — close it (freeing its runner slot) before any resume rule can
-  # re-dispatch it. Being first, it pre-empts the :needs_input/:claimed resume clauses in
-  # reconcile_active/2, so a parked run whose card was moved to Done is CANCELLED, not resumed
-  # (which would regenerate a zombie).
+  # RLY-233 / RE335: FIRST active-run rule. A card that has genuinely reached a terminal-type
+  # stage, or has been archived, must not keep an active run — close it (freeing its runner slot,
+  # and letting releasable_held/2 free its worktree) before any resume rule can re-dispatch it.
+  # Being first, it pre-empts the :needs_input/:claimed resume clauses in reconcile_active/2, so a
+  # parked run whose card was moved to Done or archived is CANCELLED, not resumed (which would
+  # regenerate a zombie). The timeline reason comes from Runs.leak_reason/1 — the same one the
+  # RunnerReaper sweep logs — never decided here.
   #
-  # The leak test is a SINGLE-SNAPSHOT query (Runs.leaked?/1), not this handler's separately-read
-  # card stage. Atomic dispatch guarantees no committed state pairs an active run with a card at a
-  # :done-type pull stage, but reading the card (from the triggering event) and the active run in
-  # two queries can straddle a concurrent Spec:Done → Plan dispatch — seeing the stale done stage
+  # The leak test is a SINGLE-SNAPSHOT query (Runs.leak_reason/1), not this handler's separately-
+  # read card stage. Atomic dispatch guarantees no committed state pairs an active run with a card
+  # at a :done-type pull stage, but reading the card (from the triggering event) and the active run
+  # in two queries can straddle a concurrent Spec:Done → Plan dispatch — seeing the stale done stage
   # alongside the fresh plan run and cancelling it (RLY-233 / RE239). One snapshot never sees that.
   defp reconcile_card(card, %Run{} = run) do
-    if Runs.leaked?(run) do
-      _ = Runs.cancel_run(run)
-      :ok
-    else
-      reconcile_active(card, run)
+    case Runs.leak_reason(run) do
+      nil ->
+        reconcile_active(card, run)
+
+      reason ->
+        _ = Runs.cancel_run(run, reason: reason)
+        :ok
     end
   end
 

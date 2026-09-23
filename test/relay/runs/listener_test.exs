@@ -312,4 +312,87 @@ defmodule Relay.Runs.ListenerTest do
     assert fresh.payload["resume_session"] == "s_boot"
     assert %Run{status: :running} = Runs.get_run!(run.id)
   end
+
+  # RE335 — the board's Archive button is unguarded. Archiving hides the card, so a parked run
+  # left on it could never be answered and would pin its runner slot forever. The Listener's
+  # first (leak) rule now covers archived cards.
+  test "archiving a card with a parked :needs_input run cancels it with 'card archived'",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+
+    {:ok, _run} =
+      Runs.report_outcome(job, %{outcome: :needs_input, detail: "Which auth model?", session_id: "s_arch"})
+
+    assert_receive {:run_parked, _run}
+
+    {:ok, _archived} = Relay.Cards.archive_card(reload(board, card), {:user, user.id})
+
+    assert_receive {:run_finished, %Run{status: :cancelled}}
+    assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+
+    assert Enum.any?(
+             Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+             &match?(%Schemas.Activity{type: :action, text: "run cancelled — card archived"}, &1)
+           )
+
+    refute_receive {:run_resumed, _run}
+    refute_receive {:dispatched, _job}
+  end
+
+  test "archiving a card with a :running run cancels it and revokes its job",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+
+    {:ok, _archived} = Relay.Cards.archive_card(reload(board, card), {:user, user.id})
+
+    assert_receive {:run_finished, %Run{status: :cancelled}}
+    assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+    assert %NodeJob{state: :revoked} = Relay.Repo.get!(NodeJob, job.id)
+  end
+
+  test "the {:card_archived, _} event alone drives the close (no other card event needed)",
+       %{board: board} do
+    code = Enum.find(board.stages, &(&1.name == "Code"))
+    card = insert(:card, stage: code, ref_number: 9_002, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+    run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+    Relay.Events.broadcast(board.id, {:card_archived, Relay.Repo.get!(Card, card.id)})
+
+    assert_receive {:run_finished, %Run{status: :cancelled}}
+    assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+  end
+
+  # RE335 D7 — an archived card must not start a run. Without the guard, a :ready, AI-owned
+  # archived card with an open rejection, sitting in the spec flow's works-in stage, would be
+  # re-entered by maybe_reenter_after_rejection/1. The unarchived twin proves the setup really
+  # would re-enter, so the refute is meaningful.
+  test "an archived :ready card with an open rejection is never re-entered", %{board: board} do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+
+    archived =
+      insert(:card,
+        stage: spec,
+        ref_number: 9_003,
+        status: :ready,
+        rejection: %Schemas.CardRejection{note: "redo it"},
+        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+    insert(:card_owner, card: archived)
+
+    Relay.Events.broadcast(board.id, {:card_archived, Relay.Repo.get!(Card, archived.id)})
+
+    refute_receive {:run_started, _run}, 200
+    assert Runs.active_run(Relay.Repo.get!(Card, archived.id)) == nil
+
+    live = insert(:card, stage: spec, status: :ready, rejection: %Schemas.CardRejection{note: "redo it"})
+    insert(:card_owner, card: live)
+
+    Relay.Events.broadcast(board.id, {:card_upserted, Relay.Repo.get!(Card, live.id)})
+
+    assert_receive {:run_started, %Run{card_id: card_id, context: %{"changes_requested" => "redo it"}}}
+    assert card_id == live.id
+  end
 end
