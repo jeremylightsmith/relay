@@ -2093,6 +2093,25 @@ class RunnerPoolTeardownRetryTest(unittest.TestCase):
         self.assertEqual(len(p.wts), 4)
         self.assertEqual(sum(1 for r in p.wts.values() if r.get("teardown_failed")), 1)
 
+    def test_reclaiming_a_retained_tree_whose_eviction_failed_does_not_reset_mid_run(self):
+        # A failed eviction marks the RETAINED record teardown_failed; reclaiming it for a new
+        # run must clear that mark, or the run's second node would match the teardown-failed
+        # re-baseline branch and hard-reset the tree out from under the run.
+        p = self.pool()
+        p.wts = {f"exec-F{i}": {"ref": f"F{i}", "run_id": None, "state": "retained",
+                                "live": False, "partition": None} for i in range(4)}
+        self.failing(p)
+        with p.lock:
+            p._evict_retained_over_cap_locked()
+        (name,) = [n for n, r in p.wts.items() if r.get("teardown_failed")]
+        ref = p.wts[name]["ref"]
+        job = self.excl("r2", ref=ref)
+        self.assertEqual(p.assign(job), (name, True))
+        self.assertNotIn("teardown_failed", p.wts[name])
+        self.assertNotIn("teardown_logged_at", p.wts[name])
+        p.release(job, name, "running")
+        self.assertEqual(p.assign(job), (name, False))
+
 
 class RunnerPoolRealTeardownTest(unittest.TestCase):
     """RE336, against a REAL git repo (the RealGitWorktreeTest discipline): the worktrees dir

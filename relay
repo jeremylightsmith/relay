@@ -56,7 +56,7 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 65
-RUNNER_FINGERPRINT = "396f05ff2562652c393f99f5fe961ab1fa1634c141091a9aaf64b27e322508d1"
+RUNNER_FINGERPRINT = "f21ce646228c1241a77c5bc70c996cc177e521f422abb5f4e81adbeb2f063154"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1923,6 +1923,10 @@ class RunnerPool:
                     return None
                 if rec.get("partition") is None:
                     rec["partition"] = self._take_partition()
+                # A failed eviction (RE336) marked it; this re-baseline supersedes that, and a
+                # stale mark would re-baseline the run's NEXT node too, mid-run.
+                rec.pop("teardown_failed", None)
+                rec.pop("teardown_logged_at", None)
                 rec.update(run_id=run_id, state="active", live=True,
                            ref=rec.get("ref") or job["vars"]["ref"])
                 return name, True
