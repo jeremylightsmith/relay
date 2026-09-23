@@ -1300,8 +1300,12 @@ defmodule Relay.Runs do
   flip-flop between the configured total and the free count. The replace list is therefore
   built per-call: replacing with the insert's values would null out a good row on every call
   that didn't carry the key.
+
+  A beat that reports held also prunes the row's release_requests (RE337, see prune_release_requests/2).
   """
   def upsert_runner(%Board{id: board_id}, attrs) do
+    held = normalize_held_attr(attrs["held"])
+
     base = %{
       board_id: board_id,
       name: to_string(attrs["name"]),
@@ -1315,7 +1319,7 @@ defmodule Relay.Runs do
       {base, [:host, :interval, :version, :last_heartbeat, :updated_at]}
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
-      |> put_reported(:held, normalize_held_attr(attrs["held"]))
+      |> put_reported(:held, held)
       |> put_rate_limit(attrs)
 
     %Runner{}
@@ -1325,7 +1329,45 @@ defmodule Relay.Runs do
       conflict_target: [:board_id, :name],
       returning: true
     )
+    |> prune_release_requests(held)
   end
+
+  # RE337: a beat that REPORTED `held` settles the runner's pending release requests — keep a ref
+  # only while this beat reports it in `Schemas.Runner.release_request_pending?/1` (bound / talk).
+  # Absent = torn down (done); running = the run resumed first (stale — must never fire later).
+  # Free on the hot path: no query unless the row actually carries requests AND one must go, and
+  # then one atomic UPDATE (an intersect in SQL), so a request appended concurrently by
+  # `request_worktree_release/4` is never lost to a read-modify-write.
+  defp prune_release_requests({:ok, %Runner{release_requests: [_ | _] = requests} = runner}, held) when is_list(held) do
+    keep = for %{"ref" => ref, "state" => state} <- held, Runner.release_request_pending?(state), do: ref
+
+    if Enum.all?(requests, &(&1 in keep)) do
+      {:ok, runner}
+    else
+      {1, [pruned]} =
+        Repo.update_all(
+          from(r in Runner,
+            where: r.id == ^runner.id,
+            select: r,
+            update: [
+              set: [
+                release_requests:
+                  fragment(
+                    "ARRAY(SELECT x FROM unnest(?) AS x WHERE x = ANY(?))",
+                    r.release_requests,
+                    type(^keep, {:array, :string})
+                  )
+              ]
+            ]
+          ),
+          []
+        )
+
+      {:ok, pruned}
+    end
+  end
+
+  defp prune_release_requests(result, _held), do: result
 
   # nil = "this request did not report the field" → not in the params, not in the replace list,
   # column untouched. The one place that discipline is expressed, for every optional field.
@@ -1643,6 +1685,101 @@ defmodule Relay.Runs do
         runs != [],
         Enum.all?(runs, &(&1.status not in Run.active_statuses())),
         do: %{ref: ref, status: Enum.max_by(runs, & &1.id).status}
+  end
+
+  @doc """
+  Records a human's request that `runner_name` release its worktree for `ref` (RE337): free the
+  worktree and its exclusive slot while the run stays parked. The run keeps its branch, and when
+  it resumes the runner's `assign()` rebuilds the tree and `reattach_branch` checks the branch out.
+
+  Accepted only when the runner's latest `held` reports `ref` as idle
+  (`Schemas.Runner.idle_holding?/1`); otherwise `{:error, :not_idle}` and nothing is recorded.
+  Idempotent: a ref already pending returns `{:ok, :already_requested}` without a second timeline
+  entry. A new request logs `"worktree released on runner <name>"` on the card's timeline (when
+  the ref resolves to a card on this board), so the card shows its worktree went away while it
+  was parked.
+
+  The request travels on the runner's next heartbeat (`release_held/3`) and is cleared by
+  `upsert_runner/2` once a beat no longer reports the ref as bound or talk.
+
+  Options: `:actor` — `:agent | {:user, user_id}`, default `:agent`.
+  """
+  def request_worktree_release(%Board{} = board, runner_name, ref, opts \\ [])
+      when is_binary(runner_name) and is_binary(ref) do
+    case Repo.get_by(Runner, board_id: board.id, name: runner_name) do
+      nil -> {:error, :runner_not_found}
+      %Runner{} = runner -> do_request_worktree_release(board, runner, ref, opts)
+    end
+  end
+
+  defp do_request_worktree_release(board, runner, ref, opts) do
+    if idle_held?(runner, ref) do
+      case append_release_request(runner, ref) do
+        {1, _rows} ->
+          log_worktree_release(board, runner.name, ref, opts)
+          {:ok, :requested}
+
+        {0, _rows} ->
+          {:ok, :already_requested}
+      end
+    else
+      {:error, :not_idle}
+    end
+  end
+
+  defp idle_held?(%Runner{held: held}, ref) do
+    Enum.any?(List.wrap(held), &(&1["ref"] == ref and Runner.idle_holding?(&1["state"])))
+  end
+
+  # One guarded UPDATE: the NOT-ANY guard makes a double click (or two app machines) idempotent
+  # without a read-modify-write race against the heartbeat's prune.
+  defp append_release_request(%Runner{id: id}, ref) do
+    Repo.update_all(
+      from(r in Runner,
+        where: r.id == ^id and fragment("NOT (? = ANY(?))", type(^ref, :string), r.release_requests),
+        update: [set: [release_requests: fragment("array_append(?, ?)", r.release_requests, type(^ref, :string))]]
+      ),
+      []
+    )
+  end
+
+  defp log_worktree_release(board, runner_name, ref, opts) do
+    case Cards.get_card_by_ref(board, ref) do
+      nil ->
+        :ok
+
+      card ->
+        {:ok, _entry} =
+          Activity.log(card, %{
+            type: :action,
+            actor: Keyword.get(opts, :actor, :agent),
+            text: "worktree released on runner #{runner_name}"
+          })
+
+        :ok
+    end
+  end
+
+  @doc """
+  The heartbeat reply's `release_held` (RE311 + RE337): the derived `releasable_held/2` entries plus
+  one `%{ref, status: Schemas.Runner.release_remove_status()}` for each of `runner`'s pending
+  `release_requests` whose ref THIS beat reports as idle (`bound`). A ref the derived list already
+  names keeps its derived status (a `failed` run's tree stays retained). `runner` must be the
+  post-`upsert_runner/2` row, so its requests are already pruned against this same `held`. No
+  query beyond `releasable_held/2`'s two.
+  """
+  def release_held(%Board{} = board, %Runner{} = runner, held) when is_list(held) do
+    derived = releasable_held(board, held)
+    derived_refs = MapSet.new(derived, & &1.ref)
+    idle = MapSet.new(for %{"ref" => ref, "state" => state} <- held, Runner.idle_holding?(state), do: ref)
+
+    requested =
+      for ref <- List.wrap(runner.release_requests),
+          MapSet.member?(idle, ref),
+          not MapSet.member?(derived_refs, ref),
+          do: %{ref: ref, status: Runner.release_remove_status()}
+
+    derived ++ requested
   end
 
   defp to_job_id(id) when is_integer(id), do: id

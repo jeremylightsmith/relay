@@ -42,6 +42,12 @@ defmodule Schemas.Runner do
     # that has not said are the same thing for occupancy purposes, and [] keeps every reader
     # (chip count, tooltip, diagnosis) free of a nil case.
     field :held, {:array, :map}, default: []
+
+    # RE337: card refs a human asked this runner to release — free the worktree and its slot while
+    # the run stays parked. Never cast: `Relay.Runs.request_worktree_release/4` appends and
+    # `Relay.Runs.upsert_runner/2` prunes, each with one atomic UPDATE, so a heartbeat and a click
+    # can never overwrite each other.
+    field :release_requests, {:array, :string}, default: []
     field :version, :integer
     field :last_heartbeat, :utc_datetime
 
@@ -86,13 +92,18 @@ defmodule Schemas.Runner do
   # runner contract fixture (`vocabulary.holding_states`) pins to this function. Strings,
   # not atoms: this vocabulary only ever arrives off the wire and is only ever compared to
   # wire values, so atomizing it would buy nothing and add a conversion at every use site.
-  @holding_states ["bound", "retained", "running", "talk"]
+  @bound "bound"
+  @retained "retained"
+  @running "running"
+  @talk "talk"
+
+  @holding_states [@bound, @retained, @running, @talk]
 
   # The three that occupy an exclusive partition. `retained` is a failed run's leftover held
   # for post-mortem: it holds no partition, the runner evicts it on its own terms, and
   # `assign()` refuses it at full capacity — so offering work for a retained ref would produce
   # a claimed-then-rejected job.
-  @active_holding_states ["bound", "running", "talk"]
+  @active_holding_states [@bound, @running, @talk]
 
   @doc """
   Every state a runner may declare for a held per-card worktree.
@@ -106,6 +117,36 @@ defmodule Schemas.Runner do
 
   @doc "The subset of `holding_states/0` that occupies an exclusive partition."
   def active_holding_states, do: @active_holding_states
+
+  # RE337 — a pending human release request survives a beat that reports its ref in one of these
+  # states: `bound` (not yet sent, or sent and not yet acted on) and `talk` (the runner defers
+  # teardown under a talk turn). Absent means the tree is gone; `running` means the run resumed
+  # first — both clear the request, so a stale one can never tear down a resumed run's worktree.
+  @release_pending_states [@bound, @talk]
+
+  # RE337 — the status a human-requested release is sent with on `release_held`. The runner's
+  # `_finish_locked` removes on anything but `failed` (which RETAINS), so this must be a remove
+  # disposition; `cancelled` is also a real run status the runner already receives here.
+  @release_remove_status :cancelled
+
+  @doc "Whether a holding is idle — an active worktree with no live job, awaiting its run's next node."
+  def idle_holding?(state), do: state == @bound
+
+  @doc "Whether a pending release request survives a beat reporting its ref in `state` (RE337)."
+  def release_request_pending?(state), do: state in @release_pending_states
+
+  @doc "The remove disposition a human-requested release is sent with on `release_held` (RE337)."
+  def release_remove_status, do: @release_remove_status
+
+  @doc """
+  Whether a human may release a holding's worktree (RE337): `:enabled` for an idle (`bound`)
+  holding, `{:disabled, reason}` while a job or a talk turn occupies it, and `:hidden` for a
+  `retained` tree, which holds no slot.
+  """
+  def release_eligibility(@bound), do: :enabled
+  def release_eligibility(@running), do: {:disabled, "a job is running in this worktree"}
+  def release_eligibility(@talk), do: {:disabled, "a talk session is attached"}
+  def release_eligibility(@retained), do: :hidden
 
   # The most per-card worktrees one beat may declare. A runner holds one worktree per card
   # and its `max_worktrees` is small (single digits in practice, and `capacity.exclusive` is

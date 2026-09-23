@@ -160,6 +160,55 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert micros < 5_000_000
     end
 
+    test "a human-requested release rides release_held with a remove disposition (RE337)",
+         %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
+
+      beat = %{
+        "runner" => %{"name" => "exec-a"},
+        "capacity" => %{"exclusive" => 1},
+        "running" => [],
+        "held" => [%{"ref" => ref, "state" => "bound"}]
+      }
+
+      conn |> post(~p"/api/node-jobs/heartbeat", beat) |> json_response(200)
+      assert {:ok, :requested} = Runs.request_worktree_release(board, "exec-a", ref)
+
+      assert %{"release_held" => release_held} =
+               conn |> post(~p"/api/node-jobs/heartbeat", beat) |> json_response(200)
+
+      # The run is still active — only the request put it here, and `cancelled` makes the runner
+      # REMOVE the tree (`failed` would retain it).
+      assert release_held == [%{"ref" => ref, "status" => "cancelled"}]
+    end
+
+    test "a requested ref reported running is dropped from release_held and the request cleared",
+         %{conn: conn, board: board} do
+      flow = four_outcome_flow(board)
+      {run, _job} = start_queued_job(board, flow)
+      ref = Relay.Cards.ref(board, Relay.Repo.get!(Schemas.Card, run.card_id))
+
+      bound = %{
+        "runner" => %{"name" => "exec-a"},
+        "capacity" => %{"exclusive" => 1},
+        "running" => [],
+        "held" => [%{"ref" => ref, "state" => "bound"}]
+      }
+
+      conn |> post(~p"/api/node-jobs/heartbeat", bound) |> json_response(200)
+      {:ok, :requested} = Runs.request_worktree_release(board, "exec-a", ref)
+
+      running = put_in(bound, ["held"], [%{"ref" => ref, "state" => "running"}])
+
+      assert %{"release_held" => []} =
+               conn |> post(~p"/api/node-jobs/heartbeat", running) |> json_response(200)
+
+      assert %Schemas.Runner{release_requests: []} =
+               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-a")
+    end
+
     test "a non-map runner is a 422, not a 500", %{conn: conn} do
       # RLY-162: Map.put/3 on a string raised BadMapError → 500 + a stack trace, so a
       # slightly-wrong client looked like a server outage on the runner's front door.
