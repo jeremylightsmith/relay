@@ -49,6 +49,25 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     {flow.nodes, flow.edges}
   end
 
+  # an agent that can park, feeding a gate that cannot.
+  defp parked_flow do
+    nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "g", type: :gate, run: "mix test"}]
+
+    edges = [
+      %{from: "start", to: "a", on: nil},
+      %{from: "a", to: "g", on: :succeeded},
+      %{from: "a", to: "needs_input", on: :failed},
+      %{from: "g", to: "done", on: :succeeded}
+    ]
+
+    {nodes, edges}
+  end
+
+  defp badge_tag(html, key) do
+    [tag] = Regex.run(~r/<span[^>]*data-park="#{key}"[^>]*>/, html)
+    tag
+  end
+
   defp label_top(html, idx) do
     [_, y] = Regex.run(~r/data-edge="#{idx}"[^>]*?top:(-?\d+)px/, html)
     String.to_integer(y)
@@ -285,6 +304,53 @@ defmodule RelayWeb.FlowGraphComponentsTest do
         span = Enum.max(ys) - Enum.min(ys)
         assert span <= @row_h, "edge path #{d} spans #{span}px vertically (> one row, #{@row_h}px)"
       end
+    end
+  end
+
+  describe "park badge (RE330)" do
+    test "every Code flow node with a needs_input edge carries exactly one badge" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, [])
+
+      badged = ~r/data-park="([^"]+)"/ |> Regex.scan(html) |> Enum.map(fn [_, k] -> k end)
+      expected = for %{from: from, to: "needs_input"} <- edges, do: from
+
+      assert length(badged) == 8
+      assert Enum.sort(badged) == Enum.sort(expected)
+    end
+
+    test "a flow with no needs_input edge renders no badge" do
+      refute one_node(:agent) =~ "data-park"
+    end
+
+    test "the badge is a warning-coloured pause glyph with hover and screen-reader text" do
+      {nodes, edges} = parked_flow()
+      html = graph(nodes, edges, [])
+      tag = badge_tag(html, "a")
+
+      assert tag =~ ~s(title="Can park for human input")
+      assert tag =~ ~s(aria-label="Can park for human input")
+      assert tag =~ "border:1.5px solid var(--color-warning)"
+      assert html =~ "hero-pause-circle"
+      refute html =~ ~s(data-park="g")
+    end
+
+    test "the badge is not interactive, even in the interactive editor" do
+      {nodes, edges} = parked_flow()
+      tag = nodes |> graph(edges, interactive?: true) |> badge_tag("a")
+
+      refute tag =~ "phx-click"
+      refute tag =~ "phx-value"
+    end
+
+    test "the badge straddles the node box's top-right corner" do
+      {nodes, edges} = parked_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      {x, y} = layout.positions["a"]
+      {w, _h} = FlowLayout.node_size(:agent)
+      tag = nodes |> graph(edges, []) |> badge_tag("a")
+
+      assert tag =~ "left:#{x + w - 12}px;top:#{y - 9}px;"
     end
   end
 end

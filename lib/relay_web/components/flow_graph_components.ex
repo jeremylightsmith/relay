@@ -16,6 +16,8 @@ defmodule RelayWeb.FlowGraphComponents do
   """
   use Phoenix.Component
 
+  import RelayWeb.CoreComponents, only: [icon: 1]
+
   alias RelayWeb.FlowLayout
 
   # rounded-corner radius for orthogonal edge turns.
@@ -101,7 +103,9 @@ defmodule RelayWeb.FlowGraphComponents do
         %{edge: edge, index: i, geo: edge_geometry(edge, i, assigns.layout, sizes)}
       end)
 
-    assigns = assign(assigns, width: w, height: h, geos: geos)
+    parked = Enum.filter(assigns.nodes, &MapSet.member?(assigns.layout.parks, &1.key))
+
+    assigns = assign(assigns, width: w, height: h, geos: geos, parked: parked)
 
     ~H"""
     <div
@@ -175,6 +179,17 @@ defmodule RelayWeb.FlowGraphComponents do
           {sub_label(node)}
         </span>
       </div>
+
+      <span
+        :for={node <- @parked}
+        data-park={node.key}
+        role="img"
+        title="Can park for human input"
+        aria-label="Can park for human input"
+        style={park_badge_style(node, @layout)}
+      >
+        <.icon name="hero-pause-circle" class="size-3" />
+      </span>
 
       <div :if={@lands_on} style={lands_style(@layout)}>
         <span style="width:7px;height:7px;border-radius:50%;background:var(--color-success);"></span>
@@ -405,6 +420,20 @@ defmodule RelayWeb.FlowGraphComponents do
   defp sign(n) when n > 0, do: 1
   defp sign(n) when n < 0, do: -1
   defp sign(0), do: 0
+
+  # "This node can park on a human" (RE330): a small warning pill straddling the node box's
+  # top-right corner, carrying the same warning colours a needs_input edge used to. A sibling of
+  # the node div rather than a child, because gate/human nodes clip-path their box and would clip
+  # a badge that overlaps the border. z-index 5 lifts it above the node (4).
+  defp park_badge_style(node, layout) do
+    {x, y} = position(node, layout)
+    {w, _h} = FlowLayout.node_size(node.type)
+    {fg, bg} = label_colors(:needs_input)
+
+    "position:absolute;left:#{x + w - 12}px;top:#{y - 9}px;z-index:5;" <>
+      "display:flex;align-items:center;justify-content:center;width:20px;height:18px;" <>
+      "border-radius:9px;border:1.5px solid #{@edge_color[:needs_input]};background:#{bg};color:#{fg};"
+  end
 
   # Flow-level "lands → <stage>" pill. Anchored to the layout's `done_point` (centred just below
   # where the exit edge lands) rather than a fixed coordinate — the flow "lands" on that stage

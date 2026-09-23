@@ -11,6 +11,14 @@ defmodule Storybook.FlowGraph do
 
   def variations do
     code = code_flow()
+    park_nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "g", type: :gate, run: "mix test"}]
+
+    park_edges = [
+      %{from: "start", to: "a", on: nil},
+      %{from: "a", to: "g", on: :succeeded},
+      %{from: "a", to: "needs_input", on: :failed},
+      %{from: "g", to: "done", on: :succeeded}
+    ]
 
     [
       %Variation{
@@ -25,6 +33,20 @@ defmodule Storybook.FlowGraph do
           nodes: code.nodes,
           edges: code.edges,
           layout: RelayWeb.FlowLayout.layout(code.nodes, code.edges),
+          lands_on: "Review",
+          interactive?: false
+        }
+      },
+      %Variation{
+        id: :park_badge,
+        description:
+          "A node that can park for human input carries a warning pause badge on its top-right " <>
+            "corner (hover: \"Can park for human input\"). Here the agent can park; the gate " <>
+            "cannot. The needs_input edges themselves are not drawn.",
+        attributes: %{
+          nodes: park_nodes,
+          edges: park_edges,
+          layout: RelayWeb.FlowLayout.layout(park_nodes, park_edges),
           lands_on: "Review",
           interactive?: false
         }
