@@ -159,7 +159,10 @@ defmodule RelayWeb.Api.NodeJobController do
         # the status that chooses remove (done/cancelled) vs retain (failed). Run-id keying
         # structurally could not see a worktree recovered after a restart — its `run_id` is
         # unknown — which is precisely how a cancelled run's slot leaked forever.
-        release_held: Runs.releasable_held(board, Runner.normalize_held(Map.get(params, "held"))),
+        # RE337: plus the human-requested releases (`runners.release_requests`) still reported
+        # bound on this beat, sent with a REMOVE disposition. `runner` is the post-upsert row, so
+        # its requests were already pruned against this same `held`.
+        release_held: Runs.release_held(board, runner, Runner.normalize_held(Map.get(params, "held"))),
         # RLY-182: `capabilities` is send-on-change, so a runner that already sent one
         # never sends it again — but the row can lose it (recreated row, or a runner
         # predating this change), which would strand preflight on a permanent false

@@ -95,7 +95,7 @@ than double-booking (YAGNI: no multi-board reservation yet).
   `Relay.Runs.releasable_held/2`) that chooses remove vs retain. It **replaces** RLY-218's
   retired run-id-keyed release channel, which structurally could not see a worktree adopted
   by `recover()` after a restart — its `run_id` is unknown — so a run cancelled while the
-  runner was down leaked its exclusive slot permanently. The same
+  runner was down leaked its exclusive slot permanently. Since RE337 `release_held` also carries **human-requested releases**: the runners page's *Release worktree* action appends the card ref to the runner row's `runners.release_requests` (`Relay.Runs.request_worktree_release/4`, accepted only while the runner's latest `held` reports the ref `bound`), and the reply (`Relay.Runs.release_held/3`) adds `{ref, status: "cancelled"}` — a *remove* disposition (`Schemas.Runner.release_remove_status/0`), never `failed` — for each pending request this beat still reports `bound`. The run stays parked; on resume the runner's `assign()` rebuilds the worktree from the branch. **Clearing rule:** every beat that reports `held` prunes the column in one atomic UPDATE (`upsert_runner/2`) — a request survives only while its ref is reported `bound` or `talk` (teardown deferred under a talk turn); absent (torn down) or `running` (the run resumed first) clears it, so a stale request can never tear down a resumed run's tree. A runner that goes silent keeps its requests until it beats again. No runner change was needed: `RunnerPool.release_held` already refuses a live or talk-attached tree and stashes dirty edits as `auto-salvage <slot>` (never restored). The same
   `running` list also refreshes card liveness (RLY-226, `Runs.refresh_running_card_liveness/2`):
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
@@ -742,6 +742,15 @@ silently billed to the paid API.
     construction. Counting active jobs made a bound-but-idle, talk-attached or retained worktree
     invisible, and that is what reported "runner available" while the runner had zero free
     exclusive slots.
+    The runners page also lists every holding in a per-runner **HELD WORKTREES** section (RE337,
+    `Relay.Runs.list_runner_status/2`'s `holdings`: card, state, the card's active run and how
+    long it has sat), with **Release worktree** (idle `bound` holdings only —
+    `Relay.Runs.release_action/1`; disabled for `running`/`talk`, hidden for `retained`) and
+    **Cancel run** (`Relay.Runs.cancel_run/2`). `Relay.Runs.starvation/2` drives an amber banner
+    above the queue when a queued exclusive job has waited past `@awaiting_slot_grace_s`, no
+    connected runner has a free exclusive slot, and every held exclusive slot is `bound` (no live
+    job) — so nothing will free a slot on its own. A roster with any `running` holding is not
+    starved. Release is manual only; there is no auto-release.
   - **Two states.** *Active*: bound to a non-terminal run, counts toward `max_worktrees`,
     holds a `MIX_TEST_PARTITION` index. *Retained*: a `failed` run's leftover kept on disk
     (marked with the gitignored `.relay-retained` sentinel at its root) for post-mortem, up
@@ -847,7 +856,7 @@ silently billed to the paid API.
   (`held`), and the server names the subset whose card has at least one run and no run left in
   `Schemas.Run.active_statuses/0` — with the status needed to choose remove vs retain
   (`Relay.Runs.releasable_held/2`) — so `RunnerPool.release_held/2` disposes of them within one
-  heartbeat. A card with **zero** runs is a talk-only worktree and is never named (ADR 0009 §2:
+  heartbeat. Since RE337 `release_held` also carries **human-requested releases**: the runners page's *Release worktree* action appends the card ref to the runner row's `runners.release_requests` (`Relay.Runs.request_worktree_release/4`, accepted only while the runner's latest `held` reports the ref `bound`), and the reply (`Relay.Runs.release_held/3`) adds `{ref, status: "cancelled"}` — a *remove* disposition (`Schemas.Runner.release_remove_status/0`), never `failed` — for each pending request this beat still reports `bound`. The run stays parked; on resume the runner's `assign()` rebuilds the worktree from the branch. **Clearing rule:** every beat that reports `held` prunes the column in one atomic UPDATE (`upsert_runner/2`) — a request survives only while its ref is reported `bound` or `talk` (teardown deferred under a talk turn); absent (torn down) or `running` (the run resumed first) clears it, so a stale request can never tear down a resumed run's tree. A runner that goes silent keeps its requests until it beats again. No runner change was needed: `RunnerPool.release_held` already refuses a live or talk-attached tree and stashes dirty edits as `auto-salvage <slot>` (never restored). A card with **zero** runs is a talk-only worktree and is never named (ADR 0009 §2:
   a talk session's tree spans runs and must outlive them), and a `retained` tree is the human's
   post-mortem, the runner's own to evict. This is how taking the baton (ADR 0004, via
   `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on its

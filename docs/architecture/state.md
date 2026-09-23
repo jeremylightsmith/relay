@@ -211,6 +211,13 @@ runner removes the worktree (auto-salvaging dirty edits; the branch stays). The 
 `run cancelled — card archived` or `run cancelled — card already completed`, chosen once by
 `Relay.Runs.leak_reason/1`. Unarchiving never revives the cancelled run.
 
+A human can also free a parked run's `exclusive` worktree **without** ending the run (RE337):
+*Release worktree* on the runners page records the ref in `runners.release_requests`, the next
+heartbeat's `release_held` carries it with a remove disposition, and the run stays `:parked`.
+When it resumes, the runner rebuilds the worktree from the card's branch (committed work
+survives; uncommitted edits were stashed as `auto-salvage`). The request is cleared once a beat
+reports the ref absent or `running`. The card timeline records `worktree released on runner <name>`.
+
 The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
 `@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block
 fails `mix precommit`). Every run-status write goes through `Relay.Runs.Transitions.transition/4`,

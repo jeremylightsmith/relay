@@ -1300,8 +1300,12 @@ defmodule Relay.Runs do
   flip-flop between the configured total and the free count. The replace list is therefore
   built per-call: replacing with the insert's values would null out a good row on every call
   that didn't carry the key.
+
+  A beat that reports held also prunes the row's release_requests (RE337, see prune_release_requests/2).
   """
   def upsert_runner(%Board{id: board_id}, attrs) do
+    held = normalize_held_attr(attrs["held"])
+
     base = %{
       board_id: board_id,
       name: to_string(attrs["name"]),
@@ -1315,7 +1319,7 @@ defmodule Relay.Runs do
       {base, [:host, :interval, :version, :last_heartbeat, :updated_at]}
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
-      |> put_reported(:held, normalize_held_attr(attrs["held"]))
+      |> put_reported(:held, held)
       |> put_rate_limit(attrs)
 
     %Runner{}
@@ -1325,7 +1329,45 @@ defmodule Relay.Runs do
       conflict_target: [:board_id, :name],
       returning: true
     )
+    |> prune_release_requests(held)
   end
+
+  # RE337: a beat that REPORTED `held` settles the runner's pending release requests — keep a ref
+  # only while this beat reports it in `Schemas.Runner.release_request_pending?/1` (bound / talk).
+  # Absent = torn down (done); running = the run resumed first (stale — must never fire later).
+  # Free on the hot path: no query unless the row actually carries requests AND one must go, and
+  # then one atomic UPDATE (an intersect in SQL), so a request appended concurrently by
+  # `request_worktree_release/4` is never lost to a read-modify-write.
+  defp prune_release_requests({:ok, %Runner{release_requests: [_ | _] = requests} = runner}, held) when is_list(held) do
+    keep = for %{"ref" => ref, "state" => state} <- held, Runner.release_request_pending?(state), do: ref
+
+    if Enum.all?(requests, &(&1 in keep)) do
+      {:ok, runner}
+    else
+      {1, [pruned]} =
+        Repo.update_all(
+          from(r in Runner,
+            where: r.id == ^runner.id,
+            select: r,
+            update: [
+              set: [
+                release_requests:
+                  fragment(
+                    "ARRAY(SELECT x FROM unnest(?) AS x WHERE x = ANY(?))",
+                    r.release_requests,
+                    type(^keep, {:array, :string})
+                  )
+              ]
+            ]
+          ),
+          []
+        )
+
+      {:ok, pruned}
+    end
+  end
+
+  defp prune_release_requests(result, _held), do: result
 
   # nil = "this request did not report the field" → not in the params, not in the replace list,
   # column untouched. The one place that discipline is expressed, for every optional field.
@@ -1645,6 +1687,117 @@ defmodule Relay.Runs do
         do: %{ref: ref, status: Enum.max_by(runs, & &1.id).status}
   end
 
+  @doc """
+  Records a human's request that `runner_name` release its worktree for `ref` (RE337): free the
+  worktree and its exclusive slot while the run stays parked. The run keeps its branch, and when
+  it resumes the runner's `assign()` rebuilds the tree and `reattach_branch` checks the branch out.
+
+  Accepted only when the runner's latest `held` reports `ref` as idle
+  (`Schemas.Runner.idle_holding?/1`); otherwise `{:error, :not_idle}` and nothing is recorded.
+  Idempotent: a ref already pending returns `{:ok, :already_requested}` without a second timeline
+  entry. A new request logs `"worktree released on runner <name>"` on the card's timeline (when
+  the ref resolves to a card on this board), so the card shows its worktree went away while it
+  was parked.
+
+  The request travels on the runner's next heartbeat (`release_held/3`) and is cleared by
+  `upsert_runner/2` once a beat no longer reports the ref as bound or talk.
+
+  Options: `:actor` — `:agent | {:user, user_id}`, default `:agent`.
+  """
+  def request_worktree_release(%Board{} = board, runner_name, ref, opts \\ [])
+      when is_binary(runner_name) and is_binary(ref) do
+    case Repo.get_by(Runner, board_id: board.id, name: runner_name) do
+      nil -> {:error, :runner_not_found}
+      %Runner{} = runner -> do_request_worktree_release(board, runner, ref, opts)
+    end
+  end
+
+  defp do_request_worktree_release(board, runner, ref, opts) do
+    if idle_held?(runner, ref) do
+      case append_release_request(runner, ref) do
+        {1, _rows} ->
+          log_worktree_release(board, runner.name, ref, opts)
+          {:ok, :requested}
+
+        {0, _rows} ->
+          {:ok, :already_requested}
+      end
+    else
+      {:error, :not_idle}
+    end
+  end
+
+  defp idle_held?(%Runner{held: held}, ref) do
+    Enum.any?(List.wrap(held), &(&1["ref"] == ref and Runner.idle_holding?(&1["state"])))
+  end
+
+  # One guarded UPDATE: the NOT-ANY guard makes a double click (or two app machines) idempotent
+  # without a read-modify-write race against the heartbeat's prune.
+  defp append_release_request(%Runner{id: id}, ref) do
+    Repo.update_all(
+      from(r in Runner,
+        where: r.id == ^id and fragment("NOT (? = ANY(?))", type(^ref, :string), r.release_requests),
+        update: [set: [release_requests: fragment("array_append(?, ?)", r.release_requests, type(^ref, :string))]]
+      ),
+      []
+    )
+  end
+
+  defp log_worktree_release(board, runner_name, ref, opts) do
+    case Cards.get_card_by_ref(board, ref) do
+      nil ->
+        :ok
+
+      card ->
+        {:ok, _entry} =
+          Activity.log(card, %{
+            type: :action,
+            actor: Keyword.get(opts, :actor, :agent),
+            text: "worktree released on runner #{runner_name}"
+          })
+
+        :ok
+    end
+  end
+
+  @doc """
+  The heartbeat reply's `release_held` (RE311 + RE337): the derived `releasable_held/2` entries plus
+  one `%{ref, status: Schemas.Runner.release_remove_status()}` for each of `runner`'s pending
+  `release_requests` whose ref THIS beat reports as idle (`bound`). A ref the derived list already
+  names keeps its derived status (a `failed` run's tree stays retained). `runner` must be the
+  post-`upsert_runner/2` row, so its requests are already pruned against this same `held`. No
+  query beyond `releasable_held/2`'s two.
+  """
+  def release_held(%Board{} = board, %Runner{} = runner, held) when is_list(held) do
+    derived = releasable_held(board, held)
+    derived_refs = MapSet.new(derived, & &1.ref)
+    idle = MapSet.new(for %{"ref" => ref, "state" => state} <- held, Runner.idle_holding?(state), do: ref)
+
+    requested =
+      for ref <- List.wrap(runner.release_requests),
+          MapSet.member?(idle, ref),
+          not MapSet.member?(derived_refs, ref),
+          do: %{ref: ref, status: Runner.release_remove_status()}
+
+    derived ++ requested
+  end
+
+  @doc """
+  What the runners page offers for a holding's worktree (RE337) — the ONE place this is decided:
+  `:releasing` while a request is pending on an idle holding, else
+  `Schemas.Runner.release_eligibility/1` (`:enabled` | `{:disabled, reason}` | `:hidden`).
+  """
+  def release_action(%{state: state, release_requested: requested?}) do
+    case Runner.release_eligibility(state) do
+      :enabled when requested? -> :releasing
+      eligibility -> eligibility
+    end
+  end
+
+  @doc "Whether the runners page offers Cancel run for a holding: its card has an active run (RE337)."
+  def cancellable_holding?(%{run: %{status: status}}), do: Run.active?(status)
+  def cancellable_holding?(_holding), do: false
+
   defp to_job_id(id) when is_integer(id), do: id
 
   defp to_job_id(id) when is_binary(id) do
@@ -1768,6 +1921,7 @@ defmodule Relay.Runs do
       )
 
     jobs_by_runner = active_jobs_by_runner(board)
+    holdings_by_runner = holdings_by_runner(board, runners, now)
 
     Enum.map(runners, fn runner ->
       jobs = Map.get(jobs_by_runner, runner.name, [])
@@ -1796,6 +1950,9 @@ defmodule Relay.Runs do
         # RE311: what this runner declares it holds — the chip's `used` is derived from it,
         # and the runners view names each entry in the chip's tooltip.
         held: List.wrap(runner.held),
+        # RE337: the same `held`, enriched for the runners page's HELD WORKTREES section —
+        # card title, the card's active run, how long it has sat, and the two action rules.
+        holdings: Map.fetch!(holdings_by_runner, runner.id),
         pools: pools_for(runner, jobs),
         jobs: jobs
       }
@@ -2392,6 +2549,89 @@ defmodule Relay.Runs do
 
   defp awaiting_slot(_run, _job, _board, _now), do: nil
 
+  @doc """
+  The runners page's starvation alert (RE337), or `nil`. Non-`nil` only when ALL hold:
+
+    1. at least one `:queued`, unclaimed `exclusive` node-job has waited past
+       `@awaiting_slot_grace_s` (the same grace as the `:job_awaiting_slot` verdict);
+    2. at least one connected runner (fresh, current, not paused — `connected_runners/2`)
+       advertises exclusive capacity, and none of them has a free exclusive slot;
+    3. on those runners, EVERY exclusive holding is idle (`bound`) and no exclusive job is live —
+       so nothing will free a slot on its own. A mixed roster (some slot still `running`) is
+       deliberately not starvation: work flows when that job ends.
+
+  Returns `%{waiting: [...], holders: [...]}` — the waiting jobs oldest first and each idle
+  holding (runner, ref, title, run status, parked reason, `since`, `held_s`) oldest first.
+  `now` is injectable. The cheap query runs first, so a board with nothing starved never reads
+  the roster.
+  """
+  @spec starvation(Board.t(), DateTime.t() | nil) :: nil | %{waiting: [map()], holders: [map()]}
+  def starvation(%Board{} = board, now \\ nil) do
+    now = now || now()
+
+    with [_ | _] = waiting <- starved_exclusive_jobs(board, now),
+         [_ | _] = runners <- exclusive_runners(board, now),
+         false <- Enum.any?(runners, &free_slot?(&1, "exclusive")),
+         true <- Enum.all?(runners, &all_exclusive_idle?/1) do
+      %{waiting: waiting, holders: idle_holders(runners)}
+    else
+      _not_starved -> nil
+    end
+  end
+
+  defp starved_exclusive_jobs(board, now) do
+    cutoff = DateTime.add(now, -@awaiting_slot_grace_s, :second)
+
+    from(j in NodeJob,
+      join: c in Card,
+      on: c.id == j.card_id,
+      where:
+        c.board_id == ^board.id and j.state == :queued and is_nil(j.runner_name) and
+          j.inserted_at < ^cutoff and fragment("?->>'isolation'", j.payload) == "exclusive",
+      order_by: [asc: j.id],
+      select: %{job_id: j.id, ref_number: c.ref_number, node_key: j.node_key, inserted_at: j.inserted_at}
+    )
+    |> Repo.all()
+    |> Enum.map(fn row ->
+      %{
+        job_id: row.job_id,
+        ref: Cards.ref(board, %Card{ref_number: row.ref_number}),
+        node_key: row.node_key,
+        queued_s: DateTime.diff(now, row.inserted_at, :second)
+      }
+    end)
+  end
+
+  defp exclusive_runners(board, now) do
+    board
+    |> connected_runners(now)
+    |> Enum.filter(fn runner -> Enum.any?(runner.pools, &(&1.name == "exclusive" and &1.total > 0)) end)
+  end
+
+  defp all_exclusive_idle?(runner) do
+    not Enum.any?(runner.jobs, &(isolation_class(&1.isolation) == "exclusive")) and
+      runner.holdings
+      |> Enum.filter(&(&1.state in Runner.active_holding_states()))
+      |> Enum.all?(&Runner.idle_holding?(&1.state))
+  end
+
+  defp idle_holders(runners) do
+    holders =
+      for runner <- runners, h <- runner.holdings, Runner.idle_holding?(h.state) do
+        %{
+          runner: runner.name,
+          ref: h.ref,
+          title: h.title,
+          run_status: h.run && h.run.status,
+          parked_reason: h.run && h.run.parked_reason,
+          since: h.since,
+          held_s: h.held_s
+        }
+      end
+
+    Enum.sort_by(holders, &{is_nil(&1.since), &1.since && DateTime.to_unix(&1.since)})
+  end
+
   # Read through list_runner_status/2 — the SAME read the runners page renders — so the
   # verdict can never disagree with what an operator is looking at while they run `relay why`.
   # OUTDATED rows are excluded: a refused runner claims nothing whatever its free slots say,
@@ -2576,6 +2816,87 @@ defmodule Relay.Runs do
   # shared tree, so its occupancy is still the active-job count (any non-"exclusive" isolation
   # counts as shared, the same rule reclaim_runner/1 applies).
   defp pool_used(name, jobs_used, _held), do: Map.get(jobs_used, name, 0)
+
+  # RE337 — every runner's `held`, enriched with at most FOUR queries for the whole roster
+  # (ref → card id, titles, active runs, last node time), never one per ref.
+  defp holdings_by_runner(board, runners, now) do
+    refs = for runner <- runners, %{"ref" => ref} <- List.wrap(runner.held), uniq: true, do: ref
+    facts = holding_facts(board, refs)
+
+    Map.new(runners, fn runner ->
+      requested = MapSet.new(List.wrap(runner.release_requests))
+
+      holdings =
+        for %{"ref" => ref, "state" => state} <- List.wrap(runner.held) do
+          holding(ref, state, Map.get(facts, ref, %{}), MapSet.member?(requested, ref), now)
+        end
+
+      {runner.id, Enum.sort_by(holdings, &holding_order(&1, now))}
+    end)
+  end
+
+  defp holding_facts(_board, []), do: %{}
+
+  defp holding_facts(board, refs) do
+    ids_by_ref = Cards.card_ids_by_ref(board, refs)
+    card_ids = Map.values(ids_by_ref)
+
+    titles = Map.new(Repo.all(from c in Card, where: c.id in ^card_ids, select: {c.id, c.title}))
+
+    runs =
+      Repo.all(
+        from r in Run,
+          where: r.card_id in ^card_ids and r.status in ^Run.active_statuses(),
+          select: %{
+            id: r.id,
+            card_id: r.card_id,
+            status: r.status,
+            parked_reason: r.parked_reason,
+            started_at: r.started_at
+          }
+      )
+
+    last_step = last_step_at(Enum.map(runs, & &1.id))
+    runs_by_card = Map.new(runs, &{&1.card_id, Map.put(&1, :since, Map.get(last_step, &1.id) || &1.started_at)})
+
+    Map.new(ids_by_ref, fn {ref, id} -> {ref, %{title: Map.get(titles, id), run: Map.get(runs_by_card, id)}} end)
+  end
+
+  # When each run last changed hands: its newest node execution's finish (or start, if still
+  # running). A parked run parked when its last node finished, so this is "parked since".
+  defp last_step_at([]), do: %{}
+
+  defp last_step_at(run_ids) do
+    from(e in NodeExecution,
+      where: e.run_id in ^run_ids,
+      group_by: e.run_id,
+      select: {e.run_id, type(max(coalesce(e.finished_at, e.started_at)), :utc_datetime)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp holding(ref, state, facts, requested?, now) do
+    run = facts[:run]
+    since = run && run.since
+
+    holding = %{
+      ref: ref,
+      title: facts[:title],
+      state: state,
+      run: run && Map.take(run, [:id, :status, :parked_reason]),
+      since: since,
+      held_s: since && max(DateTime.diff(now, since, :second), 0),
+      release_requested: requested?
+    }
+
+    Map.merge(holding, %{release: release_action(holding), cancellable: cancellable_holding?(holding)})
+  end
+
+  # Idle (bound) first — that is where a leak shows — then oldest first; an unknown age sorts as now.
+  defp holding_order(holding, now) do
+    {not Runner.idle_holding?(holding.state), DateTime.to_unix(holding.since || now)}
+  end
 
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"

@@ -732,6 +732,204 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
+  # ---------- runner rows (RE337) ----------
+
+  @doc """
+  The runners page's row frame — the artboard's WORKING NOW job row (`Relay Runners.dc.html`
+  lines ~98-115). Shared so the HELD WORKTREES rows reuse the idiom rather than inventing one.
+  """
+  def runner_row_style do
+    "display:flex;align-items:center;gap:10px;border:1px solid var(--color-base-300);" <>
+      "background:var(--color-base-200);border-radius:8px;padding:8px 11px;"
+  end
+
+  @doc ~S"""
+  The DOM id of a held-worktree row — `held-<runner>-<ref>`, CSS-safe (a runner name like
+  `mac.local` has a dot). The ONE builder: the row and the starvation banner's anchor links both
+  call it, so a link can never point at an id the row does not carry.
+  """
+  def held_row_id(runner_name, ref), do: "held-" <> dom_safe(runner_name) <> "-" <> dom_safe(ref)
+
+  defp dom_safe(value), do: String.replace(to_string(value), ~r/[^A-Za-z0-9_-]/, "-")
+
+  # ---------- held_worktree_row ----------
+
+  @doc """
+  One per-card worktree a runner holds (RE337), for the runners page's HELD WORKTREES section:
+  state badge, card ref (linking to the card) and title, the run's status and how long it has
+  sat, and the two actions. Every decision is precomputed by `Relay.Runs.list_runner_status/2`
+  — `holding.release` (`Relay.Runs.release_action/1`) and `holding.cancellable`
+  (`Relay.Runs.cancellable_holding?/1`) — this component only renders them. No artboard covers
+  this section; it wears the WORKING NOW row frame (`runner_row_style/0`).
+  """
+  attr :id, :string, required: true
+  attr :runner, :string, required: true, doc: "the runner's name (phx-value-runner)"
+  attr :holding, :map, required: true
+  attr :href, :string, required: true, doc: "the card link"
+
+  def held_worktree_row(assigns) do
+    assigns = assign(assigns, :disabled_reason, disabled_reason(assigns.holding.release))
+
+    ~H"""
+    <div
+      id={@id}
+      class="held-worktree-row"
+      style={
+        runner_row_style() <>
+          "flex-wrap:wrap;row-gap:6px;" <>
+          if(@holding.release == :hidden, do: "opacity:0.6;", else: "")
+      }
+    >
+      <%!-- Two wrap groups, so a narrow runner column drops the status + actions onto their own
+           line instead of squeezing the title to 0px and pushing the buttons out of the frame. --%>
+      <div
+        class="held-worktree-identity"
+        style="display:flex;align-items:center;gap:10px;flex:1 1 220px;min-width:0;"
+      >
+        <span
+          class={["badge badge-sm font-mono font-bold", holding_badge_class(@holding.release)]}
+          style="font-size:9.5px;letter-spacing:0.06em;flex-shrink:0;"
+        >
+          {@holding.state}
+        </span>
+        <.link
+          navigate={@href}
+          class="font-mono"
+          style="font-size:12px;font-weight:600;flex-shrink:0;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+        >
+          {@holding.ref}
+        </.link>
+        <span style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          {@holding.title || "—"}
+        </span>
+      </div>
+      <div
+        class="held-worktree-actions"
+        style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;max-width:100%;"
+      >
+        <span
+          id={"#{@id}-status"}
+          class="font-mono"
+          style="font-size:11px;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+        >
+          {holding_status_label(@holding)}
+        </span>
+        <span
+          :if={@holding.release == :releasing}
+          id={"#{@id}-releasing"}
+          class="badge badge-sm badge-ghost font-mono"
+        >
+          releasing…
+        </span>
+        <button
+          :if={@holding.release == :enabled}
+          id={"#{@id}-release"}
+          type="button"
+          class="btn btn-xs"
+          phx-click="release_worktree"
+          phx-value-runner={@runner}
+          phx-value-ref={@holding.ref}
+          data-confirm={release_confirm(@holding.ref, @runner)}
+        >
+          Release worktree
+        </button>
+        <span :if={@disabled_reason} class="tooltip tooltip-left" data-tip={@disabled_reason}>
+          <button id={"#{@id}-release"} type="button" class="btn btn-xs" disabled>
+            Release worktree
+          </button>
+        </span>
+        <button
+          :if={@holding.cancellable}
+          id={"#{@id}-cancel"}
+          type="button"
+          class="btn btn-xs btn-outline btn-error"
+          phx-click="cancel_held_run"
+          phx-value-ref={@holding.ref}
+          data-confirm={"Cancel #{@holding.ref}'s run? It ends now and its worktree is released on the runner's next heartbeat."}
+        >
+          Cancel run
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp disabled_reason({:disabled, reason}), do: reason
+  defp disabled_reason(_release), do: nil
+
+  # Amber is Blocked in this palette: an idle holding is a slot waiting on a human — the leak,
+  # legible at a glance. Everything else is neutral. Keyed on the precomputed release action,
+  # never on a state string (magic-value rule).
+  defp holding_badge_class(release) when release in [:enabled, :releasing], do: "badge-warning"
+  defp holding_badge_class(_release), do: "badge-ghost"
+
+  defp release_confirm(ref, runner) do
+    "Release #{ref}'s worktree on runner #{runner}? The run stays parked and rebuilds its " <>
+      "worktree from its branch when it resumes. Uncommitted edits are stashed (auto-salvage) " <>
+      "and will not be restored."
+  end
+
+  defp holding_status_label(%{release: :hidden}), do: "retained (failed run, no slot)"
+  defp holding_status_label(%{run: nil}), do: "no active run"
+
+  defp holding_status_label(%{run: run, held_s: held_s}) do
+    [Atom.to_string(run.status), reason_label(run.parked_reason), short_age(held_s)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" · ")
+  end
+
+  defp reason_label(nil), do: nil
+  defp reason_label(reason), do: reason |> Atom.to_string() |> String.replace("_", " ")
+
+  defp short_age(nil), do: nil
+  defp short_age(s) when s < 60, do: "<1m"
+  defp short_age(s) when s < 3600, do: "#{div(s, 60)}m"
+  defp short_age(s) when s < 86_400, do: "#{div(s, 3600)}h"
+  defp short_age(s), do: "#{div(s, 86_400)}d"
+
+  # ---------- starvation_banner ----------
+
+  @doc """
+  The runners page's starvation alert (RE337): exclusive work is queued past the awaiting-slot
+  grace and every exclusive slot is held by an idle (parked) card. Takes the verdict from
+  `Relay.Runs.starvation/2` and lists each holder, linking to its HELD WORKTREES row
+  (`held_row_id/2`). Amber — the same warning tokens as the full capacity chip and the
+  outdated-runner `stopped_work_banner/1`.
+  """
+  attr :id, :string, required: true
+  attr :verdict, :map, required: true
+
+  def starvation_banner(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="flex flex-col gap-1.5 rounded-lg px-4 py-2.5 text-sm"
+      style={stopped_work_style(:runner_outdated)}
+    >
+      <div class="flex items-center gap-3">
+        <span class="hero-exclamation-triangle size-4" />
+        <span class="flex-1">
+          Exclusive work is starved: {jobs_waiting(length(@verdict.waiting))}, and every exclusive slot is held by a parked card.
+        </span>
+      </div>
+      <div class="flex flex-wrap gap-x-4 gap-y-1 pl-7">
+        <a
+          :for={holder <- @verdict.holders}
+          id={"#{@id}-holder-#{holder.ref}"}
+          href={"#" <> held_row_id(holder.runner, holder.ref)}
+          class="font-mono text-xs underline"
+        >
+          {holder.ref}{if holder.title, do: " #{holder.title}"} · {holder.runner}{if holder.held_s,
+            do: " · #{short_age(holder.held_s)}"}
+        </a>
+      </div>
+    </div>
+    """
+  end
+
+  defp jobs_waiting(1), do: "1 job waiting"
+  defp jobs_waiting(n), do: "#{n} jobs waiting"
+
   attr :totals, :map, required: true
 
   defp failure_stats(assigns) do
