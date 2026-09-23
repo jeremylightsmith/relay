@@ -777,10 +777,13 @@ silently billed to the paid API.
     terminal), and `RunnerPool.release_held/2` retries the removal on every heartbeat. Each
     failure is forwarded as an `error` line carrying the card's ref, throttled to one per
     `IDLE_LOG_INTERVAL` per ref, and a later success logs once. Retention eviction follows the
-    same rule. A card whose teardown is failing gets `reset=True` on its next run, never
+    same rule. A card whose teardown is failing gets `reset=True` on its next run or talk turn
+    (`assign_talk` re-baselines it too, or waits if something still occupies it), never
     reuse-as-is, because the tree may be half-deleted. A half-deleted tree (its `.git` link
     gone) is removed with `rm -rf` + `prune`, and `create_or_rebaseline` deletes and re-adds
-    one rather than running git inside it, since git would walk up into the main checkout.
+    one rather than running git inside it, since git would walk up into the main checkout. If
+    that delete leaves the directory behind, it stops the tree's processes, retries once, and
+    then dies. It never falls through to `reset_worktree` on a `.git`-less path.
     Previously the record was popped *before* removal, so a failed removal left the tree on disk
     but invisible to `release_held` until a runner restart (`recover()`) rediscovered it.
   - **In-tree processes are stopped before removal (RE336).** Before `git worktree remove`

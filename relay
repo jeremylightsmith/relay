@@ -56,7 +56,7 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 65
-RUNNER_FINGERPRINT = "f21ce646228c1241a77c5bc70c996cc177e521f422abb5f4e81adbeb2f063154"
+RUNNER_FINGERPRINT = "905f76e77cc0a88a7b584dcd42dc06f946e784e207df9baebfc6abb29e92c80b"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2004,6 +2004,17 @@ class RunnerPool:
         name = self.wt_name(ref)
         with self.lock:
             rec = self.wts.get(name)
+            # RE336: a tree whose removal FAILED may have lost its `.git` link, and a talk agent's
+            # git commands inside it would walk UP into the main checkout. Re-baseline it when
+            # nothing occupies it (create_or_rebaseline rebuilds a `.git`-less tree); otherwise
+            # return None so placement retries.
+            if rec is not None and rec.get("teardown_failed"):
+                if rec["live"] or rec.get("talk_users", 0) or rec.get("pending_finish"):
+                    return None
+                rec.pop("teardown_failed", None)
+                rec.pop("teardown_logged_at", None)
+                rec["talk_users"] = 1
+                return name, True
             if rec is not None:
                 rec["talk_users"] = rec.get("talk_users", 0) + 1
                 return name, False
@@ -2167,10 +2178,20 @@ class RunnerPool:
         A tree HALF-deleted by a failed teardown (RE336) has lost its `.git` link. reset_worktree's
         git commands would then walk UP into the main checkout, so it is deleted and re-added
         instead. `prune` precedes `add` because a half-removed path can still be registered, and
-        git refuses to `add` a registered path."""
+        git refuses to `add` a registered path.
+
+        If that delete leaves the directory behind (a process still writing into it, a
+        permission error), the processes inside are stopped and the delete retried once; a tree
+        still there dies rather than fall through to reset_worktree, whose stash/reset/clean
+        would land on the main checkout."""
         path = worktree_path(slot)
         if os.path.isdir(path) and not os.path.exists(os.path.join(path, ".git")):
             shutil.rmtree(path, ignore_errors=True)
+            if os.path.isdir(path):
+                _stop_processes_in(path, ref=self._ref_of(slot))
+                shutil.rmtree(path, ignore_errors=True)
+            if os.path.isdir(path):
+                die(f"half-deleted worktree {slot} could not be cleared: {path}")
         if os.path.isdir(path):
             reset_worktree(path, self.base)
             _clear_retained_marker(path)

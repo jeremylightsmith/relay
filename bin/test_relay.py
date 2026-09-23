@@ -2112,6 +2112,25 @@ class RunnerPoolTeardownRetryTest(unittest.TestCase):
         p.release(job, name, "running")
         self.assertEqual(p.assign(job), (name, False))
 
+    def test_a_talk_turn_on_a_card_whose_teardown_failed_re_baselines(self):
+        # The failed removal may have deleted the tree's `.git` link; attaching as-is would run
+        # the talk agent's git commands in the MAIN checkout (git walks up).
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        self.assertEqual(p.assign_talk("RLY-1"), (slot, True))
+        rec = p.wts[slot]
+        self.assertEqual(rec["talk_users"], 1)
+        self.assertNotIn("teardown_failed", rec)
+        self.assertNotIn("teardown_logged_at", rec)
+
+    def test_a_talk_turn_waits_when_a_teardown_failed_tree_is_occupied(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        p.wts[slot]["talk_users"] = 1                       # someone is still in it
+        self.assertIsNone(p.assign_talk("RLY-1"))
+        self.assertEqual(p.wts[slot]["talk_users"], 1)
+        self.assertTrue(p.wts[slot]["teardown_failed"])
+
 
 class RunnerPoolRealTeardownTest(unittest.TestCase):
     """RE336, against a REAL git repo (the RealGitWorktreeTest discipline): the worktrees dir
@@ -2353,6 +2372,26 @@ class RunnerPoolBaseTest(unittest.TestCase):
         self.assertFalse([c for c in self.calls if c[0] == "reset"])
         self.assertEqual([c for c in self.calls if c[0] == "wt"],
                          [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])
+
+    def test_a_half_deleted_tree_that_cannot_be_cleared_is_never_reset(self):
+        """RE336: if the rmtree of a `.git`-less tree fails (a process still writing into it, a
+        permission error), falling through to reset_worktree would stash, hard-reset and clean
+        the MAIN checkout. It stops what is running there, retries once, then dies."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for name in ("worktree_path", "_stop_processes_in"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.addCleanup(setattr, relay.shutil, "rmtree", relay.shutil.rmtree)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        stopped = []
+        relay._stop_processes_in = lambda path, ref=None: stopped.append((path, ref)) or []
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)                                    # no `.git` link
+        relay.shutil.rmtree = lambda *a, **k: None           # removal leaves it in place
+        with self.assertRaises(SystemExit):
+            relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertEqual(stopped, [(path, "RLY-1")])
+        self.assertFalse([c for c in self.calls if c[0] in ("reset", "wt")])
 
 
 class RunnerConfigCommittedFileTest(unittest.TestCase):
