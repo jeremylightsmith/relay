@@ -128,8 +128,14 @@ sharing behavior.
   `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
   an active run (`Relay.Runs.active_run/1`) with **409 `active_run`** and writes nothing; that
   guard lives in `RelayWeb.Api.CardController`, **not** in `Cards.archive_card/2`, so the board
-  UI's Archive button stays unguarded as shipped. Both are idempotent through the domain
-  functions (a repeat logs nothing), and neither is on the `/api/all` user-token scope.
+  UI's Archive button stays unguarded as shipped. Instead of refusing, a board
+  archive **cancels** the card's active run (RE335): `Relay.Runs.Listener` reacts to
+  `{:card_archived, card}` and closes it `:cancelled` with `run cancelled — card archived`
+  (the `RunnerReaper` sweep backstops it), which lets the runner release the card's held
+  worktree on its next heartbeat. The drawer's confirm says so ("Its active run will be
+  cancelled.") only when the card has an active run. Unarchiving never revives that run. Both
+  are idempotent through the domain functions (a repeat logs nothing), and neither is on the
+  `/api/all` user-token scope.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard

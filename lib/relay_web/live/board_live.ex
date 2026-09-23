@@ -536,6 +536,7 @@ defmodule RelayWeb.BoardLive do
         reject_form={@reject_form}
         reject_error={@reject_error}
         archived={Card.archived?(@selected_card)}
+        active_run?={drawer_active_run?(@card_runs)}
         body_loading={@body_loading?}
         drawer_tab={@drawer_tab}
         talk_session={@talk_session}
@@ -4209,6 +4210,10 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp select_drawer_tab(socket, tab), do: assign(socket, :drawer_tab, tab)
+
+  # RE335 — whether the open card holds an active run, for the Archive confirm copy. Reads the
+  # drawer's already-loaded runs through Schemas.Run.active?/1 — no query from the component.
+  defp drawer_active_run?(runs), do: Enum.any?(runs, &Run.active?(&1.status))
 
   # RE325 — the tab a card opens on, chosen once when its body loads (never re-chosen while the
   # drawer is open, so a tab the human picked is kept). A card awaiting an answer opens on Detail,

@@ -1263,6 +1263,26 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "Copy link"
     end
 
+    # RE335 D5 — the board's Archive is unguarded but now cancels the card's active run, so the
+    # native confirm says so. Only the copy changes; no new dialog.
+    test "Archive's confirm keeps the plain copy when the card has no active run" do
+      attrs = drawer_attrs(%{}, %{overflow_open: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~ ~s(data-confirm="Archive this card? You can restore it from Archived.")
+      refute html =~ "Its active run will be cancelled."
+    end
+
+    test "Archive's confirm warns the active run will be cancelled when there is one" do
+      attrs = drawer_attrs(%{}, %{overflow_open: true, active_run?: true})
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+      assert html =~
+               ~s(data-confirm="Archive this card? Its active run will be cancelled. You can restore the card from Archived.")
+    end
+
     test "an archived card renders no ⋯ overflow button at all" do
       attrs = drawer_attrs(%{}, %{archived: true, overflow_open: true})
 
