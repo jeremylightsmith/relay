@@ -379,7 +379,9 @@ that stays server-side.
   oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
   The same reaper tick also calls `Relay.Runs.close_orphaned_runs/0` — a companion sweep, not
   a runner-liveness check — closing any run still active while its card already sits in a
-  terminal-type stage (RLY-233). This is safe to treat as an unambiguous leak because run
+  terminal-type stage (RLY-233) or has been archived (RE335 — the board's
+  Archive button is unguarded, and an archived card's parked run would otherwise hold its
+  `exclusive` worktree forever). This is safe to treat as an unambiguous leak because run
   dispatch (`Relay.Runs.start_run/3`) now moves the card into the flow's work lane and inserts
   the run row in one transaction: no committed state ever has an active run sitting on a
   terminal-type stage except a genuine leak. The tick's third sweep,

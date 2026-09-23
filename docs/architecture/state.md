@@ -192,8 +192,8 @@ stay append-only and "it failed here, then a human retried" is fully reconstruct
 `node_executions` plus the `retries` counter.
 
 A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
-stage (`Schemas.Stage.terminal_types/0`) while the run is still active (`running`/`parked`,
-RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
+stage (`Schemas.Stage.terminal_types/0`) **or is archived** (`archived_at` set, RE335) while the
+run is still active (`running`/`parked`, any `parked_reason`, RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
 and the `Relay.Runs.RunnerReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) catches
 anything the event path missed. A legitimately completed run is already `:done` before its card
 moves off the stage, so it is never selected by either path and never relabelled. Run dispatch
@@ -204,6 +204,12 @@ a genuine leak. Both paths judge that leak from a single `run → card → stage
 concurrent `Spec:Done → Plan` dispatch landing between two reads can't make the Listener mistake a
 freshly-dispatched run for a leak and cancel it (RLY-233 / RE239). No grace window or time
 threshold is needed to tell the two apart.
+Archiving from the board is not guarded, so the archived half of the rule is what stops a
+parked run on a hidden card from pinning its `exclusive` worktree forever: once the run is
+`:cancelled`, `Relay.Runs.releasable_held/2` names the ref on the next heartbeat and the
+runner removes the worktree (auto-salvaging dirty edits; the branch stays). The timeline reads
+`run cancelled — card archived` or `run cancelled — card already completed`, chosen once by
+`Relay.Runs.leak_reason/1`. Unarchiving never revives the cancelled run.
 
 The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
 `@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block

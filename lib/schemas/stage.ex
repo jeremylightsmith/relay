@@ -89,8 +89,8 @@ defmodule Schemas.Stage do
   @doc """
   The stage `type`s that mean a card has left every flow's scope — the single source of truth
   for "terminal stage" (RLY-233). The orphaned-run sweep (`Relay.Runs.close_orphaned_runs/0`)
-  and the card-event Listener's terminal-close rule both filter through this; no second literal
-  `:done` partition exists.
+  and the card-event Listener's leak-close rule both filter through this (a run is also a leak
+  when its card is archived, RE335); no second literal `:done` partition exists.
   """
   def terminal_types, do: [:done]
 

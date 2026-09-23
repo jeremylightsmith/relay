@@ -543,6 +543,58 @@ defmodule Relay.RunsTest do
                &match?(%Schemas.Activity{type: :action, text: "run cancelled — card already completed"}, &1)
              )
     end
+
+    # RE335 — an archived card usually sits in a WORKING stage, so the terminal-stage rule alone
+    # never closed its run: the run stayed active forever and pinned its exclusive worktree.
+    test "closes an active run on an archived, non-terminal card, logs 'card archived', is idempotent",
+         %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.close_orphaned_runs() == 1
+      assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+      assert Enum.all?(Runs.active_runs(board.id), &(&1.id != run.id))
+
+      assert Enum.any?(
+               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               &match?(%Schemas.Activity{type: :action, text: "run cancelled — card archived"}, &1)
+             )
+
+      assert Runs.close_orphaned_runs() == 0
+    end
+
+    test "closes a :running run on an archived card too", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.close_orphaned_runs() == 1
+      assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+    end
+
+    test "an archived card in a Done stage is closed with 'card archived', not 'card already completed'",
+         %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      _run = insert(:run, card: card, status: :running)
+
+      assert Runs.close_orphaned_runs() == 1
+
+      assert Enum.any?(
+               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               &match?(%Schemas.Activity{type: :action, text: "run cancelled — card archived"}, &1)
+             )
+    end
+
+    test "never touches an already-terminal run on an archived card", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :failed)
+
+      assert Runs.close_orphaned_runs() == 0
+      assert %Run{status: :failed} = Runs.get_run!(run.id)
+    end
   end
 
   # RLY-233 / RE239: the single-snapshot leak predicate the listener's terminal-close rule uses,
@@ -581,6 +633,63 @@ defmodule Relay.RunsTest do
       run = insert(:run, card: card, status: :cancelled)
 
       refute Runs.leaked?(run)
+    end
+
+    test "true for an active run whose card is archived in a non-terminal stage, false once unarchived",
+         %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.leaked?(run)
+
+      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [archived_at: nil])
+
+      refute Runs.leaked?(run)
+    end
+  end
+
+  # RE335 — the one place the close reason for a leaked run is decided, shared by the reaper sweep
+  # and the Listener's first rule so the two can never log different reasons for the same leak.
+  describe "leak_reason/1" do
+    test "'card archived' for an active run on an archived card", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.leak_reason(run) == "card archived"
+    end
+
+    test "'card already completed' for an active run on a non-archived Done card", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done)
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.leak_reason(run) == "card already completed"
+    end
+
+    test "'card archived' wins when the card is both archived and in a Done stage", %{board: board} do
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      card = insert(:card, stage: done, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.leak_reason(run) == "card archived"
+    end
+
+    test "nil for an active run on a live, non-terminal card", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code)
+      run = insert(:run, card: card, status: :running)
+
+      assert Runs.leak_reason(run) == nil
+    end
+
+    test "nil for a terminal run on an archived card", %{board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      run = insert(:run, card: card, status: :cancelled)
+
+      assert Runs.leak_reason(run) == nil
     end
   end
 
@@ -1296,6 +1405,27 @@ defmodule Relay.RunsTest do
       ref = Relay.Cards.ref(board, card)
 
       assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
+    end
+
+    # RE335 end-to-end: an archived card's active run pins its held worktree until the leak sweep
+    # cancels it; after that the next beat names the ref as :cancelled, so the runner removes it.
+    test "an archived card's held ref is released once the leak sweep cancels its run", %{board: board} do
+      flow = retry_flow(board)
+      card = card_in(board, "Next up", "archived with a live run")
+      {:ok, run} = Runs.start_run(card, flow)
+      ref = Relay.Cards.ref(board, card)
+
+      assert Runs.releasable_held(board, [held(ref, "bound")]) == []
+
+      {1, _} =
+        Relay.Repo.update_all(from(c in Card, where: c.id == ^card.id),
+          set: [archived_at: DateTime.truncate(DateTime.utc_now(), :second)]
+        )
+
+      _closed = Runs.close_orphaned_runs()
+
+      assert %Run{status: :cancelled} = Runs.get_run!(run.id)
+      assert [%{ref: ^ref, status: :cancelled}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
 
     test "never names a ref whose card has a running or parked run", %{board: board} do

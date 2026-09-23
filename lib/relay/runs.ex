@@ -1028,26 +1028,31 @@ defmodule Relay.Runs do
     end
   end
 
+  # RE335 — the timeline suffix a leaked run is closed with, one per kind of leak. They are
+  # composed by cancel_log_text/1 into "run cancelled — <reason>". Archived wins over a terminal
+  # stage: archiving is the more specific human act, and it is the one the human just did.
+  @archived_leak_reason "card archived"
+  @completed_leak_reason "card already completed"
+
   @doc """
-  Closes every leaked run — a run still `active` (`Run.active_statuses/0`) whose card already
-  sits in a terminal-type stage (`Stage.terminal_types/0`) — and returns the count closed.
-  Joins run → card → stage across all boards and routes each through `cancel_run/2`, which stops
-  its server, revokes its in-flight job (freeing a `shared_clean` slot), closes it `:cancelled`
-  and drops it from `active_runs`/capacity (freeing an `exclusive` slot), logs, and broadcasts.
+  Closes every leaked run and returns the count closed. A leaked run is still `active`
+  (`Run.active_statuses/0`) while its card either sits in a terminal-type stage
+  (`Stage.terminal_types/0`, RLY-233) **or is archived** (`archived_at` set, RE335). Joins
+  run → card → stage across all boards and routes each through `cancel_run/2` with that leak's
+  `leak_reason/1` (`"card archived"` or `"card already completed"`). `cancel_run/2` stops the
+  run's server, revokes its in-flight job (freeing a `shared_clean` slot), closes it `:cancelled`
+  and drops it from `active_runs`/capacity (freeing an `exclusive` slot, and
+  letting `releasable_held/2` name its worktree on the next beat), logs, and broadcasts.
   Idempotent — a second call finds none (`cancel_run/2` returns `{:error, :not_active}` on a
-  now-terminal run). Invoked by the `RunnerReaper` tick and usable directly as a catch-up.
+  now-terminal run). Invoked by the `RunnerReaper` tick and usable directly as a catch-up; its
+  first tick after deploy also closes runs stranded on cards archived before RE335.
   """
   def close_orphaned_runs do
-    from(r in Run,
-      join: c in Card,
-      on: c.id == r.card_id,
-      join: s in Stage,
-      on: s.id == c.stage_id,
-      where: r.status in ^Run.active_statuses() and s.type in ^Stage.terminal_types()
-    )
+    leaked_runs_query()
+    |> select([r, card: c], {r, c.archived_at})
     |> Repo.all()
-    |> Enum.reduce(0, fn run, closed ->
-      case cancel_run(run, reason: "card already completed") do
+    |> Enum.reduce(0, fn {run, archived_at}, closed ->
+      case cancel_run(run, reason: leak_close_reason(archived_at)) do
         {:ok, _cancelled} -> closed + 1
         {:error, :not_active} -> closed
       end
@@ -1055,29 +1060,55 @@ defmodule Relay.Runs do
   end
 
   @doc """
-  True if `run` is a leak — still `active` (`Run.active_statuses/0`) while its card already sits in
-  a terminal-type stage (`Stage.terminal_types/0`) — decided in ONE `run → card → stage` query, so
-  the verdict is a single consistent snapshot (the same predicate `close_orphaned_runs/0` sweeps
-  with).
+  Why `run` is a leak, or `nil` when it is not one. Returns `"card archived"` when the run is
+  still `active` (`Run.active_statuses/0`) and its card is archived (RE335), and
+  `"card already completed"` when the run is active and its card sits in a terminal-type stage
+  (`Stage.terminal_types/0`, RLY-233). Archived wins when both hold. The result is the `reason:`
+  both closers pass to `cancel_run/2` — this sweep (`close_orphaned_runs/0`) and the Listener's
+  first rule — so the two always log the same text.
 
-  Atomic dispatch (`start_seeded_run/4` moves the card into the work lane *before* inserting the
-  run, in one transaction) guarantees no committed state ever pairs an active run with a card still
-  at its (often `:done`-type) pull stage, so a freshly dispatched run is never a leak — only a
-  genuinely stranded one is. The listener's terminal-close rule uses this instead of reading the
-  card stage and the active run in separate queries, which could straddle a concurrent
-  `Spec:Done → Plan` dispatch and cancel the fresh plan run (RLY-233 / RE239).
+  Decided in ONE `run → card → stage` query (the same `leaked_runs_query/0` the sweep reads), so
+  the verdict is a single consistent snapshot. Atomic dispatch (`start_seeded_run/4` moves the
+  card into the work lane *before* inserting the run, in one transaction) guarantees no committed
+  state ever pairs an active run with a card still at its (often `:done`-type) pull stage, so a
+  freshly dispatched run is never a leak — only a genuinely stranded one is. Reading the card
+  stage and the active run in separate queries could straddle a concurrent `Spec:Done → Plan`
+  dispatch and cancel the fresh plan run (RLY-233 / RE239).
   """
-  def leaked?(%Run{id: id}) do
-    Repo.exists?(
-      from(r in Run,
-        join: c in Card,
-        on: c.id == r.card_id,
-        join: s in Stage,
-        on: s.id == c.stage_id,
-        where: r.id == ^id and r.status in ^Run.active_statuses() and s.type in ^Stage.terminal_types()
-      )
+  def leak_reason(%Run{id: id}) do
+    query =
+      leaked_runs_query()
+      |> where([r], r.id == ^id)
+      |> select([_r, card: c], {c.id, c.archived_at})
+
+    case Repo.one(query) do
+      nil -> nil
+      {_card_id, archived_at} -> leak_close_reason(archived_at)
+    end
+  end
+
+  @doc """
+  True if `run` is a leak: still `active` while its card is archived or sits in a terminal-type
+  stage. Exactly `leak_reason/1` is non-nil — see it for the single-snapshot guarantee.
+  """
+  def leaked?(%Run{} = run), do: leak_reason(run) != nil
+
+  # RE335 — THE leak definition, read by leak_reason/1 (so leaked?/1) and close_orphaned_runs/0,
+  # so the per-run predicate and the sweep can never drift apart. `:card` is a named binding so
+  # both readers can select the card's `archived_at` for the close reason.
+  defp leaked_runs_query do
+    from(r in Run,
+      join: c in Card,
+      as: :card,
+      on: c.id == r.card_id,
+      join: s in Stage,
+      on: s.id == c.stage_id,
+      where: r.status in ^Run.active_statuses() and (s.type in ^Stage.terminal_types() or not is_nil(c.archived_at))
     )
   end
+
+  defp leak_close_reason(nil), do: @completed_leak_reason
+  defp leak_close_reason(%DateTime{}), do: @archived_leak_reason
 
   ## Runners (ADR 0006 card 04)
 
