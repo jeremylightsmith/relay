@@ -37,6 +37,11 @@ defmodule RelayWeb.FlowLayout do
   @origin_x 8
   @origin_y 44
 
+  # RLY-194's `to`-only edge-endpoint sentinel. It is a park, not a terminal: an edge to it has
+  # no geometry and is left out of `routes` entirely (RE330) — its source node is listed in
+  # `parks` and the renderer badges it instead of drawing a line.
+  @park "needs_input"
+
   @doc """
   Box `{w, h}` for a node type — the single source of node dimensions for both this layout and
   the renderer. Gate nodes are the diamond (118×76); everything else is the default box (150×56).
@@ -49,7 +54,8 @@ defmodule RelayWeb.FlowLayout do
           size: {integer, integer},
           routes: %{optional(integer) => map},
           start_point: {integer, integer},
-          done_point: {integer, integer}
+          done_point: {integer, integer},
+          parks: MapSet.t(String.t())
         }
   def layout(nodes, edges) do
     types = Map.new(nodes, fn n -> {key(n), node_type(n)} end)
@@ -66,7 +72,10 @@ defmodule RelayWeb.FlowLayout do
     kinds =
       edges
       |> Enum.with_index()
+      |> Enum.reject(fn {e, _i} -> e.to == @park end)
       |> Map.new(fn {e, i} -> {i, route_kind(e, grid)} end)
+
+    parks = for %{to: @park, from: from} <- edges, into: MapSet.new(), do: from
 
     max_right = Enum.max([col_center(@spine_col) + div(@node_w, 2) | rights(grid, types)])
     max_bottom = Enum.max([@origin_y | bottoms(grid, types)])
@@ -91,7 +100,8 @@ defmodule RelayWeb.FlowLayout do
       size: {width, height},
       routes: routes,
       start_point: start_point(),
-      done_point: done_pt
+      done_point: done_pt,
+      parks: parks
     }
   end
 
@@ -192,9 +202,6 @@ defmodule RelayWeb.FlowLayout do
   defp route_kind(%{from: "start", to: "done"}, _grid), do: :enter_exit
   defp route_kind(%{from: "start"}, _grid), do: :enter
   defp route_kind(%{to: "done"}, _grid), do: :exit
-  # RLY-194: "needs_input" is the third edge-endpoint sentinel — a park, not a node — so
-  # it never appears in `grid` either. Treat it like "done": it leaves the spine.
-  defp route_kind(%{to: "needs_input"}, _grid), do: :exit
 
   defp route_kind(e, grid) do
     {fr, fc} = Map.fetch!(grid, e.from)

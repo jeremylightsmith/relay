@@ -96,6 +96,7 @@ defmodule RelayWeb.FlowGraphComponents do
     geos =
       assigns.edges
       |> Enum.with_index()
+      |> Enum.filter(fn {_edge, i} -> Map.has_key?(assigns.layout.routes, i) end)
       |> Enum.map(fn {edge, i} ->
         %{edge: edge, index: i, geo: edge_geometry(edge, i, assigns.layout, sizes)}
       end)

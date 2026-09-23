@@ -39,6 +39,16 @@ defmodule RelayWeb.FlowGraphComponentsTest do
   defp vertical?(d), do: d |> path_xs() |> Enum.uniq() |> length() == 1
   defp max_x(d), do: d |> path_xs() |> Enum.max()
 
+  # mirrors RelayWeb.FlowLayout's @row_h (the vertical pitch between spine rows).
+  @row_h 124
+
+  defp path_ys(d), do: d |> path_nums() |> Enum.drop_every(2)
+
+  defp code_flow do
+    flow = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+    {flow.nodes, flow.edges}
+  end
+
   defp label_top(html, idx) do
     [_, y] = Regex.run(~r/data-edge="#{idx}"[^>]*?top:(-?\d+)px/, html)
     String.to_integer(y)
@@ -235,6 +245,46 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       ds = edge_ds(html)
       assert length(ds) == 1
       assert vertical?(hd(ds))
+    end
+  end
+
+  describe "needs_input edges are not drawn (RE330)" do
+    test "the Code flow emits no path or label for any needs_input edge" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, [])
+
+      park_idx = for {%{to: "needs_input"}, i} <- Enum.with_index(edges), do: i
+      assert length(park_idx) == 8
+
+      assert length(edge_ds(html)) == length(edges) - length(park_idx)
+
+      labelled =
+        ~r/data-edge="(\d+)"/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end)
+
+      assert labelled != []
+      for i <- park_idx, do: refute(i in labelled)
+    end
+
+    # The original bug: every needs_input edge was routed to done_point, so each one drew a
+    # straight line from its source down the spine column through every node box below it. Any
+    # edge that is not out in the right-hand gutter connects adjacent rows (or stays on one row),
+    # so its vertical extent must never exceed one row pitch.
+    test "no non-gutter edge path spans more than one row" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, [])
+      types = Map.new(nodes, &{&1.key, &1.type})
+
+      node_right =
+        layout.positions
+        |> Enum.map(fn {k, {x, _y}} -> x + elem(FlowLayout.node_size(types[k]), 0) end)
+        |> Enum.max()
+
+      for d <- edge_ds(html), max_x(d) <= node_right do
+        ys = path_ys(d)
+        span = Enum.max(ys) - Enum.min(ys)
+        assert span <= @row_h, "edge path #{d} spans #{span}px vertically (> one row, #{@row_h}px)"
+      end
     end
   end
 end
