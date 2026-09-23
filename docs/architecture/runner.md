@@ -67,10 +67,16 @@ looks like the leftward flow is being starved. Pinned by
 `test/relay/runs/scheduler_test.exs` and exercised live over the REST API by
 `test/relay_web/api/plan_flow_e2e_test.exs` / `test/relay/runs/code_flow_e2e_test.exs`.
 
-Because that capacity is global **by runner** rather than board-scoped, a stale or contended
-view of it can over-assign — two boards' schedulers can both count the same free slot. The
-runner's own live capacity is the final backstop, so an over-assigned job waits there rather
-than double-booking (YAGNI: no multi-board reservation yet).
+The capacity **store** (`Relay.Runs.Capacity`, ETS) is global by runner id across every board
+and never evicted, but the scheduler **snapshot** is board-scoped: `Scheduler.Server.build_snapshot/2`
+keeps a capacity entry only for a runner of *this* board that `Relay.Runs.counting_runner?/1`
+accepts (not `:gone`) — an allow-list, so another board's runner or an orphaned ETS entry
+contributes nothing to dispatch or to `relay why`'s `capacity` evidence (RE338). Every snapshot
+capacity key is therefore a runner `Relay.Runs.list_runner_status/2` names. What remains
+unscoped is one physical machine registered on two boards: that is two runner rows advertising
+the same slots, so two boards' schedulers can both count the same free slot. The runner's own
+live capacity is the final backstop, so an over-assigned job waits there rather than
+double-booking (YAGNI: no multi-board reservation yet).
 
 ## Side channels
 
@@ -374,7 +380,8 @@ that stays server-side.
   to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
   `parked_reason: :runner_gone`) rather than requeued, since exclusive runs are pinned to
   one runner's worktree. A `:gone` runner's advertised capacity is also dropped from the
-  scheduler snapshot (`Scheduler.Server.build_snapshot/2`), so the planner never resumes a
+  scheduler snapshot (`Scheduler.Server.build_snapshot/2`, which keeps only this board's
+  `Relay.Runs.counting_runner?/1` runners — RE338), so the planner never resumes a
   pinned run onto a machine the reaper has given up on — without this a parked exclusive run
   oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
   The same reaper tick also calls `Relay.Runs.close_orphaned_runs/0` — a companion sweep, not

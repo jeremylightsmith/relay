@@ -2,6 +2,8 @@ defmodule Relay.Runs.DiagnoseTest do
   use Relay.DataCase, async: true
 
   alias Relay.Runs
+  alias Relay.Runs.Capacity
+  alias Relay.Runs.Scheduler.Server
   alias Schemas.Run
 
   setup do
@@ -384,5 +386,30 @@ defmodule Relay.Runs.DiagnoseTest do
 
       assert %{verdict: :awaiting_listener_resume} = Runs.diagnose(board, card, now)
     end
+  end
+
+  test "a runner registered on another board contributes no capacity to this board's diagnosis (RE338)",
+       %{board: board, queue: queue, works: works} do
+    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    card = insert(:card, stage: queue, status: :ready)
+    other = insert(:board)
+    version = Runs.min_runner_version()
+
+    # The heartbeat path (NodeJobController.heartbeat/2): upsert the row, then advertise its slots.
+    {:ok, a} =
+      Runs.upsert_runner(board, %{"name" => "relay@blackrock", "interval" => 30, "version" => version})
+
+    :ok = Capacity.put(a.id, %{"shared_clean" => 3, "exclusive" => 0})
+
+    {:ok, b} =
+      Runs.upsert_runner(other, %{"name" => "throughway@blackrock", "interval" => 30, "version" => version})
+
+    :ok = Capacity.put(b.id, %{"shared_clean" => 3, "exclusive" => 2})
+
+    {snapshot, _cards} = Server.build_snapshot(board.id, Server.configured_engine())
+    assert Map.keys(snapshot.capacity) == [a.id]
+
+    assert %{evidence: evidence} = Runs.diagnose(board, card)
+    assert Map.keys(evidence.capacity) == [a.id]
   end
 end

@@ -1892,6 +1892,23 @@ defmodule Relay.Runs do
     end
   end
 
+  @doc """
+  Whether a runner **counts** toward this board's scheduler: its freshness is not `:gone`. This is
+  the one definition of "which runners count" (RE338). It takes any map carrying `:freshness`, so
+  both a `Scheduler.Snapshot.runners` entry and a `list_runner_status/2` row qualify.
+
+  `Scheduler.Server.build_snapshot/2` keeps a capacity entry only for a counting runner of THIS
+  board, and `Scheduler.capacity_diagnosis/1` names its live roster with it. So the invariant
+  holds: for any board at any `now`, every key of the snapshot's `capacity` is the id of a
+  `list_runner_status/2` row for which this is true. (The reverse does not hold: a roster runner
+  that has not advertised capacity yet is legitimately absent from `capacity`.)
+
+  Deliberately NOT narrowed to exclude `:stale`, outdated or rate-limited runners. Those are
+  still roster members; the claim refusal and `capacity_diagnosis/1`'s reasons handle why they
+  won't claim.
+  """
+  def counting_runner?(%{freshness: freshness}), do: freshness != :gone
+
   # A machine silent for a day is history, not roster (the retention the runners view has
   # always applied). Display-only — the reaper owns row lifecycle, and this function deletes
   # nothing.

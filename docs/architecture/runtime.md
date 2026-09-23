@@ -34,7 +34,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `RelayWeb.ApiLog` | in-memory recent API request log for the admin page |
 | `Relay.BoardWatch` | ETS owner for per-board version counters (RLY-12) |
 | `Registry` (`Relay.Runs.InstanceRegistry`) | engine-instance lookup keyed by owner pid (RE298 / ADR 0009); empty in production, where every resolution falls through to `Relay.Runs.Instance.default/0` |
-| `Relay.Runs.Capacity` | ETS owner for per-runner advertised free capacity (RLY-133), fed by the runner heartbeat |
+| `Relay.Runs.Capacity` | ETS owner for per-runner advertised (configured, not live-free) slot counts (RLY-133), fed by the runner heartbeat; global across boards — each scheduler narrows it to its own board's runners (RE338) |
 | `Registry` (`Relay.Runs.SchedulerRegistry`) | per-board scheduler lookup keys (RLY-133) |
 | `Relay.Runs.SchedulerSupervisor` | DynamicSupervisor for per-board `Scheduler.Server`s (RLY-133); boot-starts per board only when `:runs_auto_start` |
 | `Relay.Activity.LogSink` | debounces runner log lines into one `insert_all` per burst (RLY-112) |
@@ -92,7 +92,7 @@ tracked as a separate follow-up.
 | `story_map_cursor:<board_id>` | `Relay.Presence` | `{:story_map_cursor, user_id, name, email, x, y}`, `{:story_map_cursor_gone, user_id}` | the same sockets; each relays to its own client with `push_event/3` (no template diff). Does NOT bump `BoardWatch` |
 | `story_map_view:<board_id>` | `Relay.StoryMap.merge_view/2` (which `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose) | `{:story_map_view_changed, board_id, view}` — the board-wide shared map view settings changed | the same sockets, **including the writer** (there is no optimistic local assign). Does NOT bump `BoardWatch` |
 | `events:firehose` | `Relay.Events` — mirrors every board event as `{board_id, event}` | every `board:<board_id>` event, tagged with its board id | `Relay.Runs.Listener` (reconciles card events against runs — RLY-132; its first rule closes, rather than resumes, an active run whose card has reached a terminal-type stage or been archived — RLY-233, RE335; `{:card_archived, card}` triggers a reconcile) |
-| `runs:capacity` | `Relay.Runs.Capacity` | `{:runner_capacity_changed, runner_id}` — a runner's advertised free capacity changed | every per-board `Relay.Runs.Scheduler.Server` |
+| `runs:capacity` | `Relay.Runs.Capacity` | `{:runner_capacity_changed, runner_id}` — a runner's advertised slot count changed | every per-board `Relay.Runs.Scheduler.Server` |
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
 | `card:<card_id>:talk` | `Relay.Talk` (RE268 / ADR 0009) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
 
