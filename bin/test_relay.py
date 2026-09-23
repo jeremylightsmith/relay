@@ -1995,6 +1995,162 @@ class RunnerPoolRecoverTest(unittest.TestCase):
         self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
 
 
+class RunnerPoolTeardownRetryTest(unittest.TestCase):
+    """RE336: `_finish_locked` used to pop a done/cancelled worktree from `self.wts` BEFORE
+    removing it, so a removal that failed (a leftover `phx.server` holding the tree) left the
+    tree on disk, out of `holdings()`, unnameable by the server's `release_held`, and leaked an
+    exclusive slot until a runner restart. Now the record is kept, still `bound`, still holding
+    its partition, until a removal actually succeeds, and `release_held` retries it every beat."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
+    ERR = "fatal: failed to delete '/x/exec-RLY-1': Directory not empty"
+
+    def setUp(self):
+        for name in ("create_or_rebaseline", "_teardown"):
+            orig = getattr(relay.RunnerPool, name)
+            self.addCleanup(setattr, relay.RunnerPool, name, orig)
+            setattr(relay.RunnerPool, name, lambda self, *a, **k: None)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+        self.now = 1000.0
+
+    def pool(self):
+        p = relay.RunnerPool(self.CFG)
+        p.clock = lambda: self.now
+        return p
+
+    def excl(self, run_id, ref="RLY-1"):
+        return {"isolation": "exclusive", "run_id": run_id, "vars": {"ref": ref}}
+
+    def failing(self, p):
+        p._teardown = lambda slot, retain: None if retain else self.ERR
+
+    def errors_for(self, ref):
+        return [m for m, k in self.lines if k.get("kind") == "error" and k.get("ref") == ref]
+
+    def done_with_failing_removal(self, p):
+        slot, _ = p.assign(self.excl("r1"))
+        self.failing(p)
+        p.release(self.excl("r1"), slot, "done")
+        return slot
+
+    def test_a_failed_removal_keeps_the_worktree_held_and_bound(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1"))
+        part = p.wts[slot]["partition"]
+        self.failing(p)
+        p.release(self.excl("r1"), slot, "done")
+        rec = p.wts[slot]
+        self.assertEqual((rec["state"], rec["live"], rec["run_id"], rec["partition"]),
+                         ("active", False, "r1", part))
+        self.assertTrue(rec["teardown_failed"])
+        self.assertNotIn(part, p.free_partitions)
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "bound"}])
+        self.assertEqual(p.capacity()["exclusive"], 1)
+        (line,) = self.errors_for("RLY-1")
+        self.assertIn("Directory not empty", line)
+
+    def test_release_held_retries_and_frees_the_partition_once_removal_succeeds(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        part = p.wts[slot]["partition"]
+        p._teardown = lambda slot, retain: None           # whatever held the tree is gone now
+        p.release_held("RLY-1", "done")
+        self.assertEqual(p.holdings(), [])
+        self.assertIn(part, p.free_partitions)
+        self.assertTrue(any("succeeded on retry" in m and k.get("ref") == "RLY-1"
+                            for m, k in self.lines))
+
+    def test_repeated_failures_are_logged_at_most_once_per_interval_per_ref(self):
+        p = self.pool()
+        self.done_with_failing_removal(p)                   # first failure: logged
+        self.now += 15
+        p.release_held("RLY-1", "done")                     # inside the interval: silent
+        self.assertEqual(len(self.errors_for("RLY-1")), 1)
+        self.now += relay.IDLE_LOG_INTERVAL
+        p.release_held("RLY-1", "done")                     # past it: one repeat
+        self.assertEqual(len(self.errors_for("RLY-1")), 2)
+        self.assertIn("exec-RLY-1", p.wts)                 # still held throughout
+
+    def test_a_new_run_of_a_card_whose_teardown_failed_re_baselines(self):
+        p = self.pool()
+        slot = self.done_with_failing_removal(p)
+        self.assertEqual(p.assign(self.excl("r2")), (slot, True))
+        rec = p.wts[slot]
+        self.assertEqual((rec["run_id"], rec["live"]), ("r2", True))
+        self.assertNotIn("teardown_failed", rec)
+        self.assertNotIn("teardown_logged_at", rec)
+
+    def test_eviction_keeps_a_retained_record_whose_removal_fails(self):
+        p = self.pool()
+        p.wts = {f"exec-F{i}": {"ref": f"F{i}", "run_id": None, "state": "retained",
+                                "live": False, "partition": None} for i in range(4)}
+        self.failing(p)
+        with p.lock:
+            p._evict_retained_over_cap_locked()
+        self.assertEqual(len(p.wts), 4)
+        self.assertEqual(sum(1 for r in p.wts.values() if r.get("teardown_failed")), 1)
+
+
+class RunnerPoolRealTeardownTest(unittest.TestCase):
+    """RE336, against a REAL git repo (the RealGitWorktreeTest discipline): the worktrees dir
+    sits INSIDE the repo, gitignored, exactly like `.claude/worktrees`, so a git command run in
+    a broken tree would really walk up into the main checkout."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
+
+    def setUp(self):
+        self.base = os.path.realpath(tempfile.mkdtemp(prefix="relay-teardown-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+        _git(self.repo, "init", "-q", "-b", "main")
+        _write(os.path.join(self.repo, ".gitignore"), ".claude/worktrees\n")
+        _write(os.path.join(self.repo, "seed.txt"), "seed")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "seed")
+        self.wts_dir = os.path.join(self.repo, ".claude", "worktrees")
+        os.makedirs(self.wts_dir)
+        for name in ("ROOT", "worktree_path", "log", "_fetch_backoff"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.ROOT = self.repo
+        relay.worktree_path = lambda name: os.path.join(self.wts_dir, name)
+        relay._fetch_backoff = lambda attempt: None
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+        self.pool = relay.RunnerPool(self.CFG)
+        self.slot = "exec-RLY-9"
+        self.tree = relay.worktree_path(self.slot)
+        _git(self.repo, "worktree", "add", "-q", "--detach", self.tree, "main")
+        self.pool.wts[self.slot] = {"ref": "RLY-9", "run_id": "r1", "state": "active",
+                                    "live": False, "partition": self.pool._take_partition()}
+
+    def git_out(self, *args):
+        return subprocess.run(["git", *args], cwd=self.repo, capture_output=True,
+                              text=True).stdout
+
+    def test_done_removes_the_tree_unregisters_it_and_frees_the_partition(self):
+        with self.pool.lock:
+            self.pool._finish_locked(self.slot, self.pool.wts[self.slot], "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertNotIn(self.slot, self.pool.wts)
+        self.assertEqual(self.pool.free_partitions, ["1", "2"])
+
+    def test_a_half_deleted_tree_is_removed_without_touching_the_main_checkout(self):
+        os.remove(os.path.join(self.tree, ".git"))   # what a failed `git worktree remove` leaves
+        _write(os.path.join(self.tree, "straggler.txt"), "x")
+        _write(os.path.join(self.repo, "main-edit.txt"), "uncommitted work in the main checkout")
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.tree, relay._list_worktree_paths())
+        self.assertTrue(os.path.exists(os.path.join(self.repo, "main-edit.txt")))
+        self.assertEqual(self.git_out("stash", "list"), "")
+
+
 class RunnerPoolBaseTest(unittest.TestCase):
     """The ref every worktree is baselined to is `base` from runner.json, not a hardcoded
     `origin/main`. A repo whose trunk is `master` (or a fork tracking `upstream/main`) had no
@@ -2053,6 +2209,24 @@ class RunnerPoolBaseTest(unittest.TestCase):
 
         with open(out) as f:
             self.assertEqual(f.read(), "origin/master origin/master")
+
+    def test_a_half_deleted_tree_is_rebuilt_not_reset(self):
+        """RE336: a failed `git worktree remove` can delete the tree's `.git` link and stop.
+        reset_worktree's git commands would then walk UP into the main checkout, so such a tree
+        is deleted and re-added instead. `prune` precedes `add` because the half-deleted path is
+        still registered, and git refuses to `add` a registered path."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(setattr, relay, "worktree_path", relay.worktree_path)
+        relay.worktree_path = lambda name: os.path.join(tmp, name)
+        path = relay.worktree_path("exec-RLY-1")
+        os.makedirs(path)
+        _write(os.path.join(path, "leftover.txt"), "x")      # no `.git` link
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RLY-1")
+        self.assertFalse(os.path.exists(os.path.join(path, "leftover.txt")))
+        self.assertFalse([c for c in self.calls if c[0] == "reset"])
+        self.assertEqual([c for c in self.calls if c[0] == "wt"],
+                         [("wt", "prune"), ("wt", "add", "--detach", path, "origin/master")])
 
 
 class RunnerConfigCommittedFileTest(unittest.TestCase):

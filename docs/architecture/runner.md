@@ -769,6 +769,20 @@ silently billed to the paid API.
     routes through `git_worktree_with_retry`, the same bounded-retry discipline as
     `git fetch` (RLY-224 §6), since concurrent per-card creates/teardowns race on the one
     shared ref db.
+  - **A failed teardown is retried, not forgotten (RE336).** `done`/`cancelled` pop a
+    worktree's record and free its partition only once the tree is actually gone. If
+    `git worktree remove --force` fails, the record stays `active`, `live=False`, bound to its
+    run and holding its partition, and is flagged `teardown_failed`. `holdings()` therefore keeps
+    reporting it `bound`, the server keeps naming it in `release_held` (its runs are all
+    terminal), and `RunnerPool.release_held/2` retries the removal on every heartbeat. Each
+    failure is forwarded as an `error` line carrying the card's ref, throttled to one per
+    `IDLE_LOG_INTERVAL` per ref, and a later success logs once. Retention eviction follows the
+    same rule. A card whose teardown is failing gets `reset=True` on its next run, never
+    reuse-as-is, because the tree may be half-deleted. A half-deleted tree (its `.git` link
+    gone) is removed with `rm -rf` + `prune`, and `create_or_rebaseline` deletes and re-adds
+    one rather than running git inside it, since git would walk up into the main checkout.
+    Previously the record was popped *before* removal, so a failed removal left the tree on disk
+    but invisible to `release_held` until a runner restart (`recover()`) rediscovered it.
 - **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
   `RELAY_NODE_SCRATCH` (`scratch_path` in `./relay`): `tmp/<REF>/<node>.md` inside that same
   worktree, keyed only on `(ref, node)` so a re-queued job after a runner restart resolves
