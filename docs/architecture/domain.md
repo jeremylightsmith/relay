@@ -133,8 +133,9 @@ sharing behavior.
   `{:card_archived, card}` and closes it `:cancelled` with `run cancelled — card archived`
   (the `RunnerReaper` sweep backstops it), which lets the runner release the card's held
   worktree on its next heartbeat. The drawer's confirm says so ("Its active run will be
-  cancelled.") only when the card has an active run. Unarchiving never revives that run. Both are idempotent through the domain
-  functions (a repeat logs nothing), and neither is on the `/api/all` user-token scope.
+  cancelled.") only when the card has an active run. Unarchiving never revives that run. Both
+  are idempotent through the domain functions (a repeat logs nothing), and neither is on the
+  `/api/all` user-token scope.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard

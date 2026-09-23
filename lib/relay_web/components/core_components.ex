@@ -4332,19 +4332,19 @@ defmodule RelayWeb.CoreComponents do
   # owns "which stages exist and which one is current"; this owns "which of them the filter
   # box is showing", so neither has to re-derive the other's answer. Matching is a
   # case-insensitive substring on the DISPLAYED name, so "rev" finds "Code · Review".
-  # RE335 D5 — archiving from the board cancels the card's active run (the runs Listener closes
-  # it on {:card_archived, _}), so the native confirm says so. Otherwise the copy is unchanged.
-  defp archive_confirm(true),
-    do: "Archive this card? Its active run will be cancelled. You can restore the card from Archived."
-
-  defp archive_confirm(false), do: "Archive this card? You can restore it from Archived."
-
   defp filter_stages(stages, filter) do
     case filter |> to_string() |> String.trim() |> String.downcase() do
       "" -> stages
       query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
     end
   end
+
+  # RE335 D5 — archiving from the board cancels the card's active run (the runs Listener closes
+  # it on {:card_archived, _}), so the native confirm says so. Otherwise the copy is unchanged.
+  defp archive_confirm(true),
+    do: "Archive this card? Its active run will be cancelled. You can restore the card from Archived."
+
+  defp archive_confirm(false), do: "Archive this card? You can restore it from Archived."
 
   # RE282 — the rail's Flow row: the latest run's flow, else the flow queued to pick the card up.
   # BoardLive passes `run_flow` as `false` when the card has no runs, so `||` covers both `false`
