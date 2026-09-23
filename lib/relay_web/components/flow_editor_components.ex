@@ -105,7 +105,13 @@ defmodule RelayWeb.FlowEditorComponents do
   # ---- Node inspector ----
 
   attr :node, :map, required: true
-  attr :edges, :list, required: true, doc: "the node's outgoing working-copy edges"
+
+  attr :edges, :list,
+    required: true,
+    doc:
+      "the node's outgoing working-copy edges as `{edge, index}`, `index` being the edge's " <>
+        "position in the working copy's `edges` (what `select_edge` takes)"
+
   attr :referenced_count, :integer, required: true
   attr :read_only?, :boolean, default: false
 
@@ -334,9 +340,18 @@ defmodule RelayWeb.FlowEditorComponents do
           <.meta_label>
             OUTGOING EDGES · routed on outcome
           </.meta_label>
-          <div
-            :for={edge <- @edges}
-            style="display:flex;align-items:center;gap:8px;border:1px solid var(--color-base-300);border-radius:8px;padding:8px 10px;background:var(--color-base-200);"
+          <%!-- RE330: a needs_input edge is not drawn on the canvas (its source shows a
+          non-interactive park badge instead), so these rows are how it reaches the edge
+          inspector. Clickable only when the editor is interactive. --%>
+          <button
+            :for={{edge, index} <- @edges}
+            id={"inspector-out-edge-#{index}"}
+            type="button"
+            data-out-edge-to={edge.to}
+            phx-click={if !@read_only?, do: "select_edge"}
+            phx-value-index={if !@read_only?, do: index}
+            disabled={@read_only?}
+            style={"display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;border:1px solid var(--color-base-300);border-radius:8px;padding:8px 10px;background:var(--color-base-200);cursor:#{if @read_only?, do: "default", else: "pointer"};"}
           >
             <span style="font-size:10px;font-weight:600;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
               {edge.on}
@@ -353,7 +368,7 @@ defmodule RelayWeb.FlowEditorComponents do
             >
               max {edge.max_loops}
             </span>
-          </div>
+          </button>
         </div>
       </div>
     </div>

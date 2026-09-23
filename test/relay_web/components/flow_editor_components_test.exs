@@ -71,6 +71,23 @@ defmodule RelayWeb.FlowEditorComponentsTest do
     end
   end
 
+  describe "OUTGOING EDGES rows (RE330)" do
+    @park_edge %{from: "n", to: "needs_input", on: :failed, max_loops: nil, when: nil}
+
+    test "an interactive inspector renders each row as a select_edge button carrying the edge's original index" do
+      html = inspector(agent_node(%{}), edges: [{@park_edge, 7}])
+      assert html =~ ~s(id="inspector-out-edge-7")
+      assert html =~ ~s(phx-click="select_edge")
+      assert html =~ ~s(phx-value-index="7")
+    end
+
+    test "a read-only inspector renders the rows without phx-click" do
+      html = inspector(agent_node(%{}), edges: [{@park_edge, 7}], read_only?: true)
+      assert html =~ ~s(id="inspector-out-edge-7")
+      refute html =~ ~s(phx-click="select_edge")
+    end
+  end
+
   describe "dark-mode-safe shadows" do
     test "the selected EFFORT segment's shadow mixes with --color-neutral, not --color-base-content" do
       html = inspector(agent_node(%{effort: "high"}))
@@ -107,7 +124,7 @@ defmodule RelayWeb.FlowEditorComponentsTest do
     end
 
     test "the outgoing-edge `on` chip uses the field-hover shortcut token" do
-      html = inspector(agent_node(%{}), edges: [%{on: :succeeded, to: "done", max_loops: nil}])
+      html = inspector(agent_node(%{}), edges: [{%{on: :succeeded, to: "done", max_loops: nil}, 0}])
 
       assert html =~
                "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"

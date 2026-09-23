@@ -11,20 +11,43 @@ defmodule Storybook.FlowGraph do
 
   def variations do
     code = code_flow()
+    park_nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "g", type: :gate, run: "mix test"}]
+
+    park_edges = [
+      %{from: "start", to: "a", on: nil},
+      %{from: "a", to: "g", on: :succeeded},
+      %{from: "a", to: "needs_input", on: :failed},
+      %{from: "g", to: "done", on: :succeeded}
+    ]
 
     [
       %Variation{
         id: :default_code_flow,
         description:
-          "The shipped Code flow: 14 nodes on a vertical spine, three fix nodes beside it, " <>
-            "back-edges in the right-hand gutter, dashed failed edges, max-N loop badges. " <>
-            "Agent nodes stack their binding — subagent · model · effort (e.g. " <>
-            "plan-implementer · sonnet · high); a generic agent node with no subagent reads " <>
-            "just model · effort.",
+          "The shipped Code flow: a vertical spine, fix nodes beside it, back-edges in the " <>
+            "right-hand gutter, dashed failed edges, max-N loop badges. Every node that can " <>
+            "park on a human (an edge into needs_input) carries a warning pause badge at its " <>
+            "top-right corner instead of a drawn edge. Agent nodes stack their binding — " <>
+            "subagent · model · effort (e.g. plan-implementer · sonnet · high); a generic agent " <>
+            "node with no subagent reads just model · effort.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
           layout: RelayWeb.FlowLayout.layout(code.nodes, code.edges),
+          lands_on: "Review",
+          interactive?: false
+        }
+      },
+      %Variation{
+        id: :park_badge,
+        description:
+          "A node that can park for human input carries a warning pause badge on its top-right " <>
+            "corner (hover: \"Can park for human input\"). Here the agent can park; the gate " <>
+            "cannot. The needs_input edges themselves are not drawn.",
+        attributes: %{
+          nodes: park_nodes,
+          edges: park_edges,
+          layout: RelayWeb.FlowLayout.layout(park_nodes, park_edges),
           lands_on: "Review",
           interactive?: false
         }
