@@ -55,4 +55,14 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "Copy branch name"
     assert html =~ "re-324-fix-long-links-including-prs-and-this-is-a-very-long-branch-name"
   end
+
+  test "GET /storybook/core_components/breadcrumbs shows the board, settings and deep flow trails (RE334)",
+       %{conn: conn} do
+    html = conn |> get("/storybook/core_components/breadcrumbs") |> html_response(200)
+
+    assert html =~ "Boards"
+    assert html =~ "Payments"
+    assert html =~ "Settings"
+    assert html =~ "Flows"
+  end
 end

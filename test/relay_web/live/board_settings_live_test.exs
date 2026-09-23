@@ -5,6 +5,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
   alias Relay.ApiKeys
   alias Relay.Boards
+  alias RelayWeb.BoardSettingsLive
 
   describe "when logged out" do
     test "GET /board/:slug/settings redirects to the sign-in page", %{conn: conn} do
@@ -178,6 +179,54 @@ defmodule RelayWeb.BoardSettingsLiveTest do
                view,
                "#stage-#{code.id}-delete[style*='color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content))']"
              )
+    end
+  end
+
+  describe "breadcrumb trail (RE334)" do
+    setup :register_and_log_in_user
+
+    test "reads Boards / <board> / Settings / <section>, every crumb a link",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+      assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
+
+      assert has_element?(
+               view,
+               ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]),
+               "Settings"
+             )
+
+      refute has_element?(view, "#top-bar-crumb-flows")
+      assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:stages))
+      refute has_element?(view, "#settings-title", "Board settings")
+    end
+
+    test "the last crumb follows the section as the rail patches", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:general))
+
+      view |> element("#settings-nav-members") |> render_click()
+      assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:members))
+
+      view |> element("#settings-tab-keys") |> render_click()
+      assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:keys))
+    end
+
+    test "the rail and tab strip label every section through section_label/1",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      for section <- [:general, :stages, :public, :flows, :members, :keys, :runners] do
+        label = BoardSettingsLive.section_label(section)
+        assert has_element?(view, "#settings-nav-#{section}", label)
+        assert has_element?(view, "#settings-tab-#{section}", label)
+      end
     end
   end
 

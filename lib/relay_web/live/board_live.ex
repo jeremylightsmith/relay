@@ -115,6 +115,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.StoryMap
   alias Relay.Talk
   alias Relay.Votes
+  alias RelayWeb.BoardCrumbs
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.RunComponents
   alias RelayWeb.StoryMapComponents
@@ -163,7 +164,13 @@ defmodule RelayWeb.BoardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb embed={@embed}>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      wide
+      crumbs={BoardCrumbs.board(@board)}
+      embed={@embed}
+    >
       <:title>
         <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">
           {@board.name}

@@ -121,4 +121,32 @@ defmodule RelayWeb.LayoutsTest do
     refute html =~ "background:var(--color-field-hover)"
     refute html =~ "oklch("
   end
+
+  describe "crumbs (RE334)" do
+    @boards_crumb %{
+      label: "Boards",
+      to: "/boards",
+      id: "top-bar-crumb-boards",
+      icon: "hero-squares-2x2"
+    }
+
+    test "renders the trail after the logo and before the title, behind the divider" do
+      html = render_app(%{inner_block: inner_block_slot(), crumbs: [@boards_crumb]})
+
+      assert html =~ ~s(id="top-bar-divider")
+      assert html =~ ~s(id="top-bar-crumb")
+
+      {logo, _} = :binary.match(html, ~s(id="top-bar-logo"))
+      {crumb, _} = :binary.match(html, ~s(id="top-bar-crumb-boards"))
+      {title, _} = :binary.match(html, ~s(id="top-bar-title"))
+      assert logo < crumb and crumb < title
+    end
+
+    test "renders no trail and no divider when there are no crumbs and no title" do
+      html = render_app(%{inner_block: inner_block_slot()})
+
+      refute html =~ ~s(id="top-bar-divider")
+      refute html =~ ~s(id="top-bar-crumb")
+    end
+  end
 end

@@ -5,6 +5,7 @@ defmodule RelayWeb.FlowEditorLiveTest do
 
   alias Relay.Boards
   alias Relay.Flows
+  alias RelayWeb.BoardSettingsLive
 
   setup :register_and_log_in_user
 
@@ -574,5 +575,29 @@ defmodule RelayWeb.FlowEditorLiveTest do
       base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
       if n.key == "implement", do: %{base | run: "CUSTOM"}, else: base
     end)
+  end
+
+  test "the top bar carries the full trail and the page has no second breadcrumb (RE334)",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+    assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
+    assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
+
+    assert has_element?(
+             view,
+             ~s(#top-bar-crumb-flows[href="/board/#{board.slug}/settings?section=flows"]),
+             BoardSettingsLive.section_label(:flows)
+           )
+
+    assert has_element?(view, "#flow-title", "code")
+
+    # The old in-page trail linked the board and the Flows section from inside <main>.
+    refute has_element?(view, ~s(main a[href="/board/#{board.slug}"]))
+    refute has_element?(view, ~s(main a[href="/board/#{board.slug}/settings?section=flows"]))
+
+    # The in-page bar keeps the Editor/Metrics tabs and the version chip.
+    assert has_element?(view, "#flow-editor-version-chip")
   end
 end
