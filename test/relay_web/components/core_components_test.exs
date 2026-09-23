@@ -3474,4 +3474,81 @@ defmodule RelayWeb.CoreComponentsTest do
       assert empty =~ "None"
     end
   end
+
+  defp crumbs_doc(crumbs) do
+    html = render_component(&CoreComponents.breadcrumbs/1, crumbs: crumbs)
+    LazyHTML.from_fragment(html)
+  end
+
+  defp crumb_class(doc, selector) do
+    doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> hd()
+  end
+
+  describe "breadcrumbs/1 (RE334)" do
+    @deep_trail [
+      %{label: "Boards", to: "/boards", id: "top-bar-crumb-boards", icon: "hero-squares-2x2"},
+      %{label: "Payments", to: "/board/payments", id: "top-bar-crumb-board"},
+      %{label: "Settings", to: "/board/payments/settings", id: "top-bar-crumb-settings"},
+      %{label: "Flows", to: "/board/payments/settings?section=flows", id: "top-bar-crumb-flows"}
+    ]
+
+    test "renders nothing for an empty trail" do
+      html = render_component(&CoreComponents.breadcrumbs/1, crumbs: [])
+      assert String.trim(html) == ""
+    end
+
+    test "renders every crumb as a navigate link, each followed by a / separator" do
+      doc = crumbs_doc(@deep_trail)
+
+      assert doc |> LazyHTML.query("nav#top-bar-crumb[aria-label=Breadcrumb]") |> Enum.count() == 1
+
+      for %{id: id, to: to, label: label} <- @deep_trail do
+        link = LazyHTML.query(doc, "a##{id}")
+        assert LazyHTML.attribute(link, "href") == [to]
+        assert LazyHTML.attribute(link, "title") == [label]
+        assert LazyHTML.text(link) =~ label
+      end
+
+      assert doc |> LazyHTML.query("[data-crumb-separator]") |> Enum.count() == length(@deep_trail)
+    end
+
+    test "the root crumb keeps the shipped Boards look — squares icon, 13px semibold /70" do
+      doc = crumbs_doc(@deep_trail)
+
+      assert doc |> LazyHTML.query("a#top-bar-crumb-boards .hero-squares-2x2") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("a#top-bar-crumb-board [class*='hero-']") |> Enum.count() == 0
+
+      class = crumb_class(doc, "a#top-bar-crumb-boards")
+      assert class =~ "text-[13px]"
+      assert class =~ "font-semibold"
+      assert class =~ "text-base-content/70"
+      assert class =~ "rounded-[7px]"
+    end
+
+    test "every crumb truncates at a capped width with its full label in title=" do
+      doc = crumbs_doc(@deep_trail)
+
+      for %{id: id} <- @deep_trail do
+        assert crumb_class(doc, "a##{id}") =~ "max-w-[160px]"
+        assert doc |> LazyHTML.query("a##{id} span.truncate") |> Enum.count() == 1
+      end
+    end
+
+    test "below md only the root, an ellipsis and the immediate parent show" do
+      doc = crumbs_doc(@deep_trail)
+
+      refute crumb_class(doc, "#top-bar-crumb-boards-segment") =~ "hidden"
+      assert crumb_class(doc, "#top-bar-crumb-board-segment") =~ "hidden md:flex"
+      assert crumb_class(doc, "#top-bar-crumb-settings-segment") =~ "hidden md:flex"
+      refute crumb_class(doc, "#top-bar-crumb-flows-segment") =~ "hidden"
+      assert crumb_class(doc, "#top-bar-crumb-ellipsis") =~ "md:hidden"
+    end
+
+    test "a two-crumb trail collapses nothing and renders no ellipsis" do
+      doc = crumbs_doc(Enum.take(@deep_trail, 2))
+
+      refute crumb_class(doc, "#top-bar-crumb-board-segment") =~ "hidden"
+      assert doc |> LazyHTML.query("#top-bar-crumb-ellipsis") |> Enum.count() == 0
+    end
+  end
 end

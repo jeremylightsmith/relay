@@ -6,6 +6,7 @@ defmodule RelayWeb.FlowMetricsLive do
   alias Relay.Cards
   alias Relay.Flows
   alias Relay.Runs
+  alias RelayWeb.BoardCrumbs
   alias RelayWeb.FlowEditorComponents
   alias RelayWeb.FlowMetricsComponents
 
@@ -185,7 +186,7 @@ defmodule RelayWeb.FlowMetricsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.flows(@board)}>
       <div style="padding:22px 26px;max-width:1100px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
           <nav style="font-size:13px;display:flex;align-items:center;gap:7px;">

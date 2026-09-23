@@ -965,6 +965,79 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The app top bar's breadcrumb trail (RE334) — the shared control every board-scoped page
+  fills through `Layouts.app`'s `crumbs` attr (`RelayWeb.BoardCrumbs` builds the lists).
+  Each crumb renders as a navigate link followed by a `/` separator; the caller's `<:title>`
+  is the final, un-linked segment, so the current page is never in `crumbs`. `[]` renders
+  nothing.
+
+  The top bar is ONE non-wrapping row, so the trail must never push the account avatar off a
+  phone: below `md` only the root crumb, an ellipsis and the immediate parent show (middle
+  crumbs are `hidden md:flex`), and every label truncates at 160px with its full text in
+  `title=`. The look is the board page's shipped `Boards` crumb; only a crumb carrying an
+  `:icon` (the root) shows one.
+  """
+  attr :id, :string, default: "top-bar-crumb"
+
+  attr :crumbs, :list,
+    required: true,
+    doc: "[%{id, label, to} + optional :icon], root first; the current page is not included"
+
+  def breadcrumbs(%{crumbs: []} = assigns), do: ~H""
+
+  def breadcrumbs(assigns) do
+    [root | rest] = assigns.crumbs
+    parent_index = length(rest) - 1
+
+    assigns =
+      assign(assigns,
+        root: root,
+        rest: Enum.with_index(rest, fn crumb, index -> {crumb, index < parent_index} end),
+        collapses?: parent_index > 0
+      )
+
+    ~H"""
+    <nav id={@id} aria-label="Breadcrumb" class="flex min-w-0 items-center gap-[7px]">
+      <.crumb_segment crumb={@root} class="flex flex-none" />
+      <div
+        :if={@collapses?}
+        id={"#{@id}-ellipsis"}
+        aria-hidden="true"
+        class="flex flex-none items-center gap-[7px] md:hidden"
+      >
+        <span class="text-[13px] text-base-content/50">…</span>
+        <span class="text-[13px] text-base-content/30">/</span>
+      </div>
+      <.crumb_segment
+        :for={{crumb, collapses?} <- @rest}
+        crumb={crumb}
+        class={if(collapses?, do: "hidden md:flex min-w-0", else: "flex min-w-0")}
+      />
+    </nav>
+    """
+  end
+
+  attr :crumb, :map, required: true
+  attr :class, :string, required: true
+
+  defp crumb_segment(assigns) do
+    ~H"""
+    <div id={"#{@crumb.id}-segment"} class={["items-center gap-[7px]", @class]}>
+      <.link
+        navigate={@crumb.to}
+        id={@crumb.id}
+        title={@crumb.label}
+        class="flex min-w-0 max-w-[160px] items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
+      >
+        <.icon :if={@crumb[:icon]} name={@crumb[:icon]} class="size-3.5 flex-none" />
+        <span class="truncate">{@crumb.label}</span>
+      </.link>
+      <span data-crumb-separator class="text-[13px] text-base-content/30">/</span>
+    </div>
+    """
+  end
+
+  @doc """
   The board header's card search (RE198) — a results **popover**, not a column filter.
 
   Filtering the rendered columns is the obvious first instinct and it is wrong here: the board

@@ -33,6 +33,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Flows
   alias Relay.Members
   alias Relay.Runs
+  alias RelayWeb.BoardCrumbs
   alias RelayWeb.FlowSettingsComponents
   alias Schemas.Board
   alias Schemas.Membership
@@ -44,7 +45,12 @@ defmodule RelayWeb.BoardSettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      wide
+      crumbs={BoardCrumbs.settings_section(@board)}
+    >
       <:title>
         <span id="settings-title">Board settings</span>
       </:title>
@@ -1449,6 +1455,19 @@ defmodule RelayWeb.BoardSettingsLive do
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}
+
+  @doc """
+  The display name of a settings section (RE334) — the ONE place it is written. The rail, the
+  mobile tab strip, the top-bar title, the Runners page title and `RelayWeb.BoardCrumbs`'
+  `Flows` crumb all call this, so a rename lands everywhere at once.
+  """
+  def section_label(:general), do: "General"
+  def section_label(:stages), do: "Stages"
+  def section_label(:public), do: "Public board"
+  def section_label(:flows), do: "Flows"
+  def section_label(:members), do: "Members"
+  def section_label(:keys), do: "API keys"
+  def section_label(:runners), do: "Runners"
 
   defp section(%{"section" => "public"}), do: :public
   defp section(%{"section" => "stages"}), do: :stages

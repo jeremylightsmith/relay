@@ -10,6 +10,7 @@ defmodule RelayWeb.FlowEditorLive do
 
   alias Relay.Boards
   alias Relay.Flows
+  alias RelayWeb.BoardCrumbs
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowEditorComponents
   alias RelayWeb.FlowGraphComponents
@@ -382,7 +383,7 @@ defmodule RelayWeb.FlowEditorLive do
     assigns = assign(assigns, :layout, FlowLayout.layout(assigns.working.nodes, assigns.working.edges))
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.flows(@board)}>
       <%!-- RLY-143 fix-up: `wide` puts this below Layouts.app's 53px chrome header (see
       board_live.ex's `h-[calc(100dvh_-_53px)]` for the sibling full-page pattern); without
       subtracting it here the editor overshoots the viewport by 53px. --%>

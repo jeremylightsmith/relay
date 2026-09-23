@@ -56,6 +56,7 @@ defmodule RelayWeb.BoardRunnersLive do
   alias Relay.AgentLog
   alias Relay.Boards
   alias Relay.Runs
+  alias RelayWeb.BoardCrumbs
   alias RelayWeb.RunComponents
 
   @tick_every to_timeout(second: 10)
@@ -71,7 +72,12 @@ defmodule RelayWeb.BoardRunnersLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumb>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      wide
+      crumbs={BoardCrumbs.settings_section(@board)}
+    >
       <:title>
         <span id="runners-title">Runners</span>
       </:title>

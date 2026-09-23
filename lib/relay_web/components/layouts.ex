@@ -52,9 +52,11 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "when true, use the full-width content container (board pages)"
 
-  attr :crumb, :boolean,
-    default: false,
-    doc: "render the 'Boards' breadcrumb button + separator before the title"
+  attr :crumbs, :list,
+    default: [],
+    doc:
+      "the breadcrumb trail rendered before the title (RE334) — build it with " <>
+        "`RelayWeb.BoardCrumbs`; see `CoreComponents.breadcrumbs/1`"
 
   attr :embed, :boolean,
     default: false,
@@ -83,20 +85,12 @@ defmodule RelayWeb.Layouts do
         <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
       </.link>
       <div
-        :if={@crumb or @title != []}
+        :if={@crumbs != [] or @title != []}
+        id="top-bar-divider"
         style="width:1px;height:18px;background:var(--color-field-border);flex:0 0 auto;"
       >
       </div>
-      <div :if={@crumb} id="top-bar-crumb" class="flex flex-none items-center gap-[7px]">
-        <.link
-          navigate={~p"/boards"}
-          id="top-bar-crumb-boards"
-          class="flex items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
-        >
-          <.icon name="hero-squares-2x2" class="size-3.5" /> Boards
-        </.link>
-        <span class="text-[13px] text-base-content/30">/</span>
-      </div>
+      <.breadcrumbs crumbs={@crumbs} />
       <div id="top-bar-title" class="flex min-w-0 items-center text-[13px] font-medium">
         {render_slot(@title)}
       </div>
