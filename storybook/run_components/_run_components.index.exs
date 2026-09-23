@@ -12,5 +12,7 @@ defmodule Storybook.RunComponents do
   def entry("run_history"), do: [icon: {:fa, "clock-rotate-left", :thin}]
   def entry("run_status"), do: [icon: {:fa, "table-list", :thin}]
   def entry("run_face"), do: [icon: {:fa, "id-card", :thin}]
+  def entry("held_worktree_row"), do: [icon: {:fa, "folder-tree", :thin}]
+  def entry("starvation_banner"), do: [icon: {:fa, "hourglass-half", :thin}]
   def entry("rate_limit_note"), do: [icon: {:fa, "gauge-high", :thin}]
 end

@@ -563,4 +563,176 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       refute has_element?(view, "#queue-diagnosis")
     end
   end
+
+  describe "HELD WORKTREES (RE337)" do
+    defp parked_holding(board, stage, age_s \\ 2 * 86_400) do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      card = insert(:card, stage: stage, title: "Waiting on you")
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      insert(:node_execution,
+        run: run,
+        started_at: DateTime.add(now, -(age_s + 60), :second),
+        finished_at: DateTime.add(now, -age_s, :second)
+      )
+
+      %{card: card, run: run, ref: Relay.Cards.ref(board, card)}
+    end
+
+    test "a bound holding renders its ref, title, bound badge and parked · needs input · age",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini-held", "HELD WORKTREES · 1")
+      assert has_element?(view, "#held-mac-mini-#{ref}", "Waiting on you")
+      assert has_element?(view, ~s|#held-mac-mini-#{ref} a[href="/board/#{board.slug}?card=#{ref}"]|, ref)
+      assert has_element?(view, "#held-mac-mini-#{ref} .badge-warning", "bound")
+      assert has_element?(view, "#held-mac-mini-#{ref}-status", "parked · needs input · 2d")
+      assert has_element?(view, "#held-mac-mini-#{ref}-release:not([disabled])", "Release worktree")
+      assert has_element?(view, "#held-mac-mini-#{ref}-cancel", "Cancel run")
+    end
+
+    test "the section sits between CAPACITY and WORKING NOW", %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+      html = render(element(view, "#runner-mac-mini"))
+
+      {cap, _} = :binary.match(html, "CAPACITY")
+      {held, _} = :binary.match(html, "HELD WORKTREES")
+      {working, _} = :binary.match(html, "WORKING NOW")
+      assert cap < held and held < working
+    end
+
+    test "a runner holding nothing has no HELD WORKTREES section", %{conn: conn, board: board} do
+      runner(board, "mac-mini", held: [])
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#runner-mac-mini-held")
+    end
+
+    test "running is disabled with its reason, talk too, retained shows no Release button",
+         %{conn: conn, board: board, stage: stage} do
+      working = insert(:card, stage: stage, title: "Working")
+      insert(:run, card: working, status: :running)
+      talk = insert(:card, stage: stage, title: "Talking")
+      retained = insert(:card, stage: stage, title: "Failed")
+      insert(:run, card: retained, status: :failed)
+      [w, t, r] = Enum.map([working, talk, retained], &Relay.Cards.ref(board, &1))
+
+      runner(board, "mac-mini",
+        held: [
+          %{"ref" => w, "state" => "running"},
+          %{"ref" => t, "state" => "talk"},
+          %{"ref" => r, "state" => "retained"}
+        ]
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#held-mac-mini-#{w}-release[disabled]")
+      assert has_element?(view, ~s|#held-mac-mini-#{w} [data-tip="a job is running in this worktree"]|)
+      assert has_element?(view, "#held-mac-mini-#{t}-release[disabled]")
+      assert has_element?(view, ~s|#held-mac-mini-#{t} [data-tip="a talk session is attached"]|)
+      refute has_element?(view, "#held-mac-mini-#{r}-release")
+      refute has_element?(view, "#held-mac-mini-#{r}-cancel")
+      assert has_element?(view, "#held-mac-mini-#{r}-status", "retained (failed run, no slot)")
+    end
+
+    test "Release worktree confirms, records the request and shows releasing…",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref, run: run} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      confirm =
+        view
+        |> element("#held-mac-mini-#{ref}-release")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.attribute("data-confirm")
+        |> List.first()
+
+      assert confirm =~ "The run stays parked"
+      assert confirm =~ "auto-salvage"
+      assert confirm =~ "will not be restored"
+
+      view |> element("#held-mac-mini-#{ref}-release") |> render_click()
+
+      assert has_element?(view, "#held-mac-mini-#{ref}-releasing", "releasing…")
+      refute has_element?(view, "#held-mac-mini-#{ref}-release")
+
+      assert %Schemas.Runner{release_requests: [^ref]} =
+               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "mac-mini")
+
+      assert Relay.Runs.get_run!(run.id).status == :parked
+    end
+
+    test "Release on a holding that stopped being idle flashes the refusal",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      r = runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # The run resumed between render and click.
+      r |> Ecto.Changeset.change(held: [%{"ref" => ref, "state" => "running"}]) |> Relay.Repo.update!()
+
+      html = view |> element("#held-mac-mini-#{ref}-release") |> render_click()
+
+      assert html =~ "#{ref} is no longer idle on mac-mini"
+    end
+
+    test "Cancel run cancels the card's active run", %{conn: conn, board: board, stage: stage} do
+      # `cancel_run/2` looks the run's server up in the instance registry; no server is running
+      # for a fixture run, so an empty private registry is all it needs.
+      registry = :"relay_runners_live_registry_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :unique, name: registry})
+      :ok = Relay.Runs.Instance.register(%{registry: registry})
+
+      %{ref: ref, run: run} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert view |> element("#held-mac-mini-#{ref}-cancel") |> render() =~ "data-confirm"
+      view |> element("#held-mac-mini-#{ref}-cancel") |> render_click()
+
+      assert Relay.Runs.get_run!(run.id).status == :cancelled
+      refute has_element?(view, "#held-mac-mini-#{ref}-cancel")
+    end
+
+    test "the starvation banner names the idle holder and links to its row",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage, 3600)
+      queued_job(stage, isolation: "exclusive", age_s: 600)
+      runner(board, "mac-mini", capacity: %{"exclusive" => 1}, held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-section #starvation-banner", "Exclusive work is starved: 1 job waiting")
+      assert has_element?(view, ~s|#starvation-banner a[href="#held-mac-mini-#{ref}"]|, ref)
+      assert render(element(view, "#starvation-banner")) =~ "var(--color-warning)"
+    end
+
+    test "no starvation banner while a held slot is running", %{conn: conn, board: board, stage: stage} do
+      working = insert(:card, stage: stage, title: "Working")
+      insert(:run, card: working, status: :running)
+      queued_job(stage, isolation: "exclusive", age_s: 600)
+
+      runner(board, "mac-mini",
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => Relay.Cards.ref(board, working), "state" => "running"}]
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#starvation-banner")
+    end
+  end
 end

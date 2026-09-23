@@ -26,6 +26,13 @@ defmodule RelayWeb.BoardRunnersLive do
   artboard's existing vocabulary and filed back to the Design project as a follow-up, not
   blocking here.
 
+  RE337 adds a HELD WORKTREES section per runner (every entry in `runners.held`, enriched by
+  `Relay.Runs.list_runner_status/2`'s `holdings`), with **Release worktree** (frees the worktree
+  and slot, run stays parked — `Relay.Runs.request_worktree_release/4`) and **Cancel run**
+  (`Relay.Runs.cancel_run/2`) actions, and an amber starvation banner above the queue
+  (`Relay.Runs.starvation/2`). Like the queue, no artboard covers these; they reuse the WORKING
+  NOW row frame (`RunComponents.runner_row_style/0`).
+
   `Relay.Runs.stopped_work/2` on the 10s tick is deliberate and cheap: it returns `nil` after one
   aggregate (`queued_jobs_summary/1`) whenever nothing is queued, and builds a scheduler snapshot
   only once the oldest queued job has waited past the stopped-work threshold — i.e. exactly when
@@ -55,6 +62,7 @@ defmodule RelayWeb.BoardRunnersLive do
 
   alias Relay.AgentLog
   alias Relay.Boards
+  alias Relay.Cards
   alias Relay.Runs
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.BoardSettingsLive
@@ -113,6 +121,11 @@ defmodule RelayWeb.BoardRunnersLive do
                 :if={@stopped_work}
                 id="queue-diagnosis"
                 verdict={@stopped_work}
+              />
+              <RunComponents.starvation_banner
+                :if={@starvation}
+                id="starvation-banner"
+                verdict={@starvation}
               />
               <%!-- Rows wear the artboard's job-row frame (`job_row_style/1`'s neutral `:fresh`
                     face — a board-wide queue has no runner freshness of its own); queued vs
@@ -390,6 +403,28 @@ defmodule RelayWeb.BoardRunnersLive do
                         </div>
                       </div>
                     </div>
+                    <%!-- HELD WORKTREES (RE337) — every per-card worktree this runner declares
+                         it holds (`runners.held`), promoted from the exclusive chip's tooltip. No
+                         artboard covers it; rows reuse the WORKING NOW frame. --%>
+                    <div
+                      :if={runner.holdings != []}
+                      id={"runner-#{dom_id(runner)}-held"}
+                      style="display:flex;flex-direction:column;gap:8px;"
+                    >
+                      <span
+                        class="font-mono"
+                        style="font-size:9.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+                      >
+                        HELD WORKTREES · {length(runner.holdings)}
+                      </span>
+                      <RunComponents.held_worktree_row
+                        :for={holding <- runner.holdings}
+                        id={RunComponents.held_row_id(runner.name, holding.ref)}
+                        runner={runner.name}
+                        holding={holding}
+                        href={~p"/board/#{@board.slug}?card=#{holding.ref}"}
+                      />
+                    </div>
                     <%!-- Working-now list — artboard lines ~98-115. --%>
                     <div style="display:flex;flex-direction:column;gap:8px;">
                       <span
@@ -544,6 +579,46 @@ defmodule RelayWeb.BoardRunnersLive do
     end
   end
 
+  # RE337 — frees only the worktree and its slot; the run stays parked. The request rides the
+  # runner's next heartbeat (`release_held`), so the row reads "releasing…" until the runner stops
+  # reporting the ref. Re-read at once so the acting user sees it without waiting for the tick.
+  @impl true
+  def handle_event("release_worktree", %{"runner" => runner, "ref" => ref}, socket) do
+    actor = {:user, socket.assigns.current_scope.user.id}
+
+    socket =
+      case Runs.request_worktree_release(socket.assigns.board, runner, ref, actor: actor) do
+        {:ok, _requested} ->
+          put_flash(socket, :info, "Releasing #{ref}'s worktree on #{runner} at its next heartbeat.")
+
+        {:error, :not_idle} ->
+          put_flash(socket, :error, "#{ref} is no longer idle on #{runner}.")
+
+        {:error, :runner_not_found} ->
+          put_flash(socket, :error, "Runner #{runner} is no longer on this board's roster.")
+      end
+
+    {:noreply, assign_runners(socket)}
+  end
+
+  # RE337 — the existing cancel path (`Runs.cancel_run/2`); the ref resolves on THIS board, so a
+  # forged ref can never reach another board's run. The worktree then frees through the derived
+  # `releasable_held/2` channel on the next beat.
+  def handle_event("cancel_held_run", %{"ref" => ref}, socket) do
+    actor = {:user, socket.assigns.current_scope.user.id}
+
+    socket =
+      with %{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
+           %{} = run <- Runs.active_run(card),
+           {:ok, _cancelled} <- Runs.cancel_run(run, actor: actor, reason: "from the runners page") do
+        put_flash(socket, :info, "Cancelled #{ref}'s run.")
+      else
+        _no_active_run -> put_flash(socket, :error, "#{ref} has no active run to cancel.")
+      end
+
+    {:noreply, assign_runners(socket)}
+  end
+
   # Re-derives everything time- and roster-dependent in one place: the runner list
   # (freshness-augmented by the context), the board-wide queue and its stopped-work verdict, the
   # summary counts, the ref → runner routing map, and drops log buffers for runners that fell
@@ -562,6 +637,7 @@ defmodule RelayWeb.BoardRunnersLive do
     |> assign(:runners, runners)
     |> assign(:queue, Runs.list_queue(board, now))
     |> assign(:stopped_work, Runs.stopped_work(board, now))
+    |> assign(:starvation, Runs.starvation(board, now))
     |> assign(:summary, %{
       fresh: counts[:fresh] || 0,
       stale: counts[:stale] || 0,
@@ -702,10 +778,7 @@ defmodule RelayWeb.BoardRunnersLive do
   defp working_label(%{freshness: :stale}), do: "AT-RISK JOB"
   defp working_label(%{freshness: :gone}), do: "ORPHANED JOB"
 
-  defp job_row_style(:fresh) do
-    "display:flex;align-items:center;gap:10px;border:1px solid var(--color-base-300);" <>
-      "background:var(--color-base-200);border-radius:8px;padding:8px 11px;"
-  end
+  defp job_row_style(:fresh), do: RunComponents.runner_row_style()
 
   defp job_row_style(_freshness) do
     "display:flex;align-items:center;gap:10px;border:1px solid color-mix(in oklab, var(--color-error) 20%, var(--color-base-100));" <>

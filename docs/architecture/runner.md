@@ -742,6 +742,15 @@ silently billed to the paid API.
     construction. Counting active jobs made a bound-but-idle, talk-attached or retained worktree
     invisible, and that is what reported "runner available" while the runner had zero free
     exclusive slots.
+    The runners page also lists every holding in a per-runner **HELD WORKTREES** section (RE337,
+    `Relay.Runs.list_runner_status/2`'s `holdings`: card, state, the card's active run and how
+    long it has sat), with **Release worktree** (idle `bound` holdings only —
+    `Relay.Runs.release_action/1`; disabled for `running`/`talk`, hidden for `retained`) and
+    **Cancel run** (`Relay.Runs.cancel_run/2`). `Relay.Runs.starvation/2` drives an amber banner
+    above the queue when a queued exclusive job has waited past `@awaiting_slot_grace_s`, no
+    connected runner has a free exclusive slot, and every held exclusive slot is `bound` (no live
+    job) — so nothing will free a slot on its own. A roster with any `running` holding is not
+    starved. Release is manual only; there is no auto-release.
   - **Two states.** *Active*: bound to a non-terminal run, counts toward `max_worktrees`,
     holds a `MIX_TEST_PARTITION` index. *Retained*: a `failed` run's leftover kept on disk
     (marked with the gitignored `.relay-retained` sentinel at its root) for post-mortem, up
