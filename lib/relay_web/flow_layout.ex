@@ -115,7 +115,18 @@ defmodule RelayWeb.FlowLayout do
           parks: MapSet.t(String.t())
         }
   def layout(nodes, edges) do
-    drawn = edges |> Enum.with_index() |> Enum.reject(fn {edge, _i} -> edge.to == @park end)
+    # The editor's working copy is laid out on every keystroke, so it can transiently hold
+    # duplicate keys (mid-rename) or edges to nodes that don't exist. Dagre raises on both, so
+    # keep the first node per key and leave dangling edges out of the routes (as parks are).
+    nodes = Enum.uniq_by(nodes, &key/1)
+    known = MapSet.new(nodes, &key/1)
+
+    drawn =
+      edges
+      |> Enum.with_index()
+      |> Enum.reject(fn {edge, _i} ->
+        edge.to == @park or not known_endpoint?(edge.from, known) or not known_endpoint?(edge.to, known)
+      end)
 
     result =
       Dagre.layout(
@@ -138,6 +149,8 @@ defmodule RelayWeb.FlowLayout do
       parks: for(%{to: @park, from: from} <- edges, into: MapSet.new(), do: from)
     }
   end
+
+  defp known_endpoint?(key, known), do: key in ["start", "done"] or MapSet.member?(known, key)
 
   defp dagre_nodes(nodes) do
     real =
@@ -177,7 +190,8 @@ defmodule RelayWeb.FlowLayout do
   # dagre's polylines are waypoints, not guaranteed axis-aligned. Snap each diagonal hop to a
   # vertical–horizontal–vertical dogleg at its mid-height, then drop repeated and collinear
   # points, so the renderer's rounded-corner builder (which assumes axis alignment) applies as-is.
-  # Every dagre waypoint is kept, so a route's label point still lies on its path.
+  # Dagre's waypoints are kept (snapping only adds doglegs between them), and the label point is
+  # dagre's own output, so it is not guaranteed to sit exactly on the snapped path.
   defp orthogonal(points) do
     points
     |> Enum.chunk_every(2, 1, :discard)

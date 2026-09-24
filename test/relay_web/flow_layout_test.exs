@@ -158,6 +158,22 @@ defmodule RelayWeb.FlowLayoutTest do
   end
 
   describe "layout/2 contract" do
+    test "is total over a transient editor working copy: duplicate keys and dangling edges" do
+      nodes = [%{key: "a", type: :agent}, %{key: "a", type: :agent}, %{key: "b", type: :shell}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "ghost", on: "ok"},
+        %{from: "ghost", to: "b", on: "ok"},
+        %{from: "a", to: "b", on: "ok"},
+        %{from: "b", to: "done", on: "ok"}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      assert layout.positions |> Map.keys() |> Enum.sort() == ["a", "b"]
+      assert layout.routes |> Map.keys() |> Enum.sort() == [0, 3, 4]
+    end
+
     test "returns positions, size, routes, start_point, done_point and parks" do
       {nodes, edges} = code_flow()
 

@@ -456,6 +456,18 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#inspector-node-name")
   end
 
+  test "renaming a node to a key another node already has does not crash the editor", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    other = view |> render() |> then(&Regex.run(~r/data-node="([^"]+)"/, &1)) |> List.last()
+    other = if other == "branch", do: "start", else: other
+
+    html = render_hook(view, "rename_node", %{"key" => "branch", "value" => other})
+    assert is_binary(html)
+    assert Process.alive?(view.pid)
+  end
+
   test "renaming a node to an empty key is blocked inline and disables Save", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     view |> element(~s([data-node="branch"])) |> render_click()
