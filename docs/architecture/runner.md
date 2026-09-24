@@ -342,8 +342,8 @@ that stays server-side.
   value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
   recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
-  or `:revoked` (zombie) job answers 409 `conflict`. The four outcomes and what each does to the
-  run and the card are tabulated in the [state reference](state.md).
+  or `:revoked` (zombie) job answers 409 `conflict`. The node outcomes (including the runner-only `blocked`,
+  RE308) and what each does to the run and the card are tabulated in the [state reference](state.md).
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
   runner can branch without a second endpoint. A `"talk"` claim carries exactly

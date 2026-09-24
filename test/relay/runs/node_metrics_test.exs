@@ -93,7 +93,7 @@ defmodule Relay.Runs.NodeMetricsTest do
       assert implement.loop_laps == 1
       # verdict counts fold from NodeExecution.outcomes/0
       assert implement.verdict_split ==
-               %{succeeded: 2, failed: 1, partial: 0, needs_input: 0}
+               %{succeeded: 2, failed: 1, partial: 0, needs_input: 0, blocked: 0}
     end
 
     test "cost is nil when unset and a rounded Decimal when a subset carry cost" do
@@ -168,7 +168,7 @@ defmodule Relay.Runs.NodeMetricsTest do
       assert row.runs == 2
       assert row.duration_total == 120
       assert Decimal.equal?(row.cost_total, Decimal.new("1.50"))
-      assert row.verdict_split == %{succeeded: 2, failed: 0, partial: 0, needs_input: 0}
+      assert row.verdict_split == %{succeeded: 2, failed: 0, partial: 0, needs_input: 0, blocked: 0}
 
       summary = Runs.flow_metrics_summary(flow, window: "all", card_id: mine.id)
 

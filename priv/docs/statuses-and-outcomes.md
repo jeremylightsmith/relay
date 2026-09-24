@@ -22,8 +22,9 @@ you — those are what show up in your "needs you" rollup.
 
 ## What an agent declares when it finishes
 
-Every step an agent runs ends with exactly one of four outcomes. This is what decides where
-the card goes next.
+Every step an agent runs ends with exactly one of these outcomes. This is what decides where
+the card goes next. The agent declares the first four; the last, **Blocked**, only the board's
+runner reports.
 
 <!-- vocab: Schemas.NodeExecution.outcomes/0 -->
 | Outcome | Meaning | What happens |
@@ -32,6 +33,7 @@ the card goes next.
 | **Failed** | The step could not do it. | The board retries a bounded number of times, then stops and puts the card in front of you with the reason. |
 | **Partial** | Some of it got done. | The flow routes it wherever that flow says partial work should go — often to a review or a follow-up step. |
 | **Needs input** | The agent needs a human decision to continue. | Work pauses and the card goes to **Needs input** with the question. Answering it resumes the same step. |
+| **Blocked** | The agent could not run at all — its Claude login expired or it hit a usage limit. | Work pauses and the card goes to **Needs input** showing the cause, with a **Retry** for once you've fixed it. No retry budget is spent. |
 
 A step that finishes without declaring anything counts as **Failed** — the board would rather
 hand you a stopped card than quietly pretend a step ran.

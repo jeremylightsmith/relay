@@ -21,7 +21,7 @@ defmodule Relay.Runs.Listener do
       and park the run `:claimed` at its last checkpoint (the card is not
       touched).
     * parked `:needs_input` + card no longer `:needs_input` (the answer
-      arrived) → resume the SAME node with the stored `session_id`
+      arrived) → resume the SAME node with the stored `session_id` (none for an `:infrastructure` park, RE308)
       (`claude -p --resume`; the only session-resuming re-entry).
     * parked `:claimed` + card AI-owned again (hand-back) → resume fresh
       (the human may have changed anything).
@@ -143,7 +143,7 @@ defmodule Relay.Runs.Listener do
 
   defp reconcile_active(card, %Run{status: :parked, parked_reason: :needs_input} = run) do
     if card.status != :needs_input do
-      _ = Runs.resume_run(run, resume_session: last_session(run))
+      _ = Runs.resume_run(run, resume_session: resume_session_for(run))
     end
 
     :ok
@@ -163,6 +163,13 @@ defmodule Relay.Runs.Listener do
   # than crashing the reconciler — reconciliation self-heals on the next
   # event, so a no-op here is safe.
   defp reconcile_active(_card, %Run{}), do: :ok
+
+  # RE308: an infrastructure park's node never ran, so there is no conversation to continue — and
+  # the node's OLDER session (an earlier visit) would resume a context the fresh attempt must not
+  # inherit. Only a question or an escalation resumes a session.
+  defp resume_session_for(%Run{} = run) do
+    if Runs.park_kind(run) == :infrastructure, do: nil, else: last_session(run)
+  end
 
   defp last_session(%Run{} = run) do
     Repo.one(

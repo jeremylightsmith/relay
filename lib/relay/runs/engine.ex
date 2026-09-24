@@ -37,14 +37,18 @@ defmodule Relay.Runs.Engine do
   @type decision ::
           {:transition, String.t(), guard() | nil}
           | {:retry, String.t()}
-          | {:park, :needs_input}
+          | {:park, :needs_input | :blocked}
           | {:finish, :done}
           | {:fail, String.t()}
 
   @doc """
   Decides the run's next move, in rule order:
 
-    1. `needs_input` parks — no edge is consulted.
+    1. `needs_input` parks — no edge is consulted. So does `blocked` (RE308): the runner reports
+       it when the agent could not run at all (an expired login, a usage limit). It parks here,
+       BEFORE rules 2–3, and those rules count only `:failed` rows — so a `blocked` attempt never
+       spends `max_retries`, never counts toward the breaker, and (see `effective_outcome/3`)
+       never consumes an edge's `max_loops`.
     2. The failure-signature circuit breaker: >= `breaker_threshold` failed
        executions sharing `current`'s signature fail the run even when
        retries/loops technically remain (catches same-error loops across
@@ -92,6 +96,10 @@ defmodule Relay.Runs.Engine do
     cond do
       current.outcome == :needs_input ->
         {:park, :needs_input}
+
+      # RE308: the agent never ran — retrying cannot fix an expired login or a usage limit.
+      current.outcome == :blocked ->
+        {:park, :blocked}
 
       # The breaker gets the FULL, unfiltered history — deliberately (see @moduledoc).
       current.outcome == :failed and breaker_tripped?(history, current, breaker_threshold) ->
@@ -233,9 +241,11 @@ defmodule Relay.Runs.Engine do
   # The outcome an execution ACTUALLY routes on, after the RLY-179 degrade rule:
   # its own outcome when the node declares an edge for it, else `:failed`. Loop
   # accounting reads history through this, so a degraded traversal spends the
-  # `:failed` edge's budget instead of resetting it. `:needs_input` parks before
-  # routing is ever reached, so it never degrades.
+  # `:failed` edge's budget instead of resetting it. `:needs_input` and `:blocked`
+  # park before routing is ever reached, so they never degrade — a `:blocked` row
+  # read as `:failed` here would spend a loop budget on an attempt that never ran.
   defp effective_outcome(_flow, _node_key, :needs_input), do: :needs_input
+  defp effective_outcome(_flow, _node_key, :blocked), do: :blocked
 
   defp effective_outcome(flow, node_key, outcome) do
     if Enum.any?(flow.edges, &(&1.from == node_key and &1.on == outcome)), do: outcome, else: :failed

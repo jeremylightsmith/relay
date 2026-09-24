@@ -19,8 +19,9 @@ defmodule Schemas.Flow.Edge do
 
   @fields [:from, :to, :on, :max_loops, :when]
   @when_values [:foreach_remaining, :foreach_exhausted]
-  # The `on` vocabulary is the runner's outcome set, defined once on Schemas.NodeExecution.
-  @outcomes Schemas.NodeExecution.outcomes()
+  # The `on` vocabulary is the ROUTABLE outcome set, defined once on Schemas.NodeExecution — every
+  # runner outcome except `:blocked`, which parks before routing (RE308).
+  @outcomes Schemas.NodeExecution.routable_outcomes()
 
   @primary_key false
   embedded_schema do

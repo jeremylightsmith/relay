@@ -142,6 +142,12 @@ defmodule Relay.Flows.DocumentTest do
       bad_when = put_in(@minimal, ["edges"], [%{"from" => "a", "to" => "done", "on" => "succeeded", "when" => "later"}])
       assert {:error, msg} = Document.decode(bad_when)
       assert msg =~ "later"
+
+      # RE308: `blocked` is a real outcome, but only the runner reports it and the engine parks
+      # on it before any edge is consulted — a flow must not be able to route around that park.
+      on_blocked = put_in(@minimal, ["edges"], [%{"from" => "a", "to" => "done", "on" => "blocked"}])
+      assert {:error, msg} = Document.decode(on_blocked)
+      assert msg =~ ~s(on "blocked")
     end
 
     test "rejects unknown keys rather than silently dropping a typo" do

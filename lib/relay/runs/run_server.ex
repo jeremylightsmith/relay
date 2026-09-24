@@ -198,7 +198,8 @@ defmodule Relay.Runs.RunServer do
         Runs.dispatcher().dispatch(next_job)
         {:reply, {:ok, run}, state}
 
-      {{:park, :needs_input}, nil} ->
+      {{:park, _why}, nil} ->
+        # :needs_input (a question / an escalation edge) and :blocked (RE308) park identically.
         # Card effect BEFORE the run's own parked write (unlike the other
         # terminal branches): the run row still reads :running in Postgres
         # while ensure_card_blocked commits, so a concurrent Listener
@@ -260,7 +261,7 @@ defmodule Relay.Runs.RunServer do
 
   # The run's own parked write happens AFTER ensure_card_blocked, in
   # apply_outcome's case handling below — not here (see the comment there).
-  defp apply_decision({:park, :needs_input}, _run, _flow, _execution), do: nil
+  defp apply_decision({:park, _why}, _run, _flow, _execution), do: nil
 
   defp apply_decision({:finish, :done}, run, _flow, _execution) do
     Runs.close_run!(run, :done, nil)
@@ -621,12 +622,14 @@ defmodule Relay.Runs.RunServer do
   defp backticked(fields), do: Enum.map_join(fields, ", ", &"`#{&1}`")
 
   # The detail of the run's most recent outcome-bearing execution, but ONLY when it
-  # failed: a re-entry after a park-on-question or a success carries no findings.
+  # failed: a re-entry after a park-on-question or a success carries no findings. A
+  # `:blocked` row (RE308) is skipped, not read: the node never ran, so the finding a
+  # retry needs is whatever sent the node here — never "the agent could not run".
   defp last_failure_detail(run) do
     last =
       Repo.one(
         from e in NodeExecution,
-          where: e.run_id == ^run.id and not is_nil(e.outcome),
+          where: e.run_id == ^run.id and not is_nil(e.outcome) and e.outcome != ^:blocked,
           order_by: [desc: e.id],
           limit: 1,
           select: %{outcome: e.outcome, detail: e.detail}
@@ -677,13 +680,21 @@ defmodule Relay.Runs.RunServer do
   # too would double it in the timeline (RLY-179).
   defp log_failure_if_final({:fail, _reason}, _run, _execution), do: :ok
 
-  defp log_failure_if_final(_decision, run, %NodeExecution{outcome: :failed} = execution) do
-    card = Repo.get!(Card, run.card_id)
-    {:ok, _entry} = Relay.Activity.log(card, %{type: :failure, actor: :agent, text: execution.detail || "node failed"})
-    :ok
-  end
+  # RE308: an infrastructure park is not a failure the engine routed, but its cause (an expired
+  # login, a usage limit) must reach the card's timeline like any other stop.
+  defp log_failure_if_final({:park, :blocked}, run, execution),
+    do: log_failure(run, execution.detail || "agent could not run")
+
+  defp log_failure_if_final(_decision, run, %NodeExecution{outcome: :failed} = execution),
+    do: log_failure(run, execution.detail || "node failed")
 
   defp log_failure_if_final(_decision, _run, _execution), do: :ok
+
+  defp log_failure(run, text) do
+    card = Repo.get!(Card, run.card_id)
+    {:ok, _entry} = Relay.Activity.log(card, %{type: :failure, actor: :agent, text: text})
+    :ok
+  end
 
   # In the real flow the agent has already blocked the card via the
   # needs-input API; ensure it idempotently with the outcome detail as the

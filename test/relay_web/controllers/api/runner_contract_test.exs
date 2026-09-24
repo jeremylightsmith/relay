@@ -153,6 +153,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
           "terminal" => stringify(Schemas.Run.terminal_statuses())
         },
         "outcomes" => stringify(Schemas.NodeExecution.outcomes()),
+        # RE308 — `outcomes` is what a RUNNER may report (it now includes `blocked`);
+        # `agent_outcomes` is what an AGENT may declare via `./relay outcome` (NODE_OUTCOMES),
+        # which is exactly the routable set. Two pins, so neither side can widen one silently.
+        "agent_outcomes" => stringify(Schemas.NodeExecution.routable_outcomes()),
         "audit_severities" => stringify(Relay.Runs.Audit.severities()),
         "isolation" => stringify(Schemas.Flow.isolation_classes()),
         "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())},

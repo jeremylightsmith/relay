@@ -18,6 +18,11 @@ defmodule Schemas.NodeExecution do
   `no_changes` records that the node ASSERTED "succeeded, and no changes were needed" (RE310) —
   what was claimed, not what the engine decided, so a rejected claim is still readable as
   `no_changes: true` with `outcome: :failed`.
+
+  `:blocked` (RE308) is reported ONLY by the runner, never declared by an agent: "the agent could
+  not run at all" — an expired login or a usage limit. The engine parks on it before any edge is
+  consulted, so it is in `outcomes/0` (what a runner may report) but not in `routable_outcomes/0`
+  (what a flow edge may route on and an agent may declare).
   """
 
   use Ecto.Schema
@@ -30,7 +35,7 @@ defmodule Schemas.NodeExecution do
     field :node_key, :string
     field :visit, :integer
     field :attempt, :integer
-    field :outcome, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input]
+    field :outcome, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input, :blocked]
     field :detail, :string
     field :failure_signature, :string
     field :git_sha, :string
@@ -46,8 +51,19 @@ defmodule Schemas.NodeExecution do
     timestamps(type: :utc_datetime)
   end
 
+  # RE308: reported by the runner only — never agent-declarable, never routable.
+  @runner_only_outcomes [:blocked]
+
   @doc "The closed set of node outcomes a runner may report."
   def outcomes, do: Ecto.Enum.values(__MODULE__, :outcome)
+
+  @doc """
+  The outcomes a flow edge may route `on:` — and, identically, the ones an agent may declare
+  (`./relay`'s `NODE_OUTCOMES`, pinned as the contract fixture's `agent_outcomes`). Excludes
+  `:blocked` (RE308): the engine parks on it before any edge is consulted, and a flow able to route
+  around that park could spend a retry budget on a condition retrying cannot fix.
+  """
+  def routable_outcomes, do: outcomes() -- @runner_only_outcomes
 
   @doc "Validates a programmatically-built execution row."
   def changeset(execution) do

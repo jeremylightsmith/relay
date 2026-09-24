@@ -112,6 +112,7 @@ defmodule Relay.Runs.RunDetail do
   defp row_state(%{outcome: :partial}, _run), do: :done
   defp row_state(%{outcome: :failed}, _run), do: :failed
   defp row_state(%{outcome: :needs_input}, _run), do: :paused
+  defp row_state(%{outcome: :blocked}, _run), do: :paused
   defp row_state(%{outcome: nil}, %{status: :running}), do: :active
   defp row_state(%{outcome: nil}, %{status: :parked}), do: :paused
   defp row_state(%{outcome: nil}, %{status: :failed}), do: :stopped
@@ -221,10 +222,11 @@ defmodule Relay.Runs.RunDetail do
   # onto the node's :failed edge and parks (Engine.degrade_to_failed) — it IS a failure for
   # forensics. Filtering to :failed only surfaced an EARLIER failure than the one that parked, so
   # the escalation drawer's failure text disagreed with its question, which comes from the same
-  # (parking) execution (RE253/A9).
+  # (parking) execution (RE253/A9). A :blocked row (RE308) is the reason an infrastructure park
+  # stopped, so it is the failure the drawer shows.
   defp last_failure_detail(nes) do
     nes
-    |> Enum.filter(&(&1.outcome in [:failed, :partial]))
+    |> Enum.filter(&(&1.outcome in [:failed, :partial, :blocked]))
     |> List.last()
     |> then(&(&1 && &1.detail))
   end

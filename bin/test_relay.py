@@ -6303,7 +6303,8 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         self.vocab = CONTRACT["vocabulary"]
 
     def test_node_outcomes_match_the_fixture(self):
-        self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["outcomes"]))
+        # RE308: NODE_OUTCOMES is what an AGENT may declare — the fixture's `agent_outcomes`.
+        self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["agent_outcomes"]))
 
     def test_active_run_states_match_the_fixture(self):
         self.assertEqual(relay.ACTIVE_RUN_STATES, tuple(self.vocab["run_states"]["active"]))

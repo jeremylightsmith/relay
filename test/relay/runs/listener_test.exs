@@ -83,6 +83,36 @@ defmodule Relay.Runs.ListenerTest do
     assert %Run{status: :running, current_node: "brainstorm"} = Runs.get_run!(run.id)
   end
 
+  test "answering an infrastructure park re-enters fresh — it never --resumes a session (RE308)",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+
+    {:ok, _run} =
+      Runs.report_outcome(job, %{outcome: :needs_input, detail: "Which auth model?", session_id: "s_old"})
+
+    assert_receive {:run_parked, _run}
+    {:ok, _card} = Relay.Cards.answer_input(reload(board, card), "Use board keys", {:user, user.id})
+    assert_receive {:dispatched, %NodeJob{} = resumed}
+    assert resumed.payload["resume_session"] == "s_old"
+
+    {:ok, _run} =
+      Runs.report_outcome(resumed, %{
+        outcome: :blocked,
+        detail: "agent could not run: OAuth session expired",
+        session_id: "s_dead"
+      })
+
+    assert_receive {:run_parked, _run}
+    {:ok, _card} = Relay.Cards.answer_input(reload(board, card), "logged back in", {:user, user.id})
+
+    # neither the dead session nor the node's older one: the node never ran, so there is nothing
+    # to continue
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
+    assert fresh.payload["resume_session"] == nil
+    assert %Run{status: :running} = Runs.get_run!(run.id)
+  end
+
   test "a human claiming mid-run revokes the active job and parks the run; hand-back resumes fresh",
        %{user: user, board: board, flow: flow, card: card} do
     {:ok, run} = Runs.start_run(card, flow)

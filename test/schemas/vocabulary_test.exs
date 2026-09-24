@@ -88,8 +88,14 @@ defmodule Schemas.VocabularyTest do
     assert Schemas.Flow.Node.types() == Ecto.Enum.values(Schemas.Flow.Node, :type)
   end
 
-  test "the edge `on` enum is the NodeExecution outcome set, not a second copy of it" do
-    assert Ecto.Enum.values(Edge, :on) == Schemas.NodeExecution.outcomes()
+  test "the edge `on` enum is the NodeExecution ROUTABLE outcome set, not a second copy of it" do
+    assert Ecto.Enum.values(Edge, :on) == Schemas.NodeExecution.routable_outcomes()
+  end
+
+  test "blocked is a runner-reportable outcome that no edge may route on (RE308)" do
+    assert :blocked in Schemas.NodeExecution.outcomes()
+    refute :blocked in Schemas.NodeExecution.routable_outcomes()
+    assert Schemas.NodeExecution.routable_outcomes() -- Schemas.NodeExecution.outcomes() == []
   end
 
   test "the edge `when` enum equals when_values/0" do
