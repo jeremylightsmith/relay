@@ -200,6 +200,17 @@ defmodule RelayWeb.BoardLiveSearchTest do
     assert input =~ ~s(phx-hook="BoardSearchInput")
   end
 
+  # RE342 — `/` focuses this box (the BoardSearchInput hook's window keydown listener). The
+  # attribute is the accessible advertisement of that shortcut; the behavior itself is client-side
+  # and pinned by RelayWeb.Browser.BoardSearchShortcutTest.
+  test "the input advertises the / shortcut", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    input = view |> element("#board-search-input") |> render()
+
+    assert input =~ ~s(aria-keyshortcuts="/")
+  end
+
   # LiveView never patches a focused input's value, and Escape leaves the cursor in the box —
   # so emptying `query` server-side is only half of it. The push is what the BoardSearchInput
   # hook listens for; without it the popover closes with the typed text still on screen.
