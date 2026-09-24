@@ -85,7 +85,9 @@ sharing behavior.
   `RelayWeb.FlowLayout.layout/2` (a deterministic layered layout — a thin adapter over the
   vendored `dagre_ex` (`Dagre`) that sizes nodes and edge labels, ranks them top to bottom and
   returns axis-aligned edge polylines with a reserved label point per edge; no stored
-  coordinates, no dragging). Hovering a node emphasises its incident edges client-side via the
+  coordinates, no dragging). FlowLayout then spreads edge endpoints into per-edge ports along
+  each node's top/bottom border, ordered so lines don't cross at the node (RE340). Hovering a
+  node emphasises its incident edges client-side via the
   `FlowFocus` hook (`assets/js/hooks/flow_focus.js`, reading the graph's `data-adjacency`); a
   selected node gets the same emphasis server-side (RE333).
   **Requirements (RLY-182):** `Flows.node_requirements/1` is a pure graph read — the agent

@@ -82,6 +82,25 @@ defmodule RelayWeb.FlowLayoutTest do
   defp crosses?([{x1, y}, {x2, y}], {bx, by, bw, bh}),
     do: y > by and y < by + bh and max(x1, x2) > bx and min(x1, x2) < bx + bw
 
+  # Every drawn, non-self-loop edge end as `{node_key, point}`: the first point on the edge's
+  # source, the last on its target.
+  defp edge_ends(edges, layout) do
+    for {edge, i} <- Enum.with_index(edges),
+        Map.has_key?(layout.routes, i),
+        edge.from != edge.to,
+        points = layout.routes[i].points,
+        end_ <- [{edge.from, hd(points)}, {edge.to, List.last(points)}],
+        do: end_
+  end
+
+  # A point on a gate's diamond outline: |dx|/(w/2) + |dy|/(h/2) = 1 about the box centre,
+  # multiplied through by w·h/2 and allowed one pixel of integer rounding in y.
+  defp on_diamond?({px, py}, {x, y, w, h}) do
+    dx = abs(2 * px - (2 * x + w))
+    dy = abs(2 * py - (2 * y + h))
+    abs(dx * h + dy * w - w * h) <= 2 * w
+  end
+
   describe "invariants over every shipped flow (RE333)" do
     test "no two node boxes overlap" do
       for flow <- library() do
@@ -149,6 +168,38 @@ defmodule RelayWeb.FlowLayoutTest do
       assert edges |> label_rects(layout) |> Enum.map(&elem(&1, 0)) |> Enum.sort() == Enum.sort(drawn)
     end
 
+    test "no two edge ends on the same node coincide (RE340)" do
+      for flow <- library() do
+        layout = FlowLayout.layout(flow.nodes, flow.edges)
+
+        for {key, points} <- flow.edges |> edge_ends(layout) |> Enum.group_by(&elem(&1, 0), &elem(&1, 1)),
+            key != "start" do
+          assert length(Enum.uniq(points)) == length(points),
+                 "#{flow.key}: two edge ends on #{key} coincide: #{inspect(points)}"
+        end
+      end
+    end
+
+    test "every edge end lies on its node's visible border, within the port span (RE340)" do
+      {branchy_nodes, branchy_edges} = branchy_flow()
+
+      for {nodes, edges} <- Enum.map(library(), &{&1.nodes, &1.edges}) ++ [{branchy_nodes, branchy_edges}] do
+        layout = FlowLayout.layout(nodes, edges)
+        boxes = boxes(nodes, layout)
+        types = Map.new(nodes, &{&1.key, node_type(&1)})
+
+        for {key, {px, py} = point} <- edge_ends(edges, layout), Map.has_key?(boxes, key) do
+          {_x, y, _w, h} = box = boxes[key]
+          {left, right} = FlowLayout.port_span(types[key], box)
+          assert px in left..right, "#{key}: end #{inspect(point)} outside port span #{left}..#{right}"
+
+          if types[key] == :gate,
+            do: assert(on_diamond?(point, box), "gate #{key}: end #{inspect(point)} is off the diamond"),
+            else: assert(py in [y, y + h], "#{key}: end #{inspect(point)} is off the top/bottom border")
+        end
+      end
+    end
+
     test "laying out the same flow twice yields equal results" do
       for flow <- library() do
         assert FlowLayout.layout(flow.nodes, flow.edges) == FlowLayout.layout(flow.nodes, flow.edges),
@@ -202,15 +253,22 @@ defmodule RelayWeb.FlowLayoutTest do
       end
     end
 
-    test "every shipped flow's entry edge leaves start_point and its exit edge lands on done_point" do
-      for flow <- library() do
-        layout = FlowLayout.layout(flow.nodes, flow.edges)
+    test "every entry edge leaves start_point and every exit edge lands on done's top border" do
+      {branchy_nodes, branchy_edges} = branchy_flow()
 
-        for {edge, i} <- Enum.with_index(flow.edges), Map.has_key?(layout.routes, i) do
-          points = layout.routes[i].points
-          if edge.from == "start", do: assert(hd(points) == layout.start_point)
-          if edge.to == "done", do: assert(List.last(points) == layout.done_point)
-        end
+      for {nodes, edges} <- Enum.map(library(), &{&1.nodes, &1.edges}) ++ [{branchy_nodes, branchy_edges}] do
+        layout = FlowLayout.layout(nodes, edges)
+        {_done_x, done_y} = layout.done_point
+        exits = for {%{to: "done"}, i} <- Enum.with_index(edges), do: List.last(layout.routes[i].points)
+
+        for {edge, i} <- Enum.with_index(edges),
+            edge.from == "start",
+            do: assert(hd(layout.routes[i].points) == layout.start_point)
+
+        # A sole exit edge lands on done_point itself; several spread along done's top border.
+        if length(exits) == 1, do: assert(exits == [layout.done_point])
+        for {_x, y} <- exits, do: assert(y == done_y)
+        assert length(Enum.uniq(exits)) == length(exits)
       end
     end
 
@@ -270,6 +328,74 @@ defmodule RelayWeb.FlowLayoutTest do
       edges = [%{from: "start", to: "a", on: nil}, %{from: "a", to: "done", on: :succeeded}]
 
       assert %{"orphan" => {_, _}} = FlowLayout.layout(nodes, edges).positions
+    end
+  end
+
+  describe "port spreading (RE340)" do
+    test "a single edge on a side keeps its centre anchor: a plain chain is unchanged" do
+      nodes = [%{key: "a", type: :agent}, %{key: "b", type: :agent}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      %{"a" => {ax, ay}, "b" => {bx, by}} = layout.positions
+      {w, h} = FlowLayout.node_size(:agent)
+
+      assert layout.routes[1].points == [{ax + div(w, 2), ay + h}, {bx + div(w, 2), by}]
+    end
+
+    test "a gate's out-edges get their own ports on the diamond's lower faces, left branch on the left" do
+      nodes = [%{key: "g", type: :gate}, %{key: "a", type: :agent}, %{key: "b", type: :agent}]
+
+      edges = [
+        %{from: "start", to: "g", on: nil},
+        %{from: "g", to: "a", on: :succeeded},
+        %{from: "g", to: "b", on: :failed},
+        %{from: "a", to: "done", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      {gx, gy, gw, gh} = gate = boxes(nodes, layout)["g"]
+      {left_i, right_i} = if elem(layout.positions["a"], 0) < elem(layout.positions["b"], 0), do: {1, 2}, else: {2, 1}
+      {lx, ly} = left_port = hd(layout.routes[left_i].points)
+      {rx, ry} = right_port = hd(layout.routes[right_i].points)
+
+      assert lx < gx + div(gw, 2) and gx + div(gw, 2) < rx
+      assert ly < gy + gh and ry < gy + gh
+      assert on_diamond?(left_port, gate) and on_diamond?(right_port, gate)
+    end
+
+    test "a loop-back edge lands on its target's bottom apart from that target's own out-edge" do
+      nodes = [%{key: "a", type: :agent}, %{key: "b", type: :agent}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "a", on: :failed},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      {_ax, ay} = layout.positions["a"]
+      {_w, h} = FlowLayout.node_size(:agent)
+      {_, out_y} = out_port = hd(layout.routes[1].points)
+      {_, back_y} = back_port = List.last(layout.routes[2].points)
+
+      assert out_y == ay + h and back_y == ay + h
+      refute out_port == back_port
+    end
+
+    test "port_span/2 insets each shape so a port never lands on a corner or a slanted face" do
+      assert FlowLayout.port_span(:agent, {0, 0, 150, 56}) == {18, 132}
+      assert FlowLayout.port_span(:done, {0, 0, 180, 40}) == {18, 162}
+      assert FlowLayout.port_span(:human, {0, 0, 150, 56}) == {27, 123}
+      assert FlowLayout.port_span(:gate, {0, 0, 118, 76}) == {29, 89}
+      assert FlowLayout.port_span(:start, {0, 0, 16, 16}) == {8, 8}
     end
   end
 

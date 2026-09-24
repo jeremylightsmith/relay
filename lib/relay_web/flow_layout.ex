@@ -14,8 +14,12 @@ defmodule RelayWeb.FlowLayout do
     * `size` — the canvas `{w, h}`
     * `routes` — edge index (position in the input `edges` list) → `%{points:, label:}`.
       `points` is an axis-aligned polyline from the source node to the target node; `label` is
-      the centre of the edge's pill, or `nil` for a start edge (which carries no pill)
-    * `start_point` — where the entry edge leaves; `done_point` — where the exit edge lands
+      the centre of the edge's pill, or `nil` for a start edge (which carries no pill). Where
+      several edges meet one side of a node, each gets its own port on that border, spread
+      left→right in the order the lines head off (RE340, `port_span/2`); a lone edge keeps the
+      side's centre
+    * `start_point` — where the entry edge leaves; `done_point` — done's top-centre, where a
+      sole exit edge lands (several exit edges spread along done's top border)
     * `parks` — the source of every edge into the `needs_input` park. Those edges have no
       geometry and are left out of `routes`; the renderer badges their source instead (RE330)
 
@@ -55,6 +59,12 @@ defmodule RelayWeb.FlowLayout do
   # dagre's bounding box starts at {0, 0}; pad every side so selection rings, park badges and
   # arrowheads never clip against the canvas edge.
   @pad 16
+
+  # Port spreading (RE340) — see `port_span/2`. @human_shoulder_pct mirrors the 14%/86% vertices
+  # of the `:human` hexagon's clip-path in `RelayWeb.FlowGraphComponents`.
+  @port_inset 18
+  @human_shoulder_pct 14
+  @human_port_inset 6
 
   # Edge-label measurement. dagre needs each label's size BEFORE layout, but text width is a
   # browser fact. The pill is a fixed 9.5px ui-monospace face (FlowGraphComponents'
@@ -139,11 +149,18 @@ defmodule RelayWeb.FlowLayout do
       )
 
     {w, h} = result.size
+    types = Map.new(nodes, &{{:node, key(&1)}, node_type(&1)})
+
+    routes =
+      drawn
+      |> Map.new(fn {edge, i} -> {i, shifted(Map.fetch!(result.edges, i), edge)} end)
+      |> spread_ports(result.nodes, types)
+      |> Map.new(fn {i, route} -> {i, %{points: orthogonal(route.points), label: route.label}} end)
 
     %{
       positions: Map.new(nodes, fn node -> {key(node), top_left(Map.fetch!(result.nodes, {:node, key(node)}))} end),
       size: {w + 2 * @pad, h + 2 * @pad},
-      routes: Map.new(drawn, fn {_edge, i} -> {i, route(Map.fetch!(result.edges, i))} end),
+      routes: routes,
       start_point: bottom_center(Map.fetch!(result.nodes, :start)),
       done_point: top_center(Map.fetch!(result.nodes, :done)),
       parks: for(%{to: @park, from: from} <- edges, into: MapSet.new(), do: from)
@@ -177,15 +194,161 @@ defmodule RelayWeb.FlowLayout do
   defp endpoint("done"), do: :done
   defp endpoint(key), do: {:node, key}
 
-  defp route(%{points: points, label: label}) do
-    %{points: points |> Enum.map(&shift/1) |> orthogonal(), label: label && shift(label)}
+  # A drawn edge's dagre route shifted onto the padded canvas, tagged with its dagre endpoint ids
+  # so `spread_ports/3` can find the node boxes it touches.
+  defp shifted(%{points: points, label: label}, edge) do
+    %{points: Enum.map(points, &shift/1), label: label && shift(label), from: endpoint(edge.from), to: endpoint(edge.to)}
   end
 
   defp shift({x, y}), do: {x + @pad, y + @pad}
 
+  @doc """
+  The usable `{left, right}` x-span for edge ports on the top/bottom border of a node of `type`
+  whose laid-out box is `{x, y, w, h}` (RE340). Inset so a port never sits on a rounded corner,
+  the accent border or a slanted face:
+
+    * default box (and `done`) — #{@port_inset}px in from each side, clearing the 11px corner
+      radius and the 4px accent border;
+    * `:human` hexagon — its flat top/bottom (14%–86% of the width, the renderer's clip-path),
+      a further #{@human_port_inset}px in;
+    * `:gate` diamond — the middle half of the width; its top/bottom is a vertex, so ports fan
+      out along the faces beside it (`layout/2` moves each port's y onto the face);
+    * `:start` — a 16px invisible anchor, too small to spread: both ends are its centre.
+  """
+  def port_span(:gate, {x, _y, w, _h}), do: {x + div(w, 4), x + w - div(w, 4)}
+  def port_span(:start, {x, _y, w, _h}), do: {x + div(w, 2), x + div(w, 2)}
+
+  def port_span(:human, {x, _y, w, _h}) do
+    flat = div(w * @human_shoulder_pct, 100) + @human_port_inset
+    {x + flat, x + w - flat}
+  end
+
+  def port_span(_type, {x, _y, w, _h}), do: {x + @port_inset, x + w - @port_inset}
+
   defp top_left(%{x: x, y: y}), do: shift({x, y})
   defp top_center(%{x: x, y: y, width: w}), do: shift({x + div(w, 2), y})
   defp bottom_center(%{x: x, y: y, width: w, height: h}), do: shift({x + div(w, 2), y + h})
+
+  # ---- port spreading (RE340) ----
+  #
+  # dagre anchors every edge at its source's bottom-centre and its target's top-centre, so on a
+  # node with several edges on one side every line converges on one pixel. This pass gives each
+  # edge its OWN port on that side. It runs on the shifted dagre points, before `orthogonal/1`.
+  #
+  #   1. Collect endpoints: a route's first point sits on its source, its last on its target.
+  #      The side is read off the geometry (`:top` / `:bottom` of the node's box), which covers
+  #      a reversed loop-back edge — it leaves its source's top and lands on its target's bottom
+  #      — without special-casing it. Self-loops (routed off the right side) are left untouched.
+  #   2. Group by {node, side}. A group of one keeps dagre's centre anchor, so a plain chain is
+  #      drawn exactly as before; `start` is too small to spread, so its edges share its centre.
+  #   3. Order each group left→right by the x the line heads to past its stub, then the far
+  #      endpoint's x, then edge index — deterministic, and no two lines cross at the node.
+  #   4. Distribute the n ports evenly over the side's `port_span/2`:
+  #      x_i = left + span_w * (i + 1) / (n + 1). A gate port's y moves onto the diamond's face.
+  #   5. Rebuild that end of the route as a vertical stub from the port to the edge of the node's
+  #      rank band, dropping dagre's own anchor and band point. The hop from the stub to the next
+  #      waypoint turns diagonal and `orthogonal/1` doglegs it in the inter-rank gap.
+  defp spread_ports(routes, dagre_nodes, types) do
+    boxes = Map.new(dagre_nodes, fn {id, node} -> {id, shift_box(node)} end)
+    bands = rank_bands(dagre_nodes, boxes)
+
+    routes
+    |> endpoints(boxes)
+    |> Enum.group_by(&{&1.id, &1.side})
+    |> Enum.reject(fn {{id, _side}, group} -> id == :start or length(group) == 1 end)
+    |> Enum.flat_map(fn {{id, side}, group} ->
+      assign_ports(group, Map.get(types, id, id), Map.fetch!(boxes, id), side, band_edge(bands, id, side))
+    end)
+    |> Enum.reduce(routes, fn {i, role, port, band_y}, routes ->
+      Map.update!(routes, i, &%{&1 | points: restub(&1.points, role, port, band_y)})
+    end)
+  end
+
+  defp endpoints(routes, boxes) do
+    for {i, route} <- routes,
+        route.from != route.to,
+        {role, id} <- [source: route.from, target: route.to],
+        point = if(role == :source, do: hd(route.points), else: List.last(route.points)),
+        side = side(point, Map.fetch!(boxes, id)),
+        side != nil do
+      %{index: i, role: role, id: id, side: side, point: point, points: route.points}
+    end
+  end
+
+  defp assign_ports(group, type, box, side, band_y) do
+    {left, right} = port_span(type, box)
+    n = length(group)
+
+    group
+    |> Enum.sort_by(&{heading_x(&1), far_x(&1), &1.index})
+    |> Enum.with_index(1)
+    |> Enum.map(fn {e, k} ->
+      x = left + div((right - left) * k, n + 1)
+      {e.index, e.role, {x, border_y(type, box, side, x)}, band_y}
+    end)
+  end
+
+  defp shift_box(%{x: x, y: y, width: w, height: h}) do
+    {sx, sy} = shift({x, y})
+    {sx, sy, w, h}
+  end
+
+  # Each node's rank band `{top, bottom}`. dagre centres every box in its band, so the rank's
+  # tallest box spans the band exactly.
+  defp rank_bands(dagre_nodes, boxes) do
+    by_rank =
+      dagre_nodes
+      |> Enum.group_by(fn {_id, node} -> node.rank end, fn {id, _node} -> Map.fetch!(boxes, id) end)
+      |> Map.new(fn {rank, rank_boxes} ->
+        {rank,
+         {rank_boxes |> Enum.map(fn {_, y, _, _} -> y end) |> Enum.min(),
+          rank_boxes |> Enum.map(fn {_, y, _, h} -> y + h end) |> Enum.max()}}
+      end)
+
+    Map.new(dagre_nodes, fn {id, node} -> {id, Map.fetch!(by_rank, node.rank)} end)
+  end
+
+  defp band_edge(bands, id, :top), do: bands |> Map.fetch!(id) |> elem(0)
+  defp band_edge(bands, id, :bottom), do: bands |> Map.fetch!(id) |> elem(1)
+
+  defp side({_x, y}, {_bx, y, _bw, _bh}), do: :top
+  defp side({_x, y}, {_bx, by, _bw, bh}) when y == by + bh, do: :bottom
+  defp side(_point, _box), do: nil
+
+  # The x the line heads to once it leaves the endpoint's vertical: the first point off it, or
+  # the endpoint's own x for a route that runs straight.
+  defp heading_x(%{role: :source, points: points}), do: first_off_vertical(points)
+  defp heading_x(%{role: :target, points: points}), do: points |> Enum.reverse() |> first_off_vertical()
+
+  defp first_off_vertical([{x0, _} | rest]) do
+    case Enum.find(rest, fn {x, _} -> x != x0 end) do
+      {x, _} -> x
+      nil -> x0
+    end
+  end
+
+  defp far_x(%{role: :source, points: points}), do: points |> List.last() |> elem(0)
+  defp far_x(%{role: :target, points: [{x, _} | _]}), do: x
+
+  # On a gate the top/bottom border is a vertex; a port beside it sits on the diamond's face,
+  # `h * |dx| / w` in from the vertex.
+  defp border_y(:gate, {x, y, w, h}, side, px) do
+    rise = div(h * abs(px - (x + div(w, 2))), w)
+    if side == :top, do: y + rise, else: y + h - rise
+  end
+
+  defp border_y(_type, {_x, y, _w, _h}, :top, _px), do: y
+  defp border_y(_type, {_x, y, _w, h}, :bottom, _px), do: y + h
+
+  # Replace one end of `points` with `port` plus a vertical stub to the band edge.
+  defp restub([{x0, _} | rest], :source, {px, _} = port, band_y),
+    do: Enum.dedup([port, {px, band_y} | drop_band_point(rest, x0, band_y)])
+
+  defp restub(points, :target, port, band_y),
+    do: points |> Enum.reverse() |> restub(:source, port, band_y) |> Enum.reverse()
+
+  defp drop_band_point([{x0, band_y} | rest], x0, band_y), do: rest
+  defp drop_band_point(points, _x0, _band_y), do: points
 
   # dagre's polylines are waypoints, not guaranteed axis-aligned. Snap each diagonal hop to a
   # vertical–horizontal–vertical dogleg at its mid-height, then drop repeated and collinear

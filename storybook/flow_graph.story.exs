@@ -82,7 +82,9 @@ defmodule Storybook.FlowGraph do
           "A branchy flow the old two-column layout could not draw (RE333): the triage gate " <>
             "diverges into two branches that never rejoin, `fix` self-loops on failure, and " <>
             "there is more than one terminal — `ship` and `publish` each reach done by their " <>
-            "own path, while `escalate` is a dead end.",
+            "own path, while `escalate` is a dead end. Where several edges meet one side of a " <>
+            "node they get their own ports (RE340): triage's two out-edges leave from separate " <>
+            "points on the diamond's lower faces, and the two exit edges land apart on done.",
         attributes: %{
           nodes: branchy_nodes,
           edges: branchy_edges,
