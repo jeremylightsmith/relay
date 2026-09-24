@@ -6,7 +6,9 @@
   },
   "base": "origin/main",
   "cache_dir": "~/.cache/relay/exec",
-  "prepare": ".relay/prepare-worktree.sh",
+  "worktrees": {
+    "prepare": ".relay/prepare-worktree.sh"
+  },
   "max_retained_failed": 3,
   "poll_timeout": 25,
   "heartbeat_interval": 15,

@@ -671,8 +671,11 @@ silently billed to the paid API.
   `Runner "X" is not currently connected.` on the parked run. Also `namespace`
   (default `exec`), `capacity: {shared_clean, exclusive}`, `base`, `poll_timeout`,
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
-  `cache_dir` (a warm dep/build cache dir passed to the prepare hook), `prepare` (path to a
-  project-specific prepare hook, default `.relay/prepare-worktree.sh`), and
+  `cache_dir` (a warm dep/build cache dir passed to the lifecycle hooks), `worktrees`
+  (RE339 — `{"prepare": path, "cleanup": path}`, the project's per-worktree lifecycle hooks,
+  defaulting to `.relay/prepare-worktree.sh` and `.relay/cleanup-worktree.sh`; a flat
+  top-level `prepare` is still read as a **deprecated alias** for `worktrees.prepare`, which
+  wins when both are set), and
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
   oldest is evicted, default 3), and two auto-update keys (RE185): `auto_update` (default
   `true`) and `auto_update_min_interval` (seconds between update attempts, default 300).
@@ -770,9 +773,10 @@ silently billed to the paid API.
     worktree active and bound, ready for the pinned resume to continue in it.
   - **Prepare hook.** On a reset (first job of a card, or reclaiming a retained worktree for
     a new run), `RunnerPool.create_or_rebaseline/1` makes the worktree clean at base, then
-    `run_prepare_hook/3` warms it: it runs `.relay/prepare-worktree.sh` if present and
-    executable, else the `prepare` command from `runner.json`, else it is a no-op (a cold
-    build, not an error). The hook receives `[worktree, ref, branch, base, cache_dir]` as
+    `run_prepare_hook/3` warms it: it runs the hook `RunnerPool._hook_path("prepare")` resolves —
+    `worktrees.prepare` from `runner.json`, else the deprecated flat `prepare`, else
+    `.relay/prepare-worktree.sh` — if that file exists and is executable, else it is a no-op
+    (a cold build, not an error). The hook receives `[worktree, ref, branch, base, cache_dir]` as
     both argv and env (`RELAY_WORKTREE`/`RELAY_REF`/`RELAY_BRANCH`/`RELAY_BASE`/
     `RELAY_CACHE_DIR`) with `cwd` set to the new worktree; **a nonzero exit fails the run
     fail-fast** (its stderr becomes the node's failure detail) rather than silently running
@@ -781,6 +785,29 @@ silently billed to the paid API.
     else the main checkout) into the fresh worktree via APFS clonefile copy-on-write
     (`cp -Rc`, falling back to plain `cp -R`), so `mix deps.get` is a no-op and `mix compile`
     only rebuilds the diff.
+  - **Cleanup hook (RE339).** Right before the runner deletes an intact per-card worktree,
+    `run_cleanup_hook/2` runs the project's cleanup hook so it can tear down what prepare set
+    up (a dev server, a docker-compose stack, a per-worktree test database, a port
+    reservation). It resolves `worktrees.cleanup` from `runner.json`, else
+    `.relay/cleanup-worktree.sh`, and is skipped when that file does not exist or is not
+    executable. Relay ships none of its own, because deleting the tree already removes
+    everything its prepare hook copies. It gets the prepare hook's contract:
+    `[worktree, ref, branch, base, cache_dir]` as argv and `RELAY_*` env, cwd = the worktree
+    (still on disk). `branch` is read from the tree and is empty when HEAD is detached.
+    **When:** every removal of a tree whose `.git` link is intact. That covers a
+    `done`/`cancelled` release, a talk-worktree release, retained-over-cap eviction, every
+    `release_held` retry, and `recover()`'s reclaim of retired `<ns>-work-N` slots, where
+    `RELAY_REF` is empty. It does **not** fire on retain (a `failed` run's post-mortem tree
+    is cleaned up later, when it is evicted), on a half-deleted tree (its cleanup already
+    ran, and a `.git`-less cwd would send git into the main checkout), or on a
+    rebaseline/reset or shared_clean refresh, since those trees are reused. **Order:** cleanup
+    hook → `_stop_processes_in` → stash salvage → `git worktree remove`, so the hook stops its
+    own services gracefully and the RE336 sweep catches the rest. **Best-effort:** unlike
+    prepare, a nonzero exit, or running past `CLEANUP_HOOK_TIMEOUT` (120s, not configurable,
+    because `_teardown` holds `RunnerPool.lock`), is killed if still running, forwarded as an
+    `error` line naming the card's ref, and the removal goes ahead. The run's outcome never
+    changes. **The hook must be idempotent:** if it succeeds and the `git worktree remove`
+    after it fails, the retry finds the link still intact and runs the hook again.
   - **Shared `.git`.** Worktrees never get their own clone; `git worktree add/remove/prune`
     routes through `git_worktree_with_retry`, the same bounded-retry discipline as
     `git fetch` (RLY-224 §6), since concurrent per-card creates/teardowns race on the one

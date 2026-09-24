@@ -36,6 +36,13 @@ the Runners view, and resumes on its own at the reset, or earlier if a probe sho
 dropped. A missing key means no limit. A card waiting only on paused runners shows an amber
 `Rate limited · resumes …` chip.
 
+**Worktree hooks.** `.relay/runner.json` can carry `"worktrees": {"prepare":
+".relay/prepare-worktree.sh", "cleanup": ".relay/cleanup-worktree.sh"}` (those are also the
+defaults). `prepare` warms a new per-card worktree, and a failure fails the run. `cleanup` runs
+right before the runner deletes one, to stop per-worktree servers or databases. It is
+best-effort (a failure is logged and the tree is removed anyway), times out after 120s, and
+must be safe to run twice. A flat top-level `"prepare"` still works but is deprecated.
+
 Full reference for any of the below: `$RELAY_URL/docs` (CLI, API, auth, statuses).
 
 ## Mental model — where state lives, where it drops
