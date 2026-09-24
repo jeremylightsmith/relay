@@ -36,8 +36,12 @@ defmodule Dagre do
   ## Options
 
     * `:nodes` — `[%{id: term, width: non_neg_integer, height: non_neg_integer}]`
-    * `:edges` — `[%{id: term, from: node_id, to: node_id, label: %{width:, height:} | nil}]`
-      (`label` may be omitted)
+    * `:edges` — `[%{id: term, from: node_id, to: node_id, label: %{width:, height:} | nil, weight: pos_integer}]`
+      (`label` and `weight` may be omitted). `weight` (default 1) says how much
+      an edge wants to be straight: when the edges heavier than all their
+      neighbours form a single directed path, every node on it gets the same
+      x-centre, so the path is drawn as one vertical line. Only `Dagre.Position`
+      reads it — ranking and crossing reduction ignore weight.
     * `:rankdir` — `:tb` (default; top to bottom). `:lr` is a planned future
       option and raises today.
     * `:ranksep` — vertical gap between layers (default 50). When any edge has
@@ -137,7 +141,14 @@ defmodule Dagre do
       raise ArgumentError, "edge #{inspect(id)} refers to unknown node #{inspect(endpoint)}"
     end
 
-    %{index: i, id: id, from: index[from], to: index[to], label: label!(Map.get(edge, :label), id)}
+    %{
+      index: i,
+      id: id,
+      from: index[from],
+      to: index[to],
+      label: label!(Map.get(edge, :label), id),
+      weight: weight!(Map.get(edge, :weight, 1), id)
+    }
   end
 
   defp edge!(edge, _i, _index), do: raise(ArgumentError, "an edge needs :id, :from and :to: #{inspect(edge)}")
@@ -154,6 +165,11 @@ defmodule Dagre do
 
   defp label!(label, id),
     do: raise(ArgumentError, "label of edge #{inspect(id)} needs :width and :height: #{inspect(label)}")
+
+  defp weight!(weight, _id) when is_integer(weight) and weight > 0, do: weight
+
+  defp weight!(weight, id),
+    do: raise(ArgumentError, "weight of edge #{inspect(id)} must be a positive integer, got: #{inspect(weight)}")
 
   defp non_neg_integer?(value), do: is_integer(value) and value >= 0
 
@@ -175,7 +191,7 @@ defmodule Dagre do
       end)
 
     Enum.reduce(edges, graph, fn edge, graph ->
-      Graph.add_edge(graph, edge.index, edge.from, edge.to, %{minlen: minlen, label: edge.label})
+      Graph.add_edge(graph, edge.index, edge.from, edge.to, %{minlen: minlen, label: edge.label, weight: edge.weight})
     end)
   end
 

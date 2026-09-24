@@ -66,4 +66,17 @@ defmodule Dagre.NormalizeTest do
     assert label == {label_dummy.x + 20, label_dummy.y + 5}
     assert routed[2].label == nil
   end
+
+  test "every segment of a long edge's chain carries the edge's weight" do
+    g = Graph.put_edge_attr(graph(), 1, :weight, 3)
+    {g, _chains} = Normalize.run(g)
+
+    for i <- 0..2, do: assert(Graph.edge(g, {:segment, 1, i}).weight == 3)
+    assert Graph.edge(g, 2) == %{label: nil}
+  end
+
+  test "a chain of an edge with no weight gets the default weight of 1" do
+    {g, _chains} = Normalize.run(graph())
+    for i <- 0..2, do: assert(Graph.edge(g, {:segment, 1, i}).weight == 1)
+  end
 end

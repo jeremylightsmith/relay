@@ -13,13 +13,14 @@ defmodule Dagre.InvariantsTest do
   defp e(id, from, to), do: %{id: id, from: from, to: to}
   defp e(id, from, to, {w, h}), do: %{id: id, from: from, to: to, label: %{width: w, height: h}}
 
-  defp random_dag(seed, count) do
+  defp random_dag(seed, count, weighted? \\ false) do
     :rand.seed(:exsss, {seed, seed * 7, seed * 13})
     nodes = for i <- 1..count, do: n(i, 20 + :rand.uniform(140), 20 + :rand.uniform(40))
 
     edges =
       for i <- 1..count, j <- (i + 1)..count//1, :rand.uniform() < 0.12 do
-        if :rand.uniform() < 0.4, do: e({i, j}, i, j, {30 + :rand.uniform(80), 16}), else: e({i, j}, i, j)
+        edge = if :rand.uniform() < 0.4, do: e({i, j}, i, j, {30 + :rand.uniform(80), 16}), else: e({i, j}, i, j)
+        if weighted?, do: Map.put(edge, :weight, :rand.uniform(3)), else: edge
       end
 
     %{nodes: nodes, edges: edges}
@@ -89,8 +90,28 @@ defmodule Dagre.InvariantsTest do
           e(9, "implement", "implement", {100, 16})
         ]
       },
+      # A heavy path a → b → c → d → e with light long edges and side nodes around it,
+      # so light dummy chains contend with the path for alignment.
+      heavy_path: %{
+        nodes: [n("a"), n("b"), n("c", 117), n("d"), n("e"), n("x", 90), n("y"), n("z", 60)],
+        edges: [
+          %{id: 1, from: "a", to: "b", weight: 5},
+          %{id: 2, from: "b", to: "c", weight: 5, label: %{width: 64, height: 16}},
+          %{id: 3, from: "c", to: "d", weight: 5},
+          %{id: 4, from: "d", to: "e", weight: 5},
+          e(5, "x", "e"),
+          e(6, "a", "y", {92, 16}),
+          e(7, "y", "d"),
+          e(8, "x", "c"),
+          e(9, "b", "z"),
+          e(10, "z", "e", {70, 16}),
+          e(11, "e", "b", {96, 16})
+        ]
+      },
       random_dag: random_dag(1, 24),
-      random_dag_2: random_dag(2, 30)
+      random_dag_2: random_dag(2, 30),
+      weighted_random_dag: random_dag(3, 24, true),
+      weighted_random_dag_2: random_dag(4, 36, true)
     }
   end
 
@@ -140,8 +161,11 @@ defmodule Dagre.InvariantsTest do
         :fan_out_labelled,
         :long_edge,
         :review_loop,
+        :heavy_path,
         :random_dag,
-        :random_dag_2
+        :random_dag_2,
+        :weighted_random_dag,
+        :weighted_random_dag_2
       ] do
     describe "#{name}" do
       setup do
@@ -252,5 +276,12 @@ defmodule Dagre.InvariantsTest do
     assert inside?(List.last(loop.points), box(l, "work"))
 
     for id <- [1, 3, 5], do: refute(l.edges[id].reversed?)
+  end
+
+  test "the heavy_path fixture's heavy edges are one vertical line" do
+    l = lay_out(fixtures().heavy_path)
+    [x] = ~w(a b c d e) |> Enum.map(&(l.nodes[&1].x + div(l.nodes[&1].width, 2))) |> Enum.uniq()
+
+    for id <- 1..4, {px, _} <- l.edges[id].points, do: assert(px == x)
   end
 end

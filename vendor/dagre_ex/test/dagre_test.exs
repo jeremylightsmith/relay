@@ -81,4 +81,16 @@ defmodule DagreTest do
 
     assert_raise ArgumentError, ~r/needs :id, :width and :height/, fn -> Dagre.layout(nodes: [%{id: 1}]) end
   end
+
+  test "rejects an edge weight that is not a positive integer" do
+    for weight <- [0, -1, 1.5, "2", nil] do
+      assert_raise ArgumentError, ~r/weight of edge 0 must be a positive integer/, fn ->
+        Dagre.layout(nodes: [n(1), n(2)], edges: [%{id: 0, from: 1, to: 2, weight: weight}])
+      end
+    end
+  end
+
+  test "accepts a positive integer edge weight" do
+    assert %Layout{} = Dagre.layout(nodes: [n(1), n(2)], edges: [%{id: 0, from: 1, to: 2, weight: 5}])
+  end
 end

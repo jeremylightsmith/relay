@@ -50,7 +50,8 @@ defmodule Dagre.Normalize do
   end
 
   defp normalize_edge({id, from, to}, {graph, chains}) do
-    label = Map.get(Graph.edge(graph, id), :label)
+    attrs = Graph.edge(graph, id)
+    label = Map.get(attrs, :label)
     from_rank = Graph.node(graph, from).rank
     to_rank = Graph.node(graph, to).rank
 
@@ -62,12 +63,12 @@ defmodule Dagre.Normalize do
         raise ArgumentError, "labelled edge #{inspect(id)} must span at least two ranks"
 
       true ->
-        {graph, chain} = split(graph, id, {from, from_rank}, {to, to_rank}, label)
+        {graph, chain} = split(graph, id, {from, from_rank}, {to, to_rank}, {label, Map.get(attrs, :weight, 1)})
         {graph, Map.put(chains, id, chain)}
     end
   end
 
-  defp split(graph, id, {from, from_rank}, {to, to_rank}, label) do
+  defp split(graph, id, {from, from_rank}, {to, to_rank}, {label, weight}) do
     label_rank = if label, do: from_rank + div(to_rank - from_rank, 2)
     ranks = Enum.to_list((from_rank + 1)..(to_rank - 1)//1)
     dummies = Enum.map(ranks, &{:dummy, id, &1})
@@ -83,7 +84,9 @@ defmodule Dagre.Normalize do
       path
       |> Enum.zip(tl(path))
       |> Enum.with_index()
-      |> Enum.reduce(graph, fn {{a, b}, i}, graph -> Graph.add_edge(graph, {:segment, id, i}, a, b) end)
+      |> Enum.reduce(graph, fn {{a, b}, i}, graph ->
+        Graph.add_edge(graph, {:segment, id, i}, a, b, %{weight: weight})
+      end)
 
     {graph, %{from: from, to: to, dummies: dummies, label: label_rank && {:dummy, id, label_rank}}}
   end
