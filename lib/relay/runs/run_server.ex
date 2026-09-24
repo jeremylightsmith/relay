@@ -470,7 +470,7 @@ defmodule Relay.Runs.RunServer do
   #   * `sub_task_id` present -> the first execution in this run with the same node_key AND
   #     sub_task_id (the foreach shape: this node's first go at THIS task);
   #   * `sub_task_id` nil     -> the first execution in this run with the same node_key (this
-  #     node's first visit in the run — final_fix, smoke_fix, acceptance_fix).
+  #     node's first visit in the run — final_fix, github_fix).
   defp binding_first_execution_id(run, job) do
     case Repo.get(NodeExecution, job.node_execution_id) do
       %NodeExecution{node_key: node_key, sub_task_id: sub_task_id} ->

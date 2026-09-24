@@ -38,8 +38,8 @@ defmodule Relay.Flows.DocumentTest do
       assert doc["trigger"] == %{"pulls_from" => "Plan:Done", "works_in" => "Code", "lands_on" => "Review"}
       assert is_list(doc["nodes"])
       assert hd(doc["nodes"])["key"] == "branch"
-      assert length(doc["nodes"]) == 18
-      assert length(doc["edges"]) == 38
+      assert length(doc["nodes"]) == 21
+      assert length(doc["edges"]) == 44
     end
 
     test "is sparse: nil fields and schema defaults are omitted" do

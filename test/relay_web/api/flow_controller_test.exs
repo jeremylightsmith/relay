@@ -52,7 +52,7 @@ defmodule RelayWeb.Api.FlowControllerTest do
       assert doc["version"] == 1
       assert doc["enabled"] == false
       assert doc["isolation"] == "exclusive"
-      assert length(doc["nodes"]) == 18
+      assert length(doc["nodes"]) == 21
       assert Enum.find(doc["nodes"], &(&1["key"] == "implement"))["expects_commits"] == true
     end
 

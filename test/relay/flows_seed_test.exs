@@ -74,23 +74,23 @@ defmodule Relay.FlowsSeedTest do
     assert [%{key: "write_plan", type: :agent, run: "/write-plan {ref}", max_retries: 1}] = plan.nodes
 
     code = Flows.get_flow(ctx.board, "code")
-    assert length(code.nodes) == 18
-    assert length(code.edges) == 38
+    assert length(code.nodes) == 21
+    assert length(code.edges) == 44
 
     # The next_task grep-gate is gone: "which task is next" is engine-derived now.
     refute Enum.any?(code.nodes, &(&1.key == "next_task"))
     assert %{foreach: "card.sub_tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
 
     implement = Enum.find(code.nodes, &(&1.key == "implement"))
-    assert %{type: :agent, model: "sonnet", effort: "high"} = implement
+    assert %{type: :agent, model: "opus", effort: "high"} = implement
 
     assert %{type: :gate, run: "mix precommit"} = Enum.find(code.nodes, &(&1.key == "precommit"))
     assert %{type: :shell} = Enum.find(code.nodes, &(&1.key == "merge"))
 
     assert %{on: :failed, max_loops: 3} =
-             Enum.find(code.edges, &(&1.from == "spec_review" and &1.to == "implement"))
+             Enum.find(code.edges, &(&1.from == "spec_review" and &1.to == "fix_findings"))
 
-    assert %{on: :succeeded} = Enum.find(code.edges, &(&1.from == "merge" and &1.to == "done"))
+    assert %{on: :succeeded} = Enum.find(code.edges, &(&1.from == "post" and &1.to == "done"))
 
     # Two edges leave quality_review on the SAME outcome, split by their guard.
     assert %{to: "implement", when: :foreach_remaining} =
@@ -102,7 +102,7 @@ defmodule Relay.FlowsSeedTest do
     # RLY-241: the JSON files ARE the library, so the shipped expects_commits marks must
     # survive the file → Document.decode! → changeset → row path.
     assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
-             ["acceptance_fix", "final_fix", "implement", "smoke_fix"]
+             ["final_fix", "fix_findings", "implement"]
 
     assert Enum.find(code.nodes, &(&1.key == "implement")).foreach == "card.sub_tasks"
 
@@ -123,8 +123,10 @@ defmodule Relay.FlowsSeedTest do
       "quality_review" => "quality-reviewer",
       "final_review" => "final-reviewer",
       "final_fix" => "final-fixer",
+      "fix_findings" => "final-fixer",
       "smoke" => "smoke-tester",
-      "acceptance" => "acceptance-tester"
+      "acceptance" => "acceptance-tester",
+      "github_fix" => "ci-fixer"
     }
 
     for {key, agent} <- mapping do
@@ -132,10 +134,8 @@ defmodule Relay.FlowsSeedTest do
       assert File.exists?(Path.join([File.cwd!(), ".claude", "agents", "#{agent}.md"]))
     end
 
-    # smoke_fix, acceptance_fix and post keep bare prompts — no agent file exists.
-    for key <- ["smoke_fix", "acceptance_fix", "post"] do
-      assert %{agent: nil} = Enum.find(code.nodes, &(&1.key == key))
-    end
+    # post keeps a bare prompt — no agent file exists.
+    assert %{agent: nil} = Enum.find(code.nodes, &(&1.key == "post"))
   end
 
   test "is idempotent and never clobbers edits (AC 2)" do

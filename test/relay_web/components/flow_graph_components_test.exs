@@ -376,7 +376,7 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       hot_nodes =
         ~r/data-node="([^"]+)" data-type="[^"]+" data-hot/ |> Regex.scan(html) |> Enum.map(fn [_, k] -> k end)
 
-      assert Enum.sort(hot_nodes) == ~w(implement quality_review spec_review sync)
+      assert Enum.sort(hot_nodes) == ~w(fix_findings implement quality_review spec_review sync)
     end
 
     test "an edge selection renders no node emphasis" do

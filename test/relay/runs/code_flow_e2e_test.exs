@@ -161,7 +161,8 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
       # branch, 3 × (implement, spec_review, quality_review), then the tail —
       # including the two RLY-192 sync points (sync before precommit, resync +
-      # reverify before merge).
+      # reverify before merge), each gate pair's browser gate, and the deploy wait
+      # before post.
       assert Enum.map(claimed, & &1["node_id"]) == [
                "branch",
                "implement",
@@ -175,13 +176,16 @@ defmodule Relay.Runs.CodeFlowE2ETest do
                "quality_review",
                "sync",
                "precommit",
+               "browser",
                "final_review",
                "smoke",
                "acceptance",
-               "post",
                "resync",
                "reverify",
-               "merge"
+               "rebrowser",
+               "merge",
+               "deploy",
+               "post"
              ]
 
       # No next_task gate anywhere in the walk.
@@ -207,13 +211,16 @@ defmodule Relay.Runs.CodeFlowE2ETest do
                {"quality_review", Enum.at(ids, 2)},
                {"sync", nil},
                {"precommit", nil},
+               {"browser", nil},
                {"final_review", nil},
                {"smoke", nil},
                {"acceptance", nil},
-               {"post", nil},
                {"resync", nil},
                {"reverify", nil},
-               {"merge", nil}
+               {"rebrowser", nil},
+               {"merge", nil},
+               {"deploy", nil},
+               {"post", nil}
              ]
 
       assert Runs.get_run!(run.id).status == :done
@@ -224,7 +231,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       settle(server)
     end
 
-    test "a refuted review loops back to implement with the findings, leaving the task undone",
+    test "a refuted review routes to fix_findings with the findings, leaving the task undone",
          %{conn: conn, board: board} do
       %{card: card, run: run, server: server} = launch(conn, board, ["Alpha"])
 
@@ -237,8 +244,9 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       assert %{"node_id" => "spec_review"} = review = Exec.claim(conn, @runner_name, @capacity)
       Exec.outcome(conn, review["id"], %{"outcome" => "failed", "detail" => "the second assertion is missing"})
 
-      # The refusal routes straight back to implement, carrying the findings.
-      assert %{"node_id" => "implement"} = again = Exec.claim(conn, @runner_name, @capacity)
+      # The refusal routes to the findings fixer (not back to implement), carrying the findings
+      # and the task it belongs to.
+      assert %{"node_id" => "fix_findings"} = again = Exec.claim(conn, @runner_name, @capacity)
       assert again["vars"]["findings"] == "the second assertion is missing"
       assert again["vars"]["sub_task"] == "Alpha"
 
@@ -254,7 +262,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
          %{conn: conn, board: board} do
       %{card: card, run: run, server: server} = launch(conn, board, ["Alpha"])
 
-      # quality_review --failed--> implement carries max_loops: 3, so the 4th
+      # quality_review --failed--> fix_findings carries max_loops: 3, so the 4th
       # refusal on the same task exhausts it. Each refusal's text is distinct
       # so the (deliberately global) circuit breaker — which trips at 3
       # IDENTICAL failures — doesn't fire before the loop budget does.
@@ -312,8 +320,8 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       # Both tasks really did burn laps — the budget reset, it wasn't bypassed.
       by_task = Enum.group_by(executions(run), & &1.sub_task_id)
       [alpha, beta] = sub_tasks(card)
-      assert Enum.count(by_task[alpha.id], &(&1.node_key == "implement")) == 4
-      assert Enum.count(by_task[beta.id], &(&1.node_key == "implement")) == 4
+      assert Enum.count(by_task[alpha.id], &(&1.node_key == "fix_findings")) == 3
+      assert Enum.count(by_task[beta.id], &(&1.node_key == "fix_findings")) == 3
 
       assert_receive {:run_finished, %{id: finished_id}}, 5_000
       assert finished_id == run.id

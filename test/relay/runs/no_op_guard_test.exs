@@ -384,7 +384,7 @@ defmodule Relay.Runs.NoOpGuardTest do
 
   test "a reviewer's failed routes to its fix node on the first failure — no retry, no park (criterion 5)", ctx do
     # Pure engine assertion against the DB-round-tripped code flow: quality_review has no
-    # max_retries, so its :failed routes straight to implement (not a retry, not a park).
+    # max_retries, so its :failed routes straight to fix_findings (not a retry, not a park).
     code = Relay.Flows.get_flow!(ctx.board, "code")
 
     current = %{
@@ -396,6 +396,6 @@ defmodule Relay.Runs.NoOpGuardTest do
       sub_task_id: nil
     }
 
-    assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "implement", nil}
+    assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "fix_findings", nil}
   end
 end

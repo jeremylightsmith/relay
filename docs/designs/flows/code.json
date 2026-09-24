@@ -6,20 +6,20 @@
     {
       "key": "branch",
       "type": "shell",
-      "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\" && {relay} branch {ref} {branch}",
+      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\" && {relay} branch {ref} {branch}",
       "reads": ["plan"],
       "writes": ["branch"]
     },
     {
       "key": "implement",
       "type": "agent",
-      "model": "sonnet",
+      "model": "opus",
       "effort": "high",
       "max_retries": 1,
       "expects_commits": true,
       "foreach": "card.sub_tasks",
       "agent": "plan-implementer",
-      "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one."
+      "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing."
     },
     {
       "key": "spec_review",
@@ -36,6 +36,15 @@
       "run": "Judge whether the change is well-built: clean, conventional, meaningfully tested."
     },
     {
+      "key": "fix_findings",
+      "type": "agent",
+      "model": "opus",
+      "max_retries": 1,
+      "agent": "final-fixer",
+      "expects_commits": true,
+      "run": "A reviewer rejected the task you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from the plan, and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure."
+    },
+    {
       "key": "sync",
       "type": "shell",
       "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
@@ -48,6 +57,7 @@
       "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
     },
     { "key": "precommit", "type": "gate", "run": "mix precommit" },
+    { "key": "browser", "type": "gate", "run": "mix test.browser" },
     {
       "key": "final_review",
       "type": "agent",
@@ -61,7 +71,7 @@
       "model": "opus",
       "agent": "final-fixer",
       "expects_commits": true,
-      "run": "Fix every blocking finding from the review in one consolidated pass; keep the suite green."
+      "run": "Fix everything in the message in one consolidated pass, then leave the branch green: `mix precommit`, plus `mix test.browser` when the browser gate, smoke or acceptance sent you here."
     },
     {
       "key": "smoke",
@@ -71,32 +81,11 @@
       "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard."
     },
     {
-      "key": "smoke_fix",
-      "type": "agent",
-      "model": "opus",
-      "expects_commits": true,
-      "run": "Fix what the smoke run proved broken; keep the suite green."
-    },
-    {
       "key": "acceptance",
       "type": "agent",
-      "model": "opus",
+      "model": "sonnet",
       "agent": "acceptance-tester",
       "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block)."
-    },
-    {
-      "key": "acceptance_fix",
-      "type": "agent",
-      "model": "opus",
-      "expects_commits": true,
-      "run": "Fix the failing acceptance criteria; keep the suite green."
-    },
-    {
-      "key": "post",
-      "type": "agent",
-      "model": "sonnet",
-      "run": "Post the acceptance checklist and smoke screenshots to card {ref} as one comment, then record the structured result with `{relay} result {ref} @<file>`, where the file holds a JSON object with `summary`, `changes` and `screens`. `summary` is a markdown bullet list — 3-5 bullets, 1-2 sentences each — for a busy product owner who knows the product but not what things are called in the code: name the screen or flow a person clicks, never a module or function. Spend the bullets on what they should go look at — the biggest behavior changes, the technically riskiest part, and any UX you are least confident matches its docs/designs artboard — and skip the routine (tests green, criteria met: the comment already covers that). `changes` is a scannable list of user-facing changes as short verb phrases, not sentences: start with a verb, no trailing period, under about eight words — 'Adds a summary to the card drawer', not 'This change adds a summary section so that…'. A change with no user-visible effect belongs in `summary`, not `changes`.",
-      "writes": ["ai_result"]
     },
     {
       "key": "resync",
@@ -108,54 +97,80 @@
       "type": "agent",
       "model": "sonnet",
       "agent": "rebaser",
-      "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
+      "run": "Bring this branch onto current origin/main with both branch gates green — `mix precommit` and `mix test.browser`: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
     },
     { "key": "reverify", "type": "gate", "run": "mix precommit" },
+    { "key": "rebrowser", "type": "gate", "run": "mix test.browser" },
     {
       "key": "merge",
       "type": "shell",
-      "run": "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); if [ \"$state\" = MERGED ]; then url=$(gh pr view {branch} --json url -q .url 2>/dev/null || echo \"\"); [ -n \"$url\" ] && {relay} pr {ref} \"$url\"; exit 0; fi; git push --force-with-lease origin HEAD:refs/heads/{branch} && url=$(gh pr view {branch} --json url -q .url 2>/dev/null || gh pr create --fill --head {branch} --base main) && {relay} pr {ref} \"$url\" && (gh pr merge {branch} --squash --auto || gh pr merge {branch} --squash)",
+      "run": "sha=$(git rev-parse HEAD); url=$(gh pr list --head {branch} --state merged --json url,headRefOid -q \"map(select(.headRefOid == \\\"$sha\\\"))[0].url // empty\"); if [ -n \"$url\" ]; then {relay} pr {ref} \"$url\"; exit 0; fi; if [ \"$(git rev-list --count origin/main..HEAD)\" = 0 ]; then echo 'nothing on {branch} beyond origin/main to ship'; exit 0; fi; git push --force-with-lease origin HEAD:refs/heads/{branch} && url=$(gh pr list --head {branch} --state open --json url -q '.[0].url // empty') && { [ -n \"$url\" ] || url=$(gh pr create --fill --head {branch} --base main); } && {relay} pr {ref} \"$url\" && gh pr merge \"$url\" --squash --auto",
       "writes": ["pr_url"]
+    },
+    {
+      "key": "deploy",
+      "type": "shell",
+      "run": "bin/await_deploy.sh \"$({relay} card {ref} --json --field pr_url)\""
+    },
+    {
+      "key": "github_fix",
+      "type": "agent",
+      "model": "opus",
+      "agent": "ci-fixer",
+      "run": "The deploy node failed: card {ref}'s PR did not merge, or main's CI did not pass and deploy it. Its output is in the message. Work out which case it is, then leave the right commits on branch {branch}. The flow then goes back through resync, the gates and merge (which pushes and opens a PR if one is needed), and waits for the deploy again."
+    },
+    {
+      "key": "post",
+      "type": "agent",
+      "model": "sonnet",
+      "run": "Post the acceptance checklist and the smoke screenshots to card {ref} as one comment, then record the structured result with `{relay} result {ref} @<file>`.\n\nUpload every screenshot to the card first — `{relay} attach {ref} <path> --field url` prints the `/attachments/<uuid>` path the board serves. That path is what both the comment (`![caption](/attachments/<uuid>)`) and the result's `screens` use. A path on your machine (`tmp/smoke/01-door.png`) is not a URL: the browser cannot fetch it and the tile renders blank.\n\nThe file holds a JSON object with **only** these keys, each optional — `summary`, `changes`, `screens`. Anything else is refused with `422 invalid_ai_result`: there is no `deploy_url`, and a screen has no `image` / `shot` / `path` / `name`.\n\n- `summary` — a string, rendered as markdown: a bullet list, 3-5 bullets, 1-2 sentences each, for a busy product owner who knows the product but not what things are called in the code. Name the screen or flow a person clicks, never a module or function. Spend the bullets on what they should go look at — the biggest behavior changes, the technically riskiest part, and any UX you are least confident matches its docs/designs artboard — and skip the routine (tests green, criteria met: the comment already covers that).\n- `changes` — a list of **strings**, not objects: user-facing changes as short verb phrases, not sentences. Start with a verb, no trailing period, under about eight words — 'Adds a summary to the card drawer', not 'This change adds a summary section so that…'. A change with no user-visible effect belongs in `summary`, not `changes`.\n- `screens` — a list of objects with `url` (required — the `/attachments/<uuid>` path from `attach`) and `caption` (optional — one short line naming the screen and what to look at). Nothing else in the object. Omit `screens` entirely when the change has no UI.",
+      "writes": ["ai_result"]
     }
   ],
   "edges": [
-    { "from": "start",          "to": "branch" },
-    { "from": "branch",         "to": "implement",      "on": "succeeded" },
-    { "from": "implement",      "to": "spec_review",    "on": "succeeded" },
-    { "from": "spec_review",    "to": "implement",      "on": "failed", "max_loops": 3 },
-    { "from": "spec_review",    "to": "quality_review", "on": "succeeded" },
-    { "from": "quality_review", "to": "implement",      "on": "failed", "max_loops": 3 },
-    { "from": "quality_review", "to": "implement",      "on": "succeeded", "when": "foreach_remaining" },
-    { "from": "quality_review", "to": "sync",           "on": "succeeded", "when": "foreach_exhausted" },
-    { "from": "sync",           "to": "precommit",      "on": "succeeded" },
-    { "from": "sync",           "to": "sync_fix",       "on": "failed" },
-    { "from": "sync_fix",       "to": "precommit",      "on": "succeeded" },
-    { "from": "precommit",      "to": "final_fix",      "on": "failed", "max_loops": 2 },
-    { "from": "precommit",      "to": "final_review",   "on": "succeeded" },
-    { "from": "final_review",   "to": "final_fix",      "on": "failed", "max_loops": 2 },
-    { "from": "final_review",   "to": "smoke",          "on": "succeeded" },
-    { "from": "final_fix",      "to": "precommit",      "on": "succeeded" },
-    { "from": "smoke",          "to": "smoke_fix",      "on": "failed", "max_loops": 2 },
-    { "from": "smoke_fix",      "to": "smoke",          "on": "succeeded" },
-    { "from": "smoke",          "to": "acceptance",     "on": "succeeded" },
-    { "from": "acceptance",     "to": "acceptance_fix", "on": "failed", "max_loops": 2 },
-    { "from": "acceptance_fix", "to": "acceptance",     "on": "succeeded" },
-    { "from": "acceptance",     "to": "post",           "on": "succeeded" },
-    { "from": "post",           "to": "resync",         "on": "succeeded" },
-    { "from": "resync",         "to": "reverify",       "on": "succeeded" },
-    { "from": "resync",         "to": "resync_fix",     "on": "failed" },
-    { "from": "resync_fix",     "to": "reverify",       "on": "succeeded" },
-    { "from": "reverify",       "to": "resync_fix",     "on": "failed", "max_loops": 2 },
-    { "from": "reverify",       "to": "merge",          "on": "succeeded" },
-    { "from": "merge",          "to": "done",           "on": "succeeded" },
-    { "from": "merge",          "to": "resync",         "on": "failed", "max_loops": 2 },
-    { "from": "implement",      "to": "needs_input",    "on": "failed" },
-    { "from": "sync_fix",       "to": "needs_input",    "on": "failed" },
-    { "from": "final_fix",      "to": "needs_input",    "on": "failed" },
-    { "from": "smoke_fix",      "to": "needs_input",    "on": "failed" },
-    { "from": "acceptance_fix", "to": "needs_input",    "on": "failed" },
-    { "from": "resync_fix",     "to": "needs_input",    "on": "failed" },
-    { "from": "post",           "to": "needs_input",    "on": "failed" },
-    { "from": "branch",         "to": "needs_input",    "on": "failed" }
+    { "from": "start",           "to": "branch" },
+    { "from": "branch",          "to": "implement",      "on": "succeeded" },
+    { "from": "implement",       "to": "spec_review",    "on": "succeeded" },
+    { "from": "spec_review",     "to": "fix_findings",   "on": "failed", "max_loops": 3 },
+    { "from": "spec_review",     "to": "quality_review", "on": "succeeded" },
+    { "from": "quality_review",  "to": "fix_findings",   "on": "failed", "max_loops": 3 },
+    { "from": "quality_review",  "to": "implement",      "on": "succeeded", "when": "foreach_remaining" },
+    { "from": "quality_review",  "to": "sync",           "on": "succeeded", "when": "foreach_exhausted" },
+    { "from": "fix_findings",    "to": "spec_review",    "on": "succeeded" },
+    { "from": "sync",            "to": "precommit",      "on": "succeeded" },
+    { "from": "sync",            "to": "sync_fix",       "on": "failed" },
+    { "from": "sync_fix",        "to": "precommit",      "on": "succeeded" },
+    { "from": "precommit",       "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "precommit",       "to": "browser",        "on": "succeeded" },
+    { "from": "browser",         "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "browser",         "to": "final_review",   "on": "succeeded" },
+    { "from": "final_review",    "to": "final_fix",      "on": "failed", "max_loops": 4 },
+    { "from": "final_review",    "to": "smoke",          "on": "succeeded" },
+    { "from": "final_fix",       "to": "precommit",      "on": "succeeded" },
+    { "from": "smoke",           "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "smoke",           "to": "acceptance",     "on": "succeeded" },
+    { "from": "acceptance",      "to": "final_fix",      "on": "failed", "max_loops": 2 },
+    { "from": "acceptance",      "to": "resync",         "on": "succeeded" },
+    { "from": "resync",          "to": "reverify",       "on": "succeeded" },
+    { "from": "resync",          "to": "resync_fix",     "on": "failed" },
+    { "from": "resync_fix",      "to": "reverify",       "on": "succeeded" },
+    { "from": "reverify",        "to": "resync_fix",     "on": "failed", "max_loops": 2 },
+    { "from": "reverify",        "to": "rebrowser",      "on": "succeeded" },
+    { "from": "rebrowser",       "to": "resync_fix",     "on": "failed", "max_loops": 2 },
+    { "from": "rebrowser",       "to": "merge",          "on": "succeeded" },
+    { "from": "merge",           "to": "deploy",         "on": "succeeded" },
+    { "from": "merge",           "to": "resync",         "on": "failed", "max_loops": 2 },
+    { "from": "deploy",          "to": "post",           "on": "succeeded" },
+    { "from": "deploy",          "to": "github_fix",     "on": "failed", "max_loops": 2 },
+    { "from": "github_fix",      "to": "resync",         "on": "succeeded" },
+    { "from": "post",            "to": "done",           "on": "succeeded" },
+    { "from": "implement",       "to": "needs_input",    "on": "failed" },
+    { "from": "fix_findings",    "to": "needs_input",    "on": "failed" },
+    { "from": "sync_fix",        "to": "needs_input",    "on": "failed" },
+    { "from": "final_fix",       "to": "needs_input",    "on": "failed" },
+    { "from": "resync_fix",      "to": "needs_input",    "on": "failed" },
+    { "from": "github_fix",      "to": "needs_input",    "on": "failed" },
+    { "from": "post",            "to": "needs_input",    "on": "failed" },
+    { "from": "branch",          "to": "needs_input",    "on": "failed" }
   ]
 }

@@ -188,14 +188,14 @@ defmodule RelayWeb.FlowEditorLiveTest do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     view |> element(~s([data-node="implement"])) |> render_click()
 
-    view |> element("#inspector-model-opus") |> render_click()
+    view |> element("#inspector-model-sonnet") |> render_click()
     assert has_element?(view, "#flow-editor-unsaved-bar")
 
     view |> element("#flow-editor-save") |> render_click()
     view |> element("#flow-save-confirm") |> render_click()
 
     assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
-    assert Enum.any?(nodes, &(&1.key == "implement" and &1.model == "opus"))
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.model == "sonnet"))
   end
 
   test "clicking an effort chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
@@ -261,10 +261,10 @@ defmodule RelayWeb.FlowEditorLiveTest do
   } do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
 
-    # spec_review → implement (failed, max_loops: 3) is edge index 3
+    # spec_review → fix_findings (failed, max_loops: 3) is edge index 3
     view |> element(~s([data-edge="3"])) |> render_click()
     assert has_element?(view, "#inspector-edge-from", "spec_review")
-    assert has_element?(view, "#inspector-edge-to", "implement")
+    assert has_element?(view, "#inspector-edge-to", "fix_findings")
 
     view |> element("#inspector-max-loops-inc") |> render_click()
     assert has_element?(view, "#flow-editor-unsaved-bar")

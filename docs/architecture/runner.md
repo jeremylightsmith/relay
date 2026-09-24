@@ -24,28 +24,39 @@ A sketch of a Code flow in this model (edges labeled with the outcome that route
 flowchart LR
     start([start]) --> impl["agent: implement task<br/>(runs repo skills)"]
     impl -- succeeded --> review["agent: spec + quality review"]
-    review -- failed --> impl
-    review -- succeeded --> pre{"gate: mix precommit"}
-    pre -- failed --> impl
-    pre -- succeeded --> smoke["agent: smoke test"]
+    review -- failed --> fixf["agent: fix findings"]
+    fixf -- succeeded --> review
+    review -- succeeded --> pre{"gates: mix precommit<br/>+ mix test.browser"}
+    pre -- failed --> fix["agent: final fix"]
+    fix -- succeeded --> pre
+    pre -- succeeded --> smoke["agent: final review → smoke"]
+    smoke -- failed --> fix
     smoke -- needs_input --> human{{"human answers<br/>(implicit pause — card blocked)"}}
     human --> smoke
     smoke -- succeeded --> acceptance["agent: acceptance"]
-    acceptance -- succeeded --> post["agent: post checklist"]
-    post -- succeeded --> resync["shell: rebase onto origin/main"]
-    resync -- succeeded --> reverify{"gate: mix precommit"}
+    acceptance -- succeeded --> resync["shell: rebase onto origin/main"]
+    resync -- succeeded --> reverify{"gates: mix precommit<br/>+ mix test.browser"}
     resync -- failed --> resync_fix["agent: rebaser (parks on semantic conflict)"]
     resync_fix -- succeeded --> reverify
-    reverify -- succeeded --> merge["shell: push · PR · squash-merge"]
+    reverify -- succeeded --> merge["shell: push · PR · auto-merge"]
     reverify -- failed --> resync_fix
-    merge -- succeeded --> done([done])
+    merge -- succeeded --> deploy["shell: await merge + deploy"]
     merge -- failed --> resync
+    deploy -- failed --> ghfix["agent: ci-fixer"]
+    ghfix -- succeeded --> resync
+    deploy -- succeeded --> post["agent: post checklist"]
+    post -- succeeded --> done([done])
 ```
 
 A run rebases onto `origin/main` twice — once before the expensive review/smoke/acceptance
-tail and once immediately before `merge`, each followed by `mix precommit` — so a busy board
+tail and once immediately before `merge`, each followed by `mix precommit` and `mix
+test.browser` — so a busy board
 moving `main` under a long run no longer strands the work at `merge` (RLY-192); real conflicts
-route to the `rebaser` agent, which parks for a human on a semantic conflict.
+route to the `rebaser` agent, which parks for a human on a semantic conflict. After `merge` queues the
+auto-merge, `deploy` (`bin/await_deploy.sh`) waits for the PR to merge and main's CI to deploy
+it, so a card reaches Review only once its change is live; `post` runs last so its summary
+describes what shipped. The authoritative graph is
+[`docs/designs/flows/code.json`](../designs/flows/code.json).
 
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
 enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the
