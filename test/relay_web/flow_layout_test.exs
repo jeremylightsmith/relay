@@ -435,4 +435,73 @@ defmodule RelayWeb.FlowLayoutTest do
       assert FlowLayout.layout(nodes, edges).parks == MapSet.new()
     end
   end
+
+  describe "the succeeded spine (RE341)" do
+    @code_spine ~w(branch implement spec_review quality_review sync precommit final_review smoke acceptance post resync reverify merge)
+
+    defp centre_x(nodes, layout, key) do
+      node = Enum.find(nodes, &(&1.key == key))
+      {x, _y} = Map.fetch!(layout.positions, key)
+      {w, _h} = FlowLayout.node_size(node_type(node))
+      x + div(w, 2)
+    end
+
+    defp edge_pairs(edges, indexes), do: for({edge, i} <- Enum.with_index(edges), i in indexes, do: {edge.from, edge.to})
+
+    test "is the walk from start along each node's succeeded edge to done" do
+      {_nodes, edges} = code_flow()
+      steps = Enum.zip(["start" | @code_spine], @code_spine ++ ["done"])
+
+      assert edges |> edge_pairs(FlowLayout.spine(edges)) |> Enum.sort() == Enum.sort(steps)
+    end
+
+    test "leaves out the foreach loop-back and every fix node's succeeded edge" do
+      {_nodes, edges} = code_flow()
+      spine = FlowLayout.spine(edges)
+
+      for {edge, i} <- Enum.with_index(edges), Map.get(edge, :when) == :foreach_remaining or edge.from =~ "_fix" do
+        refute i in spine, "#{edge.from} → #{edge.to} is on the spine"
+      end
+    end
+
+    test "stops at a node it already visited" do
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "a", on: :succeeded}
+      ]
+
+      assert FlowLayout.spine(edges) == MapSet.new([0, 1])
+    end
+
+    test "every Code flow spine node, start_point and done_point share one x-centre" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      {start_x, _} = layout.start_point
+      {done_x, _} = layout.done_point
+
+      centres = Enum.map(@code_spine, &centre_x(nodes, layout, &1))
+      assert Enum.uniq([start_x, done_x | centres]) == [start_x], "spine centres: #{inspect(centres)}"
+    end
+
+    test "every Code flow spine edge between non-gate nodes is routed as one vertical segment" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+
+      types = Map.new(nodes, &{&1.key, &1.type})
+
+      # A gate's top/bottom border is a vertex, so RE340 fans its ports onto the faces; a spine
+      # edge touching a gate is exempt from the straight-line check.
+      for i <- FlowLayout.spine(edges), edge = Enum.at(edges, i), types[edge.from] != :gate, types[edge.to] != :gate do
+        assert [{x, _}, {x, _}] = layout.routes[i].points
+      end
+    end
+
+    test "the branching flow's triage, fix and ship sit on one vertical line" do
+      {nodes, edges} = branchy_flow()
+      layout = FlowLayout.layout(nodes, edges)
+
+      assert ~w(triage fix ship) |> Enum.map(&centre_x(nodes, layout, &1)) |> Enum.uniq() |> length() == 1
+    end
+  end
 end

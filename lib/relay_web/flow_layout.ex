@@ -7,6 +7,14 @@ defmodule RelayWeb.FlowLayout do
   every edge except a start edge carries its label's measured size, so dagre reserves real room
   for the pill and no label can land on a node or another label.
 
+  The **spine** — the happy path a reader traces first — is weighted heavier than every other edge
+  (`spine/1`, RE341), and dagre lays a heavy path out as one vertical line. The spine is the walk
+  from the start edge along each node's `:succeeded` edge until `done`. The foreach loop-back
+  (`when: :foreach_remaining`) is never a step, since it points back up the flow; and the walk
+  follows only ONE `:succeeded` edge per node. A fix node's `:succeeded` edge back into the main
+  line (`sync_fix → precommit`) is left light on purpose: weighting it too would give the rejoin
+  node two heavy in-edges, and dagre can straighten a heavy path but not a heavy fork.
+
   `layout/2` returns:
 
     * `positions` — flow node key → top-left `{x, y}` (the flow's own nodes only; `start` and
@@ -55,6 +63,10 @@ defmodule RelayWeb.FlowLayout do
   @ranksep 68
   @nodesep 24
   @edgesep 12
+
+  # dagre weight of a spine edge; every other edge keeps dagre's default of 1. dagre compares
+  # weights strictly, so any value above 1 lays the spine out identically.
+  @spine_weight 2
 
   # dagre's bounding box starts at {0, 0}; pad every side so selection rings, park badges and
   # arrowheads never clip against the canvas edge.
@@ -138,10 +150,12 @@ defmodule RelayWeb.FlowLayout do
         edge.to == @park or not known_endpoint?(edge.from, known) or not known_endpoint?(edge.to, known)
       end)
 
+    spine = spine(edges)
+
     result =
       Dagre.layout(
         nodes: dagre_nodes(nodes),
-        edges: Enum.map(drawn, &dagre_edge/1),
+        edges: Enum.map(drawn, &dagre_edge(&1, spine)),
         rankdir: :tb,
         ranksep: @ranksep,
         nodesep: @nodesep,
@@ -154,7 +168,7 @@ defmodule RelayWeb.FlowLayout do
     routes =
       drawn
       |> Map.new(fn {edge, i} -> {i, shifted(Map.fetch!(result.edges, i), edge)} end)
-      |> spread_ports(result.nodes, types)
+      |> spread_ports(result.nodes, types, spine)
       |> Map.new(fn {i, route} -> {i, %{points: orthogonal(route.points), label: route.label}} end)
 
     %{
@@ -166,6 +180,29 @@ defmodule RelayWeb.FlowLayout do
       parks: for(%{to: @park, from: from} <- edges, into: MapSet.new(), do: from)
     }
   end
+
+  @doc """
+  The spine of a flow: indexes into `edges` of the walk from the start edge along each node's
+  `:succeeded` edge (never the foreach loop-back), stopping at a node with no such edge or one the
+  walk already visited. When a node has several, the first in `edges` order is taken.
+  """
+  @spec spine([map]) :: MapSet.t(non_neg_integer)
+  def spine(edges), do: walk_spine(Enum.with_index(edges), "start", MapSet.new(["start"]), MapSet.new())
+
+  defp walk_spine(indexed, from, visited, spine) do
+    case Enum.find(indexed, fn {edge, _i} -> edge.from == from and spine_step?(edge) end) do
+      {edge, i} ->
+        if MapSet.member?(visited, edge.to),
+          do: spine,
+          else: walk_spine(indexed, edge.to, MapSet.put(visited, edge.to), MapSet.put(spine, i))
+
+      nil ->
+        spine
+    end
+  end
+
+  defp spine_step?(%{from: "start"}), do: true
+  defp spine_step?(edge), do: Map.get(edge, :on) == :succeeded and Map.get(edge, :when) != :foreach_remaining
 
   defp known_endpoint?(key, known), do: key in ["start", "done"] or MapSet.member?(known, key)
 
@@ -180,12 +217,16 @@ defmodule RelayWeb.FlowLayout do
   end
 
   # A start edge draws no pill (the renderer never labels it), so it reserves no label room.
-  defp dagre_edge({%{from: "start"} = edge, i}), do: %{id: i, from: endpoint(edge.from), to: endpoint(edge.to)}
+  defp dagre_edge({%{from: "start"} = edge, i}, spine),
+    do: weighted(%{id: i, from: endpoint(edge.from), to: endpoint(edge.to)}, i, spine)
 
-  defp dagre_edge({edge, i}) do
+  defp dagre_edge({edge, i}, spine) do
     {w, h} = label_size(edge)
-    %{id: i, from: endpoint(edge.from), to: endpoint(edge.to), label: %{width: w, height: h}}
+    weighted(%{id: i, from: endpoint(edge.from), to: endpoint(edge.to), label: %{width: w, height: h}}, i, spine)
   end
+
+  defp weighted(dagre_edge, i, spine),
+    do: if(MapSet.member?(spine, i), do: Map.put(dagre_edge, :weight, @spine_weight), else: dagre_edge)
 
   # `start` and `done` are the edge-endpoint sentinels; dagre ids are namespaced so a node an
   # author transiently names "done" (the editor blocks saving it) still lays out instead of
@@ -248,7 +289,7 @@ defmodule RelayWeb.FlowLayout do
   #   5. Rebuild that end of the route as a vertical stub from the port to the edge of the node's
   #      rank band, dropping dagre's own anchor and band point. The hop from the stub to the next
   #      waypoint turns diagonal and `orthogonal/1` doglegs it in the inter-rank gap.
-  defp spread_ports(routes, dagre_nodes, types) do
+  defp spread_ports(routes, dagre_nodes, types, spine) do
     boxes = Map.new(dagre_nodes, fn {id, node} -> {id, shift_box(node)} end)
     bands = rank_bands(dagre_nodes, boxes)
 
@@ -257,7 +298,7 @@ defmodule RelayWeb.FlowLayout do
     |> Enum.group_by(&{&1.id, &1.side})
     |> Enum.reject(fn {{id, _side}, group} -> id == :start or length(group) == 1 end)
     |> Enum.flat_map(fn {{id, side}, group} ->
-      assign_ports(group, Map.get(types, id, id), Map.fetch!(boxes, id), side, band_edge(bands, id, side))
+      assign_ports(group, Map.get(types, id, id), Map.fetch!(boxes, id), side, band_edge(bands, id, side), spine)
     end)
     |> Enum.reduce(routes, fn {i, role, port, band_y}, routes ->
       Map.update!(routes, i, &%{&1 | points: restub(&1.points, role, port, band_y)})
@@ -275,18 +316,32 @@ defmodule RelayWeb.FlowLayout do
     end
   end
 
-  defp assign_ports(group, type, box, side, band_y) do
+  # A spine edge (RE341) keeps the node's centre — the column the spine is laid out on — so it
+  # stays one vertical line; the other edges spread evenly either side of it, in the same
+  # crossing-free order. With no spine edge in the group, or on a gate (whose top/bottom border
+  # is a vertex, so its ports fan out along the faces), all ports spread evenly.
+  defp assign_ports(group, type, box, side, band_y, spine) do
     {left, right} = port_span(type, box)
-    n = length(group)
+    {bx, _by, bw, _bh} = box
+    centre = bx + div(bw, 2)
+    sorted = Enum.sort_by(group, &{heading_x(&1), far_x(&1), &1.index})
 
-    group
-    |> Enum.sort_by(&{heading_x(&1), far_x(&1), &1.index})
-    |> Enum.with_index(1)
-    |> Enum.map(fn {e, k} ->
-      x = left + div((right - left) * k, n + 1)
-      {e.index, e.role, {x, border_y(type, box, side, x)}, band_y}
-    end)
+    xs =
+      case pinned_index(type, sorted, spine) do
+        nil -> spread(left, right, length(sorted))
+        p -> spread(left, centre, p) ++ [centre] ++ spread(centre, right, length(sorted) - p - 1)
+      end
+
+    sorted
+    |> Enum.zip(xs)
+    |> Enum.map(fn {e, x} -> {e.index, e.role, {x, border_y(type, box, side, x)}, band_y} end)
   end
+
+  defp pinned_index(:gate, _sorted, _spine), do: nil
+  defp pinned_index(_type, sorted, spine), do: Enum.find_index(sorted, &MapSet.member?(spine, &1.index))
+
+  # `n` x positions evenly strictly between `from` and `to`.
+  defp spread(from, to, n), do: Enum.map(1..n//1, &(from + div((to - from) * &1, n + 1)))
 
   defp shift_box(%{x: x, y: y, width: w, height: h}) do
     {sx, sy} = shift({x, y})
