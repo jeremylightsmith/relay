@@ -437,7 +437,7 @@ defmodule RelayWeb.FlowLayoutTest do
   end
 
   describe "the succeeded spine (RE341)" do
-    @code_spine ~w(branch implement spec_review quality_review sync precommit final_review smoke acceptance post resync reverify merge)
+    @code_spine ~w(branch implement spec_review quality_review sync precommit browser final_review smoke acceptance resync reverify rebrowser merge deploy post)
 
     defp centre_x(nodes, layout, key) do
       node = Enum.find(nodes, &(&1.key == key))
