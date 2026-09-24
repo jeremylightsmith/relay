@@ -1074,6 +1074,14 @@ defmodule RelayWeb.CoreComponents do
   us in — so `BoardLive` pushes `board_search_cleared` and the `BoardSearchInput` hook empties
   the box. Same split, same reason as `InlineNameInput` (RE263).
 
+  `/` focuses the box (RE342, advertised as `aria-keyshortcuts="/"`), and that also lives in the
+  `BoardSearchInput` hook, as a `window` keydown listener rather than `phx-window-keydown` +
+  `JS.focus`. The shortcut has to stand down when focus is in an editable field (`a/b` in a title
+  is a literal slash), on a Ctrl/⌘/Alt chord, while the card drawer overlay is open (focus would be
+  stranded behind it), and when this box is `hidden` at the current width. A declarative binding
+  can express none of those guards. Keeping it in the hook means the shortcut exists exactly
+  where the box does; the storybook page passes `hook={nil}` and gets none.
+
   Each `results` item is a plain map resolved server-side —
   `%{ref:, title:, stage:, archived:, path:}` — which keeps this a pure presentation function
   and lets the storybook story hand it literals.
@@ -1116,6 +1124,7 @@ defmodule RelayWeb.CoreComponents do
           autocomplete="off"
           role="searchbox"
           aria-label="Search cards"
+          aria-keyshortcuts="/"
           placeholder="Search cards…"
           phx-debounce="200"
           phx-hook={@hook}
