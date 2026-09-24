@@ -65,4 +65,13 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "Settings"
     assert html =~ "Flows"
   end
+
+  test "GET /storybook/flow_graph shows the RE333 branching variation — a diverging branch and several terminals",
+       %{conn: conn} do
+    html = conn |> get("/storybook/flow_graph") |> html_response(200)
+
+    for key <- ~w(triage fix ship write_docs publish escalate) do
+      assert html =~ ~s(data-node="#{key}"), "branching variation is missing node #{key}"
+    end
+  end
 end
