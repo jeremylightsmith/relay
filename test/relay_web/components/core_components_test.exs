@@ -2302,6 +2302,13 @@ defmodule RelayWeb.CoreComponentsTest do
       assert CoreComponents.blocked_strip_eyebrow(true, :question, "quality_review") ==
                "QUALITY_REVIEW ASKED AND EXITED"
     end
+
+    test "an infrastructure park says the node could not run (RE308)" do
+      assert CoreComponents.blocked_strip_eyebrow(true, :infrastructure, "implement") ==
+               "IMPLEMENT COULD NOT RUN"
+
+      assert CoreComponents.blocked_strip_eyebrow(true, :infrastructure, nil) == "NEEDS YOUR ANSWER"
+    end
   end
 
   describe "needs_input_panel/1" do
@@ -2317,6 +2324,48 @@ defmodule RelayWeb.CoreComponentsTest do
       }
 
       render_component(&CoreComponents.needs_input_panel/1, Map.merge(base, extra))
+    end
+
+    test "an infrastructure park shows the cause and Retry — no answer box, no attempt count (RE308)" do
+      detail = "agent could not run: Failed to authenticate: OAuth session expired and could not be refreshed"
+
+      html =
+        panel(%{
+          park_kind: :infrastructure,
+          node: "quality_review",
+          attempt: 3,
+          question: detail,
+          failure_detail: detail
+        })
+
+      assert html =~ "AGENT COULD NOT RUN"
+      assert html =~ ~s(id="needs-input-infrastructure")
+      assert html =~ "Agent could not run"
+      assert html =~ "quality_review"
+
+      # the cause, in the same dark <pre> the escalation face uses
+      assert html =~ ~s(id="needs-input-failure-detail")
+      assert html =~ "OAuth session expired"
+      assert html =~ "background:var(--color-neutral)"
+
+      # Retry is the only action — the fix is outside the card
+      assert html =~ ~s(id="needs-input-retry")
+      assert html =~ "Retry quality_review"
+      refute html =~ ~s(id="needs-input-form")
+      refute html =~ ~s(id="needs-input-answer")
+      refute html =~ "<textarea"
+
+      # no retry was spent, so no "N attempts" readout; no duplicate markdown question
+      refute html =~ "attempt"
+      refute html =~ ~s(id="needs-input-question")
+      refute html =~ "NODE FAILED"
+    end
+
+    test "an infrastructure park with no captured detail falls back to the question text" do
+      html = panel(%{park_kind: :infrastructure, node: "implement", question: "agent could not run: usage limit"})
+
+      assert html =~ ~s(id="needs-input-failure-detail")
+      assert html =~ "usage limit"
     end
 
     test "a question park keeps today's label, markdown question and placeholder, with no Retry" do

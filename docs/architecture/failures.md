@@ -23,22 +23,31 @@ is [runner.md](runner.md).
 | A5 | **No route** | `failed` with no `:failed` edge, or budgets spent | `{:fail}` → run `failed` → `mark_failed` → card `failed` | `failed` |
 | A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move since the node was *entered* — per visit, not per attempt, so a retry still counts a commit an earlier attempt of the same visit made (RE298) | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex`) → routes as A2–A5. **Unless** the node asserted `--no-changes` AND this node already committed for what it is bound to (RE310) — then the `succeeded` stands | as A2–A5 |
 | A6b | **Work already committed** | an `expects_commits` node is re-entered onto work its own earlier visit already committed, so it *cannot* move HEAD (RE306) | the failure detail names the exit (`relay outcome succeeded --no-changes`) instead of repeating "produced no commits"; a human can also `relay advance <ref>` / press "Task already done — continue" to check the task off and move on (`Runs.advance_foreach/2`) | recoverable — previously an inescapable loop |
-| A7 | **Same error looping** | 3 identical `failure_signature`s | circuit breaker `{:fail}` even with budget left (`engine.ex:82`) | `failed` |
+| A7 | **Same error looping** | 3 identical `failure_signature`s (only `failed` rows count — a `blocked` row never does, A11) | circuit breaker `{:fail}` even with budget left (`engine.ex:82`) | `failed` |
 | A8 | **Runaway** | `max_loops` on an edge, or 20 node visits, exceeded | `{:fail}` | `failed` |
 | A9 | **Unrouted non-failed outcome** | outcome (e.g. `partial`) with no matching edge | `degrade_to_failed` — follow the node's `:failed` edge, spending *its* budget (`engine.ex:145`) | as A3–A5 |
 | A10 | **Broken baton** | a node declaring `writes` reports `succeeded` with a declared card field still blank | rewritten to `failed` before finalize (`override_missing_writes/4`, `run_server.ex`) → routes as A2–A5 | as A2–A5 |
+| A11 | **Agent could not run (infrastructure)** | an agent node's `claude -p` exits non-zero with an auth or usage-limit signature in its stream — expired OAuth session, invalid key, a rejected `rate_limit_event` (RE308) | the runner reports `blocked` (`classify_claude_failure`, `./relay`) with `agent could not run: <reason>`; the engine parks *before* the breaker and retry rules (`{:park, :blocked}`, `engine.ex`), so no `max_retries`, breaker count or `max_loops` is spent; the attempt's session is dropped (`finalize_job!/2`) and the Listener never `--resume`s it; classified `:infrastructure` by `Relay.Runs.park_kind/1`, revivable by Retry | `parked/needs_input` |
 
-**Telling A1 from A4 (RE253).** Both end as `parked/needs_input`, and the only surviving difference
-in the database is the latest `NodeExecution.outcome` — `:needs_input` for A1, `:failed` for A4.
+**Telling A1, A4 and A11 apart (RE253, RE308).** All three end as `parked/needs_input`, and the
+only surviving difference in the database is the latest `NodeExecution.outcome` — `:needs_input`
+for A1, `:blocked` for A11, anything else (`:failed`, or a degraded `:partial`) for A4.
 `Relay.Runs.park_kind/1` is the one function that reads that difference, and the inference is
-exact: a `:needs_input` outcome parks in `Engine.decide/4` *before* edge routing is ever reached, so
-the two cases cannot collide and no `parked_reason` value or schema column is needed to separate
-them. The drawer renders A1 as the question the agent asked, and A4 as an answerable escalation —
-the failed node and its attempt count, the failure output in a dark `<pre>`, an answer box that
-resumes the node with the human's note as `findings`, and a Retry beside it. There is deliberately
-no "agent stopped" dead end: an agent that dies environmentally reports `failed` exactly like a node
-that ran and honestly failed, so the two are not distinguishable from the data and the UI must not
-pretend otherwise.
+exact: `:needs_input` and `:blocked` both park in `Engine.decide/4` *before* edge routing is ever
+reached, so no two cases can collide and no `parked_reason` value or schema column is needed to
+separate them. The drawer renders A1 as the question the agent asked; A4 as an answerable
+escalation — the failed node and its attempt count, the failure output in a dark `<pre>`, an
+answer box that resumes the node with the human's note as `findings`, and a Retry beside it; and
+A11 as **Agent could not run** — the cause in the same `<pre>` and a Retry, with no answer box (the
+fix is outside the card: log back in, or wait for the limit to reset) and no attempt count (none
+was spent). RE253 deliberately had no "agent stopped" state, because an agent that died
+environmentally was indistinguishable in the data from one that honestly failed. RE308 made it
+distinguishable: the runner classifies a non-zero `claude -p` exit from the stream itself (the
+assistant event's `error` tag, the result's `api_error_status`, a rejected `rate_limit_event`, then
+a phrase fallback) and reports `blocked` instead of `failed`. An expired login therefore no longer
+spends the retry budget, trips the breaker, or hands the next node `agent exited non-zero` as a
+phantom finding. A non-zero exit with no such signature is still `failed`, now with the stream's
+last words in its detail.
 
 **Telling a silent no-op from work already done (RE310).** Both look identical at the moment of
 the report — an `expects_commits` node saying `succeeded` with HEAD unmoved — and the engine tells

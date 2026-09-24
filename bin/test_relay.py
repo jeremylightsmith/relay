@@ -114,6 +114,34 @@ def rate_limit_event(five_hour=None, seven_day=None, resets_at=0, status="allowe
                                 "overageStatus": "rejected", "isUsingOverage": False}}
 
 
+# RE308 — the stream shape verified against Claude Code 2.1.281 with a bad credential: an assistant
+# event carrying a TOP-LEVEL `error` tag and the reason as text, then an errored `result` with
+# `api_error_status` (its `subtype` reads "success", so it is useless), and exit 1.
+OAUTH_EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed"
+AUTH_ASSISTANT_EVENT = {"type": "assistant", "error": "authentication_failed",
+                        "is_api_error_message": True,
+                        "message": {"content": [{"type": "text", "text": OAUTH_EXPIRED}]}}
+AUTH_RESULT_EVENT = {"type": "result", "subtype": "success", "is_error": True,
+                     "api_error_status": 401, "result": OAUTH_EXPIRED, "num_turns": 1}
+FAR_RESET = 4_102_444_800   # 2100-01-01
+
+
+def claude_report(*events):
+    """A ClaudeRunReport fed `events` in order, exactly as _stream_claude_job feeds it."""
+    report = relay.ClaudeRunReport()
+    for ev in events:
+        report.observe(ev)
+    return report
+
+
+def assistant_text_event(text):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+
+def errored_result_event(text):
+    return {"type": "result", "is_error": True, "result": text}
+
+
 class _FakeResp:
     """Minimal stand-in for a urlopen() result: a context manager with .read()."""
 
@@ -3091,6 +3119,42 @@ class StreamClaudeJobTest(unittest.TestCase):
         self._popen = relay.subprocess.Popen
         self.addCleanup(setattr, relay.subprocess, "Popen", self._popen)
 
+    def test_the_report_records_how_an_auth_failure_ended(self):
+        """RE308: `_stream_claude_job` used to keep only the session id, so the auth error that
+        was in the stream the whole time never reached the outcome."""
+        lines = [json.dumps({"type": "system", "subtype": "init", "session_id": "sess-1"}),
+                 json.dumps(AUTH_ASSISTANT_EVENT), json.dumps(AUTH_RESULT_EVENT)]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
+        ok, session, report = capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertFalse(ok)
+        self.assertEqual(session, "sess-1")
+        self.assertEqual(report.error_tag, "authentication_failed")
+        self.assertTrue(report.is_error)
+        self.assertEqual(report.api_error_status, 401)
+        self.assertEqual(report.result_text, OAUTH_EXPIRED)
+        self.assertEqual(report.assistant_text, OAUTH_EXPIRED)
+
+    def test_the_report_records_a_rejected_rate_limit_event_from_this_stream(self):
+        lines = [json.dumps(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
+        _ok, _session, report = capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertTrue(report.rejected)
+        self.assertEqual(report.rejected_window, "five_hour")
+        self.assertEqual(report.rejected_resets_at, FAR_RESET)
+
+    def test_an_allowed_rate_limit_event_is_not_a_rejection(self):
+        report = claude_report(rate_limit_event(five_hour=0.2, resets_at=FAR_RESET))
+        self.assertFalse(report.rejected)
+
+    def test_the_report_survives_garbage_events(self):
+        report = claude_report("nope", {"type": "assistant", "message": "not-a-dict"},
+                               {"type": "result", "api_error_status": True, "result": 7},
+                               {"type": "rate_limit_event", "rate_limit_info": []})
+        self.assertIsNone(report.api_error_status)
+        self.assertIsNone(report.result_text)
+        self.assertIsNone(report.assistant_text)
+        self.assertFalse(report.rejected)
+
     def test_captures_session_id_and_reports_success(self):
         lines = [
             json.dumps({"type": "system", "subtype": "init", "session_id": "sess-77"}),
@@ -3099,9 +3163,10 @@ class StreamClaudeJobTest(unittest.TestCase):
             json.dumps({"type": "result", "session_id": "sess-77", "num_turns": 2}),
         ]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
-        ok, session = capture_ret(relay._stream_claude_job, "do it", cwd="/tmp/wt")
+        ok, session, report = capture_ret(relay._stream_claude_job, "do it", cwd="/tmp/wt")
         self.assertTrue(ok)
         self.assertEqual(session, "sess-77")
+        self.assertIsInstance(report, relay.ClaudeRunReport)
 
     def test_resume_inserts_the_prior_session_into_argv(self):
         seen = {}
@@ -3230,6 +3295,61 @@ class StreamClaudeJobTest(unittest.TestCase):
         self.assertEqual(relay.USAGE_LIMITER.paused(1_800_000_000)["window"], "five_hour")
 
 
+class ClaudeFailureClassificationTest(unittest.TestCase):
+    """RE308: `classify_claude_failure` — structured signals first, a phrase fallback second,
+    failing TOWARD infrastructure (a spurious park costs a click; a spurious retry costs a run)."""
+
+    def test_the_structured_auth_tag_classifies_auth_with_the_streams_own_words(self):
+        self.assertEqual(relay.classify_claude_failure(claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)),
+                         {"kind": "auth", "reason": OAUTH_EXPIRED})
+
+    def test_an_http_401_alone_classifies_auth(self):
+        report = claude_report({"type": "result", "is_error": True, "api_error_status": 401,
+                                "result": "API Error: 401"})
+        self.assertEqual(relay.classify_claude_failure(report)["kind"], "auth")
+
+    def test_the_phrase_fallback_catches_an_untagged_cli(self):
+        report = claude_report(assistant_text_event("working…\n" + OAUTH_EXPIRED))
+        self.assertEqual(relay.classify_claude_failure(report), {"kind": "auth", "reason": OAUTH_EXPIRED})
+
+    def test_a_rejected_rate_limit_event_is_a_usage_limit_naming_its_reset(self):
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                               errored_result_event("Claude AI usage limit reached"))
+        failure = relay.classify_claude_failure(report)
+        self.assertEqual(failure["kind"], "usage_limit")
+        self.assertEqual(failure["reason"],
+                         "Claude AI usage limit reached · resets " + relay.local_clock(FAR_RESET))
+
+    def test_a_usage_limit_with_no_text_still_names_the_limit(self):
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))
+        self.assertEqual(relay.classify_claude_failure(report)["reason"],
+                         "Claude usage limit reached (five_hour) · resets " + relay.local_clock(FAR_RESET))
+
+    def test_the_usage_limit_phrase_fallback(self):
+        report = claude_report(errored_result_event("You've hit your limit · resets 3pm"))
+        self.assertEqual(relay.classify_claude_failure(report),
+                         {"kind": "usage_limit", "reason": "You've hit your limit · resets 3pm"})
+
+    def test_an_unrelated_error_is_not_classified(self):
+        report = claude_report(errored_result_event("TypeError: undefined is not a function"))
+        self.assertIsNone(relay.classify_claude_failure(report))
+
+    def test_no_report_and_an_empty_report_are_not_classified(self):
+        self.assertIsNone(relay.classify_claude_failure(None))
+        self.assertIsNone(relay.classify_claude_failure(relay.ClaudeRunReport()))
+
+    def test_the_reason_is_one_trimmed_line(self):
+        report = claude_report(errored_result_event("failed to authenticate " + "x" * 500))
+        reason = relay.classify_claude_failure(report)["reason"]
+        self.assertLessEqual(len(reason), relay.CLAUDE_FAILURE_TEXT_MAX)
+        self.assertNotIn("\n", reason)
+
+    def test_the_rate_limit_pause_line_uses_the_same_clock(self):
+        pause = {"window": "five_hour", "utilization": 1.0, "max": 0.9,
+                 "resets_at": FAR_RESET, "reason": relay.RATE_LIMIT_REASON_REJECTED}
+        self.assertIn("resumes " + relay.local_clock(FAR_RESET), relay.rate_limit_pause_line(pause))
+
+
 class AgentOutcomeContractTest(unittest.TestCase):
     def setUp(self):
         self._get = relay.get_card
@@ -3264,6 +3384,89 @@ class AgentOutcomeContractTest(unittest.TestCase):
         self.assertEqual(outcome, "failed")
         self.assertIn("did not write", detail)
         self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json")[0], "failed")
+
+    # ---- RE308: an agent that could not run is `blocked`, not `failed` ----
+
+    def test_an_expired_login_is_blocked_and_names_the_cause(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)
+        outcome, detail, no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertTrue(detail.startswith("agent could not run:"))
+        self.assertIn("OAuth session expired", detail)
+        self.assertNotIn("agent exited non-zero", detail)
+        self.assertIs(no_changes, False)
+
+    def test_a_usage_limit_is_blocked_and_names_the_reset(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                               errored_result_event("Claude AI usage limit reached"))
+        outcome, detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertIn("usage limit", detail)
+        self.assertIn(relay.local_clock(FAR_RESET), detail)
+        self.assertNotIn("agent exited non-zero", detail)
+
+    def test_an_unclassified_nonzero_exit_is_still_failed_with_its_last_words(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(errored_result_event("TypeError: boom"))
+        self.assertEqual(
+            relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report),
+            ("failed", "agent exited non-zero: TypeError: boom", False))
+
+    def test_a_silent_nonzero_exit_keeps_todays_exact_detail(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        job = {"vars": {"ref": "RLY-1"}}
+        self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json", report=relay.ClaudeRunReport()),
+                         ("failed", "agent exited non-zero", False))
+        self.assertEqual(relay.determine_agent_outcome(job, False, "/nope.json"),
+                         ("failed", "agent exited non-zero", False))
+
+    def test_a_declared_outcome_is_never_reclassified(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"outcome": "succeeded", "detail": "did the work"}, f)
+        self.addCleanup(os.remove, path)
+        report = claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)
+        self.assertEqual(relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, False, path, report=report),
+                         ("succeeded", "did the work", False))
+
+    def test_asking_a_human_is_never_reclassified(self):
+        relay.get_card = lambda ref: {"status": "needs_input"}
+        report = claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)
+        self.assertEqual(relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, False, None, report=report),
+                         ("needs_input", "agent asked the human", False))
+
+    def test_a_clean_exit_is_not_classified_even_with_an_auth_phrase(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(assistant_text_event(OAUTH_EXPIRED))
+        outcome, detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, True, "/nope.json", report=report)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("did not write", detail)
+
+    def test_an_outcome_file_cannot_declare_blocked(self):
+        """Only the runner may report `blocked` — an agent hand-writing it would park itself around
+        its own retry budget."""
+        relay.get_card = lambda ref: {"status": "working"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"outcome": "blocked", "detail": "let me out"}, f)
+        self.addCleanup(os.remove, path)
+        outcome, detail, _no_changes = relay.determine_agent_outcome({"vars": {"ref": "RLY-1"}}, True, path)
+        self.assertEqual(outcome, "failed")
+        self.assertIn("'blocked'", detail)
+
+    def test_a_blocked_agent_still_names_the_work_it_abandoned(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)
+        outcome, detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", cwd=self._dirty_repo(), report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertIn("uncommitted", detail)
 
     def _dirty_repo(self):
         """A git worktree carrying one committed file and one uncommitted edit."""
@@ -3425,6 +3628,26 @@ class NoChangesFlagTest(unittest.TestCase):
         self.assertIn("--no-changes", relay.OUTCOME_CONTRACT)
 
 
+class AgentCannotDeclareBlockedTest(unittest.TestCase):
+    """RE308: `blocked` is runner-only — `relay outcome blocked` must refuse."""
+
+    def setUp(self):
+        saved = os.environ.get("RELAY_NODE_OUTCOME")
+        self.addCleanup(lambda: os.environ.pop("RELAY_NODE_OUTCOME", None) if saved is None
+                        else os.environ.__setitem__("RELAY_NODE_OUTCOME", saved))
+        fd, self.path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        self.addCleanup(os.remove, self.path)
+        os.environ["RELAY_NODE_OUTCOME"] = self.path
+
+    def test_relay_outcome_blocked_dies(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                relay.cmd_outcome(argparse.Namespace(outcome="blocked", detail="x", no_changes=False))
+        with open(self.path) as f:
+            self.assertEqual(f.read(), "")   # nothing was written
+
+
 class AdvanceCommandTest(unittest.TestCase):
     """RE310's human hatch, ref-addressed like every other verb."""
 
@@ -3485,6 +3708,26 @@ class RunNodeJobTest(unittest.TestCase):
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         self.control = relay.JobControl()
+
+    def test_agent_job_hands_the_stream_report_to_the_outcome_contract(self):
+        """RE308: the report _stream_claude_job collected must reach determine_agent_outcome, and a
+        `blocked` verdict must reach the caller unchanged."""
+        report = relay.ClaudeRunReport()
+        seen = {}
+
+        def fake_stream(prompt, cwd, **kwargs):
+            return False, "sess-9", report
+
+        def fake_determine(job, ok, path, cwd=None, report=None):
+            seen["report"] = report
+            return relay.NODE_OUTCOME_BLOCKED, "agent could not run: x", False
+
+        relay._stream_claude_job = fake_stream
+        relay.determine_agent_outcome = fake_determine
+        j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
+        outcome, detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        self.assertIs(seen["report"], report)
+        self.assertEqual((outcome, detail), ("blocked", "agent could not run: x"))
 
     # --- RLY-166: never run a node on a detached HEAD -----------------------------------
     # reset_worktree() ends in `git checkout --detach` BY DESIGN, and it runs mid-run on the
@@ -3578,8 +3821,8 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9")
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
         outcome, detail, sha, session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3589,8 +3832,8 @@ class RunNodeJobTest(unittest.TestCase):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
         relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9")
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "already committed", True)
+            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
         result = relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3604,10 +3847,10 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["agent"] = agent
-            return True, "sess-9"
+            return True, "sess-9", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 agent="plan-implementer", vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3620,10 +3863,10 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["agent"] = agent
-            return True, "sess-9"
+            return True, "sess-9", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="/brainstorm {ref}", id="nj-2", run_id="r1",
                 agent=None, vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3637,10 +3880,10 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["session_id"] = session_id
-            return True, "sess-9"
+            return True, "sess-9", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 resume_session="sess-prior", vars={"ref": "RLY-2"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3655,9 +3898,9 @@ class RunNodeJobTest(unittest.TestCase):
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
-            return True, "sess-9"
+            return True, "sess-9", relay.ClaudeRunReport()
 
-        def fake_determine(job, ok, path, cwd=None):
+        def fake_determine(job, ok, path, cwd=None, report=None):
             seen["determine_path"] = path
             seen["determine_cwd"] = cwd
             return "succeeded", "", False
@@ -3727,10 +3970,10 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["prompt"] = prompt
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="/brainstorm {ref}", id="nj-8", run_id="r1",
                 vars={"ref": "RLY-8"})
         relay.run_node_job(j, "/tmp/wt", self.control)
@@ -3745,7 +3988,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["prompt"] = prompt
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None, scratch=None, plan=None):
             seen["cmd"] = cmd
@@ -3753,7 +3996,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         relay._stream_claude_job = fake_stream
         relay._stream_shell = fake_shell
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
 
         agent_job = job(node_type="agent", run="review it", id="nj-9", run_id="r1",
                         vars={"ref": "RLY-9"})
@@ -3782,10 +4025,10 @@ class RunNodeJobTest(unittest.TestCase):
 
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["prompt"] = prompt
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
 
         j = job(node_type="agent", run="implement {ref}", id="nj-251", run_id="r1",
                 vars={"ref": "RE251", "findings": "assert on CSV bytes"})
@@ -4930,7 +5173,7 @@ class ExecuteTalkTest(unittest.TestCase):
             for ev in events:
                 if on_event:
                     on_event(ev)
-            return ok, fake.session_id
+            return ok, fake.session_id, relay.ClaudeRunReport()
         fake.session_id = session_id
         relay._stream_claude_job = fake
         return fake
@@ -4973,7 +5216,7 @@ class ExecuteTalkTest(unittest.TestCase):
 
         def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
             control.cancel()
-            return True, "sess-2"
+            return True, "sess-2", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake
         pool = self._Pool()
@@ -5040,7 +5283,7 @@ class ExecuteTalkTest(unittest.TestCase):
         """RE268: the crash path used to POST session_id=None. If only the FIRST outcome POST
         failed transiently, that threw away session continuity for every later turn on the card."""
         def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
-            return True, "sess-live"
+            return True, "sess-live", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake
         boom = [RuntimeError("report blew up")]
@@ -5065,7 +5308,7 @@ class ExecuteTalkTest(unittest.TestCase):
         def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
             captured["tag"] = tag
             captured["mirror"] = mirror
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake
         pool = self._Pool()
@@ -6303,7 +6546,14 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         self.vocab = CONTRACT["vocabulary"]
 
     def test_node_outcomes_match_the_fixture(self):
-        self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["outcomes"]))
+        # RE308: NODE_OUTCOMES is what an AGENT may declare — the fixture's `agent_outcomes`.
+        self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["agent_outcomes"]))
+
+    def test_runner_reportable_outcomes_match_the_fixture(self):
+        # RE308: the runner may REPORT one outcome an agent may not DECLARE.
+        self.assertEqual(relay.RUNNER_OUTCOMES, tuple(self.vocab["outcomes"]))
+        self.assertEqual(relay.RUNNER_OUTCOMES, relay.NODE_OUTCOMES + (relay.NODE_OUTCOME_BLOCKED,))
+        self.assertNotIn(relay.NODE_OUTCOME_BLOCKED, relay.NODE_OUTCOMES)
 
     def test_active_run_states_match_the_fixture(self):
         self.assertEqual(relay.ACTIVE_RUN_STATES, tuple(self.vocab["run_states"]["active"]))
@@ -8194,10 +8444,10 @@ class TestPartitionTest(unittest.TestCase):
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
                         on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["partition"] = partition
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:
@@ -8371,10 +8621,10 @@ class ScratchPathTest(unittest.TestCase):
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
                         on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["scratch"] = scratch
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:
@@ -8488,10 +8738,10 @@ class PlanPathTest(unittest.TestCase):
         def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
                         on_proc=None, agent=None, partition=None, scratch=None, plan=None):
             seen["plan"] = plan
-            return True, "sess-1"
+            return True, "sess-1", relay.ClaudeRunReport()
 
         relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None: ("succeeded", "", False)
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
         try:

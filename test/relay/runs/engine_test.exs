@@ -77,6 +77,66 @@ defmodule Relay.Runs.EngineTest do
     assert Engine.decide(flow, [current], current) == {:park, :needs_input}
   end
 
+  describe "blocked (RE308): the agent could not run" do
+    test "blocked parks even with two identical failures behind it and no retry budget" do
+      flow = two_node_flow()
+      history = [failed(attempt: 1), failed(attempt: 2)]
+      current = execution(outcome: :blocked, attempt: 3)
+
+      assert Engine.decide(flow, history ++ [current], current) == {:park, :blocked}
+    end
+
+    test "blocked rows never count toward the circuit breaker" do
+      flow = two_node_flow(work: [max_retries: 5])
+
+      history = [
+        failed(attempt: 1),
+        execution(outcome: :blocked, attempt: 2),
+        execution(outcome: :blocked, attempt: 3),
+        failed(attempt: 4)
+      ]
+
+      current = List.last(history)
+      # two identical :failed rows (threshold 3) — the blocked rows between them are not failures
+      assert Engine.decide(flow, history, current) == {:retry, "work"}
+
+      third = failed(attempt: 5)
+      assert {:fail, "circuit_breaker:" <> _} = Engine.decide(flow, history ++ [third], third)
+    end
+
+    test "blocked rows never spend max_retries" do
+      flow = two_node_flow(work: [max_retries: 1])
+
+      history = [
+        execution(outcome: :blocked, attempt: 1),
+        execution(outcome: :blocked, attempt: 2),
+        failed(attempt: 3)
+      ]
+
+      current = List.last(history)
+      assert Engine.decide(flow, history, current) == {:retry, "work"}
+    end
+
+    test "blocked rows never consume the :failed edge's max_loops" do
+      flow =
+        flow([[key: "work", type: :agent], [key: "fallback", type: :agent]], [
+          [from: "start", to: "work"],
+          [from: "work", to: "done", on: :succeeded],
+          [from: "work", to: "fallback", on: :failed, max_loops: 1],
+          [from: "fallback", to: "done", on: :succeeded]
+        ])
+
+      history = [
+        execution(outcome: :blocked, attempt: 1),
+        execution(outcome: :blocked, attempt: 2),
+        failed(attempt: 3)
+      ]
+
+      current = List.last(history)
+      assert Engine.decide(flow, history, current) == {:transition, "fallback", nil}
+    end
+  end
+
   test "failed retries the same node while the current visit has budget" do
     flow = two_node_flow(work: [max_retries: 1])
     current = failed(detail: "boom-1")

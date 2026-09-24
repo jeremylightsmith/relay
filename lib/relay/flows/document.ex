@@ -24,7 +24,7 @@ defmodule Relay.Flows.Document do
 
   String→atom conversion is driven by the schemas' own source functions
   (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`,
-  `Schemas.NodeExecution.outcomes/0`, `Schemas.Flow.Edge.when_values/0`) — never
+  `Schemas.NodeExecution.routable_outcomes/0`, `Schemas.Flow.Edge.when_values/0`) — never
   `String.to_atom/1`. An unrecognized value is an `{:error, message}`, not a new atom.
   """
 
@@ -220,7 +220,7 @@ defmodule Relay.Flows.Document do
     with :ok <- reject_unknown(Map.keys(edge), field_names(Flow.Edge.fields()), "edge field"),
          {:ok, _from} <- required_string(edge, "from"),
          {:ok, _to} <- required_string(edge, "to"),
-         {:ok, on} <- optional_enum(edge, "on", NodeExecution.outcomes()),
+         {:ok, on} <- optional_enum(edge, "on", NodeExecution.routable_outcomes()),
          {:ok, guard} <- optional_enum(edge, "when", Flow.Edge.when_values()) do
       {:ok, edge |> dense(Flow.Edge.fields(), %Flow.Edge{}) |> Map.merge(%{on: on, when: guard})}
     end

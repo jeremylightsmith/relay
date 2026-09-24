@@ -14,7 +14,7 @@ what each term *means*; the sections below say what each value *does*.
 | Vocabulary | Values | Owner |
 | --- | --- | --- |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
-| Node outcome | `succeeded` · `failed` · `partial` · `needs_input` | `Schemas.NodeExecution.outcomes/0` |
+| Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
 | Run parked reason | `needs_input` · `claimed` · `runner_gone` | `Schemas.Run.parked_reasons/0` |
@@ -316,6 +316,7 @@ declared nothing cannot be distinguished from one that did nothing.
 | `failed` | Retries the same node while its `max_retries` budget lasts, then routes on the `failed` edge; with no `failed` edge, and when the circuit breaker trips on a repeated failure signature, the run **fails**. | Left where it is; on run failure the card is marked `failed` with the failure detail recorded on it. |
 | `partial` | Routes on the `{from, on: :partial}` edge like any other outcome — it is *not* a failure and does not consume retry budget. | As for `succeeded`. |
 | `needs_input` | **Parks immediately — no edge is consulted.** The run becomes `parked` with `parked_reason: :needs_input` and resumes at the same node once answered. | Set to `needs_input`, which blocks it and surfaces it in the "needs you" rollup. |
+| `blocked` | Reported **only by the runner** (RE308) when the agent could not run at all — an expired login or a usage limit. **Parks immediately — no edge is consulted**, and it never spends `max_retries`, counts toward the circuit breaker, or consumes `max_loops`. Agents cannot declare it and flows cannot route on it (`Schemas.NodeExecution.routable_outcomes/0`). | Set to `needs_input` with the cause as its question; the drawer offers Retry, not an answer box. |
 
 An outcome with no matching edge **degrades onto the node's `failed` edge** and follows it
 exactly as a real `failed` would, including that edge's `max_loops` budget — so a node that

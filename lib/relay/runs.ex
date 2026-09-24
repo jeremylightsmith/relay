@@ -3268,16 +3268,18 @@ defmodule Relay.Runs do
 
     * `:question`   — the node reported `:needs_input`; a human is being asked something (A1).
     * `:escalation` — a `--on failed --> needs_input` edge routed a node failure to a human (A4).
+    * `:infrastructure` — the node's agent could not run at all (runner reported `:blocked`: an expired login, a usage limit — RE308, A11).
     * `nil`         — not a `needs_input` park.
 
   The inference is exact, so no schema column is needed to tell the two apart: a `:needs_input`
-  outcome parks in `Relay.Runs.Engine.decide/4` *before* edge routing is ever reached, so the two
-  cases can never collide. See `docs/architecture/failures.md` (A1 vs A4).
+  outcome parks in `Relay.Runs.Engine.decide/4` *before* edge routing is ever reached, so no two
+  cases can collide (`:blocked` parks there too, RE308). See `docs/architecture/failures.md` (A1 vs A4).
 
   The 3-arity form exists because `restartable_runs/1` reads latest outcomes in ONE grouped query
   and must classify without a per-run round trip; the 1-arity form is the convenience wrapper.
   """
   def park_kind(:parked, :needs_input, :needs_input), do: :question
+  def park_kind(:parked, :needs_input, :blocked), do: :infrastructure
   def park_kind(:parked, :needs_input, _outcome), do: :escalation
   def park_kind(_status, _parked_reason, _outcome), do: nil
 
@@ -3292,7 +3294,7 @@ defmodule Relay.Runs do
   Whether `run` itself stalled in a way retry can revive in place — the ONE per-RUN eligibility
   rule, used directly by per-run retry (`check_retryable/1`). True for a clean `:failed` run, and
   for an escalation park (`park_kind/3 == :escalation` — a node failure routed to a human,
-  RLY-194/A4). False for a genuine `:needs_input` question, any `:runner_gone` park, and
+  RLY-194/A4) or an infrastructure park (`:infrastructure`, RE308). False for a genuine `:needs_input` question, any `:runner_gone` park, and
   `:running`/`:done`/`:cancelled`. A `:runner_gone` park is not restartable-in-place because
   the scheduler resumes it when the machine returns — and when it never can,
   `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
@@ -3308,13 +3310,17 @@ defmodule Relay.Runs do
   def restartable?(%Run{status: status, parked_reason: parked_reason} = run),
     do: restartable_by_outcome?(status, parked_reason, latest_execution_outcome(run))
 
+  # The park kinds retry revives in place: an escalated node failure (A4) and an agent that could
+  # not run at all (A11, RE308). A genuine question (A1) wants an answer, not a restart.
+  @revivable_park_kinds [:escalation, :infrastructure]
+
   # The eligibility rule, expressed exactly once (AGENTS.md "a magic value is defined once"):
   # a run is revivable-in-place iff it FAILED cleanly, or its park was an escalated node failure.
   # Park provenance itself is not re-derived here — `park_kind/3` owns that.
   defp restartable_by_outcome?(:failed, _parked_reason, _latest_outcome), do: true
 
   defp restartable_by_outcome?(status, parked_reason, latest_outcome),
-    do: park_kind(status, parked_reason, latest_outcome) == :escalation
+    do: park_kind(status, parked_reason, latest_outcome) in @revivable_park_kinds
 
   @doc "The `outcome` of `run`'s most recent NodeExecution, or nil when it has none."
   def latest_execution_outcome(%Run{id: run_id}) do
@@ -3597,8 +3603,9 @@ defmodule Relay.Runs do
 
   @doc """
   The one-line reason `run` is stalled — the restart dialog's copy, owned by ONE function the
-  way `retry_refusal_message/1` owns retry's (RE247). `restartable?/1` admits exactly two
-  states, so there are exactly two sentences.
+  way `retry_refusal_message/1` owns retry's (RE247). `restartable?/1` admits three
+  states (a clean `:failed` run, an escalation park, and an infrastructure park —
+  RE308), each with its own sentence.
 
   The two states are a clean `:failed` run and an ESCALATION park (`park_kind/1 == :escalation`
   — a node failed and the flow's `--on failed --> needs_input` edge handed the card to a human,
@@ -3618,7 +3625,18 @@ defmodule Relay.Runs do
   cards only, and a caller reaching it with anything else has a bug worth surfacing loudly
   rather than papering over with a generic sentence.
   """
-  def stall_reason(%Run{} = run), do: stall_sentence(run, run.current_node || last_executed_node(run))
+  def stall_reason(%Run{} = run) do
+    node = run.current_node || last_executed_node(run)
+
+    if park_kind(run) == :infrastructure,
+      do: infrastructure_stall(node),
+      else: stall_sentence(run, node)
+  end
+
+  # RE308 (A11): nothing failed — the agent could not start. Echoes the drawer's
+  # "AGENT COULD NOT RUN" face (`panel_label(:infrastructure)`); keep the two in step.
+  defp infrastructure_stall(nil), do: "Agent could not run — retry"
+  defp infrastructure_stall(node), do: "#{node} could not run — retry"
 
   defp stall_sentence(%Run{status: :failed}, nil), do: "Failed"
   defp stall_sentence(%Run{status: :failed}, node), do: "Failed at #{node}"
@@ -3871,7 +3889,10 @@ defmodule Relay.Runs do
         # rewritten `outcome` by the time we get here, and a rejected claim must still read as
         # `no_changes: true` with `outcome: :failed`. Absent key => false (an old runner).
         no_changes: attrs[:no_changes] == true,
-        session_id: attrs[:session_id],
+        # RE308: a `:blocked` attempt never got to run, so its session is not worth resuming —
+        # dropping it here means no re-entry can `claude --resume` a session that could not
+        # authenticate.
+        session_id: if(outcome == :blocked, do: nil, else: attrs[:session_id]),
         cost: attrs[:cost],
         finished_at: now()
       )

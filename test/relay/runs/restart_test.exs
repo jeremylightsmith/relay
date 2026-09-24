@@ -38,7 +38,20 @@ defmodule Relay.Runs.RestartTest do
     Runs.get_run!(run.id)
   end
 
+  # RE308 (A11): the agent could not run (expired login / usage limit) — :parked/:needs_input with
+  # the latest execution :blocked.
+  defp infrastructure_park(stage) do
+    {:ok, card} = Relay.Cards.create_card(stage, %{title: "Could not run"})
+    run = insert(:run, card: card, status: :parked, parked_reason: :needs_input, current_node: "brainstorm")
+    insert(:node_execution, run: run, node: "brainstorm", outcome: :blocked)
+    Runs.get_run!(run.id)
+  end
+
   describe "restartable?/1 truth table" do
+    test "an infrastructure park (latest outcome :blocked) is restartable (RE308)", %{stage: stage} do
+      assert Runs.restartable?(infrastructure_park(stage))
+    end
+
     test "a clean :failed run is restartable", %{stage: stage} do
       assert Runs.restartable?(clean_failed(stage))
     end
@@ -85,6 +98,12 @@ defmodule Relay.Runs.RestartTest do
   end
 
   describe "park_kind/1 — the one place park provenance is decided (RE253)" do
+    test "a park whose latest execution could not run is :infrastructure (RE308)", %{stage: stage} do
+      assert Runs.park_kind(infrastructure_park(stage)) == :infrastructure
+      assert Runs.park_kind(:parked, :needs_input, :blocked) == :infrastructure
+      assert Runs.park_kind(:parked, :runner_gone, :blocked) == nil
+    end
+
     test "a park whose latest execution asked is a :question", %{stage: stage} do
       assert Runs.park_kind(genuine_question(stage)) == :question
     end
@@ -272,6 +291,11 @@ defmodule Relay.Runs.RestartTest do
   end
 
   describe "stall_reason/1" do
+    test "an infrastructure park says the agent could not run, not that the node failed (RE308)",
+         %{stage: stage} do
+      assert Runs.stall_reason(infrastructure_park(stage)) == "brainstorm could not run — retry"
+    end
+
     test "a failed run names the node it failed on", %{stage: stage} do
       assert Runs.stall_reason(clean_failed(stage)) == "Failed at brainstorm"
     end

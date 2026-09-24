@@ -342,8 +342,8 @@ that stays server-side.
   value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
   recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
-  or `:revoked` (zombie) job answers 409 `conflict`. The four outcomes and what each does to the
-  run and the card are tabulated in the [state reference](state.md).
+  or `:revoked` (zombie) job answers 409 `conflict`. The node outcomes (including the runner-only `blocked`,
+  RE308) and what each does to the run and the card are tabulated in the [state reference](state.md).
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
   runner can branch without a second endpoint. A `"talk"` claim carries exactly
@@ -1174,7 +1174,7 @@ becomes the context handed to the next node. Which outcomes exist and what each 
 run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
 that set, not this page.
 
-Four rules sit on top of it:
+Five rules sit on top of it:
 
 - **Silence is failure — but silence is not nothing.** A node that exits without declaring is
   reported `failed` whatever its exit code: a node that did nothing is indistinguishable from one
@@ -1197,6 +1197,18 @@ Four rules sit on top of it:
   ([failures.md](failures.md) A10). `reads` is never checked at run time — it is advisory.
 - **Asking a human wins.** If the node moved the card to `needs_input`, that is the outcome even
   if the node also declared something else.
+- **An agent that could not run is `blocked`, not `failed` (RE308).** When `claude -p` exits
+  non-zero and its own stream shows the environment refused it — the assistant event's `error`
+  tag (`authentication_failed`/`billing_error` → auth, `rate_limit` → usage limit), the result's
+  `api_error_status` (401/403, 429), a `rate_limit_event` with `status: "rejected"` seen in *this*
+  job's stream, or else a phrase from `CLAUDE_AUTH_FAILURE_SIGNATURES`/`CLAUDE_USAGE_LIMIT_SIGNATURES`
+  in its last words — `determine_agent_outcome` reports `blocked` with `agent could not run:
+  <reason>` (a usage limit adds `· resets HH:MM`). The engine parks without spending retries
+  ([failures.md](failures.md) A11). The check runs after "asking a human wins" and after a declared
+  outcome file, so a declared verdict is never reclassified. `blocked` is not one of `relay
+  outcome`'s choices, and an outcome file declaring it is reported `failed`, so an agent cannot
+  park itself around its own retry budget. An unclassified non-zero exit stays `failed`, its
+  detail now `agent exited non-zero: <the stream's last words>`.
 
 The reminder is appended to every agent node's prompt automatically, so the requirement travels
 with every invocation. `shell` and `gate` nodes are exempt — their exit status is already an

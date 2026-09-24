@@ -236,6 +236,12 @@
   },
   "version": 6,
   "vocabulary": {
+    "agent_outcomes": [
+      "succeeded",
+      "failed",
+      "partial",
+      "needs_input"
+    ],
     "audit_severities": [
       "error",
       "warning"
@@ -261,7 +267,8 @@
       "succeeded",
       "failed",
       "partial",
-      "needs_input"
+      "needs_input",
+      "blocked"
     ],
     "rate_limit_reasons": [
       "limit",
