@@ -82,10 +82,12 @@ sharing behavior.
   `RelayWeb.FlowGraphComponents.flow_graph/1` function component (absolutely-positioned node
   divs + an SVG edge layer, `interactive?` toggles `phx-click`, accepts `node_states` for a
   later read-only reuse by the run panel) laid out by the pure, unit-tested
-  `RelayWeb.FlowLayout.layout/2` (a deterministic vertical layout derived from graph
-  structure alone: the `:succeeded` spine runs straight down a single column, off-spine
-  rework nodes sit in a second column, and backward edges pack into right-hand gutter lanes —
-  no stored coordinates, no dragging).
+  `RelayWeb.FlowLayout.layout/2` (a deterministic layered layout — a thin adapter over the
+  vendored `dagre_ex` (`Dagre`) that sizes nodes and edge labels, ranks them top to bottom and
+  returns axis-aligned edge polylines with a reserved label point per edge; no stored
+  coordinates, no dragging). Hovering a node emphasises its incident edges client-side via the
+  `FlowFocus` hook (`assets/js/hooks/flow_focus.js`, reading the graph's `data-adjacency`); a
+  selected node gets the same emphasis server-side (RE333).
   **Requirements (RLY-182):** `Flows.node_requirements/1` is a pure graph read — the agent
   and skill names a flow's nodes name, with no runner knowledge. It lives here rather than
   in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);

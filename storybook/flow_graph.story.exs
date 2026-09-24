@@ -20,16 +20,40 @@ defmodule Storybook.FlowGraph do
       %{from: "g", to: "done", on: :succeeded}
     ]
 
+    # RE333: the shape the old two-column layout could not draw.
+    branchy_nodes = [
+      %{key: "triage", type: :gate, run: "mix triage"},
+      %{key: "fix", type: :agent, agent: "plan-implementer", model: "sonnet", effort: "high"},
+      %{key: "ship", type: :shell, run: "mix release"},
+      %{key: "write_docs", type: :agent, model: "haiku", effort: "low"},
+      %{key: "publish", type: :shell, run: "mix docs.publish"},
+      %{key: "escalate", type: :human, run: "ask a maintainer"}
+    ]
+
+    branchy_edges = [
+      %{from: "start", to: "triage", on: nil},
+      %{from: "triage", to: "fix", on: :succeeded},
+      %{from: "triage", to: "write_docs", on: :failed},
+      %{from: "fix", to: "ship", on: :succeeded},
+      %{from: "fix", to: "fix", on: :failed, max_loops: 2},
+      %{from: "ship", to: "done", on: :succeeded},
+      %{from: "write_docs", to: "publish", on: :succeeded},
+      %{from: "publish", to: "done", on: :succeeded},
+      %{from: "write_docs", to: "escalate", on: :failed}
+    ]
+
     [
       %Variation{
         id: :default_code_flow,
         description:
-          "The shipped Code flow: a vertical spine, fix nodes beside it, back-edges in the " <>
-            "right-hand gutter, dashed failed edges, max-N loop badges. Every node that can " <>
-            "park on a human (an edge into needs_input) carries a warning pause badge at its " <>
-            "top-right corner instead of a drawn edge. Agent nodes stack their binding — " <>
-            "subagent · model · effort (e.g. plan-implementer · sonnet · high); a generic agent " <>
-            "node with no subagent reads just model · effort.",
+          "The shipped Code flow, laid out by dagre_ex: ranks run top to bottom, every rework " <>
+            "loop is routed as its own orthogonal path, and every edge label sits in room " <>
+            "reserved for it, clear of nodes and of other labels. Failed edges are dashed and " <>
+            "carry max-N loop badges. Every node that can park on a human (an edge into " <>
+            "needs_input) carries a warning pause badge at its top-right corner instead of a " <>
+            "drawn edge. Agent nodes stack their binding — subagent · model · effort (e.g. " <>
+            "plan-implementer · sonnet · high); a generic agent node with no subagent reads just " <>
+            "model · effort.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
@@ -48,6 +72,21 @@ defmodule Storybook.FlowGraph do
           nodes: park_nodes,
           edges: park_edges,
           layout: RelayWeb.FlowLayout.layout(park_nodes, park_edges),
+          lands_on: "Review",
+          interactive?: false
+        }
+      },
+      %Variation{
+        id: :branching,
+        description:
+          "A branchy flow the old two-column layout could not draw (RE333): the triage gate " <>
+            "diverges into two branches that never rejoin, `fix` self-loops on failure, and " <>
+            "there is more than one terminal — `ship` and `publish` each reach done by their " <>
+            "own path, while `escalate` is a dead end.",
+        attributes: %{
+          nodes: branchy_nodes,
+          edges: branchy_edges,
+          layout: RelayWeb.FlowLayout.layout(branchy_nodes, branchy_edges),
           lands_on: "Review",
           interactive?: false
         }
