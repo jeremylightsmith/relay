@@ -52,25 +52,32 @@ dashed = `failed`.
 ```mermaid
 flowchart LR
     A([Plan:Done]) --> BR["shell: branch"]
-    BR --> I["● implement<br/>(TDD, next task)"]
+    BR --> I["◆ implement<br/>(TDD, next task)"]
     I --> SR["● spec review"]
-    SR -.-> I
+    SR -.-> FX["◆ fix findings"]
+    FX --> SR
     SR --> QR["◆ quality review"]
-    QR -.-> I
-    QR --> NT{"gate: tasks left?"}
-    NT -. more .-> I
-    NT --> PC{"gate: mix precommit"}
+    QR -.-> FX
+    QR -. more tasks .-> I
+    QR --> SY["shell: sync"]
+    SY --> PC{"gate: mix precommit"}
     PC -.-> FF["◆ final fix"]
-    PC --> FR["◆ final review"]
+    PC --> BG{"gate: mix test.browser"}
+    BG -.-> FF
+    BG --> FR["◆ final review"]
     FR -.-> FF
     FF --> PC
     FR --> SM["◆ smoke"]
-    SM -.-> SF["◆ smoke fix"] --> SM
-    SM --> AC["◆ acceptance"]
-    AC -.-> AF["◆ acceptance fix"] --> AC
-    AC --> PO["● post to card"]
-    PO --> MG["shell: push · PR · merge"]
-    MG --> Z([Review])
+    SM -.-> FF
+    SM --> AC["● acceptance"]
+    AC -.-> FF
+    AC --> RS["shell: resync"]
+    RS --> RV{"gate: precommit + browser"}
+    RV --> MG["shell: push · PR · auto-merge"]
+    MG --> DP["shell: await deploy"]
+    DP -.-> GF["◆ github fix"] --> RS
+    DP --> PO["● post to card"]
+    PO --> Z([Review])
 ```
 
 ## Node-by-node — Code flow, three ways
@@ -79,17 +86,20 @@ flowchart LR
 | --- | --- | --- | --- |
 | `branch` | shell | `relay_config.json` shell step 1 | `toolchain` + `preflight_*` parallelograms |
 | *(gone)* | — | **Execute phase** — a haiku agent picks the next unchecked task | *(none — plan handled whole)* |
-| `implement` | agent · sonnet/high | **Implement** — `plan-implementer` agent, TDD | `implement` (gpt-55, `reasoning_effort=xhigh`, TDD) |
+| `implement` | agent · opus/high | **Implement** — `plan-implementer` agent, TDD | `implement` (gpt-55, `reasoning_effort=xhigh`, TDD) |
 | `spec_review` | agent · sonnet | **Spec review** — `spec-reviewer` agent | *(no analog — they simplify instead of judge)* |
 | `quality_review` | agent · opus | **Quality review** — `quality-reviewer` agent | `simplify_opus` → `simplify_gpt` (mutating, two models) |
 | `next_task` | gate | implicit in execute-plan's `while` loop | *(none — single pass over the plan)* |
 | `precommit` | gate | **Final check** — a *haiku agent* runs `mix precommit` | `verify` parallelogram, `goal_gate=true` |
 | `final_review` | agent · opus | **Final review** — `final-reviewer` agent | *(folded into `verify`)* |
+| `fix_findings` | agent · opus | the per-task reviewers' fix loop, via `implement` | *(no analog)* |
+| `browser` / `rebrowser` | gate | CI's Playwright job, after the fact | *(folded into `verify`)* |
 | `final_fix` | agent · opus | **Final review's** bounded fix loop → `final-fixer` | `fixup` (`max_visits=3`, `retry_target`) |
-| `smoke` / `smoke_fix` | agent · opus | **Smoke** — `smoke-tester` + bounded fix loop | *(no analog)* |
-| `acceptance` / `acceptance_fix` | agent · opus | **Acceptance** — `acceptance-tester` + fix loop | *(no analog — no card to hold criteria)* |
-| `post` | agent · sonnet | **Post** — checklist + screenshots comment | run analysis is engine-generated |
+| `smoke` | agent · opus | **Smoke** — `smoke-tester` + bounded fix loop | *(no analog)* |
+| `acceptance` | agent · sonnet | **Acceptance** — `acceptance-tester` + fix loop | *(no analog — no card to hold criteria)* |
 | `merge` | shell | config shell steps 3–6 + `tmp/exec-plan-status` gate | `project.toml [run.pull_request]` |
+| `deploy` / `github_fix` | shell · agent (opus) | *(none — a card reached Review at merge)* | *(none)* |
+| `post` | agent · sonnet | **Post** — checklist + screenshots comment | run analysis is engine-generated |
 
 ## What this translation deletes
 
@@ -124,13 +134,37 @@ became comment-free JSON (RLY-241). Keyed by node.
   "which task is next" is derived server-side, and `{sub_task}` names it in the prompt.
 - **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the runner appends
   `--agent <name>` to `claude -p`, so the file supplies the system prompt while `run` stays the
-  user prompt. `smoke_fix` / `acceptance_fix` / `post` have no agent file and keep bare prompts.
+  user prompt. `post` has no agent file and keeps a bare prompt. `final-fixer` backs two nodes:
+  `fix_findings` (one task's reviewer findings) and `final_fix` (everything after the task loop).
+- **`fix_findings`** — a rejected per-task review used to loop back to `implement`, whose job is
+  "build this task from the plan". It would re-read the plan, decide the task was already built,
+  and report success having changed nothing. The fix node's only job is the reviewer's findings,
+  on the code already committed, and it returns to `spec_review` so both reviewers see the fix.
+- **One fixer after the task loop** — `precommit`, `browser`, `final_review`, `smoke` and
+  `acceptance` all route `failed` to `final_fix`, which then goes back through the gates and
+  every check after them. The per-check fixers (`smoke_fix`, `acceptance_fix`) are gone: each
+  was a bare prompt with no agent file, and a fix that only re-ran its own check could break
+  what an earlier gate had proven.
+- **`browser` / `rebrowser`** — CI runs the Playwright journeys as their own job, so a flow that
+  gated only on `mix precommit` found a red browser suite after the merge. Each precommit gate is
+  now followed by a `mix test.browser` gate, and the fixers they feed keep both green.
+- **`deploy` / `github_fix`** — `merge` only *queues* an auto-merge, so a card used to reach
+  Review with nothing shipped if CI then went red. `deploy` runs `bin/await_deploy.sh`: it waits
+  for the PR to merge and for main's CI to run its deploy job on a commit containing it,
+  re-running failed jobs once to absorb a flake. On failure `github_fix` (the `ci-fixer` agent)
+  leaves the right commits on the branch and the card re-lands through resync → gates → merge →
+  deploy. `post` runs after `deploy`, so its summary describes what actually shipped. A repo
+  whose CI names its workflow or deploy job differently sets `AWAIT_CI_WORKFLOW` /
+  `AWAIT_DEPLOY_JOB`.
 - **`sync` / `sync_fix`, `resync` / `resync_fix` / `reverify`** — RLY-192's two rebase sync
   points. A cheap rebase onto `origin/main` before the expensive review/smoke/acceptance tail,
   and once more immediately before `merge` (gated by `reverify`, because two green branches
   don't always merge into a green branch), so a busy board moving `main` under a long run no
   longer strands the work at `merge`. Both abort a conflicted rebase **before** exiting nonzero
   so the branch is left clean and attached for the next node (RLY-166).
+- **`branch` resumes an open PR** — when the card's PR is still open (a card sent back from
+  Review before its PR merged), the branch is checked out from `origin/{branch}` rather than
+  reset onto `origin/main`, so the unmerged commits survive.
 - **`precommit` / `reverify`** — plain `gate` nodes. These were haiku *agents* before the
   cutover; a gate needs no agent.
 - **`quality_review`'s two `succeeded` edges** — this is the one place two edges leave a node on
@@ -139,7 +173,9 @@ became comment-free JSON (RLY-241). Keyed by node.
   duplicates on one `{from, on}` are still rejected by `Schemas.Flow`'s routing validation.
 - **`merge`** — replaces relay_config's four trailing shell steps *and* the `tmp/exec-plan-status`
   scratch-file gate: the node is simply **unreachable unless every gate above routed
-  `succeeded`**. Routing is the gate.
+  `succeeded`**. Routing is the gate. It short-circuits only when a merged PR's head **is this
+  HEAD** (TH-116): a state-only "the branch's PR is MERGED" check let a card rejected after its
+  first merge skip the push, and its new commits never reached origin.
 - **`needs_input` as an OUTCOME has no edge** — the engine parks before consulting any edge
   (`Engine.decide/4` rule 1). The `needs_input` **edges** in these files are the *other* kind of
   park: an edge target reached when a node reports `failed` (RLY-194). Every agent node parks on
@@ -149,8 +185,8 @@ became comment-free JSON (RLY-241). Keyed by node.
   via needs-input). RLY-224 added the same park edge to `branch`, a `shell` node, so a fetch race
   surviving the bounded retries parks instead of dead-ending. `merge` / `sync` / `resync` stay
   deliberately unrouted.
-- **`expects_commits`** — RLY-194 marks the four commit-producing nodes (`implement`,
-  `final_fix`, `smoke_fix`, `acceptance_fix`): `RunServer` may override a reported `succeeded`
+- **`expects_commits`** — RLY-194 marks the commit-producing nodes (`implement`,
+  `fix_findings`, `final_fix`): `RunServer` may override a reported `succeeded`
   back to `failed` when HEAD didn't move.
 - **`reads` / `writes`** — RE244's **card-field contract**: which card fields a node consumes and
   which it must fill, drawn from `Schemas.Card.contract_fields/0`. Valid on **every** node type

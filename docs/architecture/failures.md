@@ -18,7 +18,7 @@ is [runner.md](runner.md).
 | --- | --- | --- | --- | --- |
 | A1 | **Genuine human question** | node reports `needs_input` | park run `:needs_input`, block card; Listener resumes on answer with the stored `claude --resume` session (`listener.ex:108`); classified `:question` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A2 | **Recoverable node failure** | node reports `failed`, retry budget left | re-enter the same node (`{:retry}`, `engine.ex:85`) | continues |
-| A3 | **Routed failure → fixer** | `failed` with a `:failed` edge to a fix node | follow it (`precommit→final_fix`, `smoke→smoke_fix`, `sync→sync_fix`, …) | continues |
+| A3 | **Routed failure → fixer** | `failed` with a `:failed` edge to a fix node | follow it (`precommit→final_fix`, `smoke→final_fix`, `spec_review→fix_findings`, `sync→sync_fix`, …) | continues |
 | A4 | **Escalated failure** | `failed` with a `:failed → needs_input` edge (RLY-194: `implement`, `*_fix`, `post`, `branch`) | park `:needs_input` for a human; classified `:escalation` by `Relay.Runs.park_kind/1` | `parked/needs_input` |
 | A5 | **No route** | `failed` with no `:failed` edge, or budgets spent | `{:fail}` → run `failed` → `mark_failed` → card `failed` | `failed` |
 | A6 | **Silent no-op** | `expects_commits` node reports `succeeded` but HEAD didn't move since the node was *entered* — per visit, not per attempt, so a retry still counts a commit an earlier attempt of the same visit made (RE298) | rewritten to `failed` before finalize (`override_no_op_success/4`, `run_server.ex`) → routes as A2–A5. **Unless** the node asserted `--no-changes` AND this node already committed for what it is bound to (RE310) — then the `succeeded` stands | as A2–A5 |

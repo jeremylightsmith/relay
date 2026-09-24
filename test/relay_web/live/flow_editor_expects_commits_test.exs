@@ -25,7 +25,7 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
     end
 
     before = marked.(Flows.get_flow!(board, "code"))
-    assert before == ["acceptance_fix", "final_fix", "implement", "smoke_fix"]
+    assert before == ["final_fix", "fix_findings", "implement"]
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
 
@@ -59,7 +59,7 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
     assert Enum.find(code.nodes, &(&1.key == "post")).model == "opus"
 
     assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
-             ["acceptance_fix", "final_fix", "implement", "smoke_fix"]
+             ["final_fix", "fix_findings", "implement"]
   end
 
   test "saving the Plan flow with an untouched definition preserves the card contract (RE244)", %{

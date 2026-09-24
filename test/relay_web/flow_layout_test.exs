@@ -299,7 +299,7 @@ defmodule RelayWeb.FlowLayoutTest do
       assert map_size(routes) == length(edges) - length(park_idx)
 
       assert parks ==
-               MapSet.new(~w(branch implement sync_fix final_fix smoke_fix acceptance_fix resync_fix post))
+               MapSet.new(~w(branch implement fix_findings sync_fix final_fix resync_fix github_fix post))
     end
 
     test "a flow with no needs_input edge has an empty parks set" do

@@ -8,8 +8,8 @@ defmodule Relay.Flows.DefaultLibraryTest do
     assert Enum.map(DefaultLibrary.all(), & &1.key) == ["spec", "plan", "code"]
 
     code = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
-    assert length(code.nodes) == 18
-    assert length(code.edges) == 38
+    assert length(code.nodes) == 21
+    assert length(code.edges) == 44
     assert code.isolation == :exclusive
     assert code.trigger == %{pulls_from: "Plan:Done", works_in: "Code", lands_on: "Review"}
 
@@ -49,7 +49,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
              "park sentinel) — a failed node must never be a dead end (RLY-194)."
   end
 
-  test "exactly the four commit-producing Code nodes are marked expects_commits" do
+  test "exactly the three commit-producing Code nodes are marked expects_commits" do
     marked =
       for flow <- DefaultLibrary.all(),
           node <- flow.nodes,
@@ -60,9 +60,8 @@ defmodule Relay.Flows.DefaultLibraryTest do
     assert marked ==
              MapSet.new([
                {"code", "implement"},
-               {"code", "final_fix"},
-               {"code", "smoke_fix"},
-               {"code", "acceptance_fix"}
+               {"code", "fix_findings"},
+               {"code", "final_fix"}
              ])
   end
 
@@ -125,6 +124,29 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert n.run == "mix precommit"
     end
 
+    # CI runs the Playwright journeys as their own job, so a flow that only gates on
+    # `mix precommit` finds a red browser suite after the merge. Both precommit gates are
+    # followed by a browser gate, and both fixers they feed are told to keep it green.
+    test "browser / rebrowser gate the branch on mix test.browser after each precommit gate" do
+      flow = code_flow()
+
+      for key <- ~w(browser rebrowser) do
+        n = cf_node(flow, key)
+        assert n.type == :gate
+        assert n.run == "mix test.browser"
+      end
+
+      assert edge?(flow, "precommit", "browser", :succeeded)
+      assert edge?(flow, "browser", "final_review", :succeeded)
+      assert edge?(flow, "browser", "final_fix", :failed)
+      assert edge?(flow, "reverify", "rebrowser", :succeeded)
+      assert edge?(flow, "rebrowser", "merge", :succeeded)
+      assert edge?(flow, "rebrowser", "resync_fix", :failed)
+
+      assert cf_node(flow, "final_fix").run =~ "mix test.browser"
+      assert cf_node(flow, "resync_fix").run =~ "mix test.browser"
+    end
+
     test "sync point A replaces quality_review → precommit" do
       flow = code_flow()
       refute edge?(flow, "quality_review", "precommit", :succeeded, :foreach_exhausted)
@@ -134,17 +156,34 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert edge?(flow, "sync_fix", "precommit", :succeeded)
     end
 
-    test "sync point B sits between post and merge, gated by reverify, and merge can retry" do
+    test "sync point B sits between acceptance and merge, gated by reverify, and merge can retry" do
       flow = code_flow()
-      refute edge?(flow, "post", "merge", :succeeded)
-      assert edge?(flow, "post", "resync", :succeeded)
+      assert edge?(flow, "acceptance", "resync", :succeeded)
       assert edge?(flow, "resync", "reverify", :succeeded)
       assert edge?(flow, "resync", "resync_fix", :failed)
       assert edge?(flow, "resync_fix", "reverify", :succeeded)
       assert edge?(flow, "reverify", "resync_fix", :failed)
-      assert edge?(flow, "reverify", "merge", :succeeded)
-      assert edge?(flow, "merge", "done", :succeeded)
       assert edge?(flow, "merge", "resync", :failed)
+    end
+
+    # A card reaches Review only once its change is live: `deploy` waits for the PR to merge and
+    # main's CI to deploy it, and `post` runs last so the summary describes what actually shipped.
+    test "merge → deploy → post → done, and a failed deploy re-lands through github_fix" do
+      flow = code_flow()
+      assert edge?(flow, "merge", "deploy", :succeeded)
+      assert edge?(flow, "deploy", "post", :succeeded)
+      assert edge?(flow, "post", "done", :succeeded)
+      refute edge?(flow, "merge", "done", :succeeded)
+
+      deploy = cf_node(flow, "deploy")
+      assert deploy.type == :shell
+      assert deploy.run =~ "bin/await_deploy.sh"
+
+      github_fix = cf_node(flow, "github_fix")
+      assert github_fix.type == :agent
+      assert github_fix.agent == "ci-fixer"
+      assert edge?(flow, "deploy", "github_fix", :failed)
+      assert edge?(flow, "github_fix", "resync", :succeeded)
     end
 
     test "merge is an idempotent :shell node that converges on merged (RLY-215)" do
@@ -152,31 +191,34 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert n.type == :shell
 
       expected =
-        "state=$(gh pr view {branch} --json state -q .state 2>/dev/null || echo \"\"); " <>
-          "if [ \"$state\" = MERGED ]; then " <>
-          "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || echo \"\"); " <>
-          ~s([ -n "$url" ] && {relay} pr {ref} "$url"; exit 0; fi; ) <>
-          "git push --force-with-lease origin HEAD:refs/heads/{branch} && " <>
-          "url=$(gh pr view {branch} --json url -q .url 2>/dev/null || " <>
-          "gh pr create --fill --head {branch} --base main) && " <>
-          "{relay} pr {ref} \"$url\" && " <>
-          "(gh pr merge {branch} --squash --auto || gh pr merge {branch} --squash)"
+        ~S<sha=$(git rev-parse HEAD); > <>
+          ~S<url=$(gh pr list --head {branch} --state merged --json url,headRefOid > <>
+          ~S<-q "map(select(.headRefOid == \"$sha\"))[0].url // empty"); > <>
+          ~S<if [ -n "$url" ]; then {relay} pr {ref} "$url"; exit 0; fi; > <>
+          ~S<if [ "$(git rev-list --count origin/main..HEAD)" = 0 ]; then > <>
+          ~S<echo 'nothing on {branch} beyond origin/main to ship'; exit 0; fi; > <>
+          ~S<git push --force-with-lease origin HEAD:refs/heads/{branch} && > <>
+          ~S<url=$(gh pr list --head {branch} --state open --json url -q '.[0].url // empty') && > <>
+          ~S<{ [ -n "$url" ] || url=$(gh pr create --fill --head {branch} --base main); } && > <>
+          ~S<{relay} pr {ref} "$url" && gh pr merge "$url" --squash --auto>
 
       assert n.run == expected
 
       # Why each piece is there:
       assert n.run =~ "--force-with-lease"
-      assert n.run =~ "gh pr view {branch} --json url"
-      assert n.run =~ "|| gh pr create"
-      assert n.run =~ "if [ \"$state\" = MERGED ]; then"
+      assert n.run =~ "|| url=$(gh pr create"
+
+      # TH-116: "a PR on this branch merged" is not "this work merged". A card rejected in Review
+      # after its first PR merged comes back with new commits on the same branch; a state-only
+      # MERGED check exited 0 and those commits never reached origin. Only a merged PR whose head
+      # IS this HEAD short-circuits, and the open-PR lookup ignores the old merged one.
+      assert n.run =~ ~S<.headRefOid == \"$sha\">
+      assert n.run =~ "--state open"
 
       # RE254 / TH13: a bare `gh pr merge --squash` demands an immediate merge and dies on a repo
-      # whose branch policy still has checks IN_PROGRESS ("add the `--auto` flag"), then burns its
-      # retries against a policy no retry can satisfy. `--auto` queues the squash-merge until the
-      # required checks pass; the `|| ... --squash` fallback covers repos where auto-merge is off.
-      assert n.run =~ "gh pr merge {branch} --squash --auto"
-      assert n.run =~ "|| gh pr merge {branch} --squash)"
-      assert n.run =~ "exit 0; fi;"
+      # whose branch policy still has checks IN_PROGRESS. `--auto` queues the squash-merge until
+      # the required checks pass; `deploy` then waits for it to land.
+      assert n.run =~ ~S<gh pr merge "$url" --squash --auto>
 
       # RLY-199 regression guard: no plain non-force push may remain.
       refute n.run =~ "git push origin HEAD"
@@ -185,10 +227,35 @@ defmodule Relay.Flows.DefaultLibraryTest do
     test "every agent node parks on a hard failure via a needs_input edge (RLY-194)" do
       flow = code_flow()
 
-      for key <- ~w(implement sync_fix final_fix smoke_fix acceptance_fix resync_fix post) do
+      for key <- ~w(implement fix_findings sync_fix final_fix resync_fix github_fix post) do
         assert edge?(flow, key, "needs_input", :failed),
                "code/#{key} must route :failed to the needs_input park sentinel"
       end
+    end
+
+    # A rejected per-task review goes to a fixer that only addresses the findings — not back to
+    # the implementer, which re-derived the task from the plan, decided it was already done and
+    # reported success with nothing changed.
+    test "per-task review failures route to fix_findings, which returns to spec_review" do
+      flow = code_flow()
+
+      for from <- ~w(spec_review quality_review) do
+        assert edge?(flow, from, "fix_findings", :failed)
+        refute edge?(flow, from, "implement", :failed)
+      end
+
+      assert edge?(flow, "fix_findings", "spec_review", :succeeded)
+      n = cf_node(flow, "fix_findings")
+      assert n.agent == "final-fixer"
+      assert n.expects_commits == true
+    end
+
+    test "smoke and acceptance failures share the one final_fix fixer" do
+      flow = code_flow()
+      assert edge?(flow, "smoke", "final_fix", :failed)
+      assert edge?(flow, "acceptance", "final_fix", :failed)
+      refute cf_node(flow, "smoke_fix")
+      refute cf_node(flow, "acceptance_fix")
     end
 
     test "implement retries once before it parks" do
@@ -204,6 +271,11 @@ defmodule Relay.Flows.DefaultLibraryTest do
       assert edge?(flow, "branch", "needs_input", :failed),
              "a branch failure surviving the fetch retries must park for a human, " <>
                "not dead-end with no_route_for_outcome (RLY-224)"
+
+      # A card sent back while its PR is still open resumes from that branch rather than
+      # resetting its unmerged commits away onto origin/main.
+      assert cf_node(flow, "branch").run =~ "gh pr list --head {branch} --state open"
+      assert cf_node(flow, "branch").run =~ "base=origin/{branch}"
 
       # The branch node's fetch goes through the single retrying helper.
       assert cf_node(flow, "branch").run =~ "{relay} git-fetch"
@@ -307,14 +379,18 @@ defmodule Relay.Flows.DefaultLibraryTest do
     assert post.run =~ "verb phrases"
   end
 
-  # RE327 — the deployment link is gone from the drawer, so a deployment URL an agent writes is
-  # never rendered. Leaving the prompt asking for it is the "two copies of one fact disagreed"
-  # failure AGENTS.md warns about: the flow would request a key nothing draws.
-  test "the post node asks only for the result keys the drawer actually renders" do
+  # RE327 — the deployment link is gone from the drawer, and `Relay.Cards` refuses any key
+  # outside `ai_result_keys/0` with 422 invalid_ai_result. The prompt names exactly those keys and
+  # the two a screen may carry, and says outright that `deploy_url` is not one of them.
+  test "the post node asks only for the result keys the server accepts" do
     flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
     post = Enum.find(flow.nodes, &(&1.key == "post"))
 
-    assert post.run =~ "`summary`, `changes` and `screens`"
-    refute Enum.any?(DefaultLibrary.all(), fn f -> Enum.any?(f.nodes, &String.contains?(&1.run || "", "deploy")) end)
+    for key <- Relay.Cards.ai_result_keys() ++ Relay.Cards.ai_result_screen_keys() do
+      assert post.run =~ "`#{key}`"
+    end
+
+    assert post.run =~ "there is no `deploy_url`"
+    assert post.run =~ "{relay} attach {ref}"
   end
 end

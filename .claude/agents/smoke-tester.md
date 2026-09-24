@@ -1,6 +1,6 @@
 ---
 name: smoke-tester
-description: Final gate — prove the branch's new functionality actually works by driving it end-to-end through the running app, and (for UI) screenshot each new/changed state and compare it to the matching docs/designs artboard. Used by the Code flow's `smoke` node after precommit + whole-branch review pass. Returns a pass/broken/blocked verdict with screenshot paths.
+description: Final gate — prove the branch's new functionality actually works by driving it end-to-end through the running app, and (for UI) screenshot each new/changed state and compare it to the matching docs/designs artboard. Used by the Code flow's `smoke` node after the precommit and browser gates and the whole-branch review pass. Returns pass (`succeeded`) / broken (`failed`, routes to `final_fix`) / blocked, with screenshot paths.
 model: opus
 ---
 
@@ -15,8 +15,9 @@ confirm the feature demonstrably does what the plan says.
 
 ## 0. Which app — web (default) or mobile?
 Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is at `$RELAY_PLAN`).
-- **No directive, or a web directive → the default web smoke** (§1–§3 below): the Phoenix
+- **No directive, or a web directive → the default web smoke** (§1–§4 below): the Phoenix
   LiveView app on `http://localhost:4003`, driven with Playwright.
+- **`Smoke: none`** → the card has no runtime surface. Say so in `summary` and pass.
 - **A mobile / iOS-simulator directive (a Flutter card) → the mobile smoke** (§M below)
   instead: boot the `flutter/` app in the iOS Simulator and screenshot each new state. The web
   sections don't apply.
@@ -39,7 +40,8 @@ Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is 
   parts of `git diff main...HEAD`. Identify the user-visible or externally-observable behavior
   the branch adds, and the exact surface that exercises it (a LiveView route + interactions, an
   HTTP endpoint, an email path, a background job, a context function reachable through a page).
-- Read the spec under `docs/superpowers/specs/` if the plan references one.
+- The card's spec is on the card, not in the repo: `./relay card <ref> --field spec` (the ref
+  is in the `needs-input` command of the outcome contract at the end of your prompt).
 
 ## 2. Make sure you're testing THIS branch's code
 - A dev server is normally already running on `http://localhost:4003` and Phoenix hot-reloads
@@ -67,7 +69,9 @@ Set up your own scenario data through the app; don't assume fixtures exist.
 
 ## 4. Visual check (UI features)
 For every new or changed screen/state, capture a screenshot and compare it to the matching
-artboard in `docs/designs/` (`Relay Board.dc.html`, `Relay Landing.dc.html`, `Relay Design System.dc.html`). Judge **layout,
+artboard in `docs/designs/` (`Relay Board.dc.html`, `Relay Card Detail v5.dc.html`,
+`Relay Design System.dc.html`, … — `docs/designs/README.md` indexes them; never compare against
+a `docs/designs-as-is/` capture, which is generated from the app). Judge **layout,
 the states you built, and obvious fidelity** — flag clear divergences (missing element,
 broken layout, wrong structure), not pixel nitpicks or copy differences. Save screenshots to
 `tmp/smoke/` (gitignored) with descriptive names and return their absolute paths.
@@ -122,6 +126,10 @@ Extend this per feature (multiple pages/states, interactions, one screenshot per
   the branch. Explain in `findings` what blocked you and what would unblock it. Do not guess a
   pass/broken verdict when you couldn't actually exercise the feature.
 
+Declare the outcome as soon as you know the verdict, then write the account: `pass` →
+`succeeded`; `broken` → `failed` with the findings as the detail. A run that ends before it declares is scored a failure and repeated.
+
 Do not edit application code or commit — if the feature is broken, report it; a separate fixer
-makes the change. You may freely create/delete throwaway scripts + screenshots under
-`tmp/smoke/`.
+(`final_fix`) makes the change. You may freely create/delete throwaway scripts + screenshots
+under `tmp/smoke/`, and scenario data in the dev database.
+
