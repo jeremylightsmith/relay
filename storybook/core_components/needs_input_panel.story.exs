@@ -84,6 +84,19 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
           answer_form: answer_form(),
           advance_available?: true
         }
+      },
+      # RE308 (A11) — the node's agent could not run at all (an expired login). Retry only: no
+      # answer box, no attempt count.
+      %Variation{
+        id: :infrastructure,
+        attributes: %{
+          card: card(),
+          park_kind: :infrastructure,
+          node: "quality_review",
+          question: "agent could not run: Failed to authenticate: OAuth session expired and could not be refreshed",
+          failure_detail: "agent could not run: Failed to authenticate: OAuth session expired and could not be refreshed",
+          answer_form: answer_form()
+        }
       }
     ]
   end

@@ -2397,10 +2397,10 @@ defmodule RelayWeb.CoreComponents do
 
     # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
     # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
-    # a park that is neither A1 nor A4 (e.g. a :runner_gone re-park of an already-blocked card).
+    # a park that is none of A1, A4 or A11 (e.g. a :runner_gone re-park of an already-blocked card).
     # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
     # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
-    # fall outside needs_input_panel's declared `values: [:question, :escalation]`.
+    # fall outside needs_input_panel's declared `values:`.
     park_kind = (parked_run && Relay.Runs.park_kind(parked_run)) || :question
 
     assigns =
@@ -4049,12 +4049,15 @@ defmodule RelayWeb.CoreComponents do
 
   Public only so its three rows are unit-testable without a database.
   """
-  @spec blocked_strip_eyebrow(boolean(), :question | :escalation, String.t() | nil) :: String.t()
+  @spec blocked_strip_eyebrow(boolean(), :question | :escalation | :infrastructure, String.t() | nil) :: String.t()
   def blocked_strip_eyebrow(true, :question, node) when is_binary(node) and node != "",
     do: "#{String.upcase(node)} ASKED AND EXITED"
 
   def blocked_strip_eyebrow(true, :escalation, node) when is_binary(node) and node != "",
     do: "#{String.upcase(node)} FAILED — YOUR CALL"
+
+  def blocked_strip_eyebrow(true, :infrastructure, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} COULD NOT RUN"
 
   def blocked_strip_eyebrow(_parked?, _park_kind, _node), do: "NEEDS YOUR ANSWER"
 
@@ -4068,8 +4071,9 @@ defmodule RelayWeb.CoreComponents do
 
   attr :park_kind, :atom,
     default: :question,
-    values: [:question, :escalation],
-    doc: "RE253: from `Relay.Runs.park_kind/1` — :question is an agent ask (A1), :escalation a routed node failure (A4)"
+    values: [:question, :escalation, :infrastructure],
+    doc:
+      "RE253/RE308: from `Relay.Runs.park_kind/1` — :question is an agent ask (A1), :escalation a routed node failure (A4), :infrastructure an agent that could not run at all (A11)"
 
   attr :node, :string, default: nil, doc: "RE253: the failed node's key, for the :escalation sentence"
   attr :attempt, :integer, default: nil, doc: "RE253: attempts spent on that node"
@@ -4097,6 +4101,10 @@ defmodule RelayWeb.CoreComponents do
       derivations are not equivalent, though — `RunDetail.last_failure_detail/1` keeps `:failed`
       executions only, so an A9 (`:partial`) escalation has no `<pre>`, and there the question is
       the only surviving copy of the failure text. Never suppress both (RE253).
+    * `:infrastructure` (A11, RE308) — the node's agent could not run at all (an expired login, a
+      usage limit). Shows the cause in the same dark `<pre>` (falling back to the question, which
+      the engine posts with the same text) and a Retry, and nothing else: there is nothing to
+      answer, since the fix is outside the card, and no attempt count, since no retry was spent.
 
   Answering either face is the same event (`answer_input`) and the same resume: `Cards.answer_input/3`
   unblocks the card, the Listener resumes the run in the same visit with the human's note as
@@ -4152,9 +4160,44 @@ defmodule RelayWeb.CoreComponents do
           style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
         ><%= @failure_detail %></pre>
       </div>
+      <%!-- RE308 (A11): the agent never ran — an expired login or a usage limit. Nothing to answer
+      (the fix is outside the card) and no attempt count (no retry was spent): the cause and a Retry. --%>
+      <div
+        :if={@park_kind == :infrastructure}
+        id="needs-input-infrastructure"
+        class="flex flex-col gap-3"
+      >
+        <p
+          class="text-[13px] leading-normal"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          Agent could not run <strong>{@node}</strong>
+          — nothing about the code failed and no retry was spent. Fix the cause below, then retry.
+        </p>
+        <pre
+          :if={@failure_detail || @question}
+          id="needs-input-failure-detail"
+          style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+        ><%= @failure_detail || @question %></pre>
+        <div class="flex items-center gap-2">
+          <button
+            id="needs-input-retry"
+            type="button"
+            phx-click="retry_run"
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
+          >
+            Retry {@node}
+          </button>
+        </div>
+      </div>
       <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
       branch — a plain-string block writes no meta["questions"], so answer_questions is nil. --%>
-      <div :if={@answer_questions} id="needs-input-stepper" class="flex flex-col gap-4">
+      <div
+        :if={@answer_questions && @park_kind != :infrastructure}
+        id="needs-input-stepper"
+        class="flex flex-col gap-4"
+      >
         <div
           id="needs-input-progress"
           class="font-mono text-[10px]"
@@ -4265,7 +4308,7 @@ defmodule RelayWeb.CoreComponents do
         </div>
       </div>
       <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
-      <div :if={is_nil(@answer_questions)}>
+      <div :if={is_nil(@answer_questions) and @park_kind != :infrastructure}>
         <div
           :if={@body_loading}
           id="needs-input-question-skeleton"
@@ -4333,6 +4376,7 @@ defmodule RelayWeb.CoreComponents do
   end
 
   defp panel_label(:escalation), do: "NODE FAILED · YOUR CALL"
+  defp panel_label(:infrastructure), do: "AGENT COULD NOT RUN"
   defp panel_label(_kind), do: "RELAY AI NEEDS YOUR INPUT"
 
   defp answer_placeholder(:escalation), do: "Tell the agent what to do differently — it retries this node with your note…"
