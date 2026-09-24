@@ -1,47 +1,74 @@
 defmodule RelayWeb.FlowLayout do
   @moduledoc """
-  Deterministic, pure vertical layout for a flow graph — no stored coordinates, no dragging.
-  Derives the shape from graph structure alone: the `:succeeded` spine runs straight down a
-  single column, off-spine rework nodes sit in a second column on their partner's row, anything
-  unreachable is parked below, and every backward edge (loop or failure) is packed into a
-  right-hand gutter lane so they stop piling on top of each other. Edges into the `needs_input`
-  park are not routed at all; their source nodes are returned in `parks` for the renderer to
-  badge (RE330).
+  Deterministic, pure layout for a flow graph — no stored coordinates, no dragging. A thin adapter
+  over the vendored `dagre_ex` (`Dagre`, `vendor/dagre_ex`, RE332), which owns the layout
+  algorithm (RE333): every flow node becomes a dagre node sized by `node_size/1`; `start` and
+  `done` join as real, small nodes so they are ranked, ordered and routed like anything else; and
+  every edge except a start edge carries its label's measured size, so dagre reserves real room
+  for the pill and no label can land on a node or another label.
+
+  `layout/2` returns:
+
+    * `positions` — flow node key → top-left `{x, y}` (the flow's own nodes only; `start` and
+      `done` are internal to the layout)
+    * `size` — the canvas `{w, h}`
+    * `routes` — edge index (position in the input `edges` list) → `%{points:, label:}`.
+      `points` is an axis-aligned polyline from the source node to the target node; `label` is
+      the centre of the edge's pill, or `nil` for a start edge (which carries no pill)
+    * `start_point` — where the entry edge leaves; `done_point` — where the exit edge lands
+    * `parks` — the source of every edge into the `needs_input` park. Those edges have no
+      geometry and are left out of `routes`; the renderer badges their source instead (RE330)
 
   Consumed by the flow editor (`RelayWeb.FlowEditorLive`) and the storybook story. It is NOT
   reused by the run panel today.
 
-  Reference: the layout has intentionally diverged from
-  `docs/designs/Relay Flow Editor.dc.html` as of RLY-186 — the artboard shows the old
-  serpentine shape, so its node positions and edge paths are stale and must not be chased. The
-  artboard remains authoritative for node card shapes/sizes per type, the `@type_meta` colour
-  tokens, edge stroke colours, the dashed `:failed` stroke, arrowheads and label-pill styling
-  (all owned by `RelayWeb.FlowGraphComponents`).
+  Reference: `dagre_ex` owns layout. The layout has intentionally diverged from
+  `docs/designs/Relay Flow Editor.dc.html` since RLY-186 — the artboard shows the old serpentine
+  shape, so its node positions and edge paths are stale and must not be chased. The artboard
+  remains authoritative for node card shapes/sizes per type, the `@type_meta` colour tokens, edge
+  stroke colours, the dashed `:failed` stroke, arrowheads and label-pill styling (all owned by
+  `RelayWeb.FlowGraphComponents`).
   """
 
   # No `use Boundary` — this is a pure web-layer helper inside the RelayWeb boundary, like
   # CoreComponents/FlowSettingsComponents. Declaring a nested sub-boundary here would fail
   # compilation.
 
-  @spine_col 0
-  @side_col 1
-  # Column pitch. The gap between a spine node and its side (fix) node is @col_w − @node_w =
-  # 120px for a full-width reviewer; it must stay wide enough for the "failed · max N" edge label
-  # (~92px) to sit in it fully legible, clear of both opaque node boxes (RLY-186 acceptance #3).
-  @col_w 270
-  @row_h 124
   @node_w 150
   @node_h 56
   @gate_w 118
   @gate_h 76
-  @gutter_gap 24
-  @lane_w 22
-  @origin_x 8
-  @origin_y 44
+
+  # `start` is an invisible anchor the entry edge leaves from. `done` is wide and tall enough to
+  # hold the renderer's "lands → <stage>" pill, which sits just below `done_point` (its top edge).
+  @start_w 16
+  @start_h 16
+  @done_w 180
+  @done_h 40
+
+  # dagre separation constants, tuned by eye against the storybook. When any edge has a label,
+  # dagre gives labels their own layer and halves `ranksep` per gap.
+  @ranksep 68
+  @nodesep 24
+  @edgesep 12
+
+  # dagre's bounding box starts at {0, 0}; pad every side so selection rings, park badges and
+  # arrowheads never clip against the canvas edge.
+  @pad 16
+
+  # Edge-label measurement. dagre needs each label's size BEFORE layout, but text width is a
+  # browser fact. The pill is a fixed 9.5px ui-monospace face (FlowGraphComponents'
+  # `edge_label_style/2`) with 6px horizontal padding, so width ≈ characters × advance width +
+  # padding. This is an APPROXIMATION — accurate to a pixel or two for the ASCII labels the flow
+  # vocabulary produces, looser for wide glyphs — and deliberately so: a browser round-trip to
+  # measure exactly is not worth it for a diagram whose labels come from a tiny fixed vocabulary.
+  # @label_h is the pill's rendered height (a 9.5px line plus 2 × 2px vertical padding, rounded up).
+  @label_char_w 5.7
+  @label_pad_x 12
+  @label_h 16
 
   # RLY-194's `to`-only edge-endpoint sentinel. It is a park, not a terminal: an edge to it has
-  # no geometry and is left out of `routes` entirely (RE330) — its source node is listed in
-  # `parks` and the renderer badges it instead of drawing a line.
+  # no geometry and is left out of `routes` entirely (RE330).
   @park "needs_input"
 
   @doc """
@@ -51,232 +78,131 @@ defmodule RelayWeb.FlowLayout do
   def node_size(:gate), do: {@gate_w, @gate_h}
   def node_size(_type), do: {@node_w, @node_h}
 
+  @doc """
+  The text of an edge's label pill — outcome, then the foreach guard's human wording, then
+  `max N`, joined with " · " (a start edge's is `""`). Lives here rather than in the renderer
+  because the layout measures exactly this text; the renderer draws it.
+  """
+  def edge_label(edge) do
+    [to_string(Map.get(edge, :on)), when_label(Map.get(edge, :when)), max_loops_label(Map.get(edge, :max_loops))]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  # Human wording for the foreach guard on the diagram pill. This is a presentation label, not
+  # a second copy of Schemas.Flow.Edge.when_values/0 — the closed set is owned there.
+  defp when_label(:foreach_remaining), do: "while tasks remain"
+  defp when_label(:foreach_exhausted), do: "all tasks done"
+  defp when_label(_), do: nil
+
+  defp max_loops_label(max) when is_integer(max), do: "max #{max}"
+  defp max_loops_label(_), do: nil
+
+  @doc """
+  Approximate rendered `{w, h}` of an edge's label pill — see the measurement note above
+  `@label_char_w`. Used by `layout/2` to reserve room and by the tests to check collisions.
+  """
+  def label_size(edge) do
+    {ceil(String.length(edge_label(edge)) * @label_char_w) + @label_pad_x, @label_h}
+  end
+
   @spec layout([map], [map]) :: %{
           positions: %{optional(String.t()) => {integer, integer}},
           size: {integer, integer},
-          routes: %{optional(integer) => map},
+          routes: %{optional(integer) => %{points: [{integer, integer}], label: {integer, integer} | nil}},
           start_point: {integer, integer},
           done_point: {integer, integer},
           parks: MapSet.t(String.t())
         }
   def layout(nodes, edges) do
-    types = Map.new(nodes, fn n -> {key(n), node_type(n)} end)
-    node_keys = MapSet.new(Map.keys(types))
-    spine = spine_order(edges, node_keys)
-    grid = place(nodes, edges, spine)
+    drawn = edges |> Enum.with_index() |> Enum.reject(fn {edge, _i} -> edge.to == @park end)
 
-    positions =
-      Map.new(grid, fn {k, {r, c}} ->
-        {w, _h} = node_size(Map.fetch!(types, k))
-        {k, {col_center(c) - div(w, 2), @origin_y + r * @row_h}}
-      end)
+    result =
+      Dagre.layout(
+        nodes: dagre_nodes(nodes),
+        edges: Enum.map(drawn, &dagre_edge/1),
+        rankdir: :tb,
+        ranksep: @ranksep,
+        nodesep: @nodesep,
+        edgesep: @edgesep
+      )
 
-    kinds =
-      edges
-      |> Enum.with_index()
-      |> Enum.reject(fn {e, _i} -> e.to == @park end)
-      |> Map.new(fn {e, i} -> {i, route_kind(e, grid)} end)
-
-    parks = for %{to: @park, from: from} <- edges, into: MapSet.new(), do: from
-
-    max_right = Enum.max([col_center(@spine_col) + div(@node_w, 2) | rights(grid, types)])
-    max_bottom = Enum.max([@origin_y | bottoms(grid, types)])
-    gutter_base = max_right + @gutter_gap
-
-    lane_of = assign_lanes(back_intervals(edges, kinds, grid))
-    max_lane = Enum.max([-1 | Map.values(lane_of)])
-
-    routes =
-      Map.new(kinds, fn {i, kind} ->
-        lane = Map.get(lane_of, i)
-        {i, %{kind: kind, lane: lane, lane_x: lane && gutter_base + lane * @lane_w}}
-      end)
-
-    done_pt = done_point(spine, types)
-
-    width = if(max_lane >= 0, do: gutter_base + max_lane * @lane_w, else: max_right) + @gutter_gap
-    height = Enum.max([max_bottom, elem(done_pt, 1)]) + @gutter_gap
+    {w, h} = result.size
 
     %{
-      positions: positions,
-      size: {width, height},
-      routes: routes,
-      start_point: start_point(),
-      done_point: done_pt,
-      parks: parks
+      positions: Map.new(nodes, fn node -> {key(node), top_left(Map.fetch!(result.nodes, {:node, key(node)}))} end),
+      size: {w + 2 * @pad, h + 2 * @pad},
+      routes: Map.new(drawn, fn {_edge, i} -> {i, route(Map.fetch!(result.edges, i))} end),
+      start_point: bottom_center(Map.fetch!(result.nodes, :start)),
+      done_point: top_center(Map.fetch!(result.nodes, :done)),
+      parks: for(%{to: @park, from: from} <- edges, into: MapSet.new(), do: from)
     }
   end
 
-  # ---- node placement ----
-
-  defp place(nodes, edges, spine) do
-    spine_grid = spine |> Enum.with_index() |> Map.new(fn {k, i} -> {k, {i, @spine_col}} end)
-    spine_set = MapSet.new(spine)
-    side = nodes |> Enum.map(&key/1) |> Enum.reject(&MapSet.member?(spine_set, &1))
-
-    {placed, _taken} =
-      Enum.reduce(side, {spine_grid, MapSet.new(Map.values(spine_grid))}, fn k, {grid, taken} ->
-        case partner_row(k, edges, grid) do
-          nil ->
-            {grid, taken}
-
-          r ->
-            cell = first_free(r, @side_col, taken)
-            {Map.put(grid, k, cell), MapSet.put(taken, cell)}
-        end
+  defp dagre_nodes(nodes) do
+    real =
+      Enum.map(nodes, fn node ->
+        {w, h} = node_size(node_type(node))
+        %{id: {:node, key(node)}, width: w, height: h}
       end)
 
-    parked = nodes |> Enum.map(&key/1) |> Enum.reject(&Map.has_key?(placed, &1))
-    base = 1 + max_row(placed)
-
-    parked
-    |> Enum.with_index()
-    |> Enum.reduce(placed, fn {k, i}, acc -> Map.put(acc, k, {base + i, @side_col}) end)
+    real ++ [%{id: :start, width: @start_w, height: @start_h}, %{id: :done, width: @done_w, height: @done_h}]
   end
 
-  # A side node's partner is the node it fails INTO (entry, preferred) else the node its
-  # `:succeeded` edge returns to. We use the partner's row; the entry partner wins when both
-  # exist and their rows differ (the node that fails into it defines its row).
-  defp partner_row(key, edges, grid) do
-    entry =
-      Enum.find_value(edges, fn
-        %{to: ^key, from: from, on: :failed} -> Map.get(grid, from)
-        _ -> nil
-      end)
+  # A start edge draws no pill (the renderer never labels it), so it reserves no label room.
+  defp dagre_edge({%{from: "start"} = edge, i}), do: %{id: i, from: endpoint(edge.from), to: endpoint(edge.to)}
 
-    ret =
-      Enum.find_value(edges, fn
-        %{from: ^key, to: to, on: :succeeded} -> Map.get(grid, to)
-        _ -> nil
-      end)
-
-    case entry || ret do
-      {r, _c} -> r
-      _ -> nil
-    end
+  defp dagre_edge({edge, i}) do
+    {w, h} = label_size(edge)
+    %{id: i, from: endpoint(edge.from), to: endpoint(edge.to), label: %{width: w, height: h}}
   end
 
-  defp first_free(r, c, taken) do
-    if MapSet.member?(taken, {r, c}), do: first_free(r, c + 1, taken), else: {r, c}
+  # `start` and `done` are the edge-endpoint sentinels; dagre ids are namespaced so a node an
+  # author transiently names "done" (the editor blocks saving it) still lays out instead of
+  # colliding with the sentinel.
+  defp endpoint("start"), do: :start
+  defp endpoint("done"), do: :done
+  defp endpoint(key), do: {:node, key}
+
+  defp route(%{points: points, label: label}) do
+    %{points: points |> Enum.map(&shift/1) |> orthogonal(), label: label && shift(label)}
   end
 
-  # ---- spine discovery (unchanged behaviour) ----
+  defp shift({x, y}), do: {x + @pad, y + @pad}
 
-  # Follow the single start edge's target, then first-unvisited :succeeded edges to "done".
-  defp spine_order(edges, node_keys) do
-    start = Enum.find(edges, &(&1.from == "start"))
-    walk(start && start.to, edges, node_keys, MapSet.new(), [])
-  end
+  defp top_left(%{x: x, y: y}), do: shift({x, y})
+  defp top_center(%{x: x, y: y, width: w}), do: shift({x + div(w, 2), y})
+  defp bottom_center(%{x: x, y: y, width: w, height: h}), do: shift({x + div(w, 2), y + h})
 
-  defp walk(nil, _edges, _keys, _seen, acc), do: Enum.reverse(acc)
-  defp walk("done", _edges, _keys, _seen, acc), do: Enum.reverse(acc)
+  # dagre's polylines are waypoints, not guaranteed axis-aligned. Snap each diagonal hop to a
+  # vertical–horizontal–vertical dogleg at its mid-height, then drop repeated and collinear
+  # points, so the renderer's rounded-corner builder (which assumes axis alignment) applies as-is.
+  # Every dagre waypoint is kept, so a route's label point still lies on its path.
+  defp orthogonal(points) do
+    points
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn
+      [{ax, ay}, {bx, by}] when ax != bx and ay != by ->
+        mid = div(ay + by, 2)
+        [{ax, ay}, {ax, mid}, {bx, mid}]
 
-  defp walk(key, edges, node_keys, seen, acc) do
-    cond do
-      MapSet.member?(seen, key) ->
-        Enum.reverse(acc)
-
-      not MapSet.member?(node_keys, key) ->
-        Enum.reverse(acc)
-
-      true ->
-        seen = MapSet.put(seen, key)
-        next = next_spine_target(edges, key, seen)
-        walk(next, edges, node_keys, seen, [key | acc])
-    end
-  end
-
-  # A `foreach` loop head may leave TWO :succeeded edges — one guarded `foreach_remaining` back
-  # to itself, one guarded `foreach_exhausted` onward — so the first-listed edge is not
-  # necessarily the spine's next step. Prefer whichever candidate does NOT loop back to an
-  # already-visited node (`seen` already includes `key`, so a self-loop is excluded too); the
-  # spine should keep moving forward.
-  defp next_spine_target(edges, key, seen) do
-    candidates = for %{from: ^key, to: to} = e <- edges, Map.get(e, :on) == :succeeded, do: to
-    Enum.find(candidates, &(not MapSet.member?(seen, &1))) || List.first(candidates)
-  end
-
-  # ---- edge route kinds ----
-
-  # A bare start → done edge (a zero-node flow, e.g. a just-created scratch flow) is neither a
-  # spine entry nor exit — it connects the two virtual endpoints directly. It MUST be classified
-  # before the :enter/:exit clauses, whose handlers dereference a real node position.
-  defp route_kind(%{from: "start", to: "done"}, _grid), do: :enter_exit
-  defp route_kind(%{from: "start"}, _grid), do: :enter
-  defp route_kind(%{to: "done"}, _grid), do: :exit
-
-  defp route_kind(e, grid) do
-    {fr, fc} = Map.fetch!(grid, e.from)
-    {tr, tc} = Map.fetch!(grid, e.to)
-
-    cond do
-      tr > fr -> :drop
-      tr == fr and tc > fc -> :side_out
-      tr == fr and tc < fc -> :side_back
-      true -> :gutter
-    end
-  end
-
-  # ---- back-edge lane packing ----
-
-  # Row interval of every :gutter edge, keyed by edge index.
-  defp back_intervals(edges, kinds, grid) do
-    edges
-    |> Enum.with_index()
-    |> Enum.filter(fn {_e, i} -> Map.get(kinds, i) == :gutter end)
-    |> Enum.map(fn {e, i} ->
-      {fr, _} = Map.fetch!(grid, e.from)
-      {tr, _} = Map.fetch!(grid, e.to)
-      {i, {min(fr, tr), max(fr, tr)}}
+      [a, _b] ->
+        [a]
     end)
+    |> Kernel.++([List.last(points)])
+    |> Enum.dedup()
+    |> drop_collinear()
   end
 
-  # Greedy interval pack: sort by span ascending (tie-break source row then edge index for
-  # determinism), assign each edge the lowest lane whose members' intervals don't overlap it.
-  # Nested edges get distinct lanes with the longest outermost; row-disjoint edges share a lane.
-  defp assign_lanes(intervals) do
-    intervals
-    |> Enum.sort_by(fn {i, {lo, hi}} -> {hi - lo, lo, i} end)
-    |> Enum.reduce({%{}, %{}}, fn {i, iv}, {lane_of, lanes} ->
-      lane = lowest_free_lane(iv, lanes, 0)
-      {Map.put(lane_of, i, lane), Map.update(lanes, lane, [iv], &[iv | &1])}
-    end)
-    |> elem(0)
+  defp drop_collinear([a, b, c | rest]) do
+    if collinear?(a, b, c),
+      do: drop_collinear([a, c | rest]),
+      else: [a | drop_collinear([b, c | rest])]
   end
 
-  defp lowest_free_lane(iv, lanes, n) do
-    if Enum.any?(Map.get(lanes, n, []), &overlap?(&1, iv)),
-      do: lowest_free_lane(iv, lanes, n + 1),
-      else: n
-  end
+  defp drop_collinear(points), do: points
 
-  defp overlap?({lo1, hi1}, {lo2, hi2}), do: lo1 <= hi2 and lo2 <= hi1
-
-  # ---- endpoints & canvas geometry ----
-
-  defp start_point, do: {col_center(@spine_col), @origin_y - 24}
-
-  defp done_point([], _types), do: {col_center(@spine_col), @origin_y}
-
-  defp done_point(spine, types) do
-    last = List.last(spine)
-    row = length(spine) - 1
-    {_w, h} = node_size(Map.fetch!(types, last))
-    {col_center(@spine_col), @origin_y + row * @row_h + h + 24}
-  end
-
-  defp rights(grid, types) do
-    for {k, {_r, c}} <- grid, do: col_center(c) + div(elem(node_size(Map.fetch!(types, k)), 0), 2)
-  end
-
-  defp bottoms(grid, types) do
-    for {k, {r, _c}} <- grid, do: @origin_y + r * @row_h + elem(node_size(Map.fetch!(types, k)), 1)
-  end
-
-  defp col_center(c), do: @origin_x + c * @col_w + div(@node_w, 2)
-
-  defp max_row(grid) when map_size(grid) == 0, do: -1
-  defp max_row(grid), do: grid |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.max()
+  defp collinear?({ax, ay}, {bx, by}, {cx, cy}), do: (ax == bx and bx == cx) or (ay == by and by == cy)
 
   defp key(%{key: k}), do: k
   defp node_type(%{type: t}), do: t

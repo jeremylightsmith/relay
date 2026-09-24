@@ -37,12 +37,6 @@ defmodule RelayWeb.FlowGraphComponentsTest do
   defp path_nums(d), do: ~r/-?\d+/ |> Regex.scan(d) |> Enum.map(fn [n] -> String.to_integer(n) end)
   defp path_xs(d), do: d |> path_nums() |> Enum.take_every(2)
   defp vertical?(d), do: d |> path_xs() |> Enum.uniq() |> length() == 1
-  defp max_x(d), do: d |> path_xs() |> Enum.max()
-
-  # mirrors RelayWeb.FlowLayout's @row_h (the vertical pitch between spine rows).
-  @row_h 124
-
-  defp path_ys(d), do: d |> path_nums() |> Enum.drop_every(2)
 
   defp code_flow do
     flow = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
@@ -66,11 +60,6 @@ defmodule RelayWeb.FlowGraphComponentsTest do
   defp badge_tag(html, key) do
     [tag] = Regex.run(~r/<span[^>]*data-park="#{key}"[^>]*>/, html)
     tag
-  end
-
-  defp label_top(html, idx) do
-    [_, y] = Regex.run(~r/data-edge="#{idx}"[^>]*?top:(-?\d+)px/, html)
-    String.to_integer(y)
   end
 
   describe "node shapes/colors by type (Relay Flow Editor.dc.html typeMeta, lines ~366-395)" do
@@ -202,8 +191,8 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     end
   end
 
-  describe "vertical edge routing (RLY-186)" do
-    test "a forward spine edge is drawn as a vertical line" do
+  describe "edge routing (RE333)" do
+    test "a straight forward edge is drawn as a vertical line" do
       nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
 
       edges = [
@@ -213,41 +202,34 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       ]
 
       html = graph(nodes, edges, [])
-      # edge index 1 is a -> b (:drop)
+      # edge index 1 is a -> b
       assert vertical?(edge_d(html, 1))
     end
 
-    test "a back-edge routes out beyond every node into the right-hand gutter" do
-      nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
-
-      edges = [
-        %{from: "start", to: "a", on: nil},
-        %{from: "a", to: "b", on: :succeeded},
-        %{from: "b", to: "a", on: :failed, max_loops: 2},
-        %{from: "b", to: "done", on: :succeeded}
-      ]
-
+    test "one <path> per routed edge, drawn from the route's first point to its last" do
+      {nodes, edges} = code_flow()
       layout = FlowLayout.layout(nodes, edges)
       html = graph(nodes, edges, [])
-      # widest node right edge (both agents, width 150)
-      node_right = layout.positions |> Map.values() |> Enum.map(fn {x, _y} -> x + 150 end) |> Enum.max()
-      # edge index 2 is the b -> a back-edge (:gutter)
-      assert max_x(edge_d(html, 2)) > node_right
+
+      assert length(edge_ds(html)) == map_size(layout.routes)
+
+      for {i, %{points: points}} <- layout.routes do
+        d = edge_d(html, Enum.count(layout.routes, fn {j, _} -> j < i end))
+        {x0, y0} = hd(points)
+        {xn, yn} = List.last(points)
+        assert String.starts_with?(d, "M #{x0} #{y0} ")
+        assert d |> String.trim_trailing() |> String.ends_with?("#{xn} #{yn}")
+      end
     end
 
-    test "the two arrows of a rework detour carry labels at different y positions" do
-      nodes = [%{key: "gate", type: :gate, run: "mix precommit"}, %{key: "fix", type: :agent, run: "fix"}]
-
-      edges = [
-        %{from: "start", to: "gate", on: nil},
-        %{from: "gate", to: "fix", on: :failed, max_loops: 2},
-        %{from: "fix", to: "gate", on: :succeeded},
-        %{from: "gate", to: "done", on: :succeeded}
-      ]
-
+    test "each edge label is positioned at its route's label point" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
       html = graph(nodes, edges, [])
-      # index 1 = gate -> fix (:side_out, offset above); index 2 = fix -> gate (:side_back, below)
-      assert label_top(html, 1) != label_top(html, 2)
+
+      for {i, %{label: {x, y}}} <- layout.routes do
+        assert html =~ ~r/data-edge="#{i}"[^>]*?style="position:absolute;left:#{x}px;top:#{y}px;/
+      end
     end
 
     test "node_size/1 is the single source of node box dimensions" do
@@ -282,28 +264,6 @@ defmodule RelayWeb.FlowGraphComponentsTest do
 
       assert labelled != []
       for i <- park_idx, do: refute(i in labelled)
-    end
-
-    # The original bug: every needs_input edge was routed to done_point, so each one drew a
-    # straight line from its source down the spine column through every node box below it. Any
-    # edge that is not out in the right-hand gutter connects adjacent rows (or stays on one row),
-    # so its vertical extent must never exceed one row pitch.
-    test "no non-gutter edge path spans more than one row" do
-      {nodes, edges} = code_flow()
-      layout = FlowLayout.layout(nodes, edges)
-      html = graph(nodes, edges, [])
-      types = Map.new(nodes, &{&1.key, &1.type})
-
-      node_right =
-        layout.positions
-        |> Enum.map(fn {k, {x, _y}} -> x + elem(FlowLayout.node_size(types[k]), 0) end)
-        |> Enum.max()
-
-      for d <- edge_ds(html), max_x(d) <= node_right do
-        ys = path_ys(d)
-        span = Enum.max(ys) - Enum.min(ys)
-        assert span <= @row_h, "edge path #{d} spans #{span}px vertically (> one row, #{@row_h}px)"
-      end
     end
   end
 
