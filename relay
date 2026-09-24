@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 67
-RUNNER_FINGERPRINT = "5d641d5f30b85629b672c76d69e233d5a5645d82b8c926e15602397565c431a2"
+RUNNER_VERSION = 68
+RUNNER_FINGERPRINT = "2fbbfd7d76cec7378d59ee8b92bf7910e92afd000bf8527d2b79cf35f4298dbf"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2962,10 +2962,16 @@ def _usage_pct(fraction):
     return f"{round(fraction * 100)}%"
 
 
+def local_clock(epoch):
+    """`HH:MM` in local time — the ONE rendering of a usage-limit reset (RE320's pause line and
+    RE308's `agent could not run` detail both read it)."""
+    return time.strftime("%H:%M", time.localtime(epoch))
+
+
 def rate_limit_pause_line(pause):
     """The one line a runner logs on entering a pause, e.g.
     `⏸ rate limited: five_hour 92% ≥ 90% limit · resumes 15:40 · probing every 15m`."""
-    resumes = time.strftime("%H:%M", time.localtime(pause["resets_at"]))
+    resumes = local_clock(pause["resets_at"])
     if pause["reason"] == RATE_LIMIT_REASON_REJECTED:
         why = f"Claude refused ({pause['window']})"
     else:
@@ -3123,6 +3129,169 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes
     return (resp or {}).get("run_state")
 
 
+# ---- Agent could not run (RE308) ----
+#
+# A `claude -p` that exits non-zero because the ENVIRONMENT refused it (an expired login, a usage
+# limit) is not a verdict about the code, and retrying cannot fix it. Verified against Claude Code
+# 2.1.281 with a bad credential: the stream ends with an assistant event carrying a TOP-LEVEL
+# `"error": "authentication_failed"` (and `"is_api_error_message": true`) whose text is the reason,
+# then a `result` with `is_error: true`, `api_error_status: 401` and the same text — its `subtype`
+# reads "success", so it is useless — and the process exits 1.
+NODE_OUTCOME_BLOCKED = "blocked"   # runner-only: never in NODE_OUTCOMES; see RUNNER_OUTCOMES
+CLAUDE_FAILURE_AUTH, CLAUDE_FAILURE_USAGE_LIMIT = "auth", "usage_limit"
+# The assistant event's `error` tag. `billing_error` is auth-kind on purpose: like an expired login
+# it never clears by itself, so RE267's resume-at-reset must not mistake it for a usage limit.
+CLAUDE_AUTH_ERROR_TAGS = ("authentication_failed", "billing_error")
+CLAUDE_USAGE_LIMIT_ERROR_TAGS = ("rate_limit",)
+CLAUDE_AUTH_HTTP_STATUSES = (401, 403)
+CLAUDE_USAGE_LIMIT_HTTP_STATUSES = (429,)
+# The phrase fallback for a CLI that tags nothing: case-insensitive substrings of the result text
+# and the last assistant text. ANY hit classifies — a spurious park costs a human one click, a
+# spurious retry costs a run.
+CLAUDE_AUTH_FAILURE_SIGNATURES = ("failed to authenticate", "oauth session expired",
+                                  "oauth token has expired", "invalid api key",
+                                  "api key is invalid", "please run /login", "not logged in")
+CLAUDE_USAGE_LIMIT_SIGNATURES = ("usage limit", "hit your limit", "rate limit", "limit reached")
+CLAUDE_FAILURE_TEXT_MAX = 200
+CLAUDE_FAILURE_DEFAULT_AUTH_REASON = "Claude could not authenticate"
+CLAUDE_FAILURE_DEFAULT_USAGE_REASON = "Claude usage limit reached"
+
+
+class ClaudeRunReport:
+    """What one `claude -p` stream said about how it ended (RE308): fed every parsed event by
+    `_stream_claude_job`, read by `classify_claude_failure`. Total — an unexpected shape is
+    ignored, never raised, because it runs inside the job's own stream loop.
+
+    A rejected `rate_limit_event` is recorded from THIS job's stream, never read back from the
+    shared USAGE_LIMITER: other jobs feed that too, so it cannot say what refused this one."""
+
+    def __init__(self):
+        self.is_error = False
+        self.subtype = None
+        self.result_text = None
+        self.api_error_status = None
+        self.assistant_text = None
+        self.error_tag = None
+        self.rejected = False
+        self.rejected_window = None
+        self.rejected_resets_at = None
+
+    def observe(self, ev):
+        if not isinstance(ev, dict):
+            return
+        kind = ev.get("type")
+        if kind == "result":
+            self._observe_result(ev)
+        elif kind == "assistant":
+            self._observe_assistant(ev)
+        elif kind == "rate_limit_event":
+            self._observe_rate_limit(ev)
+
+    def _observe_result(self, ev):
+        self.is_error = bool(ev.get("is_error"))
+        self.subtype = ev.get("subtype") if isinstance(ev.get("subtype"), str) else None
+        result = ev.get("result")
+        self.result_text = result if isinstance(result, str) and result.strip() else None
+        status = ev.get("api_error_status")
+        self.api_error_status = (status if isinstance(status, int) and not isinstance(status, bool)
+                                 else None)
+
+    def _observe_assistant(self, ev):
+        message = ev.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        texts = [b["text"] for b in (content if isinstance(content, list) else [])
+                 if isinstance(b, dict) and b.get("type") == "text"
+                 and isinstance(b.get("text"), str) and b["text"].strip()]
+        if texts:
+            self.assistant_text = "\n".join(texts)
+        if isinstance(ev.get("error"), str):
+            self.error_tag = ev["error"]
+
+    def _observe_rate_limit(self, ev):
+        info = ev.get("rate_limit_info", ev)
+        if not isinstance(info, dict) or info.get("status") != CLAUDE_STATUS_REJECTED:
+            return
+        window = info.get("rateLimitType")
+        self.rejected = True
+        self.rejected_window = window if isinstance(window, str) else None
+        self.rejected_resets_at = _epoch(info.get("resetsAt"))
+
+
+def _one_line(text):
+    """`text` collapsed to one line, trimmed to CLAUDE_FAILURE_TEXT_MAX characters."""
+    line = " ".join(str(text).split())
+    if len(line) <= CLAUDE_FAILURE_TEXT_MAX:
+        return line
+    return line[:CLAUDE_FAILURE_TEXT_MAX - 1] + "…"
+
+
+def _report_texts(report):
+    return [t for t in (report.result_text, report.assistant_text) if t]
+
+
+def _signature_line(texts, signatures):
+    """The first line (of the first text) containing any of `signatures`, as one trimmed line."""
+    for text in texts:
+        for line in text.splitlines():
+            lowered = line.lower()
+            if any(sig in lowered for sig in signatures):
+                return _one_line(line)
+    return None
+
+
+def claude_failure_text(report):
+    """The last words of a `claude -p` — its `result` text, else its last assistant text — as one
+    trimmed line, or None when it said nothing."""
+    texts = _report_texts(report) if report is not None else []
+    return _one_line(texts[0]) if texts else None
+
+
+def _structured_failure_kind(report):
+    if (report.error_tag in CLAUDE_AUTH_ERROR_TAGS
+            or report.api_error_status in CLAUDE_AUTH_HTTP_STATUSES):
+        return CLAUDE_FAILURE_AUTH
+    if (report.error_tag in CLAUDE_USAGE_LIMIT_ERROR_TAGS
+            or report.api_error_status in CLAUDE_USAGE_LIMIT_HTTP_STATUSES
+            or report.rejected):
+        return CLAUDE_FAILURE_USAGE_LIMIT
+    return None
+
+
+def classify_claude_failure(report):
+    """None, or {"kind": "auth" | "usage_limit", "reason": "<one line>"} for a `claude -p` the
+    environment refused to run (RE308). Pure.
+
+    Structured signals first — the assistant event's `error` tag, the result's
+    `api_error_status`, a rejected `rate_limit_event` from this job's stream — then a phrase match
+    over the result text and last assistant text against CLAUDE_AUTH_FAILURE_SIGNATURES, then
+    CLAUDE_USAGE_LIMIT_SIGNATURES. The reason is the stream's own words (the matching line for a
+    phrase hit), falling back to a stock sentence when the stream said nothing. A usage limit with
+    a known reset appends ` · resets HH:MM` (`local_clock`)."""
+    if report is None:
+        return None
+    texts = _report_texts(report)
+    kind, reason = _structured_failure_kind(report), None
+    if kind is None:
+        for candidate, signatures in ((CLAUDE_FAILURE_AUTH, CLAUDE_AUTH_FAILURE_SIGNATURES),
+                                      (CLAUDE_FAILURE_USAGE_LIMIT, CLAUDE_USAGE_LIMIT_SIGNATURES)):
+            reason = _signature_line(texts, signatures)
+            if reason:
+                kind = candidate
+                break
+    if kind is None:
+        return None
+    if reason is None:
+        reason = claude_failure_text(report)
+    if reason is None and kind == CLAUDE_FAILURE_AUTH:
+        reason = CLAUDE_FAILURE_DEFAULT_AUTH_REASON
+    elif reason is None:
+        reason = CLAUDE_FAILURE_DEFAULT_USAGE_REASON + (
+            f" ({report.rejected_window})" if report.rejected_window else "")
+    if kind == CLAUDE_FAILURE_USAGE_LIMIT and report.rejected_resets_at:
+        reason += f" · resets {local_clock(report.rejected_resets_at)}"
+    return {"kind": kind, "reason": reason}
+
+
 def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
                       agent=None, partition=None, scratch=None, plan=None, on_event=None,
                       mirror=True):
@@ -3140,7 +3309,8 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     it arrives, so a talk turn can stream its transcript while the turn is still working.
     `mirror`, if False, is passed through to `_print_claude_event` so a talk turn prints locally
     without also forwarding to the ref-keyed board-log mirror (RE268).
-    Returns (ok, captured_session_id). `on_proc` receives the live Popen."""
+    Returns (ok, captured_session_id, report) — `report` is the job's ClaudeRunReport (RE308).
+    `on_proc` receives the live Popen."""
     cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
@@ -3167,6 +3337,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     if on_proc:
         on_proc(proc)
     captured = None
+    report = ClaudeRunReport()
     for line in proc.stdout:
         line = line.strip()
         if not line:
@@ -3174,6 +3345,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
         try:
             ev = json.loads(line)
             captured = ev.get("session_id") or captured
+            report.observe(ev)          # RE308: total; never raises
             _print_claude_event(ev, tag, mirror=mirror)
             if USAGE_LIMITER is not None:
                 USAGE_LIMITER.observe(ev, usage_clock())    # RE320: total; never raises
@@ -3181,10 +3353,10 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
                 on_event(ev)
         except Exception:
             print(f"    {tag}" + line[:200], flush=True)
-    return proc.wait() == 0, captured
+    return proc.wait() == 0, captured, report
 
 
-def determine_agent_outcome(job, ok, outcome_path, cwd=None):
+def determine_agent_outcome(job, ok, outcome_path, cwd=None, report=None):
     """Agent-node outcome contract, evaluated in order (relay.md is the write-up):
       1. re-fetch the card — status needs_input ⇒ needs_input (exactly as work() detects today);
       2. else an outcome file at $RELAY_NODE_OUTCOME supplies {outcome, detail} — the only
@@ -3198,6 +3370,13 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None):
          unconditional, but when `cwd` is given the DETAIL names any uncommitted work the node
          left in that worktree (RE298) — "did not declare" and "did nothing" are not the same
          thing, and the retry reads this detail as its findings.
+      3b. RE308: before rule 3's exit-code verdict, a NON-ZERO exit whose `report` classifies
+         (`classify_claude_failure`) is `blocked` — "agent could not run: <reason>" — so an
+         expired login or a usage limit parks for a human instead of spending the retry budget
+         and handing the next node a phantom finding. It sits AFTER rules 1–2, so a declared
+         verdict is never reclassified, and an outcome file cannot itself declare `blocked`
+         (only NODE_OUTCOMES are accepted from it). An unclassified non-zero exit stays `failed`,
+         its detail now carrying the stream's last words when there are any.
       4. NOTE (RLY-194): the SERVER may additionally override a declared `succeeded` back to
          `failed` for a node marked expects_commits that produced no commits (HEAD unchanged).
          That rule is server-side only — the three rules above are unchanged, and no field is
@@ -3216,8 +3395,13 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None):
         try:
             with open(outcome_path) as f:
                 data = json.load(f)
-            return (data.get("outcome", "succeeded"), data.get("detail", ""),
-                    bool(data.get("no_changes", False)))
+            declared = data.get("outcome", "succeeded")
+            if declared not in NODE_OUTCOMES:
+                # RE308: `blocked` is runner-only — an agent that hand-writes it would park itself
+                # around its own retry budget.
+                return ("failed", f"the outcome file declared {declared!r}, which an agent may not "
+                        f"declare (use one of {', '.join(NODE_OUTCOMES)})", False)
+            return declared, data.get("detail", ""), bool(data.get("no_changes", False))
         except Exception as e:
             # The outcome file is the ONLY channel a node has to signal `partial`; if it's
             # unreadable/malformed (e.g. an LLM-driven step wrote truncated JSON), falling
@@ -3227,12 +3411,19 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None):
             log(f"  ⚠ {ref}: outcome file at {outcome_path} is unreadable/malformed: {e}",
                 ref=ref, kind="error")
             return "failed", f"outcome file at {outcome_path} is unreadable/malformed: {e}", False
+    if not ok:
+        failure = classify_claude_failure(report)
+        if failure:
+            return (NODE_OUTCOME_BLOCKED, f"agent could not run: {failure['reason']}"
+                    + abandoned_work_note(cwd), False)
     if ok:
         return ("failed",
                 f"agent exited 0 but did not write an outcome to $RELAY_NODE_OUTCOME "
                 f"({outcome_path}) and did not raise needs-input — a node must declare its "
                 f"verdict, so this is not treated as success" + abandoned_work_note(cwd), False)
-    return ("failed", "agent exited non-zero" + abandoned_work_note(cwd), False)
+    last_words = claude_failure_text(report)
+    detail = f"agent exited non-zero: {last_words}" if last_words else "agent exited non-zero"
+    return ("failed", detail + abandoned_work_note(cwd), False)
 
 
 def uncommitted_paths(path):
@@ -3521,12 +3712,13 @@ def run_node_job(job, slot_path, control, partition=None):
         outcome_dir = tempfile.mkdtemp(prefix="relay-node-outcome-")
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
-            ok, session_id = _stream_claude_job(
+            ok, session_id, report = _stream_claude_job(
                 compose_node_prompt(job, cmd, vars), cwd=slot_path, tag=tag,
                 session_id=job.get("resume_session"),
                 outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
                 partition=partition, scratch=scratch, plan=plan)
-            outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path)
+            outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path,
+                                                                  report=report)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
@@ -3736,7 +3928,7 @@ def run_talk_job(job, slot_path, control, sender):
                 continue
             sender.enqueue(line["kind"], line["text"], line["dim"])
 
-    ok, session_id = _stream_claude_job(
+    ok, session_id, _report = _stream_claude_job(
         talk_prompt(job), cwd=slot_path, tag=tag,
         session_id=job.get("resume_session"), on_proc=control.register,
         on_event=on_event, mirror=False)
@@ -4670,6 +4862,9 @@ def cmd_start(args):
 
 
 NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
+# RE308: what the RUNNER may report — NODE_OUTCOMES (what an agent may declare, pinned as
+# vocabulary.agent_outcomes) plus the runner-only `blocked`. Pinned: vocabulary.outcomes.
+RUNNER_OUTCOMES = NODE_OUTCOMES + (NODE_OUTCOME_BLOCKED,)
 
 
 def cmd_outcome(args):
