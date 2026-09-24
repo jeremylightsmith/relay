@@ -56,7 +56,7 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
 RUNNER_VERSION = 67
-RUNNER_FINGERPRINT = "e387da1a867e7974f60bbfba11d43853e9a0b816fee8cd6530e955d8b0d4e4ef"
+RUNNER_FINGERPRINT = "5d641d5f30b85629b672c76d69e233d5a5645d82b8c926e15602397565c431a2"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2235,14 +2235,23 @@ class RunnerPool:
 
         Before a REMOVAL (never a retain) it stops any process still running inside the tree
         (_stop_processes_in, RE336), which would otherwise make git fail with 'Directory not
-        empty'."""
+        empty'.
+
+        Before that sweep, and only for an intact tree, it runs the project's cleanup hook
+        (`_cleanup_before_removal`, RE339)."""
         path = worktree_path(slot)
         if not os.path.isdir(path):
             return None
+        intact = _worktree_link_intact(path)
         if not retain:
             # Removal path only: a retained tree is a post-mortem and is left exactly as it is.
+            # The project's cleanup hook goes first so it can stop its own services gracefully;
+            # the RE336 sweep then catches anything left over. A half-deleted tree skips the
+            # hook: its cleanup already ran on the attempt that half-deleted it, and git run
+            # from a link-less cwd would walk up into the main checkout (RE339).
+            if intact:
+                self._cleanup_before_removal(path, self._ref_of(slot))
             _stop_processes_in(path, ref=self._ref_of(slot))
-        intact = _worktree_link_intact(path)
         if intact:
             dirty = subprocess.run(["git", "status", "--porcelain"], cwd=path,
                                    capture_output=True, text=True).stdout.strip()
@@ -2331,6 +2340,18 @@ class RunnerPool:
             return None
         return (proc.stderr or proc.stdout or f"cleanup hook exited {proc.returncode}").strip()
 
+    def _cleanup_before_removal(self, path, ref):
+        """Run the cleanup hook for an INTACT tree about to be removed (RE339). Best-effort: a
+        failure or timeout is forwarded as an `error` line naming the card (the channel RE336
+        teardown failures use) and the removal goes ahead, since the tree is going away
+        anyway and the run already has its outcome. The hook must be idempotent: a
+        `git worktree remove` that fails after it succeeded is retried with the link still
+        intact, and the hook runs again. Cleaning up twice is safer than leaking."""
+        err = self.run_cleanup_hook(path, ref)
+        if err:
+            log(f"⚠ {ref or path}: cleanup hook failed, removing the worktree anyway: {err}",
+                ref=ref or None, kind="error")
+
     # ---- startup / recovery --------------------------------------------
     def ensure(self):
         """Create the reused shared_clean worktree up front; per-card exclusive worktrees are
@@ -2359,6 +2380,9 @@ class RunnerPool:
                 if name in self.wts:
                     continue
                 if self._retired_pool_slot(name):
+                    # A retired slot belongs to no card, so the hook gets an empty ref (RE339).
+                    if _worktree_link_intact(path):
+                        self._cleanup_before_removal(path, "")
                     git_worktree_with_retry(["remove", "--force", path])
                     git_worktree_with_retry(["prune"])
                     continue

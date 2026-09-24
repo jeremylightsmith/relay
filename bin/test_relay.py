@@ -2007,6 +2007,35 @@ class RunnerPoolRecoverTest(unittest.TestCase):
         self.assertIn(["remove", "--force", relay.worktree_path("exec-work-1")], calls)
         self.assertIn(["remove", "--force", relay.worktree_path("exec-work-2")], calls)
 
+    def test_recover_runs_the_cleanup_hook_before_reclaiming_a_retired_slot(self):
+        """RE339: a retired `<ns>-work-N` slot is a real removal of an intact tree, so the
+        project's cleanup hook fires first. It has no card, so RELAY_REF is empty."""
+        for name in ("git_worktree_with_retry", "_worktree_link_intact"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        calls = []
+        relay.git_worktree_with_retry = lambda args: calls.append(("wt", *args)) or True
+        relay._worktree_link_intact = lambda path: True
+        relay._list_worktree_paths = lambda: [relay.worktree_path("exec-work-1")]
+        relay._is_retained_worktree = lambda path: False
+        p = relay.RunnerPool(self.CFG)
+        p.run_cleanup_hook = lambda path, ref: calls.append(("cleanup", path, ref)) or None
+        p.recover()
+        wt = relay.worktree_path("exec-work-1")
+        self.assertEqual(calls[:2], [("cleanup", wt, ""), ("wt", "remove", "--force", wt)])
+
+    def test_recover_skips_the_cleanup_hook_for_a_half_deleted_retired_slot(self):
+        for name in ("git_worktree_with_retry", "_worktree_link_intact"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        calls = []
+        relay.git_worktree_with_retry = lambda args: calls.append(("wt", *args)) or True
+        relay._worktree_link_intact = lambda path: False
+        relay._list_worktree_paths = lambda: [relay.worktree_path("exec-work-1")]
+        relay._is_retained_worktree = lambda path: False
+        p = relay.RunnerPool(self.CFG)
+        p.run_cleanup_hook = lambda path, ref: calls.append(("cleanup", path, ref)) or None
+        p.recover()
+        self.assertNotIn("cleanup", [c[0] for c in calls])
+
 
 class RunnerPoolTeardownRetryTest(unittest.TestCase):
     """RE336: `_finish_locked` used to pop a done/cancelled worktree from `self.wts` BEFORE
@@ -2270,6 +2299,146 @@ class RunnerPoolRealTeardownTest(unittest.TestCase):
         self.assertIsNone(inside.poll())
         self.assertTrue(os.path.isfile(os.path.join(self.tree, relay.RETAINED_MARKER)))
         self.assertEqual(self.pool.wts[self.slot]["state"], "retained")
+
+
+class RunnerPoolCleanupHookTest(unittest.TestCase):
+    """RE339, against a REAL git repo laid out like RunnerPoolRealTeardownTest: the project's
+    `.relay/cleanup-worktree.sh` (resolved from ROOT = the repo) runs right before an INTACT
+    per-card worktree is removed, and before the RE336 process sweep and `git worktree
+    remove`. It never runs on retain or on a half-deleted tree, fires when a retained tree is
+    later evicted, and a failing hook is logged but never blocks the removal."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "max_retained_failed": 3}
+
+    def setUp(self):
+        self.base = os.path.realpath(tempfile.mkdtemp(prefix="relay-cleanup-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+        _git(self.repo, "init", "-q", "-b", "main")
+        _write(os.path.join(self.repo, ".gitignore"), ".claude/worktrees\n.relay\n")
+        _write(os.path.join(self.repo, "seed.txt"), "seed")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "seed")
+        self.wts_dir = os.path.join(self.repo, ".claude", "worktrees")
+        os.makedirs(self.wts_dir)
+        for name in ("ROOT", "worktree_path", "log", "_fetch_backoff"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.ROOT = self.repo
+        relay.worktree_path = lambda name: os.path.join(self.wts_dir, name)
+        relay._fetch_backoff = lambda attempt: None
+        self.lines = []
+        relay.log = lambda msg, **k: self.lines.append((msg, k))
+        self.hook_log = os.path.join(self.base, "cleanup.log")   # OUTSIDE every worktree
+        self.pool = relay.RunnerPool(self.CFG)
+        self.slot, self.tree = self.add_tree("RLY-9")
+
+    def add_tree(self, ref):
+        slot = f"exec-{ref}"
+        tree = relay.worktree_path(slot)
+        _git(self.repo, "worktree", "add", "-q", "--detach", tree, "main")
+        self.pool.wts[slot] = {"ref": ref, "run_id": "r1", "state": "active",
+                               "live": False, "partition": self.pool._take_partition()}
+        return slot, tree
+
+    def hook(self, extra=""):
+        """Install `.relay/cleanup-worktree.sh`: one line per call with the ref, the tree,
+        whether the tree still existed, the cwd and the branch, then `extra`."""
+        path = os.path.join(self.repo, relay.CLEANUP_HOOK_DEFAULT)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _write(path, "#!/bin/sh\n"
+                     'if [ -d "$RELAY_WORKTREE" ]; then s=exists; else s=gone; fi\n'
+                     'printf "%s %s %s %s [%s]\\n" "$RELAY_REF" "$RELAY_WORKTREE" "$s" '
+                     f'"$(pwd -P)" "$RELAY_BRANCH" >> {self.hook_log}\n'
+                     + extra + "\n")
+        os.chmod(path, 0o755)
+
+    def hook_lines(self):
+        if not os.path.exists(self.hook_log):
+            return []
+        with open(self.hook_log) as f:
+            return f.read().splitlines()
+
+    def finish(self, slot, run_state):
+        with self.pool.lock:
+            self.pool._finish_locked(slot, self.pool.wts[slot], run_state)
+
+    def test_done_runs_the_hook_inside_the_still_present_tree_then_removes_it(self):
+        self.hook()
+        self.finish(self.slot, "done")
+        self.assertEqual(self.hook_lines(),
+                         [f"RLY-9 {self.tree} exists {self.tree} []"])
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.slot, self.pool.wts)
+
+    def test_the_hook_is_told_the_branch_checked_out_in_the_tree(self):
+        self.hook()
+        _git(self.tree, "checkout", "-q", "-b", "rly-9-x")
+        self.finish(self.slot, "done")
+        self.assertEqual(self.hook_lines(),
+                         [f"RLY-9 {self.tree} exists {self.tree} [rly-9-x]"])
+
+    def test_the_hook_runs_before_the_process_sweep_and_the_git_removal(self):
+        self.hook()
+        for name in ("_stop_processes_in", "_git_worktree_attempts"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        order = []
+        stop, attempts = relay._stop_processes_in, relay._git_worktree_attempts
+        relay._stop_processes_in = lambda path, ref=None: order.append("stop") or stop(path, ref=ref)
+        relay._git_worktree_attempts = lambda args: order.append(args[0]) or attempts(args)
+        run_hook = self.pool.run_cleanup_hook
+        self.pool.run_cleanup_hook = lambda path, ref: order.append("cleanup") or run_hook(path, ref)
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertLess(order.index("cleanup"), order.index("stop"))
+        self.assertLess(order.index("stop"), order.index("remove"))
+
+    def test_a_failing_hook_is_logged_against_the_card_and_the_tree_is_still_removed(self):
+        self.hook('echo "compose down failed" >&2; exit 1')
+        self.finish(self.slot, "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertNotIn(self.slot, self.pool.wts)
+        warned = [(m, k) for m, k in self.lines if "cleanup hook" in m]
+        self.assertEqual(len(warned), 1)
+        msg, kw = warned[0]
+        self.assertIn("RLY-9", msg)
+        self.assertIn("compose down failed", msg)
+        self.assertEqual(kw, {"ref": "RLY-9", "kind": "error"})
+
+    def test_a_timed_out_hook_is_logged_and_the_tree_is_still_removed(self):
+        self.addCleanup(setattr, relay, "CLEANUP_HOOK_TIMEOUT", relay.CLEANUP_HOOK_TIMEOUT)
+        relay.CLEANUP_HOOK_TIMEOUT = 0.5
+        self.hook("exec sleep 30")
+        self.finish(self.slot, "done")
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertTrue(any("timed out" in m and k.get("ref") == "RLY-9"
+                            for m, k in self.lines))
+
+    def test_retain_does_not_run_the_hook(self):
+        self.hook()
+        self.finish(self.slot, "failed")
+        self.assertEqual(self.hook_lines(), [])
+        self.assertTrue(os.path.isdir(self.tree))
+
+    def test_a_half_deleted_tree_does_not_run_the_hook(self):
+        self.hook()
+        os.remove(os.path.join(self.tree, ".git"))
+        self.assertIsNone(self.pool._teardown(self.slot, retain=False))
+        self.assertEqual(self.hook_lines(), [])
+        self.assertFalse(os.path.isdir(self.tree))
+
+    def test_a_retained_tree_is_cleaned_up_when_it_is_evicted(self):
+        self.hook()
+        self.pool.max_retained_failed = 1
+        self.finish(self.slot, "failed")                 # retained: no cleanup yet
+        self.assertEqual(self.hook_lines(), [])
+        os.utime(self.tree, (1, 1))                      # make RLY-9 the oldest retained tree
+        slot8, tree8 = self.add_tree("RLY-8")
+        self.finish(slot8, "failed")                     # over the cap: RLY-9 is evicted
+        self.assertEqual(self.hook_lines(),
+                         [f"RLY-9 {self.tree} exists {self.tree} []"])
+        self.assertFalse(os.path.isdir(self.tree))
+        self.assertTrue(os.path.isdir(tree8))
 
 
 @unittest.skipUnless(os.path.isdir("/proc/self") or shutil.which("lsof"),
