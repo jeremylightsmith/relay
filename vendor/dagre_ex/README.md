@@ -27,6 +27,9 @@ Dagre.layout(
 - `points` runs from the source anchor through every routed waypoint to the target anchor,
   always in the direction you declared the edge — even when cycle breaking reversed it
   internally (`reversed?: true` records that; it is informational only).
+- An edge may carry a `weight` (a positive integer, default 1) saying how much it wants to be
+  straight — see the guarantee below. Weight is read only by coordinate assignment; ranking and
+  crossing reduction ignore it.
 - Self-loops (`from == to`) are routed as a small stub loop off the node's right side.
 - Only top-to-bottom (`rankdir: :tb`) is implemented; `:lr` is a planned option.
 
@@ -40,7 +43,12 @@ and random DAGs:
   every rank they cross, so they own a slot there);
 - no label overlaps a node or another label (each label is a dummy node sized to the label, so it
   reserves real space on its rank);
-- the same input always yields the same output.
+- the same input always yields the same output;
+- if the edges heavier than all their neighbours form a single directed path (each node on it has
+  at most one heaviest in-edge and one heaviest out-edge, and cycle breaking reverses none of
+  them), every node on that path gets the same x-centre, so the whole path is drawn as one
+  vertical line — whatever lighter edges cross or fan out around it. Equal weights give plain
+  Brandes–Köpf.
 
 ## Pipeline
 

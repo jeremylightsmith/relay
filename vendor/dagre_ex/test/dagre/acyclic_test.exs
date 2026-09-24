@@ -65,4 +65,14 @@ defmodule Dagre.AcyclicTest do
              3 => %{points: [{0, 10}, {5, 5}, {0, 0}], label: {5, 5}, reversed?: true}
            }
   end
+
+  test "a reversed back-edge keeps its weight" do
+    g = graph([:a, :b], [{1, :a, :b}])
+    g = Graph.add_edge(g, 2, :b, :a, %{weight: 4})
+
+    {dag, reversed} = Acyclic.run(g)
+
+    assert reversed == MapSet.new([2])
+    assert Graph.edge(dag, 2) == %{weight: 4, reversed: true}
+  end
 end

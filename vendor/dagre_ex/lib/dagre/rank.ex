@@ -15,7 +15,9 @@ defmodule Dagre.Rank do
   minimises total weighted edge length globally and gives tighter layouts on
   wide graphs. It is deliberately *not* implemented here; longest-path plus
   tightening is correct (every edge spans at least its `minlen`) and good enough
-  for the narrow, mostly-sequential graphs this port was written for.
+  for the narrow, mostly-sequential graphs this port was written for. Edge
+  `:weight` is honoured downstream (by `Dagre.Position`) but not here, which is
+  deliberate: network simplex is where dagre's ranker would read it.
   """
 
   alias Dagre.Graph

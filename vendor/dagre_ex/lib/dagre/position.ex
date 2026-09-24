@@ -9,22 +9,40 @@ defmodule Dagre.Position do
   **x** is Brandes–Köpf ("Fast and Simple Horizontal Coordinate Assignment",
   2001), ported from dagre's `position/bk.js`:
 
-    1. mark type-1 conflicts — a non-inner segment crossing an inner segment
-       (one between two dummies), so long edges stay straight;
+    1. mark conflicts — a segment crossing a segment of strictly higher
+       *priority* `{weight, inner?}` (compared in that order; *inner* means both
+       ends are dummies) is never used for alignment. With equal weights this
+       is exactly Brandes–Köpf's type-1 rule — a non-inner segment crossing an
+       inner one — so long edges stay straight; a heavier edge beats both;
     2. for each of the four directions (up/down × left/right), align every node
        with its median neighbour into vertical *blocks*, then compact the blocks
-       horizontally over a block graph whose edge weights are the minimum
-       separation between neighbours;
+       horizontally over a block graph whose edges carry the minimum separation
+       between neighbours. A node considers only the neighbours
+       joined to it by a segment that is among its own heaviest in the sweep
+       direction AND among the neighbour's heaviest in the opposite direction,
+       so a light edge can never claim a node its heavy edge needs; with equal
+       weights that is every neighbour;
     3. shift the four candidates onto the narrowest one and take, per node, the
        average of the two middle candidate x's.
 
-  Separation respects variable widths: two neighbours on a rank are kept at least
-  `width_a / 2 + sep_a / 2 + sep_b / 2 + width_b / 2` apart (centre to centre),
-  where `sep` is `edgesep` for a dummy and `nodesep` for a real node.
+  Together, rules 1 and 2 make a heavy path straight: when the edges heavier
+  than all their neighbours form a single directed path, that path is one block
+  in all four candidates, so every node and dummy on it gets the same x-centre.
 
+  A node is aligned on the centre of its caller box (`:box`, see `box/1`), not
+  of its layout box: extra layout width — a self-loop's room — extends to the
+  right of the box. Separation respects variable widths: two neighbours on a
+  rank are kept at least `right_a + sep_a / 2 + sep_b / 2 + left_b` apart
+  (centre to centre), where `left`/`right` are the node's extents either side of
+  its centre (half its width, unless it carries a narrower `:box`) and `sep` is
+  `edgesep` for a dummy and `nodesep` for a real node.
+
+  Centres are rounded to integers before the box is placed, so `x + div(width, 2)`
+  reads back exactly the centre and an aligned path stays straight to the pixel.
   Writes `:x` / `:y` (the top-left of the node's `width × height` box, integers,
   translated so the leftmost box starts at 0) and `:band` (`{top, bottom}` of the
-  node's rank band) onto every node.
+  node's rank band) onto every node. Segment weights come from each edge's
+  `:weight` attr (default 1).
   """
 
   alias Dagre.Graph
@@ -35,7 +53,7 @@ defmodule Dagre.Position do
   def run(%Graph{} = graph, opts) do
     layering = Order.layering(graph)
     centres = x_coordinates(graph, layering, Keyword.fetch!(opts, :nodesep), Keyword.fetch!(opts, :edgesep))
-    lefts = Map.new(centres, fn {v, x} -> {v, x - width(graph, v) / 2} end)
+    lefts = Map.new(centres, fn {v, x} -> {v, round(x) - div(anchor_width(graph, v), 2)} end)
     shift = lefts |> Map.values() |> Enum.min(fn -> 0 end)
     bands = bands(graph, layering, Keyword.fetch!(opts, :ranksep))
 
@@ -44,7 +62,7 @@ defmodule Dagre.Position do
     |> Enum.reduce(graph, fn {layer, {top, bottom} = band}, graph ->
       Enum.reduce(layer, graph, fn v, graph ->
         attrs = Graph.node(graph, v)
-        placed = %{x: floor(lefts[v] - shift), y: top + div(bottom - top - attrs.height, 2), band: band}
+        placed = %{x: lefts[v] - shift, y: top + div(bottom - top - attrs.height, 2), band: band}
         Graph.add_node(graph, v, placed)
       end)
     end)
@@ -72,12 +90,13 @@ defmodule Dagre.Position do
   end
 
   defp x_coordinates(graph, layering, nodesep, edgesep) do
-    conflicts = type1_conflicts(graph, layering)
+    weights = segment_weights(graph)
+    conflicts = conflicts(graph, layering, weights)
     sep = &separation(graph, &1, &2, {nodesep, edgesep})
 
     candidates =
       for vertical <- [:up, :down], horizontal <- [:left, :right] do
-        candidate(graph, layering, conflicts, sep, {vertical, horizontal})
+        candidate(graph, layering, {conflicts, weights}, sep, {vertical, horizontal})
       end
 
     balance(align_to_narrowest(graph, candidates))
@@ -86,71 +105,71 @@ defmodule Dagre.Position do
   # One of the four Brandes–Köpf candidates. `:down` walks the layers bottom-up
   # aligning with successors; `:right` walks each layer right-to-left and negates
   # the result.
-  defp candidate(graph, layering, conflicts, sep, {vertical, horizontal}) do
+  defp candidate(graph, layering, {conflicts, weights}, sep, {vertical, horizontal}) do
     layers = if vertical == :up, do: layering, else: Enum.reverse(layering)
     layers = if horizontal == :left, do: layers, else: Enum.map(layers, &Enum.reverse/1)
-    neighbours = if vertical == :up, do: &Graph.predecessors/2, else: &Graph.successors/2
-    {root, _align} = vertical_alignment(graph, layers, conflicts, neighbours)
+
+    directions =
+      if vertical == :up,
+        do: {&Graph.predecessors/2, &Graph.successors/2},
+        else: {&Graph.successors/2, &Graph.predecessors/2}
+
+    {root, _align} = vertical_alignment(graph, layers, {conflicts, weights}, directions)
     xs = horizontal_compaction(layers, root, sep)
     xs = if horizontal == :right, do: Map.new(xs, fn {v, x} -> {v, -x} end), else: xs
     {horizontal, xs}
   end
 
-  # A type-1 conflict is a non-inner segment crossing an inner segment (both ends
-  # dummies). Marking it lets the inner segment win the alignment, which keeps
-  # long edges straight.
-  defp type1_conflicts(graph, layering) do
+  # The weight of every segment, keyed by its unordered endpoint pair. Parallel
+  # edges between the same two nodes count as their heaviest.
+  defp segment_weights(graph) do
+    for {id, u, v} <- Graph.edges(graph), reduce: %{} do
+      weights -> Map.update(weights, pair(u, v), weight(graph, id), &max(&1, weight(graph, id)))
+    end
+  end
+
+  defp weight(graph, id), do: Map.get(Graph.edge(graph, id), :weight, 1)
+
+  # Generalised type-1 conflicts: a segment crossing a segment of strictly higher
+  # priority `{weight, inner?}` (inner = both ends dummies) is marked and never
+  # used for alignment. With equal weights this is exactly Brandes–Köpf's type-1
+  # rule — a non-inner segment crossing an inner one.
+  defp conflicts(graph, layering, weights) do
     layering
     |> Enum.zip(Enum.drop(layering, 1))
-    |> Enum.reduce(MapSet.new(), fn {previous, layer}, conflicts ->
-      scan_layer(graph, previous, layer, conflicts)
+    |> Enum.reduce(MapSet.new(), fn {upper, lower}, conflicts ->
+      upper_pos = layer_positions(upper)
+
+      segments =
+        for {v, j} <- Enum.with_index(lower),
+            u <- Graph.predecessors(graph, v),
+            do: {upper_pos[u], j, priority(graph, weights, u, v), pair(u, v)}
+
+      for {u1, v1, p1, s1} <- segments,
+          {u2, v2, p2, _} <- segments,
+          p1 < p2,
+          (u1 - u2) * (v1 - v2) < 0,
+          reduce: conflicts do
+        conflicts -> MapSet.put(conflicts, s1)
+      end
     end)
   end
 
-  defp scan_layer(graph, previous, layer, conflicts) do
-    prev_pos = layer_positions(previous)
-    last = List.last(layer)
+  defp priority(graph, weights, u, v), do: {weights[pair(u, v)], dummy?(graph, u) and dummy?(graph, v)}
 
-    {conflicts, _k0, _scan} =
-      layer
-      |> Enum.with_index()
-      |> Enum.reduce({conflicts, 0, 0}, &scan_node(graph, {previous, layer, prev_pos, last}, &1, &2))
-
-    conflicts
-  end
-
-  # Scans up to each inner-segment node (and the layer's last node), marking the
-  # segments that cross outside the window between two inner segments.
-  defp scan_node(graph, {previous, layer, prev_pos, last}, {v, i}, {conflicts, k0, scan} = acc) do
-    inner = inner_segment_source(graph, v)
-
-    if inner || v == last do
-      k1 = if inner, do: prev_pos[inner], else: length(previous)
-      scanned = Enum.slice(layer, scan..i//1)
-      {mark_conflicts(graph, scanned, prev_pos, {k0, k1}, conflicts), k1, i + 1}
-    else
-      acc
-    end
-  end
-
-  defp mark_conflicts(graph, scanned, prev_pos, {k0, k1}, conflicts) do
-    for v <- scanned, u <- Graph.predecessors(graph, v), reduce: conflicts do
-      conflicts ->
-        pos = prev_pos[u]
-        both_dummies? = dummy?(graph, u) and dummy?(graph, v)
-        if (pos < k0 or k1 < pos) and not both_dummies?, do: MapSet.put(conflicts, pair(u, v)), else: conflicts
-    end
-  end
-
-  defp inner_segment_source(graph, v) do
-    if dummy?(graph, v), do: graph |> Graph.predecessors(v) |> Enum.find(&dummy?(graph, &1))
-  end
-
-  defp vertical_alignment(graph, layers, conflicts, neighbours) do
+  defp vertical_alignment(graph, layers, {conflicts, weights}, {neighbours, opposite}) do
     pos = for layer <- layers, {v, i} <- Enum.with_index(layer), into: %{}, do: {v, i}
     ids = List.flatten(layers)
     identity = Map.new(ids, &{&1, &1})
-    context = %{graph: graph, pos: pos, conflicts: conflicts, neighbours: neighbours}
+
+    context = %{
+      graph: graph,
+      pos: pos,
+      conflicts: conflicts,
+      weights: weights,
+      neighbours: neighbours,
+      opposite: opposite
+    }
 
     Enum.reduce(layers, {identity, identity}, fn layer, acc ->
       {acc, _prev} = Enum.reduce(layer, {acc, -1}, &align_node(context, &1, &2))
@@ -161,7 +180,7 @@ defmodule Dagre.Position do
   # Aligns `v` with its median neighbour(s) in the previous layer, left to right,
   # never crossing an alignment already made on this layer (`prev`).
   defp align_node(context, v, {alignment, prev}) do
-    ws = context.graph |> context.neighbours.(v) |> Enum.sort_by(&context.pos[&1])
+    ws = context |> heaviest(v) |> Enum.sort_by(&context.pos[&1])
     n = length(ws)
     medians = if n == 0, do: [], else: Enum.slice(ws, div(n - 1, 2)..div(n, 2)//1)
 
@@ -174,18 +193,34 @@ defmodule Dagre.Position do
     end)
   end
 
+  # The neighbours `v` may align with: those joined to it by a segment that is
+  # among the heaviest of `v`'s segments in the sweep direction AND among the
+  # heaviest of the neighbour's segments in the opposite direction.
+  defp heaviest(context, v) do
+    top = top_weight(context, v, context.neighbours)
+
+    Enum.filter(context.neighbours.(context.graph, v), fn w ->
+      weight = context.weights[pair(v, w)]
+      weight == top and weight == top_weight(context, w, context.opposite)
+    end)
+  end
+
+  defp top_weight(context, v, neighbours) do
+    context.graph |> neighbours.(v) |> Enum.map(&context.weights[pair(v, &1)]) |> Enum.max(fn -> nil end)
+  end
+
   # Places blocks as far left as separation allows (pass 1, topological order of
   # the block graph), then pulls each block right toward its successors to
   # remove unused space (pass 2, reverse order).
   defp horizontal_compaction(layers, root, sep) do
-    weights =
+    seps =
       for layer <- layers, {u, v} <- Enum.zip(layer, Enum.drop(layer, 1)), reduce: %{} do
-        weights -> Map.update(weights, {root[u], root[v]}, sep.(u, v), &max(&1, sep.(u, v)))
+        seps -> Map.update(seps, {root[u], root[v]}, sep.(u, v), &max(&1, sep.(u, v)))
       end
 
     blocks = layers |> List.flatten() |> Enum.map(&root[&1]) |> Enum.uniq()
-    preds = Enum.group_by(weights, fn {{_, v}, _} -> v end, fn {{u, _}, w} -> {u, w} end)
-    succs = Enum.group_by(weights, fn {{u, _}, _} -> u end, fn {{_, v}, w} -> {v, w} end)
+    preds = Enum.group_by(seps, fn {{_, v}, _} -> v end, fn {{u, _}, w} -> {u, w} end)
+    succs = Enum.group_by(seps, fn {{u, _}, _} -> u end, fn {{_, v}, w} -> {v, w} end)
     order = block_order(blocks, preds, succs)
 
     xs =
@@ -232,7 +267,7 @@ defmodule Dagre.Position do
 
   defp separation(graph, u, v, {nodesep, edgesep}) do
     gap = fn node -> if dummy?(graph, node), do: edgesep, else: nodesep end
-    width(graph, u) / 2 + gap.(u) / 2 + gap.(v) / 2 + width(graph, v) / 2
+    right_extent(graph, u) + gap.(u) / 2 + gap.(v) / 2 + left_extent(graph, v)
   end
 
   # Shifts every candidate onto the narrowest one: left candidates share its
@@ -253,8 +288,7 @@ defmodule Dagre.Position do
   defp extent(graph, xs) do
     {lo, hi} =
       Enum.reduce(xs, {nil, nil}, fn {v, x}, {lo, hi} ->
-        half = width(graph, v) / 2
-        {min_of(lo, x - half), max_of(hi, x + half)}
+        {min_of(lo, x - left_extent(graph, v)), max_of(hi, x + right_extent(graph, v))}
       end)
 
     hi - lo
@@ -276,7 +310,18 @@ defmodule Dagre.Position do
 
   defp dummy?(graph, v), do: not is_nil(Map.get(Graph.node(graph, v), :dummy))
 
-  defp width(graph, v), do: Graph.node(graph, v).width
+  # A node is aligned on the centre of its caller box (`:box`), which sits at the
+  # left edge of its layout box; any extra layout width (self-loop room) extends
+  # to the right. Without a `:box` the two coincide.
+  defp anchor_width(graph, v) do
+    case Graph.node(graph, v) do
+      %{box: {w, _}} -> w
+      attrs -> attrs.width
+    end
+  end
+
+  defp left_extent(graph, v), do: anchor_width(graph, v) / 2
+  defp right_extent(graph, v), do: Graph.node(graph, v).width - anchor_width(graph, v) / 2
 
   defp pair(a, b) when a <= b, do: {a, b}
   defp pair(a, b), do: {b, a}
