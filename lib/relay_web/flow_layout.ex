@@ -192,6 +192,8 @@ defmodule RelayWeb.FlowLayout do
   # points, so the renderer's rounded-corner builder (which assumes axis alignment) applies as-is.
   # Dagre's waypoints are kept (snapping only adds doglegs between them), and the label point is
   # dagre's own output, so it is not guaranteed to sit exactly on the snapped path.
+  defp orthogonal([]), do: []
+
   defp orthogonal(points) do
     points
     |> Enum.chunk_every(2, 1, :discard)
