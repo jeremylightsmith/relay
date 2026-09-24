@@ -14,6 +14,11 @@ defmodule RelayWeb.FlowGraphComponents do
   field present, nil when unset — since RLY-241 made `Relay.Flows.Document.decode/1` fill the
   schema default for anything the JSON omits. Every accessor below still goes through
   `Map.get/2` so a partial map from a future caller renders rather than raising.
+
+  Hover emphasis (RE333): `#flow-graph` carries `data-adjacency` (node key → indices of its drawn
+  edges) for the `FlowFocus` hook (`assets/js/hooks/flow_focus.js`), which marks a hovered or
+  focused node's edges and neighbours `data-hot` and sets `data-dim="hover"`. A selected node gets
+  the same marks server-side with `data-dim="select"`; `assets/css/app.css` does the dimming.
   """
   use Phoenix.Component
 
@@ -103,12 +108,20 @@ defmodule RelayWeb.FlowGraphComponents do
 
     parked = Enum.filter(assigns.nodes, &MapSet.member?(assigns.layout.parks, &1.key))
 
-    assigns = assign(assigns, width: w, height: h, geos: geos, parked: parked)
+    adjacency = adjacency(assigns.edges, assigns.layout.routes)
+    focus = focus(assigns.selected, adjacency)
+
+    assigns =
+      assign(assigns, width: w, height: h, geos: geos, parked: parked, adjacency: adjacency, focus: focus)
 
     ~H"""
     <div
       id="flow-graph"
       class="relative"
+      phx-hook="FlowFocus"
+      data-adjacency={Jason.encode!(@adjacency)}
+      data-selected={@focus && @focus.key}
+      data-dim={@focus && "select"}
       style={"width:#{@width}px;height:#{@height}px;background-image:radial-gradient(var(--color-field-border) 1px, transparent 1px);background-size:22px 22px;"}
     >
       <svg
@@ -131,6 +144,8 @@ defmodule RelayWeb.FlowGraphComponents do
         </defs>
         <path
           :for={g <- @geos}
+          data-edge-path={g.index}
+          data-hot={hot_edge?(@focus, g.index)}
           d={g.d}
           stroke={edge_color(g.edge)}
           stroke-width="2"
@@ -145,13 +160,19 @@ defmodule RelayWeb.FlowGraphComponents do
           :if={@interactive?}
           type="button"
           data-edge={g.index}
+          data-hot={hot_edge?(@focus, g.index)}
           phx-click="select_edge"
           phx-value-index={g.index}
           style={edge_label_style(g.edge, g.label) <> selected_ring(@selected, {:edge, g.index})}
         >
           {FlowLayout.edge_label(g.edge)}
         </button>
-        <span :if={!@interactive?} data-edge={g.index} style={edge_label_style(g.edge, g.label)}>
+        <span
+          :if={!@interactive?}
+          data-edge={g.index}
+          data-hot={hot_edge?(@focus, g.index)}
+          style={edge_label_style(g.edge, g.label)}
+        >
           {FlowLayout.edge_label(g.edge)}
         </span>
       <% end %>
@@ -160,6 +181,7 @@ defmodule RelayWeb.FlowGraphComponents do
         :for={node <- @nodes}
         data-node={node.key}
         data-type={node.type}
+        data-hot={hot_node?(@focus, node.key)}
         phx-click={@interactive? && "select_node"}
         phx-value-key={@interactive? && node.key}
         style={
@@ -199,6 +221,7 @@ defmodule RelayWeb.FlowGraphComponents do
         id="flow-node-done"
         type="button"
         data-node="done"
+        data-hot={hot_node?(@focus, "done")}
         phx-click="select_node"
         phx-value-key="done"
         style={done_marker_style(@layout)}
@@ -274,6 +297,40 @@ defmodule RelayWeb.FlowGraphComponents do
   defp truncate(s), do: String.slice(s, 0, 21) <> "…"
 
   defp humanize(key), do: String.replace(key, "_", " ")
+
+  # ---- hover / selection emphasis (RE333) ----
+
+  # Node key → the indices of its drawn edges, in either direction (so `start` and `done` appear
+  # too). Rendered as #flow-graph's `data-adjacency`, it is the FlowFocus hook's whole view of the
+  # graph, so hovering needs no server round-trip.
+  defp adjacency(edges, routes) do
+    edges
+    |> Enum.with_index()
+    |> Enum.filter(fn {_edge, i} -> Map.has_key?(routes, i) end)
+    |> Enum.flat_map(fn {edge, i} -> Enum.uniq([{edge.from, i}, {edge.to, i}]) end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  # A selected node gets the same emphasis the FlowFocus hook gives a hovered one, so keyboard
+  # selection and the mouse agree: the node, its incident edges and its neighbours are hot and
+  # everything else dims. Neighbours are exactly the nodes sharing one of its edges — the same
+  # rule the hook applies to `data-adjacency`.
+  defp focus({:node, key}, adjacency) when is_map_key(adjacency, key) do
+    edges = MapSet.new(Map.fetch!(adjacency, key))
+
+    nodes =
+      for {k, incident} <- adjacency, Enum.any?(incident, &MapSet.member?(edges, &1)), into: MapSet.new(), do: k
+
+    %{key: key, edges: edges, nodes: nodes}
+  end
+
+  defp focus(_selected, _adjacency), do: nil
+
+  defp hot_edge?(nil, _index), do: false
+  defp hot_edge?(focus, index), do: MapSet.member?(focus.edges, index)
+
+  defp hot_node?(nil, _key), do: false
+  defp hot_node?(focus, key), do: MapSet.member?(focus.nodes, key)
 
   # ---- rounded orthogonal path builder ----
 

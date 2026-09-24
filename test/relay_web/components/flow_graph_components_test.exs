@@ -62,6 +62,16 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     tag
   end
 
+  # #flow-graph's data-adjacency JSON, HTML-unescaped.
+  defp adjacency(html) do
+    [_, json] = Regex.run(~r/data-adjacency="([^"]*)"/, html)
+    json |> String.replace("&quot;", ~s(")) |> Jason.decode!()
+  end
+
+  defp hot_indices(html, attr) do
+    ~r/#{attr}="(\d+)" data-hot/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end) |> Enum.sort()
+  end
+
   describe "node shapes/colors by type (Relay Flow Editor.dc.html typeMeta, lines ~366-395)" do
     test "agent node: white fill, violet accent stripe + tag" do
       html = one_node(:agent)
@@ -311,6 +321,69 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       tag = nodes |> graph(edges, []) |> badge_tag("a")
 
       assert tag =~ "left:#{x + w - 12}px;top:#{y - 9}px;"
+    end
+  end
+
+  describe "hover and selection emphasis (RE333)" do
+    test "#flow-graph maps every node key to the indices of its drawn edges" do
+      nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "a", on: :failed, max_loops: 2},
+        %{from: "b", to: "needs_input", on: :failed},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      assert adjacency(graph(nodes, edges, [])) ==
+               %{"start" => [0], "a" => [0, 1, 2], "b" => [1, 2, 4], "done" => [4]}
+    end
+
+    test "every edge path carries data-edge-path with its edge index" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, [])
+
+      paths = ~r/data-edge-path="(\d+)"/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end)
+      assert Enum.sort(paths) == layout.routes |> Map.keys() |> Enum.sort()
+    end
+
+    test "the graph mounts the FlowFocus hook and renders no emphasis when nothing is selected" do
+      html = one_node(:agent)
+      assert html =~ ~s(phx-hook="FlowFocus")
+      refute html =~ "data-dim"
+      refute html =~ "data-hot"
+      refute html =~ "data-selected"
+    end
+
+    test "a selected node gets the hover emphasis server-side: its edges and neighbours are hot" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, selected: {:node, "quality_review"})
+
+      incident =
+        for {edge, i} <- Enum.with_index(edges),
+            Map.has_key?(layout.routes, i),
+            "quality_review" in [edge.from, edge.to],
+            do: i
+
+      assert html =~ ~s(data-dim="select")
+      assert html =~ ~s(data-selected="quality_review")
+      assert hot_indices(html, "data-edge-path") == incident
+      assert hot_indices(html, "data-edge") == incident
+
+      hot_nodes =
+        ~r/data-node="([^"]+)" data-type="[^"]+" data-hot/ |> Regex.scan(html) |> Enum.map(fn [_, k] -> k end)
+
+      assert Enum.sort(hot_nodes) == ~w(implement quality_review spec_review sync)
+    end
+
+    test "an edge selection renders no node emphasis" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, selected: {:edge, 1})
+      refute html =~ "data-dim"
+      refute html =~ "data-hot"
     end
   end
 end

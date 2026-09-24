@@ -925,3 +925,27 @@ textarea.commit-field-input { min-height: 64px; }
     gap: 10px !important;
   }
 }
+
+/* RE333 — flow-graph emphasis. `data-dim` on #flow-graph means one node is in focus: "hover"
+   from the FlowFocus hook (assets/js/hooks/flow_focus.js), "select" from the server's @selected.
+   The focused node, its neighbours and its incident edges carry `data-hot`; everything else
+   recedes. Hover also hides unrelated edge labels so the focused node's labels read cleanly;
+   selection keeps them visible because they are still `select_edge` click targets. */
+#flow-graph [data-edge-path],
+#flow-graph [data-edge],
+#flow-graph [data-node] {
+  transition: opacity 120ms ease;
+}
+
+#flow-graph[data-dim] [data-edge-path]:not([data-hot]),
+#flow-graph[data-dim] [data-edge]:not([data-hot]) {
+  opacity: 0.25;
+}
+
+#flow-graph[data-dim="hover"] [data-edge]:not([data-hot]) {
+  visibility: hidden;
+}
+
+#flow-graph[data-dim] [data-node]:not([data-hot]) {
+  opacity: 0.55;
+}
