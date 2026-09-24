@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 import urllib.error
@@ -1597,6 +1598,17 @@ class RunnerConfigTest(unittest.TestCase):
         self.assertIsNone(cfg.get("cache_dir"))
         self.assertIsNone(cfg.get("prepare"))
 
+    def test_worktrees_defaults_to_an_empty_object(self):
+        """RE339: the lifecycle hooks live under `worktrees`; with no config there are none."""
+        relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
+        self.assertEqual(relay.load_runner_config()["worktrees"], {})
+
+    def test_worktrees_keys_merge_over_the_default(self):
+        self._write({"worktrees": {"cleanup": ".relay/down.sh"}})
+        self.assertEqual(relay.load_runner_config()["worktrees"], {"cleanup": ".relay/down.sh"})
+        self._write({"worktrees": None})
+        self.assertEqual(relay.load_runner_config()["worktrees"], {})
+
     def test_auto_update_defaults_on_with_a_five_minute_floor(self):
         relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
         cfg = relay.load_runner_config()
@@ -2446,6 +2458,111 @@ class RunnerPoolBaseTest(unittest.TestCase):
         self.assertFalse([c for c in self.calls if c[0] in ("reset", "wt")])
 
 
+class WorktreeHookConfigTest(unittest.TestCase):
+    """RE339: runner.json groups the per-worktree lifecycle hooks under `worktrees`
+    (`prepare`, `cleanup`). `RunnerPool._hook_path` is the one place their precedence lives:
+    `worktrees.prepare` > flat `prepare` (deprecated alias) > `.relay/prepare-worktree.sh`, and
+    `worktrees.cleanup` > `.relay/cleanup-worktree.sh`. A hook runs only when the file exists
+    and is executable. Both hooks get the same argv/env/cwd contract."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1},
+           "base": "origin/main"}
+
+    def setUp(self):
+        self.root = os.path.realpath(tempfile.mkdtemp(prefix="relay-hooks-"))
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        relay.ROOT = self.root
+        self.tree = os.path.join(self.root, "tree")
+        os.makedirs(self.tree)
+
+    def script(self, rel, body, executable=True):
+        path = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _write(path, "#!/bin/sh\n" + body + "\n")
+        os.chmod(path, 0o755 if executable else 0o644)
+        return path
+
+    def pool(self, **cfg):
+        return relay.RunnerPool({**self.CFG, **cfg})
+
+    def test_worktrees_prepare_wins_over_the_flat_prepare_key(self):
+        self.script("old.sh", "exit 0")
+        new = self.script("new.sh", "exit 0")
+        p = self.pool(prepare="old.sh", worktrees={"prepare": "new.sh"})
+        self.assertEqual(p._hook_path("prepare"), new)
+
+    def test_a_flat_prepare_key_alone_is_still_honored(self):
+        """Auto-update pushes this runner into repos whose runner.json still says
+        `"prepare": ...`; dropping the key would silently turn their warm-up off."""
+        old = self.script("old.sh", "exit 0")
+        self.assertEqual(self.pool(prepare="old.sh")._hook_path("prepare"), old)
+
+    def test_prepare_falls_back_to_the_default_file(self):
+        default = self.script(relay.PREPARE_HOOK_DEFAULT, "exit 0")
+        self.assertEqual(self.pool()._hook_path("prepare"), default)
+
+    def test_cleanup_resolves_the_configured_key_then_the_default_file(self):
+        default = self.script(relay.CLEANUP_HOOK_DEFAULT, "exit 0")
+        mine = self.script("mine.sh", "exit 0")
+        self.assertEqual(self.pool()._hook_path("cleanup"), default)
+        self.assertEqual(self.pool(worktrees={"cleanup": "mine.sh"})._hook_path("cleanup"),
+                         mine)
+
+    def test_a_missing_or_non_executable_hook_resolves_to_none(self):
+        self.assertIsNone(self.pool()._hook_path("cleanup"))
+        self.assertIsNone(self.pool(worktrees={"cleanup": "nope.sh"})._hook_path("cleanup"))
+        self.script(relay.CLEANUP_HOOK_DEFAULT, "exit 0", executable=False)
+        self.assertIsNone(self.pool()._hook_path("cleanup"))
+
+    def test_the_prepare_hook_runs_through_worktrees_prepare(self):
+        out = os.path.join(self.root, "seen")
+        self.script("warm.sh", f'printf "%s" "$RELAY_REF" > {out}')
+        p = self.pool(worktrees={"prepare": "warm.sh"})
+        self.assertIsNone(p.run_prepare_hook(self.tree, "RLY-1", "rly-1-x"))
+        with open(out) as f:
+            self.assertEqual(f.read(), "RLY-1")
+
+    def test_the_cleanup_hook_gets_the_prepare_contract(self):
+        """argv [worktree, ref, branch, base, cache_dir], the same five as RELAY_* env, and
+        cwd = the worktree. The tree is not a git checkout here, so branch is empty."""
+        out = os.path.join(self.root, "seen")
+        self.script(relay.CLEANUP_HOOK_DEFAULT,
+                    'printf "%s|" "$1" "$2" "$3" "$4" "$5" "$RELAY_WORKTREE" "$RELAY_REF" '
+                    f'"$RELAY_BRANCH" "$RELAY_BASE" "$RELAY_CACHE_DIR" "$(pwd -P)" > {out}')
+        p = self.pool(cache_dir="/tmp/relay-cache")
+        self.assertIsNone(p.run_cleanup_hook(self.tree, "RLY-1"))
+        with open(out) as f:
+            seen = f.read().split("|")[:-1]
+        self.assertEqual(seen, [self.tree, "RLY-1", "", "origin/main", "/tmp/relay-cache",
+                                self.tree, "RLY-1", "", "origin/main", "/tmp/relay-cache",
+                                self.tree])
+
+    def test_no_cleanup_hook_is_a_silent_no_op(self):
+        self.assertIsNone(self.pool().run_cleanup_hook(self.tree, "RLY-1"))
+
+    def test_a_failing_cleanup_hook_returns_its_error_text(self):
+        self.script(relay.CLEANUP_HOOK_DEFAULT, 'echo "compose down failed" >&2; exit 3')
+        self.assertEqual(self.pool().run_cleanup_hook(self.tree, "RLY-1"),
+                         "compose down failed")
+
+    def test_a_silent_failing_cleanup_hook_names_its_exit_status(self):
+        self.script(relay.CLEANUP_HOOK_DEFAULT, "exit 4")
+        self.assertEqual(self.pool().run_cleanup_hook(self.tree, "RLY-1"),
+                         "cleanup hook exited 4")
+
+    def test_a_hung_cleanup_hook_is_killed_at_the_timeout(self):
+        """_teardown runs under RunnerPool.lock, so a hung hook would freeze the pool."""
+        self.addCleanup(setattr, relay, "CLEANUP_HOOK_TIMEOUT", relay.CLEANUP_HOOK_TIMEOUT)
+        relay.CLEANUP_HOOK_TIMEOUT = 0.5
+        self.script(relay.CLEANUP_HOOK_DEFAULT, "exec sleep 30")
+        started = time.monotonic()
+        err = self.pool().run_cleanup_hook(self.tree, "RLY-1")
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertIn("timed out", err)
+        self.assertIn("0.5", err)
+
+
 class RunnerConfigCommittedFileTest(unittest.TestCase):
     """The committed .relay/runner.json is a shared example checked into every clone; it
     must not hardcode one developer's runner identity (the `name` is the runner's wire
@@ -2461,16 +2578,18 @@ class RunnerConfigCommittedFileTest(unittest.TestCase):
         self.assertNotIn("name", cfg)
 
     def test_committed_runner_json_documents_the_new_worktree_keys(self):
-        """RLY-231: the checked-in example advertises the optional keys the per-card
-        worktree lifecycle reads (cache_dir/prepare/max_retained_failed) so a new clone
-        sees them without reading ./relay's source."""
+        """RLY-231/RE339: the checked-in example advertises the optional keys the per-card
+        worktree lifecycle reads (cache_dir/worktrees.prepare/max_retained_failed) so a new
+        clone sees them without reading ./relay's source. The flat `prepare` key is a
+        deprecated alias, so the example no longer uses it."""
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             ".relay", "runner.json",
         )
         with open(path) as f:
             cfg = json.load(f)
-        self.assertEqual(cfg["prepare"], ".relay/prepare-worktree.sh")
+        self.assertEqual(cfg["worktrees"]["prepare"], ".relay/prepare-worktree.sh")
+        self.assertNotIn("prepare", cfg)
         self.assertEqual(cfg["max_retained_failed"], 3)
         self.assertIn("cache_dir", cfg)
 

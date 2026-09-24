@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 66
-RUNNER_FINGERPRINT = "b49e8cf8ac58866d6ef1c81657d05b627ced7b4927084f020a9973cad40184b1"
+RUNNER_VERSION = 67
+RUNNER_FINGERPRINT = "e387da1a867e7974f60bbfba11d43853e9a0b816fee8cd6530e955d8b0d4e4ef"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1517,6 +1517,10 @@ def load_runner_config():
         "max_retained_failed": 3,
         # RE320: no Claude usage limit unless configured
         "limits": {},
+        # RE339: the per-worktree lifecycle hooks, `{"prepare": path, "cleanup": path}`. Each
+        # falls back to its default file (PREPARE_HOOK_DEFAULT / CLEANUP_HOOK_DEFAULT); the
+        # flat top-level `prepare` is a deprecated alias for `worktrees.prepare`.
+        "worktrees": {},
         # RE185: auto-update is ON by default (a repo-less project has no other way to move
         # forward); opt out with "auto_update": false. The interval floors how often a
         # runner may ATTEMPT an update, so a flapping board cannot make it thrash.
@@ -1532,6 +1536,7 @@ def load_runner_config():
         die(f"{RUNNER_CONFIG_PATH} is not valid JSON: {e}")
     merged = {**defaults, **cfg}
     merged["capacity"] = {**defaults["capacity"], **(cfg.get("capacity") or {})}
+    merged["worktrees"] = {**defaults["worktrees"], **(cfg.get("worktrees") or {})}
     merged["limits"] = validate_limits(cfg.get("limits"))
     return merged
 
@@ -1720,6 +1725,17 @@ RETAINED_MARKER = ".relay-retained"   # gitignored sentinel at a retained worktr
 # server's release reconciliation SKIPS any state it does not recognise, which would leak the
 # slot forever. `_holding_state` is the one derivation; nothing else labels a worktree.
 HOLDING_STATES = ("bound", "retained", "running", "talk")
+
+
+# RE339: where each per-worktree lifecycle hook lives when runner.json's `worktrees` object
+# does not name one. `RunnerPool._hook_path` is the one reader of these and of the config keys.
+PREPARE_HOOK_DEFAULT = ".relay/prepare-worktree.sh"
+CLEANUP_HOOK_DEFAULT = ".relay/cleanup-worktree.sh"
+
+# RE339: seconds a cleanup hook may run before it is killed. `_teardown` runs while
+# RunnerPool.lock is held, so a hung hook would otherwise freeze the whole pool. Deliberately
+# not configurable; the removal goes ahead either way.
+CLEANUP_HOOK_TIMEOUT = 120
 
 
 def _sanitize_ref(ref):
@@ -2246,27 +2262,74 @@ class RunnerPool:
             return err.strip() or f"{path} is still on disk after removal"
         return None
 
-    def run_prepare_hook(self, slot_path, ref, branch):
-        """Warm a freshly created/re-baselined worktree via the project's prepare hook (§4).
-        Location: `.relay/prepare-worktree.sh` if present+executable, else the `prepare` command
-        from runner.json, else SKIP (no-op — a cold build is correct, not an error). Inputs go
-        as BOTH argv and env. Returns None on success/skip, or captured stderr on nonzero exit —
-        a failing hook FAILS the run (decision 2)."""
-        hook = self.cfg.get("prepare") or os.path.join(".relay", "prepare-worktree.sh")
+    def _hook_path(self, kind):
+        """The absolute path of this pool's `kind` ("prepare" | "cleanup") lifecycle hook, or
+        None when it does not exist or is not executable (RE339). The ONE place the precedence
+        lives: `worktrees.prepare` > the flat `prepare` (deprecated alias, kept because
+        auto-update pushes this runner into repos that still use it) > PREPARE_HOOK_DEFAULT;
+        `worktrees.cleanup` > CLEANUP_HOOK_DEFAULT. Relative paths resolve against ROOT. Pools
+        are also built from raw dicts, so a missing `worktrees` is read as empty."""
+        hooks = self.cfg.get("worktrees") or {}
+        if kind == "prepare":
+            hook = hooks.get("prepare") or self.cfg.get("prepare") or PREPARE_HOOK_DEFAULT
+        else:
+            hook = hooks.get("cleanup") or CLEANUP_HOOK_DEFAULT
         hook_abs = hook if os.path.isabs(hook) else os.path.join(ROOT, hook)
-        if not (os.path.isfile(hook_abs) and os.access(hook_abs, os.X_OK)):
-            return None
+        if os.path.isfile(hook_abs) and os.access(hook_abs, os.X_OK):
+            return hook_abs
+        return None
+
+    def _run_hook(self, hook_abs, slot_path, ref, branch, timeout=None):
+        """Run one lifecycle hook with the contract every hook shares (§4, RE339): argv
+        `[worktree, ref, branch, base, cache_dir]`, the same five as `RELAY_WORKTREE`/
+        `RELAY_REF`/`RELAY_BRANCH`/`RELAY_BASE`/`RELAY_CACHE_DIR` in env, cwd = the worktree.
+        Returns the CompletedProcess. Past `timeout` subprocess.run kills the hook and raises
+        TimeoutExpired."""
         cache_dir = os.path.expanduser(self.cfg.get("cache_dir") or "")
         hook_env = dict(os.environ,
                         RELAY_WORKTREE=slot_path, RELAY_REF=str(ref),
                         RELAY_BRANCH=str(branch or ""), RELAY_BASE=self.base,
                         RELAY_CACHE_DIR=cache_dir)
-        proc = subprocess.run([hook_abs, slot_path, str(ref), str(branch or ""),
+        return subprocess.run([hook_abs, slot_path, str(ref), str(branch or ""),
                                self.base, cache_dir],
-                              cwd=slot_path, env=hook_env, capture_output=True, text=True)
+                              cwd=slot_path, env=hook_env, capture_output=True, text=True,
+                              timeout=timeout)
+
+    def run_prepare_hook(self, slot_path, ref, branch):
+        """Warm a freshly created/re-baselined worktree via the project's prepare hook (§4),
+        located by `_hook_path("prepare")`; no hook is a SKIP (a cold build is correct, not an
+        error). Returns None on success/skip, or captured stderr on nonzero exit — a failing
+        hook FAILS the run (decision 2)."""
+        hook_abs = self._hook_path("prepare")
+        if hook_abs is None:
+            return None
+        proc = self._run_hook(hook_abs, slot_path, ref, branch)
         if proc.returncode == 0:
             return None
         return (proc.stderr or proc.stdout or f"prepare hook exited {proc.returncode}").strip()
+
+    def run_cleanup_hook(self, slot_path, ref):
+        """Let the project tear down what its prepare hook set up for this worktree (a dev
+        server, a compose stack, a per-worktree database) right before the tree is deleted
+        (RE339). Located by `_hook_path("cleanup")`; no hook is a skip. Same argv/env/cwd as
+        prepare. The pool record does not store the branch, so it is read from the tree
+        (empty when HEAD is detached). Returns None on success/skip, or the error text on a
+        nonzero exit or after CLEANUP_HOOK_TIMEOUT. Best-effort: the caller logs it and
+        removes the tree anyway, unlike prepare, which fails the run."""
+        hook_abs = self._hook_path("cleanup")
+        if hook_abs is None:
+            return None
+        head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=slot_path,
+                              capture_output=True, text=True).stdout.strip()
+        branch = "" if head == "HEAD" else head
+        try:
+            proc = self._run_hook(hook_abs, slot_path, ref, branch,
+                                  timeout=CLEANUP_HOOK_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return f"cleanup hook timed out after {CLEANUP_HOOK_TIMEOUT}s and was killed"
+        if proc.returncode == 0:
+            return None
+        return (proc.stderr or proc.stdout or f"cleanup hook exited {proc.returncode}").strip()
 
     # ---- startup / recovery --------------------------------------------
     def ensure(self):
