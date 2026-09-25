@@ -111,7 +111,7 @@ sharing behavior.
   per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
   `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
-  private builder, so the summary shape is defined exactly once.
+  private builder, so the summary shape is defined exactly once. Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)).
   **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
   pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
   vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
@@ -209,7 +209,11 @@ sharing behavior.
   `Runs.metric_window_since/1` window of done cards (archived included) so per-state means plus
   `outside_secs` sum to the mean lead time. `flow_agent_secs/3` reconciles agent time with
   `Runs.node_metrics_for_flow/2` (equal when a card's executions don't overlap, smaller when they
-  do). Approximations: `ai_enabled` and node roles are read as they are now.
+  do). `flow_stream/2` (RE348) is level 2 — one flow's `node_metrics_for_flow/2` rows plus its
+  **send-backs** (a `failed` execution followed by a different node, grouped by
+  `from → to → returns_to` with `laps`, `to_secs`, `rewind_secs`, `secs`) and its **foreach**
+  N and per-copy spread, all from one read of `Runs.execution_spans_for_flow/2`, the data behind
+  the Code flow map (RE349). Approximations: `ai_enabled` and node roles are read as they are now.
 - **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
   `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryTask` (the backbone,
   ordered within an activity; `board_id` denormalized so every read is one board-scoped

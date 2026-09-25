@@ -188,12 +188,21 @@ never 403s):
   `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null`
   until runners report spend — `duration_total`, `cost_total`, `attempts_mean`,
   `verdict_split`, `loop_laps`, and the RE345 idle-gap keys `wait_p50/p95`, `wait_total`,
-  `wait_count`, `held_p50/p95`, `held_total`, `held_count`). The nodes come from
+  `wait_count`, `held_p50/p95`, `held_total`, `held_count`, and the RE348 span keys `work_total`,
+  `rework_total`, `work_count`, `rework_count`, `rewind_total`, `rewind_count`). The nodes come from
   `Relay.Runs.node_metrics_for_flow/2`, which merges in `Relay.Runs.node_waits_for_flow/2`: a
   node's gap is the time from the previous execution in the same run finishing to this one
   starting, and it is **held** when that previous execution ended `needs_input`/`blocked`
-  (`Schemas.NodeExecution.holding_outcomes/0`), otherwise hand-off **wait**; a run's first node
-  has none, and the window applies to the execution the gap precedes. An optional
+  (`Schemas.NodeExecution.holding_outcomes/0`) or the card logged a `needs_input` /
+  `input_answered` activity inside the gap (an escalation park, whose predecessor stays
+  `failed` — RE348), otherwise hand-off **wait**; a run's first node
+  has none, and the window applies to the execution the gap precedes.
+  The span keys come from `Relay.Runs.execution_spans_for_flow/2`: an execution is **work** when
+  it is in the first visit of its `(node, sub_task)` binding (so foreach tasks 2..N are work)
+  before that visit's first `failed` attempt, and **rework** otherwise — later visits, retries
+  after a failure, and every execution of a fix-role node. **Rewind** (`rewind_total` /
+  `rewind_count`, fix nodes only) is the non-fix rework charged to the fix that opened the charge,
+  closed by the next work or fix execution. `work_total + rework_total == duration_total`. An optional
   `?card=<ref>` (RE235) scopes every figure to one card's node executions across ALL of its
   runs of that flow: `?window=` is then ignored, the eight percentile keys
   (`duration_*`, `cost_*`, `wait_*`, `held_*` p50/p95) and `median_end_to_end` come back `null`

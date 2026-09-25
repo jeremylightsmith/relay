@@ -5,6 +5,8 @@ defmodule Relay.ValueStream do
   to `Done`, split by stream state and by who holds the baton (`batons/0`). The data source
   for the card stream map (RE347); nothing here renders. `stream_summary/2` averages spans over
   a set of done cards; `flow_agent_secs/3` reconciles agent time with Flow Metrics.
+  `flow_stream/2` is level 2 (RE348): one flow's per-node rows plus its send-back hops and
+  foreach spread, all built on `Relay.Runs.execution_spans_for_flow/2`.
 
   Read-only: no processes, no PubSub, no writes. Everything is derived from durable history —
   `:moved` / `:approved` / `:rejected` rows (with `from_stage_id` / `to_stage_id` meta),
@@ -159,6 +161,41 @@ defmodule Relay.ValueStream do
     |> Enum.group_by(&elem(&1, 0), fn {_id, started, finished} -> {unix(started), unix(finished)} end)
     |> Enum.map(fn {_id, intervals} -> intervals |> union() |> total() end)
     |> Enum.sum()
+  end
+
+  @doc """
+  The level-2 roll-up for one flow (RE348) — the data behind the Code flow map (RE349). Options
+  are exactly `Relay.Runs.node_metrics_for_flow/2`'s (`:window`, `:card_id`). Reads
+  `Relay.Runs.execution_spans_for_flow/2` once for the sends and the foreach block, so every
+  figure is built from the same classified seconds that feed `rework_total` / `rewind_total`.
+
+  Returns `%{runs, nodes, sends, foreach}`:
+
+  - `runs` — distinct runs with ≥1 in-window execution (the per-run divisor).
+  - `nodes` — `Relay.Runs.node_metrics_for_flow/2`, unchanged, in flow order.
+  - `sends` — one `%{from, to, returns_to, laps, to_secs, rewind_secs, secs}` per
+    `(from, to, returns_to)`, sorted by `secs` descending. A **send-back hop** is a consecutive
+    pair in a run where the first execution `:failed` and the second is a different node. Its span
+    runs from that target execution up to (not including) the next work execution, the next hop,
+    or the run's end: `to_secs` is the target node's own executions in it (retries included),
+    `rewind_secs` the other rework in it, `secs = to_secs + rewind_secs`, and `returns_to` the
+    first other node in it (nil if the run ended or parked there). A hop counts when its target
+    execution is in the window.
+  - `foreach` — nil when the flow has no foreach node, else `%{node_key, runs, n_mean, n_min,
+    n_max, copies, copy_p50, copy_max, copy_total}`. N per run is its distinct non-nil
+    `sub_task_id`s among in-window executions; a **copy** is every execution bound to one
+    `(run, sub_task)` — the foreach node plus its in-loop reviews and fixes, rework included.
+  """
+  def flow_stream(%Flow{} = flow, opts \\ []) do
+    spans = Runs.execution_spans_for_flow(flow, opts)
+    in_window = Enum.filter(spans, & &1.in_window?)
+
+    %{
+      runs: in_window |> Enum.map(& &1.run_id) |> Enum.uniq() |> length(),
+      nodes: Runs.node_metrics_for_flow(flow, opts),
+      sends: sends(spans),
+      foreach: foreach(Runs.foreach_node_key(flow), in_window)
+    }
   end
 
   # ── board context ────────────────────────────────────────────────────────────
@@ -584,6 +621,91 @@ defmodule Relay.ValueStream do
     |> Decimal.div(n)
     |> Decimal.round(2)
   end
+
+  # ── level 2: one flow (RE348) ───────────────────────────────────────────────
+
+  # Hops are found over each run's FULL classified history (so a span can see past the window's
+  # edge), then kept when their target execution is in the window.
+  defp sends(spans) do
+    spans
+    |> Enum.chunk_by(& &1.run_id)
+    |> Enum.flat_map(&run_hops/1)
+    |> Enum.filter(& &1.in_window?)
+    |> Enum.group_by(&{&1.from, &1.to, &1.returns_to})
+    |> Enum.map(fn {{from, to, returns_to}, hops} ->
+      to_secs = hops |> Enum.map(& &1.to_secs) |> Enum.sum()
+      rewind_secs = hops |> Enum.map(& &1.rewind_secs) |> Enum.sum()
+
+      %{
+        from: from,
+        to: to,
+        returns_to: returns_to,
+        laps: length(hops),
+        to_secs: to_secs,
+        rewind_secs: rewind_secs,
+        secs: to_secs + rewind_secs
+      }
+    end)
+    |> Enum.sort_by(&{-&1.secs, &1.from, &1.to, &1.returns_to || ""})
+  end
+
+  defp run_hops(execs) do
+    tagged = Enum.zip(execs, [false | Enum.zip_with(execs, tl(execs), &hop?/2)])
+
+    tagged
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {{target, true}, i} -> [hop(Enum.at(execs, i - 1), target, Enum.drop(tagged, i + 1))]
+      _not_a_hop -> []
+    end)
+  end
+
+  defp hop?(prev, next), do: prev.outcome == :failed and next.node_key != prev.node_key
+
+  defp hop(prev, target, after_target) do
+    rest =
+      after_target
+      |> Enum.take_while(fn {exec, starts_hop?} -> exec.rework? and not starts_hop? end)
+      |> Enum.map(&elem(&1, 0))
+
+    {own, other} = Enum.split_with([target | rest], &(&1.node_key == target.node_key))
+
+    %{
+      from: prev.node_key,
+      to: target.node_key,
+      returns_to: rest |> Enum.map(& &1.node_key) |> Enum.find(&(&1 != target.node_key)),
+      in_window?: target.in_window?,
+      to_secs: sum_secs(own),
+      rewind_secs: sum_secs(other)
+    }
+  end
+
+  defp foreach(nil, _spans), do: nil
+
+  defp foreach(node_key, spans) do
+    bound = Enum.reject(spans, &is_nil(&1.sub_task_id))
+
+    ns =
+      bound
+      |> Enum.group_by(& &1.run_id, & &1.sub_task_id)
+      |> Enum.map(fn {_run_id, ids} -> ids |> Enum.uniq() |> length() end)
+
+    copies = bound |> Enum.group_by(&{&1.run_id, &1.sub_task_id}) |> Enum.map(fn {_copy, rows} -> sum_secs(rows) end)
+
+    %{
+      node_key: node_key,
+      runs: length(ns),
+      n_mean: if(ns == [], do: nil, else: Enum.sum(ns) / length(ns)),
+      n_min: Enum.min(ns, fn -> nil end),
+      n_max: Enum.max(ns, fn -> nil end),
+      copies: length(copies),
+      copy_p50: median(copies),
+      copy_max: Enum.max(copies, fn -> nil end),
+      copy_total: Enum.sum(copies)
+    }
+  end
+
+  defp sum_secs(rows), do: rows |> Enum.map(&(&1.secs || 0)) |> Enum.sum()
 
   # ── interval arithmetic (unix seconds) ──────────────────────────────────────
 

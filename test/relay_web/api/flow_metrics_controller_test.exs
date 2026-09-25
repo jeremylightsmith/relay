@@ -36,6 +36,67 @@ defmodule RelayWeb.Api.FlowMetricsControllerTest do
     assert conn |> get(~p"/api/flows/nope/metrics") |> json_response(404)
   end
 
+  test "every node carries the RE348 work/rework/rewind keys, as plain numbers in both scopes",
+       %{conn: conn, board: board} do
+    insert(:flow,
+      board: board,
+      key: "code",
+      nodes: [
+        %Schemas.Flow.Node{key: "precommit", type: :agent, role: :check},
+        %Schemas.Flow.Node{key: "final_fix", type: :agent, role: :fix}
+      ]
+    )
+
+    card = insert(:card, board: board, stage: insert(:stage, board: board))
+    run = insert(:run, card: card, flow_key: "code", status: :done)
+    t0 = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -600, :second)
+
+    for {node, start_s, opts} <- [
+          {"precommit", 0, [outcome: :failed]},
+          {"final_fix", 60, []},
+          {"precommit", 120, [visit: 2]}
+        ] do
+      insert(
+        :node_execution,
+        [
+          run: run,
+          node: node,
+          started_at: DateTime.add(t0, start_s, :second),
+          finished_at: DateTime.add(t0, start_s + 60, :second)
+        ] ++ opts
+      )
+    end
+
+    ref = Relay.Cards.ref(board, card)
+
+    for path <- [~p"/api/flows/code/metrics?window=all", ~p"/api/flows/code/metrics?#{[card: ref]}"] do
+      nodes =
+        conn
+        |> get(path)
+        |> json_response(200)
+        |> get_in(["data", "nodes"])
+        |> Map.new(&{&1["node_key"], &1})
+
+      assert %{
+               "work_total" => 60,
+               "rework_total" => 60,
+               "work_count" => 1,
+               "rework_count" => 1,
+               "rewind_total" => nil,
+               "rewind_count" => 0
+             } = nodes["precommit"]
+
+      assert %{
+               "work_total" => 0,
+               "rework_total" => 60,
+               "work_count" => 0,
+               "rework_count" => 1,
+               "rewind_total" => 60,
+               "rewind_count" => 1
+             } = nodes["final_fix"]
+    end
+  end
+
   describe "?card= scoping (RE235)" do
     setup %{board: board} do
       flow =
