@@ -461,4 +461,54 @@ defmodule RelayWeb.Api.CardControllerTest do
                %{"Live widget" => false, "Archived widget" => true}
     end
   end
+
+  describe "PATCH owners — board membership (RE344)" do
+    setup %{board: board, stage: stage} do
+      outsider = insert(:user, name: "Zed Secretname", email: "zed.secret@example.com")
+      member = insert(:user)
+      insert(:membership, board: board, user: member, email: member.email)
+      %{card: insert(:card, stage: stage, title: "Original"), outsider: outsider, member: member}
+    end
+
+    test "a non-member owner is 422 owner_not_member, names nobody, and changes nothing",
+         %{conn: conn, board: board, card: card, outsider: outsider} do
+      body = conn |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:#{outsider.id}"]}) |> response(422)
+
+      assert %{"error" => %{"code" => "owner_not_member", "message" => "owners must be members of this board"}} =
+               Jason.decode!(body)
+
+      refute body =~ "Zed Secretname"
+      refute body =~ "zed.secret@example.com"
+      assert Relay.Repo.get_by(Schemas.CardOwner, card_id: card.id) == nil
+    end
+
+    test "an unknown user id gets the byte-identical refusal",
+         %{conn: conn, board: board, card: card, outsider: outsider} do
+      path = ~p"/api/cards/#{ref(board, card)}"
+      known = conn |> patch(path, %{owners: ["user:#{outsider.id}"]}) |> response(422)
+      unknown = conn |> patch(path, %{owners: ["user:999999999"]}) |> response(422)
+
+      assert known == unknown
+    end
+
+    test "a refused owner list leaves the rest of the PATCH unapplied",
+         %{conn: conn, board: board, card: card, outsider: outsider} do
+      conn
+      |> patch(~p"/api/cards/#{ref(board, card)}", %{title: "should not stick", owners: ["user:#{outsider.id}"]})
+      |> json_response(422)
+
+      assert Relay.Repo.get!(Schemas.Card, card.id).title == "Original"
+    end
+
+    test "a board member is still assignable", %{conn: conn, board: board, card: card, member: member} do
+      data =
+        conn
+        |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["user:#{member.id}"]})
+        |> json_response(200)
+        |> Map.fetch!("data")
+
+      assert [%{"type" => "user", "id" => id}] = data["owners"]
+      assert id == member.id
+    end
+  end
 end

@@ -54,9 +54,11 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, owners} <- owner_actors(params),
+         :ok <- check_owners(card, owners),
          {:ok, card} <- update_fields(card, params),
          {:ok, card} <- update_status(card, params),
-         {:ok, card} <- update_owners(card, params),
+         {:ok, card} <- update_owners(card, owners),
          {:ok, card} <- update_ai_result(card, params),
          {:ok, card} <- update_sub_tasks(card, params),
          {:ok, card} <- update_dependencies(board, card, params) do
@@ -147,7 +149,10 @@ defmodule RelayWeb.Api.CardController do
 
   defp update_status(card, _params), do: {:ok, card}
 
-  defp update_owners(card, %{"owners" => owners}) when is_list(owners) do
+  # RE344 — the ONE reading of an "owners" payload. It is parsed BEFORE any write, so the
+  # pre-flight and the write see the same list and a refused list leaves the PATCH unapplied.
+  # A non-list "owners" is ignored, as it always was.
+  defp owner_actors(%{"owners" => owners}) when is_list(owners) do
     owners
     |> Enum.map(&parse_actor/1)
     |> Enum.reduce_while({:ok, []}, fn
@@ -155,12 +160,20 @@ defmodule RelayWeb.Api.CardController do
       :error, _acc -> {:halt, :error}
     end)
     |> case do
-      {:ok, actors} -> Cards.set_owners(card, Enum.reverse(actors), :agent)
+      {:ok, actors} -> {:ok, Enum.reverse(actors)}
       :error -> :error
     end
   end
 
-  defp update_owners(card, _params), do: {:ok, card}
+  defp owner_actors(_params), do: {:ok, :absent}
+
+  # The rule itself is Relay.Cards' (check_owners/2 == what set_owners/3 enforces); this only
+  # makes the refusal atomic, mirroring create/2's check_dependencies pre-flight.
+  defp check_owners(_card, :absent), do: :ok
+  defp check_owners(card, actors), do: Cards.check_owners(card, actors)
+
+  defp update_owners(card, :absent), do: {:ok, card}
+  defp update_owners(card, actors), do: Cards.set_owners(card, actors, :agent)
 
   defp parse_actor("agent"), do: {:ok, :agent}
 

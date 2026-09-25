@@ -2216,22 +2216,13 @@ defmodule RelayWeb.BoardLive do
     end
   end
 
-  # RLY-32: any board member (or the agent) can be assigned — the old
-  # "only yourself" restriction is lifted. A non-member {:user, id} is a no-op.
+  # RLY-32: any board member (or the agent) can be assigned — the old "only yourself"
+  # restriction is lifted. Membership is Relay.Cards' rule (RE344): a non-member {:user, id}
+  # comes back {:error, :owner_not_member}, which apply_owner_change/2 treats as a no-op.
   def handle_event("add_owner", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     case resolve_actor(params) do
-      :agent ->
-        apply_owner_change(socket, Cards.add_owner(card, :agent, current_actor(socket)))
-
-      {:user, id} = actor ->
-        if member_user_id?(socket, id) do
-          apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
-        else
-          {:noreply, socket}
-        end
-
-      _other ->
-        {:noreply, socket}
+      nil -> {:noreply, socket}
+      actor -> apply_owner_change(socket, Cards.add_owner(card, actor, current_actor(socket)))
     end
   end
 
@@ -3409,12 +3400,8 @@ defmodule RelayWeb.BoardLive do
 
   defp resolve_actor(_params), do: nil
 
-  defp member_user_id?(socket, id) do
-    Enum.any?(socket.assigns.members, &(&1.user_id == id))
-  end
-
   defp apply_owner_change(socket, {:ok, %Card{} = card}), do: {:noreply, refresh_card(socket, card)}
-  defp apply_owner_change(socket, {:error, _changeset}), do: {:noreply, socket}
+  defp apply_owner_change(socket, {:error, _reason}), do: {:noreply, socket}
 
   # A persisted baton change: sync the drawer assigns and re-stream the
   # card so the board card re-renders its colour/badge. Also recomputes
