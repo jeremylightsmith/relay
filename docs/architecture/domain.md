@@ -198,7 +198,8 @@ sharing behavior.
   already exists (transition rows' `from_stage_id` / `to_stage_id`, `:needs_input` →
   `:input_answered` parks, `node_executions`). `stream_states/1` derives the ordered states from
   the board (stream start = the last queue main stage before the first work/planning main stage,
-  through the terminal stage; kinds `kinds/0` = queue / flow / gate / done). `card_stream/1`
+  through the terminal stage, minus any `ai_enabled` work/planning stage no enabled flow works in,
+  such as RE's `Deploy`; kinds `kinds/0` = queue / flow / gate / done). `card_stream/1`
   returns one card's spans with a per-span baton split (`batons/0`: agent = union of the card's
   node executions inside an `ai_enabled` flow stage, human = parks and gates, nobody = the rest),
   plus lead time, value-add (agent time on `:do` nodes per `Schemas.Flow.node_roles/1`), flow

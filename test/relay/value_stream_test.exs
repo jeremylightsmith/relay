@@ -26,6 +26,25 @@ defmodule Relay.ValueStreamTest do
       assert board.id |> ValueStream.stream_states() |> Enum.map(& &1.name) == ["Code", "Done"]
     end
 
+    test "an AI stage no enabled flow works in is off-stream; a card's time there is a nobody queue span" do
+      s = re_board()
+      card = card_in(s.done, at(0))
+      walk(card, [{s.next_up, 0}, {s.code, 10}, {s.review, 30}, {s.deploy, 40}, {s.done, 100}])
+
+      refute Enum.any?(ValueStream.stream_states(s.board.id), &(&1.stage_id == s.deploy.id))
+
+      deploy = Enum.find(ValueStream.card_stream(card).spans, &(&1.stage_id == s.deploy.id))
+      assert %{kind: :queue, secs: 60, baton: %{agent: 0, human: 0, nobody: 60}} = deploy
+    end
+
+    test "with no enabled flows every work stage stays in the stream" do
+      s = re_board()
+      Relay.Repo.update_all(Ecto.Query.where(Schemas.Flow, board_id: ^s.board.id), set: [enabled: false])
+
+      names = s.board.id |> ValueStream.stream_states() |> Enum.map(& &1.name)
+      assert Enum.take(names, -3) == ["Review", "Deploy", "Done"]
+    end
+
     test "a board with no stages has no stream" do
       assert ValueStream.stream_states(insert(:board).id) == []
     end

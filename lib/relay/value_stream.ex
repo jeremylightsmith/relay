@@ -63,9 +63,15 @@ defmodule Relay.ValueStream do
   the first main stage. `kind` comes from `Stage.type`: `:queue` → `:queue`, work/planning →
   `:flow`, `:review` → `:gate`, the terminal stage → `:done`, and a mid-board `:done` substage
   → `:queue` (the card is parked; nobody holds it).
+
+  States come from the flows' triggers: an `ai_enabled` work/planning main stage that no
+  **enabled** flow works in (`works_in_stage_id`) is left out, substages included (RE's
+  `Deploy`). No agent can hold the baton there, so time in it counts as off-stream (a `:queue`
+  span nobody holds). A board with no enabled flows has no triggers to read, so every work
+  stage stays in. A work stage that isn't `ai_enabled` is manual work and always stays in.
   """
   def stream_states(board_id) when is_integer(board_id) do
-    board_id |> load_stages() |> build_states()
+    build_states(load_stages(board_id), flow_worked_stage_ids(board_id))
   end
 
   @doc """
@@ -159,7 +165,7 @@ defmodule Relay.ValueStream do
 
   defp board_context(board_id) do
     stages = load_stages(board_id)
-    states = build_states(stages)
+    states = build_states(stages, flow_worked_stage_ids(board_id))
 
     %{
       stages: stages,
@@ -174,7 +180,15 @@ defmodule Relay.ValueStream do
 
   defp load_stages(board_id), do: Boards.list_stages(%Board{id: board_id})
 
-  defp build_states(stages) do
+  # Stage ids an enabled flow works in, or `nil` when the board has no enabled flows.
+  defp flow_worked_stage_ids(board_id) do
+    case Flows.list_enabled_flows(%Board{id: board_id}) do
+      [] -> nil
+      flows -> MapSet.new(flows, & &1.works_in_stage_id)
+    end
+  end
+
+  defp build_states(stages, worked_ids) do
     case Boards.terminal_stage(stages) do
       nil ->
         []
@@ -186,6 +200,7 @@ defmodule Relay.ValueStream do
 
         mains
         |> Enum.drop(stream_start_index(mains))
+        |> Enum.filter(&in_stream?(&1, worked_ids))
         |> Enum.flat_map(&with_substages(&1, subs, terminal))
         |> Enum.map(&%{stage_id: &1.id, name: Map.fetch!(names, &1.id), kind: kind(&1, terminal)})
     end
@@ -196,6 +211,14 @@ defmodule Relay.ValueStream do
   defp with_substages(%Stage{} = main, subs, _terminal) do
     [main | subs |> Map.get(main.id, []) |> Enum.sort_by(&substage_order/1)]
   end
+
+  defp in_stream?(_stage, nil), do: true
+
+  defp in_stream?(%Stage{ai_enabled: true, type: type} = stage, worked_ids) do
+    type not in Stage.work_types() or MapSet.member?(worked_ids, stage.id)
+  end
+
+  defp in_stream?(%Stage{}, _worked_ids), do: true
 
   defp substage_order(%Stage{type: :review}), do: 0
   defp substage_order(%Stage{}), do: 1

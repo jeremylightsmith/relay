@@ -22,7 +22,9 @@ defmodule Relay.ValueStreamFixtures do
 
   @doc """
   Backlog, Triage, Next up (queues) | Spec (+ Review, Done substages) | Plan (+ Done) | Code |
-  Review (top-level gate) | Done (terminal). `code_ai_enabled: false` makes Code human-only.
+  Review (top-level gate) | Deploy (AI-enabled `:work`, but no flow works in it — as on RE) |
+  Done (terminal), plus RE's three enabled flows (`spec`, `plan`, `code`) wired to their
+  stages. `code_ai_enabled: false` makes Code human-only.
   """
   def re_board(opts \\ []) do
     board = insert(:board, key: "RE")
@@ -35,14 +37,30 @@ defmodule Relay.ValueStreamFixtures do
       plan: stage(board, "Plan", :planning, :planning, 5, true),
       code: stage(board, "Code", :work, :in_progress, 6, Keyword.get(opts, :code_ai_enabled, true)),
       review: stage(board, "Review", :review, :in_progress, 7, false),
-      done: stage(board, "Done", :done, :complete, 8, false)
+      deploy: stage(board, "Deploy", :work, :in_progress, 8, true),
+      done: stage(board, "Done", :done, :complete, 9, false)
     }
 
     {:ok, spec_review} = Boards.enable_lane(stages.spec, :review)
     {:ok, spec_done} = Boards.enable_lane(stages.spec, :done)
     {:ok, plan_done} = Boards.enable_lane(stages.plan, :done)
 
+    wire_flow(board, "spec", stages.next_up, stages.spec, spec_review)
+    wire_flow(board, "plan", spec_done, stages.plan, plan_done)
+    wire_flow(board, "code", plan_done, stages.code, stages.review)
+
     Map.merge(stages, %{board: board, spec_review: spec_review, spec_done: spec_done, plan_done: plan_done})
+  end
+
+  defp wire_flow(board, key, pulls_from, works_in, lands_on) do
+    insert(:flow,
+      board: board,
+      key: key,
+      enabled: true,
+      pulls_from_stage_id: pulls_from.id,
+      works_in_stage_id: works_in.id,
+      lands_on_stage_id: lands_on.id
+    )
   end
 
   defp stage(board, name, type, category, position, ai_enabled) do
@@ -106,11 +124,13 @@ defmodule Relay.ValueStreamFixtures do
     )
   end
 
-  @doc "A `code` flow whose node roles are implement → :do, spec_review → :check, fix → :fix."
+  @doc """
+  The board's `code` flow (reusing the one `re_board/1` wired, else a new one) with nodes whose
+  roles are implement → :do, spec_review → :check, fix → :fix.
+  """
   def code_flow(board) do
-    insert(:flow,
-      board: board,
-      key: "code",
+    (Relay.Repo.get_by(Schemas.Flow, board_id: board.id, key: "code") || insert(:flow, board: board, key: "code"))
+    |> Ecto.Changeset.change(
       nodes: [
         %Schemas.Flow.Node{key: "implement", type: :agent, run: "/implement"},
         %Schemas.Flow.Node{key: "spec_review", type: :gate, run: "true"},
@@ -124,6 +144,7 @@ defmodule Relay.ValueStreamFixtures do
         %Edge{from: "spec_review", to: "done", on: :succeeded}
       ]
     )
+    |> Relay.Repo.update!()
   end
 
   defp transition_meta(from, to) do
