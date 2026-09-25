@@ -20,20 +20,28 @@ defmodule RelayWeb.TalkComponents do
 
   def talk_line(assigns) do
     ~H"""
+    <%!-- RE301 — `phx-no-format` and the flush `{@event.text}` are load-bearing, for the same
+    reason as `talk_seed/1`'s field rows: under `white-space:pre-wrap` the HEEx formatter's line
+    break and indent inside the tag would render as a blank line and leading spaces. --%>
     <div :if={@event.kind == :user} style="display:flex;gap:8px;padding-top:9px;">
       <span style={mono() <> "color:oklch(0.72 0.14 150);flex:0 0 auto;"}>❯</span>
-      <span style={mono() <> "color:oklch(0.92 0.01 262);flex:1;min-width:0;"}>{@event.text}</span>
+      <span
+        phx-no-format
+        style={mono() <> "color:oklch(0.92 0.01 262);flex:1;min-width:0;" <> pre_wrap()}
+      >{@event.text}</span>
     </div>
     <div :if={@event.kind == :tool} style="display:flex;gap:8px;">
       <span style={mono() <> "color:oklch(0.5 0.02 262);flex:0 0 auto;"}>·</span>
-      <span style={mono() <> "color:oklch(0.56 0.03 262);flex:1;min-width:0;"}>{@event.text}</span>
+      <span
+        phx-no-format
+        style={mono() <> "color:oklch(0.56 0.03 262);flex:1;min-width:0;" <> pre_wrap()}
+      >{@event.text}</span>
     </div>
     <span
       :if={@event.kind in [:out, :error]}
-      style={mono() <> "color:" <> out_color(@event) <> ";padding-bottom:2px;display:block;"}
-    >
-      {@event.text}
-    </span>
+      phx-no-format
+      style={mono() <> "color:" <> out_color(@event) <> ";padding-bottom:2px;display:block;" <> pre_wrap()}
+    >{@event.text}</span>
     """
   end
 
@@ -216,6 +224,10 @@ defmodule RelayWeb.TalkComponents do
   # (title bar, footer copy, slash chips) — concatenating `mono()` would leave a stray
   # `line-height:19px` behind after the font-size override, which is not what the artboard draws.
   defp mono_family, do: "font-family:'JetBrains Mono',ui-monospace,monospace;"
+
+  # RE301 — keeps the `\n`s a transcript line carries (and runs of spaces) while still wrapping
+  # long lines; `overflow-wrap:anywhere` stops a long path or URL from widening the pane.
+  defp pre_wrap, do: "white-space:pre-wrap;overflow-wrap:anywhere;"
 
   @doc """
   The one slash command the pane handles itself rather than posting as a turn — so it is the one

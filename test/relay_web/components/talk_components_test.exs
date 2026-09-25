@@ -45,6 +45,19 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "line-height:19px"
   end
 
+  # RE301 — the runner posts one `:out` event per assistant text block, so its text carries real
+  # `\n`s (paragraphs, lists, code). Under the default `white-space: normal` every one of them
+  # folded into a space. `pre-wrap` keeps them; the text node must be exactly the event's text,
+  # because under `pre-wrap` any formatter-injected newline or indent inside the tag would render
+  # as a visible blank line or leading spaces.
+  for kind <- [:out, :error, :user, :tool] do
+    test "a #{kind} line keeps its newlines verbatim under pre-wrap" do
+      html = render_component(&TalkComponents.talk_line/1, event: event(%{kind: unquote(kind), text: "a\nb"}))
+
+      assert html =~ ~r/white-space:pre-wrap;overflow-wrap:anywhere;[^>]*>a\nb<\/span>/
+    end
+  end
+
   # RE268 quality review — `talk_seed/1`'s toggle button carried a hardcoded id, so a page
   # rendering more than one `talk_pane` (the storybook page renders four) emitted duplicate DOM
   # ids. Defaults to the old literal for standalone (test/story) use, but `talk_pane` overrides
