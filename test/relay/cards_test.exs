@@ -669,7 +669,7 @@ defmodule Relay.CardsTest do
         queue_stage: insert(:stage, board: board, type: :queue, ai_enabled: false, position: 22),
         done_stage: insert(:stage, board: board, type: :done, ai_enabled: false, position: 23),
         review_stage: insert(:stage, board: board, type: :review, ai_enabled: false, position: 24),
-        user: insert(:user)
+        user: member!(board)
       }
     end
 
@@ -870,9 +870,9 @@ defmodule Relay.CardsTest do
   end
 
   describe "owner management" do
-    setup %{stage: stage} do
+    setup %{board: board, stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Owned"})
-      %{card: card, user: insert(:user)}
+      %{card: card, user: member!(board)}
     end
 
     test "add_owner/3 with {:user, id} adds a human owner with the user preloaded",
@@ -904,14 +904,14 @@ defmodule Relay.CardsTest do
       assert [%{actor_type: :agent}] = again.owners
     end
 
-    test "add_owner/3 returns an error changeset for an unknown user id", %{card: card} do
-      assert {:error, %Ecto.Changeset{}} = Cards.add_owner(card, {:user, -1})
+    test "add_owner/3 refuses an unknown user id as :owner_not_member", %{card: card} do
+      assert {:error, :owner_not_member} = Cards.add_owner(card, {:user, -1})
       assert {:ok, %Card{owners: []}} = Cards.set_owners(card, [])
     end
 
     test "remove_owner/3 removes only the matching actor and is idempotent",
-         %{card: card, user: user} do
-      other = insert(:user)
+         %{board: board, card: card, user: user} do
+      other = member!(board)
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
       {:ok, _card} = Cards.add_owner(card, {:user, other.id})
 
@@ -975,17 +975,75 @@ defmodule Relay.CardsTest do
          %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
-      assert {:error, %Ecto.Changeset{}} = Cards.set_owners(card, [:agent, {:user, -1}])
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [:agent, {:user, -1}])
 
       assert {:ok, %Card{} = reloaded} = Cards.remove_owner(card, :agent)
       assert [%{actor_type: :user}] = reloaded.owners
     end
   end
 
+  describe "owner membership (RE344)" do
+    setup %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Guarded"})
+      %{card: card, member: member!(board), outsider: insert(:user)}
+    end
+
+    test "set_owners/3 refuses a non-member and leaves the existing owners unchanged",
+         %{card: card, member: member, outsider: outsider} do
+      {:ok, _card} = Cards.set_owners(card, [{:user, member.id}])
+
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, outsider.id}])
+      assert owner_user_ids(card) == [member.id]
+    end
+
+    test "a non-existent user id gets the identical refusal", %{card: card, outsider: outsider} do
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, outsider.id}])
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, -1}])
+    end
+
+    test "a member id succeeds", %{card: card, member: member} do
+      assert {:ok, %Card{}} = Cards.set_owners(card, [{:user, member.id}])
+      assert owner_user_ids(card) == [member.id]
+    end
+
+    test "add_owner/3 refuses a non-member", %{card: card, outsider: outsider} do
+      assert {:error, :owner_not_member} = Cards.add_owner(card, {:user, outsider.id})
+      assert owner_user_ids(card) == []
+    end
+
+    test "take_over/2 by a non-member is refused and keeps the AI owner",
+         %{card: card, outsider: outsider} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:error, :owner_not_member} = Cards.take_over(card, {:user, outsider.id})
+      assert Repo.exists?(from o in Schemas.CardOwner, where: o.card_id == ^card.id and o.actor_type == :agent)
+    end
+
+    test "a non-member human's claim on move is refused and the move rolls back",
+         %{board: board, stage: stage, card: card, outsider: outsider} do
+      work = insert(:stage, board: board, type: :work, ai_enabled: false, position: 40)
+
+      assert {:error, :owner_not_member} = Cards.move_card(card, work, 0, {:user, outsider.id})
+      assert Repo.get!(Card, card.id).stage_id == stage.id
+      assert owner_user_ids(card) == []
+    end
+
+    test "check_owners/2 is the same rule as a pre-flight", %{card: card, member: member, outsider: outsider} do
+      assert :ok = Cards.check_owners(card, [:agent, {:user, member.id}])
+      assert :ok = Cards.check_owners(card, [])
+      assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, member.id}, {:user, outsider.id}])
+      assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, -1}])
+    end
+
+    test "owner_error_message/0 names nobody" do
+      assert Cards.owner_error_message() == "owners must be members of this board"
+    end
+  end
+
   describe "active_owner_type/1" do
-    setup %{stage: stage} do
+    setup %{board: board, stage: stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "Baton"})
-      %{card: card, user: insert(:user)}
+      %{card: card, user: member!(board)}
     end
 
     test "returns nil for an unowned card", %{card: card} do
@@ -1007,7 +1065,7 @@ defmodule Relay.CardsTest do
 
   describe "activity logging" do
     setup %{board: board} do
-      user = insert(:user, name: "Ada Lovelace")
+      user = member!(board, name: "Ada Lovelace")
       target = insert(:stage, board: board, name: "Code", position: 2)
       %{user: user, target: target}
     end
@@ -1530,6 +1588,18 @@ defmodule Relay.CardsTest do
     |> Cards.list_cards()
     |> Enum.filter(&(&1.stage_id == stage.id))
     |> Enum.map(& &1.position)
+  end
+
+  # RE344 — an owner must hold a resolved membership on the card's board; the :board factory
+  # creates none, so owner fixtures are made members explicitly.
+  defp member!(board, attrs \\ []) do
+    user = insert(:user, attrs)
+    insert(:membership, board: board, user: user, email: user.email)
+    user
+  end
+
+  defp owner_user_ids(card) do
+    Repo.all(from o in Schemas.CardOwner, where: o.card_id == ^card.id and o.actor_type == :user, select: o.user_id)
   end
 
   defp activities(card) do

@@ -36,10 +36,18 @@ defmodule Relay.Members do
     )
   end
 
-  @doc "True when `user` holds a resolved membership on `board`."
-  def member?(%Board{id: board_id}, %User{id: user_id}) do
+  @doc """
+  True when `user_id` holds a **resolved** membership on `board_id`. An invited row
+  (`user_id: nil`) never matches. This is the ONE membership query: `member?/2` and
+  `Relay.Cards`' owner rule (RE344) both read it.
+  """
+  @spec member_user_id?(integer(), integer()) :: boolean()
+  def member_user_id?(board_id, user_id) when is_integer(board_id) and is_integer(user_id) do
     Repo.exists?(from m in Membership, where: m.board_id == ^board_id and m.user_id == ^user_id)
   end
+
+  @doc "True when `user` holds a resolved membership on `board`."
+  def member?(%Board{id: board_id}, %User{id: user_id}), do: member_user_id?(board_id, user_id)
 
   @doc """
   Invites `email` to `board`. Normalizes the address; if a registered user

@@ -86,6 +86,7 @@ defmodule RelayWeb.Api.CardControllerTest do
 
   test "PATCH owners claims for AI then hands back to a user", %{conn: conn, board: board, stage: stage} do
     user = insert(:user)
+    insert(:membership, board: board, user: user, email: user.email)
     card = insert(:card, stage: stage)
 
     ai =
