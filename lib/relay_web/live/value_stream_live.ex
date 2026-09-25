@@ -180,7 +180,6 @@ defmodule RelayWeb.ValueStreamLive do
       boxes: boxes,
       geometry: ValueStreamLayout.geometry(length(boxes)),
       ladder_items: ValueStreamLayout.ladder_items(boxes),
-      list_rows: ValueStreamLayout.list_rows(vs.states, vs.lead_secs),
       rows: Map.new(vs.states, &{&1.stage_id, ValueStreamLayout.box_rows(&1, assigns.scope, vs.extras[&1.stage_id])}),
       hrefs: Map.new(vs.states, &{&1.stage_id, box_href(&1, assigns)}),
       tiles: tiles(vs, assigns),
@@ -451,7 +450,7 @@ defmodule RelayWeb.ValueStreamLive do
           </div>
         <% else %>
           <ValueStreamComponents.baton_legend />
-          <div id="vs-map" class="hidden md:block" style="overflow-x:auto;max-width:100%;">
+          <div id="vs-map" style="overflow-x:auto;max-width:100%;">
             <div style={"position:relative;width:#{@geometry.w}px;height:#{@geometry.h}px;"}>
               <ValueStreamComponents.stream_line
                 boxes={@boxes}
@@ -472,7 +471,6 @@ defmodule RelayWeb.ValueStreamLive do
               />
             </div>
           </div>
-          <ValueStreamComponents.stream_list rows={@list_rows} class="md:hidden" />
           <ValueStreamComponents.lead_bar
             baton={@vs.baton_secs}
             total={ValueStreamLayout.fmt_duration(@vs.lead_secs)}

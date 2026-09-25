@@ -165,15 +165,13 @@ defmodule RelayWeb.ValueStreamLiveTest do
   end
 
   describe "phones" do
-    test "get the vertical stream list and a two-column tile grid instead of the wide map", ctx do
+    test "get the same map, scrolling sideways inside its container — no stacked list", ctx do
       {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream?card=#{ctx.ref}")
 
-      assert has_element?(view, "#vs-map.hidden[class*='md:block']")
-      assert has_element?(view, "#vs-list[class*='md:hidden']")
-      assert length(texts(view, "#vs-list > li", "#vs-list")) == 9
-      assert length(texts(view, ".vs-row-bar", "#vs-list")) == 9
+      assert has_element?(view, "#vs-map[style*='overflow-x:auto']")
+      refute has_element?(view, "#vs-map.hidden")
+      refute has_element?(view, "#vs-list")
       assert has_element?(view, "#vs-tiles.grid-cols-2")
-      assert has_element?(view, "#vs-row-#{ctx.s.review.id}-rework", "Request changes 50% → re-runs Code")
     end
   end
 

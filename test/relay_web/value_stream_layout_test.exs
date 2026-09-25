@@ -131,19 +131,7 @@ defmodule RelayWeb.ValueStreamLayoutTest do
     end
   end
 
-  describe "the phone list and the lead bar" do
-    test "list rows carry the time, a bar to scale against lead time and the rework note" do
-      rows = VSL.list_rows(re_states(), 140_940.0)
-
-      assert length(rows) == 9
-      assert hd(rows).primary == "18.0h"
-      assert hd(rows).bar_pct == 46.0
-      assert hd(rows).token == "warning"
-      assert Enum.at(rows, 1).visits == "×2"
-      assert Enum.at(rows, 7).rework_note == "Request changes 50% → re-runs Code"
-      assert Enum.at(rows, 6).rework_note == nil
-    end
-
+  describe "the lead bar" do
     test "lead segments follow ValueStream.batons/0 and drop empty batons" do
       assert VSL.lead_segments(%{agent: 600, human: 0, nobody: 3_600}) == [
                %{key: :agent, grow: 600, label: "agent working 10m"},

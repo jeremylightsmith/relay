@@ -5,6 +5,7 @@ defmodule RelayWeb.ValueStreamComponentsTest do
   import RelayWeb.ValueStreamStates
 
   alias RelayWeb.ValueStreamComponents, as: C
+  alias RelayWeb.ValueStreamFlowLayout, as: FL
   alias RelayWeb.ValueStreamLayout, as: VSL
 
   @hatch "repeating-linear-gradient(45deg, color-mix(in oklab, var(--color-warning) 55%, var(--color-base-100)) 0 5px, color-mix(in oklab, var(--color-warning) 25%, var(--color-base-100)) 5px 10px)"
@@ -106,15 +107,150 @@ defmodule RelayWeb.ValueStreamComponentsTest do
     assert html =~ "background:var(--color-error)"
   end
 
-  test "stream_list: one row per state with a baton-coloured bar to scale and the rework note" do
-    rows = VSL.list_rows(re_states(), 140_940.0)
-    html = render_component(&C.stream_list/1, rows: rows, class: "md:hidden")
+  test "ladder: a custom label and footnote (level 2)" do
+    items = VSL.ladder_items(VSL.boxes(re_states()))
 
-    doc = LazyHTML.from_fragment(html)
-    assert doc |> LazyHTML.query("#vs-list > li") |> Enum.count() == 9
-    assert doc |> LazyHTML.query(".vs-row-bar") |> Enum.count() == 9
-    assert html =~ "md:hidden"
-    assert html =~ "width:46.0%"
-    assert text(html, "#vs-row-8-rework") == "Request changes 50% → re-runs Code"
+    html =
+      render_component(&C.ladder/1,
+        id: "vs-flow-ladder",
+        items: items,
+        geometry: VSL.geometry(9),
+        label: "TIME — each rung sits under the node it measures",
+        footnote: "a fix’s minutes are folded into the rung of the check that causes most of them"
+      )
+
+    assert html =~ "TIME — each rung sits under the node it measures"
+    refute html =~ "rise = the card sitting still"
+    assert text(html, "#vs-flow-ladder-footnote") =~ "folded into the rung of the check"
+  end
+
+  defp node_row(key, attrs) do
+    base = %{node_key: key, runs: 1, work_total: nil, rework_total: nil, wait_total: nil, cost_total: nil}
+    base |> Map.put(:verdict_split, %{}) |> Map.merge(Map.new(attrs))
+  end
+
+  describe "level 2 (RE349)" do
+    setup do
+      attrs = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+      flow = %Schemas.Flow{board_id: 1} |> Schemas.Flow.changeset(attrs) |> Ecto.Changeset.apply_action!(:build)
+      %{layout: FL.layout(flow)}
+    end
+
+    test "flow_node_box: a fix is dashed rose with FIX; a check carries its pass strip; hot visits are rose",
+         %{layout: layout} do
+      stream = %{
+        runs: 2,
+        nodes: [
+          node_row("final_fix", rework_total: 360, cost_total: Decimal.new("0.90")),
+          node_row("precommit", runs: 3, work_total: 480, verdict_split: %{succeeded: 2, failed: 1})
+        ]
+      }
+
+      boxes = Map.new(FL.node_boxes(layout, stream), &{&1.key, &1})
+
+      fix = render_component(&C.flow_node_box/1, box: boxes["final_fix"])
+      assert fix =~ ~s(id="vs-node-final_fix")
+      assert fix =~ "vs-node-fix"
+      assert fix =~ "border:1px dashed color-mix(in oklab, var(--color-error) 55%, var(--color-base-100))"
+      assert fix =~ "width:136px;height:92px"
+      assert text(fix, ".vs-role") == "FIX"
+      assert text(fix, ".vs-node-type") == "agent"
+      assert fix =~ "Rework"
+      refute fix =~ "vs-pass-strip"
+
+      check = render_component(&C.flow_node_box/1, box: boxes["precommit"])
+      assert text(check, ".vs-role") == "CHECK"
+      assert check =~ "background:var(--color-info)"
+      assert check =~ "width:67%;background:var(--color-success)"
+      assert text(check, ".vs-node-visits") == "×1.50"
+      assert check =~ "color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
+
+      plain = render_component(&C.flow_node_box/1, box: boxes["branch"])
+      assert text(plain, ".vs-role") == "DO"
+      assert plain =~ "background:var(--color-success)"
+      assert plain =~ "border:1px solid var(--color-base-300)"
+      refute plain =~ "vs-node-visits"
+    end
+
+    test "flow_map: band labels, both verify frames, the foreach loop, arcs, the queue and both terminals",
+         %{layout: layout} do
+      sends = [
+        %{
+          from: "acceptance",
+          to: "final_fix",
+          returns_to: "precommit",
+          laps: 2,
+          to_secs: 600,
+          rewind_secs: 900,
+          secs: 1_500
+        }
+      ]
+
+      html =
+        render_component(&C.flow_map/1,
+          layout: layout,
+          arcs: FL.arcs(layout, sends),
+          queue: FL.queue(:exclusive, %{mean_secs: 150, jobs: 2}),
+          terminals: FL.terminals(layout, %{runs: 2, done_runs: 2, parked_runs: 1}, "Review")
+        )
+
+      assert text(html, "#vs-band-rework") ==
+               "REWORK — everything above the line exists only because something failed"
+
+      assert text(html, "#vs-band-stream") == "THE STREAM — one line, in execution order"
+      assert text(html, "#vs-verify-1") == "VERIFY BLOCK ①"
+      assert text(html, "#vs-verify-2") == "VERIFY BLOCK ② — byte-identical run commands"
+      assert html =~ "stroke-dasharray:6 5"
+      assert text(html, "#vs-foreach-loop") == "foreach_remaining · next sub-task · planned, not waste"
+      assert html =~ "stroke-dasharray:8 6"
+      assert text(html, "#vs-send-acceptance-final_fix") == "×2"
+      assert text(html, "#vs-return-final_fix-precommit") == "⟲ REWIND to precommit · 2 laps re-run every node between"
+      assert html =~ "stroke:var(--color-error);stroke-opacity:0.85;stroke-width:15.0;"
+      assert text(html, "#vs-queue") =~ "2.5m"
+      assert text(html, "#vs-queue") =~ "queued for the"
+      assert text(html, "#vs-queue") =~ "exclusive slot"
+      assert html =~ "fill:var(--color-warning)"
+      assert text(html, "#vs-term-done") =~ "done → Review"
+      assert text(html, "#vs-term-done") =~ "2 of 2 runs · 100%"
+      assert text(html, "#vs-term-park") =~ "⏸ needs_input"
+      assert text(html, "#vs-term-park") =~ "1 run · the baton passes to a human"
+      assert text(html, "#vs-park-note") == "8 of the 21 nodes can park here"
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query(".vs-connector") |> Enum.count() == 15
+      refute html =~ "oklch("
+    end
+
+    test "flow_legend: DO / CHECK / FIX chips, the send-back and foreach swatches, the visits note" do
+      html = render_component(&C.flow_legend/1, runs: 128)
+
+      assert html =~ "value-add"
+      assert html =~ "necessary, not value-add"
+      assert html =~ "rework only · above the line"
+      assert html =~ "thickness = minutes"
+      assert html =~ "label = laps / 128 runs"
+      assert html =~ "border-top:2px dashed"
+      assert html =~ "×n in a header = visits per run"
+      assert html =~ "background:var(--color-success)"
+      assert html =~ "background:var(--color-info)"
+      assert html =~ "background:var(--color-error)"
+    end
+
+    test "run_lead_bands: PROCESS TIME and RUN WALL-CLOCK, coloured by class, with totals" do
+      bands =
+        FL.bands(%{value_add: 600.0, checking: 240.0, rework: 300.0, wait: 60.0, process: 840.0, wall: 1_200.0})
+
+      html = render_component(&C.run_lead_bands/1, bands: bands)
+
+      assert html =~ "RUN LEAD TIME · to scale"
+      assert text(html, "#vs-band-process-value_add") == "value-add 10.0m"
+      assert text(html, "#vs-band-process-checking") == "checking 4.0m"
+      assert text(html, "#vs-band-wall-rework") == "rework 5.0m"
+      assert text(html, "#vs-band-wall-wait") == "wait 1.0m"
+      assert text(html, "#vs-band-process-total") == "14.0m"
+      assert text(html, "#vs-band-wall-total") == "20.0m"
+      assert html =~ "background:var(--color-success)"
+      assert html =~ "background:var(--color-info)"
+      assert html =~ "background:var(--color-error)"
+      assert html =~ @hatch
+    end
   end
 end

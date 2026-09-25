@@ -189,36 +189,6 @@ defmodule RelayWeb.ValueStreamLayout do
   defp mean_label(:card, _mean, actual), do: actual
   defp mean_label(_scope, mean, _actual), do: mean
 
-  @doc """
-  The phone-width list's rows, one per state: the visits badge, the primary time figure, a bar
-  to scale against `lead_secs` (percent) coloured by `token`, and a gate's rework note
-  ("Request changes N% → re-runs X") in place of the arc.
-  """
-  def list_rows(states, lead_secs) do
-    names = Map.new(states, &{&1.stage_id, &1.name})
-
-    Enum.map(states, fn state ->
-      %{
-        state: state,
-        visits: fmt_visits(state.mean_visits),
-        primary: fmt_duration(state.mean_secs),
-        bar_pct: bar_pct(state.mean_secs, lead_secs),
-        token: kind_token(state.kind),
-        rework_note: rework_note(state, names)
-      }
-    end)
-  end
-
-  defp bar_pct(secs, lead) when is_number(lead) and lead > 0, do: Float.round(min(secs / lead, 1.0) * 100, 1)
-  defp bar_pct(_secs, _lead), do: 0.0
-
-  defp rework_note(state, names) do
-    case {send_back_rate(state), Map.get(names, state.rework_target)} do
-      {rate, name} when is_number(rate) and is_binary(name) -> "Request changes #{fmt_pct(rate)} → re-runs #{name}"
-      _none -> nil
-    end
-  end
-
   @doc "The lead-time bar's segments in `Relay.ValueStream.batons/0` order, empty batons dropped."
   def lead_segments(baton_secs) do
     ValueStream.batons()
