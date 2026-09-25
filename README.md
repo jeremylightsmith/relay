@@ -7,7 +7,7 @@ working. "Who holds the baton" is a first-class property of every card.
 
 **Try it:** <https://relayboard.fly.dev> (sign in with Google).
 
-![A Relay board: AI stages (Spec, Plan, Code) with cards parked waiting on a human, a failed run, a card ready for review, and completed runs with their time and cost](docs/images/board.png)
+![A Relay board: agents working cards through Spec, Plan and Code, two cards parked waiting on a human answer, cards ready for your review, and shipped work in Done](docs/images/board.png)
 
 ## What it does today
 
