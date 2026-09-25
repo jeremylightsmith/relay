@@ -23,7 +23,7 @@ defmodule Relay.Flows.Document do
   empty one is omitted, and an absent or null one decodes back to `[]`.
 
   String→atom conversion is driven by the schemas' own source functions
-  (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`,
+  (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`, `Schemas.Flow.Node.roles/0`,
   `Schemas.NodeExecution.routable_outcomes/0`, `Schemas.Flow.Edge.when_values/0`) — never
   `String.to_atom/1`. An unrecognized value is an `{:error, message}`, not a new atom.
   """
@@ -207,12 +207,13 @@ defmodule Relay.Flows.Document do
     with :ok <- reject_unknown(Map.keys(node), field_names(Flow.Node.fields()), "node field"),
          {:ok, _key} <- required_string(node, "key"),
          {:ok, type} <- required_enum(node, "type", Flow.Node.types()),
+         {:ok, role} <- optional_enum(node, "role", Flow.Node.roles()),
          {:ok, reads} <- enum_list(node, "reads", Card.contract_fields()),
          {:ok, writes} <- enum_list(node, "writes", Card.contract_fields()) do
       {:ok,
        node
        |> dense(Flow.Node.fields(), %Flow.Node{})
-       |> Map.merge(%{type: type, reads: reads, writes: writes})}
+       |> Map.merge(%{type: type, role: role, reads: reads, writes: writes})}
     end
   end
 

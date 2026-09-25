@@ -30,6 +30,14 @@ defmodule Schemas.Flow.Node do
   precondition): plenty of legitimate cards carry a title and no description, so a read
   precondition would fail the Spec flow on every one of them. Do not "complete the
   symmetry".
+
+  `role` (RE346, nil = guess) is the node's place in the value stream — `:do` changes the work,
+  `:check` inspects it, `:fix` exists only because a check failed. It is valid on **every** node
+  type and any value is legal anywhere: an authored role **always wins**, and
+  `Schemas.Flow.node_roles/1` guesses only an unset one (all-`:failed` inbound edges → `:fix`,
+  a `:gate` → `:check`, otherwise `:do`). Check vs do can't be fully guessed — `sync`, `resync`
+  and `merge` have outbound `:failed` edges yet change the work — so agent and shell checks author
+  `role: :check`. **Display-only**: the engine and the runner never branch on it.
   """
 
   use Ecto.Schema
@@ -48,9 +56,11 @@ defmodule Schemas.Flow.Node do
     :agent,
     :expects_commits,
     :reads,
-    :writes
+    :writes,
+    :role
   ]
   @types [:agent, :shell, :gate, :parallel, :human]
+  @roles [:do, :check, :fix]
 
   @primary_key false
   embedded_schema do
@@ -66,6 +76,7 @@ defmodule Schemas.Flow.Node do
     field :expects_commits, :boolean, default: false
     field :reads, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
     field :writes, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
+    field :role, Ecto.Enum, values: @roles
   end
 
   @doc """
@@ -78,6 +89,13 @@ defmodule Schemas.Flow.Node do
 
   @doc "The closed set of node `type` values (read by the schema field and by the decoder)."
   def types, do: @types
+
+  @doc """
+  The closed set of node `role` values (RE346) — Do changes the work, Check inspects it, Fix exists
+  only because a check failed. Read by the schema field, by `Relay.Flows.Document`'s decoder and by
+  `Schemas.Flow.node_roles/1`'s callers; never re-typed elsewhere.
+  """
+  def roles, do: @roles
 
   @doc ~S"""
   The subset of node `type`s a runner actually runs (RLY-139). A strict subset of `types/0` —

@@ -55,6 +55,7 @@ defmodule Schemas.VocabularyTest do
           {Schemas.NodeJob, :kinds, :kind},
           {Schemas.NodeExecution, :outcomes, :outcome},
           {Schemas.Flow, :isolation_classes, :isolation},
+          {Schemas.Flow.Node, :roles, :role},
           {Schemas.TalkTurn, :statuses, :status},
           {Schemas.TalkEvent, :kinds, :kind}
         ] do
