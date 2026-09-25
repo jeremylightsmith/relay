@@ -71,6 +71,18 @@ defmodule Schemas.NodeExecution do
   """
   def routable_outcomes, do: outcomes() -- @runner_only_outcomes
 
+  # RE345: the outcomes that park a run on something outside the flow.
+  @holding_outcomes [:needs_input, :blocked]
+
+  @doc """
+  The outcomes after which the run is HELD rather than handed off (RE345): `:needs_input` asked a
+  human; `:blocked` (RE308) could not run at all — an auth failure or a usage limit, which
+  includes every `resume_at` (RE267) requeue. The idle gap before the next execution is charged
+  as `held` time instead of plain hand-off `wait` by `Relay.Runs.node_waits_for_flow/2`. The ONE
+  definition of this set — consumers call it, never retype it.
+  """
+  def holding_outcomes, do: @holding_outcomes
+
   @doc "Validates a programmatically-built execution row."
   def changeset(execution) do
     execution
