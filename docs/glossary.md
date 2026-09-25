@@ -52,6 +52,11 @@ the MMF design specs).
   task, up to its first failed attempt; **rework** is everything after — a revisit, a retry after
   a failure, and every run of a Fix node. **Rewind** is the rework a fix forces: the checks
   re-run after `final_fix` are charged to `final_fix`, until the next piece of new work.
+- **Send-back** — a hop in a run where a node's execution failed and the next execution is a
+  different node: a check sending work to its fix (`precommit → final_fix`), or a failure routed to
+  a do node (`merge → resync`). `Relay.ValueStream.flow_stream/2` (RE348) groups them by
+  `from → to → returns_to` and sizes each by the minutes it cost — the target's own time plus the
+  rework it forced before new work resumed. These are the arcs of the Code flow map.
 - **Status** — a card's lifecycle state. A stage type's default status is applied on arrival when
   the current status isn't valid there (ADR 0003). The values are generated from the schema into
   [`architecture/state.md`](architecture/state.md).
