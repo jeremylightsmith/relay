@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);text-decoration:none;} a:hover{color:oklch(0.42 0.14 250);text-decoration:underline;}
+</style>
+</helmet>
+
+<div style="width:1780px;padding:56px 60px 100px;display:flex;flex-direction:column;gap:36px;">
+
+  <div style="display:flex;flex-direction:column;gap:10px;max-width:920px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · PAYMENTS / FLOWS / CODE · VALUE STREAM MAP</span>
+    <h1 style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0;color:oklch(0.22 0.02 255);">Code flow: value stream map</h1>
+    <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0;text-wrap:pretty;">This is a classic VSM that knows three kinds of state. <b style="color:oklch(0.40 0.10 155);">Do</b> states change the work. <b style="color:oklch(0.44 0.08 215);">Check</b> states inspect it. <b style="color:oklch(0.52 0.15 22);">Fix</b> states exist only because a check failed. The same three colors run through the timeline, so lead time splits into Lean's categories: value-add, necessary checking, rework, and waiting. All numbers are per-run averages over 128 runs on v4, last 30 days.</p>
+  </div>
+
+  <!-- ===== MAP ===== -->
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:16px;padding:26px 30px 28px;display:flex;flex-direction:column;gap:18px;">
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:oklch(0.50 0.02 255);">
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.12 155);border-radius:3px;padding:2px 5px;">DO</span>value-add</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.09 215);border-radius:3px;padding:2px 5px;">CHECK</span>necessary, not value-add</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.56 0.16 22);border-radius:3px;padding:2px 5px;">FIX</span>rework</span>
+      <span style="width:1px;height:16px;background:oklch(0.90 0.006 255);"></span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:22px;height:4px;border-radius:2px;background:oklch(0.62 0.16 22);"></span>sent back / fix loop</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:22px;height:0;border-top:2px dashed oklch(0.60 0.02 255);"></span>planned iteration</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:4px;height:14px;background:oklch(0.28 0.02 255);"></span>fork / join</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid oklch(0.82 0.10 70);"></span>runs queued</span>
+      <span style="flex:1;"></span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:oklch(0.60 0.02 255);">loop thickness = laps per 128 runs</span>
+    </div>
+
+    <div style="position:relative;width:1660px;height:650px;">
+      <div style="position:absolute;inset:0;pointer-events:none;">{{ mapSvg }}</div>
+      <sc-for list="{{ tris }}" as="t" hint-placeholder-count="10">
+        <div style="position:absolute;left:{{ t.x }}px;top:{{ t.y }}px;width:30px;display:flex;flex-direction:column;align-items:center;gap:3px;">
+          <div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:15px solid oklch(0.82 0.10 70);"></div>
+          <span style="font-size:9.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.10 65);">{{ t.wip }}</span>
+        </div>
+      </sc-for>
+      <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="13">
+        <div style="position:absolute;left:{{ n.x }}px;top:{{ n.y }}px;width:{{ n.w }}px;height:{{ n.h }}px;border:1px {{ n.borderStyle }} {{ n.border }};border-radius:9px;background:oklch(1 0 0);overflow:hidden;display:flex;flex-direction:column;">
+          <div style="background:{{ n.headBg }};padding:6px 8px 5px;display:flex;flex-direction:column;gap:3px;border-bottom:1px solid oklch(0.94 0.006 255);">
+            <span style="font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.26 0.02 255);white-space:nowrap;">{{ n.name }}</span>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="font-size:8px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:{{ n.roleColor }};border-radius:3px;padding:1px 4px;">{{ n.roleLabel }}</span>
+              <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:oklch(0.56 0.02 255);white-space:nowrap;">{{ n.type }}</span>
+            </div>
+          </div>
+          <div style="padding:4px 8px;display:flex;flex-direction:column;gap:{{ n.rowGap }}px;flex:1;">
+            <sc-for list="{{ n.rows }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex;justify-content:space-between;font-size:10px;line-height:16px;"><span style="color:oklch(0.56 0.02 255);">{{ r.k }}</span><span style="font-family:'JetBrains Mono',monospace;color:{{ r.c }};font-weight:{{ r.w }};">{{ r.v }}</span></div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ n.isCheck }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;height:5px;flex:0 0 auto;"><div style="width:{{ n.pass }}%;background:oklch(0.60 0.13 155);"></div><div style="flex:1;background:oklch(0.62 0.16 22);"></div></div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- lead-time breakdown -->
+    <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid oklch(0.94 0.006 255);padding-top:18px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">WHERE THE {{ leadLabel }} LEAD TIME GOES · CRITICAL PATH</span>
+      </div>
+      <div style="display:flex;height:30px;border-radius:7px;overflow:hidden;gap:2px;">
+        <sc-for list="{{ breakdown }}" as="s" hint-placeholder-count="4">
+          <div style="flex:{{ s.grow }} 1 0;background:{{ s.bg }};display:flex;align-items:center;padding:0 9px;min-width:0;">
+            <span style="font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;color:{{ s.ink }};white-space:nowrap;">{{ s.v }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+        <sc-for list="{{ stats }}" as="s" hint-placeholder-count="8">
+          <div style="border:1px solid oklch(0.92 0.006 255);border-radius:9px;padding:9px 13px;display:flex;flex-direction:column;gap:2px;">
+            <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">{{ s.k }}</span>
+            <span style="font-size:17px;font-weight:600;color:{{ s.c }};">{{ s.v }}</span>
+            <span style="font-size:10.5px;color:oklch(0.58 0.02 255);">{{ s.sub }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GRAMMAR ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">READING THE MAP</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">Eight symbols, four rules</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;max-width:820px;text-wrap:pretty;">Rules: <b style="color:oklch(0.30 0.02 255);">every loop starts at a check.</b> A check either sends work back to an upstream do (arc above the line) or hands it to its own fix (arrows beside it). Fix states never sit on the main line. Gates take no time.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;">
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;">
+          <div style="width:112px;border:1px solid oklch(0.80 0.02 255);border-radius:8px;overflow:hidden;"><div style="background:oklch(0.975 0.02 155);padding:6px 8px;display:flex;flex-direction:column;gap:3px;"><span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.26 0.02 255);">implement</span><span style="align-self:flex-start;font-size:8px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.12 155);border-radius:3px;padding:1px 4px;">DO</span></div><div style="height:14px;"></div></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Do</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Changes the work. Its first pass counts as value-add (green). When a check sends work back, the repeat visit counts as rework.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;">
+          <div style="width:112px;border:1px solid oklch(0.72 0.06 215);border-radius:8px;overflow:hidden;"><div style="background:oklch(0.975 0.015 215);padding:6px 8px;display:flex;flex-direction:column;gap:3px;"><span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.26 0.02 255);">smoke</span><span style="align-self:flex-start;font-size:8px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.09 215);border-radius:3px;padding:1px 4px;">CHECK</span></div><div style="height:9px;"></div><div style="display:flex;height:5px;"><div style="width:80%;background:oklch(0.60 0.13 155);"></div><div style="flex:1;background:oklch(0.62 0.16 22);"></div></div></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Check</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Inspects the work. Needed, but not value-add (slate). The bar along the bottom shows how often work passes on the first try. VSM calls this %C&amp;A.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;">
+          <div style="width:104px;border:1px dashed oklch(0.62 0.16 22);border-radius:8px;overflow:hidden;"><div style="background:oklch(0.975 0.02 22);padding:6px 8px;display:flex;flex-direction:column;gap:3px;"><span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.26 0.02 255);">smoke_fix</span><span style="align-self:flex-start;font-size:8px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.56 0.16 22);border-radius:3px;padding:1px 4px;">FIX</span></div><div style="height:10px;"></div></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Fix</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Runs only because a check failed. Drawn dashed, beside its check and off the main line. Every minute it spends is rework.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;padding-left:14px;">
+          <div style="width:24px;height:24px;transform:rotate(45deg);background:oklch(0.50 0.02 255);border-radius:3px;"></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Gate</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Routes the work and takes no time. A loop back through a gate, like “next task”, is planned iteration: drawn dashed gray, not counted as waste.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:flex-end;padding-bottom:10px;">
+          <div style="width:120px;height:44px;border:6px solid oklch(0.62 0.16 22);border-bottom:none;border-radius:60px 60px 0 0;opacity:0.85;"></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Sent back</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">A check returning work to an upstream do. Drawn above the line, and thickness shows laps. Nested arcs make the worst offender obvious.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;gap:0;">
+          <div style="width:36px;height:40px;border:1px solid oklch(0.72 0.06 215);border-radius:6px;"></div>
+          <div style="width:40px;display:flex;flex-direction:column;gap:10px;align-items:center;"><span style="font-size:9.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.15 22);">×22</span><div style="width:32px;height:3px;background:oklch(0.62 0.16 22);"></div><div style="width:32px;height:3px;background:oklch(0.62 0.16 22);"></div></div>
+          <div style="width:32px;height:30px;border:1px dashed oklch(0.62 0.16 22);border-radius:6px;"></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Fix loop</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Fail goes out to the fix, and the fixed work comes back for a re-check. The count sits on the arrows. Re-check time lands on the check as rework.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;gap:8px;">
+          <div style="width:4px;height:52px;background:oklch(0.28 0.02 255);"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;"><div style="width:70px;height:10px;border-radius:3px;background:oklch(0.88 0.02 255);"></div><div style="width:100px;height:10px;border-radius:3px;background:oklch(0.28 0.02 255);"></div><div style="width:44px;height:10px;border-radius:3px;background:oklch(0.88 0.02 255);"></div></div>
+          <div style="width:4px;height:52px;background:oklch(0.28 0.02 255);"></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Fork / join</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">Branches run at the same time. Lead time follows the slowest branch (the critical path). The others finish early and wait at the join. That wait is slack, not queue.</p>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="height:64px;display:flex;align-items:center;gap:12px;">
+          <div style="width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-top:18px solid oklch(0.82 0.10 70);"></div>
+          <div style="width:120px;height:34px;border-left:1.5px solid oklch(0.42 0.02 255);position:relative;"><div style="position:absolute;left:0;top:0;width:50px;border-top:1.5px solid oklch(0.42 0.02 255);"></div><div style="position:absolute;left:50px;top:0;height:34px;border-left:1.5px solid oklch(0.42 0.02 255);"></div><div style="position:absolute;left:50px;bottom:0;width:70px;height:4px;background:oklch(0.60 0.13 155);"></div></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">Queue &amp; timeline</div>
+        <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">The triangle shows runs queued in front of a state. On the stepped timeline, rises are waiting and valleys are working, colored by the kind of state.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== FAN-OUT KINDS ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">FAN-OUTS</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">Two kinds, one treatment</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;max-width:820px;text-wrap:pretty;">Both kinds get fork and join bars, a timeline that follows the slowest branch, and a work total that counts every branch. They differ in whether the branches are named nodes or copies of one node.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><span style="font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Static: different nodes in parallel</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">what the map above shows</span></div>
+        <div style="display:flex;align-items:center;gap:10px;height:120px;">
+          <div style="width:4px;height:104px;background:oklch(0.28 0.02 255);"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:96px;height:26px;border:1px solid oklch(0.72 0.06 215);border-radius:6px;background:oklch(0.975 0.015 215);font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;display:flex;align-items:center;padding-left:7px;">final_review</div><div style="width:18px;height:2px;background:oklch(0.62 0.16 22);"></div><div style="width:64px;height:22px;border:1px dashed oklch(0.62 0.16 22);border-radius:6px;"></div><div style="width:60px;border-top:1.5px dashed oklch(0.70 0.02 255);"></div></div>
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:96px;height:26px;border:1px solid oklch(0.72 0.06 215);border-radius:6px;background:oklch(0.975 0.015 215);font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;display:flex;align-items:center;padding-left:7px;">smoke</div><div style="width:18px;height:2px;background:oklch(0.62 0.16 22);"></div><div style="width:64px;height:22px;border:1px dashed oklch(0.62 0.16 22);border-radius:6px;"></div><div style="width:60px;border-top:1.5px dashed oklch(0.70 0.02 255);"></div></div>
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:96px;height:26px;border:1px solid oklch(0.28 0.02 255);border-radius:6px;background:oklch(0.975 0.015 215);font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;display:flex;align-items:center;padding-left:7px;">acceptance</div><div style="width:18px;height:2px;background:oklch(0.62 0.16 22);"></div><div style="width:64px;height:22px;border:1px dashed oklch(0.62 0.16 22);border-radius:6px;"></div><div style="width:60px;border-top:2.5px solid oklch(0.28 0.02 255);"></div></div>
+          </div>
+          <div style="width:4px;height:104px;background:oklch(0.28 0.02 255);"></div>
+        </div>
+        <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);">
+          <li>Each branch is its own row, with its own queue triangle, data box and fix loop.</li>
+          <li>The critical branch gets a dark border and a solid line to the join. The others get dotted lines labeled with their slack.</li>
+          <li>A fix loop inside a branch only slows that branch. If the branch isn't critical, its rework adds no lead time. The map shows this: smoke's 22 laps cost 0m of lead time today.</li>
+        </ul>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><span style="font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Dynamic: one node × N copies</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">e.g. implement per task</span></div>
+        <div style="display:flex;align-items:center;gap:14px;height:120px;">
+          <div style="width:4px;height:84px;background:oklch(0.28 0.02 255);"></div>
+          <div style="position:relative;width:150px;height:92px;">
+            <div style="position:absolute;left:12px;top:0;width:128px;height:78px;border:1px solid oklch(0.86 0.01 255);border-radius:8px;background:oklch(0.99 0.004 255);"></div>
+            <div style="position:absolute;left:6px;top:6px;width:128px;height:78px;border:1px solid oklch(0.84 0.01 255);border-radius:8px;background:oklch(0.995 0.003 255);"></div>
+            <div style="position:absolute;left:0;top:12px;width:128px;height:78px;border:1px solid oklch(0.80 0.02 255);border-radius:8px;background:oklch(1 0 0);overflow:hidden;">
+              <div style="background:oklch(0.975 0.02 155);padding:5px 8px;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;">implement</span><span style="font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);">×N</span></div>
+              <div style="padding:4px 8px;display:flex;flex-direction:column;gap:1px;font-size:9.5px;">
+                <div style="display:flex;justify-content:space-between;"><span style="color:oklch(0.56 0.02 255);">N</span><span style="font-family:'JetBrains Mono',monospace;">3.2 avg · 2–6</span></div>
+                <div style="display:flex;justify-content:space-between;"><span style="color:oklch(0.56 0.02 255);">Slowest</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);">4.1m</span></div>
+                <div style="display:flex;justify-content:space-between;"><span style="color:oklch(0.56 0.02 255);">Σ all copies</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);">11.6m</span></div>
+              </div>
+            </div>
+          </div>
+          <div style="width:4px;height:84px;background:oklch(0.28 0.02 255);"></div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.52 0.15 22);"><span style="font-weight:700;">sent back: 1 copy</span><span style="color:oklch(0.58 0.02 255);">not the whole fan</span></div>
+        </div>
+        <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);">
+          <li>Drawn as one stacked box, with N as an average and a range. Drawing one row per copy would change the map's shape from run to run.</li>
+          <li>The timeline rung is the <b style="color:oklch(0.34 0.02 255);">slowest copy</b>. The Σ row is the real work and spend.</li>
+          <li>Loop arcs count copies sent back, not runs. If tasks move to a dynamic fan-out, the dashed next-task loop goes away: planned iteration becomes parallelism.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;splitRework&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Map&quot;},&quot;showKaizen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Map&quot;},&quot;loopWidth&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;By laps&quot;,&quot;Uniform&quot;],&quot;default&quot;:&quot;By laps&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Map&quot;}}">
+class Component extends DCLogic {
+  C = { ink:'oklch(0.28 0.02 255)', muted:'oklch(0.58 0.02 255)', line:'oklch(0.42 0.02 255)', green:'oklch(0.60 0.13 155)', greenT:'oklch(0.40 0.10 155)', chk:'oklch(0.58 0.09 215)', chkT:'oklch(0.44 0.08 215)', amberT:'oklch(0.52 0.10 65)', rose:'oklch(0.62 0.16 22)', roseT:'oklch(0.52 0.15 22)', gray:'oklch(0.60 0.02 255)', grayT:'oklch(0.48 0.02 255)', violetT:'oklch(0.48 0.14 292)', kz:'oklch(0.82 0.13 70)', kzT:'oklch(0.48 0.10 65)' };
+  mono = "JetBrains Mono, ui-monospace, monospace";
+
+  N = {
+    branch:         { role:'do',    type:'shell',          x:70,   y:200, visits:1.00, first:0.1, repeat:0,   wait:0.4,  wip:0.1, cost:0.00 },
+    implement:      { role:'do',    type:'agent · sonnet', x:230,  y:200, visits:1.67, first:3.8, repeat:2.6, wait:3.2,  wip:0.8, cost:0.62 },
+    spec_review:    { role:'check', type:'agent · sonnet', x:390,  y:200, visits:1.38, first:0.5, repeat:0.3, wait:1.1,  wip:0.3, pass:76, sends:31, cost:0.10 },
+    quality_review: { role:'check', type:'agent · opus',   x:550,  y:200, visits:1.31, first:1.9, repeat:1.2, wait:12.0, wip:2.6, pass:59, sends:64, cost:0.44, hot:true },
+    precommit:      { role:'check', type:'shell',          x:780,  y:200, visits:0.94, first:0.6, repeat:0.1, wait:0.6,  wip:0.2, pass:90, sends:12, cost:0.02 },
+    final_review:   { role:'check', type:'agent · opus',   x:968,  y:82,  visits:1.01, first:0.7, repeat:0.1, wait:0.9,  wip:0.2, pass:92, cost:0.10, fan:true },
+    final_fix:      { role:'fix',   type:'agent · opus',   x:1138, y:82,  visits:0.09, first:0,   repeat:0.3, wait:0.1,  cost:0.02, laps:11, fan:true },
+    smoke:          { role:'check', type:'agent · opus',   x:968,  y:216, visits:1.12, first:1.4, repeat:0.4, wait:2.8,  wip:0.7, pass:80, cost:0.16, fan:true },
+    smoke_fix:      { role:'fix',   type:'agent · opus',   x:1138, y:216, visits:0.17, first:0,   repeat:0.5, wait:0.2,  cost:0.06, laps:22, fan:true },
+    acceptance:     { role:'check', type:'agent · opus',   x:968,  y:350, visits:1.02, first:0.8, repeat:0.1, wait:6.0,  wip:1.4, pass:86, cost:0.10, fan:true, crit:true },
+    acceptance_fix: { role:'fix',   type:'agent · opus',   x:1138, y:350, visits:0.11, first:0,   repeat:0.3, wait:0.1,  cost:0.02, laps:14, fan:true, crit:true },
+    post:           { role:'do',    type:'agent · sonnet', x:1310, y:200, visits:0.88, first:0.4, repeat:0,   wait:0.8,  wip:0.2, cost:0.03 },
+    merge:          { role:'do',    type:'shell',          x:1470, y:200, visits:0.88, first:0.2, repeat:0,   wait:0.4,  wip:0.1, cost:0.01 },
+  };
+  ROWS = [['final_review', 'final_fix'], ['smoke', 'smoke_fix'], ['acceptance', 'acceptance_fix']];
+
+  f(x) { return x.toFixed(1) + 'm'; }
+  tb(n) { return n.wait + n.first + n.repeat; }
+  branchT(r) { return this.tb(this.N[r[0]]) + this.tb(this.N[r[1]]); }
+  t(key, x, y, str, o = {}) {
+    return React.createElement('text', { key, x, y, fontSize: o.size || 10, fill: o.color || this.C.muted, textAnchor: o.anchor || 'start', fontWeight: o.weight || 500, fontFamily: this.mono,
+      stroke: o.halo ? 'white' : undefined, strokeWidth: o.halo ? 4 : undefined, paintOrder: 'stroke', strokeLinejoin: 'round' }, str);
+  }
+  arrow(key, x, y, a, dir, color) {
+    const P = { down: [[x - a, y - a * 1.3], [x + a, y - a * 1.3]], up: [[x - a, y + a * 1.3], [x + a, y + a * 1.3]], left: [[x + a * 1.3, y - a], [x + a * 1.3, y + a]], right: [[x - a * 1.3, y - a], [x - a * 1.3, y + a]] }[dir];
+    return React.createElement('polygon', { key, points: `${P[0][0]},${P[0][1]} ${P[1][0]},${P[1][1]} ${x},${y}`, fill: color });
+  }
+  star(key, cx, cy, r) {
+    const p = [];
+    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.42 : r; p.push((cx + rr * Math.cos(a)).toFixed(1) + ',' + (cy + rr * Math.sin(a)).toFixed(1)); }
+    return React.createElement('polygon', { key, points: p.join(' '), fill: this.C.kz });
+  }
+  roleColor(n) { return n.role === 'do' ? this.C.green : n.role === 'check' ? this.C.chk : this.C.rose; }
+
+  buildMap(split, kaizen, uniform) {
+    const h = React.createElement, C = this.C, E = [], N = this.N;
+    const sw = (l) => uniform ? 3 : 1.5 + (l / 128) * 14;
+    const base = 200;
+    // sent-back arcs (check → implement)
+    [['spec_review', 312, 52], ['quality_review', 290, 96], ['precommit', 268, 140]].forEach(([id, tx, hg], k) => {
+      const n = N[id], sx = n.x + 60, w = sw(n.sends), ah = w * 0.7 + 4, c = base - hg * 1.33;
+      E.push(h('circle', { key: 'sbs' + k, cx: sx, cy: base, r: w / 2 + 1, fill: C.rose }));
+      E.push(h('path', { key: 'sb' + k, d: `M${sx},${base} C${sx},${c} ${tx},${c} ${tx},${base - ah * 1.2}`, fill: 'none', stroke: C.rose, strokeWidth: w, strokeOpacity: 0.85 }));
+      E.push(this.arrow('sba' + k, tx, base, ah, 'down', C.rose));
+      E.push(this.t('sbl' + k, (sx + tx) / 2, base - hg - w / 2 - 5, `${n.sends} sent back`, { color: C.roseT, anchor: 'middle', weight: 600, size: 10.5, halo: true }));
+    });
+    // gate + planned iteration
+    E.push(h('line', { key: 'g0', x1: 670, y1: 275, x2: 706, y2: 275, stroke: C.line, strokeWidth: 1.5 }));
+    E.push(h('line', { key: 'g1', x1: 734, y1: 275, x2: 746, y2: 275, stroke: C.line, strokeWidth: 1.5 }));
+    E.push(h('polygon', { key: 'gd', points: '720,261 734,275 720,289 706,275', fill: 'oklch(0.50 0.02 255)' }));
+    E.push(this.t('gl', 720, 250, 'next_task', { anchor: 'middle', weight: 600, color: C.ink }));
+    E.push(this.t('gl2', 720, 238, 'GATE', { anchor: 'middle', size: 8.5, weight: 700 }));
+    { const w = sw(40), ah = w * 0.7 + 4;
+      E.push(h('path', { key: 'it', d: `M720,289 C720,440 270,440 270,${350 + ah * 1.2}`, fill: 'none', stroke: C.gray, strokeWidth: w, strokeDasharray: '7 5', strokeOpacity: 0.8 }));
+      E.push(this.arrow('ita', 270, 350, ah, 'up', C.gray));
+      E.push(this.t('itl', 495, 428, 'next task · 40 laps · planned', { color: C.grayT, anchor: 'middle', weight: 600, size: 10.5, halo: true }));
+    }
+    // fork
+    E.push(h('line', { key: 'f0', x1: 900, y1: 275, x2: 914, y2: 275, stroke: C.line, strokeWidth: 1.5 }));
+    E.push(h('rect', { key: 'fb', x: 914, y: 131, width: 4, height: 288, rx: 1, fill: C.ink }));
+    E.push(this.t('fbl', 916, 122, 'fork', { anchor: 'middle', size: 9.5, weight: 600 }));
+    const crit = Math.max(...this.ROWS.map((r) => this.branchT(r)));
+    this.ROWS.forEach(([c, fx], k) => {
+      const T = N[c].y, F = N[fx], w = sw(F.laps), ah = w * 0.7 + 4, isCrit = !!N[c].crit;
+      E.push(h('line', { key: 'fl' + k, x1: 918, y1: T + 59, x2: 934, y2: T + 59, stroke: C.line, strokeWidth: 1.5 }));
+      E.push(h('line', { key: 'fo' + k, x1: 1088, y1: T + 22, x2: 1138 - ah * 1.2, y2: T + 22, stroke: C.rose, strokeWidth: w, strokeOpacity: 0.85 }));
+      E.push(this.arrow('foa' + k, 1138, T + 22, ah, 'right', C.rose));
+      E.push(h('line', { key: 'fr' + k, x1: 1138, y1: T + 52, x2: 1088 + ah * 1.2, y2: T + 52, stroke: C.rose, strokeWidth: w, strokeOpacity: 0.85 }));
+      E.push(this.arrow('fra' + k, 1088, T + 52, ah, 'left', C.rose));
+      E.push(this.t('fxl' + k, 1113, T + 14 - w / 2, '×' + F.laps, { color: C.roseT, anchor: 'middle', weight: 700, size: 10.5 }));
+      E.push(h('line', { key: 'pl' + k, x1: 1088, y1: T + 100, x2: 1256, y2: T + 100, stroke: isCrit ? C.ink : 'oklch(0.72 0.02 255)', strokeWidth: isCrit ? 2.5 : 1.5, strokeDasharray: isCrit ? undefined : '3 4' }));
+      E.push(this.t('pt' + k, 1172, T + 114, isCrit ? 'critical path' : 'slack ' + this.f(crit - this.branchT([c, fx])), { color: isCrit ? C.ink : C.muted, anchor: 'middle', weight: isCrit ? 700 : 500 }));
+    });
+    E.push(h('rect', { key: 'jb', x: 1256, y: 172, width: 4, height: 288, rx: 1, fill: C.ink }));
+    E.push(this.t('jbl', 1258, 164, 'join', { anchor: 'middle', size: 9.5, weight: 600 }));
+    E.push(h('line', { key: 'j0', x1: 1260, y1: 275, x2: 1272, y2: 275, stroke: C.line, strokeWidth: 1.5 }));
+
+    // timeline
+    const yW = 540, yK = 585;
+    E.push(this.t('th', 30, 510, 'TIMELINE · per run · critical path — rises = waiting, valleys = working', { size: 9.5, weight: 600 }));
+    const S = [
+      ['W', 30, 70, 'branch'], ['K', 70, 190, 'branch'], ['W', 190, 230, 'implement'], ['K', 230, 350, 'implement'],
+      ['W', 350, 390, 'spec_review'], ['K', 390, 510, 'spec_review'], ['W', 510, 550, 'quality_review'], ['K', 550, 670, 'quality_review'],
+      ['F', 670, 740, 'gate'], ['W', 740, 780, 'precommit'], ['K', 780, 900, 'precommit'],
+      ['W', 900, 968, 'acceptance'], ['K', 968, 1088, 'acceptance'], ['W', 1088, 1138, 'acceptance_fix'], ['K', 1138, 1242, 'acceptance_fix'],
+      ['F', 1242, 1270, 'join'], ['W', 1270, 1310, 'post'], ['K', 1310, 1430, 'post'], ['W', 1430, 1470, 'merge'], ['K', 1470, 1590, 'merge'], ['E', 1590, 1630],
+    ];
+    let prevY = yW;
+    S.forEach(([kind, L, R, id], i) => {
+      const y = kind === 'W' || kind === 'E' ? yW : yK;
+      if (y !== prevY) E.push(h('line', { key: 'tv' + i, x1: L, y1: prevY, x2: L, y2: y, stroke: C.line, strokeWidth: 1.4 }));
+      prevY = y;
+      if (kind === 'W' || kind === 'E') {
+        E.push(h('line', { key: 'tw' + i, x1: L, y1: yW, x2: R, y2: yW, stroke: C.line, strokeWidth: 1.4 }));
+        if (kind === 'W') { const n = N[id]; E.push(this.t('twl' + i, (L + R) / 2, yW - 8, this.f(n.wait), { color: C.amberT, anchor: 'middle', weight: n.hot ? 700 : 500 })); }
+      } else if (kind === 'F') {
+        E.push(h('line', { key: 'tf' + i, x1: L, y1: yK, x2: R, y2: yK, stroke: C.line, strokeWidth: 1.4, strokeDasharray: '2 4' }));
+        E.push(this.t('tfl' + i, (L + R) / 2, yK - 7, id, { anchor: 'middle', size: 9 }));
+      } else {
+        const n = N[id], rc = this.roleColor(n), tot = n.first + n.repeat;
+        const m = n.role === 'fix' ? L : L + (R - L) * (n.first / tot);
+        const showSplit = split && n.repeat > 0 && n.role !== 'fix';
+        E.push(h('line', { key: 'tk' + i, x1: L, y1: yK, x2: R, y2: yK, stroke: C.line, strokeWidth: 1.4 }));
+        if (n.role === 'fix') E.push(h('line', { key: 'tr' + i, x1: L, y1: yK, x2: R, y2: yK, stroke: C.rose, strokeWidth: 4 }));
+        else if (showSplit) {
+          E.push(h('line', { key: 'tg' + i, x1: L, y1: yK, x2: m, y2: yK, stroke: rc, strokeWidth: 4 }));
+          E.push(h('line', { key: 'tr' + i, x1: m, y1: yK, x2: R, y2: yK, stroke: C.rose, strokeWidth: 4 }));
+        } else E.push(h('line', { key: 'tg' + i, x1: L, y1: yK, x2: R, y2: yK, stroke: rc, strokeWidth: 4 }));
+        const lc = n.role === 'do' ? C.greenT : n.role === 'check' ? C.chkT : C.roseT;
+        if (showSplit) E.push(h('text', { key: 'tkl' + i, x: (L + R) / 2, y: yK + 19, fontSize: 10, textAnchor: 'middle', fontFamily: this.mono },
+          [h('tspan', { key: 1, fill: lc }, n.first.toFixed(1)), h('tspan', { key: 2, fill: C.muted }, ' + '), h('tspan', { key: 3, fill: C.roseT }, this.f(n.repeat))]));
+        else E.push(this.t('tkl' + i, (L + R) / 2, yK + 19, this.f(tot), { color: lc, anchor: 'middle' }));
+      }
+    });
+    this.ROWS.filter(([c]) => !N[c].crit).reverse().forEach((r, k) =>
+      E.push(this.t('gh' + k, 1105, yK + 40 + k * 14, `${r[0]} ${this.f(this.branchT(r))} · slack ${this.f(crit - this.branchT(r))}`, { anchor: 'middle', size: 9.5 })));
+    if (kaizen) {
+      E.push(this.star('kz', 514, 512, 10));
+      E.push(this.t('kzt', 529, 516, 'kaizen: 12m queue + 64 sent back at quality_review', { color: C.kzT, weight: 700, size: 10.5 }));
+    }
+    return React.createElement('svg', { width: 1660, height: 650, viewBox: '0 0 1660 650', style: { display: 'block', overflow: 'visible' } }, E);
+  }
+
+  renderVals() {
+    const C = this.C, N = this.N;
+    const split = this.props.splitRework ?? true, kaizen = this.props.showKaizen ?? true, uniform = (this.props.loopWidth ?? 'By laps') === 'Uniform';
+    const nodes = Object.keys(N).map((id) => {
+      const n = N[id], tot = n.first + n.repeat, fix = n.role === 'fix';
+      const vis = { k: 'Visits', v: '×' + n.visits.toFixed(2), c: n.visits > 1.2 ? C.roseT : C.ink, w: n.visits > 1.2 ? 700 : 500 };
+      const wk = { k: 'Work', v: this.f(tot), c: fix ? C.roseT : n.role === 'check' ? C.chkT : C.greenT, w: 500 };
+      const cost = { k: '$ / run', v: '$' + n.cost.toFixed(2), c: C.violetT, w: 500 };
+      let rows;
+      if (fix) rows = [vis, wk];
+      else if (n.role === 'do') rows = [vis, wk, { k: 'Rework', v: tot ? Math.round(n.repeat / tot * 100) + '%' : '0%', c: n.repeat > 0 ? C.roseT : C.muted, w: n.repeat > 0 ? 700 : 500 }, cost];
+      else {
+        const pass = { k: '1st-try pass', v: n.pass + '%', c: n.pass < 80 ? C.roseT : C.ink, w: n.pass < 80 ? 700 : 500 };
+        rows = n.fan ? [vis, wk, pass, cost] : [vis, wk, pass, { k: 'Sent back', v: String(n.sends), c: C.roseT, w: 700 }, cost];
+      }
+      return {
+        name: id, type: n.type.replace('agent · ', ''), x: n.x, y: n.y, w: fix ? 104 : 120, h: fix ? 88 : n.fan ? 118 : 150, rows, rowGap: n.fan ? 0 : 2,
+        roleLabel: n.role.toUpperCase(), roleColor: n.role === 'do' ? 'oklch(0.52 0.12 155)' : n.role === 'check' ? 'oklch(0.52 0.09 215)' : 'oklch(0.56 0.16 22)',
+        border: n.hot ? C.rose : n.crit && !fix ? C.ink : fix ? C.rose : n.role === 'check' ? 'oklch(0.72 0.06 215)' : 'oklch(0.80 0.02 255)',
+        borderStyle: fix ? 'dashed' : 'solid',
+        headBg: n.hot ? 'oklch(0.975 0.02 22)' : n.role === 'do' ? 'oklch(0.975 0.02 155)' : n.role === 'check' ? 'oklch(0.975 0.015 215)' : 'oklch(0.975 0.02 22)',
+        isCheck: n.role === 'check', pass: n.pass || 0,
+      };
+    });
+    const tris = Object.keys(N).filter((id) => N[id].role !== 'fix').map((id) => {
+      const n = N[id];
+      return n.fan ? { x: 935, y: n.y + 42, wip: n.wip.toFixed(1) } : { x: n.x - 35, y: n.y + 58, wip: n.wip.toFixed(1) };
+    });
+    // critical-path breakdown
+    const cp = Object.keys(N).filter((id) => !N[id].fan || N[id].crit).map((id) => N[id]);
+    const va = cp.filter((n) => n.role === 'do').reduce((a, n) => a + n.first, 0);
+    const chk = cp.filter((n) => n.role === 'check').reduce((a, n) => a + n.first, 0);
+    const rw = cp.reduce((a, n) => a + n.repeat, 0);
+    const wt = cp.reduce((a, n) => a + n.wait, 0);
+    const lead = va + chk + rw + wt;
+    const pct = (x) => Math.round(x / lead * 100) + '%';
+    const breakdown = [
+      { grow: va, bg: C.green, ink: 'oklch(1 0 0)', v: 'value-add ' + this.f(va) },
+      { grow: chk, bg: C.chk, ink: 'oklch(1 0 0)', v: 'checking ' + this.f(chk) },
+      { grow: rw, bg: C.rose, ink: 'oklch(1 0 0)', v: 'rework ' + this.f(rw) },
+      { grow: wt, bg: 'repeating-linear-gradient(45deg,oklch(0.86 0.08 70) 0 5px,oklch(0.93 0.05 75) 5px 10px)', ink: 'oklch(0.44 0.10 65)', v: 'waiting ' + this.f(wt) },
+    ];
+    const fpy = Object.values(N).filter((n) => n.role === 'check').reduce((a, n) => a * n.pass / 100, 1);
+    const serialFan = this.ROWS.reduce((a, r) => a + this.branchT(r), 0), critFan = Math.max(...this.ROWS.map((r) => this.branchT(r)));
+    const allRework = Object.values(N).reduce((a, n) => a + n.repeat, 0);
+    const stats = [
+      { k: 'LEAD TIME', v: this.f(lead), c: C.ink, sub: 'critical path, per run' },
+      { k: 'FLOW EFFICIENCY', v: pct(va), c: C.greenT, sub: 'value-add ÷ lead' },
+      { k: 'CHECKING', v: pct(chk), c: C.chkT, sub: this.f(chk) + ' of lead' },
+      { k: 'REWORK', v: pct(rw), c: C.roseT, sub: this.f(allRework) + ' across all branches' },
+      { k: 'WAITING', v: pct(wt), c: C.amberT, sub: '12m of it before quality_review' },
+      { k: 'ROLLED FIRST-PASS', v: Math.round(fpy * 100) + '%', c: C.roseT, sub: 'runs no check sends back' },
+      { k: 'SAVED BY FAN-OUT', v: this.f(serialFan - critFan), c: C.ink, sub: 'vs running checks in series' },
+      { k: 'SPEND / RUN', v: '$' + Object.values(N).reduce((a, n) => a + n.cost, 0).toFixed(2), c: C.violetT, sub: 'all branches' },
+    ];
+    return { mapSvg: this.buildMap(split, kaizen, uniform), nodes, tris, breakdown, stats, leadLabel: this.f(lead) };
+  }
+}
+</script>
+</body>
+</html>

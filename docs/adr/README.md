@@ -19,6 +19,7 @@ that supersedes the old one (update the old one's status to `Superseded by NNNN`
 | [0008](0008-documentation-taxonomy.md) | Documentation taxonomy: what lives where, and why | Proposed |
 | [0009](0009-test-isolation.md) | Test isolation: process-tree dependencies and explicit sandbox ownership | Proposed |
 | [0010](0010-serving-the-scaffold-from-the-app.md) | The board serves the scaffold | Proposed |
+| [0011](0011-simplifying-the-factory.md) | Simplifying the factory: the task is the unit of record | Proposed |
 
 ## Format
 

@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Helvetica Neue',Helvetica,-apple-system,system-ui,sans-serif;color:oklch(0.32 0.02 255);background:oklch(0.955 0.008 255);-webkit-font-smoothing:antialiased;}
+  a{color:oklch(0.50 0.14 250);text-decoration:none;} a:hover{color:oklch(0.42 0.14 250);text-decoration:underline;}
+  code{font-family:'JetBrains Mono',ui-monospace,monospace;}
+</style>
+</helmet>
+
+<div style="width:3620px;padding:56px 60px 100px;display:flex;flex-direction:column;gap:40px;">
+
+  <!-- ===== HEADER ===== -->
+  <div style="display:flex;flex-direction:column;gap:12px;max-width:1120px;">
+    <span style="font-size:11px;font-weight:600;letter-spacing:0.14em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">RELAY · VALUE STREAM MAP · TWO LEVELS</span>
+    <h1 style="font-size:36px;font-weight:600;letter-spacing:-0.03em;line-height:1.08;margin:0;color:oklch(0.22 0.02 255);">Where a card's time actually goes</h1>
+    <p style="font-size:15.5px;line-height:1.6;color:oklch(0.42 0.02 255);margin:0;text-wrap:pretty;">Two maps, one grammar, nested. The <b style="color:oklch(0.30 0.02 255);">card stream</b> is door-to-door: nine states from <code>Next up</code> to <code>Done</code>, coloured by <b style="color:oklch(0.44 0.14 250);">who holds the baton</b>. The <b style="color:oklch(0.30 0.02 255);">Code flow stream</b> is what you open when the <code>Code</code> box is the problem — all 21 nodes, coloured by <b style="color:oklch(0.40 0.10 155);">Do</b> / <b style="color:oklch(0.44 0.08 215);">Check</b> / <b style="color:oklch(0.52 0.15 22);">Fix</b>. Both obey the same rule: <b style="color:oklch(0.30 0.02 255);">rework above the line, the stream on it, time below</b> — and on both, the ladder rung sits directly under the box it measures.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
+      <span style="font-size:11px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.42 0.12 65);background:oklch(0.96 0.04 75);border:1px solid oklch(0.85 0.07 70);border-radius:5px;padding:5px 9px;">⚠ ILLUSTRATIVE DATA — NOT YET WIRED</span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);background:oklch(0.97 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:5px;padding:5px 9px;">topology exact, from <code>spec/plan/code.json</code> · code = <b>21 nodes, 44 edges</b></span>
+      <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.50 0.02 255);background:oklch(0.97 0.004 255);border:1px solid oklch(0.90 0.006 255);border-radius:5px;padding:5px 9px;">every visit / send-back / lap is <b>derived</b> from pass rates by flow balance — not typed in</span>
+    </div>
+  </div>
+
+  <!-- ===== CARD STREAM ===== -->
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:16px;padding:26px 30px 28px;display:flex;flex-direction:column;gap:18px;">
+    <div style="display:flex;flex-direction:column;gap:5px;max-width:1120px;">
+      <span style="font-size:10.5px;font-weight:700;letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.14 250);">LEVEL 1 · DOOR TO DOOR</span>
+      <h3 style="font-size:20px;font-weight:600;margin:0;color:oklch(0.24 0.02 255);letter-spacing:-0.015em;">The card stream — Next up → Done</h3>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0;text-wrap:pretty;">Nine states. Three flows do the work, two human gates decide, and everything else is a card sitting still. Colour is the baton: <b style="color:oklch(0.44 0.14 292);">violet = an agent holds it</b>, <b style="color:oklch(0.44 0.14 250);">blue = a human holds it</b>, <b style="color:oklch(0.48 0.10 65);">hatched = nobody does</b>.</p>
+    </div>
+
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:oklch(0.50 0.02 255);border-top:1px solid oklch(0.95 0.006 255);border-bottom:1px solid oklch(0.95 0.006 255);padding:11px 0;max-width:2200px;">
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.56 0.16 292);border-radius:3px;padding:2px 5px;">AI</span>agent flow</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.55 0.14 250);border-radius:3px;padding:2px 5px;">HUMAN</span>review gate — Approve / Request changes</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:18px;height:9px;border-radius:2px;background:repeating-linear-gradient(45deg,oklch(0.86 0.08 70) 0 4px,oklch(0.93 0.05 75) 4px 8px);"></span>queue — nobody holds the baton</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:22px;height:5px;border-radius:2px;background:oklch(0.62 0.16 22);"></span>Request changes — the card-level rework loop</span>
+      <span style="flex:1;"></span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:oklch(0.58 0.02 255);">the <code>Code</code> box expands into level 2 below</span>
+    </div>
+
+    <div style="position:relative;width:{{ cardW }}px;height:{{ cardH }}px;">
+      <div style="position:absolute;inset:0;pointer-events:none;">{{ cardSvg }}</div>
+      <sc-for list="{{ cardNodes }}" as="n" hint-placeholder-count="9">
+        <div style="position:absolute;left:{{ n.x }}px;top:{{ n.y }}px;width:{{ n.w }}px;height:{{ n.h }}px;border:{{ n.bw }}px {{ n.borderStyle }} {{ n.border }};border-radius:10px;background:oklch(1 0 0);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px oklch(0.20 0.02 255 / 0.07);">
+          <div style="background:{{ n.headBg }};padding:7px 10px 6px;display:flex;flex-direction:column;gap:4px;border-bottom:1px solid oklch(0.94 0.006 255);">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;">
+              <span style="font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.24 0.02 255);white-space:nowrap;">{{ n.name }}</span>
+              <span style="font-size:9.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:{{ n.visitsC }};white-space:nowrap;">{{ n.visits }}</span>
+            </div>
+            <span style="align-self:flex-start;font-size:8px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:{{ n.roleColor }};border-radius:3px;padding:1px 5px;">{{ n.roleLabel }}</span>
+          </div>
+          <div style="padding:6px 10px;display:flex;flex-direction:column;gap:0;flex:1;">
+            <sc-for list="{{ n.rows }}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;justify-content:space-between;gap:6px;font-size:10px;line-height:17px;"><span style="color:oklch(0.58 0.02 255);white-space:nowrap;">{{ r.k }}</span><span style="font-family:'JetBrains Mono',monospace;color:{{ r.c }};font-weight:{{ r.w }};white-space:nowrap;">{{ r.v }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;border-top:1px solid oklch(0.94 0.006 255);padding-top:18px;max-width:1500px;">
+      <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">CARD LEAD TIME · to scale</span>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="flex:1;display:flex;height:36px;border-radius:7px;overflow:hidden;gap:2px;background:oklch(0.97 0.004 255);">
+          <sc-for list="{{ cardBand }}" as="s" hint-placeholder-count="4">
+            <div style="flex:{{ s.grow }} 1 0;background:{{ s.bg }};display:flex;align-items:center;padding:0 9px;min-width:0;overflow:hidden;">
+              <span style="font-size:10.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:{{ s.ink }};white-space:nowrap;">{{ s.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <span style="width:104px;flex:0 0 auto;text-align:right;font-size:19px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.28 0.02 255);">{{ cardTotal }}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid oklch(0.94 0.006 255);padding-top:18px;max-width:1700px;">
+      <sc-for list="{{ cardStats }}" as="s" hint-placeholder-count="6">
+        <div style="border:1px solid {{ s.bd }};background:{{ s.bg }};border-radius:9px;padding:10px 15px;display:flex;flex-direction:column;gap:2px;min-width:168px;">
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">{{ s.k }}</span>
+          <span style="font-size:19px;font-weight:600;color:{{ s.c }};font-family:'JetBrains Mono',monospace;">{{ s.v }}</span>
+          <span style="font-size:10.5px;color:oklch(0.56 0.02 255);line-height:1.4;">{{ s.sub }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="background:oklch(0.98 0.012 250);border:1px solid oklch(0.86 0.05 250);border-radius:12px;padding:16px 20px;max-width:1500px;">
+      <p style="font-size:13.5px;line-height:1.6;color:oklch(0.40 0.05 250);margin:0;text-wrap:pretty;"><b>Read this before optimising a single node.</b> {{ punchline }} Every minute the Code flow map below argues about is inside the one violet box that accounts for {{ codeShare }} of the card's life. The queues and the two human gates are the rest — and they are invisible from inside any flow.</p>
+    </div>
+  </div>
+
+  <!-- ===== QUESTIONS ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1440px;">
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">THE BRIEF</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">{{ qCount }} questions these maps must answer</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">A map that doesn't answer a question is decoration. Each row names where you read the answer and carries two independent verdicts: <b style="color:oklch(0.30 0.02 255);">DRAWN</b> — does the design render it — and <b style="color:oklch(0.30 0.02 255);">DATA</b> — can the board compute it today. Those fail independently, and conflating them is how a map ends up showing a number nobody measured.</p>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <sc-for list="{{ qTally }}" as="t" hint-placeholder-count="4">
+        <div style="border:1px solid {{ t.border }};background:{{ t.bg }};border-radius:9px;padding:8px 14px;display:flex;align-items:baseline;gap:8px;">
+          <span style="font-size:19px;font-weight:600;color:{{ t.c }};font-family:'JetBrains Mono',monospace;">{{ t.v }}</span>
+          <span style="font-size:11.5px;color:oklch(0.48 0.02 255);">{{ t.k }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:18px;">
+      <sc-for list="{{ qGroups }}" as="g" hint-placeholder-count="5">
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <span style="width:4px;height:15px;border-radius:2px;background:{{ g.c }};"></span>
+            <span style="font-size:11px;font-weight:700;letter-spacing:0.09em;font-family:'JetBrains Mono',monospace;color:{{ g.c }};">{{ g.title }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <sc-for list="{{ g.qs }}" as="q" hint-placeholder-count="4">
+              <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-left:3px solid {{ q.edge }};border-radius:10px;padding:11px 16px;display:flex;align-items:flex-start;gap:14px;">
+                <span style="font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.62 0.02 255);width:24px;flex:0 0 auto;padding-top:2px;">{{ q.n }}</span>
+                <span style="font-size:8.5px;font-weight:700;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:{{ q.lvIk }};background:{{ q.lvBg }};border-radius:3px;padding:3px 6px;flex:0 0 auto;margin-top:1px;">{{ q.level }}</span>
+                <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;">
+                  <span style="font-size:14px;font-weight:600;color:oklch(0.24 0.02 255);line-height:1.4;">{{ q.q }}</span>
+                  <span style="font-size:12px;line-height:1.5;color:oklch(0.50 0.02 255);">{{ q.where }}</span>
+                  <sc-if value="{{ q.note }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size:12px;line-height:1.5;color:oklch(0.52 0.13 22);"><b>Gap:</b> {{ q.note }}</span>
+                  </sc-if>
+                </div>
+                <div style="display:flex;gap:6px;flex:0 0 auto;padding-top:1px;">
+                  <span style="font-size:9px;font-weight:700;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:{{ q.dIk }};background:{{ q.dBg }};border:1px solid {{ q.dBd }};border-radius:4px;padding:3px 7px;white-space:nowrap;">DRAWN {{ q.drawn }}</span>
+                  <span style="font-size:9px;font-weight:700;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:{{ q.tIk }};background:{{ q.tBg }};border:1px solid {{ q.tBd }};border-radius:4px;padding:3px 7px;white-space:nowrap;">DATA {{ q.data }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== CODE FLOW STREAM ===== -->
+  <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:16px;padding:26px 30px 28px;display:flex;flex-direction:column;gap:18px;">
+
+    <div style="display:flex;flex-direction:column;gap:5px;max-width:1120px;">
+      <span style="font-size:10.5px;font-weight:700;letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.08 215);">LEVEL 2 · INSIDE ONE BOX</span>
+      <h3 style="font-size:20px;font-weight:600;margin:0;color:oklch(0.24 0.02 255);letter-spacing:-0.015em;">{{ topoTitle }}</h3>
+      <p style="font-size:13.5px;line-height:1.55;color:oklch(0.46 0.02 255);margin:0;text-wrap:pretty;">{{ topoSub }}</p>
+    </div>
+
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:oklch(0.50 0.02 255);border-top:1px solid oklch(0.95 0.006 255);border-bottom:1px solid oklch(0.95 0.006 255);padding:11px 0;max-width:2400px;">
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.12 155);border-radius:3px;padding:2px 5px;">DO</span>value-add</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.52 0.09 215);border-radius:3px;padding:2px 5px;">CHECK</span>necessary, not value-add</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="font-size:8.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:oklch(0.56 0.16 22);border-radius:3px;padding:2px 5px;">FIX</span>rework only · above the line</span>
+      <span style="width:1px;height:16px;background:oklch(0.90 0.006 255);"></span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:22px;height:5px;border-radius:2px;background:oklch(0.62 0.16 22);"></span>send-back · <b style="color:oklch(0.40 0.02 255);">thickness = minutes</b>, label = laps / 128 runs</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:22px;height:0;border-top:2px dashed oklch(0.60 0.02 255);"></span>planned iteration (<code>foreach</code>)</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:18px;height:9px;border-radius:2px;background:repeating-linear-gradient(45deg,oklch(0.86 0.08 70) 0 4px,oklch(0.93 0.05 75) 4px 8px);"></span>external wait (no tokens)</span>
+      <span style="flex:1;"></span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:oklch(0.58 0.02 255);">×n in a header = visits per run, derived</span>
+    </div>
+
+    <div style="position:relative;width:{{ mapW }}px;height:{{ mapH }}px;">
+      <div style="position:absolute;inset:0;pointer-events:none;">{{ mapSvg }}</div>
+      <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="21">
+        <div style="position:absolute;left:{{ n.x }}px;top:{{ n.y }}px;width:{{ n.w }}px;height:{{ n.h }}px;border:{{ n.bw }}px {{ n.borderStyle }} {{ n.border }};border-radius:9px;background:oklch(1 0 0);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px oklch(0.20 0.02 255 / 0.06);">
+          <div style="background:{{ n.headBg }};padding:6px 9px 5px;display:flex;flex-direction:column;gap:3px;border-bottom:1px solid oklch(0.94 0.006 255);">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:5px;">
+              <span style="font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.26 0.02 255);white-space:nowrap;">{{ n.name }}</span>
+              <span style="font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;color:{{ n.visitsC }};white-space:nowrap;">{{ n.visits }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="font-size:8px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(1 0 0);background:{{ n.roleColor }};border-radius:3px;padding:1px 4px;">{{ n.roleLabel }}</span>
+              <span style="font-size:8.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.56 0.02 255);white-space:nowrap;">{{ n.type }}</span>
+            </div>
+          </div>
+          <div style="padding:4px 9px;display:flex;flex-direction:column;gap:0;flex:1;">
+            <sc-for list="{{ n.rows }}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;justify-content:space-between;gap:6px;font-size:9.5px;line-height:16px;"><span style="color:oklch(0.58 0.02 255);white-space:nowrap;">{{ r.k }}</span><span style="font-family:'JetBrains Mono',monospace;color:{{ r.c }};font-weight:{{ r.w }};white-space:nowrap;">{{ r.v }}</span></div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ n.isCheck }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;height:5px;flex:0 0 auto;"><div style="width:{{ n.pass }}%;background:oklch(0.60 0.13 155);"></div><div style="flex:1;background:oklch(0.62 0.16 22);"></div></div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;border-top:1px solid oklch(0.94 0.006 255);padding-top:18px;max-width:1500px;">
+      <span style="font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">RUN LEAD TIME · to scale (the ladder above is aligned to nodes, so it is not)</span>
+      <sc-for list="{{ bands }}" as="b" hint-placeholder-count="2">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:176px;flex:0 0 auto;display:flex;flex-direction:column;gap:1px;">
+            <span style="font-size:11px;font-weight:700;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.30 0.02 255);">{{ b.k }}</span>
+            <span style="font-size:10px;color:oklch(0.58 0.02 255);">{{ b.sub }}</span>
+          </div>
+          <div style="flex:1;display:flex;height:34px;border-radius:7px;overflow:hidden;gap:2px;background:oklch(0.97 0.004 255);">
+            <sc-for list="{{ b.segs }}" as="s" hint-placeholder-count="5">
+              <div style="flex:{{ s.grow }} 1 0;background:{{ s.bg }};display:flex;align-items:center;padding:0 9px;min-width:0;overflow:hidden;">
+                <span style="font-size:10.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:{{ s.ink }};white-space:nowrap;">{{ s.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <span style="width:96px;flex:0 0 auto;text-align:right;font-size:17px;font-weight:600;font-family:'JetBrains Mono',monospace;color:{{ b.c }};">{{ b.total }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid oklch(0.94 0.006 255);padding-top:18px;max-width:1700px;">
+      <sc-for list="{{ stats }}" as="s" hint-placeholder-count="6">
+        <div style="border:1px solid {{ s.bd }};background:{{ s.bg }};border-radius:9px;padding:10px 15px;display:flex;flex-direction:column;gap:2px;min-width:168px;">
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">{{ s.k }}</span>
+          <span style="font-size:19px;font-weight:600;color:{{ s.c }};font-family:'JetBrains Mono',monospace;">{{ s.v }}</span>
+          <span style="font-size:10.5px;color:oklch(0.56 0.02 255);line-height:1.4;">{{ s.sub }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== KAIZEN ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1800px;">
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:1120px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">WHAT TO CHANGE FIRST</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">Ranked by hours returned to the card</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">Ranked against the <b style="color:oklch(0.30 0.02 255);">card</b> clock, not the run clock — which reorders everything. The largest engine-level win is worth less than shaving an hour off a queue nobody owns.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;">
+      <sc-for list="{{ kaizen }}" as="k" hint-placeholder-count="5">
+        <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-top:3px solid {{ k.c }};border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;">
+          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:22px;font-weight:600;font-family:'JetBrains Mono',monospace;color:{{ k.c }};">{{ k.gain }}</span>
+            <span style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:oklch(0.58 0.02 255);">{{ k.pct }} of card</span>
+          </div>
+          <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);line-height:1.35;">{{ k.title }}</div>
+          <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">{{ k.body }}</p>
+          <span style="align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:0.05em;font-family:'JetBrains Mono',monospace;color:{{ k.tagC }};background:{{ k.tagBg }};border-radius:4px;padding:3px 7px;">{{ k.tag }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== FAN-OUT ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1800px;">
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:1120px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">FAN-OUT · COMING</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">Two kinds, one treatment — and what each buys</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">The engine already has a <code>:parallel</code> node type (<code>Schemas.Flow.Node.types/0</code>); it is deliberately excluded from <code>runnable_types/0</code> and the Code flow does not use it yet. So the map ships fan-out as a <b style="color:oklch(0.30 0.02 255);">topology toggle</b>, not a claim: flip the prop and the same per-visit times re-solve as a fork/join, collapsing three slots into one. The delta is computed, not asserted.</p>
+    </div>
+
+    <div style="background:oklch(0.98 0.012 250);border:1px solid oklch(0.86 0.05 250);border-radius:12px;padding:18px 22px;display:flex;align-items:center;gap:26px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <span style="font-size:9.5px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.10 250);">FANNING final_review ∥ smoke ∥ acceptance RETURNS</span>
+        <span style="font-size:30px;font-weight:600;font-family:'JetBrains Mono',monospace;color:oklch(0.44 0.14 250);letter-spacing:-0.02em;">{{ fanGain }}</span>
+      </div>
+      <div style="width:1px;height:46px;background:oklch(0.88 0.03 250);"></div>
+      <p style="font-size:13px;line-height:1.55;color:oklch(0.42 0.04 250);margin:0;max-width:980px;text-wrap:pretty;">Today those three run strictly in series, so every minute of all three is on the critical path; fanned, only the slowest branch is — {{ fanDetail }} <b>The trap:</b> one shared <code>final_fix</code> rewinds to <code>precommit</code>, so a fan re-serialises the moment any branch fails. Fan-out only pays once each branch owns its fix — the same argument ADR 0011 makes for a parameterised verify subgraph. <b>And against the card clock it is worth {{ fanCardPct }}</b>, which is the honest way to rank it.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;"><span style="font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Static: different nodes in parallel</span><span style="font-size:10.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.48 0.10 250);background:oklch(0.96 0.03 250);border-radius:4px;padding:2px 7px;">PROPOSED</span></div>
+        <div style="display:flex;align-items:center;gap:10px;height:112px;">
+          <div style="width:4px;height:98px;background:oklch(0.28 0.02 255);"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <sc-for list="{{ fanRows }}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="width:110px;height:26px;border:{{ r.bw }}px solid {{ r.bd }};border-radius:6px;background:oklch(0.975 0.015 215);font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:600;display:flex;align-items:center;padding-left:8px;">{{ r.id }}</div>
+                <div style="width:56px;border-top:{{ r.lw }}px {{ r.ls }} {{ r.lc }};"></div>
+                <span style="font-size:9.5px;font-family:'JetBrains Mono',monospace;font-weight:{{ r.tw }};color:{{ r.tc }};">{{ r.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="width:4px;height:98px;background:oklch(0.28 0.02 255);"></div>
+        </div>
+        <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);">
+          <li>The three stack into one slot between fork and join bars, so the stream stays one line and the ladder keeps one rung for the fan.</li>
+          <li><b style="color:oklch(0.34 0.02 255);">Slack is not free.</b> A branch with slack absorbs roughly one fix lap before it turns critical — the map labels how much each has.</li>
+          <li>Lead time follows the slowest branch; <b style="color:oklch(0.34 0.02 255);">spend still counts every branch</b>. Fan-out buys wall-clock, never dollars.</li>
+        </ul>
+      </div>
+
+      <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;"><span style="font-size:15px;font-weight:600;color:oklch(0.26 0.02 255);">Dynamic: one node × N copies</span><span style="font-size:10.5px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.42 0.12 65);background:oklch(0.96 0.04 75);border-radius:4px;padding:2px 7px;">TODAY: SERIAL</span></div>
+        <div style="display:flex;align-items:center;gap:14px;height:112px;">
+          <div style="position:relative;width:152px;height:96px;">
+            <div style="position:absolute;left:12px;top:0;width:128px;height:82px;border:1px solid oklch(0.86 0.01 255);border-radius:8px;background:oklch(0.99 0.004 255);"></div>
+            <div style="position:absolute;left:6px;top:6px;width:128px;height:82px;border:1px solid oklch(0.84 0.01 255);border-radius:8px;background:oklch(0.995 0.003 255);"></div>
+            <div style="position:absolute;left:0;top:12px;width:128px;height:82px;border:1px solid oklch(0.80 0.02 255);border-radius:8px;background:oklch(1 0 0);overflow:hidden;">
+              <div style="background:oklch(0.975 0.02 155);padding:5px 8px;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;">implement</span><span style="font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);">×N</span></div>
+              <div style="padding:4px 8px;display:flex;flex-direction:column;gap:1px;font-size:9.5px;">
+                <sc-for list="{{ dynRows }}" as="d" hint-placeholder-count="3">
+                  <div style="display:flex;justify-content:space-between;"><span style="color:oklch(0.56 0.02 255);">{{ d.k }}</span><span style="font-family:'JetBrains Mono',monospace;color:oklch(0.40 0.10 155);">{{ d.v }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-family:'JetBrains Mono',monospace;">
+            <span style="font-weight:700;color:oklch(0.52 0.15 22);">sent back: 1 copy</span>
+            <span style="color:oklch(0.58 0.02 255);">not the whole fan</span>
+            <span style="margin-top:6px;font-weight:700;color:oklch(0.44 0.14 250);">if fanned: {{ dynGain }}</span>
+          </div>
+        </div>
+        <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);">
+          <li>Drawn as one stacked box with N as an average and a range — one row per copy would change the map's shape run to run.</li>
+          <li>Today <code>foreach: card.sub_tasks</code> iterates <b style="color:oklch(0.34 0.02 255);">serially</b>, so the Σ row <i>is</i> the critical path — the widest valley on the ladder. The dashed loop above the line is planned iteration, not waste.</li>
+          <li>The biggest engine-level lever on this page — and still smaller than either human gate.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GRAMMAR ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1800px;">
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:1120px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">READING EITHER MAP</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">One line, three bands, five symbols</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">No swim lanes: a value stream is one stream, and rows imply concurrent actors that do not exist. Both maps read vertically — <b style="color:oklch(0.52 0.15 22);">rework above</b>, <b style="color:oklch(0.30 0.02 255);">the stream</b>, <b style="color:oklch(0.44 0.08 215);">time below</b> — and every loop starts at whatever just judged the work: a check, or a human.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;">
+      <sc-for list="{{ grammar }}" as="g" hint-placeholder-count="5">
+        <div style="background:oklch(1 0 0);border:1px solid oklch(0.92 0.006 255);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;">
+          <div style="height:54px;display:flex;align-items:center;">{{ g.art }}</div>
+          <div style="font-size:14px;font-weight:600;color:oklch(0.26 0.02 255);">{{ g.title }}</div>
+          <p style="font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);margin:0;">{{ g.body }}</p>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===== BUILD ===== -->
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1800px;">
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:1120px;">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">WIRING IT UP</span>
+      <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">What has to be written</h2>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">Level 2 is mostly one query away — <code>Runs.node_metrics_for_flow/2</code> already rolls up duration, cost, <code>attempts_mean</code>, <code>loop_laps</code> and a verdict split per node. <b style="color:oklch(0.30 0.02 255);">Level 1 is the gap</b>: the card's stage history is not recorded, so every queue and both gates are currently unmeasurable. Whatever lands must agree with the shipped Flow Metrics page rather than restate it.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;">
+      <sc-for list="{{ prov }}" as="p" hint-placeholder-count="4">
+        <div style="background:oklch(1 0 0);border:1px solid {{ p.bd }};border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+            <span style="font-size:9px;font-weight:700;letter-spacing:0.06em;font-family:'JetBrains Mono',monospace;color:{{ p.ink }};background:{{ p.bg }};border-radius:4px;padding:3px 8px;">{{ p.tag }}</span>
+            <span style="font-size:13.5px;font-weight:600;color:oklch(0.26 0.02 255);">{{ p.title }}</span>
+          </div>
+          <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;line-height:1.5;color:oklch(0.48 0.02 255);">
+            <sc-for list="{{ p.items }}" as="i" hint-placeholder-count="4">
+              <li>{{ i }}</li>
+            </sc-for>
+          </ul>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;topology&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;As-is · serial&quot;,&quot;Proposed · fan-out&quot;],&quot;default&quot;:&quot;As-is · serial&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Map&quot;},&quot;splitRework&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Map&quot;},&quot;showDuplication&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Map&quot;},&quot;loopWidth&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;By minutes&quot;,&quot;Uniform&quot;],&quot;default&quot;:&quot;By minutes&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Map&quot;}}">
+class Component extends DCLogic {
+  C = {
+    ink:'oklch(0.28 0.02 255)', muted:'oklch(0.58 0.02 255)', line:'oklch(0.44 0.02 255)',
+    green:'oklch(0.60 0.13 155)', greenT:'oklch(0.40 0.10 155)',
+    chk:'oklch(0.58 0.09 215)', chkT:'oklch(0.44 0.08 215)',
+    amber:'oklch(0.82 0.10 70)', amberT:'oklch(0.48 0.10 65)',
+    rose:'oklch(0.62 0.16 22)', roseT:'oklch(0.52 0.15 22)',
+    gray:'oklch(0.62 0.02 255)', grayT:'oklch(0.48 0.02 255)',
+    ai:'oklch(0.56 0.16 292)', aiT:'oklch(0.44 0.14 292)',
+    hum:'oklch(0.55 0.14 250)', humT:'oklch(0.44 0.14 250)',
+    hatch:'repeating-linear-gradient(45deg,oklch(0.86 0.08 70) 0 5px,oklch(0.93 0.05 75) 5px 10px)',
+  };
+  mono = "JetBrains Mono, ui-monospace, monospace";
+  RUNS = 128; NAVG = 3.2; PARKED = 11;
+
+  // ===========================================================================
+  // LEVEL 1 — the card stream. Nine states from the three flows' triggers.
+  //   hours = median hours a card spends here (queues and gates)
+  //   approve = the gate's Approve rate; the remainder is Request changes,
+  //             which is the card-level rework loop back to `back`
+  // ===========================================================================
+  C1 = [
+    {id:'Next up',     kind:'queue', hours:18.0, wip:7},
+    {id:'Spec',        kind:'ai',    flow:'spec', mins:6,  cost:0.30, nodes:1},
+    {id:'Spec:Review', kind:'human', hours:5.5,  approve:0.82, back:'Spec'},
+    {id:'Spec:Done',   kind:'queue', hours:3.2,  wip:3},
+    {id:'Plan',        kind:'ai',    flow:'plan', mins:9,  cost:0.55, nodes:1},
+    {id:'Plan:Done',   kind:'queue', hours:2.6,  wip:2},
+    {id:'Code',        kind:'ai',    flow:'code', mins:null, cost:null, nodes:21, drill:true},
+    {id:'Review',      kind:'human', hours:7.5,  approve:0.88, back:'Code'},
+    {id:'Done',        kind:'done'},
+  ];
+
+  // ===========================================================================
+  // LEVEL 2 — the Code flow. Topology exact: 21 nodes, 44 edges.
+  // PRIMITIVES ONLY. Per-visit minutes, per-visit cost, first-try pass rate.
+  // Visits, sends and laps are DERIVED by flow balance in derive() — so the
+  // map cannot show a set of numbers that don't conserve.
+  // ===========================================================================
+  N = {
+    branch:         {role:'do',    kind:'shell',  min:0.3,  wait:0.5, cost:0},
+    implement:      {role:'do',    kind:'agent',  model:'opus',   min:9.0,  wait:1.2, cost:0.66, foreach:true},
+    spec_review:    {role:'check', kind:'agent',  model:'sonnet', min:2.4,  wait:0.6, cost:0.065, pass:0.76},
+    quality_review: {role:'check', kind:'agent',  model:'opus',   min:5.6,  wait:0.8, cost:0.24,  pass:0.62, hot:true},
+    sync:           {role:'do',    kind:'shell',  min:0.4,  wait:0.3, cost:0, pass:0.96},
+    precommit:      {role:'check', kind:'gate',   min:4.6,  wait:0.3, cost:0, pass:0.88},
+    browser:        {role:'check', kind:'gate',   min:5.2,  wait:0.3, cost:0, pass:0.84},
+    final_review:   {role:'check', kind:'agent',  model:'opus',   min:7.5,  wait:0.5, cost:0.31, pass:0.79, fan:true},
+    smoke:          {role:'check', kind:'agent',  model:'opus',   min:11.0, wait:0.6, cost:0.56, pass:0.72, fan:true},
+    acceptance:     {role:'check', kind:'agent',  model:'sonnet', min:5.1,  wait:0.5, cost:0.23, pass:0.88, fan:true},
+    resync:         {role:'do',    kind:'shell',  min:0.5,  wait:0.3, cost:0, pass:0.96, dup:'sync'},
+    reverify:       {role:'check', kind:'gate',   min:4.6,  wait:0.3, cost:0, pass:0.95, dup:'precommit'},
+    rebrowser:      {role:'check', kind:'gate',   min:5.2,  wait:0.3, cost:0, pass:0.96, dup:'browser'},
+    merge:          {role:'do',    kind:'shell',  min:0.6,  wait:0.3, cost:0, pass:0.97},
+    deploy:         {role:'check', kind:'wait',   min:0,    wait:0.2, cost:0, pass:0.86, ext:11.5},
+    post:           {role:'do',    kind:'agent',  model:'sonnet', min:1.7, wait:0.4, cost:0.05},
+    fix_findings:   {fix:true, role:'fix', kind:'agent', model:'opus',   min:3.9, wait:0.3, cost:0.26},
+    sync_fix:       {fix:true, role:'fix', kind:'agent', model:'sonnet', min:4.0, wait:0.3, cost:0.09},
+    final_fix:      {fix:true, role:'fix', kind:'agent', model:'opus',   min:6.4, wait:0.3, cost:0.44, hot:true},
+    resync_fix:     {fix:true, role:'fix', kind:'agent', model:'sonnet', min:6.0, wait:0.3, cost:0.12},
+    github_fix:     {fix:true, role:'fix', kind:'agent', model:'opus',   min:8.0, wait:0.4, cost:0.55},
+  };
+
+  // All 13 check→fix relationships in code.json — including merge→resync,
+  // the only loop-back that originates from a `do`.
+  FIXOF = {spec_review:'fix_findings', quality_review:'fix_findings', sync:'sync_fix',
+           precommit:'final_fix', browser:'final_fix', final_review:'final_fix', smoke:'final_fix',
+           acceptance:'final_fix', resync:'resync_fix', reverify:'resync_fix', rebrowser:'resync_fix',
+           deploy:'github_fix', merge:'resync'};
+  RETURNS = {fix_findings:'spec_review', sync_fix:'precommit', final_fix:'precommit',
+             resync_fix:'reverify', github_fix:'resync'};
+  FOLD = {spec_review:'fix_findings', sync:'sync_fix', smoke:'final_fix', reverify:'resync_fix', deploy:'github_fix'};
+  FANIDS = ['final_review','smoke','acceptance'];
+
+  f(x)  { return (Math.round(x * 10) / 10).toFixed(1) + 'm'; }
+  hm(x) { const t = Math.round(x), h = Math.floor(t / 60), m = t % 60; return h ? h + 'h ' + String(m).padStart(2,'0') + 'm' : m + 'm'; }
+  hrs(x){ return x >= 24 ? (x/24).toFixed(1) + 'd' : x >= 1 ? x.toFixed(1) + 'h' : Math.round(x*60) + 'm'; }
+  fan() { return (this.props.topology ?? 'As-is · serial').indexOf('fan-out') >= 0; }
+
+  // ---------------------------------------------------------------------------
+  // FLOW BALANCE — everything derived, nothing typed twice.
+  // Closed forms: for a chain whose failures all rewind to its head, the head's
+  // visits are exits / Π(pass); a self-returning loop is exits / Π(pass) too.
+  // ---------------------------------------------------------------------------
+  derive() {
+    if (this._d) return this._d;
+    const N = this.N, R = this.RUNS, V = {}, first = {};
+    const p = (id) => N[id].pass;
+
+    // lane 1: implement → spec_review → quality_review, fix_findings returns to spec_review.
+    // A quality failure therefore re-runs spec too — visits = N / (ps·pq).
+    V.branch = 1; first.branch = 1;
+    V.implement = this.NAVG; first.implement = this.NAVG;
+    V.spec_review = this.NAVG / (p('spec_review') * p('quality_review'));
+    V.quality_review = this.NAVG / p('quality_review');
+    first.spec_review = first.quality_review = this.NAVG;
+    V.fix_findings = V.spec_review - this.NAVG;
+
+    // lane 2: precommit → browser → final_review → smoke → acceptance,
+    // every failure rewinding to precommit. One acceptance success per run.
+    V.sync = 1; first.sync = 1;
+    // Fanned, the three branches all run on every entry and the fan passes only if
+    // ALL of them do — so its pass rate is the PRODUCT, not the weakest link. Their
+    // send-backs then sum to more than final_fix's laps, because two branches failing
+    // on the same visit coalesce into one fix.
+    const chain2 = this.fan() ? ['precommit','browser','__FAN__']
+                              : ['precommit','browser','final_review','smoke','acceptance'];
+    const pp = (id) => id === '__FAN__' ? this.FANIDS.reduce((a, i) => a * p(i), 1) : p(id);
+    let v = 1 / chain2.reduce((a, id) => a * pp(id), 1);
+    chain2.forEach(id => {
+      if (id === '__FAN__') this.FANIDS.forEach(i => { V[i] = v; first[i] = 1; });
+      else { V[id] = v; first[id] = 1; }
+      v *= pp(id);
+    });
+    V.sync_fix = V.sync * (1 - p('sync'));
+    V.final_fix = V.precommit - 1;
+
+    // lane 3: merge and deploy both rewind to resync → merge = 1/(pm·pd).
+    // reverify/rebrowser failures rewind to reverify, so that block passes
+    // through exactly as many cards as enter it.
+    V.merge = 1 / (p('merge') * p('deploy'));
+    V.deploy = V.merge * p('merge');
+    V.resync = V.merge;
+    V.reverify = V.resync / (p('reverify') * p('rebrowser'));
+    V.rebrowser = V.reverify * p('reverify');
+    V.resync_fix = V.reverify - V.resync + V.resync * (1 - p('resync'));
+    V.github_fix = V.deploy * (1 - p('deploy'));
+    V.post = 1;
+    ['resync','reverify','rebrowser','merge','deploy','post'].forEach(id => first[id] = 1);
+
+    // per-node roll-up
+    const D = {};
+    for (const id in N) {
+      const n = N[id], visits = V[id] ?? 0, fv = first[id] ?? 0;
+      const rv = Math.max(visits - fv, 0);
+      D[id] = {
+        visits, firstVisits: fv, reworkVisits: rv,
+        work:   fv * (n.min + (n.ext || 0)),
+        rework: rv * (n.min + (n.ext || 0)),
+        ext:    fv * (n.ext || 0),
+        wait:   visits * n.wait,
+        cost:   visits * n.cost,
+        sends:  n.pass !== undefined ? Math.round(visits * (1 - n.pass) * R) : 0,
+        laps:   n.fix ? Math.round(visits * R) : 0,
+      };
+    }
+    this._d = {V, D};
+    return this._d;
+  }
+
+  // one rung per slot on the line, in line order
+  lineOrder() {
+    const base = ['branch','implement','spec_review','quality_review','sync','precommit','browser',
+                  'final_review','smoke','acceptance','resync','reverify','rebrowser','merge','deploy','post'];
+    if (!this.fan()) return base;
+    const out = [];
+    base.forEach(id => { if (id === 'final_review') out.push('__FAN__'); else if (!this.N[id].fan) out.push(id); });
+    return out;
+  }
+  rungs() {
+    const {D} = this.derive();
+    return this.lineOrder().map(id => {
+      if (id === '__FAN__') {
+        const slow = this.FANIDS.reduce((a,b) => this.tot(D[a]) > this.tot(D[b]) ? a : b);
+        const d = D[slow];
+        return {id, label:'fork ∥ ' + slow, role:'check', wait:d.wait, work:d.work, rework:d.rework + D.final_fix.rework, ext:d.ext};
+      }
+      const d = D[id], fold = this.FOLD[id];
+      let extra = fold && (this.fan() ? fold !== 'final_fix' : true) ? D[fold].rework : 0;
+      return {id, label:id, role:this.N[id].role, wait:d.wait, work:d.work, rework:d.rework + extra, ext:d.ext};
+    });
+  }
+  tot(d) { return d.work + d.rework + d.wait + d.ext; }
+
+  // ---------------------------------------------------------------------------
+  // shared drawing helpers
+  // ---------------------------------------------------------------------------
+  t(key, x, y, str, o = {}) {
+    return React.createElement('text', {key, x, y, fontSize:o.size || 10.5, fill:o.color || this.C.muted,
+      textAnchor:o.anchor || 'start', fontWeight:o.weight || 500, fontFamily:this.mono,
+      stroke:o.halo ? 'white' : undefined, strokeWidth:o.halo ? 4.5 : undefined, paintOrder:'stroke', strokeLinejoin:'round'}, str);
+  }
+  arrow(key, x, y, a, dir, color) {
+    const P = {down:[[x-a,y-a*1.3],[x+a,y-a*1.3]], up:[[x-a,y+a*1.3],[x+a,y+a*1.3]],
+               left:[[x+a*1.3,y-a],[x+a*1.3,y+a]], right:[[x-a*1.3,y-a],[x-a*1.3,y+a]]}[dir];
+    return React.createElement('polygon', {key, points:`${P[0][0]},${P[0][1]} ${P[1][0]},${P[1][1]} ${x},${y}`, fill:color});
+  }
+  port(p, s) {
+    return s === 'r' ? [p.x + p.w, p.y + p.h / 2] : s === 'l' ? [p.x, p.y + p.h / 2]
+         : s === 't' ? [p.x + p.w / 2, p.y] : [p.x + p.w / 2, p.y + p.h];
+  }
+  // the ladder — rise in the gap before each box, valley directly under it
+  ladder(E, items, geo) {
+    const h = React.createElement, C = this.C;
+    const {tY0, tY1, gap, endX, unit} = geo;
+    const split = this.props.splitRework ?? true;
+    let cum = 0, prevY = tY0;
+    items.forEach((r, i) => {
+      const L = r.x, R = r.x + r.w, riseL = L - gap;
+      E.push(h('line', {key:'gd'+i, x1:L+r.w/2, y1:r.guideFrom, x2:L+r.w/2, y2:tY1,
+        stroke:'oklch(0.88 0.01 255)', strokeWidth:1, strokeDasharray:'2 5'}));
+      if (prevY !== tY0) E.push(h('line', {key:'rv'+i, x1:riseL, y1:prevY, x2:riseL, y2:tY0, stroke:C.line, strokeWidth:1.5}));
+      E.push(h('line', {key:'rw'+i, x1:riseL, y1:tY0, x2:L, y2:tY0, stroke:C.line, strokeWidth:1.5}));
+      if (r.wait > 0) E.push(this.t('rwl'+i, (riseL+L)/2, tY0-8, unit(r.wait),
+        {color:C.amberT, anchor:'middle', size:9.5, weight:r.waitHot ? 700 : 500}));
+      E.push(h('line', {key:'rd'+i, x1:L, y1:tY0, x2:L, y2:tY1, stroke:C.line, strokeWidth:1.5}));
+      E.push(h('line', {key:'rk'+i, x1:L, y1:tY1, x2:R, y2:tY1, stroke:C.line, strokeWidth:1.5}));
+      const kv = r.work + r.rework + r.ext;
+      const gW = kv > 0 ? (R-L) * ((r.work + r.ext) / kv) : (R-L);
+      E.push(h('line', {key:'rg'+i, x1:L, y1:tY1, x2:L+gW, y2:tY1, stroke:r.color, strokeWidth:6,
+        strokeDasharray:r.ext > 0 ? '5 3' : undefined}));
+      if (split && r.rework > 0) E.push(h('line', {key:'rr'+i, x1:L+gW, y1:tY1, x2:R, y2:tY1, stroke:C.rose, strokeWidth:6}));
+      if (split && r.rework > 0) E.push(h('text', {key:'rl'+i, x:(L+R)/2, y:tY1+18, fontSize:10, textAnchor:'middle', fontFamily:this.mono},
+        [h('tspan', {key:1, fill:r.inkColor}, unit(r.work + r.ext).replace(/[mhd]$/,'')), h('tspan', {key:2, fill:C.muted}, ' + '), h('tspan', {key:3, fill:C.roseT}, unit(r.rework))]));
+      else E.push(this.t('rl'+i, (L+R)/2, tY1+18, kv > 0 ? unit(kv) : '—', {anchor:'middle', size:10, color:r.inkColor}));
+      cum += r.wait + kv;
+      E.push(this.t('rc'+i, (L+R)/2, tY1+33, geo.cumFmt(cum), {anchor:'middle', size:9, color:'oklch(0.68 0.02 255)', weight:600}));
+      prevY = tY1;
+    });
+    E.push(h('line', {key:'rend', x1:endX, y1:tY1, x2:endX, y2:tY0, stroke:C.line, strokeWidth:1.5}));
+    E.push(this.t('rendl', endX+12, tY0+4, 'Δ ' + geo.cumFmt(cum), {color:C.ink, weight:700, size:13}));
+    E.push(this.t('rch', 2, tY1+33, 'cumulative', {size:8.5, color:'oklch(0.68 0.02 255)', weight:600}));
+    return cum;
+  }
+
+  // ===========================================================================
+  // LEVEL 1 MAP
+  // ===========================================================================
+  cardLay() {
+    const W = 186, GAP = 58, X0 = 66, Y = 150, H = 132;
+    const pos = {};
+    this.C1.forEach((s, i) => { pos[s.id] = {x:X0 + i*(W+GAP), y:Y, w:W, h:H}; });
+    const last = this.C1[this.C1.length-1];
+    return {pos, W, GAP, X0, Y, H, lineEnd:pos[last.id].x + W, tY0:Y+H+52, tY1:Y+H+110,
+            mapW:pos[last.id].x + W + 60, mapH:Y+H+110+96};
+  }
+  cardData() {
+    if (this._c) return this._c;
+    const D = this.derive().D;
+    const codeMins = this.rungs().reduce((a, r) => a + r.wait + r.work + r.rework + r.ext, 0);
+    // a Request-changes at a gate re-runs the stage it sends back to
+    const visits = {};
+    this.C1.forEach(s => visits[s.id] = 1);
+    this.C1.filter(s => s.kind === 'human').forEach(g => { visits[g.back] = 1 / g.approve; visits[g.id] = 1 / g.approve; });
+    const rows = this.C1.map(s => {
+      const v = visits[s.id];
+      const mins = s.kind === 'ai' ? (s.flow === 'code' ? codeMins : s.mins) : 0;
+      const cost = s.kind === 'ai' ? (s.flow === 'code' ? Object.keys(this.N).reduce((a,k) => a + D[k].cost, 0) : s.cost) : 0;
+      return {...s, visits:v, hoursFirst:(s.hours || 0), minsFirst:mins, cost:cost * v,
+              hoursTotal:(s.hours || 0) * v, minsTotal:mins * v};
+    });
+    this._c = {rows, codeMins};
+    return this._c;
+  }
+  buildCard() {
+    const h = React.createElement, C = this.C, E = [];
+    const G = this.cardLay(), {pos} = G, {rows} = this.cardData();
+    const midY = G.Y + G.H / 2;
+
+    E.push(this.t('cb1', 2, 24, 'REWORK — Request changes sends the card back', {size:11, weight:700, color:C.roseT}));
+    E.push(this.t('cb2', 2, G.Y - 14, 'THE CARD STREAM — Next up → Done', {size:11, weight:700, color:C.ink}));
+    E.push(this.t('cb3', 2, G.tY0 - 30, 'TIME — rise = the card sitting still, valley = something happening to it', {size:11, weight:700, color:C.chkT}));
+
+    for (let i = 0; i < rows.length - 1; i++) {
+      const a = pos[rows[i].id], b = pos[rows[i+1].id];
+      E.push(h('line', {key:'cl'+i, x1:a.x+a.w, y1:midY, x2:b.x-9, y2:midY, stroke:C.line, strokeWidth:1.8}));
+      E.push(this.arrow('cla'+i, b.x, midY, 5.5, 'right', C.line));
+    }
+    // Request-changes arcs, above the line
+    rows.filter(r => r.kind === 'human').forEach((g, k) => {
+      const a = pos[g.id], b = pos[g.back];
+      const rate = 1 - g.approve, w = 2.5 + rate * 26, ah = w*0.7+4;
+      const apex = 46 + k * 30;
+      const [ax, ay] = this.port(a, 't'), [bx] = this.port(b, 't'), by = b.y;
+      E.push(h('path', {key:'rc'+k, d:`M${ax},${ay} C${ax},${apex} ${bx},${apex} ${bx},${by-ah*1.2}`,
+        fill:'none', stroke:C.rose, strokeWidth:w, strokeOpacity:0.85}));
+      E.push(this.arrow('rca'+k, bx, by, ah, 'down', C.rose));
+      E.push(this.t('rcl'+k, (ax+bx)/2, apex-9, 'Request changes · ' + Math.round(rate*100) + '% → re-runs ' + g.back,
+        {color:C.roseT, anchor:'middle', weight:700, size:11, halo:true}));
+    });
+    // the drill-down marker on Code
+    {
+      const p = pos['Code'];
+      E.push(h('rect', {key:'dr', x:p.x-7, y:p.y-7, width:p.w+14, height:p.h+14, rx:13,
+        fill:'none', stroke:C.aiT, strokeWidth:1.6, strokeDasharray:'7 5'}));
+      E.push(this.t('drl', p.x + p.w/2, p.y + p.h + 30, '▼ 21 nodes — level 2 below', {anchor:'middle', color:C.aiT, size:10.5, weight:700}));
+    }
+    // ladder
+    const items = rows.map(r => {
+      const p = pos[r.id], isQ = r.kind === 'queue', isH = r.kind === 'human';
+      return {x:p.x, w:p.w, guideFrom:p.y + p.h + 6,
+        wait:isQ || isH ? r.hoursTotal : 0, waitHot:r.hoursTotal >= 7,
+        work:isQ || isH ? 0 : r.minsFirst / 60, rework:isQ || isH ? 0 : (r.minsTotal - r.minsFirst) / 60, ext:0,
+        color:r.kind === 'ai' ? C.ai : r.kind === 'done' ? C.green : C.amber,
+        inkColor:r.kind === 'ai' ? C.aiT : r.kind === 'done' ? C.greenT : C.amberT};
+    });
+    const total = this.ladder(E, items, {tY0:G.tY0, tY1:G.tY1, gap:G.GAP, endX:G.lineEnd,
+      unit:(x) => this.hrs(x), cumFmt:(x) => this.hrs(x)});
+    return h('svg', {width:G.mapW, height:G.mapH, viewBox:`0 0 ${G.mapW} ${G.mapH}`, style:{display:'block', overflow:'visible'}}, E);
+  }
+
+  // ===========================================================================
+  // LEVEL 2 MAP
+  // ===========================================================================
+  NW = 150; NH = 138; GAP = 48; X0 = 76; FIXW = 136; FIXH = 92; FIXY = 188; LINE_Y = 340;
+  lay() {
+    const fan = this.fan(), NW = this.NW, SLOT = NW + this.GAP;
+    const line = this.lineOrder(), slot = {};
+    line.forEach((id, i) => slot[id] = i);
+    const sx = (i) => this.X0 + i * SLOT;
+    const pos = {};
+    line.forEach((id, i) => { if (id !== '__FAN__') pos[id] = {x:sx(i), y:this.LINE_Y, w:NW, h:this.NH}; });
+    if (fan) this.FANIDS.forEach((id, k) => { pos[id] = {x:sx(slot['__FAN__']), y:this.LINE_Y - 50 + k * 88, w:NW, h:80}; });
+    const at = (id, s) => { pos[id] = {x:sx(s) + (NW - this.FIXW)/2, y:this.FIXY, w:this.FIXW, h:this.FIXH}; };
+    at('fix_findings', slot.spec_review + 0.5);
+    at('sync_fix', slot.sync);
+    at('final_fix', fan ? slot['__FAN__'] + 0.6 : slot.final_review + 0.5);
+    at('resync_fix', slot.reverify);
+    at('github_fix', slot.deploy);
+    const lineEnd = sx(line.length - 1) + NW;
+    const tY0 = fan ? this.LINE_Y + 250 : this.LINE_Y + this.NH + 52;
+    return {pos, slot, sx, line, fan, SLOT, lineEnd, tY0, tY1:tY0 + 58, W:lineEnd + 300, mapH:tY0 + 58 + 104};
+  }
+  buildMap() {
+    const h = React.createElement, C = this.C, N = this.N, E = [];
+    const G = this.lay(), {pos, slot, sx, line, fan, tY0, tY1} = G;
+    const {D} = this.derive();
+    const uniform = (this.props.loopWidth ?? 'By minutes') === 'Uniform';
+    const dup = this.props.showDuplication ?? true;
+    const maxRe = Math.max(...Object.keys(N).filter(k => N[k].fix).map(k => D[k].rework));
+    const sw = (m) => uniform ? 3.5 : 2 + (Math.max(m, 0.2) / maxRe) * 13;
+    const midY = this.LINE_Y + this.NH / 2;
+
+    E.push(this.t('bl1', 2, 24, 'REWORK — everything above the line exists only because something failed', {size:11, weight:700, color:C.roseT}));
+    E.push(this.t('bl2', 2, this.LINE_Y - 14, 'THE STREAM — one line, in execution order', {size:11, weight:700, color:C.ink}));
+    E.push(this.t('bl3', 2, tY0 - 30, 'TIME — each rung sits under the node it measures', {size:11, weight:700, color:C.chkT}));
+
+    if (dup) {
+      [[['sync','precommit','browser'], 'VERIFY BLOCK ①'],
+       [['resync','reverify','rebrowser'], 'VERIFY BLOCK ② — byte-identical run commands']].forEach(([ids, label], k) => {
+        const a = pos[ids[0]], b = pos[ids[ids.length-1]];
+        E.push(h('rect', {key:'dup'+k, x:a.x-14, y:a.y-16, width:(b.x+b.w)-a.x+28, height:a.h+32, rx:12,
+          fill:'oklch(0.62 0.16 22)', fillOpacity:0.045, stroke:'oklch(0.78 0.09 22)', strokeWidth:1.4, strokeDasharray:'6 5'}));
+        E.push(this.t('dupl'+k, a.x-10, a.y+a.h+30, label, {size:10, weight:700, color:C.roseT}));
+      });
+    }
+    for (let i = 0; i < line.length - 1; i++) {
+      const A = line[i], B = line[i+1];
+      const ax = A === '__FAN__' ? sx(i) + this.NW : pos[A].x + pos[A].w;
+      const bx = B === '__FAN__' ? sx(i+1) : pos[B].x;
+      E.push(h('line', {key:'ln'+i, x1:ax, y1:midY, x2:bx-9, y2:midY, stroke:C.line, strokeWidth:1.8}));
+      E.push(this.arrow('lna'+i, bx, midY, 5.5, 'right', C.line));
+    }
+    if (fan) {
+      const fx = sx(slot['__FAN__']);
+      const top = pos.final_review.y - 16, bot = pos.acceptance.y + pos.acceptance.h + 16;
+      const FB = fx - 27, JB = fx + this.NW + 22;
+      E.push(h('rect', {key:'fkb', x:FB, y:top, width:5, height:bot-top, rx:2, fill:C.ink}));
+      E.push(this.t('fkl', FB+2, top-8, 'fork', {anchor:'middle', size:10, weight:600, color:C.ink}));
+      E.push(h('rect', {key:'jnb', x:JB, y:top, width:5, height:bot-top, rx:2, fill:C.ink}));
+      E.push(this.t('jnl', JB+2, top-8, 'join', {anchor:'middle', size:10, weight:600, color:C.ink}));
+      const tots = this.FANIDS.map(i => this.tot(D[i])), crit = Math.max(...tots);
+      this.FANIDS.forEach((id, k) => {
+        const p = pos[id], y = p.y + p.h/2, isC = this.tot(D[id]) === crit;
+        E.push(h('line', {key:'fki'+k, x1:FB+5, y1:y, x2:p.x-9, y2:y, stroke:C.line, strokeWidth:1.5}));
+        E.push(this.arrow('fkia'+k, p.x, y, 5, 'right', C.line));
+        E.push(h('line', {key:'fko'+k, x1:p.x+p.w, y1:y, x2:JB, y2:y,
+          stroke:isC ? C.ink : 'oklch(0.74 0.02 255)', strokeWidth:isC ? 2.6 : 1.5, strokeDasharray:isC ? undefined : '4 4'}));
+        E.push(this.t('fkt'+k, (p.x+p.w+JB)/2, y-7, isC ? 'critical' : 'slack ' + this.f(crit - this.tot(D[id])),
+          {anchor:'middle', size:9, weight:isC ? 700 : 500, color:isC ? C.ink : C.muted, halo:true}));
+      });
+    }
+    // check → fix
+    Object.keys(this.FIXOF).forEach((cid, k) => {
+      const target = this.FIXOF[cid];
+      if (!pos[cid] || !pos[target]) return;
+      const a = pos[cid], b = pos[target], d = D[cid], w = sw(d.rework), ah = w*0.7+4;
+      const onLine = !N[target].fix;   // merge → resync lands back on the stream
+      const [ax, ay] = this.port(a, 't');
+      const [bx] = this.port(b, 't'), by = b.y;
+      const apex = onLine ? 128 : undefined;
+      if (onLine) {
+        E.push(h('path', {key:'cf'+k, d:`M${ax},${ay} C${ax},${apex} ${bx},${apex} ${bx},${by-ah*1.2}`,
+          fill:'none', stroke:C.rose, strokeWidth:w, strokeOpacity:0.82}));
+        E.push(this.arrow('cfa'+k, bx, by, ah, 'down', C.rose));
+        E.push(this.t('cfl'+k, (ax+bx)/2, apex-9, cid + ' failed · ×' + d.sends + ' → ' + target,
+          {color:C.roseT, anchor:'middle', weight:700, size:10, halo:true}));
+      } else {
+        const [bx2, by2] = this.port(b, 'b');
+        E.push(h('path', {key:'cf'+k, d:`M${ax},${ay} C${ax},${ay-40} ${bx2},${by2+40} ${bx2},${by2+ah*1.2}`,
+          fill:'none', stroke:C.rose, strokeWidth:w, strokeOpacity:0.8}));
+        E.push(this.arrow('cfa'+k, bx2, by2, ah, 'up', C.rose));
+        E.push(this.t('cfl'+k, (ax+bx2)/2 + 6, (ay+by2)/2 + 3, '×' + d.sends,
+          {color:C.roseT, weight:700, size:9.5, halo:true, anchor:'middle'}));
+      }
+    });
+    // fix → re-entry
+    const slotOf = (id) => (pos[id].x - this.X0) / G.SLOT;
+    Object.keys(this.RETURNS).forEach((fid, k) => {
+      const target = this.RETURNS[fid], a = pos[fid], b = pos[target], d = D[fid];
+      const w = sw(d.rework), ah = w*0.7+4;
+      const span = Math.abs(slotOf(fid) - slotOf(target));
+      const apex = Math.max(44, 152 - span * 22);
+      const [ax, ay] = this.port(a, 't'), [bx] = this.port(b, 't'), by = b.y;
+      E.push(h('path', {key:'fr'+k, d:`M${ax},${ay} C${ax},${apex} ${bx},${apex} ${bx},${by-ah*1.2}`,
+        fill:'none', stroke:C.rose, strokeWidth:w, strokeOpacity:0.88}));
+      E.push(this.arrow('fra'+k, bx, by, ah, 'down', C.rose));
+      const big = span >= 2;
+      E.push(this.t('frl'+k, (ax+bx)/2, apex - 9, big
+        ? '⟲ REWIND to ' + target + ' · ' + d.laps + ' laps re-run every node between'
+        : '→ ' + target + ' · ×' + d.laps, {color:C.roseT, anchor:'middle', weight:700, size:big ? 11.5 : 10, halo:true}));
+    });
+    // foreach loop-back
+    {
+      const a = pos.quality_review, b = pos.implement, ah = 7, apex = 104;
+      const [ax, ay] = this.port(a, 't'), [bx] = this.port(b, 't'), by = b.y;
+      E.push(h('path', {key:'fo', d:`M${ax+30},${ay} C${ax+30},${apex} ${bx+30},${apex} ${bx+30},${by-ah*1.2}`,
+        fill:'none', stroke:C.gray, strokeWidth:4.5, strokeDasharray:'8 6', strokeOpacity:0.85}));
+      E.push(this.arrow('foa', bx+30, by, ah, 'down', C.gray));
+      E.push(this.t('fol', (ax+bx)/2 + 30, apex - 9, 'foreach_remaining · next sub-task · planned, not waste',
+        {color:C.grayT, anchor:'middle', weight:600, size:10.5, halo:true}));
+    }
+    // the one queue
+    {
+      const x = 20, y = this.LINE_Y + 46;
+      E.push(h('polygon', {key:'q0', points:`${x},${y+20} ${x+12},${y} ${x+24},${y+20}`, fill:C.amber}));
+      E.push(this.t('q0l', x+12, y+35, '2.4', {anchor:'middle', color:C.amberT, size:10.5, weight:700}));
+      E.push(this.t('q0s', x-16, y-21, 'queued for the ONE', {color:C.amberT, size:9.5, weight:600}));
+      E.push(this.t('q0s2', x-16, y-10, 'exclusive slot', {color:C.amberT, size:9.5, weight:700}));
+    }
+    // terminals
+    {
+      const termX = G.lineEnd + 58, a = pos.post, [ax, ay] = this.port(a, 'r');
+      E.push(h('line', {key:'dn0', x1:ax, y1:ay, x2:termX-9, y2:ay, stroke:C.green, strokeWidth:2.4}));
+      E.push(this.arrow('dn0a', termX, ay, 6, 'right', C.green));
+      const term = (key, y, label, sub, ink, bg, bd) => {
+        E.push(h('rect', {key:'tm'+key, x:termX, y, width:184, height:54, rx:10, fill:bg, stroke:bd, strokeWidth:1.5}));
+        E.push(this.t('tml'+key, termX+14, y+23, label, {color:ink, weight:700, size:12}));
+        E.push(this.t('tms'+key, termX+14, y+40, sub, {color:ink, weight:500, size:10}));
+      };
+      term('done', ay-27, 'done → Review', (this.RUNS-this.PARKED) + ' of ' + this.RUNS + ' runs · 91%',
+        'oklch(0.36 0.11 155)', 'oklch(0.96 0.03 155)', 'oklch(0.80 0.09 155)');
+      term('park', ay+50, '⏸ needs_input', this.PARKED + ' runs · the baton passes to a human',
+        'oklch(0.44 0.11 65)', 'oklch(0.97 0.035 75)', 'oklch(0.84 0.08 70)');
+      E.push(h('path', {key:'pk0', d:`M${pos.implement.x + 40},${this.LINE_Y + this.NH + 8} L${pos.implement.x + 40},${ay+77} L${termX-9},${ay+77}`,
+        fill:'none', stroke:'oklch(0.82 0.08 70)', strokeWidth:2, strokeDasharray:'5 4'}));
+      E.push(this.arrow('pk0a', termX, ay+77, 6, 'right', 'oklch(0.82 0.08 70)'));
+      E.push(this.t('pkn', termX, ay+124, '8 of the 21 nodes can park here', {color:C.amberT, size:10, weight:600}));
+    }
+    ['implement','quality_review','smoke'].forEach((id, k) => {
+      const p = pos[id], r = 11, cx = p.x + p.w - 9, cy = p.y - 9, pt = [];
+      for (let i = 0; i < 10; i++) { const ang = -Math.PI/2 + i*Math.PI/5, rr = i%2 ? r*0.42 : r; pt.push((cx+rr*Math.cos(ang)).toFixed(1)+','+(cy+rr*Math.sin(ang)).toFixed(1)); }
+      E.push(h('polygon', {key:'kz'+k, points:pt.join(' '), fill:'oklch(0.80 0.14 70)'}));
+    });
+
+    const items = this.rungs().map((r, i) => {
+      const isFan = r.id === '__FAN__';
+      const p = isFan ? {x:sx(i), w:this.NW} : pos[r.id];
+      return {x:p.x, w:p.w, guideFrom:(isFan ? pos.acceptance.y + pos.acceptance.h : this.LINE_Y + this.NH) + 6,
+        wait:r.wait, waitHot:r.wait >= 2, work:r.work, rework:r.rework, ext:r.ext,
+        color:r.ext > 0 ? C.amber : r.role === 'do' ? C.green : C.chk,
+        inkColor:r.ext > 0 ? C.amberT : r.role === 'do' ? C.greenT : C.chkT};
+    });
+    this.ladder(E, items, {tY0, tY1, gap:this.GAP, endX:G.lineEnd,
+      unit:(x) => this.f(x), cumFmt:(x) => this.hm(x)});
+    E.push(this.t('rfold', 2, tY1+52, 'a fix’s minutes are folded into the rung of the check that causes most of them', {size:9, color:'oklch(0.68 0.02 255)'}));
+
+    return h('svg', {width:G.W, height:G.mapH, viewBox:`0 0 ${G.W} ${G.mapH}`, style:{display:'block', overflow:'visible'}}, E);
+  }
+
+  // ===========================================================================
+  QGROUPS = [
+    {title:'WHERE IS THE TIME GOING?', c:'oklch(0.44 0.08 215)', qs:[
+      {lv:'CARD', q:'How long does a card take, Next up → Done, in wall-clock?',
+       where:'the card lead-time bar, and the Δ at the end of the level-1 ladder', drawn:'YES', data:'NO',
+       note:'a card’s stage history is not recorded — no transition timestamps, so every queue and both gates are unmeasurable today'},
+      {lv:'CARD', q:'Which state holds the card longest — and is it a queue, a gate, or real work?',
+       where:'the tallest rise on the level-1 ladder; colour says who held the baton', drawn:'YES', data:'NO',
+       note:'same gap: needs stage-transition timestamps'},
+      {lv:'FLOW', q:'Which node eats the most of a run?',
+       where:'the deepest valley on the level-2 ladder — the node sits directly above it', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'How much of a run is value-add, checking, rework and waiting?',
+       where:'valley colour, and the four-segment run lead-time bar', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'What is the biggest wait inside a run, and is anything holding it?',
+       where:'the tallest rise on the level-2 ladder, versus the ⏸ terminal', drawn:'YES', data:'PARTIAL',
+       note:'inter-node gaps are derivable (next.started_at − prev.finished_at) but no query computes them'},
+    ]},
+    {title:'WHERE IS THE WASTE?', c:'oklch(0.52 0.15 22)', qs:[
+      {lv:'CARD', q:'How often does a human send work back, and what does that cost?',
+       where:'the Request-changes arcs — thickness is the rate, and the visits badge shows the re-runs it forces', drawn:'YES', data:'PARTIAL',
+       note:'approve/request-changes is recorded per card; attributing the re-run cost to it needs the stage history'},
+      {lv:'FLOW', q:'Which check rejects work most often?',
+       where:'the %C&A bar along the bottom edge of each check', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'Which rework loop costs the most minutes — not the most laps?',
+       where:'arc thickness is minutes; the label carries laps', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'How much is redone because a fix rewinds past nodes that already passed?',
+       where:'the ⟲ REWIND arc, and the REWIND COST tile', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'Is the second verify block earning its keep?',
+       where:'the two dashed VERIFY BLOCK frames and their catch rates', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'What fraction of runs clear every check first try?',
+       where:'the ROLLED 1ST-PASS tile — per run and per task, since the inner loop runs N times', drawn:'YES', data:'YES'},
+    ]},
+    {title:'WHERE DOES THE BATON SIT?', c:'oklch(0.50 0.14 250)', qs:[
+      {lv:'CARD', q:'What share of a card’s life is an agent working, a human deciding, or nobody?',
+       where:'the three colours of the card lead-time bar — the headline number on this page', drawn:'YES', data:'NO',
+       note:'the defining Relay question, and the one nothing can answer yet'},
+      {lv:'FLOW', q:'How often does a run stop and need a human, and at which node?',
+       where:'the ⏸ needs_input terminal', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'How long does a parked run wait on a person?',
+       where:'the ⏸ terminal', drawn:'PARTIAL', data:'NO',
+       note:'runs.status is current-state only; park duration is stored nowhere'},
+      {lv:'FLOW', q:'What fraction of runs never reach Review, and where do they die?',
+       where:'the done vs ⏸ terminals', drawn:'YES', data:'YES'},
+    ]},
+    {title:'WHAT DOES IT COST?', c:'oklch(0.48 0.14 292)', qs:[
+      {lv:'CARD', q:'What does a card cost across all three flows?',
+       where:'the $ row on each AI state — and the re-runs a Request-changes forces are already in it', drawn:'YES', data:'YES'},
+      {lv:'FLOW', q:'Which node dominates the bill, and what does one rework lap cost?',
+       where:'the $ row per node; fix nodes carry $ per lap rather than a run average', drawn:'YES', data:'YES'},
+    ]},
+    {title:'WHAT SHOULD I CHANGE FIRST?', c:'oklch(0.40 0.10 155)', qs:[
+      {lv:'BOTH', q:'If I could change one thing, which buys the most?',
+       where:'the kaizen bursts — ranked against the CARD clock, which reorders every engine-level win', drawn:'YES', data:'PARTIAL',
+       note:'the ranking is only trustworthy once level-1 data exists; today the queue and gate figures are estimates'},
+      {lv:'FLOW', q:'What would fanning out the final checks actually save?',
+       where:'the topology toggle — same per-visit times, re-solved as fork/join', drawn:'YES', data:'YES'},
+      {lv:'BOTH', q:'Is any of this getting better over time?',
+       where:'nowhere — both maps are single snapshots', drawn:'NO', data:'YES',
+       note:'metric_windows/0 already supports 7d / 30d / all; a trend needs a second view, deliberately out of scope'},
+    ]},
+  ];
+
+  renderVals() {
+    const C = this.C, N = this.N;
+    const {D} = this.derive();
+    const G = this.lay(), pos = G.pos, fan = G.fan;
+    const CG = this.cardLay(), {rows: crows} = this.cardData();
+    const money = (x) => '$' + (x < 10 ? x.toFixed(2) : x.toFixed(1));
+
+    // ---- level 1 boxes ----
+    const cardNodes = crows.map(r => {
+      const p = CG.pos[r.id];
+      const kindMap = {queue:{lab:'QUEUE', c:'oklch(0.66 0.11 70)', bg:'oklch(0.975 0.025 75)', bd:'oklch(0.85 0.07 70)'},
+                       ai:{lab:'AI', c:C.ai, bg:'oklch(0.975 0.02 292)', bd:'oklch(0.80 0.07 292)'},
+                       human:{lab:'HUMAN', c:C.hum, bg:'oklch(0.975 0.02 250)', bd:'oklch(0.80 0.07 250)'},
+                       done:{lab:'DONE', c:'oklch(0.52 0.12 155)', bg:'oklch(0.975 0.02 155)', bd:'oklch(0.80 0.08 155)'}}[r.kind];
+      const rows = [];
+      if (r.kind === 'queue') {
+        rows.push({k:'Median wait', v:this.hrs(r.hoursTotal), c:C.amberT, w:700});
+        rows.push({k:'Cards here', v:String(r.wip), c:C.ink, w:500});
+        rows.push({k:'Baton', v:'nobody', c:C.muted, w:500});
+      } else if (r.kind === 'ai') {
+        rows.push({k:'Work', v:this.hm(r.minsFirst), c:C.aiT, w:700});
+        rows.push({k:'Nodes', v:String(r.nodes), c:r.nodes > 10 ? C.roseT : C.ink, w:r.nodes > 10 ? 700 : 500});
+        rows.push({k:'$ / card', v:money(r.cost), c:C.aiT, w:500});
+      } else if (r.kind === 'human') {
+        rows.push({k:'Median to decide', v:this.hrs(r.hoursFirst), c:C.humT, w:700});
+        rows.push({k:'Approve', v:Math.round(r.approve*100) + '%', c:r.approve < 0.85 ? C.roseT : C.ink, w:r.approve < 0.85 ? 700 : 500});
+        rows.push({k:'Sends back', v:Math.round((1-r.approve)*100) + '%', c:C.roseT, w:700});
+      } else {
+        rows.push({k:'Cards / week', v:'14', c:C.greenT, w:700});
+      }
+      return {name:r.id, x:p.x, y:p.y, w:p.w, h:p.h, rows,
+        visits: r.visits > 1.001 ? '×' + r.visits.toFixed(2) : '',
+        visitsC: r.visits > 1.001 ? C.roseT : C.muted,
+        roleLabel:kindMap.lab, roleColor:kindMap.c, headBg:kindMap.bg, border:kindMap.bd,
+        bw: r.id === 'Code' ? 2 : 1, borderStyle:'solid'};
+    });
+
+    const hQueue = crows.filter(r => r.kind === 'queue').reduce((a, r) => a + r.hoursTotal, 0);
+    const hHuman = crows.filter(r => r.kind === 'human').reduce((a, r) => a + r.hoursTotal, 0);
+    const hAI    = crows.filter(r => r.kind === 'ai').reduce((a, r) => a + r.minsTotal / 60, 0);
+    const cardTot = hQueue + hHuman + hAI;
+    const codeHrs = crows.find(r => r.id === 'Code').minsTotal / 60;
+    // value-add at card level: only the Do-node work inside the flows
+    const flowVA = this.rungs().filter(r => r.role === 'do').reduce((a, r) => a + r.work, 0);
+    const cardVA = (flowVA * crows.find(r => r.id === 'Code').visits + crows.find(r => r.id === 'Spec').minsTotal + crows.find(r => r.id === 'Plan').minsTotal) / 60;
+    const cardBand = [
+      {grow:hAI,    bg:C.ai,   ink:'oklch(1 0 0)', v:'agent working ' + this.hrs(hAI)},
+      {grow:hHuman, bg:C.hum,  ink:'oklch(1 0 0)', v:'human deciding ' + this.hrs(hHuman)},
+      {grow:hQueue, bg:C.hatch, ink:'oklch(0.42 0.10 65)', v:'nobody · queued ' + this.hrs(hQueue)},
+    ];
+    const cardCost = crows.reduce((a, r) => a + (r.cost || 0), 0);
+    const tile = (k, v, c, sub, hot) => ({k, v, c, sub,
+      bd:hot ? 'oklch(0.86 0.07 22)' : 'oklch(0.92 0.006 255)', bg:hot ? 'oklch(0.985 0.012 22)' : 'oklch(1 0 0)'});
+    const cardStats = [
+      tile('CARD LEAD TIME', this.hrs(cardTot), C.ink, 'Next up → Done'),
+      tile('FLOW EFFICIENCY', (cardVA / cardTot * 100).toFixed(1) + '%', C.roseT, 'value-add ÷ card lead time', true),
+      tile('BATON: NOBODY', Math.round(hQueue / cardTot * 100) + '%', C.amberT, this.hrs(hQueue) + ' in queues', true),
+      tile('BATON: HUMAN', Math.round(hHuman / cardTot * 100) + '%', C.humT, this.hrs(hHuman) + ' at two gates'),
+      tile('BATON: AGENT', Math.round(hAI / cardTot * 100) + '%', C.aiT, this.hrs(hAI) + ' across three flows'),
+      tile('$ / CARD', money(cardCost), C.aiT, 'all three flows, re-runs included'),
+    ];
+
+    // ---- level 2 boxes — three rows each ----
+    const nodes = Object.keys(N).map(id => {
+      const n = N[id], p = pos[id], d = D[id], isFix = !!n.fix, compact = fan && n.fan;
+      const typeLabel = n.kind === 'agent' ? 'agent · ' + n.model : n.kind === 'wait' ? 'shell · external' : n.kind;
+      const rows = [];
+      if (isFix) {
+        rows.push({k:'Rework', v:this.f(d.rework), c:C.roseT, w:700});
+        rows.push({k:'Laps /128', v:String(d.laps), c:C.roseT, w:700});
+        rows.push({k:'$ / lap', v:money(n.cost), c:C.aiT, w:500});
+      } else if (n.role === 'do') {
+        rows.push({k:'Work', v:this.f(d.work), c:C.greenT, w:500});
+        rows.push({k:'Wait', v:this.f(d.wait), c:C.amberT, w:500});
+        rows.push({k:'$ / run', v:money(d.cost), c:C.aiT, w:500});
+      } else {
+        rows.push({k:n.ext ? 'External' : 'Work', v:this.f(d.work), c:n.ext ? C.amberT : C.chkT, w:500});
+        rows.push({k:'1st-try pass', v:Math.round(n.pass*100) + '%', c:n.pass < 0.8 ? C.roseT : C.ink, w:n.pass < 0.8 ? 700 : 500});
+        if (!compact) rows.push({k:'$ / run', v:money(d.cost), c:C.aiT, w:500});
+      }
+      return {name:id, type:typeLabel, x:p.x, y:p.y, w:p.w, h:p.h, rows,
+        visits:'×' + d.visits.toFixed(2), visitsC:d.visits > 1.25 ? C.roseT : C.muted,
+        roleLabel:n.role.toUpperCase(),
+        roleColor:n.role === 'do' ? 'oklch(0.52 0.12 155)' : n.role === 'check' ? 'oklch(0.52 0.09 215)' : 'oklch(0.56 0.16 22)',
+        border:n.hot ? C.rose : isFix ? C.rose : n.kind === 'wait' ? 'oklch(0.80 0.08 70)' : n.role === 'check' ? 'oklch(0.74 0.06 215)' : 'oklch(0.82 0.02 255)',
+        bw:n.hot ? 2 : 1, borderStyle:isFix ? 'dashed' : 'solid',
+        headBg:n.hot ? 'oklch(0.975 0.02 22)' : n.kind === 'wait' ? 'oklch(0.975 0.025 75)' : n.role === 'do' ? 'oklch(0.975 0.02 155)' : n.role === 'check' ? 'oklch(0.975 0.015 215)' : 'oklch(0.975 0.02 22)',
+        isCheck:n.role === 'check', pass:Math.round((n.pass || 0) * 100)};
+    });
+
+    const rg = this.rungs();
+    const va = rg.filter(r => r.role === 'do').reduce((a, r) => a + r.work, 0);
+    const chk = rg.filter(r => r.role === 'check').reduce((a, r) => a + r.work, 0);
+    const rw = rg.reduce((a, r) => a + r.rework, 0);
+    const wt = rg.reduce((a, r) => a + r.wait, 0);
+    const ex = rg.reduce((a, r) => a + r.ext, 0);
+    const runWall = va + chk + rw + wt + ex;
+    const pctOf = (x, of) => Math.round(x / of * 100) + '%';
+    const seg = (grow, bg, ink, v) => ({grow, bg, ink, v});
+    const bands = [
+      {k:'PROCESS TIME', sub:'touch time, critical path', c:C.greenT, total:this.hm(va + chk), segs:[
+        seg(va, C.green, 'oklch(1 0 0)', 'value-add ' + this.f(va)),
+        seg(chk, C.chk, 'oklch(1 0 0)', 'checking ' + this.f(chk))]},
+      {k:'RUN WALL-CLOCK', sub:'engine start → finish', c:C.ink, total:this.hm(runWall), segs:[
+        seg(va, C.green, 'oklch(1 0 0)', this.f(va)),
+        seg(chk, C.chk, 'oklch(1 0 0)', this.f(chk)),
+        seg(rw, C.rose, 'oklch(1 0 0)', 'rework ' + this.f(rw)),
+        seg(wt, C.hatch, 'oklch(0.44 0.10 65)', 'wait ' + this.f(wt)),
+        seg(ex, 'oklch(0.86 0.09 70)', 'oklch(0.36 0.10 65)', 'deploy ' + this.f(ex))]},
+    ];
+
+    const spend = Object.keys(N).reduce((a, k) => a + D[k].cost, 0);
+    const rewindCost = D.final_fix.rework + ['precommit','browser','final_review','smoke','acceptance'].reduce((a, k) => a + D[k].rework, 0);
+    const rtyRun = Object.keys(N).filter(k => N[k].role === 'check' && !N[k].dup && !N[k].ext).reduce((a, k) => a * N[k].pass, 1);
+    const rtyTask = Math.pow(N.spec_review.pass * N.quality_review.pass, this.NAVG);
+    const fanTots = this.FANIDS.map(i => this.tot(D[i]));
+    const fanSave = fanTots.reduce((a,b) => a+b, 0) - Math.max(...fanTots);
+    const dupCost = ['resync','reverify','rebrowser','resync_fix'].reduce((a, k) => a + this.tot(D[k]), 0);
+    const innerRe = ['implement','spec_review','quality_review','fix_findings'].reduce((a, k) => a + D[k].rework, 0);
+    const stats = [
+      tile('RUN WALL-CLOCK', this.hm(runWall), C.ink, pctOf(runWall/60, cardTot) + ' of the card'),
+      tile('FLOW EFFICIENCY', pctOf(va, runWall), C.greenT, 'value-add ÷ run — ' + (cardVA/cardTot*100).toFixed(1) + '% against the card', true),
+      tile('REWORK', pctOf(rw, runWall), C.roseT, this.f(rw) + ' on the line', true),
+      tile('REWIND COST', this.f(rewindCost), C.roseT, 'final_fix + the re-checks it forces', true),
+      tile('ROLLED 1ST-PASS', Math.round(rtyRun*100) + '% / ' + Math.round(rtyTask*100) + '%', C.roseT, 'per run / per task (×' + this.NAVG.toFixed(1) + ')'),
+      tile('SPEND / RUN', money(spend), C.aiT, money(Object.keys(N).filter(k => N[k].fix).reduce((a,k) => a + D[k].cost, 0)) + ' of it rework'),
+    ];
+
+    // ---- questions ----
+    const chip = (v) => v === 'YES' ? {ik:'oklch(0.36 0.11 155)', bg:'oklch(0.96 0.03 155)', bd:'oklch(0.82 0.08 155)'}
+                      : v === 'PARTIAL' ? {ik:'oklch(0.44 0.11 65)', bg:'oklch(0.97 0.035 75)', bd:'oklch(0.86 0.08 70)'}
+                      : {ik:'oklch(0.48 0.15 22)', bg:'oklch(0.975 0.025 22)', bd:'oklch(0.86 0.09 22)'};
+    const lvChip = {CARD:{ik:'oklch(0.42 0.13 250)', bg:'oklch(0.96 0.03 250)'},
+                    FLOW:{ik:'oklch(0.42 0.08 215)', bg:'oklch(0.96 0.02 215)'},
+                    BOTH:{ik:'oklch(0.46 0.02 255)', bg:'oklch(0.96 0.004 255)'}};
+    let qn = 0;
+    const qGroups = this.QGROUPS.map(g => ({title:g.title, c:g.c, qs:g.qs.map(q => {
+      qn += 1; const d = chip(q.drawn), t = chip(q.data), lv = lvChip[q.lv];
+      return {n:String(qn).padStart(2,'0'), q:q.q, where:q.where, note:q.note || '', drawn:q.drawn, data:q.data,
+        level:q.lv, lvIk:lv.ik, lvBg:lv.bg,
+        edge:(q.drawn === 'NO' || q.data === 'NO') ? 'oklch(0.86 0.09 22)' : (q.drawn === 'YES' && q.data === 'YES') ? 'oklch(0.82 0.08 155)' : 'oklch(0.86 0.08 70)',
+        dIk:d.ik, dBg:d.bg, dBd:d.bd, tIk:t.ik, tBg:t.bg, tBd:t.bd};
+    })}));
+    const flat = this.QGROUPS.flatMap(g => g.qs);
+    const qTally = [
+      {k:'questions', v:String(flat.length), c:C.ink, border:'oklch(0.92 0.006 255)', bg:'oklch(1 0 0)'},
+      {k:'drawn & measurable', v:String(flat.filter(q => q.drawn==='YES' && q.data==='YES').length), c:'oklch(0.36 0.11 155)', border:'oklch(0.82 0.08 155)', bg:'oklch(0.97 0.02 155)'},
+      {k:'drawn, data partial', v:String(flat.filter(q => q.data==='PARTIAL' || q.drawn==='PARTIAL').length), c:'oklch(0.44 0.11 65)', border:'oklch(0.86 0.08 70)', bg:'oklch(0.98 0.025 75)'},
+      {k:'blocked — needs schema', v:String(flat.filter(q => q.data==='NO' || q.drawn==='NO').length), c:'oklch(0.48 0.15 22)', border:'oklch(0.86 0.09 22)', bg:'oklch(0.98 0.018 22)'},
+    ];
+
+    // ---- kaizen, ranked against the CARD clock ----
+    const hrPct = (h2) => (h2 / cardTot * 100).toFixed(1) + '%';
+    const K = [
+      {gain:this.hrs(hQueue * 0.5), h:hQueue*0.5, c:C.amber, title:'Halve the queues', tag:'BOARD / WIP',
+       tagC:'oklch(0.44 0.11 65)', tagBg:'oklch(0.97 0.035 75)',
+       body:'Three queues hold the card ' + this.hrs(hQueue) + ' with nobody working it. No engine change touches this — it is a WIP and pull-policy question, and it is the single largest block on the page.'},
+      {gain:this.hrs(hHuman * 0.5), h:hHuman*0.5, c:C.hum, title:'Halve time-to-decide at the gates', tag:'NOTIFY / MOBILE',
+       tagC:'oklch(0.42 0.13 250)', tagBg:'oklch(0.96 0.03 250)',
+       body:'Two human gates cost ' + this.hrs(hHuman) + ' between them. This is what the mobile inbox is for — the work is done and waiting on a person to look at it.'},
+      {gain:this.hrs(innerRe/60), h:innerRe/60, c:C.rose, title:'Land the per-task fan-out', tag:'foreach → :parallel',
+       tagC:'oklch(0.48 0.15 22)', tagBg:'oklch(0.975 0.025 22)',
+       body:'The inner loop is the widest valley in level 2 and runs serially ' + this.NAVG.toFixed(1) + '× a run. The biggest engine-level win — and still worth less than either human one.'},
+      {gain:this.hrs(rewindCost*0.6/60), h:rewindCost*0.6/60, c:C.rose, title:'Stop final_fix rewinding to precommit', tag:'ONE EDGE',
+       tagC:'oklch(0.48 0.15 22)', tagBg:'oklch(0.975 0.025 22)',
+       body:'An acceptance failure re-runs precommit, browser, final_review and smoke. Returning the fix to the check that raised it recovers most of ' + this.f(rewindCost) + '. Cheapest change on the page.'},
+      {gain:this.hrs(dupCost/60), h:dupCost/60, c:C.chk, title:'Collapse verify block ②', tag:'ADR 0011 §2',
+       tagC:'oklch(0.42 0.08 215)', tagBg:'oklch(0.96 0.02 215)',
+       body:'Eight nodes re-running byte-identical commands, catching ' + (D.reverify.sends + D.rebrowser.sends) + ' problems per ' + this.RUNS + ' runs. Collapsing it takes 21 nodes toward 14 — buy the simplicity, not the minutes.'},
+    ].sort((a, b) => b.h - a.h).map(k => ({...k, pct:hrPct(k.h)}));
+
+    // ---- fan-out panels ----
+    const crit = Math.max(...fanTots);
+    const fanRows = this.FANIDS.map(id => {
+      const isC = this.tot(D[id]) === crit;
+      return {id, bw:isC ? 1.5 : 1, bd:isC ? 'oklch(0.28 0.02 255)' : 'oklch(0.72 0.06 215)',
+        lw:isC ? 2.5 : 1.5, ls:isC ? 'solid' : 'dashed', lc:isC ? 'oklch(0.28 0.02 255)' : 'oklch(0.72 0.02 255)',
+        label:isC ? 'critical' : 'slack ' + this.f(crit - this.tot(D[id])),
+        tw:isC ? 700 : 500, tc:isC ? 'oklch(0.28 0.02 255)' : 'oklch(0.58 0.02 255)'};
+    });
+    const dynRows = [{k:'N', v:this.NAVG.toFixed(1) + ' avg · 2–6'},
+                     {k:'Slowest copy', v:this.f(N.implement.min * 1.27)},
+                     {k:'Σ all copies', v:this.f(D.implement.work)}];
+
+    const grammar = [
+      {title:'One line, three bands', body:'Rework above, the stream on the line, time below. No swim lanes — rows would imply concurrent actors that do not exist.',
+       art:React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'5px'}},
+         ...[C.ai, C.hum, C.amber, C.ai, C.green].map((c, i) => React.createElement('div', {key:i, style:{width:'30px', height:'11px', background:c, borderRadius:'3px'}})))},
+      {title:'Colour is who holds it', body:'Level 1 colours by baton — violet agent, blue human, hatched nobody. Level 2 colours by role — Do, Check, Fix. Same map, different question.',
+       art:React.createElement('div', {style:{display:'flex', gap:'6px'}},
+         ...[['AI', C.ai], ['HUMAN', C.hum], ['DO', 'oklch(0.52 0.12 155)'], ['FIX', C.rose]].map(([l, c], i) =>
+           React.createElement('span', {key:i, style:{fontSize:'8px', fontWeight:700, fontFamily:this.mono, color:'white', background:c, borderRadius:'3px', padding:'3px 5px'}}, l)))},
+      {title:'Send-back & rewind', body:'Thickness is minutes, the label is laps. An arc landing upstream of whatever judged the work is a rewind — every box in between re-runs.',
+       art:React.createElement('div', {style:{width:'126px', height:'40px', border:'6px solid oklch(0.62 0.16 22)', borderBottom:'none', borderRadius:'60px 60px 0 0', opacity:0.85}})},
+      {title:'The ladder, aligned', body:'Locked to the boxes above: the rise before a box is its wait, the valley under it is its work, the rose tail is rework. Aligned means not to scale — the bars beside it are.',
+       art:React.createElement('div', {style:{width:'134px', height:'34px', position:'relative'}},
+         React.createElement('div', {style:{position:'absolute', left:0, top:0, width:'42px', borderTop:'1.5px solid oklch(0.44 0.02 255)'}}),
+         React.createElement('div', {style:{position:'absolute', left:'42px', top:0, height:'34px', borderLeft:'1.5px solid oklch(0.44 0.02 255)'}}),
+         React.createElement('div', {style:{position:'absolute', left:'42px', bottom:0, width:'58px', height:'5px', background:'oklch(0.60 0.13 155)'}}),
+         React.createElement('div', {style:{position:'absolute', left:'100px', bottom:0, width:'34px', height:'5px', background:'oklch(0.62 0.16 22)'}}))},
+      {title:'Everything is derived', body:'Only per-visit minutes, cost and first-try pass rate are authored. Visits, send-backs and laps are solved by flow balance, so the map cannot show numbers that fail to conserve.',
+       art:React.createElement('div', {style:{fontSize:'12px', fontFamily:this.mono, color:'oklch(0.46 0.02 255)', lineHeight:1.5}},
+         React.createElement('div', {key:1}, 'visits = exits / Π pass'),
+         React.createElement('div', {key:2, style:{color:'oklch(0.52 0.15 22)'}}, 'laps = visits − first'))},
+    ];
+
+    const prov = [
+      {tag:'SHIPPED', title:'Level 2, already computed', ink:'oklch(0.36 0.11 155)', bg:'oklch(0.96 0.03 155)', bd:'oklch(0.86 0.06 155)', items:[
+        'Per-node duration and cost p50/p95/total — Runs.node_metrics_for_flow/2',
+        'attempts_mean and loop_laps off node_executions.visit',
+        'Verdict split → the %C&A bars, from NodeExecution.outcomes/0',
+        'needs_input is a real node outcome, so the ⏸ tally is free',
+      ]},
+      {tag:'ONE QUERY', title:'Level 2, derivable', ink:'oklch(0.44 0.11 65)', bg:'oklch(0.97 0.035 75)', bd:'oklch(0.88 0.06 70)', items:[
+        'Inter-node wait — next.started_at − prev.finished_at, grouped by node_key',
+        'Rewind cost — minutes on nodes re-entered at visit > 1 after a given fix',
+        'Sub-task N and per-copy spread, from node_executions.sub_task_id',
+        'Queue depth at the exclusive slot, from runs awaiting a runner',
+      ]},
+      {tag:'SCHEMA', title:'Level 1 is blocked', ink:'oklch(0.48 0.15 22)', bg:'oklch(0.975 0.025 22)', bd:'oklch(0.88 0.07 22)', items:[
+        'A card’s stage history is not recorded — no transition timestamps, so all three queues and both gates are unmeasurable',
+        'Run park duration likewise: runs.status is current-state only',
+        'These gate every baton question — the ones Relay exists to answer',
+        'Smallest viable fix: an append-only card_transitions row per stage move',
+      ]},
+      {tag:'FLOW DOC', title:'Role is not a field', ink:'oklch(0.42 0.13 250)', bg:'oklch(0.96 0.03 250)', bd:'oklch(0.84 0.06 250)', items:[
+        'Schemas.Flow.Node has type, not role — Do/Check/Fix cannot be read off a flow today',
+        'fix IS derivable: "every inbound edge is on:failed" returns exactly the 5 fix nodes, no false positives',
+        'check vs do is NOT derivable — sync, resync and merge all have outbound failed edges yet are Do',
+        'Minimal ask: derive fix, treat type: :gate as check, add role: :check to the 5 agent checks',
+      ]},
+    ];
+
+    return {
+      cardSvg:this.buildCard(), cardNodes, cardW:CG.mapW, cardH:CG.mapH, cardBand,
+      cardTotal:this.hrs(cardTot), cardStats,
+      punchline:'A card spends ' + this.hrs(cardTot) + ' getting from Next up to Done, and ' +
+        (cardVA/cardTot*100).toFixed(1) + '% of that is an agent actually changing the product.',
+      codeShare:pctOf(codeHrs, cardTot),
+      mapSvg:this.buildMap(), nodes, mapW:G.W, mapH:G.mapH, bands, stats,
+      qGroups, qTally, qCount:String(flat.length), kaizen:K, grammar, prov, fanRows, dynRows,
+      fanGain:'−' + this.f(fanSave) + ' per run',
+      fanCardPct:(fanSave / 60 / cardTot * 100).toFixed(1) + '% of a card',
+      dynGain:'−' + this.f(D.implement.work - N.implement.min * 1.27),
+      fanDetail:'series ' + this.f(fanTots.reduce((a,b)=>a+b,0)) + ' → parallel ' + this.f(crit) + '.',
+      topoTitle:fan ? 'Code flow · proposed, final checks fanned out' : 'Code flow · as-is, every check in series',
+      topoSub:fan ? 'Same authored per-visit times, re-solved as a fork/join — every visit count below moves with it, because they are derived rather than typed.'
+                  : 'Exactly the graph in docs/designs/flows/code.json at v4: 21 nodes, 44 edges, isolation exclusive. Every visit, send-back and lap below is solved from the first-try pass rates by flow balance.',
+    };
+  }
+}
+</script>
+</body>
+</html>
