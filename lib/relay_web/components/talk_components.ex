@@ -20,20 +20,28 @@ defmodule RelayWeb.TalkComponents do
 
   def talk_line(assigns) do
     ~H"""
+    <%!-- RE301 — `phx-no-format` and the flush `{@event.text}` are load-bearing, for the same
+    reason as `talk_seed/1`'s field rows: under `white-space:pre-wrap` the HEEx formatter's line
+    break and indent inside the tag would render as a blank line and leading spaces. --%>
     <div :if={@event.kind == :user} style="display:flex;gap:8px;padding-top:9px;">
       <span style={mono() <> "color:oklch(0.72 0.14 150);flex:0 0 auto;"}>❯</span>
-      <span style={mono() <> "color:oklch(0.92 0.01 262);flex:1;min-width:0;"}>{@event.text}</span>
+      <span
+        phx-no-format
+        style={mono() <> "color:oklch(0.92 0.01 262);flex:1;min-width:0;" <> pre_wrap()}
+      >{@event.text}</span>
     </div>
     <div :if={@event.kind == :tool} style="display:flex;gap:8px;">
       <span style={mono() <> "color:oklch(0.5 0.02 262);flex:0 0 auto;"}>·</span>
-      <span style={mono() <> "color:oklch(0.56 0.03 262);flex:1;min-width:0;"}>{@event.text}</span>
+      <span
+        phx-no-format
+        style={mono() <> "color:oklch(0.56 0.03 262);flex:1;min-width:0;" <> pre_wrap()}
+      >{@event.text}</span>
     </div>
     <span
       :if={@event.kind in [:out, :error]}
-      style={mono() <> "color:" <> out_color(@event) <> ";padding-bottom:2px;display:block;"}
-    >
-      {@event.text}
-    </span>
+      phx-no-format
+      style={mono() <> "color:" <> out_color(@event) <> ";padding-bottom:2px;display:block;" <> pre_wrap()}
+    >{@event.text}</span>
     """
   end
 
@@ -98,6 +106,7 @@ defmodule RelayWeb.TalkComponents do
     ~H"""
     <div
       id={@id}
+      data-talk-pane
       style="height:548px;background:oklch(0.185 0.015 262);display:flex;flex-direction:column;"
     >
       <div style="flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:10px 16px;border-bottom:1px solid oklch(0.26 0.018 262);">
@@ -120,7 +129,11 @@ defmodule RelayWeb.TalkComponents do
         </button>
       </div>
 
-      <div style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;">
+      <div
+        id={"#{@id}-scroll"}
+        phx-hook=".TalkAutoscroll"
+        style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;"
+      >
         <.talk_seed
           id={"#{@id}-seed-toggle"}
           ref={@ref}
@@ -206,6 +219,63 @@ defmodule RelayWeb.TalkComponents do
           </button>
         </div>
       </div>
+
+      <%!-- RE301 — stick-to-bottom autoscroll. The pane is NOT remounted when the Talk tab opens:
+      the drawer keeps it rendered and only toggles `hidden` on the tab panel, and `display:none`
+      resets scrollTop to 0. So "opens at the bottom" is keyed off the scroll body becoming
+      visible (ResizeObserver, clientHeight 0 -> >0), not off `mounted()`. New content is followed
+      with a MutationObserver rather than `updated()`, which a stream insert into a CHILD
+      container is not guaranteed to fire. Our own scroll-to-bottom leaves the distance at 0, so
+      the scroll listener never mistakes it for the user scrolling away. --%>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TalkAutoscroll">
+        // How close to the bottom (px) still counts as "at the bottom" — the slack that lets a
+        // user who scrolled back down, but not to the last pixel, resume following.
+        const STICK_PX = 24
+
+        export default {
+          mounted() {
+            this.stuck = true
+            this.visible = this.el.clientHeight > 0
+            this.toBottom = () => { this.el.scrollTop = this.el.scrollHeight }
+
+            this.onScroll = () => {
+              const el = this.el
+              this.stuck = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX
+            }
+            this.el.addEventListener("scroll", this.onScroll, {passive: true})
+
+            this.mutations = new MutationObserver(() => { if (this.stuck) this.toBottom() })
+            this.mutations.observe(this.el, {childList: true, subtree: true, characterData: true})
+
+            this.resizes = new ResizeObserver(() => {
+              const visible = this.el.clientHeight > 0
+              if (visible && !this.visible) this.stuck = true
+              this.visible = visible
+              if (this.stuck) this.toBottom()
+            })
+            this.resizes.observe(this.el)
+
+            // Sending re-sticks: the user just acted at the bottom and expects to see the reply.
+            // The slash chips sit in the footer, outside this element, so listen on the pane root.
+            this.pane = this.el.closest("[data-talk-pane]")
+            this.onSend = (e) => {
+              if (e.type === "click" && !e.target.closest('[phx-click="talk_slash"]')) return
+              this.stuck = true
+              this.toBottom()
+            }
+            this.pane.addEventListener("submit", this.onSend)
+            this.pane.addEventListener("click", this.onSend)
+
+            this.toBottom()
+          },
+          destroyed() {
+            this.mutations.disconnect()
+            this.resizes.disconnect()
+            this.pane.removeEventListener("submit", this.onSend)
+            this.pane.removeEventListener("click", this.onSend)
+          }
+        }
+      </script>
     </div>
     """
   end
@@ -216,6 +286,10 @@ defmodule RelayWeb.TalkComponents do
   # (title bar, footer copy, slash chips) — concatenating `mono()` would leave a stray
   # `line-height:19px` behind after the font-size override, which is not what the artboard draws.
   defp mono_family, do: "font-family:'JetBrains Mono',ui-monospace,monospace;"
+
+  # RE301 — keeps the `\n`s a transcript line carries (and runs of spaces) while still wrapping
+  # long lines; `overflow-wrap:anywhere` stops a long path or URL from widening the pane.
+  defp pre_wrap, do: "white-space:pre-wrap;overflow-wrap:anywhere;"
 
   @doc """
   The one slash command the pane handles itself rather than posting as a turn — so it is the one

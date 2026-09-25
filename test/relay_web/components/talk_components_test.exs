@@ -45,6 +45,19 @@ defmodule RelayWeb.TalkComponentsTest do
     assert html =~ "line-height:19px"
   end
 
+  # RE301 — the runner posts one `:out` event per assistant text block, so its text carries real
+  # `\n`s (paragraphs, lists, code). Under the default `white-space: normal` every one of them
+  # folded into a space. `pre-wrap` keeps them; the text node must be exactly the event's text,
+  # because under `pre-wrap` any formatter-injected newline or indent inside the tag would render
+  # as a visible blank line or leading spaces.
+  for kind <- [:out, :error, :user, :tool] do
+    test "a #{kind} line keeps its newlines verbatim under pre-wrap" do
+      html = render_component(&TalkComponents.talk_line/1, event: event(%{kind: unquote(kind), text: "a\nb"}))
+
+      assert html =~ ~r/white-space:pre-wrap;overflow-wrap:anywhere;[^>]*>a\nb<\/span>/
+    end
+  end
+
   # RE268 quality review — `talk_seed/1`'s toggle button carried a hardcoded id, so a page
   # rendering more than one `talk_pane` (the storybook page renders four) emitted duplicate DOM
   # ids. Defaults to the old literal for standalone (test/story) use, but `talk_pane` overrides
@@ -189,6 +202,27 @@ defmodule RelayWeb.TalkComponentsTest do
     assert idle =~ ~s(id="talk-pane-2-seed-toggle")
     assert busy =~ ~s(id="talk-pane-2-seed-toggle")
     assert busy =~ ~s(id="talk-pane-2-stop")
+  end
+
+  # RE301 — the scroll body owns stick-to-bottom autoscroll via a colocated hook. The hook needs
+  # a stable id (LiveView requires one on any phx-hook element), derived from the pane's id so
+  # the storybook's several panes on one page stay unique. The pane root carries
+  # `data-talk-pane` so the hook can reach the footer's slash chips, which sit outside the
+  # scroll body.
+  test "the scroll body carries the autoscroll hook and an id derived from the pane's" do
+    html = render_component(&TalkComponents.talk_pane/1, pane(%{id: "talk-pane-2"}))
+    doc = LazyHTML.from_fragment(html)
+
+    scroll = LazyHTML.query(doc, "#talk-pane-2-scroll")
+    assert Enum.count(scroll) == 1
+    assert [hook] = LazyHTML.attribute(scroll, "phx-hook")
+    assert hook =~ "TalkAutoscroll"
+
+    # The transcript and the composer live inside the scrolled body.
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2-scroll #talk-pane-2-transcript")) == 1
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2-scroll #talk-pane-2-composer")) == 1
+
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2[data-talk-pane]")) == 1
   end
 
   test "the slash-chip row is the mockup's five chips" do
