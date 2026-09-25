@@ -76,7 +76,11 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "session_id" => "sess-fixture",
       # RE310: always sent, never omitted — this is the key set bin/test_relay.py pins
       # `outcome_body` against.
-      "no_changes" => false
+      "no_changes" => false,
+      # RE267: optional — the runner sends it only for a usage-limit `blocked` with a known reset.
+      # Present here so bin/test_relay.py pins its key and format; on this `needs_input` it is
+      # ignored by design (read only on `blocked`), which this POST also proves is not a 422.
+      "resume_at" => "2100-01-01T00:00:00Z"
     }
 
     outcome_response =

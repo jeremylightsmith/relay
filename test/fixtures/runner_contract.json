@@ -126,6 +126,7 @@
       "git_sha": "0000000000000000000000000000000000000000",
       "no_changes": false,
       "outcome": "needs_input",
+      "resume_at": "2100-01-01T00:00:00Z",
       "session_id": "<session-id>"
     },
     "response": {

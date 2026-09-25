@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 68
-RUNNER_FINGERPRINT = "2fbbfd7d76cec7378d59ee8b92bf7910e92afd000bf8527d2b79cf35f4298dbf"
+RUNNER_VERSION = 69
+RUNNER_FINGERPRINT = "77414fb59ef30a1711f1d2e2516dc9f8598606d1d555b8d10a649fea6a8d45f4"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -2968,6 +2968,12 @@ def local_clock(epoch):
     return time.strftime("%H:%M", time.localtime(epoch))
 
 
+def iso_utc(epoch):
+    """`epoch` as ISO-8601 UTC (`2100-01-01T00:00:00Z`) — how a usage-limit reset crosses the
+    wire in the outcome body's `resume_at` (RE267)."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
 def rate_limit_pause_line(pause):
     """The one line a runner logs on entering a pause, e.g.
     `⏸ rate limited: five_hour 92% ≥ 90% limit · resumes 15:40 · probing every 15m`."""
@@ -3071,7 +3077,7 @@ def claim_node_job(runner, capacity, timeout, running=(), held=()):
     return resp or None
 
 
-def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False):
+def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False, resume_at=None):
     """The exact body POSTed to /api/node-jobs/:id/outcome.
 
     Pure and separate from the POST so bin/test_relay.py can pin its key set against
@@ -3080,10 +3086,17 @@ def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False):
 
     `no_changes` (RE310) is the node's ASSERTION that its work was already committed. It is
     always sent, never omitted, so the controller reads one shape; the server decides whether to
-    honour it (it checks this run's own history) and rejects it by default."""
-    return {"outcome": outcome, "detail": detail,
+    honour it (it checks this run's own history) and rejects it by default.
+
+    `resume_at` (RE267) is the epoch a usage-limit `blocked` resets at (`blocked_resume_at`),
+    sent as ISO-8601 UTC and ONLY when there is one — so every other body is byte-identical to
+    what it was before. With it the server requeues the node instead of parking it."""
+    body = {"outcome": outcome, "detail": detail,
             "git_sha": git_sha, "session_id": session_id,
             "no_changes": bool(no_changes)}
+    if resume_at is not None:
+        body["resume_at"] = iso_utc(resume_at)
+    return body
 
 
 def claim_body(runner, capacity, running=(), held=()):
@@ -3119,13 +3132,15 @@ def heartbeat_body(runner, capacity, running, held, capabilities=None, rate_limi
     return body
 
 
-def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes=False):
+def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes=False,
+                   resume_at=None):
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the runner whether to keep or free an
     exclusive slot (§3). idempotent=True: the endpoint is first-writer-wins per job (RLY-202),
     so a dropped request/response retries into the server's duplicate-200 rather than die()ing."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
-               outcome_body(outcome, detail, git_sha, session_id, no_changes), idempotent=True)
+               outcome_body(outcome, detail, git_sha, session_id, no_changes, resume_at),
+               idempotent=True)
     return (resp or {}).get("run_state")
 
 
@@ -3426,6 +3441,23 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None, report=None):
     return ("failed", detail + abandoned_work_note(cwd), False)
 
 
+def blocked_resume_at(outcome, report):
+    """The epoch a `blocked` usage limit resets at, else None (RE267). Pure.
+
+    Only a usage-limit classification with a rejected `rate_limit_event` in THIS job's stream
+    (`report.rejected_resets_at`, never the shared USAGE_LIMITER) has one. An auth failure or
+    `billing_error` (auth-kind: it never clears by itself), a phrase-only usage limit, and every
+    non-`blocked` outcome return None — so the server parks them as RE308 does. When this returns
+    an epoch, RE320's UsageLimiter has already seen the same event and paused this runner's
+    claiming until then, which is why the server may requeue rather than park."""
+    if outcome != NODE_OUTCOME_BLOCKED:
+        return None
+    failure = classify_claude_failure(report)
+    if not failure or failure["kind"] != CLAUDE_FAILURE_USAGE_LIMIT:
+        return None
+    return report.rejected_resets_at
+
+
 def uncommitted_paths(path):
     """The paths `git status --porcelain` reports dirty in `path`, or `[]` when it cannot be
     read (a missing slot, a non-git directory). Unreadable is not the same as clean, but the
@@ -3660,7 +3692,7 @@ def compose_node_prompt(job, cmd, vars):
 
 def run_node_job(job, slot_path, control, partition=None):
     """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id,
-    no_changes). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
+    no_changes, resume_at). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
     POSTs the outcome (§6) and acts on the run_state (§3).
 
     `partition` (the caller's `pool.partition_for(slot)`, RLY-213) rides straight through to
@@ -3681,7 +3713,10 @@ def run_node_job(job, slot_path, control, partition=None):
 
     Prompt composition is compose_node_prompt's job, for BOTH branches: an agent gets its
     rendered `run` + the findings block (RE251) + the outcome contract, a shell/gate node gets
-    its command line unchanged."""
+    its command line unchanged.
+
+    `resume_at` (RE267) is `blocked_resume_at` for an agent node and always None for a
+    shell/gate node or a refused detached HEAD."""
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
     raw_vars = dict(job.get("vars") or {})
@@ -3701,7 +3736,7 @@ def run_node_job(job, slot_path, control, partition=None):
     detached = check_branch_attached(slot_path, job.get("isolation"), vars.get("branch"), cmd)
     if detached:
         log(f"  ⚠ {ref}: {detached}", ref=ref, kind="error")
-        return "failed", detached, git_head_sha(slot_path), None, False
+        return "failed", detached, git_head_sha(slot_path), None, False, None
 
     session_id = None
     if job.get("node_type") == "agent":
@@ -3719,6 +3754,7 @@ def run_node_job(job, slot_path, control, partition=None):
                 partition=partition, scratch=scratch, plan=plan)
             outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path,
                                                                   report=report)
+            resume_at = blocked_resume_at(outcome, report)
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
@@ -3730,10 +3766,11 @@ def run_node_job(job, slot_path, control, partition=None):
         detail = "" if ok else "\n".join(tail).strip()
         # A shell/gate node's exit code is its whole verdict — it has nothing to assert.
         no_changes = False
+        resume_at = None
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
                               capture_output=True, text=True)
     git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
-    return outcome, detail, git_sha, session_id, no_changes
+    return outcome, detail, git_sha, session_id, no_changes, resume_at
 
 
 # ---- Talk (RE268 / ADR 0009) ------------------------------------------------
@@ -4066,7 +4103,7 @@ def execute_one(job, slot, reset, control, pool):
                 run_state = report_outcome(job["id"], "failed", detail,
                                            git_head_sha(slot_path), None)
                 return run_state
-        outcome, detail, git_sha, session_id, no_changes = run_node_job(
+        outcome, detail, git_sha, session_id, no_changes, resume_at = run_node_job(
             job, slot_path, control, partition=partition)
         if control.cancelled():
             revoked = True
@@ -4074,7 +4111,8 @@ def execute_one(job, slot, reset, control, pool):
             # card/run and is left on its branch to resume — NO reset/detach here anymore.
             return None
         completed_outcome = outcome
-        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id, no_changes)
+        run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id, no_changes,
+                                   resume_at)
         return run_state
     except (Exception, SystemExit) as e:
         # run_node_job (or the report_outcome call above) can raise SystemExit via api()'s

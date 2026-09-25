@@ -33,7 +33,7 @@ runner reports.
 | **Failed** | The step could not do it. | The board retries a bounded number of times, then stops and puts the card in front of you with the reason. |
 | **Partial** | Some of it got done. | The flow routes it wherever that flow says partial work should go — often to a review or a follow-up step. |
 | **Needs input** | The agent needs a human decision to continue. | Work pauses and the card goes to **Needs input** with the question. Answering it resumes the same step. |
-| **Blocked** | The agent could not run at all — its Claude login expired or it hit a usage limit. | Work pauses and the card goes to **Needs input** showing the cause, with a **Retry** for once you've fixed it. No retry budget is spent. |
+| **Blocked** | The agent could not run at all — its Claude login expired or it hit a usage limit. | If Claude said when the usage limit resets, the step waits and runs again by itself once it does — up to three waits in a row, with a note on the card saying when. Otherwise (an expired login, or no reset time), or after the third wait, work pauses and the card goes to **Needs input** showing the cause, with a **Retry** for once you've fixed it. No retry budget is spent. |
 
 A step that finishes without declaring anything counts as **Failed** — the board would rather
 hand you a stopped card than quietly pretend a step ran.

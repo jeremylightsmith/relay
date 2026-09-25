@@ -27,7 +27,8 @@ is [runner.md](runner.md).
 | A8 | **Runaway** | `max_loops` on an edge, or 20 node visits, exceeded | `{:fail}` | `failed` |
 | A9 | **Unrouted non-failed outcome** | outcome (e.g. `partial`) with no matching edge | `degrade_to_failed` — follow the node's `:failed` edge, spending *its* budget (`engine.ex:145`) | as A3–A5 |
 | A10 | **Broken baton** | a node declaring `writes` reports `succeeded` with a declared card field still blank | rewritten to `failed` before finalize (`override_missing_writes/4`, `run_server.ex`) → routes as A2–A5 | as A2–A5 |
-| A11 | **Agent could not run (infrastructure)** | an agent node's `claude -p` exits non-zero with an auth or usage-limit signature in its stream — expired OAuth session, invalid key, a rejected `rate_limit_event` (RE308) | the runner reports `blocked` (`classify_claude_failure`, `./relay`) with `agent could not run: <reason>`; the engine parks *before* the breaker and retry rules (`{:park, :blocked}`, `engine.ex`), so no `max_retries`, breaker count or `max_loops` is spent; the attempt's session is dropped (`finalize_job!/2`) and the Listener never `--resume`s it; classified `:infrastructure` by `Relay.Runs.park_kind/1`, revivable by Retry | `parked/needs_input` |
+| A11 | **Agent could not run (infrastructure)** | an agent node's `claude -p` exits non-zero with an auth or usage-limit signature in its stream — expired OAuth session, invalid key, `billing_error`, a usage limit with **no known reset** (phrase match only), or a usage-limit wait past the cap (A11b) (RE308) | the runner reports `blocked` (`classify_claude_failure`, `./relay`) with `agent could not run: <reason>` and no `resume_at`; the engine parks *before* the breaker and retry rules (`{:park, :blocked}`, `engine.ex`), so no `max_retries`, breaker count or `max_loops` is spent; the attempt's session is dropped (`finalize_job!/2`) and the Listener never `--resume`s it; classified `:infrastructure` by `Relay.Runs.park_kind/1`, revivable by Retry | `parked/needs_input` |
+| A11b | **Usage limit with a known reset (waits it out)** | as A11, but the job's own stream carried a rejected `rate_limit_event` with `resetsAt` (RE267) | the runner reports `blocked` **plus** `resume_at` (`blocked_resume_at`, `./relay`); the engine returns `{:requeue, node}` (`engine.ex`): RunServer inserts attempt +1 of the same visit/binding with a verbatim copy of the blocked job's payload, logs one `:action` line (`usage limit — waiting for reset at …; node … will re-run (wait N of 3)`), and the run stays `running` with the AI baton. The refused runner has already paused its own claiming until the reset (RE320), so while every runner is paused the run face shows the C7 **Rate limited · resumes …** verdict; an unlimited runner may claim it at once. No retry, breaker count or `max_loops` is spent. After `Engine.max_usage_limit_waits/0` (3) consecutive waits on one node the next one parks as A11 | continues (`running`), else `parked/needs_input` |
 
 **Telling A1, A4 and A11 apart (RE253, RE308).** All three end as `parked/needs_input`, and the
 only surviving difference in the database is the latest `NodeExecution.outcome` — `:needs_input`
@@ -35,11 +36,14 @@ for A1, `:blocked` for A11, anything else (`:failed`, or a degraded `:partial`) 
 `Relay.Runs.park_kind/1` is the one function that reads that difference, and the inference is
 exact: `:needs_input` and `:blocked` both park in `Engine.decide/4` *before* edge routing is ever
 reached, so no two cases can collide and no `parked_reason` value or schema column is needed to
-separate them. The drawer renders A1 as the question the agent asked; A4 as an answerable
+separate them. An A11b wait never parks at all — `resume_at` on the `:blocked` row is what
+`Engine.decide/4` reads to requeue instead — so it never reaches `park_kind/1` until the wait past
+the cap, which is an ordinary A11. The drawer renders A1 as the question the agent asked; A4 as an answerable
 escalation — the failed node and its attempt count, the failure output in a dark `<pre>`, an
 answer box that resumes the node with the human's note as `findings`, and a Retry beside it; and
 A11 as **Agent could not run** — the cause in the same `<pre>` and a Retry, with no answer box (the
-fix is outside the card: log back in, or wait for the limit to reset) and no attempt count (none
+fix is outside the card: log back in, or — for a limit with no known reset, or after three waits
+(A11b) — wait for it to reset) and no attempt count (none
 was spent). RE253 deliberately had no "agent stopped" state, because an agent that died
 environmentally was indistinguishable in the data from one that honestly failed. RE308 made it
 distinguishable: the runner classifies a non-zero `claude -p` exit from the stream itself (the
