@@ -285,6 +285,10 @@ defmodule RelayWeb.Api.NodeJobController do
   this run (RunnerPool.release, ./relay). `no_changes` (RE310) is the
   node's assertion that its work was already committed; the engine honours it
   only when this node's own history proves it (see `Relay.Runs.RunServer`).
+
+  `resume_at` (RE267, optional ISO-8601) is when a usage-limit `blocked` resets: with it the
+  engine requeues the node instead of parking it (see `Relay.Runs.Engine.decide/4`). It is read
+  only on `blocked`, and an unparseable value is ignored, never refused.
   """
   def outcome(conn, %{"id" => id} = params) do
     board = conn.assigns.current_board
@@ -315,7 +319,10 @@ defmodule RelayWeb.Api.NodeJobController do
       # RE310: the agent's assertion that no changes were needed. A runner predating the flag
       # omits the key, which reads false — byte-identical to today's behaviour, which is why
       # `@min_runner_version` is deliberately NOT raised for this change.
-      no_changes: params["no_changes"] == true
+      no_changes: params["no_changes"] == true,
+      # RE267: when a usage-limit `blocked` resets. Optional — only a runner that knows the reset
+      # sends it, and an older runner never does (RE308's park, unchanged).
+      resume_at: parse_resume_at(outcome, params["resume_at"])
     }
 
     case Runs.report_outcome(job, attrs) do
@@ -324,6 +331,17 @@ defmodule RelayWeb.Api.NodeJobController do
       {:error, other} -> {:error, other}
     end
   end
+
+  # RE267: accepted ONLY with outcome `blocked`; anything unparseable is dropped to nil rather than
+  # refused, so a bad value degrades to RE308's park — never to a 422 that would lose the outcome.
+  defp parse_resume_at(:blocked, value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _offset} -> DateTime.truncate(at, :second)
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp parse_resume_at(_outcome, _value), do: nil
 
   # RLY-203: the accepted outcome strings are derived from Schemas.NodeExecution.outcomes/0, so
   # the transport can never name an outcome the domain lacks (or miss one). The set itself is
