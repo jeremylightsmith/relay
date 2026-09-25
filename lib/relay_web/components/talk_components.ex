@@ -106,6 +106,7 @@ defmodule RelayWeb.TalkComponents do
     ~H"""
     <div
       id={@id}
+      data-talk-pane
       style="height:548px;background:oklch(0.185 0.015 262);display:flex;flex-direction:column;"
     >
       <div style="flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:10px 16px;border-bottom:1px solid oklch(0.26 0.018 262);">
@@ -128,7 +129,11 @@ defmodule RelayWeb.TalkComponents do
         </button>
       </div>
 
-      <div style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;">
+      <div
+        id={"#{@id}-scroll"}
+        phx-hook=".TalkAutoscroll"
+        style="flex:1;min-height:0;overflow-y:auto;padding:15px 16px;display:flex;flex-direction:column;gap:2px;"
+      >
         <.talk_seed
           id={"#{@id}-seed-toggle"}
           ref={@ref}
@@ -214,6 +219,63 @@ defmodule RelayWeb.TalkComponents do
           </button>
         </div>
       </div>
+
+      <%!-- RE301 — stick-to-bottom autoscroll. The pane is NOT remounted when the Talk tab opens:
+      the drawer keeps it rendered and only toggles `hidden` on the tab panel, and `display:none`
+      resets scrollTop to 0. So "opens at the bottom" is keyed off the scroll body becoming
+      visible (ResizeObserver, clientHeight 0 -> >0), not off `mounted()`. New content is followed
+      with a MutationObserver rather than `updated()`, which a stream insert into a CHILD
+      container is not guaranteed to fire. Our own scroll-to-bottom leaves the distance at 0, so
+      the scroll listener never mistakes it for the user scrolling away. --%>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TalkAutoscroll">
+        // How close to the bottom (px) still counts as "at the bottom" — the slack that lets a
+        // user who scrolled back down, but not to the last pixel, resume following.
+        const STICK_PX = 24
+
+        export default {
+          mounted() {
+            this.stuck = true
+            this.visible = this.el.clientHeight > 0
+            this.toBottom = () => { this.el.scrollTop = this.el.scrollHeight }
+
+            this.onScroll = () => {
+              const el = this.el
+              this.stuck = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX
+            }
+            this.el.addEventListener("scroll", this.onScroll, {passive: true})
+
+            this.mutations = new MutationObserver(() => { if (this.stuck) this.toBottom() })
+            this.mutations.observe(this.el, {childList: true, subtree: true, characterData: true})
+
+            this.resizes = new ResizeObserver(() => {
+              const visible = this.el.clientHeight > 0
+              if (visible && !this.visible) this.stuck = true
+              this.visible = visible
+              if (this.stuck) this.toBottom()
+            })
+            this.resizes.observe(this.el)
+
+            // Sending re-sticks: the user just acted at the bottom and expects to see the reply.
+            // The slash chips sit in the footer, outside this element, so listen on the pane root.
+            this.pane = this.el.closest("[data-talk-pane]")
+            this.onSend = (e) => {
+              if (e.type === "click" && !e.target.closest('[phx-click="talk_slash"]')) return
+              this.stuck = true
+              this.toBottom()
+            }
+            this.pane.addEventListener("submit", this.onSend)
+            this.pane.addEventListener("click", this.onSend)
+
+            this.toBottom()
+          },
+          destroyed() {
+            this.mutations.disconnect()
+            this.resizes.disconnect()
+            this.pane.removeEventListener("submit", this.onSend)
+            this.pane.removeEventListener("click", this.onSend)
+          }
+        }
+      </script>
     </div>
     """
   end

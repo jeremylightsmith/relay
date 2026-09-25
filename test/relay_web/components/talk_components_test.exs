@@ -204,6 +204,27 @@ defmodule RelayWeb.TalkComponentsTest do
     assert busy =~ ~s(id="talk-pane-2-stop")
   end
 
+  # RE301 — the scroll body owns stick-to-bottom autoscroll via a colocated hook. The hook needs
+  # a stable id (LiveView requires one on any phx-hook element), derived from the pane's id so
+  # the storybook's several panes on one page stay unique. The pane root carries
+  # `data-talk-pane` so the hook can reach the footer's slash chips, which sit outside the
+  # scroll body.
+  test "the scroll body carries the autoscroll hook and an id derived from the pane's" do
+    html = render_component(&TalkComponents.talk_pane/1, pane(%{id: "talk-pane-2"}))
+    doc = LazyHTML.from_fragment(html)
+
+    scroll = LazyHTML.query(doc, "#talk-pane-2-scroll")
+    assert Enum.count(scroll) == 1
+    assert [hook] = LazyHTML.attribute(scroll, "phx-hook")
+    assert hook =~ "TalkAutoscroll"
+
+    # The transcript and the composer live inside the scrolled body.
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2-scroll #talk-pane-2-transcript")) == 1
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2-scroll #talk-pane-2-composer")) == 1
+
+    assert Enum.count(LazyHTML.query(doc, "#talk-pane-2[data-talk-pane]")) == 1
+  end
+
   test "the slash-chip row is the mockup's five chips" do
     html = render_component(&TalkComponents.talk_pane/1, pane(%{}))
 
