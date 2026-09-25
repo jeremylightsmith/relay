@@ -1,8 +1,12 @@
 defmodule Relay.ValueStreamFlowTest do
   use Relay.DataCase, async: true
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Relay.Repo
   alias Relay.Runs
   alias Relay.ValueStream
+  alias Schemas.NodeExecution
 
   defp t0_ago(ago_s), do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -ago_s, :second)
 
@@ -211,7 +215,8 @@ defmodule Relay.ValueStreamFlowTest do
                copies: 5,
                copy_p50: 30,
                copy_max: 160,
-               copy_total: 370
+               copy_total: 370,
+               clean_copies: 4
              }
     end
 
@@ -229,10 +234,15 @@ defmodule Relay.ValueStreamFlowTest do
                  n_min: nil,
                  n_max: nil,
                  copies: 0,
+                 clean_copies: 0,
                  copy_p50: nil,
                  copy_max: nil,
                  copy_total: 0
-               }
+               },
+               queue_wait: %{mean_secs: nil, jobs: 0},
+               done_runs: 0,
+               parked_runs: 0,
+               first_pass_runs: 0
              }
 
       plain =
@@ -257,5 +267,123 @@ defmodule Relay.ValueStreamFlowTest do
       assert %{runs: 2, sends: [%{laps: 2} | _]} = ValueStream.flow_stream(flow, window: "all")
       assert %{runs: 1, sends: [%{laps: 1} | _]} = ValueStream.flow_stream(flow, card_id: old.card_id)
     end
+
+    test "card_ids: the union of those cards' runs, window ignored; card_id unchanged" do
+      board = insert(:board)
+      flow = code_flow(board)
+      a = code_run(board, 3600)
+      old = code_run(board, 40 * 86_400)
+      _other = code_run(board, 1800)
+      ids = [a.card_id, old.card_id]
+
+      union =
+        Runs.execution_spans_for_flow(flow, card_id: a.card_id) ++
+          Runs.execution_spans_for_flow(flow, card_id: old.card_id)
+
+      spans = Runs.execution_spans_for_flow(flow, card_ids: ids, window: "7d")
+      assert Enum.sort_by(spans, &{&1.run_id, &1.started_at}) == Enum.sort_by(union, &{&1.run_id, &1.started_at})
+
+      rows = flow |> Runs.node_metrics_for_flow(card_ids: ids, window: "7d") |> Map.new(&{&1.node_key, &1})
+      assert rows["implement"].runs == 4
+      assert rows["precommit"].duration_total == 240
+      assert Runs.node_waits_for_flow(flow, card_ids: ids)["merge"].wait_count == 4
+      assert Runs.flow_metrics_summary(flow, card_ids: ids, window: "7d").total_runs == 2
+
+      assert %{runs: 2} = ValueStream.flow_stream(flow, card_ids: ids, window: "7d")
+      assert ValueStream.flow_stream(flow, card_ids: ids).nodes == Runs.node_metrics_for_flow(flow, card_ids: ids)
+      assert %{runs: 0, nodes: []} = ValueStream.flow_stream(flow, card_ids: [])
+
+      # card_id keeps its single-card meaning even when card_ids is also given
+      assert %{runs: 1} = ValueStream.flow_stream(flow, card_id: old.card_id, card_ids: ids)
+    end
+  end
+
+  describe "flow_stream/2 — terminals and first pass" do
+    test "done, parked, first-pass runs and clean foreach copies count the population's runs" do
+      board = insert(:board)
+      flow = code_flow(board)
+      # done; spec_review and precommit (checks) failed; one of its two copies had rework
+      code_run(board, 3600)
+
+      clean = new_run(board, 1800)
+      clean_task = insert(:sub_task, card: %Schemas.Card{id: clean.card_id})
+      exec_at(clean, "implement", t0_ago(1800), 0, 60, sub_task_id: clean_task.id)
+
+      asked = new_run(board, 1200)
+      exec_at(asked, "implement", t0_ago(1200), 0, 60, outcome: :needs_input)
+
+      parked_card = insert(:card, board: board, stage: insert(:stage, board: board))
+      parked = insert(:run, card: parked_card, flow_key: "code", status: :parked, parked_reason: :needs_input)
+      exec_at(parked, "implement", t0_ago(600), 0, 30)
+
+      stream = ValueStream.flow_stream(flow, window: "all")
+
+      assert stream.runs == 4
+      assert stream.done_runs == 3
+      assert stream.parked_runs == 2
+      assert stream.first_pass_runs == 3
+      assert stream.foreach.copies == 3
+      assert stream.foreach.clean_copies == 2
+    end
+  end
+
+  describe "Runs.first_node_queue_wait/2" do
+    test "means claimed_at − inserted_at of each run's first node job, scoped like the roll-up" do
+      board = insert(:board)
+      flow = code_flow(board)
+      a = code_run(board, 3600)
+      b = code_run(board, 1800)
+      old = code_run(board, 40 * 86_400)
+
+      queued(a, 60)
+      first_b = queued(b, 120)
+      queued(old, 600)
+
+      # an unclaimed job on a first execution and any later execution's job never count
+      insert(:node_job, node_execution: first_b.node_execution, state: :queued, claimed_at: nil)
+      later = Repo.one!(from ne in NodeExecution, where: ne.run_id == ^a.id and ne.node_key == "merge" and ne.visit == 2)
+
+      insert(:node_job,
+        node_execution: later,
+        inserted_at: later.started_at,
+        claimed_at: DateTime.add(later.started_at, 9_999)
+      )
+
+      assert Runs.first_node_queue_wait(flow, window: "7d") == %{mean_secs: 90, jobs: 2}
+      assert Runs.first_node_queue_wait(flow, window: "all") == %{mean_secs: 260, jobs: 3}
+      assert Runs.first_node_queue_wait(flow, card_id: old.card_id) == %{mean_secs: 600, jobs: 1}
+      assert Runs.first_node_queue_wait(flow, card_ids: [a.card_id, old.card_id]) == %{mean_secs: 330, jobs: 2}
+      assert ValueStream.flow_stream(flow, window: "7d").queue_wait == %{mean_secs: 90, jobs: 2}
+      assert Runs.first_node_queue_wait(code_flow(insert(:board))) == %{mean_secs: nil, jobs: 0}
+    end
+  end
+
+  describe "ValueStream.done_card_ids/2" do
+    test "is stream_summary/2's card set — the one last-N selector" do
+      s = Relay.ValueStreamFixtures.re_board()
+      base = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -86_400, :second)
+
+      ids =
+        for offset <- [0, 100, 200] do
+          card = Relay.ValueStreamFixtures.card_in(s.done, base)
+          Relay.ValueStreamFixtures.walk(card, [{s.next_up, 0}, {s.code, 10}, {s.done, 50 + offset}], base)
+          card.id
+        end
+
+      assert ValueStream.done_card_ids(s.board.id, last: 2) == ids |> Enum.reverse() |> Enum.take(2)
+      assert ValueStream.done_card_ids(s.board.id, window: "7d") == Enum.reverse(ids)
+      assert length(ValueStream.done_card_ids(s.board.id)) == 3
+      assert ValueStream.stream_summary(s.board.id, last: 2).cards == 2
+    end
+  end
+
+  # The run's lowest-id execution, with a claimed node job queued `wait_s` before it started.
+  defp queued(run, wait_s) do
+    first = Repo.one!(from ne in NodeExecution, where: ne.run_id == ^run.id, order_by: [asc: ne.id], limit: 1)
+    queued_at = DateTime.add(first.started_at, -wait_s, :second)
+
+    :node_job
+    |> insert(node_execution: first, inserted_at: queued_at, updated_at: queued_at, claimed_at: first.started_at)
+    |> Map.put(:node_execution, first)
   end
 end

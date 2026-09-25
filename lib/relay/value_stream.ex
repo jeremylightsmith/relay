@@ -157,6 +157,17 @@ defmodule Relay.ValueStream do
   end
 
   @doc """
+  The ids of the done cards `stream_summary/2` averages for the same `opts` (`last:` / `window:`),
+  newest `done_at` first — the ONE "last N" selector, so level 2 (RE349) scopes its roll-up to
+  exactly the cards level 1 shows (`Relay.Runs.node_metrics_for_flow/2`'s `card_ids:`).
+  """
+  def done_card_ids(board_id, opts \\ []) when is_integer(board_id) do
+    board_id
+    |> selected_done_cards(board_context(board_id), opts)
+    |> Enum.map(fn {card, _rows, _done_at} -> card.id end)
+  end
+
+  @doc """
   Agent seconds on `flow_key` for a card set — `card_id:` for one card, else the same
   `last:` / `window:` set as `stream_summary/2` — reading the same
   `node_executions.started_at/finished_at` columns `Relay.Runs.node_metrics_for_flow/2` sums
@@ -169,9 +180,7 @@ defmodule Relay.ValueStream do
     card_ids =
       case Keyword.get(opts, :card_id) do
         nil ->
-          board_id
-          |> selected_done_cards(board_context(board_id), opts)
-          |> Enum.map(fn {card, _rows, _done_at} -> card.id end)
+          done_card_ids(board_id, opts)
 
         card_id ->
           [card_id]
@@ -194,14 +203,15 @@ defmodule Relay.ValueStream do
   end
 
   @doc """
-  The level-2 roll-up for one flow (RE348) — the data behind the Code flow map (RE349). Options
-  are exactly `Relay.Runs.node_metrics_for_flow/2`'s (`:window`, `:card_id`). Reads
-  `Relay.Runs.execution_spans_for_flow/2` once for the sends and the foreach block, so every
-  figure is built from the same classified seconds that feed `rework_total` / `rewind_total`.
+  The level-2 roll-up for one flow (RE348) — the data behind the flow map (RE349). Options are
+  exactly `Relay.Runs.node_metrics_for_flow/2`'s (`:window`, `:card_id`, `:card_ids`). Reads
+  `Relay.Runs.execution_spans_for_flow/2` once for the sends, the foreach block and the run
+  counts, so every figure is built from the same classified executions that feed
+  `rework_total` / `rewind_total`.
 
-  Returns `%{runs, nodes, sends, foreach}`:
+  Returns `%{runs, nodes, sends, foreach, queue_wait, done_runs, parked_runs, first_pass_runs}`:
 
-  - `runs` — distinct runs with ≥1 in-window execution (the per-run divisor).
+  - `runs` — distinct runs with ≥1 in-window execution (the per-run divisor; the population).
   - `nodes` — `Relay.Runs.node_metrics_for_flow/2`, unchanged, in flow order.
   - `sends` — one `%{from, to, returns_to, laps, to_secs, rewind_secs, secs}` per
     `(from, to, returns_to)`, sorted by `secs` descending. A **send-back hop** is a consecutive
@@ -212,19 +222,35 @@ defmodule Relay.ValueStream do
     first other node in it (nil if the run ended or parked there). A hop counts when its target
     execution is in the window.
   - `foreach` — nil when the flow has no foreach node, else `%{node_key, runs, n_mean, n_min,
-    n_max, copies, copy_p50, copy_max, copy_total}`. N per run is its distinct non-nil
-    `sub_task_id`s among in-window executions; a **copy** is every execution bound to one
-    `(run, sub_task)` — the foreach node plus its in-loop reviews and fixes, rework included.
+    n_max, copies, clean_copies, copy_p50, copy_max, copy_total}`. N per run is its distinct
+    non-nil `sub_task_id`s among in-window executions; a **copy** is every execution bound to one
+    `(run, sub_task)` — the foreach node plus its in-loop reviews and fixes, rework included; a
+    **clean** copy has no rework execution.
+  - `queue_wait` — `Relay.Runs.first_node_queue_wait/2` for the same options (RE349).
+  - `done_runs` — population runs whose status is `:done`.
+  - `parked_runs` — population runs that ever parked for input: an execution ended in
+    `Schemas.NodeExecution.holding_outcomes/0`, or the run is parked with `parked_reason:
+    :needs_input`.
+  - `first_pass_runs` — population runs with no `:failed` execution of a `:check`-role node
+    (`Schemas.Flow.node_roles/1`).
   """
   def flow_stream(%Flow{} = flow, opts \\ []) do
     spans = Runs.execution_spans_for_flow(flow, opts)
     in_window = Enum.filter(spans, & &1.in_window?)
+    run_ids = in_window |> Enum.map(& &1.run_id) |> Enum.uniq()
+    members = MapSet.new(run_ids)
+    population = Enum.filter(spans, &MapSet.member?(members, &1.run_id))
+    runs = load_runs(run_ids)
 
     %{
-      runs: in_window |> Enum.map(& &1.run_id) |> Enum.uniq() |> length(),
+      runs: length(run_ids),
       nodes: Runs.node_metrics_for_flow(flow, opts),
       sends: sends(spans),
-      foreach: foreach(Runs.foreach_node_key(flow), in_window)
+      foreach: foreach(Runs.foreach_node_key(flow), in_window),
+      queue_wait: Runs.first_node_queue_wait(flow, opts),
+      done_runs: Enum.count(runs, &(&1.status == :done)),
+      parked_runs: parked_runs(population, runs),
+      first_pass_runs: first_pass_runs(population, run_ids, Flow.node_roles(flow))
     }
   end
 
@@ -737,6 +763,29 @@ defmodule Relay.ValueStream do
 
   # ── level 2: one flow (RE348) ───────────────────────────────────────────────
 
+  defp load_runs(run_ids) do
+    Repo.all(
+      from(r in Run, where: r.id in ^run_ids, select: %{id: r.id, status: r.status, parked_reason: r.parked_reason})
+    )
+  end
+
+  # A run that ever parked for input: an execution ended holding, or it is parked on a question now.
+  defp parked_runs(population, runs) do
+    holding = NodeExecution.holding_outcomes()
+    held = population |> Enum.filter(&(&1.outcome in holding)) |> MapSet.new(& &1.run_id)
+    Enum.count(runs, &(MapSet.member?(held, &1.id) or &1.parked_reason == :needs_input))
+  end
+
+  # Rolled first pass per run: no check-role execution in the run ever failed.
+  defp first_pass_runs(population, run_ids, roles) do
+    failed =
+      population
+      |> Enum.filter(&(&1.outcome == :failed and Map.get(roles, &1.node_key) == :check))
+      |> MapSet.new(& &1.run_id)
+
+    Enum.count(run_ids, &(not MapSet.member?(failed, &1)))
+  end
+
   # Hops are found over each run's FULL classified history (so a span can see past the window's
   # edge), then kept when their target execution is in the window.
   defp sends(spans) do
@@ -803,7 +852,9 @@ defmodule Relay.ValueStream do
       |> Enum.group_by(& &1.run_id, & &1.sub_task_id)
       |> Enum.map(fn {_run_id, ids} -> ids |> Enum.uniq() |> length() end)
 
-    copies = bound |> Enum.group_by(&{&1.run_id, &1.sub_task_id}) |> Enum.map(fn {_copy, rows} -> sum_secs(rows) end)
+    grouped = Enum.group_by(bound, &{&1.run_id, &1.sub_task_id})
+    copies = Enum.map(grouped, fn {_copy, rows} -> sum_secs(rows) end)
+    clean = Enum.count(grouped, fn {_copy, rows} -> not Enum.any?(rows, & &1.rework?) end)
 
     %{
       node_key: node_key,
@@ -812,6 +863,7 @@ defmodule Relay.ValueStream do
       n_min: Enum.min(ns, fn -> nil end),
       n_max: Enum.max(ns, fn -> nil end),
       copies: length(copies),
+      clean_copies: clean,
       copy_p50: median(copies),
       copy_max: Enum.max(copies, fn -> nil end),
       copy_total: Enum.sum(copies)

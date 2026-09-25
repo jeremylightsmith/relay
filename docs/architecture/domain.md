@@ -111,7 +111,7 @@ sharing behavior.
   per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
   `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
-  private builder, so the summary shape is defined exactly once. Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)).
+  private builder, so the summary shape is defined exactly once. Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)). The four metrics roll-ups (`node_metrics_for_flow/2`, `node_waits_for_flow/2`, `execution_spans_for_flow/2`, `flow_metrics_summary/2`) take `card_id:` (one card, RE235) or `card_ids:` (a list — RE349's Last-N population, `card_id:` winning when both are given); either drops the window. `first_node_queue_wait/2` (RE349) is the mean `claimed_at − inserted_at` of the `NodeJob.flow_kinds/0` job bound to each in-population run's first execution — the value stream's queue triangle.
   **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
   pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
   vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
@@ -227,7 +227,12 @@ sharing behavior.
   **send-backs** (a `failed` execution followed by a different node, grouped by
   `from → to → returns_to` with `laps`, `to_secs`, `rewind_secs`, `secs`) and its **foreach**
   N and per-copy spread, all from one read of `Runs.execution_spans_for_flow/2`, the data behind
-  the Code flow map (RE349). Approximations: `ai_enabled` and node roles are read as they are now.
+  the Code flow map (RE349).
+  RE349 adds `done_card_ids/2` — the ids of the done cards `stream_summary/2` averages, the ONE
+  "last N" selector level 2 passes as `card_ids:` — and, on `flow_stream/2`, `queue_wait`,
+  `done_runs`, `parked_runs` (an execution ended in `NodeExecution.holding_outcomes/0` or the run
+  is parked on `:needs_input`), `first_pass_runs` (no failed `:check` execution) and the
+  foreach's `clean_copies`. Approximations: `ai_enabled` and node roles are read as they are now.
 - **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
   `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryTask` (the backbone,
   ordered within an activity; `board_id` denormalized so every read is one board-scoped
