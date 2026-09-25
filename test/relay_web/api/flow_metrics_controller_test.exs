@@ -130,4 +130,88 @@ defmodule RelayWeb.Api.FlowMetricsControllerTest do
       assert body["summary"]["median_end_to_end"]
     end
   end
+
+  describe "wait vs held gaps (RE345)" do
+    setup %{board: board} do
+      insert(:flow,
+        board: board,
+        key: "code",
+        nodes: [
+          %Schemas.Flow.Node{key: "review", type: :agent, model: "sonnet"},
+          %Schemas.Flow.Node{key: "fix", type: :agent, model: "sonnet"}
+        ]
+      )
+
+      card = insert(:card, board: board, stage: insert(:stage, board: board))
+      t0 = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -7200, :second)
+
+      # run 1: review succeeds, fix starts 30s later -> 30s of hand-off wait
+      waited = insert(:run, card: card, flow_key: "code", status: :done, started_at: t0)
+      exec_at(waited, "review", t0, 0, 10, :succeeded)
+      exec_at(waited, "fix", t0, 40, 50, :succeeded)
+
+      # run 2: review asks a human, fix starts 3600s later -> 3600s held
+      parked = insert(:run, card: card, flow_key: "code", status: :done, started_at: t0)
+      exec_at(parked, "review", t0, 0, 10, :needs_input)
+      exec_at(parked, "fix", t0, 3610, 3620, :succeeded)
+
+      {:ok, ref: Relay.Cards.ref(board, card)}
+    end
+
+    test "flow scope reports every wait and held figure per node", %{conn: conn} do
+      body = conn |> get(~p"/api/flows/code/metrics?window=all") |> json_response(200) |> Map.fetch!("data")
+
+      assert [review, fix] = body["nodes"]
+
+      # the first node of every run has no gap
+      assert %{
+               "wait_p50" => nil,
+               "wait_p95" => nil,
+               "wait_total" => nil,
+               "wait_count" => 0,
+               "held_p50" => nil,
+               "held_p95" => nil,
+               "held_total" => nil,
+               "held_count" => 0
+             } = review
+
+      assert %{
+               "wait_p50" => 30,
+               "wait_p95" => 30,
+               "wait_total" => 30,
+               "wait_count" => 1,
+               "held_p50" => 3600,
+               "held_p95" => 3600,
+               "held_total" => 3600,
+               "held_count" => 1
+             } = fix
+    end
+
+    test "card scope nulls the wait/held percentiles but keeps totals and counts", %{conn: conn, ref: ref} do
+      body = conn |> get(~p"/api/flows/code/metrics?#{[card: ref]}") |> json_response(200) |> Map.fetch!("data")
+
+      assert [_review, fix] = body["nodes"]
+
+      assert %{
+               "wait_p50" => nil,
+               "wait_p95" => nil,
+               "held_p50" => nil,
+               "held_p95" => nil,
+               "wait_total" => 30,
+               "wait_count" => 1,
+               "held_total" => 3600,
+               "held_count" => 1
+             } = fix
+    end
+  end
+
+  defp exec_at(run, node, t0, start_s, finish_s, outcome) do
+    insert(:node_execution,
+      run: run,
+      node: node,
+      outcome: outcome,
+      started_at: DateTime.add(t0, start_s, :second),
+      finished_at: DateTime.add(t0, finish_s, :second)
+    )
+  end
 end

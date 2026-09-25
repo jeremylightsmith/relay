@@ -62,6 +62,23 @@ defmodule Relay.Runs.NodeMetricsTest do
     Relay.Repo.update!(Ecto.Changeset.change(exec, started_at: started, finished_at: finished))
   end
 
+  # An execution at explicit offsets (seconds) from `t0` — gap tests need exact timestamps, and a
+  # shared `t0` keeps every row on one clock (utc_now per row could tick a second between rows).
+  # `finish_s: nil` leaves finished_at nil (an abandoned / in-flight execution).
+  defp exec_at(run, node, t0, start_s, finish_s, opts \\ []) do
+    insert(:node_execution,
+      run: run,
+      node: node,
+      visit: Keyword.get(opts, :visit, 1),
+      outcome: Keyword.get(opts, :outcome, :succeeded),
+      resume_at: Keyword.get(opts, :resume_at),
+      started_at: DateTime.add(t0, start_s, :second),
+      finished_at: finish_s && DateTime.add(t0, finish_s, :second)
+    )
+  end
+
+  defp t0_ago(ago_s), do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -ago_s, :second)
+
   describe "node_metrics_for_flow/2" do
     test "one row per node with executions, in flow node order, with counts and percentiles" do
       board = insert(:board)
@@ -230,6 +247,244 @@ defmodule Relay.Runs.NodeMetricsTest do
     end
   end
 
+  describe "node_waits_for_flow/2 (RE345)" do
+    test "a hand-off gap is charged to the node it precedes; a run's first node gets none" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["branch", "implement"])
+      run = completed_run(board, "code", 3600, :done)
+      t0 = t0_ago(3600)
+
+      exec_at(run, "branch", t0, 0, 30)
+      exec_at(run, "implement", t0, 90, 200)
+
+      waits = Runs.node_waits_for_flow(flow, window: "all")
+
+      refute Map.has_key?(waits, "branch")
+
+      assert waits["implement"] == %{
+               wait_p50: 60,
+               wait_p95: 60,
+               wait_total: 60,
+               wait_count: 1,
+               held_p50: nil,
+               held_p95: nil,
+               held_total: nil,
+               held_count: 0
+             }
+    end
+
+    test "a gap after a :needs_input execution is held, not wait" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["review", "fix"])
+      run = completed_run(board, "code", 7200, :done)
+      t0 = t0_ago(7200)
+
+      exec_at(run, "review", t0, 0, 60, outcome: :needs_input)
+      exec_at(run, "fix", t0, 3660, 3700)
+
+      assert %{
+               held_total: 3600,
+               held_count: 1,
+               held_p50: 3600,
+               wait_count: 0,
+               wait_total: nil,
+               wait_p50: nil
+             } = Runs.node_waits_for_flow(flow, window: "all")["fix"]
+    end
+
+    test "a gap after a :blocked execution (usage limit with resume_at) is held" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      run = completed_run(board, "code", 7200, :done)
+      t0 = t0_ago(7200)
+
+      exec_at(run, "implement", t0, 0, 10, outcome: :blocked, resume_at: DateTime.add(t0, 600, :second))
+      exec_at(run, "implement", t0, 610, 700)
+
+      assert %{held_total: 600, held_count: 1, wait_count: 0} =
+               Runs.node_waits_for_flow(flow, window: "all")["implement"]
+    end
+
+    test "the held classification is exactly holding_outcomes/0" do
+      board = insert(:board)
+      keys = Enum.map(NodeExecution.outcomes(), &Atom.to_string/1)
+      flow = flow_with_nodes(board, Enum.map(keys, &("after_" <> &1)))
+      t0 = t0_ago(7200)
+
+      for outcome <- NodeExecution.outcomes() do
+        run = completed_run(board, "code", 7200, :done)
+        exec_at(run, "first", t0, 0, 10, outcome: outcome)
+        exec_at(run, "after_#{outcome}", t0, 40, 50)
+      end
+
+      waits = Runs.node_waits_for_flow(flow, window: "all")
+
+      for outcome <- NodeExecution.outcomes() do
+        row = waits["after_#{outcome}"]
+
+        if outcome in NodeExecution.holding_outcomes() do
+          assert %{held_count: 1, held_total: 30, wait_count: 0} = row
+        else
+          assert %{wait_count: 1, wait_total: 30, held_count: 0} = row
+        end
+      end
+    end
+
+    test "in a loop A→B→A the gap before the second A is charged to A" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement", "review"])
+      run = completed_run(board, "code", 3600, :done)
+      t0 = t0_ago(3600)
+
+      exec_at(run, "implement", t0, 0, 10)
+      exec_at(run, "review", t0, 20, 30, outcome: :failed)
+      exec_at(run, "implement", t0, 50, 60, visit: 2)
+
+      waits = Runs.node_waits_for_flow(flow, window: "all")
+      assert %{wait_total: 10, wait_count: 1} = waits["review"]
+      assert %{wait_total: 20, wait_count: 1} = waits["implement"]
+    end
+
+    test "no gap is recorded after an execution with no finished_at, nor for a negative gap" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["a", "b", "c"])
+      run = completed_run(board, "code", 3600, :done)
+      t0 = t0_ago(3600)
+
+      exec_at(run, "a", t0, 0, nil, outcome: nil)
+      exec_at(run, "b", t0, 100, 500)
+      # c starts before b finished (clock skew) — defensive skip
+      exec_at(run, "c", t0, 200, 300)
+
+      assert Runs.node_waits_for_flow(flow, window: "all") == %{}
+    end
+
+    test "the window applies to the successor: a predecessor before `since` still yields its gap" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["plan", "implement"])
+      run = completed_run(board, "code", 9 * 86_400, :done)
+      t0 = t0_ago(8 * 86_400)
+
+      # plan: started 8 days ago (outside 7d); implement: started 6 days ago (inside 7d)
+      exec_at(run, "plan", t0, 0, 60)
+      exec_at(run, "implement", t0, 2 * 86_400, 2 * 86_400 + 60)
+
+      waits = Runs.node_waits_for_flow(flow, window: "7d")
+      assert %{wait_total: 172_740, wait_count: 1} = waits["implement"]
+      refute Map.has_key?(waits, "plan")
+    end
+
+    test "window excludes a gap whose successor started before `since`" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["plan", "implement"])
+      run = completed_run(board, "code", 41 * 86_400, :done)
+      t0 = t0_ago(40 * 86_400)
+
+      exec_at(run, "plan", t0, 0, 60)
+      exec_at(run, "implement", t0, 120, 180)
+
+      assert Runs.node_waits_for_flow(flow, window: "7d") == %{}
+      assert %{wait_total: 60} = Runs.node_waits_for_flow(flow, window: "all")["implement"]
+    end
+
+    test "card scope counts only that card's runs and ignores the window" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["plan", "implement"])
+      stage = insert(:stage, board: board)
+      mine = insert(:card, board: board, stage: stage)
+      other = insert(:card, board: board, stage: stage)
+
+      old_t0 = t0_ago(40 * 86_400)
+      old_run = completed_run_for(mine, "code", 40 * 86_400, 600)
+      exec_at(old_run, "plan", old_t0, 0, 10)
+      exec_at(old_run, "implement", old_t0, 30, 40)
+
+      t0 = t0_ago(3600)
+      new_run = completed_run_for(mine, "code", 3600, 600)
+      exec_at(new_run, "plan", t0, 0, 10)
+      exec_at(new_run, "implement", t0, 50, 60)
+
+      other_run = completed_run_for(other, "code", 3600, 600)
+      exec_at(other_run, "plan", t0, 0, 10)
+      exec_at(other_run, "implement", t0, 1010, 1020)
+
+      assert %{wait_total: 60, wait_count: 2} =
+               Runs.node_waits_for_flow(flow, window: "7d", card_id: mine.id)["implement"]
+
+      # flow scope, same window: the 40-day-old gap drops out, the other card's comes in
+      assert %{wait_total: 1040, wait_count: 2} =
+               Runs.node_waits_for_flow(flow, window: "7d")["implement"]
+    end
+
+    test "other flows and other boards are excluded" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["plan", "implement"])
+      t0 = t0_ago(3600)
+
+      mine = completed_run(board, "code", 3600, :done)
+      exec_at(mine, "plan", t0, 0, 10)
+      exec_at(mine, "implement", t0, 20, 30)
+
+      other_flow_run = completed_run(board, "spec", 3600, :done)
+      exec_at(other_flow_run, "plan", t0, 0, 10)
+      exec_at(other_flow_run, "implement", t0, 500, 510)
+
+      other_board = insert(:board)
+      other_board_run = completed_run(other_board, "code", 3600, :done)
+      exec_at(other_board_run, "plan", t0, 0, 10)
+      exec_at(other_board_run, "implement", t0, 900, 910)
+
+      assert %{"implement" => %{wait_total: 10, wait_count: 1}} =
+               Runs.node_waits_for_flow(flow, window: "all")
+    end
+
+    test "p50/p95 are percentile_cont over each class separately" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["plan", "implement"])
+      t0 = t0_ago(7200)
+
+      for gap <- [10, 20, 30] do
+        run = completed_run(board, "code", 7200, :done)
+        exec_at(run, "plan", t0, 0, 10)
+        exec_at(run, "implement", t0, 10 + gap, 100 + gap)
+      end
+
+      held_run = completed_run(board, "code", 7200, :done)
+      exec_at(held_run, "plan", t0, 0, 10, outcome: :needs_input)
+      exec_at(held_run, "implement", t0, 1010, 1100)
+
+      row = Runs.node_waits_for_flow(flow, window: "all")["implement"]
+      # percentile_cont(0.95) over [10, 20, 30] = 20 + 0.9 * 10 = 29
+      assert %{wait_p50: 20, wait_p95: 29, wait_total: 60, wait_count: 3} = row
+      assert %{held_p50: 1000, held_p95: 1000, held_total: 1000, held_count: 1} = row
+    end
+
+    test "node_metrics_for_flow/2 rows carry the wait keys, nil/0 for a node with no gaps" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["branch", "implement"])
+      run = completed_run(board, "code", 3600, :done)
+      t0 = t0_ago(3600)
+
+      exec_at(run, "branch", t0, 0, 30)
+      exec_at(run, "implement", t0, 90, 200)
+
+      [branch, implement] = Runs.node_metrics_for_flow(flow, window: "all")
+
+      assert %{
+               wait_p50: nil,
+               wait_p95: nil,
+               wait_total: nil,
+               wait_count: 0,
+               held_p50: nil,
+               held_p95: nil,
+               held_total: nil,
+               held_count: 0
+             } = branch
+
+      assert %{runs: 1, wait_total: 60, wait_count: 1, held_count: 0} = implement
+    end
+  end
+
   describe "policy accessors" do
     test "windows and threshold are defined once" do
       assert Runs.metric_windows() == ["7d", "30d", "all"]
@@ -250,5 +505,11 @@ defmodule Relay.Runs.NodeMetricsTest do
   test "outcome closed set is sourced from the schema, not retyped" do
     # guards against a drifting literal in verdict_split
     assert :partial in NodeExecution.outcomes()
+  end
+
+  test "holding_outcomes/0 is a subset of outcomes/0 (RE345)" do
+    holding = NodeExecution.holding_outcomes()
+    refute Enum.empty?(holding)
+    assert holding -- NodeExecution.outcomes() == []
   end
 end

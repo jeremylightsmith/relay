@@ -187,10 +187,18 @@ never 403s):
   (`total_runs`, `completed`, `completed_pct`, `total_spend`, `median_end_to_end`,
   `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null`
   until runners report spend — `duration_total`, `cost_total`, `attempts_mean`,
-  `verdict_split`, `loop_laps`). An optional `?card=<ref>` (RE235) scopes every figure to one
-  card's node executions across ALL of its runs of that flow: `?window=` is then ignored, the
-  four percentile keys and `median_end_to_end` come back `null` (a percentile over one card is
-  noise), and an unknown, unparseable or other-board ref is a `404`. Read-only, board-scoped.
+  `verdict_split`, `loop_laps`, and the RE345 idle-gap keys `wait_p50/p95`, `wait_total`,
+  `wait_count`, `held_p50/p95`, `held_total`, `held_count`). The nodes come from
+  `Relay.Runs.node_metrics_for_flow/2`, which merges in `Relay.Runs.node_waits_for_flow/2`: a
+  node's gap is the time from the previous execution in the same run finishing to this one
+  starting, and it is **held** when that previous execution ended `needs_input`/`blocked`
+  (`Schemas.NodeExecution.holding_outcomes/0`), otherwise hand-off **wait**; a run's first node
+  has none, and the window applies to the execution the gap precedes. An optional
+  `?card=<ref>` (RE235) scopes every figure to one card's node executions across ALL of its
+  runs of that flow: `?window=` is then ignored, the eight percentile keys
+  (`duration_*`, `cost_*`, `wait_*`, `held_*` p50/p95) and `median_end_to_end` come back `null`
+  (a percentile over one card is noise), and an unknown, unparseable or other-board ref is a
+  `404`. Read-only, board-scoped.
 - `GET /api/flows/:key/audit` (`RelayWeb.Api.AuditController.audit/2`) — run-history health
   findings for a flow over a `?window=7d|30d|all` window (default `30d`), composing
   `Relay.Runs.audit/2` (`Relay.Runs.Audit.findings/2` over `Relay.Runs.recent_runs_for_flow/2`).

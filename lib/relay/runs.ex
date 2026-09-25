@@ -240,6 +240,19 @@ defmodule Relay.Runs do
   def metric_scope(nil), do: :flow
   def metric_scope(_card_id), do: :card
 
+  # What a node with executions but no gaps (e.g. only ever a run's first node) merges in, so
+  # every rollup row carries the RE345 keys in one shape.
+  @empty_waits %{
+    wait_p50: nil,
+    wait_p95: nil,
+    wait_total: nil,
+    wait_count: 0,
+    held_p50: nil,
+    held_p95: nil,
+    held_total: nil,
+    held_count: 0
+  }
+
   @doc """
   Per-node rollup for `flow` over `opts[:window]` (one of `metric_windows/0`, default
   `default_window/0`). Returns one map per node key that has executions in the window, in the
@@ -253,6 +266,10 @@ defmodule Relay.Runs do
 
   `duration_total` and `cost_total` are present in BOTH scopes — they come out of the same
   grouped pass as the percentiles, so scoping costs no extra round trip.
+
+  Every row also carries the RE345 idle-gap keys from `node_waits_for_flow/2` (`wait_p50/p95/
+  total/count`, `held_p50/p95/total/count`), nil figures and 0 counts for a node with no gaps —
+  one source for the page, the API and the Value Stream Map.
   """
   def node_metrics_for_flow(%Flow{} = flow, opts \\ []) do
     card_id = Keyword.get(opts, :card_id)
@@ -260,13 +277,80 @@ defmodule Relay.Runs do
 
     numeric = node_numeric_rows(flow, since, card_id)
     verdicts = node_verdict_counts(flow, since, card_id)
+    waits = node_waits_for_flow(flow, opts)
 
     flow.nodes
     |> Enum.map(& &1.key)
     |> Enum.uniq()
     |> Enum.filter(&Map.has_key?(numeric, &1))
     |> Enum.map(fn key ->
-      Map.put(numeric[key], :verdict_split, verdict_split(Map.get(verdicts, key, %{})))
+      numeric[key]
+      |> Map.put(:verdict_split, verdict_split(Map.get(verdicts, key, %{})))
+      |> Map.merge(Map.get(waits, key, @empty_waits))
+    end)
+  end
+
+  @doc """
+  Per-node idle gaps for `flow` (RE345) — the time between one execution finishing and the next
+  execution in the SAME run starting, charged to the node the gap precedes. Consecutive pairs are
+  taken in `started_at ASC, id ASC` order within each run (executions in a run are sequential), so
+  a run's first execution has no gap, and in a loop A→B→A the gap before the second A is A's.
+
+  Each gap is `held` when the previous execution's outcome is in
+  `Schemas.NodeExecution.holding_outcomes/0` (the run was parked on a human, or blocked on auth /
+  a usage limit), otherwise plain hand-off `wait`. A pair is skipped when the previous execution
+  has no `finished_at` (abandoned or still in flight) or the gap is negative (clock skew).
+
+  Known limitation: an escalation park (`--on failed --> needs_input`) leaves the previous
+  outcome `:failed`, so its gap counts as `wait` — telling it apart needs the flow's edges (left
+  for RE348).
+
+  Options are exactly `node_metrics_for_flow/2`'s and resolve through the same helpers, so the two
+  rollups cover the same executions: `opts[:window]` filters on the SUCCESSOR's `started_at` (the
+  execution the gap is charged to), applied AFTER the `LAG` so a predecessor that started before
+  the window still yields its successor's gap; `opts[:card_id]` scopes to one card and drops the
+  window (RE235 decision 3).
+
+  Returns `%{node_key => %{wait_p50, wait_p95, wait_total, wait_count, held_p50, held_p95,
+  held_total, held_count}}` in whole seconds. A class with no gaps has nil figures and a 0 count;
+  a node with no gaps at all is absent. Public so RE348 can read it directly.
+  """
+  def node_waits_for_flow(%Flow{} = flow, opts \\ []) do
+    card_id = Keyword.get(opts, :card_id)
+    since = metrics_since(opts, card_id)
+
+    gaps =
+      flow
+      |> lagged_executions(card_id, NodeExecution.holding_outcomes())
+      |> gaps_since(since)
+
+    from(g in subquery(gaps),
+      group_by: g.node_key,
+      select: %{
+        node_key: g.node_key,
+        wait_p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?) FILTER (WHERE NOT ?)", g.gap, g.held),
+        wait_p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?) FILTER (WHERE NOT ?)", g.gap, g.held),
+        wait_total: filter(sum(g.gap), not g.held),
+        wait_count: filter(count(), not g.held),
+        held_p50: fragment("percentile_cont(0.5) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ?)", g.gap, g.held),
+        held_p95: fragment("percentile_cont(0.95) WITHIN GROUP (ORDER BY ?) FILTER (WHERE ?)", g.gap, g.held),
+        held_total: filter(sum(g.gap), g.held),
+        held_count: filter(count(), g.held)
+      }
+    )
+    |> Repo.all()
+    |> Map.new(fn row ->
+      {row.node_key,
+       %{
+         wait_p50: round_secs(row.wait_p50),
+         wait_p95: round_secs(row.wait_p95),
+         wait_total: round_secs(row.wait_total),
+         wait_count: row.wait_count,
+         held_p50: round_secs(row.held_p50),
+         held_p95: round_secs(row.held_p95),
+         held_total: round_secs(row.held_total),
+         held_count: row.held_count
+       }}
     end)
   end
 
@@ -355,6 +439,47 @@ defmodule Relay.Runs do
   # One grouped pass over node_executions for the numeric columns. percentile_cont ignores NULLs,
   # so a node with unset cost / open timestamps yields nil there without a FILTER clause. The
   # `*_total` columns ride along in the same pass — no second query for card scope (RE235).
+  # RE345: each execution with its run-predecessor's `finished_at` and whether that predecessor
+  # ended in `holding`. LAG runs over the whole (board, flow, card) set BEFORE any window filter —
+  # filtering here would drop the predecessor row and with it the successor's gap.
+  defp lagged_executions(%Flow{} = flow, card_id, holding) do
+    lagged =
+      from(ne in NodeExecution,
+        join: r in Run,
+        on: r.id == ne.run_id,
+        join: c in Card,
+        on: c.id == r.card_id,
+        where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+        windows: [run: [partition_by: ne.run_id, order_by: [asc: ne.started_at, asc: ne.id]]],
+        select: %{
+          node_key: ne.node_key,
+          started_at: ne.started_at,
+          prev_finished_at: over(lag(ne.finished_at), :run),
+          prev_held: over(lag(ne.outcome in ^holding), :run)
+        }
+      )
+
+    filter_card(lagged, card_id)
+  end
+
+  # RE345: one row per non-negative gap, classified held/wait, windowed on the SUCCESSOR's
+  # `started_at` (the first binding, so `filter_since/2` applies unchanged). `coalesce` keeps a
+  # NULL predecessor outcome from making `NOT held` NULL and dropping the gap from both classes.
+  defp gaps_since(lagged, since) do
+    gaps =
+      from(g in subquery(lagged),
+        where: not is_nil(g.prev_finished_at) and g.started_at >= g.prev_finished_at,
+        select: %{
+          node_key: g.node_key,
+          started_at: g.started_at,
+          held: coalesce(g.prev_held, false),
+          gap: fragment("EXTRACT(EPOCH FROM (? - ?))::float", g.started_at, g.prev_finished_at)
+        }
+      )
+
+    filter_since(gaps, since)
+  end
+
   defp node_numeric_rows(%Flow{} = flow, since, card_id) do
     from(ne in NodeExecution,
       join: r in Run,

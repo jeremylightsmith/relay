@@ -75,7 +75,15 @@ defmodule RelayWeb.Api.FlowMetricsController do
       cost_total: decimal(n.cost_total),
       attempts_mean: n.attempts_mean,
       verdict_split: n.verdict_split,
-      loop_laps: n.loop_laps
+      loop_laps: n.loop_laps,
+      wait_p50: percentile(scope, n.wait_p50),
+      wait_p95: percentile(scope, n.wait_p95),
+      wait_total: n.wait_total,
+      wait_count: n.wait_count,
+      held_p50: percentile(scope, n.held_p50),
+      held_p95: percentile(scope, n.held_p95),
+      held_total: n.held_total,
+      held_count: n.held_count
     }
   end
 
