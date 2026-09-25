@@ -818,6 +818,25 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert html =~ ~r/id="board-view-tab-value-stream"[^>]*aria-current="page"/
     end
+
+    test "collapses to labelled icons below sm and may shrink, so it fits a phone's top bar (RE347)" do
+      html =
+        render_component(&CoreComponents.board_view_tabs/1, board_slug: "my-board", active: :board)
+
+      doc = LazyHTML.from_fragment(html)
+      assert html =~ "flex:0 1 auto;min-width:0;overflow-x:auto"
+
+      for {id, label} <- [
+            {"board-view-tab-board", "Board"},
+            {"board-view-tab-story-map", "Story map"},
+            {"board-view-tab-value-stream", "Value stream"}
+          ] do
+        seg = LazyHTML.query(doc, "##{id}")
+        assert LazyHTML.attribute(seg, "aria-label") == [label]
+        assert seg |> LazyHTML.query("span.sm\\:hidden") |> Enum.count() == 1
+        assert seg |> LazyHTML.query("span.hidden.sm\\:inline") |> LazyHTML.text() == label
+      end
+    end
   end
 
   describe "RE260 — zoom_levels/0 and parse_zoom/1" do

@@ -378,7 +378,9 @@ defmodule RelayWeb.ValueStreamLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.board(@board)}>
       <:title>
-        <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">{@board.name}</span>
+        <span id="board-name" class="truncate shrink-[1000] max-w-[58vw] sm:max-w-[280px]">
+          {@board.name}
+        </span>
         <.board_view_tabs board_slug={@board.slug} active={:value_stream} />
       </:title>
       <div
