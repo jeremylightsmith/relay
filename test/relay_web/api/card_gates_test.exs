@@ -54,7 +54,13 @@ defmodule RelayWeb.Api.CardGatesTest do
 
     approved = Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "approved"))
     assert approved["author"]["name"] == "Relay AI"
-    assert approved["meta"] == %{"from_stage" => "Review", "to_stage" => "Deploy"}
+
+    assert approved["meta"] == %{
+             "from_stage" => "Review",
+             "to_stage" => "Deploy",
+             "from_stage_id" => review.id,
+             "to_stage_id" => deploy.id
+           }
   end
 
   test "POST reject with no :to routes the card to the previous main stage, note attached", %{

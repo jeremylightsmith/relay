@@ -176,7 +176,11 @@ sharing behavior.
 - **ApiKeys** — per-board agent credentials for the `/api` scope.
 - **Activity** — the card timeline: comments, activity entries, and runner log rows.
   `Activity.LogSink` batches ref-tagged runner lines into one insert per burst;
-  `Activity.Pruner` ages `:action` chatter out after 14 days (RLY-112).
+  `Activity.Pruner` ages `:action` chatter out after 14 days (RLY-112). Transition rows
+  (`:moved`, `:approved`, `:rejected`) carry `from_stage_id` / `to_stage_id` in `meta` beside
+  the display-name snapshots (RE146) — the names are for the timeline, the ids for
+  `Relay.ValueStream`; the `BackfillActivityStageIds` migration stamped older rows and deleted
+  those whose names no longer resolved to exactly one stage.
 - **AgentLog** — stateless live relay of runner feed lines to the board's log sheet
   (subscribe-only; no server buffer, no backfill — RLY-55).
 - **Events** — the realtime seam: contexts broadcast semantic domain events after each
