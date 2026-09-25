@@ -12,10 +12,11 @@ defmodule Relay.Runs.Engine do
   Rows may be `Schemas.NodeExecution` structs or plain maps with
   `node_key`/`visit`/`outcome`/`failure_signature`.
 
-  `opts[:bonus]` (default 0, RLY-189) is added to EVERY cap this module
+  `opts[:bonus]` (default 0, RLY-189) is added to every cap this module
   consults — the node's `max_retries`, the edge's `max_loops` (only when the
   edge declares one; `nil` stays unlimited), the breaker threshold, and the
-  visit cap. It is the run's human-retry count, so a retried run can always
+  visit cap — but NOT to `max_usage_limit_waits/0` (RE267): a wait spends no
+  budget, so there is nothing for a human retry to top up. It is the run's human-retry count, so a retried run can always
   make exactly one more move than it just did without any counter being
   reset. The engine stays pure: it receives the number, it never reads the
   run.
@@ -27,6 +28,8 @@ defmodule Relay.Runs.Engine do
 
   @default_breaker_threshold 3
   @default_visit_cap 20
+  # RE267: consecutive usage-limit waits one node may take before it parks for a human (RE308).
+  @max_usage_limit_waits 3
 
   @typedoc """
   A foreach `when` guard. The RUNTIME closed set is `Schemas.Flow.Edge.when_values/0` —
@@ -37,6 +40,7 @@ defmodule Relay.Runs.Engine do
   @type decision ::
           {:transition, String.t(), guard() | nil}
           | {:retry, String.t()}
+          | {:requeue, String.t()}
           | {:park, :needs_input | :blocked}
           | {:finish, :done}
           | {:fail, String.t()}
@@ -44,11 +48,13 @@ defmodule Relay.Runs.Engine do
   @doc """
   Decides the run's next move, in rule order:
 
-    1. `needs_input` parks — no edge is consulted. So does `blocked` (RE308): the runner reports
-       it when the agent could not run at all (an expired login, a usage limit). It parks here,
-       BEFORE rules 2–3, and those rules count only `:failed` rows — so a `blocked` attempt never
-       spends `max_retries`, never counts toward the breaker, and (see `effective_outcome/3`)
-       never consumes an edge's `max_loops`.
+    1. `needs_input` parks — no edge is consulted. A `blocked` (RE308) carrying a `resume_at`
+       (RE267) — a usage limit whose reset the runner knows — is `{:requeue, node}` while
+       `usage_limit_waits/2` is at most `max_usage_limit_waits/0`: the same node goes back on the
+       queue and waits the limit out. Every other `blocked` parks — an expired login, a limit with
+       no known reset, or the wait past the cap. Both happen BEFORE rules 2–3, and those rules
+       count only `:failed` rows — so a `blocked` attempt never spends `max_retries`, never counts
+       toward the breaker, and (see `effective_outcome/3`) never consumes an edge's `max_loops`.
     2. The failure-signature circuit breaker: >= `breaker_threshold` failed
        executions sharing `current`'s signature fail the run even when
        retries/loops technically remain (catches same-error loops across
@@ -97,9 +103,8 @@ defmodule Relay.Runs.Engine do
       current.outcome == :needs_input ->
         {:park, :needs_input}
 
-      # RE308: the agent never ran — retrying cannot fix an expired login or a usage limit.
       current.outcome == :blocked ->
-        {:park, :blocked}
+        blocked(history, current)
 
       # The breaker gets the FULL, unfiltered history — deliberately (see @moduledoc).
       current.outcome == :failed and breaker_tripped?(history, current, breaker_threshold) ->
@@ -113,11 +118,45 @@ defmodule Relay.Runs.Engine do
     end
   end
 
+  # RE267: a usage limit with a known reset clears by itself — requeue, spending nothing.
+  # RE308: anything else blocked never ran — retrying cannot fix an expired login.
+  defp blocked(history, current) do
+    if usage_limit_wait?(current) and usage_limit_waits(history, current) <= @max_usage_limit_waits,
+      do: {:requeue, current.node_key},
+      else: {:park, :blocked}
+  end
+
   # Iteration scoping: nil (any node outside a foreach) is the IDENTITY function,
   # so those nodes keep whole-run budgets exactly as before. Map.get, not the dot
   # access, because history rows may be plain maps in tests.
   defp scope_to_iteration(history, nil), do: history
   defp scope_to_iteration(history, id), do: Enum.filter(history, &(Map.get(&1, :sub_task_id) == id))
+
+  @doc "RE267: the most consecutive usage-limit waits one node takes before it parks (RE308)."
+  def max_usage_limit_waits, do: @max_usage_limit_waits
+
+  @doc """
+  RE267: how many usage-limit waits in a row `current`'s node has taken, `current` included —
+  the trailing run of `:blocked` rows carrying a `resume_at` for the same `node_key`, `visit` and
+  `sub_task_id`. Any other outcome on that node (a success, a failure, a plain RE308 `blocked`)
+  ends the streak, so a node that ran and was later limited again starts counting from 1.
+  `history` includes `current`, as for `decide/4`.
+  """
+  def usage_limit_waits(history, current) do
+    history
+    |> Enum.filter(&same_attempt_line?(&1, current))
+    |> Enum.reverse()
+    |> Enum.take_while(&usage_limit_wait?/1)
+    |> length()
+  end
+
+  # Map.get, not dot access: history rows may be plain maps in tests.
+  defp same_attempt_line?(row, current) do
+    row.node_key == current.node_key and row.visit == current.visit and
+      Map.get(row, :sub_task_id) == Map.get(current, :sub_task_id)
+  end
+
+  defp usage_limit_wait?(row), do: row.outcome == :blocked and not is_nil(Map.get(row, :resume_at))
 
   @doc """
   SHA-1 signature of a normalized failure detail (trimmed, truncated to
