@@ -100,6 +100,10 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     )
   end
 
+  defp blocked_execution(run) do
+    Relay.Repo.one!(from e in Schemas.NodeExecution, where: e.run_id == ^run.id and e.outcome == :blocked)
+  end
+
   # Module-level helper (ExUnit forbids defp inside describe): claim a fresh job, return {run, id}.
   defp claim_one(conn, board, flow) do
     {run, _job} = start_queued_job(board, flow)
@@ -617,6 +621,62 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert conn
              |> post(~p"/api/node-jobs/abc/outcome", Jason.encode!(%{"outcome" => "succeeded"}))
              |> json_response(404)
+    end
+
+    test "RE267: resume_at is stored on a blocked outcome, and the node is requeued", %{
+      conn: conn,
+      board: board,
+      flow: flow
+    } do
+      {run, id} = claim_one(conn, board, flow)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/#{id}/outcome",
+          Jason.encode!(%{
+            "outcome" => "blocked",
+            "detail" => "agent could not run: usage limit",
+            "resume_at" => "2100-01-01T00:00:00Z"
+          })
+        )
+        |> json_response(200)
+
+      assert body["run_state"] == "running"
+      assert blocked_execution(run).resume_at == ~U[2100-01-01 00:00:00Z]
+    end
+
+    test "RE267: resume_at is ignored on any outcome but blocked", %{conn: conn, board: board, flow: flow} do
+      {run, id} = claim_one(conn, board, flow)
+
+      conn
+      |> post(
+        ~p"/api/node-jobs/#{id}/outcome",
+        Jason.encode!(%{"outcome" => "failed", "detail" => "x", "resume_at" => "2100-01-01T00:00:00Z"})
+      )
+      |> json_response(200)
+
+      execution = Relay.Repo.one!(from e in Schemas.NodeExecution, where: e.run_id == ^run.id)
+      assert execution.resume_at == nil
+    end
+
+    test "RE267: an unparseable resume_at becomes nil and the blocked outcome still parks", %{
+      conn: conn,
+      board: board,
+      flow: flow
+    } do
+      {run, id} = claim_one(conn, board, flow)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/#{id}/outcome",
+          Jason.encode!(%{"outcome" => "blocked", "detail" => "agent could not run: x", "resume_at" => "soon-ish"})
+        )
+        |> json_response(200)
+
+      assert body["run_state"] == "parked"
+      assert blocked_execution(run).resume_at == nil
     end
   end
 

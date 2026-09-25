@@ -23,6 +23,11 @@ defmodule Schemas.NodeExecution do
   not run at all" — an expired login or a usage limit. The engine parks on it before any edge is
   consulted, so it is in `outcomes/0` (what a runner may report) but not in `routable_outcomes/0`
   (what a flow edge may route on and an agent may declare).
+
+  `resume_at` (RE267) is set ONLY on a `:blocked` row, and only when the runner knew when the
+  usage limit that refused the agent resets (a rejected `rate_limit_event`'s `resetsAt`). Its
+  presence is what `Relay.Runs.Engine.decide/4` reads to requeue the node instead of parking it;
+  an auth failure, `billing_error`, or a phrase-only usage limit leaves it nil and parks (RE308).
   """
 
   use Ecto.Schema
@@ -45,6 +50,7 @@ defmodule Schemas.NodeExecution do
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
     field :sub_task_id, :integer
+    field :resume_at, :utc_datetime
 
     belongs_to :run, Schemas.Run
 

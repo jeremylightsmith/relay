@@ -3893,6 +3893,8 @@ defmodule Relay.Runs do
         # dropping it here means no re-entry can `claude --resume` a session that could not
         # authenticate.
         session_id: if(outcome == :blocked, do: nil, else: attrs[:session_id]),
+        # RE267: only a `:blocked` row can be a usage-limit wait, so only it keeps a reset time.
+        resume_at: if(outcome == :blocked, do: attrs[:resume_at]),
         cost: attrs[:cost],
         finished_at: now()
       )

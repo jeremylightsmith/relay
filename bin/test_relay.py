@@ -265,8 +265,21 @@ class ReverseContractTest(unittest.TestCase):
     """
 
     def test_outcome_body_key_set_matches_the_fixture(self):
+        # RE267: `resume_at` is OPTIONAL — sent only for a usage-limit `blocked` with a known
+        # reset — so a plain body is a SUBSET of the fixture's keys and a full one matches it.
         body = relay.outcome_body("succeeded", "done", "abc123", "sess-1")
-        self.assertEqual(set(body), set(CONTRACT["outcome"]["request"]))
+        self.assertTrue(set(body) <= set(CONTRACT["outcome"]["request"]))
+        full = relay.outcome_body("blocked", "agent could not run: x", "abc123", None, False, FAR_RESET)
+        self.assertEqual(set(full), set(CONTRACT["outcome"]["request"]))
+
+    def test_outcome_body_omits_resume_at_when_there_is_none(self):
+        self.assertNotIn("resume_at", relay.outcome_body("succeeded", "done", "abc123"))
+        self.assertNotIn("resume_at", relay.outcome_body("blocked", "x", "abc123", None, False, None))
+
+    def test_outcome_body_sends_resume_at_as_iso_utc_in_the_fixture_s_format(self):
+        full = relay.outcome_body("blocked", "x", "abc123", None, False, FAR_RESET)
+        self.assertEqual(full["resume_at"], "2100-01-01T00:00:00Z")
+        self.assertEqual(full["resume_at"], CONTRACT["outcome"]["request"]["resume_at"])
 
     def test_outcome_body_defaults_session_id_to_none_rather_than_omitting_it(self):
         self.assertIsNone(relay.outcome_body("succeeded", "done", "abc123")["session_id"])
@@ -3409,6 +3422,67 @@ class AgentOutcomeContractTest(unittest.TestCase):
         self.assertIn(relay.local_clock(FAR_RESET), detail)
         self.assertNotIn("agent exited non-zero", detail)
 
+    # ---- RE267: a usage limit with a known reset carries its resume time ----
+
+    def test_a_rejected_rate_limit_event_gives_the_blocked_outcome_its_reset(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                               errored_result_event("Claude AI usage limit reached"))
+        outcome, detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertEqual(relay.blocked_resume_at(outcome, report), FAR_RESET)
+        body = relay.outcome_body(outcome, detail, "sha", None, False, relay.blocked_resume_at(outcome, report))
+        self.assertEqual(body["resume_at"], "2100-01-01T00:00:00Z")
+
+    def test_the_same_rejected_stream_pauses_the_usage_limiter_until_the_reset(self):
+        """The whole RE267 design leans on RE320: the runner that was refused has already paused
+        its own claiming until `resetsAt`, so the requeued job is not re-claimed straight away."""
+        limiter = relay.UsageLimiter()
+        limiter.observe(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                        FAR_RESET - 3600)
+        paused = limiter.paused(FAR_RESET - 3600)
+        self.assertIsNotNone(paused)
+        self.assertEqual(paused["resets_at"], FAR_RESET)
+        self.assertIsNone(limiter.paused(FAR_RESET))
+
+    def test_a_phrase_only_usage_limit_has_no_resume_time(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(errored_result_event("Claude AI usage limit reached"))
+        outcome, detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertIsNone(relay.blocked_resume_at(outcome, report))
+        self.assertNotIn("resume_at", relay.outcome_body(outcome, detail, "sha", None, False,
+                                                         relay.blocked_resume_at(outcome, report)))
+
+    def test_an_expired_login_has_no_resume_time(self):
+        relay.get_card = lambda ref: {"status": "working"}
+        report = claude_report(AUTH_ASSISTANT_EVENT, AUTH_RESULT_EVENT)
+        outcome, _detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertIsNone(relay.blocked_resume_at(outcome, report))
+
+    def test_a_billing_error_has_no_resume_time_even_beside_a_rejected_event(self):
+        """billing_error is auth-kind on purpose (it never clears by itself), so even a stream that
+        also carried a rejected rate_limit_event must not be told to wait for a reset."""
+        relay.get_card = lambda ref: {"status": "working"}
+        billing = {"type": "assistant", "error": "billing_error",
+                   "message": {"content": [{"type": "text", "text": "Credit balance is too low"}]}}
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                               billing, errored_result_event("Credit balance is too low"))
+        outcome, _detail, _no_changes = relay.determine_agent_outcome(
+            {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
+        self.assertEqual(outcome, "blocked")
+        self.assertIsNone(relay.blocked_resume_at(outcome, report))
+
+    def test_only_a_blocked_outcome_carries_a_resume_time(self):
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))
+        for outcome in ("failed", "succeeded", "needs_input", "partial"):
+            self.assertIsNone(relay.blocked_resume_at(outcome, report), outcome)
+        self.assertIsNone(relay.blocked_resume_at("blocked", None))
+
     def test_an_unclassified_nonzero_exit_is_still_failed_with_its_last_words(self):
         relay.get_card = lambda ref: {"status": "working"}
         report = claude_report(errored_result_event("TypeError: boom"))
@@ -3725,9 +3799,20 @@ class RunNodeJobTest(unittest.TestCase):
         relay._stream_claude_job = fake_stream
         relay.determine_agent_outcome = fake_determine
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
-        outcome, detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertIs(seen["report"], report)
         self.assertEqual((outcome, detail), ("blocked", "agent could not run: x"))
+
+    def test_a_usage_limit_with_a_known_reset_rides_out_as_resume_at(self):
+        """RE267: run_node_job's 6th element is the reset the stream reported, for execute_one to
+        forward to report_outcome."""
+        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
+                               errored_result_event("Claude AI usage limit reached"))
+        relay._stream_claude_job = lambda prompt, cwd, **kwargs: (False, "sess-9", report)
+        relay.get_card = lambda ref: {"status": "working"}
+        j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
+        outcome, _detail, _sha, _session, _no_changes, resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        self.assertEqual((outcome, resume_at), ("blocked", FAR_RESET))
 
     # --- RLY-166: never run a node on a detached HEAD -----------------------------------
     # reset_worktree() ends in `git checkout --detach` BY DESIGN, and it runs mid-run on the
@@ -3751,7 +3836,7 @@ class RunNodeJobTest(unittest.TestCase):
         self._git_head("", returncode=1)  # detached: symbolic-ref exits non-zero
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
-        outcome, detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("detached", detail)
@@ -3763,7 +3848,7 @@ class RunNodeJobTest(unittest.TestCase):
         self._git_head("refs/heads/some-other-branch\n")
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
-        outcome, detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("feature-x", detail)
@@ -3778,7 +3863,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"},
                 run="git checkout -B {branch} origin/main")
-        outcome, _detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(len(ran), 1)
@@ -3797,7 +3882,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         j = job("shared_clean_agent", node_type="shell", run="true")
         self.assertIsNotNone(j["vars"]["branch"], "the fixture must carry a branch var here")
-        outcome, _detail, _sha, _session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(len(ran), 1)
@@ -3805,7 +3890,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_shell_job_reports_succeeded_with_git_sha(self):
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        outcome, detail, sha, session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, sha, session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
 
     def test_shell_job_failure_carries_the_output_tail(self):
@@ -3815,7 +3900,7 @@ class RunNodeJobTest(unittest.TestCase):
             return False
         relay._stream_shell = fail
         j = job(node_type="gate", run="false", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        outcome, detail, _, _, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _, _, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual(outcome, "failed")
         self.assertIn("boom line", detail)
 
@@ -3825,7 +3910,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
-        outcome, detail, sha, session, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, sha, session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
 
     def test_agent_job_carries_the_no_changes_assertion_through_to_the_return(self):
@@ -3926,7 +4011,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "", "returncode": 128})()
         j = job(node_type="shell", run="true", id="nj-5", run_id="r1", vars={"ref": "RLY-5"})
-        _, _, sha, _, _no_changes = relay.run_node_job(j, "/tmp/wt", self.control)
+        _, _, sha, _, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertIsNone(sha)
 
     def test_shell_job_expands_ref_branch_relay_and_url_placeholders(self):
@@ -4933,10 +5018,10 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
     def setUp(self):
         self.reported = []
         self.addCleanup(setattr, relay, "report_outcome", relay.report_outcome)
-        relay.report_outcome = lambda jid, o, d, sha, sid, no_changes=False: (
+        relay.report_outcome = lambda jid, o, d, sha, sid, no_changes=False, resume_at=None: (
             self.reported.append((o, d)) or "failed")
         self.addCleanup(setattr, relay, "run_node_job", relay.run_node_job)
-        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False)
+        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None)
 
     def job(self):
         return {"id": 1, "isolation": "exclusive", "run_id": "r1",
@@ -4944,7 +5029,7 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
 
     def test_failing_prepare_hook_fails_the_run_without_running_the_node(self):
         ran = []
-        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False)
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None)
         pool = self._pool("cache restore blew up")
         ctl = relay.JobControl()
         relay.execute_one(self.job(), "exec-RLY-1", True, ctl, pool)
@@ -4956,7 +5041,7 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
 
     def test_ok_hook_creates_then_runs_the_node(self):
         ran = []
-        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False)
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None)
         pool = self._pool(None)
         relay.execute_one(self.job(), "exec-RLY-1", True, relay.JobControl(), pool)
         self.assertEqual(pool.created, ["exec-RLY-1"])
@@ -4985,7 +5070,7 @@ class ExecuteOneTest(unittest.TestCase):
         self.pool._teardown = lambda slot, retain: self.torn.append((slot, retain))
 
     def test_first_exclusive_job_creates_warms_then_runs_and_reports(self):
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha1", None, False)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha1", None, False, None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
         self.assertEqual(slot, "exec-RLY-1")
@@ -4993,21 +5078,31 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(rs, "done")
         self.assertEqual(self.created, ["exec-RLY-1"])               # created before use
         self.assertEqual(self.prepared, ["RLY-1"])                  # then warmed
-        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, False))
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, False, None))
 
     def test_a_no_changes_assertion_reaches_report_outcome(self):
         """RE310: execute_one must forward run_node_job's no_changes element to
         report_outcome unchanged — this is the join between the two ends the fixture and
         determine_agent_outcome tests already pin."""
         relay.run_node_job = lambda job, path, control, partition=None: (
-            "succeeded", "", "sha1", None, True)
+            "succeeded", "", "sha1", None, True, None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
         relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
-        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, True))
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, True, None))
+
+    def test_a_resume_time_reaches_report_outcome(self):
+        """RE267: execute_one forwards run_node_job's resume_at to report_outcome unchanged."""
+        relay.run_node_job = lambda job, path, control, partition=None: (
+            "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET)
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0],
+                         ("nj-1", "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET))
 
     def test_shared_job_is_not_reset(self):
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha2", None, False)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha2", None, False, None)
         j = job(node_type="shell", run="x", id="nj-2", run_id="r2", vars={"ref": "RLY-2"})
         slot, reset = self.pool.assign(j)
         relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
@@ -5023,7 +5118,7 @@ class ExecuteOneTest(unittest.TestCase):
 
         def revoked_run(job, path, ctl, partition=None):
             ctl.cancel()                     # heartbeat revoked it while it ran
-            return ("succeeded", "", "sha", None, False)
+            return ("succeeded", "", "sha", None, False, None)
 
         relay.run_node_job = revoked_run
         j = job(node_type="shell", run="x", id="nj-9", run_id="r9", vars={"ref": "RLY-9"})
@@ -5039,7 +5134,7 @@ class ExecuteOneTest(unittest.TestCase):
 
         def revoked_run(job, path, ctl, partition=None):
             ctl.cancel()                     # heartbeat revoked it while it ran
-            return ("succeeded", "", "sha", None, False)
+            return ("succeeded", "", "sha", None, False, None)
 
         relay.run_node_job = revoked_run
         j = job("exclusive_shell", node_type="agent", run="x", id="nj-3", run_id="r3",
@@ -5087,10 +5182,11 @@ class ExecuteOneTest(unittest.TestCase):
         """RLY-202: when the node produced an outcome but reporting it fails after retries, the
         fallback detail must be transport-labeled — not "worker crashed:" — so RLY-194's
         environmental-vs-judgment split and the failure_signature bucket treat it as environmental."""
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "done", "sha", None, False)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "done", "sha", None, False, None)
         calls = []
 
-        def flaky_report(job_id, outcome, detail, git_sha, session_id=None, no_changes=False):
+        def flaky_report(job_id, outcome, detail, git_sha, session_id=None, no_changes=False,
+                         resume_at=None):
             calls.append((outcome, detail))
             if len(calls) == 1:
                 raise SystemExit(1)        # the real report exhausts its retries and die()s
@@ -5622,7 +5718,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.log = lambda *a, **k: None
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None)
         relay.load_runner_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 0},
@@ -6075,7 +6171,7 @@ class RateLimitLoopTest(unittest.TestCase):
         def run_node_job(job, path, control, partition=None):
             relay.USAGE_LIMITER.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600),
                                         self.NOW)
-            return ("succeeded", "", "sha", None, False)
+            return ("succeeded", "", "sha", None, False, None)
 
         relay.claim_node_job = claim
         relay.run_node_job = run_node_job
@@ -6252,7 +6348,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
             running.set()
             gate.wait(2)               # still "in flight" for as long as this blocks
             running.clear()
-            return ("succeeded", "", "sha", None, False)
+            return ("succeeded", "", "sha", None, False, None)
 
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
@@ -6744,7 +6840,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None)
         relay.report_outcome = lambda *a: "done"
         relay.load_runner_config = lambda: {
             "name": "box", "namespace": "exec",
@@ -6820,7 +6916,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
 
         def blocking_run(job, path, control, partition=None):
             gate.wait(2)
-            return ("succeeded", "", "sha", None, False)
+            return ("succeeded", "", "sha", None, False, None)
 
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
@@ -6906,7 +7002,7 @@ class RealGitWorktreeTest(unittest.TestCase):
 
         j = job("exclusive_shell", run="true", id="nj-1", run_id="r1",
                 vars={"ref": "RLY-1", "branch": branch})
-        outcome, detail, sha, _session, _no_changes = relay.run_node_job(j, self.dir, self.control)
+        outcome, detail, sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded", detail)
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
@@ -6920,7 +7016,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "--detach", "main")
         j = job("exclusive_shell", run="true", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-1", "branch": "never-created"})
-        outcome, detail, _sha, _session, _no_changes = relay.run_node_job(j, self.dir, self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("detached", detail)
@@ -6931,7 +7027,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "--detach", "main")
         j = job(node_type="shell", run="true", id="nj-3", run_id="r1",
                 vars={"ref": "RLY-1", "branch": "rly-1-feature"})
-        outcome, _detail, _sha, _session, _no_changes = relay.run_node_job(j, self.dir, self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "", "shared_clean must stay detached")
@@ -6941,7 +7037,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "-b", branch)
         j = job("exclusive_shell", run="true", id="nj-4", run_id="r1",
                 vars={"ref": "RLY-1", "branch": branch})
-        outcome, _detail, _sha, _session, _no_changes = relay.run_node_job(j, self.dir, self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
@@ -8469,7 +8565,7 @@ class TestPartitionTest(unittest.TestCase):
         relay.reset_worktree = lambda path, base: None
         relay.report_outcome = lambda *a: "done"
         relay.run_node_job = lambda job, path, control, partition=None: (
-            seen.__setitem__("partition", partition) or ("succeeded", "", "sha", None, False))
+            seen.__setitem__("partition", partition) or ("succeeded", "", "sha", None, False, None))
         try:
             pool = relay.RunnerPool(
                 {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})

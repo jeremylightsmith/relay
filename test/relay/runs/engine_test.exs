@@ -26,6 +26,11 @@ defmodule Relay.Runs.EngineTest do
     execution(Keyword.merge([outcome: :failed, failure_signature: Engine.failure_signature(detail)], attrs))
   end
 
+  @reset ~U[2100-01-01 00:00:00Z]
+
+  # RE267: a usage-limit `blocked` whose reset the runner knew.
+  defp waited(attrs), do: execution(Keyword.merge([outcome: :blocked, resume_at: @reset], attrs))
+
   defp two_node_flow(opts \\ []) do
     flow(
       [
@@ -134,6 +139,86 @@ defmodule Relay.Runs.EngineTest do
 
       current = List.last(history)
       assert Engine.decide(flow, history, current) == {:transition, "fallback", nil}
+    end
+  end
+
+  describe "usage-limit waits (RE267): a known reset requeues instead of parking" do
+    test "the cap is one named policy number" do
+      assert Engine.max_usage_limit_waits() == 3
+    end
+
+    test "a first blocked with a resume_at requeues the same node" do
+      current = waited(attempt: 1)
+      assert Engine.decide(two_node_flow(), [current], current) == {:requeue, "work"}
+    end
+
+    test "the third consecutive wait still requeues" do
+      history = [waited(attempt: 1), waited(attempt: 2)]
+      current = waited(attempt: 3)
+      assert Engine.usage_limit_waits(history ++ [current], current) == 3
+      assert Engine.decide(two_node_flow(), history ++ [current], current) == {:requeue, "work"}
+    end
+
+    test "the fourth consecutive wait parks exactly as RE308" do
+      history = [waited(attempt: 1), waited(attempt: 2), waited(attempt: 3)]
+      current = waited(attempt: 4)
+      assert Engine.usage_limit_waits(history ++ [current], current) == 4
+      assert Engine.decide(two_node_flow(), history ++ [current], current) == {:park, :blocked}
+    end
+
+    test "a blocked with no resume_at parks (auth, or a limit with no known reset)" do
+      absent = execution(outcome: :blocked)
+      explicit_nil = execution(outcome: :blocked, resume_at: nil)
+      assert Engine.decide(two_node_flow(), [absent], absent) == {:park, :blocked}
+      assert Engine.decide(two_node_flow(), [explicit_nil], explicit_nil) == {:park, :blocked}
+    end
+
+    test "a succeeded or failed row on the node breaks the streak" do
+      waits = [waited(attempt: 1), waited(attempt: 2), waited(attempt: 3)]
+
+      for breaker <- [execution(outcome: :succeeded, attempt: 4), failed(attempt: 4)] do
+        current = waited(attempt: 5)
+        history = waits ++ [breaker, current]
+        assert Engine.usage_limit_waits(history, current) == 1
+        assert Engine.decide(two_node_flow(work: [max_retries: 5]), history, current) == {:requeue, "work"}
+      end
+    end
+
+    test "a plain RE308 blocked (no resume_at) also breaks the streak" do
+      current = waited(attempt: 5)
+
+      history =
+        [waited(attempt: 1), waited(attempt: 2), waited(attempt: 3), execution(outcome: :blocked, attempt: 4), current]
+
+      assert Engine.usage_limit_waits(history, current) == 1
+    end
+
+    test "waits are counted per node, per visit and per foreach iteration" do
+      current = waited(attempt: 1, visit: 2, sub_task_id: 7)
+
+      history = [
+        waited(node_key: "fallback", attempt: 1),
+        waited(attempt: 1, visit: 1, sub_task_id: 7),
+        waited(attempt: 2, visit: 1, sub_task_id: 7),
+        waited(attempt: 1, visit: 2, sub_task_id: 6),
+        current
+      ]
+
+      assert Engine.usage_limit_waits(history, current) == 1
+    end
+
+    test "waiting never spends retry budget or trips the breaker" do
+      flow = two_node_flow(work: [max_retries: 0])
+      history = [failed(attempt: 1), failed(attempt: 2)]
+      current = waited(attempt: 3)
+
+      assert Engine.decide(flow, history ++ [current], current, breaker_threshold: 2) == {:requeue, "work"}
+    end
+
+    test "the human-retry bonus does not raise the wait cap" do
+      history = [waited(attempt: 1), waited(attempt: 2), waited(attempt: 3)]
+      current = waited(attempt: 4)
+      assert Engine.decide(two_node_flow(), history ++ [current], current, bonus: 5) == {:park, :blocked}
     end
   end
 

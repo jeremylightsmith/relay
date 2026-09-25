@@ -342,7 +342,10 @@ that stays server-side.
   value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
   recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
-  or `:revoked` (zombie) job answers 409 `conflict`. The node outcomes (including the runner-only `blocked`,
+  or `:revoked` (zombie) job answers 409 `conflict`. The body's optional `resume_at` (RE267,
+  ISO-8601 UTC) is read only with outcome `blocked` — an unparseable value is dropped to nil, never
+  refused — and makes the engine requeue the node until that reset instead of parking it
+  ([failures.md](failures.md) A11b). The node outcomes (including the runner-only `blocked`,
   RE308) and what each does to the run and the card are tabulated in the [state reference](state.md).
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
@@ -435,7 +438,7 @@ explicit "next iteration". `RunServer.binding_for/5` keys off the guard the engi
 | `when: :foreach_remaining` edge | the derived cursor — the loop tail already checked the finished task off inside the same transaction |
 | `when: :foreach_exhausted` edge | `nil` — the run has left the loop |
 | unguarded edge into the foreach head | **inherit**, falling back to the derived cursor when unbound (first entry from outside the loop, e.g. `branch → implement`) |
-| anything else, including a `{:retry, node}` | inherit |
+| anything else, including a `{:retry, node}` or a `{:requeue, node}` (RE267) | inherit |
 
 The third row is the one that matters. A review's failure loop-back
 (`spec_review`/`quality_review` `--failed--> implement`) is **not** an advance: it re-enters the
@@ -1208,7 +1211,13 @@ Five rules sit on top of it:
   outcome file, so a declared verdict is never reclassified. `blocked` is not one of `relay
   outcome`'s choices, and an outcome file declaring it is reported `failed`, so an agent cannot
   park itself around its own retry budget. An unclassified non-zero exit stays `failed`, its
-  detail now `agent exited non-zero: <the stream's last words>`.
+  detail now `agent exited non-zero: <the stream's last words>`. When the classification is a
+  usage limit AND this job's stream carried a rejected `rate_limit_event` with `resetsAt`,
+  `blocked_resume_at` returns that epoch, `run_node_job` returns it as its 6th element, and
+  `outcome_body` sends it as `resume_at` (the key is omitted otherwise, so every other body is
+  unchanged). The server then requeues the node rather than parking it — up to 3 consecutive
+  waits — while the runner's own RE320 pause holds its claiming until the reset (RE267). Auth,
+  `billing_error` and a phrase-only usage limit send no `resume_at` and park as before.
 
 The reminder is appended to every agent node's prompt automatically, so the requirement travels
 with every invocation. `shell` and `gate` nodes are exempt — their exit status is already an

@@ -47,6 +47,11 @@ defmodule Relay.Runs.RunServer do
   (before the remaining count is recomputed and handed to the engine), but,
   like every other card effect here, the `{:card_upserted, ...}` broadcast for
   it is deferred until after commit.
+
+  A `{:requeue, node}` (RE267) is a usage-limit wait: the node's agent was refused by a Claude
+  usage limit whose reset the runner knows. It continues like a retry — attempt +1, same visit and
+  binding — but the new job's payload is a verbatim copy of the blocked job's, because the node
+  never ran, and the card gets one `:action` timeline line saying when the limit resets.
   """
 
   use GenServer, restart: :transient
@@ -183,13 +188,14 @@ defmodule Relay.Runs.RunServer do
             [sub_task_id: execution.sub_task_id, foreach_remaining: Runs.remaining_sub_tasks(run)]
 
         decision = Engine.decide(flow, history, execution, opts)
-        {decision, execution, apply_decision(decision, run, flow, execution), checked_off_id}
+        {decision, execution, apply_decision(decision, run, flow, execution, job), checked_off_id}
       end)
 
     run = Repo.get!(Run, run.id)
     board_id = Runs.board_id_of(run)
     notify_sub_task_checked_off(run, checked_off_id)
     log_failure_if_final(decision, run, execution)
+    log_usage_limit_wait(decision, run, execution)
     Runs.broadcast_runs(board_id, {:node_finished, run, execution})
 
     case {decision, next} do
@@ -228,6 +234,18 @@ defmodule Relay.Runs.RunServer do
         {:stop, :normal, {:ok, run}, state}
     end
   end
+
+  # RE267: the node never ran, so the SAME work goes back on the queue — the new job carries the
+  # blocked job's payload verbatim (its findings / prior_detail / resume_session, and no "agent
+  # could not run" finding). Attempt +1 on the same visit and binding, numbered exactly as a retry
+  # is; insert_job!/3 re-derives the exclusive pin, so an exclusive run still waits for its own
+  # runner. Every other decision needs no job and goes to apply_decision/4.
+  defp apply_decision({:requeue, node}, run, _flow, execution, job) do
+    next = Runs.insert_execution!(run, node, execution.visit, execution.attempt + 1, execution.sub_task_id)
+    {next, Runs.insert_job!(run, next, job.payload)}
+  end
+
+  defp apply_decision(decision, run, flow, execution, _job), do: apply_decision(decision, run, flow, execution)
 
   # Row writes per decision, inside apply_outcome's transaction. Returns
   # {next_execution, next_job} for continuing decisions, nil otherwise.
@@ -695,6 +713,24 @@ defmodule Relay.Runs.RunServer do
     {:ok, _entry} = Relay.Activity.log(card, %{type: :failure, actor: :agent, text: text})
     :ok
   end
+
+  # RE267: a usage-limit wait is not a failure, but a human glancing at the card must see why
+  # nothing is moving — so one `:action` line, never a `:failure`. The count is the engine's own
+  # (`usage_limit_waits/2`), read back after commit; the new attempt has no outcome yet, so it is
+  # not in the history.
+  defp log_usage_limit_wait({:requeue, node}, run, execution) do
+    wait = Engine.usage_limit_waits(outcome_history(run), execution)
+
+    text =
+      "usage limit — waiting for reset at #{Runs.resume_time_label(execution.resume_at)}; " <>
+        "node #{node} will re-run (wait #{wait} of #{Engine.max_usage_limit_waits()})"
+
+    card = Repo.get!(Card, run.card_id)
+    {:ok, _entry} = Relay.Activity.log(card, %{type: :action, actor: :agent, text: text})
+    :ok
+  end
+
+  defp log_usage_limit_wait(_decision, _run, _execution), do: :ok
 
   # In the real flow the agent has already blocked the card via the
   # needs-input API; ensure it idempotently with the outcome detail as the

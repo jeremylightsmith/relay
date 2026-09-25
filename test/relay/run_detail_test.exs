@@ -209,4 +209,36 @@ defmodule Relay.RunDetailTest do
                "The run stopped before reaching the end of the flow."
     end
   end
+
+  describe "attempt numbers skip :blocked attempts (RE267)" do
+    test "a node that waited out a usage limit twice reads as its first attempt" do
+      r =
+        run(%{
+          current_node: "implement",
+          node_executions: [
+            ne("implement", 1, :blocked, %{visit: 1, resume_at: ~U[2100-01-01 00:00:00Z]}),
+            ne("implement", 2, :blocked, %{visit: 1, resume_at: ~U[2100-01-01 00:00:00Z]}),
+            ne("implement", 3, nil, %{visit: 1, duration_s: nil})
+          ]
+        })
+
+      rows = Enum.filter(Runs.run_detail(r, code_flow()).timeline, &(&1.kind == :node and &1.node_key == "implement"))
+      assert rows |> Enum.map(& &1.attempt) |> Enum.take(3) == [1, 1, 1]
+    end
+
+    test "the escalation's attempt count counts only attempts that actually ran" do
+      r =
+        run(%{
+          status: :parked,
+          current_node: "implement",
+          node_executions: [
+            ne("implement", 1, :failed, %{visit: 1}),
+            ne("implement", 2, :blocked, %{visit: 1, resume_at: ~U[2100-01-01 00:00:00Z]}),
+            ne("implement", 3, :failed, %{visit: 1})
+          ]
+        })
+
+      assert Runs.run_detail(r, code_flow()).parked_attempt == 2
+    end
+  end
 end

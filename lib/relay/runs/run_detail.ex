@@ -77,7 +77,7 @@ defmodule Relay.Runs.RunDetail do
                 kind: :loop,
                 from_node: prev.node_key,
                 to_node: ne.node_key,
-                attempt: ne.attempt,
+                attempt: spent_attempt(ne, nes),
                 max_loops: max_loops(prev, flow)
               }
             ]
@@ -95,7 +95,7 @@ defmodule Relay.Runs.RunDetail do
     %{
       kind: :node,
       node_key: ne.node_key,
-      attempt: ne.attempt,
+      attempt: spent_attempt(ne, nes),
       state: row_state(ne, run),
       resumed?: resumed?(ne, nes),
       partial?: ne.outcome == :partial,
@@ -104,6 +104,20 @@ defmodule Relay.Runs.RunDetail do
       cost: Map.get(ne, :cost),
       duration_s: ne_duration_s(ne)
     }
+  end
+
+  # RE267: the attempt number a human reads. A `:blocked` attempt spent no retry — RE308 parks it,
+  # RE267 requeues it at attempt +1 — so earlier blocked attempts of the same {node, visit} are not
+  # counted. Without this a node that waited out a usage limit twice read "attempt 3" on its first
+  # real run, and an escalation said "failed after 3 attempts" for two.
+  defp spent_attempt(ne, nes) do
+    waits =
+      Enum.count(nes, fn other ->
+        other.node_key == ne.node_key and Map.get(other, :visit) == Map.get(ne, :visit) and
+          other.attempt < ne.attempt and other.outcome == :blocked
+      end)
+
+    max(ne.attempt - waits, 1)
   end
 
   # ---- row_state (was RunComponents.row_state/2), verbatim ----
@@ -254,7 +268,7 @@ defmodule Relay.Runs.RunDetail do
   defp parked_attempt(%{current_node: node_key}, nes) do
     nes
     |> Enum.filter(&(&1.node_key == node_key))
-    |> Enum.map(& &1.attempt)
+    |> Enum.map(&spent_attempt(&1, nes))
     |> case do
       [] -> 1
       attempts -> Enum.max(attempts)
