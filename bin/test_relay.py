@@ -8873,10 +8873,15 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
         ).stdout.splitlines()
         hits = []
         for rel in tracked:
-            with open(os.path.join(repo_root, rel), encoding="utf-8") as f:
-                for lineno, line in enumerate(f, start=1):
-                    if self.HARD_CODED_TMP_PATH.search(line):
-                        hits.append(f"{rel}:{lineno}: {line.strip()}")
+            with open(os.path.join(repo_root, rel), "rb") as f:
+                raw = f.read()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue  # binary (e.g. docs/images/*.png) — nothing an agent could copy-paste
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if self.HARD_CODED_TMP_PATH.search(line):
+                    hits.append(f"{rel}:{lineno}: {line.strip()}")
         self.assertEqual(
             hits, [],
             "hard-coded /tmp path(s) an agent could copy-paste — point at "
