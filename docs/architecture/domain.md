@@ -22,6 +22,13 @@ sharing behavior.
   Every node also carries a `reads`/`writes` **card-field contract** (RE244; vocabulary
   `Schemas.Card.contract_fields/0`) — `writes` is enforced at run time by
   `RunServer.override_missing_writes/4`, `reads` is advisory.
+  Every node may also carry an optional **`role`** (`:do | :check | :fix`, RE346; vocabulary
+  `Schemas.Flow.Node.roles/0`) — **display-only**, never read by the engine or the runner.
+  `Schemas.Flow.node_roles/1` resolves every node's role, first match wins: the authored `role`;
+  else `:fix` when every inbound edge is `on: :failed` (the `"start"` edge counts and is never
+  failed); else `:check` for a `:gate`; else `:do`. The default Code flow authors `role: :check`
+  only on the six checks the guess can't see (`spec_review`, `quality_review`, `final_review`,
+  `smoke`, `acceptance`, `deploy`).
   The invariant that no `:agent`/`:gate`
   node in any shipped flow leaves `:failed` unrouted is enforced by
   `default_library_test.exs`.

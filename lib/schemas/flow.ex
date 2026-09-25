@@ -55,6 +55,35 @@ defmodule Schemas.Flow do
   end
 
   @doc """
+  Every node's role (RE346), as `%{node_key => :do | :check | :fix}` — the ONE place the rule
+  lives; the value stream map (RE349) and any future display call this rather than re-deriving
+  it. Pure and display-only: the engine and the runner never branch on a role.
+
+  First match wins:
+
+    1. the node's authored `role` — it always wins, whatever the graph says;
+    2. `:fix` — the node has at least one inbound edge and every inbound edge is `on: :failed`.
+       The `"start"` edge counts as inbound and is never `:failed`, so an unannotated start node
+       is never guessed `:fix`;
+    3. `:check` — a `:gate` node;
+    4. `:do`.
+  """
+  def node_roles(%__MODULE__{nodes: nodes, edges: edges}) do
+    inbound = Enum.group_by(edges || [], & &1.to, & &1.on)
+    Map.new(nodes || [], &{&1.key, node_role(&1, Map.get(inbound, &1.key, []))})
+  end
+
+  defp node_role(%Schemas.Flow.Node{role: role}, _inbound) when not is_nil(role), do: role
+
+  defp node_role(%Schemas.Flow.Node{type: type}, inbound) do
+    cond do
+      inbound != [] and Enum.all?(inbound, &(&1 == :failed)) -> :fix
+      type == :gate -> :check
+      true -> :do
+    end
+  end
+
+  @doc """
   Validates a flow definition. `board_id` must already be set on the struct.
   Trigger-stage-belongs-to-board is validated in `Relay.Flows` — it needs
   the database, which the Schemas boundary (`deps: []`) can't reach.

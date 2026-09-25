@@ -250,4 +250,89 @@ defmodule Relay.Flows.DocumentTest do
       assert msg =~ "reads must be an array"
     end
   end
+
+  describe "node role (RE346)" do
+    @roles_doc %{
+      "key" => "roles",
+      "isolation" => "shared_clean",
+      "nodes" => [
+        %{"key" => "a", "type" => "agent", "role" => "do"},
+        %{"key" => "b", "type" => "agent", "role" => "check"},
+        %{"key" => "c", "type" => "agent", "role" => "fix"},
+        %{"key" => "d", "type" => "agent"}
+      ],
+      "edges" => [
+        %{"from" => "start", "to" => "a"},
+        %{"from" => "a", "to" => "b", "on" => "succeeded"},
+        %{"from" => "b", "to" => "c", "on" => "succeeded"},
+        %{"from" => "c", "to" => "d", "on" => "succeeded"},
+        %{"from" => "d", "to" => "done", "on" => "succeeded"}
+      ]
+    }
+
+    test "decodes every role to an atom through Schemas.Flow.Node.roles/0" do
+      assert {:ok, attrs} = Document.decode(@roles_doc)
+      assert Enum.map(attrs.nodes, & &1.role) == [:do, :check, :fix, nil]
+    end
+
+    test "an absent or null role decodes to nil" do
+      nulled = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent", "role" => nil}])
+      assert {:ok, %{nodes: [%{role: nil}]}} = Document.decode(nulled)
+      assert {:ok, %{nodes: [%{role: nil}]}} = Document.decode(@minimal)
+    end
+
+    test "a junk role is an error naming it, never a minted atom" do
+      bad = put_in(@minimal, ["nodes"], [%{"key" => "a", "type" => "agent", "role" => "review"}])
+      assert {:error, msg} = Document.decode(bad)
+      assert msg =~ ~s(role "review")
+    end
+
+    test "encode emits an authored role as a string and omits an unset one" do
+      flow = %Flow{
+        key: "roles",
+        version: 1,
+        enabled: false,
+        isolation: :shared_clean,
+        pulls_from_stage: nil,
+        works_in_stage: nil,
+        lands_on_stage: nil,
+        nodes: [
+          %Flow.Node{key: "a", type: :agent, role: :check},
+          %Flow.Node{key: "b", type: :agent, role: :fix},
+          %Flow.Node{key: "c", type: :agent}
+        ],
+        edges: []
+      }
+
+      doc = Document.encode(flow)
+      assert Enum.map(doc["nodes"], &Map.get(&1, "role")) == ["check", "fix", nil]
+      refute Map.has_key?(Enum.at(doc["nodes"], 2), "role")
+
+      assert doc |> Document.decode!() |> Map.fetch!(:nodes) |> Enum.map(& &1.role) == [:check, :fix, nil]
+    end
+
+    test "import keeps every authored role, and export → re-import preserves them" do
+      board = library_board()
+
+      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "roles", @roles_doc)
+
+      exported = encoded(board, "roles")
+      assert Enum.map(exported["nodes"], &Map.get(&1, "role")) == ["do", "check", "fix", nil]
+      refute Map.has_key?(Enum.at(exported["nodes"], 3), "role")
+
+      assert {:ok, :updated, reimported} =
+               Flows.upsert_from_document(board, "roles", Map.drop(exported, ["version", "enabled"]))
+
+      assert Enum.map(reimported.nodes, & &1.role) == [:do, :check, :fix, nil]
+    end
+
+    test "importing a junk role is rejected with an error on role" do
+      bad = put_in(@roles_doc, ["nodes"], [%{"key" => "a", "type" => "agent", "role" => "review"}])
+
+      assert {:error, {:invalid_document, msg}} =
+               Flows.upsert_from_document(library_board(), "roles", bad)
+
+      assert msg =~ ~s(role "review")
+    end
+  end
 end

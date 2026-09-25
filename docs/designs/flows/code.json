@@ -24,6 +24,7 @@
     {
       "key": "spec_review",
       "type": "agent",
+      "role": "check",
       "model": "sonnet",
       "agent": "spec-reviewer",
       "run": "Review the just-implemented task against its spec in the plan: nothing missing, nothing extra."
@@ -31,6 +32,7 @@
     {
       "key": "quality_review",
       "type": "agent",
+      "role": "check",
       "model": "opus",
       "agent": "quality-reviewer",
       "run": "Judge whether the change is well-built: clean, conventional, meaningfully tested."
@@ -61,6 +63,7 @@
     {
       "key": "final_review",
       "type": "agent",
+      "role": "check",
       "model": "opus",
       "agent": "final-reviewer",
       "run": "Whole-branch cross-cutting review — issues only visible across the whole diff. Includes the docs/architecture freshness check."
@@ -76,6 +79,7 @@
     {
       "key": "smoke",
       "type": "agent",
+      "role": "check",
       "model": "opus",
       "agent": "smoke-tester",
       "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard."
@@ -83,6 +87,7 @@
     {
       "key": "acceptance",
       "type": "agent",
+      "role": "check",
       "model": "sonnet",
       "agent": "acceptance-tester",
       "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block)."
@@ -110,6 +115,7 @@
     {
       "key": "deploy",
       "type": "shell",
+      "role": "check",
       "run": "bin/await_deploy.sh \"$({relay} card {ref} --json --field pr_url)\""
     },
     {
