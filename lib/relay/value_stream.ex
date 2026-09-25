@@ -16,6 +16,12 @@ defmodule Relay.ValueStream do
   unfinished card) with no gaps and no overlaps: `Σ span.secs == lead_secs`, and for every
   span `agent + human + nobody == secs`.
 
+  **Cost attribution (RE347).** A span's `cost` is the summed `cost` of the card's node
+  executions whose `started_at` falls in `[entered_at, left_at)` — `nil` when none of them
+  reports a cost. An execution that started before the stream began, or at/after its end, is
+  attributed to no span, so `Σ span.cost ≤ cost`, equal when every execution started inside the
+  window.
+
   **Gate attribution.** A decision belongs to the gate the card just left — the
   `from_stage_id` of the latest `:moved` row before it — or, for an in-place approve, to its
   own stage. (`Relay.Cards.reject/3` logs the gate's *main* stage as `from_stage_id`, so the
@@ -46,6 +52,7 @@ defmodule Relay.ValueStream do
   @kinds [:queue, :flow, :gate, :done]
   @batons [:agent, :human, :nobody]
   @default_last 20
+  @week_secs 7 * 86_400
   @decision_types [:approved, :rejected]
   @history_types [:moved, :needs_input, :input_answered | @decision_types]
 
@@ -55,16 +62,21 @@ defmodule Relay.ValueStream do
   @doc "The closed set of baton holders. Defined once; RE347 reads it."
   def batons, do: @batons
 
+  @doc "The closed set of gate-decision activity types. Defined once; RE347's LiveView reads it."
+  def decision_types, do: @decision_types
+
   @doc """
-  The board's ordered stream states, `[%{stage_id, name, kind}]`, from the **stream start**
-  through the terminal stage (`Relay.Boards.terminal_stage/1`), each main stage followed by its
-  substages (review, then done).
+  The board's ordered stream states, `[%{stage_id, name, kind, rework_target}]`, from the
+  **stream start** through the terminal stage (`Relay.Boards.terminal_stage/1`), each main stage
+  followed by its substages (review, then done).
 
   The stream start is the last `:queue` main stage before the first
   `Schemas.Stage.work_types/0` main stage (`Next up` on RE), else that first work stage, else
   the first main stage. `kind` comes from `Stage.type`: `:queue` → `:queue`, work/planning →
   `:flow`, `:review` → `:gate`, the terminal stage → `:done`, and a mid-board `:done` substage
-  → `:queue` (the card is parked; nobody holds it).
+  → `:queue` (the card is parked; nobody holds it). A `:gate`'s `rework_target` is the stage_id
+  of the nearest `:flow` state before it — what a Request changes re-runs — else `nil`; every
+  other state's is `nil`.
 
   States come from the flows' triggers: an `ai_enabled` work/planning main stage that no
   **enabled** flow works in (`works_in_stage_id`) is left out, substages included (RE's
@@ -88,13 +100,21 @@ defmodule Relay.ValueStream do
   - `lead_secs`, `baton_secs` (summed over spans), `value_add_secs` (agent time on `:do`
     nodes), `flow_efficiency` (`value_add_secs / lead_secs`, nil for a zero lead), `cost` (a
     Decimal over every execution of every run of the card), and `gates` (one
-    `%{stage_id, approved, rejected}` per `:gate` stream state).
+    `%{stage_id, approved, rejected}` per `:gate` stream state). Each span also carries `cost`
+    (see **Cost attribution**).
+  - `states` — `stream_summary/2`'s per-state shape over this one card (n = 1):
+    `approve_rate` is the card's own approved / decided at that gate.
+  - `outside_secs` — its time in off-stream or deleted stages.
   """
   def card_stream(%Card{} = card) do
     ctx = board_context(card.board_id)
     history = [card.id] |> load_history() |> Map.get(card.id, [])
     execs = [card.id] |> load_executions() |> Map.get(card.id, [])
-    build_stream(card, ctx, history, execs, now())
+
+    case build_stream(card, ctx, history, execs, now()) do
+      nil -> nil
+      stream -> Map.merge(stream, %{states: states_for([stream], ctx), outside_secs: outside_secs(stream.spans, ctx, 1)})
+    end
   end
 
   @doc "How many done cards `stream_summary/2` averages when no `:window` is given."
@@ -108,11 +128,20 @@ defmodule Relay.ValueStream do
   Metrics does), which keeps cards whose `done_at` falls inside it.
 
   Returns `%{cards, states, mean_lead_secs, median_lead_secs, baton_secs, flow_efficiency,
-  mean_cost, outside_secs}`. Each state (in `stream_states/1` order) is `%{stage_id, name,
-  kind, mean_secs, mean_visits, mean_baton, approve_rate}`; `approve_rate` is set for gates
-  only — Σapproved / (Σapproved + Σrejected), `nil` with no decisions. Means are per state so
-  they add up: `Σ states.mean_secs + outside_secs == mean_lead_secs` (`outside_secs` is time
-  in off-stream or deleted stages). `flow_efficiency` is Σvalue-add / Σlead.
+  mean_cost, outside_secs, cards_per_week}`. Each state (in `stream_states/1` order) is
+  `%{stage_id, name, kind, rework_target, mean_secs, mean_first_secs, mean_visits, mean_baton,
+  mean_cost, wip, approve_rate}`; `approve_rate` is set for gates only — Σapproved /
+  (Σapproved + Σrejected), `nil` with no decisions. Means are per state so they add up:
+  `Σ states.mean_secs + outside_secs == mean_lead_secs` (`outside_secs` is time in off-stream
+  or deleted stages). `flow_efficiency` is Σvalue-add / Σlead.
+
+  - `mean_first_secs` — the visit-1 time, so the rework tail is `mean_secs - mean_first_secs`.
+  - `mean_cost` — the state's span costs averaged over the n cards, rounded to 2 dp; `nil`
+    when every contributing cost is nil.
+  - `wip` — the board's non-archived cards whose stage is that state's stage **now**.
+  - `cards_per_week` — cards / weeks. With `window:`, weeks is the window's length (`"all"`
+    falls back to the done_at span); with `last:`, weeks is the span from the oldest to the
+    newest `done_at`. `nil` for fewer than 2 cards or a zero span.
   """
   def stream_summary(board_id, opts \\ []) when is_integer(board_id) do
     ctx = board_context(board_id)
@@ -124,6 +153,7 @@ defmodule Relay.ValueStream do
     |> Enum.map(fn {card, rows, _done_at} -> build_stream(card, ctx, rows, Map.get(execs, card.id, []), now) end)
     |> Enum.reject(&is_nil/1)
     |> summarize(ctx)
+    |> Map.put(:cards_per_week, cards_per_week(selected, opts))
   end
 
   @doc """
@@ -211,11 +241,23 @@ defmodule Relay.ValueStream do
       states: states,
       state_by_id: Map.new(states, &{&1.stage_id, &1}),
       terminal: Boards.terminal_stage(stages),
+      wip: wip_by_stage(board_id),
       roles: %Board{id: board_id} |> Flows.list_flows() |> Map.new(&{&1.key, Flow.node_roles(&1)})
     }
   end
 
   defp load_stages(board_id), do: Boards.list_stages(%Board{id: board_id})
+
+  # The board's non-archived cards per stage, as they sit now — the boxes' "Cards here".
+  defp wip_by_stage(board_id) do
+    from(c in Card,
+      where: c.board_id == ^board_id and is_nil(c.archived_at),
+      group_by: c.stage_id,
+      select: {c.stage_id, count(c.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
 
   # Stage ids an enabled flow works in, or `nil` when the board has no enabled flows.
   defp flow_worked_stage_ids(board_id) do
@@ -240,7 +282,21 @@ defmodule Relay.ValueStream do
         |> Enum.filter(&in_stream?(&1, worked_ids))
         |> Enum.flat_map(&with_substages(&1, subs, terminal))
         |> Enum.map(&%{stage_id: &1.id, name: Map.fetch!(names, &1.id), kind: kind(&1, terminal)})
+        |> with_rework_targets()
     end
+  end
+
+  # A gate's rework target is the nearest :flow state before it (Spec · Review → Spec,
+  # Review → Code). Computed here, once, so no consumer re-derives it.
+  defp with_rework_targets(states) do
+    {states, _last_flow} =
+      Enum.map_reduce(states, nil, fn state, last_flow ->
+        target = if state.kind == :gate, do: last_flow
+        next = if state.kind == :flow, do: state.stage_id, else: last_flow
+        {Map.put(state, :rework_target, target), next}
+      end)
+
+    states
   end
 
   defp with_substages(%Stage{id: id} = terminal, _subs, %Stage{id: id}), do: [terminal]
@@ -329,7 +385,8 @@ defmodule Relay.ValueStream do
       clocks = %{
         agent: execs |> exec_intervals(end_at) |> union(),
         parks: park_intervals(history, end_at),
-        value: execs |> Enum.filter(&do_node?(&1, ctx.roles)) |> exec_intervals(end_at) |> union()
+        value: execs |> Enum.filter(&do_node?(&1, ctx.roles)) |> exec_intervals(end_at) |> union(),
+        costs: for(%{started_at: %DateTime{} = started, cost: cost} <- execs, do: {unix(started), cost})
       }
 
       spans = build_spans(span_stays, end_at, in_place?, ctx, clocks)
@@ -449,8 +506,18 @@ defmodule Relay.ValueStream do
       left_at: left_at,
       secs: b - a,
       baton: baton,
-      value_add_secs: value_add
+      value_add_secs: value_add,
+      cost: span_cost(clocks.costs, a, b)
     }
+  end
+
+  # Cost attribution (moduledoc): executions whose started_at is in [a, b); nil when none of
+  # them reports a cost.
+  defp span_cost(costs, a, b) do
+    case for({started, cost} <- costs, started >= a and started < b and not is_nil(cost), do: cost) do
+      [] -> nil
+      found -> Enum.reduce(found, Decimal.new(0), &Decimal.add/2)
+    end
   end
 
   # Decision 3: inside an ai_enabled flow stage the agent holds the baton for the union of the
@@ -561,33 +628,79 @@ defmodule Relay.ValueStream do
 
     %{
       cards: n,
-      states: Enum.map(ctx.states, &state_summary(&1, spans, streams, n)),
+      states: states_for(streams, ctx),
       mean_lead_secs: mean(total_lead, n),
       median_lead_secs: median(leads),
       baton_secs: Map.new(@batons, fn b -> {b, streams |> Enum.map(& &1.baton_secs[b]) |> Enum.sum() |> mean(n)} end),
       flow_efficiency: if(total_lead == 0, do: nil, else: value_add / total_lead),
       mean_cost: mean_cost(streams, n),
-      outside_secs:
-        spans
-        |> Enum.reject(&Map.has_key?(ctx.state_by_id, &1.stage_id))
-        |> Enum.map(& &1.secs)
-        |> Enum.sum()
-        |> mean(n)
+      outside_secs: outside_secs(spans, ctx, n)
     }
   end
 
-  defp state_summary(state, spans, streams, n) do
+  # One per-state shape for both the averaged view and a single card (n = 1).
+  defp states_for(streams, ctx) do
+    n = length(streams)
+    spans = Enum.flat_map(streams, & &1.spans)
+    Enum.map(ctx.states, &state_summary(&1, spans, streams, n, ctx))
+  end
+
+  defp outside_secs(spans, ctx, n) do
+    spans
+    |> Enum.reject(&Map.has_key?(ctx.state_by_id, &1.stage_id))
+    |> Enum.map(& &1.secs)
+    |> Enum.sum()
+    |> mean(n)
+  end
+
+  defp state_summary(state, spans, streams, n, ctx) do
     mine = Enum.filter(spans, &(&1.stage_id == state.stage_id))
 
     %{
       stage_id: state.stage_id,
       name: state.name,
       kind: state.kind,
+      rework_target: state.rework_target,
       mean_secs: mine |> Enum.map(& &1.secs) |> Enum.sum() |> mean(n),
+      mean_first_secs: mine |> Enum.filter(&(&1.visit == 1)) |> Enum.map(& &1.secs) |> Enum.sum() |> mean(n),
       mean_visits: mean(length(mine), n),
       mean_baton: Map.new(@batons, fn b -> {b, mine |> Enum.map(& &1.baton[b]) |> Enum.sum() |> mean(n)} end),
+      mean_cost: state_mean_cost(mine, n),
+      wip: Map.get(ctx.wip, state.stage_id, 0),
       approve_rate: approve_rate(state, streams)
     }
+  end
+
+  defp state_mean_cost(spans, n) do
+    case spans |> Enum.map(& &1.cost) |> Enum.reject(&is_nil/1) do
+      [] -> nil
+      costs -> costs |> Enum.reduce(Decimal.new(0), &Decimal.add/2) |> Decimal.div(n) |> Decimal.round(2)
+    end
+  end
+
+  defp cards_per_week([_, _ | _] = entries, opts) do
+    secs =
+      case Keyword.fetch(opts, :window) do
+        {:ok, window} -> window_secs(window) || done_span_secs(entries)
+        :error -> done_span_secs(entries)
+      end
+
+    if secs > 0, do: length(entries) / (secs / @week_secs)
+  end
+
+  defp cards_per_week(_entries, _opts), do: nil
+
+  # The window's length from the ONE window → cutoff mapping; nil for "all".
+  defp window_secs(window) do
+    case Runs.metric_window_since(window) do
+      nil -> nil
+      since -> DateTime.diff(now(), since)
+    end
+  end
+
+  defp done_span_secs(entries) do
+    dones = Enum.map(entries, fn {_card, _rows, done_at} -> unix(done_at) end)
+    Enum.max(dones) - Enum.min(dones)
   end
 
   defp approve_rate(%{kind: :gate, stage_id: id}, streams) do

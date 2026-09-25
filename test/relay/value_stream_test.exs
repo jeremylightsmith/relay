@@ -16,6 +16,26 @@ defmodule Relay.ValueStreamTest do
       assert Enum.map(states, & &1.kind) == [:queue, :flow, :gate, :queue, :flow, :queue, :flow, :gate, :done]
       assert hd(states).stage_id == s.next_up.id
       assert Enum.all?(states, &(&1.kind in ValueStream.kinds()))
+
+      targets = Map.new(states, &{&1.name, &1.rework_target})
+      assert targets["Spec · Review"] == s.spec.id
+      assert targets["Review"] == s.code.id
+      assert targets["Code"] == nil
+      assert targets["Spec · Done"] == nil
+    end
+
+    test "a gate with no flow state before it has no rework target" do
+      board = insert(:board)
+      insert(:stage, board: board, name: "Next up", type: :queue, category: :unstarted, position: 1)
+      insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 2)
+      insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 3)
+
+      assert board.id |> ValueStream.stream_states() |> Enum.map(&{&1.name, &1.rework_target}) ==
+               [{"Next up", nil}, {"Review", nil}, {"Done", nil}]
+    end
+
+    test "decision_types/0 is the one closed set of gate-decision activity types" do
+      assert ValueStream.decision_types() == [:approved, :rejected]
     end
 
     test "with no queue before the first work stage, the stream starts at that stage" do
@@ -111,6 +131,33 @@ defmodule Relay.ValueStreamTest do
       assert stream.value_add_secs == 0
       assert stream.flow_efficiency == 0.0
       assert Decimal.equal?(stream.cost, Decimal.new(0))
+    end
+
+    test "states carry stream_summary's per-state shape over this one card (n = 1)", %{s: s, card: card} do
+      stream = ValueStream.card_stream(card)
+
+      assert Enum.map(stream.states, & &1.stage_id) ==
+               Enum.map(ValueStream.stream_states(s.board.id), & &1.stage_id)
+
+      spec = Enum.find(stream.states, &(&1.stage_id == s.spec.id))
+      assert spec.mean_secs == 120.0
+      assert spec.mean_first_secs == 60.0
+      assert spec.mean_visits == 2.0
+      assert spec.mean_cost == nil
+
+      spec_review = Enum.find(stream.states, &(&1.stage_id == s.spec_review.id))
+      assert spec_review.approve_rate == 0.5
+      assert spec_review.rework_target == s.spec.id
+
+      review = Enum.find(stream.states, &(&1.stage_id == s.review.id))
+      assert review.approve_rate == 1.0
+      assert review.rework_target == s.code.id
+
+      assert Enum.find(stream.states, &(&1.stage_id == s.done.id)).wip == 1
+      assert Enum.find(stream.states, &(&1.stage_id == s.next_up.id)).wip == 0
+
+      assert stream.outside_secs == 0.0
+      assert (stream.states |> Enum.map(& &1.mean_secs) |> Enum.sum()) + stream.outside_secs == stream.lead_secs
     end
 
     test "gate decisions are attributed to the gate the card left", %{s: s, card: card} do
@@ -230,6 +277,17 @@ defmodule Relay.ValueStreamTest do
              ]
     end
 
+    test "outside_secs is the card's off-stream time, so its states plus outside tile the lead" do
+      s = re_board()
+      card = card_in(s.done, at(0))
+      walk(card, [{s.next_up, 0}, {s.code, 10}, {s.review, 30}, {s.deploy, 40}, {s.done, 100}])
+
+      stream = ValueStream.card_stream(card)
+
+      assert stream.outside_secs == 60.0
+      assert (stream.states |> Enum.map(& &1.mean_secs) |> Enum.sum()) + stream.outside_secs == stream.lead_secs
+    end
+
     test "a card that never entered the stream has no stream" do
       s = re_board()
       assert ValueStream.card_stream(card_in(s.backlog, at(0))) == nil
@@ -290,6 +348,51 @@ defmodule Relay.ValueStreamTest do
       assert stream.flow_efficiency == stream.value_add_secs / stream.lead_secs
       assert stream.flow_efficiency == 0.1
       assert Decimal.equal?(stream.cost, Decimal.new("1.75"))
+    end
+  end
+
+  describe "card_stream/1 — per-span cost (RE347)" do
+    defp attributed(spans),
+      do: spans |> Enum.map(&(&1.cost || Decimal.new(0))) |> Enum.reduce(Decimal.new(0), &Decimal.add/2)
+
+    test "a span sums the cost of executions that started inside it; the rest belong to no span" do
+      s = re_board()
+      card = card_in(s.done, at(0))
+      walk(card, [{s.next_up, 0}, {s.code, 100}, {s.review, 400}, {s.done, 500}])
+      # started before the stream began — unattributed
+      executed(card, "implement", at(-10), at(5), cost: Decimal.new("5.00"))
+      executed(card, "implement", at(50), at(60), cost: Decimal.new("0.10"))
+      executed(card, "implement", at(150), at(250), cost: Decimal.new("1.00"))
+      executed(card, "implement", at(260), at(300))
+      # Review only ran an execution with no reported cost
+      executed(card, "fix", at(450), at(460))
+      # started at done_at — outside [entered_at, left_at) of every span
+      executed(card, "implement", at(500), at(510), cost: Decimal.new("2.00"))
+
+      stream = ValueStream.card_stream(card)
+      costs = Map.new(stream.spans, &{&1.name, &1.cost})
+
+      assert Decimal.equal?(costs["Next up"], Decimal.new("0.10"))
+      assert Decimal.equal?(costs["Code"], Decimal.new("1.00"))
+      assert costs["Review"] == nil
+      assert Decimal.equal?(stream.cost, Decimal.new("8.10"))
+      assert Decimal.compare(attributed(stream.spans), stream.cost) == :lt
+
+      code = Enum.find(stream.states, &(&1.stage_id == s.code.id))
+      assert Decimal.equal?(code.mean_cost, Decimal.new("1.00"))
+    end
+
+    test "Σ span.cost equals the card's cost when every execution started inside the stream" do
+      s = re_board()
+      card = card_in(s.done, at(0))
+      walk(card, [{s.next_up, 0}, {s.code, 100}, {s.done, 300}])
+      executed(card, "implement", at(150), at(200), cost: Decimal.new("1.25"))
+      executed(card, "fix", at(210), at(250), cost: Decimal.new("0.75"))
+
+      stream = ValueStream.card_stream(card)
+
+      assert Decimal.equal?(stream.cost, Decimal.new("2.00"))
+      assert Decimal.equal?(attributed(stream.spans), stream.cost)
     end
   end
 end

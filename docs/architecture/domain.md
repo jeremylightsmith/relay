@@ -207,7 +207,21 @@ sharing behavior.
   `[started_at, done_at]` — `Σ span.secs == lead_secs` and every span's
   `agent + human + nobody == secs`. `stream_summary/2` averages over the last N (default 20) or a
   `Runs.metric_window_since/1` window of done cards (archived included) so per-state means plus
-  `outside_secs` sum to the mean lead time. `flow_agent_secs/3` reconciles agent time with
+  `outside_secs` sum to the mean lead time. RE347 adds per-span `cost` (executions attributed
+  by `started_at` ∈ `[entered_at, left_at)`, so `Σ span.cost ≤ cost`), per-state
+  `mean_first_secs` / `mean_cost` / `wip` / `rework_target` (a gate's nearest `:flow` state
+  before it) in both `card_stream/1` (n = 1, plus `outside_secs`) and `stream_summary/2`, the
+  summary's `cards_per_week`, and `decision_types/0`. **View (RE347):**
+  `RelayWeb.ValueStreamLive` at `/board/:slug/value-stream` renders it.
+  - `?card=<ref>` opens one card's stream (linked from the card drawer's Run tab).
+  - Without it, the page shows the board average, the third Board | Story map | Value stream
+    segment.
+  - State lives in the URL (`card`, `scope`, `window`).
+  - Geometry is the pure `RelayWeb.ValueStreamLayout`, and rendering is
+    `RelayWeb.ValueStreamComponents`, shared with level 2 (RE349).
+  - Flow boxes link to Flow Metrics instead of restating it.
+
+  `flow_agent_secs/3` reconciles agent time with
   `Runs.node_metrics_for_flow/2` (equal when a card's executions don't overlap, smaller when they
   do). `flow_stream/2` (RE348) is level 2 — one flow's `node_metrics_for_flow/2` rows plus its
   **send-backs** (a `failed` execution followed by a different node, grouped by

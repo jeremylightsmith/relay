@@ -94,6 +94,7 @@ defmodule RelayWeb.Router do
       # BoardLive, so this is a live_action on it, not a separate LiveView. If a third view ever
       # needs the drawer, extract it then — that is the trigger, not this route.
       live "/board/:slug/story-map", BoardLive, :story_map
+      live "/board/:slug/value-stream", ValueStreamLive
       live "/board/:slug/settings", BoardSettingsLive
       live "/board/:slug/runners", BoardRunnersLive
       live "/board/:slug/flows/:key", FlowEditorLive

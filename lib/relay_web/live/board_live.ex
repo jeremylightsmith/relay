@@ -172,7 +172,7 @@ defmodule RelayWeb.BoardLive do
       embed={@embed}
     >
       <:title>
-        <span id="board-name" class="truncate max-w-[58vw] sm:max-w-[280px]">
+        <span id="board-name" class="truncate shrink-[1000] max-w-[58vw] sm:max-w-[280px]">
           {@board.name}
         </span>
         <.board_view_tabs

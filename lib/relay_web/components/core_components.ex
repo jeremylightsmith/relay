@@ -919,49 +919,68 @@ defmodule RelayWeb.CoreComponents do
   defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
 
   @doc """
-  The Board ↔ Story map switch (RE264) — shared board chrome, so it lives here with the rest of
-  it. Renders `docs/designs/Relay Story Map.dc.html`'s segmented control (lines ~37-40) as two
-  `<.link navigate=…>` segments; `RelayWeb.BoardLive` renders it in `Layouts.app`'s `<:title>`
-  slot, immediately after the board name, on both of its board actions.
+  The Board ↔ Story map ↔ Value stream switch (RE264, RE347) — shared board chrome, so it lives
+  here with the rest of it. Renders `docs/designs/Relay Story Map.dc.html`'s segmented control
+  (lines ~37-40) as `<.link navigate=…>` segments; `RelayWeb.BoardLive` renders it in
+  `Layouts.app`'s `<:title>` slot, immediately after the board name, on both of its board
+  actions. The third segment (RE347) opens the board-average value stream map,
+  `RelayWeb.ValueStreamLive`, which renders the same switch with `active: :value_stream`.
+
+  Below `sm` each segment shows only its icon (the label stays as `aria-label`/`title`) and the
+  switch may shrink and scroll inside itself; callers give `#board-name` a heavy
+  `flex-shrink` so the name truncates before the switch does. Together these keep the switch
+  off the crumb, header actions and avatar in a phone's one-row top bar.
   """
   attr :board_slug, :string, required: true
-  attr :active, :atom, values: [:board, :story_map], required: true
+  attr :active, :atom, values: [:board, :story_map, :value_stream], required: true
 
   def board_view_tabs(assigns) do
+    assigns =
+      assign(assigns,
+        segments: [
+          {:board, "board-view-tab-board", ~p"/board/#{assigns.board_slug}", "Board", "hero-view-columns"},
+          {:story_map, "board-view-tab-story-map", ~p"/board/#{assigns.board_slug}/story-map", "Story map", "hero-map"},
+          {:value_stream, "board-view-tab-value-stream", ~p"/board/#{assigns.board_slug}/value-stream", "Value stream",
+           "hero-chart-bar"}
+        ]
+      )
+
+    # Below `sm` the three text segments (~237px) do not fit the one-row top bar (RE347 smoke),
+    # so each segment collapses to its icon (label kept as aria-label/title). The container may
+    # also shrink and scroll inside itself, so a still-narrower bar clips the switch rather than
+    # overlapping the crumb, header actions or avatar.
     ~H"""
     <div
       id="board-view-tabs"
       role="navigation"
       aria-label="Board view"
-      style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:2px;flex:0 0 auto;margin-left:13px;"
+      class="ml-1.5 sm:ml-[13px]"
+      style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:2px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;"
     >
       <.link
-        navigate={~p"/board/#{@board_slug}"}
-        id="board-view-tab-board"
-        aria-current={@active == :board && "page"}
-        style={board_view_tab_style(@active == :board)}
+        :for={{view, id, path, label, icon} <- @segments}
+        navigate={path}
+        id={id}
+        aria-current={@active == view && "page"}
+        aria-label={label}
+        title={label}
+        class="flex flex-none items-center whitespace-nowrap px-[7px] sm:px-[11px]"
+        style={board_view_tab_style(@active == view)}
       >
-        Board
-      </.link>
-      <.link
-        navigate={~p"/board/#{@board_slug}/story-map"}
-        id="board-view-tab-story-map"
-        aria-current={@active == :story_map && "page"}
-        style={board_view_tab_style(@active == :story_map)}
-      >
-        Story map
+        <.icon name={icon} class="size-3.5 sm:hidden" />
+        <span class="hidden sm:inline">{label}</span>
       </.link>
     </div>
     """
   end
 
   defp board_view_tab_style(true) do
-    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);padding:4px 11px;" <>
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);padding-top:4px;padding-bottom:4px;" <>
       "border-radius:6px;background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 8%, transparent);"
   end
 
   defp board_view_tab_style(_active) do
-    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);padding:4px 11px;border-radius:6px;"
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);padding-top:4px;padding-bottom:4px;border-radius:6px;"
   end
 
   @doc """
@@ -975,7 +994,8 @@ defmodule RelayWeb.CoreComponents do
   phone: below `md` only the root crumb, an ellipsis and the immediate parent show (middle
   crumbs are `hidden md:flex`), and every label truncates at 160px with its full text in
   `title=`. The look is the board page's shipped `Boards` crumb; only a crumb carrying an
-  `:icon` (the root) shows one.
+  `:icon` (the root) shows one, and below `sm` that crumb shows only its icon so the board-view
+  switch fits a phone's top bar (RE347).
   """
   attr :id, :string, default: "top-bar-crumb"
 
@@ -1030,7 +1050,7 @@ defmodule RelayWeb.CoreComponents do
         class="flex min-w-0 max-w-[160px] items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
       >
         <.icon :if={@crumb[:icon]} name={@crumb[:icon]} class="size-3.5 flex-none" />
-        <span class="truncate">{@crumb.label}</span>
+        <span class={["truncate", @crumb[:icon] && "hidden sm:inline"]}>{@crumb.label}</span>
       </.link>
       <span data-crumb-separator class="text-[13px] text-base-content/30">/</span>
     </div>
@@ -3355,16 +3375,22 @@ defmodule RelayWeb.CoreComponents do
                     baton={baton_label(@latest_run, @card)}
                   />
                   <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
-                    <.link
-                      :if={@latest_detail.flow_key}
-                      id="run-view-in-flow-metrics"
-                      navigate={
-                        ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
-                      }
-                      style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
+                    <div
+                      id="run-tab-links"
+                      style="display:flex;flex-wrap:wrap;gap:16px;align-self:flex-start;"
                     >
-                      View in flow metrics →
-                    </.link>
+                      <.link
+                        :if={@latest_detail.flow_key}
+                        id="run-view-in-flow-metrics"
+                        navigate={
+                          ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
+                        }
+                        style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
+                      >
+                        View in flow metrics →
+                      </.link>
+                      <.value_stream_link board_slug={@board_slug} ref={@ref} />
+                    </div>
                     <RunComponents.run_state_banner
                       :if={@rate_limited && @latest_detail.status == :running}
                       variant={:rate_limited}
@@ -3414,7 +3440,11 @@ defmodule RelayWeb.CoreComponents do
                     <RunComponents.run_history :if={length(@runs) > 1} runs={history_entries(@runs)} />
                   </div>
                 <% else %>
-                  <div id="run-tab-queued" style="padding:18px 22px;">
+                  <div
+                    id="run-tab-queued"
+                    style="padding:18px 22px;display:flex;flex-direction:column;gap:14px;"
+                  >
+                    <.value_stream_link board_slug={@board_slug} ref={@ref} />
                     <RunComponents.run_face
                       :if={@queued_flow}
                       ref="drawer"
@@ -4421,6 +4451,23 @@ defmodule RelayWeb.CoreComponents do
   # RLY-207: prior runs are terminal, so a `nil` flow is behavior-neutral — the
   # old history timeline passed no flow either, so no type tags and no pending
   # tail render for history entries (same as before this read-model rewire).
+  # RE347 — the card's own stream on the value stream map, beside "View in flow metrics →" and
+  # shown whether or not the card has a run.
+  attr :board_slug, :string, required: true
+  attr :ref, :string, required: true
+
+  defp value_stream_link(assigns) do
+    ~H"""
+    <.link
+      id="card-value-stream-link"
+      navigate={~p"/board/#{@board_slug}/value-stream?#{[card: @ref]}"}
+      style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));"
+    >
+      Value stream →
+    </.link>
+    """
+  end
+
   defp history_entries([_latest | prior]) do
     count = length(prior)
 
