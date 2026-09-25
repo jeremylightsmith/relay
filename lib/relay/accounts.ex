@@ -13,6 +13,7 @@ defmodule Relay.Accounts do
 
   import Ecto.Query
 
+  alias Relay.Accounts.GoogleTokenValidator
   alias Relay.Repo
   alias Schemas.User
   alias Schemas.UserApiToken
@@ -53,16 +54,32 @@ defmodule Relay.Accounts do
   Upserts a user from a Google `%Ueberauth.Auth{}` (the web redirect flow).
   Maps the auth struct onto provider claims and delegates to
   `upsert_user_from_provider/1`.
+
+  Rejects with `{:error, :email_unverified}`, before touching the DB, unless
+  Google's userinfo (`auth.extra.raw_info.user`) says the email is verified
+  (`GoogleTokenValidator.email_verified?/1`, the same predicate native sign-in
+  uses). Board invites bind by email, so an unverified address could otherwise
+  claim someone else's invites and, because `users.email` is unique, lock the
+  real owner out (RE343).
   """
   def upsert_user_from_google(%Ueberauth.Auth{} = auth) do
-    upsert_user_from_provider(%{
-      provider: "google",
-      provider_uid: to_string(auth.uid),
-      email: auth.info.email,
-      name: auth.info.name,
-      avatar_url: auth.info.image
-    })
+    if GoogleTokenValidator.email_verified?(google_userinfo(auth)) do
+      upsert_user_from_provider(%{
+        provider: "google",
+        provider_uid: to_string(auth.uid),
+        email: auth.info.email,
+        name: auth.info.name,
+        avatar_url: auth.info.image
+      })
+    else
+      {:error, :email_unverified}
+    end
   end
+
+  # `ueberauth_google` stores Google's userinfo (string keys) at `extra.raw_info.user`.
+  # Anything missing along that path reads as "no claims", which the predicate treats as unverified.
+  defp google_userinfo(%Ueberauth.Auth{extra: %{raw_info: %{user: user}}}) when is_map(user), do: user
+  defp google_userinfo(%Ueberauth.Auth{}), do: %{}
 
   @doc """
   Upserts and returns the fixed local dev user (dev/test only login

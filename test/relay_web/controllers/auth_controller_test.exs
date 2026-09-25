@@ -1,10 +1,14 @@
 defmodule RelayWeb.AuthControllerTest do
   use RelayWeb.ConnCase, async: true
 
+  alias Relay.Members
   alias Relay.Repo
+  alias Schemas.Membership
   alias Schemas.User
 
-  defp google_auth do
+  @unverified_flash "Your Google account's email address isn't verified. Verify it with Google, then sign in again."
+
+  defp google_auth(userinfo \\ %{"email_verified" => true}) do
     %Ueberauth.Auth{
       provider: :google,
       uid: "google-uid-123",
@@ -12,7 +16,8 @@ defmodule RelayWeb.AuthControllerTest do
         email: "ada@example.com",
         name: "Ada Lovelace",
         image: "https://example.com/ada.png"
-      }
+      },
+      extra: %Ueberauth.Auth.Extra{raw_info: %{user: userinfo}}
     }
   end
 
@@ -60,6 +65,51 @@ defmodule RelayWeb.AuthControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "failed"
       refute get_session(conn, :user_id)
       assert Repo.aggregate(User, :count) == 0
+    end
+  end
+
+  describe "GET /auth/google/callback email verification (RE343)" do
+    for {label, userinfo} <- [
+          {"email_verified false", %{"email_verified" => false}},
+          {"email_verified \"false\"", %{"email_verified" => "false"}},
+          {"a missing email_verified claim", %{}}
+        ] do
+      test "with #{label} refuses sign-in and leaves pending invites unbound", %{conn: conn} do
+        board = insert(:board)
+        {:ok, invite} = Members.invite(board, "ada@example.com")
+
+        conn =
+          conn
+          |> assign(:ueberauth_auth, google_auth(unquote(Macro.escape(userinfo))))
+          |> get(~p"/auth/google/callback")
+
+        assert redirected_to(conn) == ~p"/"
+        assert Phoenix.Flash.get(conn.assigns.flash, :error) == @unverified_flash
+        refute get_session(conn, :user_id)
+        # The board factory builds an owner user, so check this identity, not the total count.
+        refute Repo.get_by(User, provider_uid: "google-uid-123")
+        refute Repo.get_by(User, email: "ada@example.com")
+        assert Repo.get!(Membership, invite.id).user_id == nil
+      end
+    end
+
+    for verified <- [true, "true"] do
+      test "with email_verified #{inspect(verified)} signs in and resolves the pending invite",
+           %{conn: conn} do
+        board = insert(:board)
+        {:ok, invite} = Members.invite(board, "ada@example.com")
+
+        conn =
+          conn
+          |> assign(:ueberauth_auth, google_auth(%{"email_verified" => unquote(verified)}))
+          |> get(~p"/auth/google/callback")
+
+        user = Repo.get_by!(User, provider_uid: "google-uid-123")
+        assert get_session(conn, :user_id) == user.id
+        assert redirected_to(conn) == ~p"/board"
+        assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Signed in as ada@example.com"
+        assert Repo.get!(Membership, invite.id).user_id == user.id
+      end
     end
   end
 

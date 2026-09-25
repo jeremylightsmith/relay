@@ -2,7 +2,8 @@ defmodule RelayWeb.AuthController do
   @moduledoc """
   Google OAuth via Ueberauth: `request` redirects to Google (handled by
   the Ueberauth plug), `callback` upserts the user and starts the
-  session, `delete` logs out.
+  session, refusing a Google account whose email isn't verified (RE343:
+  invites bind by email), `delete` logs out.
 
   `return_to` (RLY-69): a caller (e.g. the public board's sign-in link) may add
   `?return_to=<path>` to the request-phase URL. `put_return_to/2` runs before the
@@ -39,6 +40,14 @@ defmodule RelayWeb.AuthController do
         conn
         |> put_flash(:info, "Signed in as #{user.email}")
         |> Auth.log_in_user(user, return_to)
+
+      {:error, :email_unverified} ->
+        conn
+        |> put_flash(
+          :error,
+          "Your Google account's email address isn't verified. Verify it with Google, then sign in again."
+        )
+        |> redirect(to: ~p"/")
 
       {:error, _changeset} ->
         conn

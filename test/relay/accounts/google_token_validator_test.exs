@@ -70,4 +70,20 @@ defmodule Relay.Accounts.GoogleTokenValidatorTest do
 
     assert {:error, :network_error} = GoogleTokenValidator.validate_token("tok")
   end
+
+  describe "email_verified?/1" do
+    test "is true for a boolean or string true" do
+      assert GoogleTokenValidator.email_verified?(%{"email_verified" => true})
+      assert GoogleTokenValidator.email_verified?(%{"email_verified" => "true"})
+    end
+
+    test "is false for anything else, including a missing claim" do
+      refute GoogleTokenValidator.email_verified?(%{"email_verified" => false})
+      refute GoogleTokenValidator.email_verified?(%{"email_verified" => "false"})
+      refute GoogleTokenValidator.email_verified?(%{"email_verified" => nil})
+      refute GoogleTokenValidator.email_verified?(%{"email" => "ada@example.com"})
+      refute GoogleTokenValidator.email_verified?(%{})
+      refute GoogleTokenValidator.email_verified?(nil)
+    end
+  end
 end
