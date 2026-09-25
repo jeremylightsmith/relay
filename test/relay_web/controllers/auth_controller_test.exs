@@ -4,7 +4,7 @@ defmodule RelayWeb.AuthControllerTest do
   alias Relay.Repo
   alias Schemas.User
 
-  defp google_auth do
+  defp google_auth(userinfo \\ %{"email_verified" => true}) do
     %Ueberauth.Auth{
       provider: :google,
       uid: "google-uid-123",
@@ -12,7 +12,8 @@ defmodule RelayWeb.AuthControllerTest do
         email: "ada@example.com",
         name: "Ada Lovelace",
         image: "https://example.com/ada.png"
-      }
+      },
+      extra: %Ueberauth.Auth.Extra{raw_info: %{user: userinfo}}
     }
   end
 

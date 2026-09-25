@@ -4,6 +4,7 @@ defmodule Relay.AccountsTest do
   alias Relay.Accounts
   alias Schemas.Scope
   alias Schemas.User
+  alias Ueberauth.Auth.Extra
 
   defp google_auth(attrs) do
     %Ueberauth.Auth{
@@ -13,6 +14,9 @@ defmodule Relay.AccountsTest do
         email: Map.get(attrs, :email, "ada@example.com"),
         name: Map.get(attrs, :name, "Ada Lovelace"),
         image: Map.get(attrs, :image, "https://example.com/ada.png")
+      },
+      extra: %Extra{
+        raw_info: %{user: Map.get(attrs, :userinfo, %{"email_verified" => true})}
       }
     }
   end
@@ -60,6 +64,46 @@ defmodule Relay.AccountsTest do
                Accounts.upsert_user_from_google(google_auth(%{email: "  Ada@Example.com "}))
 
       assert user.email == "ada@example.com"
+    end
+
+    test "accepts a string \"true\" email_verified claim" do
+      assert {:ok, %User{}} =
+               Accounts.upsert_user_from_google(google_auth(%{userinfo: %{"email_verified" => "true"}}))
+    end
+
+    test "rejects an unverified email without touching the DB" do
+      for userinfo <- [%{"email_verified" => false}, %{"email_verified" => "false"}, %{}] do
+        assert {:error, :email_unverified} =
+                 Accounts.upsert_user_from_google(google_auth(%{userinfo: userinfo}))
+      end
+
+      assert Repo.aggregate(User, :count) == 0
+    end
+
+    test "treats a missing extra / raw_info / user as unverified" do
+      base = google_auth(%{})
+
+      for auth <- [
+            %{base | extra: nil},
+            %{base | extra: %Extra{raw_info: nil}},
+            %{base | extra: %Extra{raw_info: %{}}},
+            %{base | extra: %Extra{raw_info: %{user: nil}}}
+          ] do
+        assert {:error, :email_unverified} = Accounts.upsert_user_from_google(auth)
+      end
+
+      assert Repo.aggregate(User, :count) == 0
+    end
+
+    test "does not refresh an existing user's profile from an unverified sign-in" do
+      {:ok, user} = Accounts.upsert_user_from_google(google_auth(%{}))
+
+      assert {:error, :email_unverified} =
+               Accounts.upsert_user_from_google(
+                 google_auth(%{email: "squat@example.com", userinfo: %{"email_verified" => false}})
+               )
+
+      assert Repo.get!(User, user.id).email == "ada@example.com"
     end
   end
 

@@ -76,7 +76,17 @@ defmodule Relay.Accounts.GoogleTokenValidator do
   defp verify_issuer(%{"iss" => iss}) when iss in @issuers, do: :ok
   defp verify_issuer(_), do: {:error, :invalid_issuer}
 
-  defp verify_email_verified(%{"email_verified" => verified}) when verified in [true, "true"], do: :ok
+  @doc """
+  The one definition of "Google says this email is verified" (RE343), shared by
+  native sign-in (`validate_token/1`) and web sign-in
+  (`Relay.Accounts.upsert_user_from_google/1`). `claims` is a Google claims /
+  userinfo map with string keys. Returns `true` only when `"email_verified"` is
+  `true` or `"true"`. A missing claim, any other value, or a non-map is `false`.
+  """
+  def email_verified?(%{"email_verified" => verified}) when verified in [true, "true"], do: true
+  def email_verified?(_claims), do: false
 
-  defp verify_email_verified(_), do: {:error, :email_unverified}
+  defp verify_email_verified(info) do
+    if email_verified?(info), do: :ok, else: {:error, :email_unverified}
+  end
 end

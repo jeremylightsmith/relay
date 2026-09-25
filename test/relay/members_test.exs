@@ -4,6 +4,7 @@ defmodule Relay.MembersTest do
   alias Relay.Members
   alias Relay.Repo
   alias Schemas.Membership
+  alias Ueberauth.Auth.Extra
   alias Ueberauth.Auth.Info
 
   describe "invite/2" do
@@ -43,7 +44,8 @@ defmodule Relay.MembersTest do
       auth = %Ueberauth.Auth{
         provider: :google,
         uid: "google-uid-ada",
-        info: %Info{email: "  Ada@Example.com ", name: "Ada Lovelace", image: nil}
+        info: %Info{email: "  Ada@Example.com ", name: "Ada Lovelace", image: nil},
+        extra: %Extra{raw_info: %{user: %{"email_verified" => true}}}
       }
 
       {:ok, user} = Relay.Accounts.upsert_user_from_google(auth)
@@ -76,7 +78,8 @@ defmodule Relay.MembersTest do
       auth = %Ueberauth.Auth{
         provider: :google,
         uid: "google-uid-later",
-        info: %Info{email: "  Later@Example.com ", name: "Later Person", image: nil}
+        info: %Info{email: "  Later@Example.com ", name: "Later Person", image: nil},
+        extra: %Extra{raw_info: %{user: %{"email_verified" => true}}}
       }
 
       {:ok, user} = Relay.Accounts.upsert_user_from_google(auth)
