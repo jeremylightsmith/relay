@@ -209,6 +209,15 @@ became comment-free JSON (RLY-241). Keyed by node.
   (`version > 1`) is skipped and keeps its undeclared nodes — `/relay-doctor`'s establish
   dialogue is the upgrade path for those. An undeclared node never fires the guard, so a skipped
   flow behaves exactly as it does today.
+- **`role`** — RE346's **Do / Check / Fix** value-stream role, `Schemas.Flow.Node.roles/0`.
+  Optional and valid on every node type; an authored role always wins, and an unset one is
+  guessed by `Schemas.Flow.node_roles/1` (every inbound edge `failed` → `fix`, a `gate` →
+  `check`, else `do`). `code.json` authors `"role": "check"` only where that guess is wrong: the
+  five agent checks (`spec_review`, `quality_review`, `final_review`, `smoke`, `acceptance`) and
+  `deploy`, a `shell` node that only waits on CI + the Fly deploy and whose failure routes to
+  `github_fix`. Display-only — the engine and the runner never read it. Existing
+  library-managed boards pick the annotations up via `Relay.Flows.sync_defaults!/0` at deploy,
+  like any other default change.
 
 ## Open modeling questions (settle in RLY-131/132)
 

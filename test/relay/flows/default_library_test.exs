@@ -65,6 +65,57 @@ defmodule Relay.Flows.DefaultLibraryTest do
              ])
   end
 
+  # RE346 oracle: docs/designs/Value Stream Map v2.dc.html, level-2 `N` table — the role column
+  # for every Code-flow node. `deploy` is a check even though the card listed five: it only waits
+  # on CI + the Fly deploy, and its failure routes to github_fix (a fix exists only because a
+  # check failed).
+  test "the Code flow's node roles match the Value Stream Map v2 grammar" do
+    expected =
+      Map.new(
+        Enum.map(~w(branch implement sync resync merge post), &{&1, :do}) ++
+          Enum.map(
+            ~w(spec_review quality_review precommit browser final_review smoke acceptance reverify rebrowser deploy),
+            &{&1, :check}
+          ) ++
+          Enum.map(~w(fix_findings final_fix sync_fix resync_fix github_fix), &{&1, :fix})
+      )
+
+    assert map_size(expected) == 21
+    assert Schemas.Flow.node_roles(library_struct("code")) == expected
+
+    # spec and plan are single-agent flows: their one node is guessed :do.
+    for key <- ~w(spec plan) do
+      roles = Schemas.Flow.node_roles(library_struct(key))
+      assert roles != %{}
+      assert Enum.all?(Map.values(roles), &(&1 == :do)), "#{key}: #{inspect(roles)}"
+    end
+  end
+
+  # Keep the default sparse: author a role only where the guess is wrong, so it shows authors the
+  # pattern. Gates guess :check and fixers guess :fix on their own.
+  test "the default library authors role only on the six checks the guess can't see" do
+    authored =
+      for flow <- DefaultLibrary.all(),
+          node <- flow.nodes,
+          node.role,
+          into: MapSet.new(),
+          do: {flow.key, node.key, node.role}
+
+    assert authored ==
+             MapSet.new(
+               for key <- ~w(spec_review quality_review final_review smoke acceptance deploy),
+                   do: {"code", key, :check}
+             )
+  end
+
+  defp library_struct(key) do
+    attrs = Enum.find(DefaultLibrary.all(), &(&1.key == key))
+
+    %Schemas.Flow{board_id: 1}
+    |> Schemas.Flow.changeset(attrs)
+    |> Ecto.Changeset.apply_action!(:build)
+  end
+
   test "every :agent node's :failed route reaches a fix node or the needs_input sentinel" do
     for flow <- DefaultLibrary.all(),
         node <- flow.nodes,

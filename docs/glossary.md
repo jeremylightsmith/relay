@@ -48,6 +48,13 @@ the MMF design specs).
   them (`./relay start`; `Schemas.Runner`, one row per machine per board; the Runners view at
   `/board/:slug/runners`). Formerly *executor* — renamed in RE319; older mockups still use that word.
   Not the legacy board-runner (`relay watch`), which is deleted.
+- **Do / Check / Fix (node role)** — every flow node's place in the value stream (RE346): **Do**
+  changes the work (`implement`, `merge`), **Check** inspects it without changing it (the
+  reviewers, the `precommit`/`browser` gates, `smoke`, `acceptance`, `deploy`), and **Fix** exists
+  only because a check failed (`fix_findings`, `final_fix`, the rebasers). An author may set
+  `role` on any node (`Schemas.Flow.Node.roles/0`) and an authored role always wins; an unset one
+  is guessed by `Schemas.Flow.node_roles/1` — every inbound edge `on: failed` → Fix, a `gate` →
+  Check, otherwise Do. Display-only: the engine and the runner never branch on it.
 - **Review gate** — the Approve / Request-changes decision shown for a card whose stage is
   `:review`-type (main or substage). **Approve advances the card to the next stage or substage;**
   **Request changes** sends it back to a derived destination.
