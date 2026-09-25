@@ -192,7 +192,9 @@ never 403s):
   `Relay.Runs.node_metrics_for_flow/2`, which merges in `Relay.Runs.node_waits_for_flow/2`: a
   node's gap is the time from the previous execution in the same run finishing to this one
   starting, and it is **held** when that previous execution ended `needs_input`/`blocked`
-  (`Schemas.NodeExecution.holding_outcomes/0`), otherwise hand-off **wait**; a run's first node
+  (`Schemas.NodeExecution.holding_outcomes/0`) or the card logged a `needs_input` /
+  `input_answered` activity inside the gap (an escalation park, whose predecessor stays
+  `failed` — RE348), otherwise hand-off **wait**; a run's first node
   has none, and the window applies to the execution the gap precedes. An optional
   `?card=<ref>` (RE235) scopes every figure to one card's node executions across ALL of its
   runs of that flow: `?window=` is then ignored, the eight percentile keys

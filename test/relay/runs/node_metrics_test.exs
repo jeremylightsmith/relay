@@ -79,6 +79,12 @@ defmodule Relay.Runs.NodeMetricsTest do
 
   defp t0_ago(ago_s), do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -ago_s, :second)
 
+  # A card activity row at an exact timestamp — the RE348 held rule reads `:needs_input` /
+  # `:input_answered` rows whose `inserted_at` falls inside a gap. The factory only needs the id.
+  defp park_activity(run, type, at) do
+    insert(:activity, card: %Schemas.Card{id: run.card_id}, type: type, meta: %{}, inserted_at: at, updated_at: at)
+  end
+
   describe "node_metrics_for_flow/2" do
     test "one row per node with executions, in flow node order, with counts and percentiles" do
       board = insert(:board)
@@ -303,6 +309,39 @@ defmodule Relay.Runs.NodeMetricsTest do
 
       assert %{held_total: 600, held_count: 1, wait_count: 0} =
                Runs.node_waits_for_flow(flow, window: "all")["implement"]
+    end
+
+    test "an escalation park (predecessor :failed, then needs_input / input_answered on the card) is held (RE348)" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["a"])
+      run = completed_run(board, "code", 7200, :done)
+      t0 = t0_ago(7200)
+
+      exec_at(run, "a", t0, 0, 60, outcome: :failed)
+      park_activity(run, :needs_input, DateTime.add(t0, 60, :second))
+      park_activity(run, :input_answered, DateTime.add(t0, 3000, :second))
+      exec_at(run, "a", t0, 3660, 3700)
+
+      assert %{held_total: 3600, held_count: 1, wait_total: nil, wait_count: 0} =
+               Runs.node_waits_for_flow(flow, window: "all")["a"]
+    end
+
+    test "a :failed predecessor stays wait without a park activity inside the gap on the run's own card" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["a"])
+      run = completed_run(board, "code", 7200, :done)
+      other = completed_run(board, "code", 7200, :done)
+      t0 = t0_ago(7200)
+
+      exec_at(run, "a", t0, 0, 60, outcome: :failed)
+      # another card's park, a non-park activity inside the gap, and a park after the gap closed
+      park_activity(other, :needs_input, DateTime.add(t0, 100, :second))
+      park_activity(run, :commented, DateTime.add(t0, 100, :second))
+      park_activity(run, :needs_input, DateTime.add(t0, 5000, :second))
+      exec_at(run, "a", t0, 3660, 3700)
+
+      assert %{wait_total: 3600, wait_count: 1, held_total: nil, held_count: 0} =
+               Runs.node_waits_for_flow(flow, window: "all")["a"]
     end
 
     test "the held classification is exactly holding_outcomes/0" do

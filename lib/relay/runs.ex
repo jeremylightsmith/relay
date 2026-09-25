@@ -305,12 +305,11 @@ defmodule Relay.Runs do
 
   Each gap is `held` when the previous execution's outcome is in
   `Schemas.NodeExecution.holding_outcomes/0` (the run was parked on a human, or blocked on auth /
-  a usage limit), otherwise plain hand-off `wait`. A pair is skipped when the previous execution
-  has no `finished_at` (abandoned or still in flight) or the gap is negative (clock skew).
-
-  Known limitation: an escalation park (`--on failed --> needs_input`) leaves the previous
-  outcome `:failed`, so its gap counts as `wait` — telling it apart needs the flow's edges (left
-  for RE348).
+  a usage limit), OR when the run's card logged a `:needs_input` / `:input_answered` activity
+  whose `inserted_at` falls in `[date_trunc('second', prev_finished_at), started_at]` (RE348 — an
+  escalation park, `--on failed --> needs_input`, leaves the previous outcome `:failed`);
+  otherwise plain hand-off `wait`. A pair is skipped when the previous execution has no
+  `finished_at` (abandoned or still in flight) or the gap is negative (clock skew).
 
   Options are exactly `node_metrics_for_flow/2`'s and resolve through the same helpers, so the two
   rollups cover the same executions: `opts[:window]` filters on the SUCCESSOR's `started_at` (the
@@ -446,6 +445,11 @@ defmodule Relay.Runs do
   # One grouped pass over node_executions for the numeric columns. percentile_cont ignores NULLs,
   # so a node with unset cost / open timestamps yields nil there without a FILTER clause. The
   # `*_total` columns ride along in the same pass — no second query for card scope (RE235).
+  # RE348: the card activity that makes a gap a human park even when the predecessor's outcome is
+  # not holding — an escalation (`--on failed --> needs_input`) leaves that outcome `:failed`.
+  # The ONE copy of this pair; `park_in_gap/0` reads it.
+  @park_activity_types [:needs_input, :input_answered]
+
   # RE345: each execution with its run-predecessor's `finished_at` and whether that predecessor
   # ended in `holding`. LAG runs over the whole (board, flow, card) set BEFORE any window filter —
   # filtering here would drop the predecessor row and with it the successor's gap.
@@ -460,6 +464,7 @@ defmodule Relay.Runs do
         windows: [run: [partition_by: ne.run_id, order_by: [asc: ne.started_at, asc: ne.id]]],
         select: %{
           node_key: ne.node_key,
+          card_id: r.card_id,
           started_at: ne.started_at,
           prev_finished_at: over(lag(ne.finished_at), :run),
           prev_held: over(lag(ne.outcome in ^holding), :run)
@@ -472,19 +477,35 @@ defmodule Relay.Runs do
   # RE345: one row per non-negative gap, classified held/wait, windowed on the SUCCESSOR's
   # `started_at` (the first binding, so `filter_since/2` applies unchanged). `coalesce` keeps a
   # NULL predecessor outcome from making `NOT held` NULL and dropping the gap from both classes.
+  # RE348: a gap is also held when the card logged a park activity inside it (`park_in_gap/0`).
   defp gaps_since(lagged, since) do
+    park = park_in_gap()
+
     gaps =
       from(g in subquery(lagged),
+        as: :gap,
         where: not is_nil(g.prev_finished_at) and g.started_at >= g.prev_finished_at,
         select: %{
           node_key: g.node_key,
           started_at: g.started_at,
-          held: coalesce(g.prev_held, false),
+          held: coalesce(g.prev_held, false) or exists(park),
           gap: fragment("EXTRACT(EPOCH FROM (? - ?))::float", g.started_at, g.prev_finished_at)
         }
       )
 
     filter_since(gaps, since)
+  end
+
+  # RE348: a `:needs_input` / `:input_answered` row for the gap's card inside the gap. Activity
+  # timestamps have second precision, so the gap's start is truncated to the second to match.
+  defp park_in_gap do
+    from(a in Schemas.Activity,
+      where:
+        a.card_id == parent_as(:gap).card_id and a.type in ^@park_activity_types and
+          a.inserted_at >= fragment("date_trunc('second', ?)", parent_as(:gap).prev_finished_at) and
+          a.inserted_at <= parent_as(:gap).started_at,
+      select: 1
+    )
   end
 
   defp node_numeric_rows(%Flow{} = flow, since, card_id) do
