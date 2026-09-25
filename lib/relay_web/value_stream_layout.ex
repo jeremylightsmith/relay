@@ -2,7 +2,7 @@ defmodule RelayWeb.ValueStreamLayout do
   @moduledoc """
   Pure geometry and formatting for the value stream map (RE347; RE349's level 2 reuses it).
   Turns `Relay.ValueStream` per-state maps into box positions, connector and Request-changes arc
-  paths, ladder items, box stat rows and the phone list's rows, using the level-1 artboard's
+  paths, ladder items, box stat rows, using the level-1 artboard's
   constants (`docs/designs/Value Stream Map v2.dc.html`, `cardLay()` / `buildCard()` /
   `ladder()`): boxes W 186 × H 132, gap 58, from x 66 at y 150. Nothing here renders or touches
   the database, so it is unit-tested without a LiveView.
@@ -283,11 +283,14 @@ defmodule RelayWeb.ValueStreamLayout do
 
   defp one_dp(x), do: :erlang.float_to_binary(x * 1.0, decimals: 1)
 
-  defp arrow(x, y, a, :right), do: points([{x - a * 1.3, y - a}, {x - a * 1.3, y + a}, {x, y}])
-  defp arrow(x, y, a, :down), do: points([{x - a, y - a * 1.3}, {x + a, y - a * 1.3}, {x, y}])
+  @doc "An arrowhead's polygon points, tip at `{x, y}`, pointing `:right`, `:down` or `:up` (half-width `a`)."
+  def arrow(x, y, a, :right), do: points([{x - a * 1.3, y - a}, {x - a * 1.3, y + a}, {x, y}])
+  def arrow(x, y, a, :down), do: points([{x - a, y - a * 1.3}, {x + a, y - a * 1.3}, {x, y}])
+  def arrow(x, y, a, :up), do: points([{x - a, y + a * 1.3}, {x + a, y + a * 1.3}, {x, y}])
 
   defp points(pairs), do: Enum.map_join(pairs, " ", fn {px, py} -> "#{num(px)},#{num(py)}" end)
 
-  defp num(x) when is_integer(x), do: Integer.to_string(x)
-  defp num(x), do: one_dp(x)
+  @doc "An SVG coordinate: integers bare, floats to one decimal."
+  def num(x) when is_integer(x), do: Integer.to_string(x)
+  def num(x), do: one_dp(x)
 end

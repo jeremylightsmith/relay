@@ -35,6 +35,9 @@ defmodule Schemas.Flow do
   @doc "The closed set of flow isolation classes."
   def isolation_classes, do: Ecto.Enum.values(__MODULE__, :isolation)
 
+  @doc ~S|The `to`-only edge sentinel that parks the run on a human (RLY-194): `"needs_input"`.|
+  def needs_input_sentinel, do: "needs_input"
+
   @doc """
   The node a run of this flow begins at: the `to` of its single `"start"` edge.
 
