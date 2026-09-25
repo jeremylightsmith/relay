@@ -42,6 +42,7 @@ defmodule Relay do
       Scaffold,
       StoryMap,
       Talk,
+      ValueStream,
       Votes
     ]
 end

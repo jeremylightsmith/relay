@@ -19,6 +19,7 @@ defmodule Schemas.Stage do
   import Ecto.Changeset
 
   @types [:queue, :work, :planning, :review, :done]
+  @work_types [:work, :planning]
 
   schema "stages" do
     field :name, :string
@@ -100,9 +101,15 @@ defmodule Schemas.Stage do
   @doc "The closed set of stage types."
   def types, do: Ecto.Enum.values(__MODULE__, :type)
 
+  @doc """
+  The stage types where work happens — the only types `ai_enabled` applies to, and the types
+  `Relay.ValueStream` classifies as a `:flow` state (RE146). Defined once.
+  """
+  def work_types, do: @work_types
+
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
-    if get_field(changeset, :type) in [:work, :planning] do
+    if get_field(changeset, :type) in @work_types do
       changeset
     else
       put_change(changeset, :ai_enabled, false)
