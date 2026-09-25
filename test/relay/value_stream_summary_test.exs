@@ -118,6 +118,40 @@ defmodule Relay.ValueStreamSummaryTest do
     assert summary.median_lead_secs == nil
     assert summary.flow_efficiency == nil
     assert summary.mean_cost == nil
+    assert summary.cards_per_week == nil
+  end
+
+  test "per-state mean_first_secs, mean_cost, wip and rework_target (RE347)", %{s: s} do
+    summary = ValueStream.stream_summary(s.board.id)
+    find = fn stage -> Enum.find(summary.states, &(&1.stage_id == stage.id)) end
+
+    code = find.(s.code)
+    # Code visits: A 200 · B 100 + 100 (rework) · C 100 · D 100 over 4 cards
+    assert code.mean_secs == 150.0
+    assert code.mean_first_secs == 125.0
+    # only A's implement (2.00) started in a Code span; spec_review reported no cost
+    assert Decimal.equal?(code.mean_cost, Decimal.new("0.50"))
+    # E is still in Code
+    assert code.wip == 1
+    assert code.rework_target == nil
+
+    assert find.(s.review).rework_target == s.code.id
+    assert find.(s.review).wip == 0
+    assert find.(s.next_up).mean_cost == nil
+    assert find.(s.next_up).wip == 0
+    # A, B, C — D is archived
+    assert find.(s.done).wip == 3
+  end
+
+  test "cards_per_week is cards over the window's weeks, or over the done_at span for last:", %{s: s} do
+    # newest done_at is D (recent + 2250), oldest is C (recent − 18d + 200)
+    span_weeks = (18 * 86_400 + 2_050) / (7 * 86_400)
+
+    assert_in_delta ValueStream.stream_summary(s.board.id).cards_per_week, 4 / span_weeks, 1.0e-9
+    assert_in_delta ValueStream.stream_summary(s.board.id, window: "all").cards_per_week, 4 / span_weeks, 1.0e-9
+    assert_in_delta ValueStream.stream_summary(s.board.id, window: "7d").cards_per_week, 3.0, 0.001
+    assert_in_delta ValueStream.stream_summary(s.board.id, window: "30d").cards_per_week, 4 / (30 / 7), 0.001
+    assert ValueStream.stream_summary(s.board.id, last: 1).cards_per_week == nil
   end
 
   describe "flow_agent_secs/3" do
