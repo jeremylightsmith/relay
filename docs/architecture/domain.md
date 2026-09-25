@@ -126,7 +126,10 @@ sharing behavior.
   run ends terminally — a separate path from `needs_input`'s genuine question. Card state ×
   stage validity is governed by
   [ADR 0003](../adr/0003-card-state-stage-type-validity.md); ownership and the claim rule
-  by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md); derived agent health
+  by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md) — a user owner must hold a
+  resolved membership on the card's board, checked in `Relay.Cards` via
+  `Relay.Members.member_user_id?/2` on every owner write (`{:error, :owner_not_member}`, API
+  **422 `owner_not_member`**); derived agent health
   (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup
   (`needs_input` / `in_review` / `awaiting_human` / `agent_stalled` — RLY-148) surfaced by
   `GET /api/board` and the boards-home badges. A move that would strand a live run
@@ -155,7 +158,8 @@ sharing behavior.
   capped by `:limit`, and carrying `list_cards/1`'s trimmed projection. Three surfaces call it and
   none re-implements it: `GET /api/cards?q=` (with `limit`/`archived`; **no `q` leaves that
   listing exactly as it was**), `./relay search`, and the board header's results popover.
-- **Members** — board membership; who can see and act on a board.
+- **Members** — board membership; who can see and act on a board. `member_user_id?/2` is the
+  one membership query (also the card-owner rule `Relay.Cards` enforces).
 - **Presence** (`Relay.Presence`) — who is looking at a board's **story map** right now, and
   where their pointer is (RE257); the app's first `Phoenix.Presence` context, supervised
   directly after `Phoenix.PubSub`. Two board-scoped topics it owns outright:

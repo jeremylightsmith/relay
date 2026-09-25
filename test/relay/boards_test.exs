@@ -397,6 +397,40 @@ defmodule Relay.BoardsTest do
     end
   end
 
+  describe "update_stage/2 reject_to_stage_id board scoping (RE344)" do
+    setup do
+      board = insert(:board)
+      plan = insert(:stage, board: board, name: "Plan", type: :planning, category: :planning, position: 1)
+      review = insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 2)
+      %{plan: plan, review: review}
+    end
+
+    test "refuses another board's stage", %{review: review} do
+      foreign = insert(:stage, board: insert(:board), position: 1)
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Boards.update_stage(review, %{reject_to_stage_id: foreign.id})
+
+      assert "must be a main stage on this board" in errors_on(changeset).reject_to_stage_id
+      assert Repo.get!(Stage, review.id).reject_to_stage_id == nil
+    end
+
+    test "refuses a sub-lane on the same board", %{plan: plan, review: review} do
+      {:ok, sublane} = Boards.enable_lane(plan, :review)
+
+      assert {:error, %Ecto.Changeset{}} = Boards.update_stage(review, %{reject_to_stage_id: sublane.id})
+      assert Repo.get!(Stage, review.id).reject_to_stage_id == nil
+    end
+
+    test "accepts a same-board main stage, and clearing to nil", %{plan: plan, review: review} do
+      assert {:ok, set} = Boards.update_stage(review, %{reject_to_stage_id: plan.id})
+      assert set.reject_to_stage_id == plan.id
+
+      assert {:ok, cleared} = Boards.update_stage(set, %{reject_to_stage_id: nil})
+      assert cleared.reject_to_stage_id == nil
+    end
+  end
+
   describe "update_stage/2 collapsed_by_default" do
     test "persists collapsed_by_default" do
       board = insert(:board)

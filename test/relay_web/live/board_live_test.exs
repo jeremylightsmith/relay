@@ -1994,17 +1994,19 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-drawer input[name='card[progress]']")
     end
 
-    test "adding another user's id as owner is ignored", %{conn: conn, user: user} do
-      other = insert(:user)
+    test "adding another user's id as owner is ignored and leaks nothing", %{conn: conn, user: user} do
+      other = insert(:user, name: "Zed Secretname", email: "zed.secret@example.com")
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
+      html = render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
 
       assert Repo.all(CardOwner) == []
       assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      refute html =~ "Zed Secretname"
+      refute html =~ "zed.secret@example.com"
     end
 
     test "Take over keeps the drawer open (RLY-115 scope guard)",

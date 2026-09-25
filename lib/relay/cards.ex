@@ -9,13 +9,14 @@ defmodule Relay.Cards do
   """
 
   use Boundary,
-    deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Push, Relay.Repo, Relay.Votes, Schemas]
+    deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Members, Relay.Push, Relay.Repo, Relay.Votes, Schemas]
 
   import Ecto.Query
 
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Events
+  alias Relay.Members
   alias Relay.Push
   alias Relay.Repo
   alias Relay.Votes
@@ -1103,8 +1104,9 @@ defmodule Relay.Cards do
   Replaces the card's whole owner list with `actors`
   (`:agent | {:user, user_id}`) atomically, attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning
-  `{:ok, card}` with owners preloaded or `{:error, changeset}` (nothing
-  changes on error). Logs an `:owners_changed` activity entry (MMF 07)
+  `{:ok, card}` with owners preloaded, `{:error, :owner_not_member}` when any
+  `{:user, id}` is not a resolved member of the card's board (RE344), or
+  `{:error, changeset}` (nothing changes on error). Logs an `:owners_changed` activity entry (MMF 07)
   with the new owner labels.
   """
   def set_owners(%Card{} = card, actors, actor \\ :agent) when is_list(actors) do
@@ -1131,9 +1133,28 @@ defmodule Relay.Cards do
   Flips ownership to the human `{:user, id}` (RLY-47 "Take over"), attributed to
   that user. A thin wrapper over `set_owners/3`; drops the AI (exclusivity, rule
   2). Status is untouched — provenance changes, the baton's substate does not.
-  Returns `{:ok, card}` or `{:error, changeset}`.
+  Returns `{:ok, card}`, `{:error, :owner_not_member}` for a non-member, or
+  `{:error, changeset}`.
   """
   def take_over(%Card{} = card, {:user, _id} = actor), do: set_owners(card, [actor], actor)
+
+  @doc """
+  Pre-flight for an owner list (RE344): `:ok` when every actor may own `card`, else
+  `{:error, :owner_not_member}`. This is the same `owner_allowed?/2` rule `set_owners/3`
+  enforces on write. The write stays the authority; this lets a caller that applies several
+  writes (the API's PATCH) refuse the whole request before touching anything.
+  """
+  @spec check_owners(Card.t(), [:agent | {:user, integer()}]) :: :ok | {:error, :owner_not_member}
+  def check_owners(%Card{board_id: board_id}, actors) when is_list(actors) do
+    if Enum.all?(actors, &owner_allowed?(board_id, &1)), do: :ok, else: {:error, :owner_not_member}
+  end
+
+  @doc """
+  The API's sentence for an `:owner_not_member` refusal. It is fixed, so it never names the
+  refused user or reveals whether the id exists.
+  """
+  @spec owner_error_message() :: String.t()
+  def owner_error_message, do: "owners must be members of this board"
 
   @doc """
   Adds one owner actor to the card, attributed to `actor`
@@ -1143,7 +1164,9 @@ defmodule Relay.Cards do
   clears every human owner (rule 2); adding a `{:user, id}` owner to an
   AI-owned card removes the agent first (take-over). Adding an actor that is
   already an owner is an ok no-op that logs nothing; otherwise logs an
-  `:owners_changed` activity entry.
+  `:owners_changed` activity entry. A `{:user, id}` that is not a resolved
+  member of the card's board is refused with `{:error, :owner_not_member}` and
+  nothing changes (RE344).
   """
   def add_owner(card, owner_actor, actor \\ :agent)
 
@@ -1926,7 +1949,11 @@ defmodule Relay.Cards do
   defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: nil} = stage, _from),
     do: Boards.previous_main_stage(stage)
 
-  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: target_id}, _from), do: Repo.get(Stage, target_id)
+  # RE344 — scoped to the stage's own board: a reject_to written before update_stage/2
+  # validated it falls back to the previous main stage instead of surfacing (or moving the card
+  # to) another board's stage.
+  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: target_id} = stage, _from),
+    do: Repo.get_by(Stage, id: target_id, board_id: stage.board_id) || Boards.previous_main_stage(stage)
 
   @doc """
   Marks the card `:ready` in place (the drawer's "Mark done") and clears any open rejection —
@@ -2421,7 +2448,7 @@ defmodule Relay.Cards do
   defp insert_owner_or_rollback(%Card{} = card, actor) do
     case insert_owner(card, actor) do
       {:ok, _owner} -> :ok
-      {:error, changeset} -> Repo.rollback(changeset)
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -2431,11 +2458,25 @@ defmodule Relay.Cards do
     |> Repo.insert(on_conflict: :nothing)
   end
 
-  defp insert_owner(%Card{} = card, {:user, user_id}) when is_integer(user_id) do
-    %CardOwner{card_id: card.id, actor_type: :user, user_id: user_id}
-    |> CardOwner.changeset()
-    |> Repo.insert(on_conflict: :nothing)
+  # RE344 — the single place a user-owner row is written, so set_owners/3, add_owner/3,
+  # take_over/2 and the claim's put_owners/3 all share the membership rule. The check runs
+  # BEFORE the insert, so a non-existent id and a real non-member get the same refusal (no
+  # foreign-key error to tell them apart).
+  defp insert_owner(%Card{} = card, {:user, user_id} = owner) when is_integer(user_id) do
+    if owner_allowed?(card.board_id, owner) do
+      %CardOwner{card_id: card.id, actor_type: :user, user_id: user_id}
+      |> CardOwner.changeset()
+      |> Repo.insert(on_conflict: :nothing)
+    else
+      {:error, :owner_not_member}
+    end
   end
+
+  # The ONE owner rule (RE344): Relay AI is always allowed; a user must hold a resolved
+  # membership on the card's board.
+  defp owner_allowed?(_board_id, :agent), do: true
+
+  defp owner_allowed?(board_id, {:user, user_id}) when is_integer(user_id), do: Members.member_user_id?(board_id, user_id)
 
   defp owner_query(%Card{} = card, :agent) do
     from o in CardOwner, where: o.card_id == ^card.id and o.actor_type == ^:agent

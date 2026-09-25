@@ -73,6 +73,15 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
+  # RE344 — a fixed sentence from Relay.Cards: the refusal never names the user, and an
+  # unknown id gets the byte-identical body a real non-member does.
+  def call(conn, {:error, :owner_not_member}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "owner_not_member", message: Cards.owner_error_message())
+  end
+
   def call(conn, {:error, :stale_version}) do
     conn
     |> put_status(:conflict)

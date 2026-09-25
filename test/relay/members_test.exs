@@ -126,4 +126,24 @@ defmodule Relay.MembersTest do
       refute Repo.get(Membership, membership.id)
     end
   end
+
+  describe "member_user_id?/2 (RE344)" do
+    test "true only for a resolved membership on that board" do
+      board = insert(:board)
+      member = insert(:user)
+      insert(:membership, board: board, user: member, email: member.email)
+
+      # Invited-only: the row carries the user's email but is not yet resolved (user_id nil).
+      invitee = insert(:user)
+      insert(:membership, board: board, user: nil, email: invitee.email)
+
+      elsewhere = insert(:user)
+      insert(:membership, board: insert(:board), user: elsewhere, email: elsewhere.email)
+
+      assert Members.member_user_id?(board.id, member.id)
+      refute Members.member_user_id?(board.id, invitee.id)
+      refute Members.member_user_id?(board.id, elsewhere.id)
+      refute Members.member_user_id?(board.id, -1)
+    end
+  end
 end

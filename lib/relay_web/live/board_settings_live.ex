@@ -1235,10 +1235,17 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, refresh_stages(socket)}
   end
 
+  # RE344 — Boards.update_stage/2 refuses a target that isn't a main stage on this board; a
+  # refused or unparseable target leaves the socket as it was instead of crashing the view.
   def handle_event("set_reject_to", %{"stage-id" => stage_id, "target-id" => target_id}, socket) do
     stage = find_stage(socket, stage_id)
-    {:ok, _stage} = Boards.update_stage(stage, %{reject_to_stage_id: parse_target(target_id)})
-    {:noreply, refresh_stages(socket)}
+
+    with {:ok, target} <- parse_target(target_id),
+         {:ok, _stage} <- Boards.update_stage(stage, %{reject_to_stage_id: target}) do
+      {:noreply, refresh_stages(socket)}
+    else
+      _refused -> {:noreply, socket}
+    end
   end
 
   def handle_event("toggle_ai", %{"stage-id" => stage_id}, socket) do
@@ -1641,8 +1648,14 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
-  defp parse_target(""), do: nil
-  defp parse_target(id), do: String.to_integer(id)
+  defp parse_target(""), do: {:ok, nil}
+
+  defp parse_target(id) do
+    case Integer.parse(id) do
+      {int, ""} -> {:ok, int}
+      _other -> :error
+    end
+  end
 
   defp lane_atom("review"), do: :review
   defp lane_atom("done"), do: :done

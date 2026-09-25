@@ -326,12 +326,14 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit).
-  `ai_enabled` is normalized by the changeset. Broadcasts `{:stages_changed, board_id}`.
+  Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit, reject_to).
+  `ai_enabled` is normalized by the changeset; a changed `reject_to_stage_id` must be a main stage
+  on the same board. Broadcasts `{:stages_changed, board_id}`.
   """
   def update_stage(%Stage{} = stage, attrs) do
     stage
     |> Stage.changeset(attrs)
+    |> validate_reject_to_stage(stage)
     |> Repo.update()
     |> broadcast_stages_changed(stage.board_id)
   end
@@ -587,6 +589,22 @@ defmodule Relay.Boards do
           changeset
         else
           Changeset.add_error(changeset, :public_intake_stage_id, "must be a stage on this board")
+        end
+    end
+  end
+
+  # RE344 — mirrors validate_intake_stage/2: a review's reject target must be a MAIN stage on
+  # the stage's own board. Clearing it (nil) is not a change to validate.
+  defp validate_reject_to_stage(changeset, %Stage{board_id: board_id}) do
+    case Changeset.get_change(changeset, :reject_to_stage_id) do
+      nil ->
+        changeset
+
+      target_id ->
+        if Repo.exists?(from s in Stage, where: s.id == ^target_id and s.board_id == ^board_id and is_nil(s.parent_id)) do
+          changeset
+        else
+          Changeset.add_error(changeset, :reject_to_stage_id, "must be a main stage on this board")
         end
     end
   end
