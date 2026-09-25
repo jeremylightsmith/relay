@@ -8,7 +8,8 @@ defmodule Storybook.Components.CoreComponents.BoardViewTabs do
   def variations do
     [
       %Variation{id: :board_active, attributes: %{board_slug: "my-board", active: :board}},
-      %Variation{id: :story_map_active, attributes: %{board_slug: "my-board", active: :story_map}}
+      %Variation{id: :story_map_active, attributes: %{board_slug: "my-board", active: :story_map}},
+      %Variation{id: :value_stream_active, attributes: %{board_slug: "my-board", active: :value_stream}}
     ]
   end
 end

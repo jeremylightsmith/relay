@@ -796,6 +796,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ ~s(id="board-view-tab-story-map")
       assert html =~ ~s(href="/board/my-board")
       assert html =~ ~s(href="/board/my-board/story-map")
+      assert html =~ ~s(id="board-view-tab-value-stream")
+      assert html =~ ~s(href="/board/my-board/value-stream")
       # container + active segment — artboard lines ~37-39
       assert html =~ "background:var(--color-field-hover);border-radius:8px;padding:2px"
       assert html =~ "box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 8%, transparent)"
@@ -808,6 +810,13 @@ defmodule RelayWeb.StoryMapComponentsTest do
         render_component(&CoreComponents.board_view_tabs/1, board_slug: "my-board", active: :board)
 
       assert html =~ ~r/id="board-view-tab-board"[^>]*aria-current="page"/
+    end
+
+    test "marks the value stream segment active on the value stream view (RE347)" do
+      html =
+        render_component(&CoreComponents.board_view_tabs/1, board_slug: "my-board", active: :value_stream)
+
+      assert html =~ ~r/id="board-view-tab-value-stream"[^>]*aria-current="page"/
     end
   end
 
