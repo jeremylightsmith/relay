@@ -38,6 +38,36 @@ defmodule Relay.Runs.NodeMetricsTest do
     )
   end
 
+  # A "code" flow whose nodes carry authored roles (`nil` = let `Schemas.Flow.node_roles/1` guess).
+  defp flow_with_roles(board, keyed_roles) do
+    insert(:flow,
+      board: board,
+      key: "code",
+      nodes:
+        Enum.map(keyed_roles, fn {key, role} ->
+          %Schemas.Flow.Node{key: key, type: :agent, model: "sonnet", role: role}
+        end)
+    )
+  end
+
+  defp code_flow(board), do: flow_with_roles(board, [{"implement", nil}, {"precommit", :check}, {"final_fix", :fix}])
+
+  # The criterion-1 run: three foreach `implement` tasks (visits 1–3, one sub-task each), a
+  # failed precommit, a final_fix, and a passing second precommit visit — 60s each, back to back.
+  defp criterion_run(board) do
+    run = completed_run(board, "code", 3600, :done)
+    t0 = t0_ago(3600)
+    [s1, s2, s3] = for _ <- 1..3, do: insert(:sub_task, card: %Schemas.Card{id: run.card_id})
+
+    exec_at(run, "implement", t0, 0, 60, visit: 1, sub_task_id: s1.id)
+    exec_at(run, "implement", t0, 60, 120, visit: 2, sub_task_id: s2.id)
+    exec_at(run, "implement", t0, 120, 180, visit: 3, sub_task_id: s3.id)
+    exec_at(run, "precommit", t0, 180, 240, outcome: :failed)
+    exec_at(run, "final_fix", t0, 240, 300)
+    exec_at(run, "precommit", t0, 300, 360, visit: 2)
+    run
+  end
+
   # A completed run of `flow_key` for an EXISTING card — card scoping needs two runs to share
   # one card, which `completed_run/4` (which mints its own card) cannot express.
   defp completed_run_for(card, flow_key, ago_s, elapsed_s) do
@@ -70,7 +100,9 @@ defmodule Relay.Runs.NodeMetricsTest do
       run: run,
       node: node,
       visit: Keyword.get(opts, :visit, 1),
+      attempt: Keyword.get(opts, :attempt, 1),
       outcome: Keyword.get(opts, :outcome, :succeeded),
+      sub_task_id: Keyword.get(opts, :sub_task_id),
       resume_at: Keyword.get(opts, :resume_at),
       started_at: DateTime.add(t0, start_s, :second),
       finished_at: finish_s && DateTime.add(t0, finish_s, :second)
@@ -521,6 +553,115 @@ defmodule Relay.Runs.NodeMetricsTest do
              } = branch
 
       assert %{runs: 1, wait_total: 60, wait_count: 1, held_count: 0} = implement
+    end
+  end
+
+  describe "work / rework / rewind (RE348)" do
+    test "foreach tasks 2..N are work; a failed check's revisit and its fix are rework" do
+      board = insert(:board)
+      flow = code_flow(board)
+      criterion_run(board)
+
+      rows = flow |> Runs.node_metrics_for_flow(window: "all") |> Map.new(&{&1.node_key, &1})
+
+      assert %{work_total: 180, rework_total: 0, work_count: 3, rework_count: 0} = rows["implement"]
+      assert %{work_total: 60, rework_total: 60, work_count: 1, rework_count: 1} = rows["precommit"]
+      assert %{work_total: 0, rework_total: 60, work_count: 0, rework_count: 1} = rows["final_fix"]
+    end
+
+    test "a fix is charged the re-check it forced; non-fix rows carry no rewind" do
+      board = insert(:board)
+      flow = code_flow(board)
+      criterion_run(board)
+
+      rows = flow |> Runs.node_metrics_for_flow(window: "all") |> Map.new(&{&1.node_key, &1})
+
+      assert %{rewind_total: 60, rewind_count: 1} = rows["final_fix"]
+      assert %{rewind_total: nil, rewind_count: 0} = rows["implement"]
+      assert %{rewind_total: nil, rewind_count: 0} = rows["precommit"]
+    end
+
+    test "only a retry after :failed is rework — needs_input, blocked and abandoned attempts continue the work" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      run = completed_run(board, "code", 3600, :done)
+      t0 = t0_ago(3600)
+
+      exec_at(run, "implement", t0, 0, 10, attempt: 1, outcome: :needs_input)
+      exec_at(run, "implement", t0, 20, 30, attempt: 2, outcome: :blocked)
+      exec_at(run, "implement", t0, 40, 50, attempt: 3, outcome: nil)
+      exec_at(run, "implement", t0, 60, 70, attempt: 4, outcome: :failed)
+      exec_at(run, "implement", t0, 80, 100, attempt: 5)
+
+      assert [%{work_total: 40, work_count: 4, rework_total: 20, rework_count: 1}] =
+               Runs.node_metrics_for_flow(flow, window: "all")
+    end
+
+    test "the three invariants hold; rework with no open fix charge is unattributed" do
+      board = insert(:board)
+      flow = code_flow(board)
+      criterion_run(board)
+      run = completed_run(board, "code", 1800, :done)
+      t0 = t0_ago(1800)
+      exec_at(run, "precommit", t0, 0, 30, outcome: :failed)
+      # a plain retry of the gate: rework, but no fix opened a charge
+      exec_at(run, "precommit", t0, 40, 70, attempt: 2)
+      # unfinished: counted, adds no seconds
+      exec_at(run, "implement", t0, 80, nil, outcome: nil)
+
+      rows = Runs.node_metrics_for_flow(flow, window: "all")
+
+      for row <- rows do
+        assert (row.work_total || 0) + (row.rework_total || 0) == (row.duration_total || 0)
+        assert row.work_count + row.rework_count == row.runs
+      end
+
+      {fix, non_fix} = Enum.split_with(rows, &(&1.node_key == "final_fix"))
+      rewound = fix |> Enum.map(&(&1.rewind_total || 0)) |> Enum.sum()
+      non_fix_rework = non_fix |> Enum.map(&(&1.rework_total || 0)) |> Enum.sum()
+
+      assert rewound == 60
+      assert non_fix_rework == 90
+      assert rewound <= non_fix_rework
+    end
+
+    test "a first visit before the window keeps a windowed revisit as rework" do
+      board = insert(:board)
+      flow = code_flow(board)
+      run = completed_run(board, "code", 40 * 86_400, :done)
+      t0 = t0_ago(40 * 86_400)
+      exec_at(run, "precommit", t0, 0, 60, outcome: :failed)
+      exec_at(run, "precommit", t0, 39 * 86_400, 39 * 86_400 + 60, visit: 2)
+
+      assert [%{node_key: "precommit", runs: 1, work_total: 0, work_count: 0, rework_total: 60, rework_count: 1}] =
+               Runs.node_metrics_for_flow(flow, window: "7d")
+
+      assert [first, second] = Runs.execution_spans_for_flow(flow, window: "7d")
+      assert %{node_key: "precommit", visit: 1, secs: 60, rework?: false, in_window?: false, rewind_to: nil} = first
+      assert %{visit: 2, secs: 60, rework?: true, in_window?: true, rewind_to: nil} = second
+      assert second.run_id == run.id
+      assert second.card_id == run.card_id
+    end
+
+    test "a negative duration (clock skew) has nil secs" do
+      board = insert(:board)
+      flow = flow_with_nodes(board, ["implement"])
+      run = completed_run(board, "code", 3600, :done)
+      exec_at(run, "implement", t0_ago(3600), 100, 50)
+
+      assert [%{secs: nil, rework?: false, in_window?: true}] = Runs.execution_spans_for_flow(flow, window: "all")
+    end
+
+    test "card scope counts only that card and ignores the window, like every other figure" do
+      board = insert(:board)
+      flow = code_flow(board)
+      run = criterion_run(board)
+      criterion_run(board)
+
+      rows = flow |> Runs.node_metrics_for_flow(card_id: run.card_id) |> Map.new(&{&1.node_key, &1})
+
+      assert %{work_total: 60, rework_total: 60} = rows["precommit"]
+      assert %{rewind_total: 60, rewind_count: 1} = rows["final_fix"]
     end
   end
 

@@ -260,6 +260,17 @@ defmodule Relay.Runs do
     held_count: 0
   }
 
+  # RE348: what a node with no classified executions in the window merges in — the same six keys
+  # on every rollup row. (A node with executions but none finished gets real counts, nil totals.)
+  @empty_spans %{
+    work_total: nil,
+    rework_total: nil,
+    work_count: 0,
+    rework_count: 0,
+    rewind_total: nil,
+    rewind_count: 0
+  }
+
   @doc """
   Per-node rollup for `flow` over `opts[:window]` (one of `metric_windows/0`, default
   `default_window/0`). Returns one map per node key that has executions in the window, in the
@@ -277,6 +288,13 @@ defmodule Relay.Runs do
   Every row also carries the RE345 idle-gap keys from `node_waits_for_flow/2` (`wait_p50/p95/
   total/count`, `held_p50/p95/total/count`), nil figures and 0 counts for a node with no gaps —
   one source for the page, the API and the Value Stream Map.
+
+  Every row also carries the RE348 span keys, built from `execution_spans_for_flow/2`'s in-window
+  rows: `work_total` / `rework_total` (Σ seconds per class; nil when none of the node's executions
+  finished, else 0 for an empty class), `work_count` / `rework_count` (executions per class, so
+  they sum to `runs`), and — on fix-role rows only, nil / 0 elsewhere — `rewind_total` /
+  `rewind_count`, the non-fix rework charged to that fix. `work_total + rework_total ==
+  duration_total` (nil as 0).
   """
   def node_metrics_for_flow(%Flow{} = flow, opts \\ []) do
     card_id = Keyword.get(opts, :card_id)
@@ -285,6 +303,7 @@ defmodule Relay.Runs do
     numeric = node_numeric_rows(flow, since, card_id)
     verdicts = node_verdict_counts(flow, since, card_id)
     waits = node_waits_for_flow(flow, opts)
+    spans = node_span_rows(flow, opts)
 
     flow.nodes
     |> Enum.map(& &1.key)
@@ -294,6 +313,7 @@ defmodule Relay.Runs do
       numeric[key]
       |> Map.put(:verdict_split, verdict_split(Map.get(verdicts, key, %{})))
       |> Map.merge(Map.get(waits, key, @empty_waits))
+      |> Map.merge(Map.get(spans, key, @empty_spans))
     end)
   end
 
@@ -359,6 +379,148 @@ defmodule Relay.Runs do
        }}
     end)
   end
+
+  @doc """
+  Every execution of `flow` classified for the value stream (RE348) — the ONE place work vs
+  rework is decided; `node_metrics_for_flow/2`'s span keys and `Relay.ValueStream.flow_stream/2`
+  both read it.
+
+  Options are exactly `node_metrics_for_flow/2`'s, resolved through the same helpers. The load
+  covers ALL of the flow's executions (card-filtered if `:card_id`) and ignores the window, because
+  classification needs history: a first visit before the window must still make a windowed
+  revisit rework. `in_window?` marks the rows a consumer counts.
+
+  Per run, in `started_at ASC, id ASC` order:
+
+  - **work** — the execution belongs to the first visit of its binding `(node_key, sub_task_id)`
+    (a nil sub-task is its own binding, so foreach tasks 2..N are work) and no earlier attempt of
+    that visit ended `:failed`. A `:needs_input` park, a `:blocked` requeue or an abandoned
+    (nil-outcome) attempt continues the work; only a retry after `:failed` is a redo.
+  - **rework** — everything else: later visits of the binding, retries after a failure, and every
+    execution of a fix-role node (`Schemas.Flow.node_roles/1` on the flow as it is now; a key
+    missing from it is non-fix).
+  - **rewind_to** — a fix execution opens a charge; each later rework execution of a non-fix node
+    is charged to that fix's key. The charge closes at the next work execution, the next fix
+    execution (which opens its own), or the run's end. Rework with no open charge is unattributed
+    (nil).
+
+  Returns `[%{run_id, card_id, node_key, sub_task_id, visit, attempt, outcome, started_at,
+  finished_at, secs, rework?, rewind_to, in_window?}]` ordered by run, then execution order.
+  `secs` is whole seconds, nil when unfinished or negative (clock skew, as RE345 skips a negative
+  gap).
+  """
+  def execution_spans_for_flow(%Flow{} = flow, opts \\ []) do
+    card_id = Keyword.get(opts, :card_id)
+    since = metrics_since(opts, card_id)
+    fix_keys = fix_node_keys(flow)
+
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
+      order_by: [asc: ne.run_id, asc: ne.started_at, asc: ne.id],
+      select: %{
+        run_id: ne.run_id,
+        card_id: r.card_id,
+        node_key: ne.node_key,
+        sub_task_id: ne.sub_task_id,
+        visit: ne.visit,
+        attempt: ne.attempt,
+        outcome: ne.outcome,
+        started_at: ne.started_at,
+        finished_at: ne.finished_at
+      }
+    )
+    |> filter_card(card_id)
+    |> Repo.all()
+    |> Enum.chunk_by(& &1.run_id)
+    |> Enum.flat_map(&classify_run(&1, fix_keys, since))
+  end
+
+  defp classify_run(execs, fix_keys, since) do
+    initial = %{first: %{}, failed: MapSet.new(), charge: nil}
+    {rows, _acc} = Enum.map_reduce(execs, initial, &classify(&1, &2, fix_keys, since))
+    rows
+  end
+
+  # `first` maps a binding to its first visit; `failed` holds bindings whose first visit already
+  # saw a `:failed` attempt; `charge` is the fix key an open rewind charge belongs to.
+  defp classify(exec, acc, fix_keys, since) do
+    binding = {exec.node_key, exec.sub_task_id}
+    first = Map.get(acc.first, binding, exec.visit)
+    fix? = MapSet.member?(fix_keys, exec.node_key)
+    rework? = fix? or exec.visit != first or MapSet.member?(acc.failed, binding)
+
+    failed =
+      if exec.visit == first and exec.outcome == :failed,
+        do: MapSet.put(acc.failed, binding),
+        else: acc.failed
+
+    {rewind_to, charge} =
+      cond do
+        fix? -> {nil, exec.node_key}
+        rework? -> {acc.charge, acc.charge}
+        true -> {nil, nil}
+      end
+
+    row =
+      Map.merge(exec, %{
+        secs: exec_secs(exec),
+        rework?: rework?,
+        rewind_to: rewind_to,
+        in_window?: in_window?(exec.started_at, since)
+      })
+
+    {row, %{acc | first: Map.put(acc.first, binding, first), failed: failed, charge: charge}}
+  end
+
+  defp exec_secs(%{started_at: %DateTime{} = started, finished_at: %DateTime{} = finished}) do
+    case DateTime.diff(finished, started, :second) do
+      secs when secs >= 0 -> secs
+      _skew -> nil
+    end
+  end
+
+  defp exec_secs(_exec), do: nil
+
+  # Mirrors `filter_since/2`'s `started_at >= since` so the span rows and the SQL rollups count
+  # exactly the same executions (a NULL `started_at` is out of any bounded window).
+  defp in_window?(_started_at, nil), do: true
+  defp in_window?(nil, _since), do: false
+  defp in_window?(started_at, since), do: DateTime.compare(started_at, since) != :lt
+
+  defp fix_node_keys(%Flow{} = flow) do
+    for {key, :fix} <- Flow.node_roles(flow), into: MapSet.new(), do: key
+  end
+
+  # RE348: the per-node span keys `node_metrics_for_flow/2` merges, from the in-window rows.
+  defp node_span_rows(%Flow{} = flow, opts) do
+    fix_keys = fix_node_keys(flow)
+    rows = flow |> execution_spans_for_flow(opts) |> Enum.filter(& &1.in_window?)
+    charged = rows |> Enum.reject(&is_nil(&1.rewind_to)) |> Enum.group_by(& &1.rewind_to)
+
+    rows
+    |> Enum.group_by(& &1.node_key)
+    |> Map.new(fn {key, execs} ->
+      {rework, work} = Enum.split_with(execs, & &1.rework?)
+      finished? = Enum.any?(execs, &is_integer(&1.secs))
+      mine = Map.get(charged, key, [])
+
+      {key,
+       %{
+         work_total: if(finished?, do: sum_secs(work)),
+         rework_total: if(finished?, do: sum_secs(rework)),
+         work_count: length(work),
+         rework_count: length(rework),
+         rewind_total: if(MapSet.member?(fix_keys, key), do: sum_secs(mine)),
+         rewind_count: length(mine)
+       }}
+    end)
+  end
+
+  defp sum_secs(rows), do: rows |> Enum.map(&(&1.secs || 0)) |> Enum.sum()
 
   @doc """
   Stat-band summary for `flow` over `opts[:window]`, or for one card's runs of it when

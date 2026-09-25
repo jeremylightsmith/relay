@@ -47,6 +47,11 @@ the MMF design specs).
   flow, gate or done, and each stay is split by who holds the baton — agent, human or nobody.
   **Lead time** is stream start → Done. **Flow efficiency** is agent time on `:do` nodes (node
   roles, RE346) divided by lead time.
+- **Work / rework · rewind** — the level-2 split of a flow node's agent time (RE348,
+  `Relay.Runs.execution_spans_for_flow/2`). **Work** is the first visit of a node for one foreach
+  task, up to its first failed attempt; **rework** is everything after — a revisit, a retry after
+  a failure, and every run of a Fix node. **Rewind** is the rework a fix forces: the checks
+  re-run after `final_fix` are charged to `final_fix`, until the next piece of new work.
 - **Status** — a card's lifecycle state. A stage type's default status is applied on arrival when
   the current status isn't valid there (ADR 0003). The values are generated from the schema into
   [`architecture/state.md`](architecture/state.md).

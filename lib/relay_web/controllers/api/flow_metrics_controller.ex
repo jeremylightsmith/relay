@@ -83,7 +83,13 @@ defmodule RelayWeb.Api.FlowMetricsController do
       held_p50: percentile(scope, n.held_p50),
       held_p95: percentile(scope, n.held_p95),
       held_total: n.held_total,
-      held_count: n.held_count
+      held_count: n.held_count,
+      work_total: n.work_total,
+      rework_total: n.rework_total,
+      work_count: n.work_count,
+      rework_count: n.rework_count,
+      rewind_total: n.rewind_total,
+      rewind_count: n.rewind_count
     }
   end
 
