@@ -3,7 +3,8 @@ defmodule Relay.ValueStream do
   Level-1 value-stream derivation (RE146): turns a card's activity log and its runs' node
   executions into **spans** — the card's time from the board's stream start (`Next up` on RE)
   to `Done`, split by stream state and by who holds the baton (`batons/0`). The data source
-  for the card stream map (RE347); nothing here renders.
+  for the card stream map (RE347); nothing here renders. `stream_summary/2` averages spans over
+  a set of done cards; `flow_agent_secs/3` reconciles agent time with Flow Metrics.
 
   Read-only: no processes, no PubSub, no writes. Everything is derived from durable history —
   `:moved` / `:approved` / `:rejected` rows (with `from_stage_id` / `to_stage_id` meta),
@@ -23,7 +24,7 @@ defmodule Relay.ValueStream do
   (`Schemas.Flow.node_roles/1`); a node key missing from it is not value-add.
   """
 
-  use Boundary, deps: [Relay.Boards, Relay.Cards, Relay.Flows, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Boards, Relay.Cards, Relay.Flows, Relay.Repo, Relay.Runs, Schemas]
 
   import Ecto.Query
 
@@ -31,6 +32,7 @@ defmodule Relay.ValueStream do
   alias Relay.Cards
   alias Relay.Flows
   alias Relay.Repo
+  alias Relay.Runs
   alias Schemas.Activity
   alias Schemas.Board
   alias Schemas.Card
@@ -41,6 +43,7 @@ defmodule Relay.ValueStream do
 
   @kinds [:queue, :flow, :gate, :done]
   @batons [:agent, :human, :nobody]
+  @default_last 20
   @decision_types [:approved, :rejected]
   @history_types [:moved, :needs_input, :input_answered | @decision_types]
 
@@ -84,6 +87,72 @@ defmodule Relay.ValueStream do
     history = [card.id] |> load_history() |> Map.get(card.id, [])
     execs = [card.id] |> load_executions() |> Map.get(card.id, [])
     build_stream(card, ctx, history, execs, now())
+  end
+
+  @doc "How many done cards `stream_summary/2` averages when no `:window` is given."
+  def default_last, do: @default_last
+
+  @doc """
+  The level-1 stream averaged over a set of the board's done cards — archived ones included,
+  because they shipped — newest `done_at` first. `opts`: `last: n` (default `default_last/0`)
+  or `window: w` (validated against `Relay.Runs.metric_windows/0` via
+  `Relay.Runs.metric_window_since/1`; an unknown window falls back to the default, as Flow
+  Metrics does), which keeps cards whose `done_at` falls inside it.
+
+  Returns `%{cards, states, mean_lead_secs, median_lead_secs, baton_secs, flow_efficiency,
+  mean_cost, outside_secs}`. Each state (in `stream_states/1` order) is `%{stage_id, name,
+  kind, mean_secs, mean_visits, mean_baton, approve_rate}`; `approve_rate` is set for gates
+  only — Σapproved / (Σapproved + Σrejected), `nil` with no decisions. Means are per state so
+  they add up: `Σ states.mean_secs + outside_secs == mean_lead_secs` (`outside_secs` is time
+  in off-stream or deleted stages). `flow_efficiency` is Σvalue-add / Σlead.
+  """
+  def stream_summary(board_id, opts \\ []) when is_integer(board_id) do
+    ctx = board_context(board_id)
+    selected = selected_done_cards(board_id, ctx, opts)
+    execs = selected |> Enum.map(fn {card, _rows, _done_at} -> card.id end) |> load_executions()
+    now = now()
+
+    selected
+    |> Enum.map(fn {card, rows, _done_at} -> build_stream(card, ctx, rows, Map.get(execs, card.id, []), now) end)
+    |> Enum.reject(&is_nil/1)
+    |> summarize(ctx)
+  end
+
+  @doc """
+  Agent seconds on `flow_key` for a card set — `card_id:` for one card, else the same
+  `last:` / `window:` set as `stream_summary/2` — reading the same
+  `node_executions.started_at/finished_at` columns `Relay.Runs.node_metrics_for_flow/2` sums
+  (finished executions only). Per card it is the **union** of the intervals, so it equals Flow
+  Metrics' `Σ duration_total` when a card's executions don't overlap and can only be smaller,
+  never larger, when they do. Exists for the criterion-4 reconciliation; it is not another
+  metric.
+  """
+  def flow_agent_secs(board_id, flow_key, opts \\ []) when is_integer(board_id) and is_binary(flow_key) do
+    card_ids =
+      case Keyword.get(opts, :card_id) do
+        nil ->
+          board_id
+          |> selected_done_cards(board_context(board_id), opts)
+          |> Enum.map(fn {card, _rows, _done_at} -> card.id end)
+
+        card_id ->
+          [card_id]
+      end
+
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      join: c in Card,
+      on: c.id == r.card_id,
+      where:
+        c.board_id == ^board_id and r.flow_key == ^flow_key and c.id in ^card_ids and
+          not is_nil(ne.started_at) and not is_nil(ne.finished_at),
+      select: {c.id, ne.started_at, ne.finished_at}
+    )
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), fn {_id, started, finished} -> {unix(started), unix(finished)} end)
+    |> Enum.map(fn {_id, intervals} -> intervals |> union() |> total() end)
+    |> Enum.sum()
   end
 
   # ── board context ────────────────────────────────────────────────────────────
@@ -367,6 +436,130 @@ defmodule Relay.ValueStream do
         rejected: Enum.count(mine, &(&1.type == :rejected))
       }
     end
+  end
+
+  # ── averaged ────────────────────────────────────────────────────────────────
+
+  # [{card, history_rows, done_at}] — the board's done cards (archived included), newest
+  # done_at first, scoped by `last:` or `window:`.
+  defp selected_done_cards(board_id, ctx, opts) do
+    cards = done_cards(board_id, ctx)
+    history = cards |> Enum.map(& &1.id) |> load_history()
+
+    cards
+    |> Enum.map(fn card ->
+      rows = Map.get(history, card.id, [])
+      {card, rows, done_at(card, ctx, rows)}
+    end)
+    |> Enum.reject(fn {_card, _rows, done_at} -> is_nil(done_at) end)
+    |> Enum.sort_by(fn {_card, _rows, done_at} -> done_at end, {:desc, DateTime})
+    |> apply_scope(opts)
+  end
+
+  defp done_cards(_board_id, %{terminal: nil}), do: []
+
+  defp done_cards(board_id, %{terminal: terminal} = ctx) do
+    from(c in Card, where: c.board_id == ^board_id and c.stage_id == ^terminal.id)
+    |> Repo.all()
+    |> Enum.filter(&Cards.done?(&1, ctx.stages))
+  end
+
+  defp done_at(card, ctx, rows) do
+    {stays, decisions} = fold_history(card, rows)
+
+    with start when is_integer(start) <- stream_start(stays, ctx) do
+      {_stays, done_at, _in_place?} = stream_window(card, ctx, stays, decisions, start)
+      done_at
+    end
+  end
+
+  defp apply_scope(entries, opts) do
+    case Keyword.fetch(opts, :window) do
+      {:ok, window} -> since(entries, Runs.metric_window_since(window))
+      :error -> Enum.take(entries, last_n(opts))
+    end
+  end
+
+  defp since(entries, nil), do: entries
+
+  defp since(entries, cutoff),
+    do: Enum.filter(entries, fn {_card, _rows, done_at} -> DateTime.compare(done_at, cutoff) != :lt end)
+
+  defp last_n(opts) do
+    case Keyword.get(opts, :last) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @default_last
+    end
+  end
+
+  defp summarize(streams, ctx) do
+    n = length(streams)
+    spans = Enum.flat_map(streams, & &1.spans)
+    leads = Enum.map(streams, & &1.lead_secs)
+    total_lead = Enum.sum(leads)
+    value_add = streams |> Enum.map(& &1.value_add_secs) |> Enum.sum()
+
+    %{
+      cards: n,
+      states: Enum.map(ctx.states, &state_summary(&1, spans, streams, n)),
+      mean_lead_secs: mean(total_lead, n),
+      median_lead_secs: median(leads),
+      baton_secs: Map.new(@batons, fn b -> {b, streams |> Enum.map(& &1.baton_secs[b]) |> Enum.sum() |> mean(n)} end),
+      flow_efficiency: if(total_lead == 0, do: nil, else: value_add / total_lead),
+      mean_cost: mean_cost(streams, n),
+      outside_secs:
+        spans
+        |> Enum.reject(&Map.has_key?(ctx.state_by_id, &1.stage_id))
+        |> Enum.map(& &1.secs)
+        |> Enum.sum()
+        |> mean(n)
+    }
+  end
+
+  defp state_summary(state, spans, streams, n) do
+    mine = Enum.filter(spans, &(&1.stage_id == state.stage_id))
+
+    %{
+      stage_id: state.stage_id,
+      name: state.name,
+      kind: state.kind,
+      mean_secs: mine |> Enum.map(& &1.secs) |> Enum.sum() |> mean(n),
+      mean_visits: mean(length(mine), n),
+      mean_baton: Map.new(@batons, fn b -> {b, mine |> Enum.map(& &1.baton[b]) |> Enum.sum() |> mean(n)} end),
+      approve_rate: approve_rate(state, streams)
+    }
+  end
+
+  defp approve_rate(%{kind: :gate, stage_id: id}, streams) do
+    gates = streams |> Enum.flat_map(& &1.gates) |> Enum.filter(&(&1.stage_id == id))
+    approved = gates |> Enum.map(& &1.approved) |> Enum.sum()
+    decided = approved + (gates |> Enum.map(& &1.rejected) |> Enum.sum())
+    if decided == 0, do: nil, else: approved / decided
+  end
+
+  defp approve_rate(_state, _streams), do: nil
+
+  defp mean(_total, 0), do: 0.0
+  defp mean(total, n), do: total / n
+
+  defp median([]), do: nil
+
+  defp median(values) do
+    sorted = Enum.sort(values)
+    mid = div(length(sorted), 2)
+
+    if rem(length(sorted), 2) == 1,
+      do: Enum.at(sorted, mid),
+      else: (Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2
+  end
+
+  defp mean_cost(_streams, 0), do: nil
+
+  defp mean_cost(streams, n) do
+    streams
+    |> Enum.reduce(Decimal.new(0), &Decimal.add(&2, &1.cost))
+    |> Decimal.div(n)
+    |> Decimal.round(2)
   end
 
   # ── interval arithmetic (unix seconds) ──────────────────────────────────────
