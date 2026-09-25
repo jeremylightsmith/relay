@@ -22,6 +22,13 @@ defmodule Relay.AccountsTest do
   end
 
   describe "upsert_user_from_google/1" do
+    test "stores a Google avatar URL longer than 255 characters" do
+      image = "https://lh3.googleusercontent.com/a/" <> String.duplicate("x", 1000)
+
+      assert {:ok, %User{} = user} = Accounts.upsert_user_from_google(google_auth(%{image: image}))
+      assert user.avatar_url == image
+    end
+
     test "creates a user on first sign-in" do
       assert {:ok, %User{} = user} = Accounts.upsert_user_from_google(google_auth(%{}))
       assert user.email == "ada@example.com"
