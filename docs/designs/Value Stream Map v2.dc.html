@@ -342,7 +342,7 @@
     <div style="display:flex;flex-direction:column;gap:6px;max-width:1120px;">
       <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.02 255);">WIRING IT UP</span>
       <h2 style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:0;color:oklch(0.24 0.02 255);">What has to be written</h2>
-      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;">Level 2 is mostly one query away — <code>Runs.node_metrics_for_flow/2</code> already rolls up duration, cost, <code>attempts_mean</code>, <code>loop_laps</code> and a verdict split per node. <b style="color:oklch(0.30 0.02 255);">Level 1 is the gap</b>: the card's stage history is not recorded, so every queue and both gates are currently unmeasurable. Whatever lands must agree with the shipped Flow Metrics page rather than restate it.</p>
+      <p style="font-size:14.5px;line-height:1.6;color:oklch(0.44 0.02 255);margin:0;text-wrap:pretty;"><b style="color:oklch(0.30 0.02 255);">Both levels are derivable today — nothing new has to be tracked.</b> Level 2 rolls up from <code>Runs.node_metrics_for_flow/2</code>, which already has duration, cost, <code>attempts_mean</code>, <code>loop_laps</code> and a verdict split per node. Level 1 folds <code>Schemas.Activity</code> rows into per-state spans: <code>:moved</code> carries <code>from_stage</code>/<code>to_stage</code>, <code>:approved</code>/<code>:rejected</code> carry the gate decisions, <code>:needs_input</code>/<code>:input_answered</code> bracket a park — and the pruner ages out runner chatter only, never an audit row, so the card's story is durable. Whatever lands must agree with the shipped Flow Metrics page rather than restate it.</p>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;">
       <sc-for list="{{ prov }}" as="p" hint-placeholder-count="4">
@@ -838,11 +838,9 @@ class Component extends DCLogic {
   QGROUPS = [
     {title:'WHERE IS THE TIME GOING?', c:'oklch(0.44 0.08 215)', qs:[
       {lv:'CARD', q:'How long does a card take, Next up → Done, in wall-clock?',
-       where:'the card lead-time bar, and the Δ at the end of the level-1 ladder', drawn:'YES', data:'NO',
-       note:'a card’s stage history is not recorded — no transition timestamps, so every queue and both gates are unmeasurable today'},
+       where:'the card lead-time bar, and the Δ at the end of the level-1 ladder', drawn:'YES', data:'YES'},
       {lv:'CARD', q:'Which state holds the card longest — and is it a queue, a gate, or real work?',
-       where:'the tallest rise on the level-1 ladder; colour says who held the baton', drawn:'YES', data:'NO',
-       note:'same gap: needs stage-transition timestamps'},
+       where:'the tallest rise on the level-1 ladder; colour says who held the baton', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'Which node eats the most of a run?',
        where:'the deepest valley on the level-2 ladder — the node sits directly above it', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'How much of a run is value-add, checking, rework and waiting?',
@@ -853,8 +851,7 @@ class Component extends DCLogic {
     ]},
     {title:'WHERE IS THE WASTE?', c:'oklch(0.52 0.15 22)', qs:[
       {lv:'CARD', q:'How often does a human send work back, and what does that cost?',
-       where:'the Request-changes arcs — thickness is the rate, and the visits badge shows the re-runs it forces', drawn:'YES', data:'PARTIAL',
-       note:'approve/request-changes is recorded per card; attributing the re-run cost to it needs the stage history'},
+       where:'the Request-changes arcs — thickness is the rate, and the visits badge shows the re-runs it forces', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'Which check rejects work most often?',
        where:'the %C&A bar along the bottom edge of each check', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'Which rework loop costs the most minutes — not the most laps?',
@@ -868,13 +865,12 @@ class Component extends DCLogic {
     ]},
     {title:'WHERE DOES THE BATON SIT?', c:'oklch(0.50 0.14 250)', qs:[
       {lv:'CARD', q:'What share of a card’s life is an agent working, a human deciding, or nobody?',
-       where:'the three colours of the card lead-time bar — the headline number on this page', drawn:'YES', data:'NO',
-       note:'the defining Relay question, and the one nothing can answer yet'},
+       where:'the three colours of the card lead-time bar — the headline number on this page', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'How often does a run stop and need a human, and at which node?',
        where:'the ⏸ needs_input terminal', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'How long does a parked run wait on a person?',
-       where:'the ⏸ terminal', drawn:'PARTIAL', data:'NO',
-       note:'runs.status is current-state only; park duration is stored nowhere'},
+       where:'the ⏸ terminal', drawn:'PARTIAL', data:'YES',
+       note:'the data is there — :needs_input → :input_answered activities bracket it — but the terminal only shows a count; it needs the duration too'},
       {lv:'FLOW', q:'What fraction of runs never reach Review, and where do they die?',
        where:'the done vs ⏸ terminals', drawn:'YES', data:'YES'},
     ]},
@@ -886,8 +882,7 @@ class Component extends DCLogic {
     ]},
     {title:'WHAT SHOULD I CHANGE FIRST?', c:'oklch(0.40 0.10 155)', qs:[
       {lv:'BOTH', q:'If I could change one thing, which buys the most?',
-       where:'the kaizen bursts — ranked against the CARD clock, which reorders every engine-level win', drawn:'YES', data:'PARTIAL',
-       note:'the ranking is only trustworthy once level-1 data exists; today the queue and gate figures are estimates'},
+       where:'the kaizen bursts — ranked against the CARD clock, which reorders every engine-level win', drawn:'YES', data:'YES'},
       {lv:'FLOW', q:'What would fanning out the final checks actually save?',
        where:'the topology toggle — same per-visit times, re-solved as fork/join', drawn:'YES', data:'YES'},
       {lv:'BOTH', q:'Is any of this getting better over time?',
@@ -1044,7 +1039,7 @@ class Component extends DCLogic {
       {k:'questions', v:String(flat.length), c:C.ink, border:'oklch(0.92 0.006 255)', bg:'oklch(1 0 0)'},
       {k:'drawn & measurable', v:String(flat.filter(q => q.drawn==='YES' && q.data==='YES').length), c:'oklch(0.36 0.11 155)', border:'oklch(0.82 0.08 155)', bg:'oklch(0.97 0.02 155)'},
       {k:'drawn, data partial', v:String(flat.filter(q => q.data==='PARTIAL' || q.drawn==='PARTIAL').length), c:'oklch(0.44 0.11 65)', border:'oklch(0.86 0.08 70)', bg:'oklch(0.98 0.025 75)'},
-      {k:'blocked — needs schema', v:String(flat.filter(q => q.data==='NO' || q.drawn==='NO').length), c:'oklch(0.48 0.15 22)', border:'oklch(0.86 0.09 22)', bg:'oklch(0.98 0.018 22)'},
+      {k:'not drawn — out of scope', v:String(flat.filter(q => q.data==='NO' || q.drawn==='NO').length), c:'oklch(0.48 0.15 22)', border:'oklch(0.86 0.09 22)', bg:'oklch(0.98 0.018 22)'},
     ];
 
     // ---- kaizen, ranked against the CARD clock ----
@@ -1115,11 +1110,11 @@ class Component extends DCLogic {
         'Sub-task N and per-copy spread, from node_executions.sub_task_id',
         'Queue depth at the exclusive slot, from runs awaiting a runner',
       ]},
-      {tag:'SCHEMA', title:'Level 1 is blocked', ink:'oklch(0.48 0.15 22)', bg:'oklch(0.975 0.025 22)', bd:'oklch(0.88 0.07 22)', items:[
-        'A card’s stage history is not recorded — no transition timestamps, so all three queues and both gates are unmeasurable',
-        'Run park duration likewise: runs.status is current-state only',
-        'These gate every baton question — the ones Relay exists to answer',
-        'Smallest viable fix: an append-only card_transitions row per stage move',
+      {tag:'DERIVABLE', title:'Level 1, from the activity log', ink:'oklch(0.36 0.11 155)', bg:'oklch(0.96 0.03 155)', bd:'oklch(0.86 0.06 155)', items:[
+        ':moved carries meta from_stage / to_stage — fold consecutive rows into per-state spans for every queue',
+        ':approved / :rejected carry each gate decision, so Approve rate and the Request-changes arcs come free',
+        ':needs_input → :input_answered bracket a park, giving the baton-held-by-human duration',
+        'Activity.Pruner ages out :action chatter only and never an audit row — the history is durable',
       ]},
       {tag:'FLOW DOC', title:'Role is not a field', ink:'oklch(0.42 0.13 250)', bg:'oklch(0.96 0.03 250)', bd:'oklch(0.84 0.06 250)', items:[
         'Schemas.Flow.Node has type, not role — Do/Check/Fix cannot be read off a flow today',

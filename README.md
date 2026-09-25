@@ -5,6 +5,28 @@ moves back and forth between humans and AI agents, and the board makes each hand
 explicit — whose turn it is, what's waiting on a person, and what an agent is actively
 working. "Who holds the baton" is a first-class property of every card.
 
+**Try it:** <https://relayboard.fly.dev> (sign in with Google).
+
+![A Relay board: AI stages (Spec, Plan, Code) with cards parked waiting on a human, a failed run, a card ready for review, and completed runs with their time and cost](docs/images/board.png)
+
+## What it does today
+
+- **Boards whose stages are owned by humans or AI.** A card's holder follows its stage, so
+  moving a card into an AI stage hands it to an agent, and the agent hands it back for review.
+- **Flows run the AI stages.** Each AI stage (for example Spec → Plan → Code) runs a flow: a
+  graph of agent, shell, and gate steps with retries, review loops, and fix passes. Flows are
+  data you can edit in the flow editor, with per-flow metrics.
+- **Agents run on your machine.** The `./relay` runner claims work from the board and runs
+  Claude Code in git worktrees of your repo, with its own skills and agents. Nothing runs on
+  the server but the board.
+- **Humans stay in the loop.** Agents that hit a decision park the card and ask; you answer
+  inline, then approve or reject at the review gate. The board shows runs live, what's
+  blocked on you, and what each run cost.
+- **Also:** a story map view, card dependencies, a public roadmap page per board, and
+  iOS/Android apps that wrap the same LiveView UI.
+
+To wire one of your own repos to a board, see [`relay.md`](relay.md).
+
 - **Product north star:** [`docs/vision.md`](docs/vision.md)
 - **Architecture decisions:** [`docs/adr/`](docs/adr/README.md)
 - **How AI agents should work in this repo:** [`AGENTS.md`](AGENTS.md)
@@ -62,7 +84,7 @@ storybook/          Component stories (surfaced at /storybook)
 docs/adr/           Architecture Decision Records
 docs/vision.md      Product vision
 .claude/            Skills, agents, commands, and workflows for AI-assisted development
-.github/workflows/  CI (fast suite + browser journeys; Fly deploy is stubbed until launch)
+.github/workflows/  CI (fast suite + browser journeys, then deploy to Fly on main)
 ```
 
 ## Contributing
