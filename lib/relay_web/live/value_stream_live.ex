@@ -13,8 +13,11 @@ defmodule RelayWeb.ValueStreamLive do
   button works. An unknown or other-board ref degrades to the average, like Flow Metrics.
 
   Realtime: subscribes to the board's `Relay.Events` topic and recomputes on the events that
-  change a card's stage or a gate decision. Flow boxes link to their Flow Metrics page for the
-  same window instead of restating it; nothing here shows a per-node figure.
+  change a card's stage or a gate decision. A flow box drills into level 2
+  (`RelayWeb.ValueStreamFlowLive`, RE349) with the same `card` / `scope` / `window`
+  (`RelayWeb.ValueStreamParams`) and keeps a secondary "Flow metrics →" link for the same window.
+  The map scrolls sideways inside an `overflow-x:auto` container at every width — there is no
+  phone list (RE349).
   """
   use RelayWeb, :live_view
 
@@ -22,11 +25,11 @@ defmodule RelayWeb.ValueStreamLive do
   alias Relay.Cards
   alias Relay.Events
   alias Relay.Flows
-  alias Relay.Runs
   alias Relay.ValueStream
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.ValueStreamComponents
   alias RelayWeb.ValueStreamLayout
+  alias RelayWeb.ValueStreamParams, as: Params
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -41,23 +44,23 @@ defmodule RelayWeb.ValueStreamLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    card = resolve_card(socket.assigns.board, blank_to_nil(params["card"]))
+    card = Params.resolve_card(socket.assigns.board, Params.blank_to_nil(params["card"]))
 
     {:noreply,
      socket
      |> assign_card(card)
-     |> assign(:scope, normalize_scope(params["scope"], card))
-     |> assign(:window, normalize_window(params["window"]))
+     |> assign(:scope, Params.normalize_scope(params["scope"], card))
+     |> assign(:window, Params.normalize_window(params["window"]))
      |> load()}
   end
 
   @impl true
   def handle_event("set-window", %{"window" => window}, socket) do
-    {:noreply, push_patch(socket, to: stream_path(socket.assigns, window: normalize_window(window)))}
+    {:noreply, push_patch(socket, to: stream_path(socket.assigns, window: Params.normalize_window(window)))}
   end
 
   def handle_event("set-scope", %{"scope" => scope}, socket) do
-    scope = normalize_scope(scope, socket.assigns.card)
+    scope = Params.normalize_scope(scope, socket.assigns.card)
     {:noreply, push_patch(socket, to: stream_path(socket.assigns, scope: scope))}
   end
 
@@ -76,44 +79,14 @@ defmodule RelayWeb.ValueStreamLive do
 
   # ── params ─────────────────────────────────────────────────────────────────
 
-  defp resolve_card(_board, nil), do: nil
-  defp resolve_card(board, ref), do: Cards.get_card_by_ref(board, ref)
-
   defp assign_card(socket, nil), do: assign(socket, card: nil, card_ref: nil)
   defp assign_card(socket, card), do: assign(socket, card: card, card_ref: Cards.ref(socket.assigns.board, card))
-
-  # No resolved card pins the flow-wide scope; with one, an explicit ?scope= wins when it names a
-  # real scope, else This card (Flow Metrics' rule — the one scope vocabulary, RE235).
-  defp normalize_scope(_param, nil), do: Runs.metric_scope(nil)
-
-  defp normalize_scope(param, card),
-    do: Enum.find(Runs.metric_scopes(), Runs.metric_scope(card.id), &(to_string(&1) == param))
-
-  # nil = Last N (`ValueStream.default_last/0`); anything else must be a real metrics window.
-  defp normalize_window(window), do: if(window in Runs.metric_windows(), do: window)
-
-  defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
 
   defp stream_path(assigns, overrides) do
     window = Keyword.get(overrides, :window, assigns.window)
     scope = Keyword.get(overrides, :scope, assigns.scope)
-
-    params =
-      []
-      |> maybe_put("card", assigns.card_ref)
-      |> maybe_put("scope", assigns.card_ref && to_string(scope))
-      |> maybe_put("window", window)
-
-    value_stream_href(assigns.board.slug, params)
+    Params.stream_path(assigns.board.slug, Params.query(assigns.card_ref, scope, window))
   end
-
-  defp value_stream_href(slug, []), do: ~p"/board/#{slug}/value-stream"
-  defp value_stream_href(slug, params), do: ~p"/board/#{slug}/value-stream?#{params}"
-
-  defp maybe_put(list, _key, value) when value in [nil, false], do: list
-  defp maybe_put(list, key, value), do: list ++ [{key, value}]
 
   # ── data ───────────────────────────────────────────────────────────────────
 
@@ -124,7 +97,7 @@ defmodule RelayWeb.ValueStreamLive do
 
     socket
     |> assign_card(card)
-    |> assign(:scope, normalize_scope(to_string(scope), card))
+    |> assign(:scope, Params.normalize_scope(to_string(scope), card))
     |> load()
   end
 
@@ -182,6 +155,7 @@ defmodule RelayWeb.ValueStreamLive do
       ladder_items: ValueStreamLayout.ladder_items(boxes),
       rows: Map.new(vs.states, &{&1.stage_id, ValueStreamLayout.box_rows(&1, assigns.scope, vs.extras[&1.stage_id])}),
       hrefs: Map.new(vs.states, &{&1.stage_id, box_href(&1, assigns)}),
+      metrics_hrefs: Map.new(vs.states, &{&1.stage_id, metrics_href(&1, assigns)}),
       tiles: tiles(vs, assigns),
       subject: subject(vs, assigns),
       callout: callout(vs, assigns)
@@ -242,25 +216,38 @@ defmodule RelayWeb.ValueStreamLive do
     end
   end
 
-  # A flow box links to the Flow Metrics page of the enabled flow that works in its stage, for
-  # the same window (and, on one card, `from=<ref>` so it opens scoped to that card).
+  # A flow box drills into level 2 (RE349) for the enabled flow that works in its stage, with the
+  # same card / scope / window; its secondary link is that flow's Flow Metrics page (window, and
+  # `from=<ref>` on one card).
   defp box_href(%{kind: :flow, stage_id: stage_id}, assigns) do
     case Map.get(assigns.flows, stage_id) do
-      nil -> nil
-      flow -> metrics_href(assigns.board.slug, flow.key, metrics_params(assigns))
+      nil ->
+        nil
+
+      flow ->
+        Params.flow_path(assigns.board.slug, flow.key, Params.query(assigns.card_ref, assigns.scope, assigns.window))
     end
   end
 
   defp box_href(_state, _assigns), do: nil
 
-  defp metrics_params(%{window: window, scope: scope, card_ref: ref}) do
-    []
-    |> maybe_put("window", window)
-    |> maybe_put("from", if(scope == :card, do: ref))
+  defp metrics_href(%{kind: :flow, stage_id: stage_id}, assigns) do
+    case Map.get(assigns.flows, stage_id) do
+      nil -> nil
+      flow -> metrics_path(assigns.board.slug, flow.key, metrics_params(assigns))
+    end
   end
 
-  defp metrics_href(slug, key, []), do: ~p"/board/#{slug}/flows/#{key}/metrics"
-  defp metrics_href(slug, key, params), do: ~p"/board/#{slug}/flows/#{key}/metrics?#{params}"
+  defp metrics_href(_state, _assigns), do: nil
+
+  defp metrics_params(%{window: window, scope: scope, card_ref: ref}) do
+    []
+    |> Params.maybe_put("window", window)
+    |> Params.maybe_put("from", if(scope == :card, do: ref))
+  end
+
+  defp metrics_path(slug, key, []), do: ~p"/board/#{slug}/flows/#{key}/metrics"
+  defp metrics_path(slug, key, params), do: ~p"/board/#{slug}/flows/#{key}/metrics?#{params}"
 
   # ── copy ───────────────────────────────────────────────────────────────────
 
@@ -361,17 +348,6 @@ defmodule RelayWeb.ValueStreamLive do
 
   defp fmt(secs), do: ValueStreamLayout.fmt_duration(secs)
 
-  defp scope_options, do: Enum.map(Runs.metric_scopes(), &{to_string(&1), scope_label(&1)})
-
-  defp scope_label(:card), do: "This card"
-  defp scope_label(:flow), do: "All cards"
-
-  defp window_options,
-    do: [{"last", "Last #{ValueStream.default_last()}"} | Enum.map(Runs.metric_windows(), &{&1, window_label(&1)})]
-
-  defp window_label("all"), do: "All"
-  defp window_label(window), do: window
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -417,7 +393,7 @@ defmodule RelayWeb.ValueStreamLive do
         <div class="flex flex-wrap items-center gap-2">
           <div :if={@card} id="vs-scope" class="join">
             <button
-              :for={{key, label} <- scope_options()}
+              :for={{key, label} <- Params.scope_options()}
               id={"vs-scope-#{key}"}
               type="button"
               phx-click="set-scope"
@@ -429,7 +405,7 @@ defmodule RelayWeb.ValueStreamLive do
           </div>
           <div :if={@scope == :flow} id="vs-window" class="join">
             <button
-              :for={{key, label} <- window_options()}
+              :for={{key, label} <- Params.window_options()}
               id={"vs-window-#{key}"}
               type="button"
               phx-click="set-window"
@@ -468,6 +444,7 @@ defmodule RelayWeb.ValueStreamLive do
                 box={box}
                 rows={@rows[box.state.stage_id]}
                 href={@hrefs[box.state.stage_id]}
+                metrics_href={@metrics_hrefs[box.state.stage_id]}
               />
             </div>
           </div>

@@ -20,11 +20,14 @@ defmodule RelayWeb.ValueStreamComponentsTest do
       render_component(&C.stream_box/1,
         box: box,
         rows: VSL.box_rows(box.state, :flow, %{nodes: 1}),
-        href: "/board/b/flows/spec/metrics?window=7d"
+        href: "/board/b/value-stream/spec?window=7d",
+        metrics_href: "/board/b/flows/spec/metrics?window=7d"
       )
 
     assert html =~ ~s(id="vs-box-2")
-    assert html =~ ~s(href="/board/b/flows/spec/metrics?window=7d")
+    assert html =~ ~s(href="/board/b/value-stream/spec?window=7d")
+    assert html =~ ~s(id="vs-box-2-metrics")
+    assert text(html, "#vs-box-2-metrics") == "Flow metrics →"
     assert html =~ "left:310px;top:150px;width:186px;height:132px"
     assert html =~ "border-radius:10px"
     assert html =~ "background:color-mix(in oklab, var(--color-secondary) 6%, var(--color-base-100))"

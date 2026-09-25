@@ -29,7 +29,8 @@ defmodule Storybook.ValueStream.StreamBox do
         ),
         :flow,
         %{nodes: 21},
-        "/storybook/value_stream/stream_box"
+        href: "/storybook/value_stream/flow_map",
+        metrics_href: "/storybook/value_stream/stream_box"
       ),
       box(
         :gate,
@@ -42,13 +43,14 @@ defmodule Storybook.ValueStream.StreamBox do
     ]
   end
 
-  defp box(id, state, scope, extra, href \\ nil) do
+  defp box(id, state, scope, extra, hrefs \\ []) do
     %Variation{
       id: id,
       attributes: %{
         box: %{state: state, x: 0, y: 0, w: 186, h: 132},
         rows: ValueStreamLayout.box_rows(state, scope, extra),
-        href: href
+        href: hrefs[:href],
+        metrics_href: hrefs[:metrics_href]
       }
     }
   end

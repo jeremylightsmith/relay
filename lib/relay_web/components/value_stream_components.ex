@@ -19,7 +19,8 @@ defmodule RelayWeb.ValueStreamComponents do
 
   attr :box, :map, required: true, doc: "a `ValueStreamLayout.boxes/1` entry — `%{state, x, y, w, h}`"
   attr :rows, :list, required: true, doc: "`ValueStreamLayout.box_rows/3` — `[%{k, v, tone, bold}]`"
-  attr :href, :string, default: nil, doc: "a flow box's Flow Metrics page; nil renders a plain box"
+  attr :href, :string, default: nil, doc: "a flow box's level-2 drill (RE349); nil renders a plain box"
+  attr :metrics_href, :string, default: nil, doc: "a flow box's secondary Flow Metrics link, under the box"
 
   @doc "One stream-state box, absolutely positioned on the map canvas; a flow box is a link."
   def stream_box(%{href: nil} = assigns) do
@@ -41,6 +42,15 @@ defmodule RelayWeb.ValueStreamComponents do
     >
       <.box_header state={@box.state} />
       <.stat_rows rows={@rows} />
+    </.link>
+    <.link
+      :if={@metrics_href}
+      id={"vs-box-#{@box.state.stage_id}-metrics"}
+      navigate={@metrics_href}
+      class="hover:underline"
+      style={"position:absolute;left:#{@box.x}px;top:#{@box.y + @box.h + 5}px;width:#{@box.w}px;text-align:right;font-size:10px;font-weight:600;font-family:var(--font-mono);color:#{ink("secondary")};text-decoration:none;"}
+    >
+      Flow metrics →
     </.link>
     """
   end

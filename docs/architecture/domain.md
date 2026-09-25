@@ -219,7 +219,21 @@ sharing behavior.
   - State lives in the URL (`card`, `scope`, `window`).
   - Geometry is the pure `RelayWeb.ValueStreamLayout`, and rendering is
     `RelayWeb.ValueStreamComponents`, shared with level 2 (RE349).
-  - Flow boxes link to Flow Metrics instead of restating it.
+  - A flow box drills into level 2 with the same `card` / `scope` / `window` and keeps a
+    secondary "Flow metrics →" link to that flow's Flow Metrics page.
+  - Both maps scroll sideways inside an `overflow-x:auto` container at every width — there is no
+    phone list (RE349).
+
+  **Level 2 (RE349):** `RelayWeb.ValueStreamFlowLive` at `/board/:slug/value-stream/:flow_key`
+  renders one flow's `flow_stream/2` — every node on one line in execution order, coloured by
+  `Schemas.Flow.node_roles/1` (Do / Check / Fix), fixes above the line, send-back and re-entry
+  arcs sized by minutes (the `final_fix → precommit` REWIND), the VERIFY BLOCK frames, the
+  foreach loop, the queue triangle (`Runs.first_node_queue_wait/2`), the done / ⏸ needs_input
+  terminals, the aligned ladder, a two-band run lead-time bar and six tiles. Geometry is derived
+  from the flow graph alone by the pure `RelayWeb.ValueStreamFlowLayout` (any flow drills);
+  URL state is shared with level 1 through `RelayWeb.ValueStreamParams`; Last N scopes the
+  roll-up with `card_ids:` from `done_card_ids/2`. An unknown flow key redirects to level 1 with
+  a flash. Realtime: `Relay.Runs.subscribe/1`, recomputing on `{:run_changed, card_id}`.
 
   `flow_agent_secs/3` reconciles agent time with
   `Runs.node_metrics_for_flow/2` (equal when a card's executions don't overlap, smaller when they
