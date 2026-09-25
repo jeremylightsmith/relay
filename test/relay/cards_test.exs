@@ -1099,7 +1099,12 @@ defmodule Relay.CardsTest do
       assert [_created, %Schemas.Activity{type: :moved, actor_type: :user, meta: meta}] =
                activities(moved)
 
-      assert meta == %{"from_stage" => stage.name, "to_stage" => "Code"}
+      assert meta == %{
+               "from_stage" => stage.name,
+               "to_stage" => "Code",
+               "from_stage_id" => stage.id,
+               "to_stage_id" => target.id
+             }
     end
 
     test "move_card/4 into a sub-lane snapshots the human label, not the composite Stage.name",
@@ -1116,7 +1121,12 @@ defmodule Relay.CardsTest do
       assert [%Schemas.Activity{type: :moved, meta: meta}] =
                Enum.filter(activities(moved), &(&1.type == :moved))
 
-      assert meta == %{"from_stage" => stage.name, "to_stage" => "Code · Review"}
+      assert meta == %{
+               "from_stage" => stage.name,
+               "to_stage" => "Code · Review",
+               "from_stage_id" => stage.id,
+               "to_stage_id" => review.id
+             }
     end
 
     test "a same-stage reorder logs nothing", %{stage: stage} do

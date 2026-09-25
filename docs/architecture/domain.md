@@ -176,7 +176,11 @@ sharing behavior.
 - **ApiKeys** — per-board agent credentials for the `/api` scope.
 - **Activity** — the card timeline: comments, activity entries, and runner log rows.
   `Activity.LogSink` batches ref-tagged runner lines into one insert per burst;
-  `Activity.Pruner` ages `:action` chatter out after 14 days (RLY-112).
+  `Activity.Pruner` ages `:action` chatter out after 14 days (RLY-112). Transition rows
+  (`:moved`, `:approved`, `:rejected`) carry `from_stage_id` / `to_stage_id` in `meta` beside
+  the display-name snapshots (RE146) — the names are for the timeline, the ids for
+  `Relay.ValueStream`; the `BackfillActivityStageIds` migration stamped older rows and deleted
+  those whose names no longer resolved to exactly one stage.
 - **AgentLog** — stateless live relay of runner feed lines to the board's log sheet
   (subscribe-only; no server buffer, no backfill — RLY-55).
 - **Events** — the realtime seam: contexts broadcast semantic domain events after each
@@ -189,6 +193,23 @@ sharing behavior.
   change never waits on Apple (RLY-81).
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
+- **ValueStream** (`Relay.ValueStream`, RE146) — the level-1 value-stream derivation behind the
+  card stream map (RE347). Read-only: no processes, no PubSub, no writes — it folds history that
+  already exists (transition rows' `from_stage_id` / `to_stage_id`, `:needs_input` →
+  `:input_answered` parks, `node_executions`). `stream_states/1` derives the ordered states from
+  the board (stream start = the last queue main stage before the first work/planning main stage,
+  through the terminal stage, minus any `ai_enabled` work/planning stage no enabled flow works in,
+  such as RE's `Deploy`; kinds `kinds/0` = queue / flow / gate / done). `card_stream/1`
+  returns one card's spans with a per-span baton split (`batons/0`: agent = union of the card's
+  node executions inside an `ai_enabled` flow stage, human = parks and gates, nobody = the rest),
+  plus lead time, value-add (agent time on `:do` nodes per `Schemas.Flow.node_roles/1`), flow
+  efficiency, cost and per-gate approve/reject counts. **Invariant:** spans tile
+  `[started_at, done_at]` — `Σ span.secs == lead_secs` and every span's
+  `agent + human + nobody == secs`. `stream_summary/2` averages over the last N (default 20) or a
+  `Runs.metric_window_since/1` window of done cards (archived included) so per-state means plus
+  `outside_secs` sum to the mean lead time. `flow_agent_secs/3` reconciles agent time with
+  `Runs.node_metrics_for_flow/2` (equal when a card's executions don't overlap, smaller when they
+  do). Approximations: `ai_enabled` and node roles are read as they are now.
 - **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
   `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryTask` (the backbone,
   ordered within an activity; `board_id` denormalized so every read is one board-scoped

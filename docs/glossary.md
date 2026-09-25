@@ -38,6 +38,15 @@ the MMF design specs).
   Releases as swimlanes down the left, and real board cards filling the cells. Story-map cards
   **are** board cards; a card is assigned to at most one Activity+Task and one Release, and
   starts **unmapped**.
+- **Value stream (stream state · lead time · flow efficiency)** — the level-1 view of a card's
+  life from the **stream start** to Done (`Relay.ValueStream`, RE146). The stream start is
+  derived, never configured: the last queue-type main stage before the board's first
+  planning/work main stage (`Next up` on RE); a card that skips it starts on its first entry
+  into any later state. States come from the flows' triggers: an AI-enabled work stage no enabled
+  flow works in (RE's `Deploy`) is off-stream. A **stream state** is one stage or substage on that path, kinded queue,
+  flow, gate or done, and each stay is split by who holds the baton — agent, human or nobody.
+  **Lead time** is stream start → Done. **Flow efficiency** is agent time on `:do` nodes (node
+  roles, RE346) divided by lead time.
 - **Status** — a card's lifecycle state. A stage type's default status is applied on arrival when
   the current status isn't valid there (ADR 0003). The values are generated from the schema into
   [`architecture/state.md`](architecture/state.md).

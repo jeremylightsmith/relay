@@ -67,6 +67,11 @@ flowchart LR
     Talk --> Cards
     Talk --> Repo
     Talk --> Runs
+    ValueStream --> Boards
+    ValueStream --> Cards
+    ValueStream --> Flows
+    ValueStream --> Repo
+    ValueStream --> Runs
     Votes --> Events
     Votes --> Repo
 ```

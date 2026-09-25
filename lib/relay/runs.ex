@@ -225,6 +225,13 @@ defmodule Relay.Runs do
   @doc "Default metrics window."
   def default_window, do: "30d"
 
+  @doc """
+  The cutoff a metrics `window` starts at — `nil` for `"all"`; anything not in
+  `metric_windows/0` falls back to `default_window/0`. The ONE window → time mapping, shared by
+  `node_metrics_for_flow/2` and `Relay.ValueStream.stream_summary/2` (RE146).
+  """
+  def metric_window_since(window), do: window |> normalize_window() |> window_since()
+
   @doc "Completed-run count below which per-node percentiles aren't worth trusting (empty state)."
   def min_runs_for_percentiles, do: 10
 
@@ -408,7 +415,7 @@ defmodule Relay.Runs do
   the contract, not a convenience.
   """
   def recent_runs_for_flow(%Flow{} = flow, opts \\ []) do
-    since = opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+    since = opts |> Keyword.get(:window, default_window()) |> metric_window_since()
     executions = from(ne in NodeExecution, order_by: [asc: ne.id])
 
     from(r in Run,
@@ -581,8 +588,7 @@ defmodule Relay.Runs do
   # query drops the window entirely. Defined here, once, so the page and the API cannot disagree.
   defp metrics_since(_opts, card_id) when not is_nil(card_id), do: nil
 
-  defp metrics_since(opts, _card_id),
-    do: opts |> Keyword.get(:window, default_window()) |> normalize_window() |> window_since()
+  defp metrics_since(opts, _card_id), do: opts |> Keyword.get(:window, default_window()) |> metric_window_since()
 
   # Every metrics query over node_executions already joins Run then Card, so scoping to one card
   # is a WHERE on the third binding — no new join, no schema change.

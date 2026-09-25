@@ -40,7 +40,14 @@ defmodule Relay.CardsRejectTest do
       timeline = Activity.list_timeline(card)
       assert Enum.any?(timeline, &(is_struct(&1, Schemas.Comment) and &1.body == "Handle the empty case"))
       entry = Enum.find(timeline, &(Map.get(&1, :type) == :rejected))
-      assert entry.meta == %{"from_stage" => "Review", "to_stage" => "Code", "note" => "Handle the empty case"}
+
+      assert entry.meta == %{
+               "from_stage" => "Review",
+               "to_stage" => "Code",
+               "from_stage_id" => review.id,
+               "to_stage_id" => code.id,
+               "note" => "Handle the empty case"
+             }
     end
 
     test "a top-level review honors its configured reject_to over the previous stage",

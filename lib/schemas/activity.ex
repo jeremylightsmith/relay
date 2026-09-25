@@ -13,6 +13,15 @@ defmodule Schemas.Activity do
   empty meta. `:archived` / `:unarchived` (RLY-4) record a card being
   soft-hidden from the board and restored, with empty meta.
 
+  `:moved`, `:approved` and `:rejected` (RE146) also carry `"from_stage_id"` /
+  `"to_stage_id"` (integers) beside the `"from_stage"` / `"to_stage"` display-name snapshots:
+  the names are what the timeline renders, the ids are what `Relay.ValueStream` folds, so a
+  renamed stage no longer cuts a card off from its history. For `:rejected`, `from_stage_id`
+  is the gate's **main** stage (`Relay.Cards.reject/3` logs `current_main_stage`); an in-place
+  approve at the terminal stage has `from_stage_id == to_stage_id`. Rows written before RE146
+  were backfilled by `BackfillActivityStageIds`, which deleted any whose names no longer
+  resolved.
+
   `:dependencies_changed` (RE93) records a replacement of the card's blocker set, with
   `meta: %{"added" => [ref], "removed" => [ref]}`; a no-op re-set logs nothing.
 

@@ -2286,7 +2286,9 @@ defmodule Relay.Cards do
   defp log_gate(%Card{} = card, type, actor, from_stage, to_stage, note) do
     meta = %{
       "from_stage" => Boards.stage_display_name(from_stage),
-      "to_stage" => Boards.stage_display_name(to_stage)
+      "to_stage" => Boards.stage_display_name(to_stage),
+      "from_stage_id" => from_stage.id,
+      "to_stage_id" => to_stage.id
     }
 
     meta = if note, do: Map.put(meta, "note", note), else: meta
@@ -2337,7 +2339,9 @@ defmodule Relay.Cards do
   # timeline entry with both stage names snapshotted into meta. Routed
   # through Boards.stage_display_name/1 so a move into/out of a sub-lane
   # snapshots the human label ("Code · Review"), not the composite
-  # internal Stage.name ("Code:Review") enable_lane/2 builds.
+  # internal Stage.name ("Code:Review") enable_lane/2 builds. The ids ride
+  # alongside (RE146) so a renamed stage keeps its history — the names are
+  # for the timeline, the ids for Relay.ValueStream.
   defp emit_stage_changed(%Card{} = moved, previous_stage_id, %Stage{} = target_stage, actor) do
     from_stage = Repo.get!(Stage, previous_stage_id)
 
@@ -2347,7 +2351,9 @@ defmodule Relay.Cards do
         actor: actor,
         meta: %{
           "from_stage" => Boards.stage_display_name(from_stage),
-          "to_stage" => Boards.stage_display_name(target_stage)
+          "to_stage" => Boards.stage_display_name(target_stage),
+          "from_stage_id" => from_stage.id,
+          "to_stage_id" => target_stage.id
         }
       })
   end

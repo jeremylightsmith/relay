@@ -103,14 +103,20 @@ defmodule Relay.CardsGatesTest do
       assert Cards.done?(approved, Boards.list_stages(board))
     end
 
-    test "logs an :approved activity with from/to stage names", %{review: review} do
+    test "logs an :approved activity with from/to stage names and ids", %{review: review, deploy: deploy} do
       card = insert(:card, stage: review)
       {:ok, card} = Cards.set_status(card, %{status: :in_review})
       {:ok, _approved} = Cards.approve(card, :agent)
 
       entry = card |> Activity.list_timeline() |> Enum.find(&(Map.get(&1, :type) == :approved))
       assert entry.actor_type == :agent
-      assert entry.meta == %{"from_stage" => "Review", "to_stage" => "Deploy"}
+
+      assert entry.meta == %{
+               "from_stage" => "Review",
+               "to_stage" => "Deploy",
+               "from_stage_id" => review.id,
+               "to_stage_id" => deploy.id
+             }
     end
 
     test "broadcasts the move and the :approved timeline entry", %{board: board, review: review} do
@@ -201,6 +207,8 @@ defmodule Relay.CardsGatesTest do
       assert entry.meta == %{
                "from_stage" => "Review",
                "to_stage" => "Code",
+               "from_stage_id" => review.id,
+               "to_stage_id" => code.id,
                "note" => "Specs are missing edge cases"
              }
     end
