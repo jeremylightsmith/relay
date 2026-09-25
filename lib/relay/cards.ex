@@ -1949,7 +1949,11 @@ defmodule Relay.Cards do
   defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: nil} = stage, _from),
     do: Boards.previous_main_stage(stage)
 
-  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: target_id}, _from), do: Repo.get(Stage, target_id)
+  # RE344 — scoped to the stage's own board: a reject_to written before update_stage/2
+  # validated it falls back to the previous main stage instead of surfacing (or moving the card
+  # to) another board's stage.
+  defp reject_destination(%Stage{parent_id: nil, reject_to_stage_id: target_id} = stage, _from),
+    do: Repo.get_by(Stage, id: target_id, board_id: stage.board_id) || Boards.previous_main_stage(stage)
 
   @doc """
   Marks the card `:ready` in place (the drawer's "Mark done") and clears any open rejection —

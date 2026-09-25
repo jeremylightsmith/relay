@@ -1579,6 +1579,44 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "reject_to scoped to the stage's board (RE344)" do
+    setup %{board: board} do
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 30)
+      foreign = insert(:stage, board: insert(:board), name: "Elsewhere Plan", type: :planning, position: 1)
+
+      # Inserted straight through the factory, bypassing update_stage/2's validation — a row
+      # written before the write-side check existed.
+      review =
+        insert(:stage,
+          board: board,
+          name: "Review",
+          type: :review,
+          category: :in_progress,
+          position: 31,
+          reject_to_stage_id: foreign.id
+        )
+
+      %{code: code, review: review}
+    end
+
+    test "reject_target/1 falls back to the previous main stage, not the foreign one",
+         %{code: code, review: review} do
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert %Schemas.Stage{id: id, name: "Code"} = Cards.reject_target(card)
+      assert id == code.id
+    end
+
+    test "reject/3 moves the card to the previous main stage without crashing",
+         %{code: code, review: review} do
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert {:ok, %Card{} = rejected} = Cards.reject(card, "rework", :agent)
+      assert rejected.stage_id == code.id
+      assert rejected.rejection.to_stage_id == code.id
+    end
+  end
+
   defp stage_card_ids(board, stage) do
     board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
   end

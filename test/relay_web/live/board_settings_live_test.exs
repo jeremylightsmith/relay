@@ -335,4 +335,44 @@ defmodule RelayWeb.BoardSettingsLiveTest do
     |> LazyHTML.text()
     |> String.trim()
   end
+
+  describe "set_reject_to board scoping (RE344)" do
+    setup %{conn: conn} do
+      user = Relay.Factory.insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board}
+    end
+
+    test "a foreign stage id leaves the view alive and the stored reject_to unchanged",
+         %{conn: conn, board: board} do
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      foreign = Relay.Factory.insert(:stage, board: Relay.Factory.insert(:board), name: "Elsewhere")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      render_click(view, "set_reject_to", %{"stage-id" => "#{review.id}", "target-id" => "#{foreign.id}"})
+
+      assert Process.alive?(view.pid)
+      assert Relay.Repo.get!(Schemas.Stage, review.id).reject_to_stage_id == review.reject_to_stage_id
+    end
+
+    test "a non-integer target id is ignored", %{conn: conn, board: board} do
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      render_click(view, "set_reject_to", %{"stage-id" => "#{review.id}", "target-id" => "abc"})
+
+      assert Process.alive?(view.pid)
+      assert Relay.Repo.get!(Schemas.Stage, review.id).reject_to_stage_id == review.reject_to_stage_id
+    end
+
+    test "a same-board main stage still persists", %{conn: conn, board: board} do
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      render_click(view, "set_reject_to", %{"stage-id" => "#{review.id}", "target-id" => "#{code.id}"})
+
+      assert Relay.Repo.get!(Schemas.Stage, review.id).reject_to_stage_id == code.id
+    end
+  end
 end
