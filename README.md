@@ -64,3 +64,19 @@ docs/vision.md      Product vision
 .claude/            Skills, agents, commands, and workflows for AI-assisted development
 .github/workflows/  CI (fast suite + browser journeys; Fly deploy is stubbed until launch)
 ```
+
+## Contributing
+
+Contributions are welcome, but we review every change closely, so please:
+
+1. **Open an issue first** and wait for a go-ahead before writing code. Pull requests
+   without an agreed issue may be closed.
+2. **Keep it small.** One focused change per pull request.
+3. **Make `mix precommit` pass** and add tests for any behavior you change.
+4. **Follow [`AGENTS.md`](AGENTS.md).** It holds the project's rules, and they apply whether
+   a person or an AI wrote the code. Say in the PR if an AI tool helped.
+
+## License
+
+Relay is released under the [MIT License](LICENSE). Vendored third-party code under
+`assets/vendor/` and `vendor/` keeps its own license, noted in each file or directory.
