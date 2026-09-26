@@ -17,6 +17,9 @@ defmodule Schemas.Scope do
   # real role. Gates everything under /admin (see RelayWeb.Auth).
   @superadmin_emails ["jeremy.lightsmith@gmail.com"]
 
+  @doc "The superadmin allowlist — the one definition; callers (and tests) read it, never re-type it."
+  def superadmin_emails, do: @superadmin_emails
+
   @doc "True when the scope belongs to a superadmin."
   def superadmin?(%__MODULE__{user: %User{email: email}}), do: email in @superadmin_emails
   def superadmin?(_), do: false

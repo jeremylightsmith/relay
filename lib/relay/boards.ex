@@ -222,6 +222,60 @@ defmodule Relay.Boards do
     Repo.all(from b in Board, where: is_nil(b.archived_at), select: b.id)
   end
 
+  @doc """
+  Every board — archived included, regardless of membership — for the superadmin
+  `/admin/boards` table (RE353), newest first (`inserted_at desc, id desc`). Unscoped on
+  purpose: the gate is the `/admin` route (`RelayWeb.Auth.require_superadmin`), not this
+  context. One query: `member_count` counts resolved memberships (`user_id` set — pending
+  email invites excluded) and `card_count` counts non-archived cards, both via aggregate
+  subqueries.
+  """
+  def list_all_boards_for_admin do
+    member_counts =
+      from m in Membership,
+        where: not is_nil(m.user_id),
+        group_by: m.board_id,
+        select: %{board_id: m.board_id, n: count(m.id)}
+
+    card_counts =
+      from c in Card,
+        where: is_nil(c.archived_at),
+        group_by: c.board_id,
+        select: %{board_id: c.board_id, n: count(c.id)}
+
+    Repo.all(
+      from b in Board,
+        left_join: o in assoc(b, :owner),
+        left_join: mc in subquery(member_counts),
+        on: mc.board_id == b.id,
+        left_join: cc in subquery(card_counts),
+        on: cc.board_id == b.id,
+        order_by: [desc: b.inserted_at, desc: b.id],
+        select: %{
+          id: b.id,
+          name: b.name,
+          slug: b.slug,
+          key: b.key,
+          archived_at: b.archived_at,
+          inserted_at: b.inserted_at,
+          owner_email: o.email,
+          member_count: coalesce(mc.n, 0),
+          card_count: coalesce(cc.n, 0)
+        }
+    )
+  end
+
+  @doc """
+  The ids of every board `user` is a (resolved) member of, archived boards included, as a
+  MapSet. Unlike `list_boards/1` it keeps archived boards, since those are still loadable. The admin
+  boards table uses it to link a name only where the superadmin already has access (RE353).
+  """
+  def member_board_ids(%User{id: user_id}) do
+    from(m in Membership, where: m.user_id == ^user_id, select: m.board_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
   @doc "Returns the stage with `id` on `board`, or nil (board-scoped lookup)."
   def get_stage(%Board{id: board_id}, id) do
     Repo.get_by(Stage, id: id, board_id: board_id)
