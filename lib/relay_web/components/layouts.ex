@@ -5,6 +5,8 @@ defmodule RelayWeb.Layouts do
   """
   use RelayWeb, :html
 
+  alias Schemas.Scope
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -118,6 +120,11 @@ defmodule RelayWeb.Layouts do
           class="menu dropdown-content z-50 mt-2 w-60 rounded-box bg-base-100 p-2 shadow"
         >
           {render_slot(@menu_items)}
+          <li :if={Scope.superadmin?(@current_scope)}>
+            <.link navigate={~p"/admin"} id="admin-link">
+              <.icon name="hero-shield-check" class="size-4" /> Admin
+            </.link>
+          </li>
           <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Theme</li>
           <li>
             <div class="pointer-events-auto px-1 py-1 hover:bg-transparent">

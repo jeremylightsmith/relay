@@ -12,6 +12,9 @@ sharing behavior.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).
+  `list_all_boards_for_admin/0` (every board, archived included, with owner email and
+  member/card counts in one query) and `member_board_ids/1` back the superadmin-only
+  `/admin/boards` page (RE353). They are unscoped reads, and the gate is the `/admin` route.
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
   stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
@@ -173,6 +176,8 @@ sharing behavior.
   Humans only — no AI/agent avatar and no agent cursor.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
   tokens); user API tokens for `/api/all`.
+  `list_users_for_admin/0` (every user with a board count, newest first) backs the
+  superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
 - **ApiKeys** — per-board agent credentials for the `/api` scope.
 - **Activity** — the card timeline: comments, activity entries, and runner log rows.
   `Activity.LogSink` batches ref-tagged runner lines into one insert per burst;
