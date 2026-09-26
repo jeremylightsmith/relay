@@ -94,10 +94,19 @@ defmodule RelayWeb.ValueStreamLiveTest do
       assert has_element?(view, "#vs-box-#{ctx.s.done.id}", "Done")
     end
 
-    test "flow boxes link to that flow's Flow Metrics for this card", ctx do
+    test "flow boxes drill into level 2 for this card and keep a Flow metrics link", ctx do
       {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream?card=#{ctx.ref}")
 
-      assert has_element?(view, "a#vs-box-#{ctx.s.code.id}[href='/board/#{ctx.slug}/flows/code/metrics?from=#{ctx.ref}']")
+      assert has_element?(
+               view,
+               "a#vs-box-#{ctx.s.code.id}[href='/board/#{ctx.slug}/value-stream/code?card=#{ctx.ref}&scope=card']"
+             )
+
+      assert has_element?(
+               view,
+               "a#vs-box-#{ctx.s.code.id}-metrics[href='/board/#{ctx.slug}/flows/code/metrics?from=#{ctx.ref}']"
+             )
+
       refute has_element?(view, "a#vs-box-#{ctx.s.review.id}")
     end
 
@@ -139,13 +148,13 @@ defmodule RelayWeb.ValueStreamLiveTest do
       assert has_element?(view, "#vs-subject", "Mean of the last 1 done card")
     end
 
-    test "a flow box lands on Flow Metrics for the same window", ctx do
+    test "a flow box drills into level 2 for the same window", ctx do
       {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream?window=7d")
 
       assert {:error, {:live_redirect, %{to: to}}} =
                view |> element("#vs-box-#{ctx.s.code.id}") |> render_click()
 
-      assert to == "/board/#{ctx.slug}/flows/code/metrics?window=7d"
+      assert to == "/board/#{ctx.slug}/value-stream/code?window=7d"
     end
 
     test "a newly shipped card updates the view without a reload", ctx do
@@ -165,15 +174,13 @@ defmodule RelayWeb.ValueStreamLiveTest do
   end
 
   describe "phones" do
-    test "get the vertical stream list and a two-column tile grid instead of the wide map", ctx do
+    test "get the same map, scrolling sideways inside its container — no stacked list", ctx do
       {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream?card=#{ctx.ref}")
 
-      assert has_element?(view, "#vs-map.hidden[class*='md:block']")
-      assert has_element?(view, "#vs-list[class*='md:hidden']")
-      assert length(texts(view, "#vs-list > li", "#vs-list")) == 9
-      assert length(texts(view, ".vs-row-bar", "#vs-list")) == 9
+      assert has_element?(view, "#vs-map[style*='overflow-x:auto']")
+      refute has_element?(view, "#vs-map.hidden")
+      refute has_element?(view, "#vs-list")
       assert has_element?(view, "#vs-tiles.grid-cols-2")
-      assert has_element?(view, "#vs-row-#{ctx.s.review.id}-rework", "Request changes 50% → re-runs Code")
     end
   end
 

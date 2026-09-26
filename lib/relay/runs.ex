@@ -282,6 +282,11 @@ defmodule Relay.Runs do
   web layer resolves the ref with `Cards.card_ids_by_ref/2`, which is board-scoped and skips the
   owners preload `get_card_by_ref/2` performs. Do not "correct" it to a struct.
 
+  `opts[:card_ids]` (RE349) scopes to a LIST of cards — every run of this flow on those cards,
+  window ignored, like `:card_id` but multi-card, so percentiles stay meaningful. The value
+  stream's level 2 passes the Last-N done cards here (`Relay.ValueStream.done_card_ids/2`).
+  `:card_id` wins when both are given, so its single-card meaning never changes.
+
   `duration_total` and `cost_total` are present in BOTH scopes — they come out of the same
   grouped pass as the percentiles, so scoping costs no extra round trip.
 
@@ -297,7 +302,7 @@ defmodule Relay.Runs do
   duration_total` (nil as 0).
   """
   def node_metrics_for_flow(%Flow{} = flow, opts \\ []) do
-    card_id = Keyword.get(opts, :card_id)
+    card_id = metrics_cards(opts)
     since = metrics_since(opts, card_id)
 
     numeric = node_numeric_rows(flow, since, card_id)
@@ -342,7 +347,7 @@ defmodule Relay.Runs do
   a node with no gaps at all is absent. Public so RE348 can read it directly.
   """
   def node_waits_for_flow(%Flow{} = flow, opts \\ []) do
-    card_id = Keyword.get(opts, :card_id)
+    card_id = metrics_cards(opts)
     since = metrics_since(opts, card_id)
 
     gaps =
@@ -410,7 +415,7 @@ defmodule Relay.Runs do
   gap).
   """
   def execution_spans_for_flow(%Flow{} = flow, opts \\ []) do
-    card_id = Keyword.get(opts, :card_id)
+    card_id = metrics_cards(opts)
     since = metrics_since(opts, card_id)
     fix_keys = fix_node_keys(flow)
 
@@ -531,7 +536,7 @@ defmodule Relay.Runs do
   card exists to fix.
   """
   def flow_metrics_summary(%Flow{} = flow, opts \\ []) do
-    card_id = Keyword.get(opts, :card_id)
+    card_id = metrics_cards(opts)
     since = metrics_since(opts, card_id)
 
     run_stats =
@@ -565,6 +570,48 @@ defmodule Relay.Runs do
       median_end_to_end: round_secs(run_stats.median),
       total_end_to_end: round_secs(run_stats.total_elapsed)
     }
+  end
+
+  @doc """
+  How long a run of `flow` waited for a runner before its FIRST node started (RE349) — the mean
+  `claimed_at − inserted_at` of the `Schemas.NodeJob`s (kind in `NodeJob.flow_kinds/0`,
+  `claimed_at` set) bound to each run's lowest-id execution. The run population is
+  `execution_spans_for_flow/2`'s: a run counts when any of its executions is in the window, or —
+  with `:card_id` / `:card_ids` — when it is one of those cards' runs (window ignored). Options
+  are exactly `node_metrics_for_flow/2`'s.
+
+  Returns `%{mean_secs: integer | nil, jobs: count}` — `mean_secs` nil when no job is measurable.
+  """
+  def first_node_queue_wait(%Flow{} = flow, opts \\ []) do
+    card_id = metrics_cards(opts)
+    since = metrics_since(opts, card_id)
+
+    executions =
+      filter_card(
+        from(ne in NodeExecution,
+          join: r in Run,
+          on: r.id == ne.run_id,
+          join: c in Card,
+          on: c.id == r.card_id,
+          where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key
+        ),
+        card_id
+      )
+
+    firsts = from([ne] in executions, group_by: ne.run_id, select: %{run_id: ne.run_id, id: min(ne.id)})
+    population = from([ne] in filter_since(executions, since), select: ne.run_id)
+
+    from(f in subquery(firsts),
+      join: j in NodeJob,
+      on: j.node_execution_id == f.id,
+      where: j.kind in ^NodeJob.flow_kinds() and not is_nil(j.claimed_at) and f.run_id in subquery(population),
+      select: %{
+        mean: fragment("AVG(EXTRACT(EPOCH FROM (? - ?)))::float", j.claimed_at, j.inserted_at),
+        jobs: count(j.id)
+      }
+    )
+    |> Repo.one()
+    |> then(fn %{mean: mean, jobs: jobs} -> %{mean_secs: round_secs(mean), jobs: jobs} end)
   end
 
   # ---- Board-health audit (RE249) ----
@@ -767,6 +814,11 @@ defmodule Relay.Runs do
   defp filter_runs_since(query, nil), do: query
   defp filter_runs_since(query, since), do: from([r] in query, where: r.started_at >= ^since)
 
+  # RE349: the card filter a metrics query applies — `:card_id` (one card, RE235) wins, else
+  # `:card_ids` (a list — the value stream's Last-N population), else nil (flow-wide). Either
+  # card form drops the window (`metrics_since/2`). The ONE reader of both options.
+  defp metrics_cards(opts), do: Keyword.get(opts, :card_id) || Keyword.get(opts, :card_ids)
+
   # Decision 3 (RE235): a card's numbers always cover ALL of its executions, so a card-scoped
   # query drops the window entirely. Defined here, once, so the page and the API cannot disagree.
   defp metrics_since(_opts, card_id) when not is_nil(card_id), do: nil
@@ -774,13 +826,15 @@ defmodule Relay.Runs do
   defp metrics_since(opts, _card_id), do: opts |> Keyword.get(:window, default_window()) |> metric_window_since()
 
   # Every metrics query over node_executions already joins Run then Card, so scoping to one card
-  # is a WHERE on the third binding — no new join, no schema change.
+  # (or RE349's list of cards) is a WHERE on the third binding — no new join, no schema change.
   defp filter_card(query, nil), do: query
+  defp filter_card(query, card_ids) when is_list(card_ids), do: from([_ne, _r, c] in query, where: c.id in ^card_ids)
   defp filter_card(query, card_id), do: from([_ne, _r, c] in query, where: c.id == ^card_id)
 
   # The summary's run query joins Card second, hence its own arity-matched clause — the same
   # split the existing filter_since/filter_runs_since pair already makes.
   defp filter_runs_card(query, nil), do: query
+  defp filter_runs_card(query, card_ids) when is_list(card_ids), do: from([_r, c] in query, where: c.id in ^card_ids)
   defp filter_runs_card(query, card_id), do: from([_r, c] in query, where: c.id == ^card_id)
 
   defp normalize_window(window) when window in @metric_windows, do: window
