@@ -138,6 +138,9 @@ defmodule RelayWeb.Router do
           do: [RelayWeb.LiveAcceptance],
           else: []
         ) ++ [{RelayWeb.Auth, :require_superadmin}] do
+      live "/", IndexLive
+      live "/boards", BoardsLive
+      live "/users", UsersLive
       live "/api", ApiLive
     end
   end

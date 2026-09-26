@@ -79,6 +79,28 @@ defmodule RelayWeb.LayoutsTest do
     assert html =~ "AL"
   end
 
+  test "the avatar menu shows the Admin entry only for the superadmin (RE353)" do
+    superadmin = %Schemas.Scope{
+      user: %Schemas.User{
+        id: 1,
+        email: hd(Schemas.Scope.superadmin_emails()),
+        name: "Super Admin",
+        avatar_url: nil
+      }
+    }
+
+    member = %Schemas.Scope{
+      user: %Schemas.User{id: 2, email: "a@b.co", name: "Ada Lovelace", avatar_url: nil}
+    }
+
+    html = render_app(%{current_scope: superadmin, inner_block: inner_block_slot()})
+    assert html =~ ~s(id="admin-link")
+    assert html =~ ~s(href="/admin")
+
+    html = render_app(%{current_scope: member, inner_block: inner_block_slot()})
+    refute html =~ ~s(id="admin-link")
+  end
+
   test "the theme toggle is a labelled radiogroup whose indicator tracks data-theme-pref" do
     html = render_app(%{inner_block: inner_block_slot()})
 
