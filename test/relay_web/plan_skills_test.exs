@@ -47,4 +47,31 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "acceptance-tester"
     end
   end
+
+  @agents_dir Path.join([File.cwd!(), ".claude", "agents"])
+  @doctor Path.join([File.cwd!(), ".claude", "skills", "relay-doctor", "SKILL.md"])
+
+  describe "the Code flow's agents fetch their task by id (RE357)" do
+    for name <- ~w(plan-implementer spec-reviewer quality-reviewer final-fixer) do
+      test "#{name} fetches the task body with relay task show" do
+        doc = File.read!(Path.join(@agents_dir, unquote(name) <> ".md"))
+        assert doc =~ "./relay task show <ref> <id>"
+        refute doc =~ "## Task N"
+      end
+    end
+
+    test "final-reviewer reads the whole task list, then bodies as needed" do
+      doc = File.read!(Path.join(@agents_dir, "final-reviewer.md"))
+      assert doc =~ "./relay tasks list <ref>"
+      assert doc =~ "./relay task show <ref> <id>"
+      refute doc =~ "## Task N"
+    end
+
+    test "/relay-doctor counts the task verbs as sub_tasks evidence" do
+      doc = File.read!(@doctor)
+      assert doc =~ "| `sub_tasks` | `relay tasks add`"
+      assert doc =~ "`relay task show`"
+      assert doc =~ "`relay tasks list`"
+    end
+  end
 end

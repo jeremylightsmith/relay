@@ -44,9 +44,9 @@ that rule protects the checkout.
 
 The run re-enters the same node with your session resumed. The human's answer arrives as a
 **card comment** — read it with `./relay card <ref>`; it is not interpolated into your prompt.
-**The answer, not the plan, is authoritative for the rest of this run.** The plan (at
-`$RELAY_PLAN`) and the card's `plan` field stay as they are by design; any lasting plan
-correction is a follow-up card.
+**The answer, not the plan, is authoritative for the rest of this run.** The plan (the
+header at `$RELAY_PLAN`), the card's `plan` field and its tasks' bodies stay as they are by
+design; any lasting plan correction is a follow-up card.
 
 Resolve, and do not park again on the same finding:
 

@@ -20,12 +20,14 @@ disagreed. Depending on which node routed you here it is one of:
 Fix ALL of it in one consolidated pass.
 
 ## Per-task findings (`fix_findings`)
-The findings are the SUBJECT of this run — not the plan. Read them first.
+The findings are the SUBJECT of this run — not the task body. Read them first.
 
-- The task is already implemented and committed, and the reviewer read that committed code.
-  **Do not re-derive the task from the plan** (at `$RELAY_PLAN`), and **do not open by diffing
-  the code against the plan and concluding it already matches** — that is how a fix pass turns
-  into a no-op that burns a loop and teaches the next attempt nothing.
+- The task is already implemented and committed, and the reviewer read that committed code. The
+  message names the task by **id**; its body is `./relay task show <ref> <id>` — look there only to
+  understand what a finding refers to. **Do not re-derive the task from its body** (or from the plan
+  header at `$RELAY_PLAN`), and **do not open by diffing the code against the task and concluding it
+  already matches** — that is how a fix pass turns into a no-op that burns a loop and teaches the
+  next attempt nothing.
 - Keep the change scoped to that one task. Do not start the next task, and do not fix things
   in other tasks' code the findings did not name.
 - Your gate is the one the plan's "## Verification" section declares under `Gate:` —
@@ -48,7 +50,8 @@ The findings are the SUBJECT of this run — not the plan. Read them first.
 ## Work
 - Order them: blocking/security → simple → refactor.
 - Minimal, targeted fixes (TDD where a fix adds behavior). No unrelated changes or scope creep.
-- If a finding conflicts with what the plan (at `$RELAY_PLAN`) mandates, note the conflict for
+- If a finding conflicts with what the task body (`./relay task show <ref> <id>`) or the plan
+  header (at `$RELAY_PLAN`) mandates, note the conflict for
   the human rather than silently overriding the plan. **A finding that carries a quoted human
   authorization to deviate** (a reviewer escalated a plan-mandated defect and the human said
   "fix it anyway") outranks the plan for this run: implement the finding, and record in your

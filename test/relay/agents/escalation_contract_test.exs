@@ -102,8 +102,12 @@ defmodule Relay.Agents.EscalationContractTest do
     assert sent_back =~ "authorization",
            "it must say a finding carrying a quoted human authorization is special"
 
-    assert sent_back =~ "plan.md",
-           "it must say that authorization outranks plan.md for this task"
+    # RE357: the per-task spec is the task's body, fetched by id — no longer plan.md.
+    assert sent_back =~ "outranks the task's body",
+           "it must say that authorization outranks the task's body for this task"
+
+    assert sent_back =~ "./relay task show <ref> <id>",
+           "it must say where that body comes from"
   end
 
   test "no agent file contains an unrendered template token" do

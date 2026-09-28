@@ -31,12 +31,17 @@ Inspect with `git log`/`git diff`/`git show` only. Do not touch the working tree
 or branch state. If you need a different revision, check it out into a temp worktree
 (`git worktree add`) — never move HEAD here.
 
-## Assess against the plan (at `$RELAY_PLAN`, the spec for this work)
-- **Spec coverage:** every plan task / acceptance item actually implemented? List gaps.
-- **Design fidelity & consistency:** for any plan task that named a `docs/designs/*.dc.html`
+## Assess against the plan (the card's header and its tasks — the spec for this work)
+The plan at `$RELAY_PLAN` is only the card's **header** — Goal, Architecture, Global Constraints,
+`## Verification`. The per-task specs are the card's **tasks**: run `./relay tasks list <ref>` for
+the whole picture (titles and done-state), then `./relay task show <ref> <id>` for any task whose
+body you need to judge coverage or a cross-task interface.
+
+- **Spec coverage:** every task / acceptance item actually implemented? List gaps.
+- **Design fidelity & consistency:** for any task whose body named a `docs/designs/*.dc.html`
   artboard, confirm the built UI matches the elements/states it called out, and that tasks
   touching the same component styled it one consistent way (per the mockup), not two competing
-  ways. Only judge what the plan named an artboard for — don't invent design findings elsewhere.
+  ways. Only judge what a task body named an artboard for — don't invent design findings elsewhere.
 - **Consistency:** one coherent pattern across the branch — no contradictory choices between
   tasks (two ways of doing the same thing, mismatched naming or error handling), and no closed
   set or policy number defined twice (`AGENTS.md`: "a magic value is defined exactly once").
@@ -49,7 +54,7 @@ or branch state. If you need a different revision, check it out into a temp work
   input / missing authz), migrations safe and reversible, backward compatibility considered.
 - **Runner contract:** if the branch changes `./relay`, `RUNNER_VERSION` was bumped, and any
   vocabulary mirrored across the wire is pinned in `test/fixtures/runner_contract.json`.
-- **Dead code / scope creep:** anything built that no plan task asked for, or left unused.
+- **Dead code / scope creep:** anything built that no task asked for, or left unused.
 - **Architecture records current:**
   - If the branch adds or changes a **context, PubSub topic, API endpoint, or supervised
     process**, the matching `docs/architecture/` page must be updated in this branch (see
@@ -116,11 +121,11 @@ note-and-approve — there is no mechanism behind a note, so the branch would me
 in it. Escalate instead (see `## Decide`).
 
 ## Decide
-- **Approve** (`succeeded`) — coherent, complete against the plan, ready to merge.
+- **Approve** (`succeeded`) — coherent, complete against the tasks, ready to merge.
 - **Fix** (`failed`, with the findings as the detail) — blocking issues remain. Give each with a `file:line` reference, what's wrong, why it matters, and how to
   fix (if not obvious), so one consolidated fix pass (`final_fix`) can address them all.
-- **Escalate** — the branch is a *faithful* implementation of the plan (at `$RELAY_PLAN`) and
-  the defect is in the plan itself. The consolidated fix pass cannot correct it without
+- **Escalate** — the branch is a *faithful* implementation of the plan (the header at
+  `$RELAY_PLAN` and the tasks' bodies) and the defect is in the plan itself. The consolidated fix pass cannot correct it without
   contradicting the plan, and approving with a note would merge it. Raise `needs-input` and
   stop — do **not** also declare an outcome.
 

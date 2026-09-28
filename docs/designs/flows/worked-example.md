@@ -230,7 +230,8 @@ erDiagram
         string current_node
     }
     SubTask {
-        string title "### Task N: <name> heading"
+        string title "written by relay tasks add --task"
+        text body "the task's full spec: files, steps, code, commit message"
         bool done "checked at the loop tail, after review"
         int position
     }
@@ -297,8 +298,9 @@ Every row involved (abridged JSON; timestamps trimmed):
 { "id": "nj_c88", "run": "run_7f3a", "node": "implement", "state": "claimed",
   "runner_id": 3, "claimed_at": "…T18:41:55Z",
   "payload": { "isolation": "exclusive", "resume_session": "s_a41…", "agent": "plan-implementer",
-               "run": "Implement the task named {sub_task} from the card's plan with strict red/green TDD. One task only — do not start the next one.",
+               "run": "Implement task {sub_task_id} (\"{sub_task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {sub_task_id}`. …",
                "vars": { "ref": "RLY-150", "branch": "rly-150-csv-export",
+                         "sub_task_id": 502,
                          "sub_task": "Wire the export button up",
                          "findings": "export test asserts on private struct internals; …" } } }
 ```

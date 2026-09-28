@@ -130,8 +130,11 @@ became comment-free JSON (RLY-241). Keyed by node.
   comment ("all criteria pass") and the summary section earns nothing. Pinned by
   `test/relay/flows/default_library_test.exs`.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
-  one iteration bound to one of the card's sub_tasks. The `next_task` grep-gate is **gone** —
-  "which task is next" is derived server-side, and `{sub_task}` names it in the prompt.
+  one iteration bound to one of the card's tasks. The `next_task` grep-gate is **gone** —
+  "which task is next" is derived server-side; `{sub_task}` names the task in the prompt and
+  `{sub_task_id}` lets the node fetch its body with `relay task show {ref} {sub_task_id}`
+  (RE357). `implement`, `spec_review`, `quality_review` and `fix_findings` all declare
+  `reads: [sub_tasks]`.
 - **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the runner appends
   `--agent <name>` to `claude -p`, so the file supplies the system prompt while `run` stays the
   user prompt. `post` has no agent file and keeps a bare prompt. `final-fixer` backs two nodes:
