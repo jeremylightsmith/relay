@@ -20,7 +20,7 @@ defmodule RelayWeb.StoryMapGrid do
   `Relay.StoryMap`'s own derivation (and the artboard's `ownerAct/1`), so a column and its band
   can never disagree about which activity a card belongs to. Expressing rule 3 as the
   *fallback* rather than a defensive branch is what makes the invariant hold with no
-  special-case code: a `story_task_id` this board does not have simply resolves to no task, and
+  special-case code: a `story_step_id` this board does not have simply resolves to no task, and
   rule 3 catches it.
 
   Lane placement mirrors it: the card's release when the board has it, otherwise **the last
@@ -207,7 +207,7 @@ defmodule RelayWeb.StoryMapGrid do
   takes. This module *defines* the key formats, so it also parses them — the format is written
   once and `RelayWeb.BoardLive` never string-matches on `"nt:"`.
 
-      decode_placement("t:7", "r:2")     #=> {:ok, %{story_task_id: 7, release_id: 2}}
+      decode_placement("t:7", "r:2")     #=> {:ok, %{story_step_id: 7, release_id: 2}}
       decode_placement("nt:3", "r:none") #=> {:ok, %{story_activity_id: 3, release_id: nil}}
       decode_placement("x:1", "r:2")     #=> :error
 
@@ -231,7 +231,7 @@ defmodule RelayWeb.StoryMapGrid do
   def merged_column?(_other), do: false
 
   defp decode_column("t:" <> id) do
-    with {:ok, id} <- decode_id(id), do: {:ok, %{story_task_id: id}}
+    with {:ok, id} <- decode_id(id), do: {:ok, %{story_step_id: id}}
   end
 
   defp decode_column("nt:" <> id) do
@@ -261,7 +261,7 @@ defmodule RelayWeb.StoryMapGrid do
   # Rules 1 vs 2/3, and the task → activity derivation, in one place. A task id that is not on
   # this board resolves to `nil`, so the card falls to rule 3 rather than off the grid.
   defp place(card, tasks_by_id, activity_ids) do
-    task = card.story_task_id && Map.get(tasks_by_id, card.story_task_id)
+    task = card.story_step_id && Map.get(tasks_by_id, card.story_step_id)
     activity_id = (task && task.story_activity_id) || card.story_activity_id
 
     if activity_id && MapSet.member?(activity_ids, activity_id) do

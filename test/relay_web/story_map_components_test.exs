@@ -17,7 +17,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   alias Schemas.Release
   alias Schemas.Stage
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
   alias Schemas.SubTask
 
   # Every helper lives at module level — a `defp` inside a `describe` block compiles, but
@@ -65,7 +65,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
   defp grid(draft \\ nil) do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
-    task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+    task = %StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
     StoryMapGrid.build(
@@ -73,7 +73,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       [task],
       releases,
       [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100)
       ],
       draft
@@ -709,7 +709,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
 
     test "a cell with cards tightens the ＋ padding to the artboard's 3px" do
-      html = cell_html(%{cards: [card(1, story_task_id: 10)]})
+      html = cell_html(%{cards: [card(1, story_step_id: 10)]})
 
       style =
         html
@@ -1061,7 +1061,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   # RE260 — the same one-activity board as `grid/1`, merged.
   defp merged_grid do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
-    task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+    task = %StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
     StoryMapGrid.build(
@@ -1069,7 +1069,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       [task],
       releases,
       [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100)
       ],
       nil,
@@ -1453,9 +1453,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
         %StoryActivity{id: 2, board_id: 1, name: "Plan the backlog", position: 2}
       ]
 
-      tasks = [%StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}]
+      tasks = [%StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}]
       releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
-      cards = [card(1, story_activity_id: 1, story_task_id: 10, release_id: 100)]
+      cards = [card(1, story_activity_id: 1, story_step_id: 10, release_id: 100)]
 
       grid =
         StoryMapGrid.build(

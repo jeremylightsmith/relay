@@ -4,7 +4,7 @@ defmodule Schemas.StoryMapSchemasTest do
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
 
   describe "changesets" do
     test "StoryActivity requires a name and a position and never casts board_id" do
@@ -16,8 +16,8 @@ defmodule Schemas.StoryMapSchemasTest do
       assert get_field(changeset, :board_id) == nil
     end
 
-    test "StoryTask requires name, position and story_activity_id and never casts board_id" do
-      changeset = StoryTask.changeset(%StoryTask{}, %{board_id: 99})
+    test "StoryStep requires name, position and story_activity_id and never casts board_id" do
+      changeset = StoryStep.changeset(%StoryStep{}, %{board_id: 99})
 
       refute changeset.valid?
       assert "can't be blank" in errors_on(changeset).name
@@ -26,8 +26,8 @@ defmodule Schemas.StoryMapSchemasTest do
       assert get_field(changeset, :board_id) == nil
     end
 
-    test "StoryTask casts story_activity_id so a task can move between activities" do
-      changeset = StoryTask.changeset(%StoryTask{board_id: 1}, %{name: "Sign in", position: 1, story_activity_id: 7})
+    test "StoryStep casts story_activity_id so a step can move between activities" do
+      changeset = StoryStep.changeset(%StoryStep{board_id: 1}, %{name: "Sign in", position: 1, story_activity_id: 7})
 
       assert changeset.valid?
       assert get_field(changeset, :story_activity_id) == 7
@@ -52,53 +52,53 @@ defmodule Schemas.StoryMapSchemasTest do
       board = insert(:board)
       stage = insert(:stage, board: board)
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
+      step = insert(:story_step, story_activity: activity)
       release = insert(:release, board: board)
 
       card =
         insert(:card,
           stage: stage,
           story_activity_id: activity.id,
-          story_task_id: task.id,
+          story_step_id: step.id,
           release_id: release.id
         )
 
-      %{board: board, activity: activity, task: task, release: release, card: card}
+      %{board: board, activity: activity, step: step, release: release, card: card}
     end
 
-    test "deleting an activity deletes its tasks and unmaps the card, leaving release alone",
-         %{activity: activity, task: task, release: release, card: card} do
+    test "deleting an activity deletes its steps and unmaps the card, leaving release alone",
+         %{activity: activity, step: step, release: release, card: card} do
       Repo.delete!(activity)
 
       reloaded = Repo.get!(Card, card.id)
 
       assert reloaded.title == card.title
       assert reloaded.story_activity_id == nil
-      assert reloaded.story_task_id == nil
+      assert reloaded.story_step_id == nil
       assert reloaded.release_id == release.id
-      assert Repo.get(StoryTask, task.id) == nil
+      assert Repo.get(StoryStep, step.id) == nil
     end
 
-    test "deleting a task leaves the card in its activity's 'No task yet' column",
-         %{activity: activity, task: task, release: release, card: card} do
-      Repo.delete!(task)
+    test "deleting a step leaves the card in its activity's 'No step yet' column",
+         %{activity: activity, step: step, release: release, card: card} do
+      Repo.delete!(step)
 
       reloaded = Repo.get!(Card, card.id)
 
-      assert reloaded.story_task_id == nil
+      assert reloaded.story_step_id == nil
       assert reloaded.story_activity_id == activity.id
       assert reloaded.release_id == release.id
     end
 
     test "deleting a release only nilifies release_id",
-         %{activity: activity, task: task, release: release, card: card} do
+         %{activity: activity, step: step, release: release, card: card} do
       Repo.delete!(release)
 
       reloaded = Repo.get!(Card, card.id)
 
       assert reloaded.release_id == nil
       assert reloaded.story_activity_id == activity.id
-      assert reloaded.story_task_id == task.id
+      assert reloaded.story_step_id == step.id
     end
   end
 end

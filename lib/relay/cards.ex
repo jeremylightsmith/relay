@@ -59,7 +59,7 @@ defmodule Relay.Cards do
     # RE264 — the story map's placement, read straight off this list by
     # RelayWeb.StoryMapGrid.build/7. Without them every card comes back unplaced.
     :story_activity_id,
-    :story_task_id,
+    :story_step_id,
     :release_id,
     # RE262 — the card's order within its cell. Without it every cell falls back to board order.
     :story_map_position,
@@ -173,7 +173,7 @@ defmodule Relay.Cards do
   those heavy text bodies must fetch the full card via `get_card_by_ref/2`
   (the drawer already does). Every other column, the `owners: :user` and
   ordered `sub_tasks` preloads, and the `rejection` embed are populated.
-  That includes the three story-map columns (`story_activity_id`, `story_task_id`,
+  That includes the three story-map columns (`story_activity_id`, `story_step_id`,
   `release_id`), which `RelayWeb.StoryMapGrid` places the card by (RE264).
 
   `opts`:

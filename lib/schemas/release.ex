@@ -5,7 +5,7 @@ defmodule Schemas.Release do
 
   Every board is seeded with `seed_names/0` — MVP / Fast follow / Later — all fully editable
   afterwards. `board_id` is set programmatically, never cast. A card's `release_id` is
-  genuinely optional and independent of its activity/task: a card can be mapped to a cell
+  genuinely optional and independent of its activity/step: a card can be mapped to a cell
   with its release still undecided.
 
   Not to be confused with `Relay.Release`, the Phoenix release-task module — different

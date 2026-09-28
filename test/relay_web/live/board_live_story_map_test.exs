@@ -25,8 +25,8 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
     {:ok, onboard} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
     {:ok, plan} = StoryMap.create_activity(board, %{name: "Plan the backlog", position: 2})
-    {:ok, sign_in} = StoryMap.create_task(onboard, %{name: "Sign in", position: 1})
-    {:ok, organize} = StoryMap.create_task(plan, %{name: "Organize cards", position: 1})
+    {:ok, sign_in} = StoryMap.create_step(onboard, %{name: "Sign in", position: 1})
+    {:ok, organize} = StoryMap.create_step(plan, %{name: "Organize cards", position: 1})
     [mvp, fast_follow, later] = StoryMap.list_releases(board)
 
     {:ok, sso} = Cards.create_card(backlog, %{title: "Add SSO"})
@@ -35,10 +35,10 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     {:ok, limits} = Cards.create_card(backlog, %{title: "Rate limits"})
     {:ok, dashboards} = Cards.create_card(backlog, %{title: "Shared dashboards"})
 
-    {:ok, sso} = StoryMap.assign_card(sso, %{story_task_id: sign_in.id, release_id: mvp.id})
-    {:ok, bulk} = StoryMap.assign_card(bulk, %{story_task_id: organize.id, release_id: fast_follow.id})
+    {:ok, sso} = StoryMap.assign_card(sso, %{story_step_id: sign_in.id, release_id: mvp.id})
+    {:ok, bulk} = StoryMap.assign_card(bulk, %{story_step_id: organize.id, release_id: fast_follow.id})
     {:ok, audit} = StoryMap.assign_card(audit, %{story_activity_id: onboard.id, release_id: mvp.id})
-    {:ok, limits} = StoryMap.assign_card(limits, %{story_task_id: sign_in.id})
+    {:ok, limits} = StoryMap.assign_card(limits, %{story_step_id: sign_in.id})
 
     %{
       board: board,
@@ -234,7 +234,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       {:ok, _card} =
         StoryMap.assign_card(ctx.dashboards, %{
-          story_task_id: ctx.sign_in.id,
+          story_step_id: ctx.sign_in.id,
           release_id: ctx.mvp.id
         })
 
@@ -316,7 +316,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       placed = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.dashboards))
       assert placed.story_activity_id == ctx.onboard.id
-      assert placed.story_task_id == nil
+      assert placed.story_step_id == nil
       assert placed.release_id == ctx.mvp.id
     end
 
@@ -326,7 +326,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       {:ok, second} =
         StoryMap.assign_card(ctx.dashboards, %{
-          story_task_id: ctx.sign_in.id,
+          story_step_id: ctx.sign_in.id,
           release_id: ctx.mvp.id
         })
 
@@ -564,7 +564,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       tasks =
         ctx.board
-        |> StoryMap.list_tasks()
+        |> StoryMap.list_steps()
         |> Enum.filter(&(&1.story_activity_id == ctx.onboard.id))
 
       assert Enum.map(tasks, &{&1.name, &1.position}) == [
@@ -591,7 +591,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       submit_draft(view, "Watch it live")
 
       shipped_tasks =
-        ctx.board |> StoryMap.list_tasks() |> Enum.filter(&(&1.story_activity_id == shipped.id))
+        ctx.board |> StoryMap.list_steps() |> Enum.filter(&(&1.story_activity_id == shipped.id))
 
       assert [%{name: "Watch it live", position: 1}] = shipped_tasks
     end
@@ -602,7 +602,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       render_click(view, "story_map_add_task", %{"activity-id" => "999999"})
 
       refute has_element?(view, "#story-map-draft-input")
-      assert length(StoryMap.list_tasks(ctx.board)) == 2
+      assert length(StoryMap.list_steps(ctx.board)) == 2
     end
   end
 
@@ -682,7 +682,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       view |> element("#story-map-name-task-#{ctx.sign_in.id}") |> render_click()
       submit_rename(view, "task", ctx.sign_in.id, "Sign in with SSO")
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in with SSO"
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).name == "Sign in with SSO"
 
       view |> element("#story-map-name-release-#{ctx.mvp.id}") |> render_click()
       submit_rename(view, "release", ctx.mvp.id, "MVP 2")
@@ -696,7 +696,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       submit_rename(view, "task", ctx.sign_in.id, "   ")
 
       refute has_element?(view, "#story-map-rename-task-#{ctx.sign_in.id}")
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in"
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).name == "Sign in"
       refute has_element?(view, "#flash-error")
     end
 
@@ -707,7 +707,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       view |> element("#story-map-rename-task-#{ctx.sign_in.id}") |> render_keydown(%{"key" => "Escape"})
 
       refute has_element?(view, "#story-map-rename-task-#{ctx.sign_in.id}")
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).name == "Sign in"
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).name == "Sign in"
     end
 
     test "clicking away cancels, and blur is not bound at all", %{conn: conn} = ctx do
@@ -838,7 +838,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       view |> element(button) |> render_click()
 
-      assert Repo.get(Schemas.StoryTask, ctx.organize.id) == nil
+      assert Repo.get(Schemas.StoryStep, ctx.organize.id) == nil
       refute has_element?(view, "#story-map-task-#{ctx.organize.id}")
       # The card that moved out is still on the board, in the column it was dropped into.
       assert has_element?(
@@ -855,7 +855,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       # `bulk` sits in Fast follow, and a swimlane holding a card cannot be deleted — empty it
       # first (this is exactly the acceptance criterion's "emptying each one first").
-      {:ok, _} = StoryMap.assign_card(ctx.bulk, %{story_task_id: ctx.organize.id})
+      {:ok, _} = StoryMap.assign_card(ctx.bulk, %{story_step_id: ctx.organize.id})
       {:ok, _} = StoryMap.delete_release(fast_follow)
       {:ok, _} = StoryMap.delete_release(later)
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
@@ -921,7 +921,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
                "id" => to_string(ctx.organize.id)
              }) =~ "archived"
 
-      assert Repo.get(Schemas.StoryTask, ctx.organize.id)
+      assert Repo.get(Schemas.StoryStep, ctx.organize.id)
     end
   end
 
@@ -954,10 +954,10 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       reorder(view, "task", ctx.sign_in.id, "task", ctx.organize.id)
 
-      moved = Repo.get!(Schemas.StoryTask, ctx.sign_in.id)
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
       assert moved.story_activity_id == ctx.plan.id
       assert moved.position == 1
-      assert Repo.get!(Schemas.StoryTask, ctx.organize.id).position == 2
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 2
 
       # The cards came with it — and none landed in the tray.
       assert Repo.get!(Schemas.Card, ctx.sso.id).story_activity_id == ctx.plan.id
@@ -970,25 +970,25 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       reorder(view, "task", ctx.sign_in.id, "activity", ctx.plan.id)
 
-      moved = Repo.get!(Schemas.StoryTask, ctx.sign_in.id)
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
       assert moved.story_activity_id == ctx.plan.id
       assert moved.position == 2
-      assert Repo.get!(Schemas.StoryTask, ctx.organize.id).position == 1
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 1
     end
 
     test "task onto a task in its OWN activity is a pure renumber", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      {:ok, second} = StoryMap.create_task(ctx.onboard, %{name: "Reset password", position: 2})
+      {:ok, second} = StoryMap.create_step(ctx.onboard, %{name: "Reset password", position: 2})
       # Force the {:story_map_changed, _} refresh to land before the drop, so @story_tasks
       # actually holds the new column when the server computes the order.
       assert has_element?(view, "#story-map-task-#{second.id}")
 
       reorder(view, "task", second.id, "task", ctx.sign_in.id)
 
-      assert Repo.get!(Schemas.StoryTask, second.id).position == 1
-      assert Repo.get!(Schemas.StoryTask, second.id).story_activity_id == ctx.onboard.id
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).position == 2
+      assert Repo.get!(Schemas.StoryStep, second.id).position == 1
+      assert Repo.get!(Schemas.StoryStep, second.id).story_activity_id == ctx.onboard.id
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).position == 2
     end
 
     # Unlike an activity dropped on itself (below), the artboard's moveTask/4 does NOT no-op a
@@ -998,14 +998,14 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     test "dropping a task on itself moves it to the end of its own activity", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      {:ok, second} = StoryMap.create_task(ctx.onboard, %{name: "Reset password", position: 2})
+      {:ok, second} = StoryMap.create_step(ctx.onboard, %{name: "Reset password", position: 2})
       assert has_element?(view, "#story-map-task-#{second.id}")
 
       reorder(view, "task", ctx.sign_in.id, "task", ctx.sign_in.id)
 
-      assert Repo.get!(Schemas.StoryTask, second.id).position == 1
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).position == 2
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+      assert Repo.get!(Schemas.StoryStep, second.id).position == 1
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).position == 2
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).story_activity_id == ctx.onboard.id
     end
 
     test "release onto release reorders the swimlanes", %{conn: conn} = ctx do
@@ -1034,7 +1034,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       assert Enum.map(StoryMap.list_activities(ctx.board), & &1.id) == before_activities
       assert Enum.map(StoryMap.list_releases(ctx.board), & &1.id) == before_releases
-      assert Repo.get!(Schemas.StoryTask, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).story_activity_id == ctx.onboard.id
     end
 
     test "dropping a header on itself changes nothing", %{conn: conn} = ctx do
@@ -1164,7 +1164,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view, compose)
 
       assert created.stage_id == Boards.intake_stage(ctx.board).id
-      assert created.story_task_id == ctx.organize.id
+      assert created.story_step_id == ctx.organize.id
       assert created.release_id == ctx.mvp.id
     end
 
@@ -1188,7 +1188,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#{cell} ##{card_dom_id(ctx.board, created)}")
 
       assert created.story_activity_id == ctx.onboard.id
-      assert created.story_task_id == nil
+      assert created.story_step_id == nil
       assert created.release_id == ctx.mvp.id
     end
 
@@ -1383,7 +1383,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       view_a |> element("#story-map-add-task-#{ctx.onboard.id}") |> render_click()
 
       assert has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
-      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == false
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_steps"] == false
     end
   end
 
@@ -1401,7 +1401,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       })
 
       moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
-      assert moved.story_task_id == ctx.sign_in.id
+      assert moved.story_step_id == ctx.sign_in.id
       assert moved.story_activity_id == ctx.onboard.id
       assert moved.release_id == ctx.later.id
 
@@ -1425,7 +1425,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       })
 
       moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
-      assert moved.story_task_id == nil
+      assert moved.story_step_id == nil
       assert moved.story_activity_id == ctx.plan.id
       assert moved.release_id == ctx.mvp.id
 
@@ -1447,7 +1447,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       })
 
       moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.audit))
-      assert moved.story_task_id == nil
+      assert moved.story_step_id == nil
       assert moved.story_activity_id == ctx.onboard.id
       assert moved.release_id == ctx.later.id
     end
@@ -1464,7 +1464,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       })
 
       moved = Cards.get_card_by_ref(ctx.board, Cards.ref(ctx.board, ctx.sso))
-      assert moved.story_task_id == nil
+      assert moved.story_step_id == nil
       assert moved.story_activity_id == ctx.onboard.id
     end
   end
@@ -1669,7 +1669,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
       refute has_element?(view_b, "#story-map-task-#{ctx.sign_in.id}")
       assert has_element?(view_b, "#story-map-merged-#{ctx.onboard.id}")
-      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_tasks"] == true
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_steps"] == true
 
       {:ok, view_c, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
       refute has_element?(view_c, "#story-map-task-#{ctx.sign_in.id}")
@@ -1933,7 +1933,7 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       view_state = StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))
       assert view_state["collapsed"] == []
       assert view_state["focus"] == nil
-      assert view_state["hide_tasks"] == false
+      assert view_state["hide_steps"] == false
     end
 
     test "the narrowed view is SHARED — a collapse in one session lands in the other",

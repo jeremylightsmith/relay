@@ -24,15 +24,15 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
     a1 = insert(:story_activity, board: board, position: 1)
     a2 = insert(:story_activity, board: board, position: 2)
     a3 = insert(:story_activity, board: board, position: 3)
-    t1 = insert(:story_task, story_activity: a1, position: 1)
-    t2 = insert(:story_task, story_activity: a2, position: 1)
+    t1 = insert(:story_step, story_activity: a1, position: 1)
+    t2 = insert(:story_step, story_activity: a2, position: 1)
     r1 = insert(:release, board: board, position: 1)
     r2 = insert(:release, board: board, position: 2)
 
     # In R1 for real.
-    {:ok, _} = StoryMap.assign_card(insert(:card, board: board, stage: stage), %{story_task_id: t1.id, release_id: r1.id})
+    {:ok, _} = StoryMap.assign_card(insert(:card, board: board, stage: stage), %{story_step_id: t1.id, release_id: r1.id})
     # A STRAY: mapped, no release — the grid parks it on the LAST lane (R2), the server does not.
-    {:ok, _} = StoryMap.assign_card(insert(:card, board: board, stage: stage), %{story_task_id: t1.id})
+    {:ok, _} = StoryMap.assign_card(insert(:card, board: board, stage: stage), %{story_step_id: t1.id})
     # Archived: invisible to Cards.list_cards/1, and must be invisible to the guard too.
     archived = insert(:card, board: board, stage: stage)
     {:ok, archived} = StoryMap.assign_card(archived, %{story_activity_id: a3.id, release_id: r2.id})
@@ -41,7 +41,7 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
     grid =
       StoryMapGrid.build(
         StoryMap.list_activities(board),
-        StoryMap.list_tasks(board),
+        StoryMap.list_steps(board),
         StoryMap.list_releases(board),
         Cards.list_cards(board)
       )
@@ -62,7 +62,7 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
 
   test "everything the grid counts 0 for — an ENABLED ✕ — the server actually deletes", ctx do
     assert column_count(ctx.grid, ctx.t2.id) == 0
-    assert {:ok, _} = StoryMap.delete_task(ctx.t2)
+    assert {:ok, _} = StoryMap.delete_step(ctx.t2)
 
     assert band_count(ctx.grid, ctx.a2.id) == 0
     assert {:ok, _} = StoryMap.delete_activity(ctx.a2)
@@ -77,7 +77,7 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
     assert {:error, :not_empty} = StoryMap.delete_activity(ctx.a1)
 
     assert column_count(ctx.grid, ctx.t1.id) > 0
-    assert {:error, :not_empty} = StoryMap.delete_task(ctx.t1)
+    assert {:error, :not_empty} = StoryMap.delete_step(ctx.t1)
   end
 
   test "releases are the only gap, and it leans the SAFE way", ctx do

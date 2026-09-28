@@ -106,13 +106,13 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
   test "the story map drawer hands focus back to its card on close, with card nav still off", ctx do
     {:ok, board} = Boards.create_board(ctx.user, %{name: "Focus map"})
     {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
-    {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+    {:ok, task} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
     [mvp | _later] = StoryMap.list_releases(board)
 
     board = Boards.get_board!(ctx.user, board.slug)
     [backlog | _rest] = board.stages
     {:ok, card} = Cards.create_card(backlog, %{title: "Add SSO"})
-    {:ok, _placed} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: mvp.id})
+    {:ok, _placed} = StoryMap.assign_card(card, %{story_step_id: task.id, release_id: mvp.id})
     ref = Cards.ref(board, card)
 
     ctx.conn

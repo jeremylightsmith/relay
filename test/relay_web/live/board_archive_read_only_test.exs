@@ -157,7 +157,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
     # only outcome is a "(read-only)" flash, the way the board hides its own add-work button.
     test "the story map renders no inline add button", %{conn: conn, board: board} do
       {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
-      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      {:ok, task} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
       [release | _rest] = StoryMap.list_releases(board)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")

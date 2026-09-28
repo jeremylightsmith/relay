@@ -95,7 +95,7 @@ defmodule RelayWeb.Browser.StoryMapCreateTest do
              "Report & share"
            ]
 
-    assert Enum.map(StoryMap.list_tasks(board), & &1.name) == ["Watch it live", "Run big changes"]
+    assert Enum.map(StoryMap.list_steps(board), & &1.name) == ["Watch it live", "Run big changes"]
     assert List.last(StoryMap.list_releases(board)).name == "Someday"
   end
 

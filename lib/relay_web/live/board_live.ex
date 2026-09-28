@@ -985,7 +985,7 @@ defmodule RelayWeb.BoardLive do
       # is no stale-assign branch to get wrong. `story_map_cards` is the SAME list this mount
       # already loaded — no extra query.
       |> assign(:story_activities, StoryMap.list_activities(board))
-      |> assign(:story_tasks, StoryMap.list_tasks(board))
+      |> assign(:story_tasks, StoryMap.list_steps(board))
       |> assign(:releases, StoryMap.list_releases(board))
       |> assign(:story_map_cards, cards)
       # RE257 — the map's view settings are SHARED, board-wide, not per-socket assigns: every
@@ -1907,7 +1907,7 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("toggle_story_map_hide_tasks", _params, socket) do
-    log_view_write(StoryMap.toggle_view(socket.assigns.board, "hide_tasks"), "hide_tasks")
+    log_view_write(StoryMap.toggle_view(socket.assigns.board, "hide_steps"), "hide_steps")
     {:noreply, socket}
   end
 
@@ -3367,7 +3367,7 @@ defmodule RelayWeb.BoardLive do
 
   # RE260 — a merged (Hide tasks) column names an ACTIVITY, not a task, and
   # StoryMap.resolve_placement/2 is total: passing the decoded `%{story_activity_id: _}` straight
-  # through would write `story_task_id: nil`. So a user who hides tasks and drags a card one lane
+  # through would write `story_step_id: nil`. So a user who hides tasks and drags a card one lane
   # down to change its RELEASE would silently lose the card's task — data loss from a gesture
   # that looks purely vertical. The artboard does exactly that (`onDropCell(e, (col.merged ||
   # col.noTask) ? null : …)`, line ~530) and gets away with it because the mock persists nothing.
@@ -3377,15 +3377,15 @@ defmodule RelayWeb.BoardLive do
   # different key and still clears — that is the point of that column.
   defp merged_drop_attrs(placement, column, card, tasks) do
     if StoryMapGrid.merged_column?(column) and keeps_task?(card, placement, tasks) do
-      placement |> Map.delete(:story_activity_id) |> Map.put(:story_task_id, card.story_task_id)
+      placement |> Map.delete(:story_activity_id) |> Map.put(:story_step_id, card.story_step_id)
     else
       placement
     end
   end
 
-  defp keeps_task?(%Card{story_task_id: nil}, _placement, _tasks), do: false
+  defp keeps_task?(%Card{story_step_id: nil}, _placement, _tasks), do: false
 
-  defp keeps_task?(%Card{story_task_id: task_id}, %{story_activity_id: activity_id}, tasks) do
+  defp keeps_task?(%Card{story_step_id: task_id}, %{story_activity_id: activity_id}, tasks) do
     Enum.any?(tasks, &(&1.id == task_id and &1.story_activity_id == activity_id))
   end
 
@@ -3847,7 +3847,7 @@ defmodule RelayWeb.BoardLive do
 
     socket
     |> assign(:story_activities, StoryMap.list_activities(board))
-    |> assign(:story_tasks, StoryMap.list_tasks(board))
+    |> assign(:story_tasks, StoryMap.list_steps(board))
     |> assign(:releases, StoryMap.list_releases(board))
     |> assign(:story_map_cards, Cards.list_cards(board))
   end
@@ -3886,12 +3886,12 @@ defmodule RelayWeb.BoardLive do
   # `merge_view/2` so the three keys land together.
   defp show_tasks_for_draft(socket, {:task, activity_id}) do
     changes = %{
-      "hide_tasks" => false,
+      "hide_steps" => false,
       "collapsed" => List.delete(socket.assigns.story_map_collapsed, activity_id),
       "focus" => focus_after_add_task(socket.assigns.story_map_focus, activity_id)
     }
 
-    log_view_write(StoryMap.merge_view(socket.assigns.board, changes), "hide_tasks")
+    log_view_write(StoryMap.merge_view(socket.assigns.board, changes), "hide_steps")
     socket
   end
 
@@ -3909,7 +3909,7 @@ defmodule RelayWeb.BoardLive do
     socket
     |> assign(:story_map_tray_open, view["tray_open"])
     |> assign(:story_map_zoom, zoom_from_view(view))
-    |> assign(:story_map_hide_tasks, view["hide_tasks"] == true)
+    |> assign(:story_map_hide_tasks, view["hide_steps"] == true)
     |> assign(:story_map_owner_filter, List.wrap(view["owner_filter"]))
     |> assign(:story_map_needs_filter, view["needs_input_filter"] == true)
     |> assign(:story_map_collapsed, List.wrap(view["collapsed"]))
@@ -3987,7 +3987,7 @@ defmodule RelayWeb.BoardLive do
           |> Enum.filter(&(&1.story_activity_id == activity_id))
           |> StoryMap.next_position()
 
-        after_story_map_create(socket, StoryMap.create_task(activity, %{name: name, position: position}))
+        after_story_map_create(socket, StoryMap.create_step(activity, %{name: name, position: position}))
     end
   end
 
@@ -4070,11 +4070,11 @@ defmodule RelayWeb.BoardLive do
   end
 
   defp rename_structure(:activity, record, name), do: StoryMap.update_activity(record, %{name: name})
-  defp rename_structure(:task, record, name), do: StoryMap.update_task(record, %{name: name})
+  defp rename_structure(:task, record, name), do: StoryMap.update_step(record, %{name: name})
   defp rename_structure(:release, record, name), do: StoryMap.update_release(record, %{name: name})
 
   defp delete_structure(:activity, record), do: StoryMap.delete_activity(record)
-  defp delete_structure(:task, record), do: StoryMap.delete_task(record)
+  defp delete_structure(:task, record), do: StoryMap.delete_step(record)
   defp delete_structure(:release, record), do: StoryMap.delete_release(record)
 
   # A stale :story_map_edit pointing at a just-deleted record simply matches nothing when the
@@ -4105,7 +4105,7 @@ defmodule RelayWeb.BoardLive do
   defp apply_story_map_reorder(socket, {:task, %{id: id} = dragged}, {:task, %{id: id}}) do
     ids = Enum.reject(story_map_task_ids(socket, dragged.story_activity_id), &(&1 == id)) ++ [id]
 
-    _ = StoryMap.move_task(dragged, dragged.story_activity_id, ids)
+    _ = StoryMap.move_step(dragged, dragged.story_activity_id, ids)
     socket
   end
 
@@ -4121,7 +4121,7 @@ defmodule RelayWeb.BoardLive do
         target.id
       )
 
-    _ = StoryMap.move_task(dragged, target.story_activity_id, ids)
+    _ = StoryMap.move_step(dragged, target.story_activity_id, ids)
     socket
   end
 
@@ -4130,7 +4130,7 @@ defmodule RelayWeb.BoardLive do
   defp apply_story_map_reorder(socket, {:task, dragged}, {:activity, target}) do
     ids = Enum.reject(story_map_task_ids(socket, target.id), &(&1 == dragged.id)) ++ [dragged.id]
 
-    _ = StoryMap.move_task(dragged, target.id, ids)
+    _ = StoryMap.move_step(dragged, target.id, ids)
     socket
   end
 

@@ -10,12 +10,12 @@ defmodule RelayWeb.StoryMapGridTest do
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
 
   defp activity(id, position), do: %StoryActivity{id: id, board_id: 1, name: "Activity #{id}", position: position}
 
   defp task(id, activity_id, position),
-    do: %StoryTask{id: id, board_id: 1, story_activity_id: activity_id, name: "Task #{id}", position: position}
+    do: %StoryStep{id: id, board_id: 1, story_activity_id: activity_id, name: "Task #{id}", position: position}
 
   defp release(id, position), do: %Release{id: id, board_id: 1, name: "Release #{id}", position: position}
 
@@ -28,7 +28,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1)],
           [task(10, 1, 1)],
           [release(100, 1), release(200, 2)],
-          [card(5, story_activity_id: 1, story_task_id: 10, release_id: 100)]
+          [card(5, story_activity_id: 1, story_step_id: 10, release_id: 100)]
         )
 
       assert Map.keys(grid.cells) == [{"t:10", "r:100"}]
@@ -60,7 +60,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1)],
           [task(10, 1, 1)],
           [release(100, 1)],
-          [card(5, story_activity_id: 1, story_task_id: 10, release_id: 100)]
+          [card(5, story_activity_id: 1, story_step_id: 10, release_id: 100)]
         )
 
       assert Enum.map(grid.columns, & &1.key) == ["t:10"]
@@ -81,7 +81,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1), activity(2, 2)],
           [task(20, 2, 1)],
           [release(100, 1)],
-          [card(5, story_activity_id: 1, story_task_id: 20, release_id: 100)]
+          [card(5, story_activity_id: 1, story_step_id: 20, release_id: 100)]
         )
 
       assert [%Card{id: 5}] = grid.cells[{"t:20", "r:100"}]
@@ -96,8 +96,8 @@ defmodule RelayWeb.StoryMapGridTest do
           [release(100, 1)],
           [
             card(5, story_activity_id: 1, release_id: 100),
-            card(6, story_activity_id: 1, story_task_id: 11, release_id: 100),
-            card(7, story_activity_id: 2, story_task_id: 20, release_id: 100)
+            card(6, story_activity_id: 1, story_step_id: 11, release_id: 100),
+            card(7, story_activity_id: 2, story_step_id: 20, release_id: 100)
           ]
         )
 
@@ -139,7 +139,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1)],
           [task(10, 1, 1)],
           [release(100, 1), release(200, 2), release(300, 3)],
-          [card(5, story_activity_id: 1, story_task_id: 10)]
+          [card(5, story_activity_id: 1, story_step_id: 10)]
         )
 
       assert [%Card{id: 5}] = grid.cells[{"t:10", "r:300"}]
@@ -154,7 +154,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1)],
           [task(10, 1, 1)],
           reordered,
-          [card(5, story_activity_id: 1, story_task_id: 10)]
+          [card(5, story_activity_id: 1, story_step_id: 10)]
         )
 
       assert Enum.map(grid.lanes, & &1.key) == ["r:300", "r:100", "r:200"]
@@ -167,7 +167,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [activity(1, 1)],
           [task(10, 1, 1)],
           [release(100, 1), release(200, 2)],
-          [card(5, story_activity_id: 1, story_task_id: 10, release_id: 999)]
+          [card(5, story_activity_id: 1, story_step_id: 10, release_id: 999)]
         )
 
       assert [%Card{id: 5}] = grid.cells[{"t:10", "r:200"}]
@@ -180,8 +180,8 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1)],
           [],
           [
-            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(6, story_activity_id: 1, story_task_id: 10)
+            card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(6, story_activity_id: 1, story_step_id: 10)
           ]
         )
 
@@ -199,9 +199,9 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1)],
           [release(100, 1)],
           [
-            card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
             card(2),
-            card(3, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(3, story_activity_id: 1, story_step_id: 10, release_id: 100),
             card(4)
           ]
         )
@@ -216,12 +216,12 @@ defmodule RelayWeb.StoryMapGridTest do
       releases = [release(100, 1), release(200, 2)]
 
       cards = [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
-        card(2, story_activity_id: 1, story_task_id: 11),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
+        card(2, story_activity_id: 1, story_step_id: 11),
         card(3, story_activity_id: 1, release_id: 200),
-        card(4, story_activity_id: 2, story_task_id: 20, release_id: 999),
+        card(4, story_activity_id: 2, story_step_id: 20, release_id: 999),
         card(5, story_activity_id: 3),
-        card(6, story_activity_id: 3, story_task_id: 10, release_id: 100),
+        card(6, story_activity_id: 3, story_step_id: 10, release_id: 100),
         card(7, release_id: 100),
         card(8),
         card(9, story_activity_id: 42, release_id: 200)
@@ -324,7 +324,7 @@ defmodule RelayWeb.StoryMapGridTest do
 
     test "the draft column gets no cells, and the invariant still holds with a draft open" do
       cards = [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100),
         card(3, release_id: 100)
       ]
@@ -354,9 +354,9 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1)],
           [release(100, 1)],
           [
-            card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(2, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 2),
-            card(3, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 1)
+            card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(2, story_activity_id: 1, story_step_id: 10, release_id: 100, story_map_position: 2),
+            card(3, story_activity_id: 1, story_step_id: 10, release_id: 100, story_map_position: 1)
           ]
         )
 
@@ -370,9 +370,9 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1)],
           [release(100, 1)],
           [
-            card(7, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(8, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(9, story_activity_id: 1, story_task_id: 10, release_id: 100, story_map_position: 5)
+            card(7, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(8, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(9, story_activity_id: 1, story_step_id: 10, release_id: 100, story_map_position: 5)
           ]
         )
 
@@ -394,7 +394,7 @@ defmodule RelayWeb.StoryMapGridTest do
 
   describe "decode_placement/2 — the key format, parsed where it is defined" do
     test "a task column plus a release lane" do
-      assert StoryMapGrid.decode_placement("t:7", "r:2") == {:ok, %{story_task_id: 7, release_id: 2}}
+      assert StoryMapGrid.decode_placement("t:7", "r:2") == {:ok, %{story_step_id: 7, release_id: 2}}
     end
 
     test "a No task yet column carries the activity, never a task" do
@@ -453,9 +453,9 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1), task(11, 1, 2)],
           [release(100, 1), release(200, 2)],
           [
-            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(6, story_activity_id: 1, story_task_id: 10, release_id: 200),
-            card(7, story_activity_id: 1, story_task_id: 11, release_id: 100)
+            card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(6, story_activity_id: 1, story_step_id: 10, release_id: 200),
+            card(7, story_activity_id: 1, story_step_id: 11, release_id: 100)
           ]
         )
 
@@ -482,8 +482,8 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1), task(20, 2, 1)],
           [release(100, 1)],
           [
-            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(6, story_activity_id: 2, story_task_id: 20, release_id: 100)
+            card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(6, story_activity_id: 2, story_step_id: 20, release_id: 100)
           ],
           {:task, 1}
         )
@@ -501,7 +501,7 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1)],
           [release(100, 1)],
           [
-            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+            card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
             card(6, story_activity_id: 99, release_id: 100),
             card(7)
           ]
@@ -546,8 +546,8 @@ defmodule RelayWeb.StoryMapGridTest do
           [task(10, 1, 1), task(11, 1, 2)],
           [release(100, 1)],
           [
-            card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
-            card(6, story_activity_id: 1, story_task_id: 11, release_id: 100),
+            card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
+            card(6, story_activity_id: 1, story_step_id: 11, release_id: 100),
             card(7, story_activity_id: 1, release_id: 100)
           ],
           nil,
@@ -562,7 +562,7 @@ defmodule RelayWeb.StoryMapGridTest do
 
     test "the no-card-can-disappear invariant and total still hold while merged" do
       cards = [
-        card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(6, story_activity_id: 2, release_id: 200),
         card(7, story_activity_id: 1),
         card(8, release_id: 100),
@@ -623,9 +623,9 @@ defmodule RelayWeb.StoryMapGridTest do
         [task(10, 1, 1), task(20, 2, 1)],
         [release(100, 1)],
         [
-          card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+          card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
           card(6, story_activity_id: 1, release_id: 100),
-          card(7, story_activity_id: 2, story_task_id: 20, release_id: 100),
+          card(7, story_activity_id: 2, story_step_id: 20, release_id: 100),
           card(8)
         ],
         nil,
@@ -674,7 +674,7 @@ defmodule RelayWeb.StoryMapGridTest do
           activities,
           [task(10, 1, 1)],
           [release(100, 1)],
-          [card(5, story_activity_id: 1, story_task_id: 10, release_id: 100)],
+          [card(5, story_activity_id: 1, story_step_id: 10, release_id: 100)],
           nil,
           true,
           StoryMapGrid.collapsed_set(activities, [1], nil)
@@ -720,9 +720,9 @@ defmodule RelayWeb.StoryMapGridTest do
                  [task(10, 1, 1), task(20, 2, 1)],
                  [release(100, 1)],
                  [
-                   card(5, story_activity_id: 1, story_task_id: 10, release_id: 100),
+                   card(5, story_activity_id: 1, story_step_id: 10, release_id: 100),
                    card(6, story_activity_id: 1, release_id: 100),
-                   card(7, story_activity_id: 2, story_task_id: 20, release_id: 100),
+                   card(7, story_activity_id: 2, story_step_id: 20, release_id: 100),
                    card(8)
                  ]
                )

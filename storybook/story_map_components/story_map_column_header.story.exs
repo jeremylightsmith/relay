@@ -40,7 +40,7 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
       %{
         key: "t:10",
         activity: %Schemas.StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1},
-        task: %Schemas.StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1},
+        task: %Schemas.StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1},
         no_task?: false,
         bare?: false,
         draft?: false,

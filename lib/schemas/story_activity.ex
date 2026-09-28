@@ -6,7 +6,7 @@ defmodule Schemas.StoryActivity do
 
   Named `StoryActivity`, not `Activity`, because `Schemas.Activity` is already the card
   activity log. `board_id` is set programmatically from the board, never cast from input.
-  Deleting an activity deletes its `Schemas.StoryTask`s (`on_delete: :delete_all`) and
+  Deleting an activity deletes its `Schemas.StoryStep`s (`on_delete: :delete_all`) and
   nilifies `cards.story_activity_id` (`on_delete: :nilify_all`) — structure deletes unmap
   cards, they never delete them.
   """
@@ -20,7 +20,7 @@ defmodule Schemas.StoryActivity do
     field :position, :integer
 
     belongs_to :board, Schemas.Board
-    has_many :story_tasks, Schemas.StoryTask
+    has_many :story_steps, Schemas.StoryStep
 
     timestamps(type: :utc_datetime)
   end
@@ -42,7 +42,7 @@ defmodule Schemas.StoryActivity do
   end
 
   @doc """
-  The cap on a user-typed story-map name — the ONE definition, shared by `Schemas.StoryTask`
+  The cap on a user-typed story-map name — the ONE definition, shared by `Schemas.StoryStep`
   and `Schemas.Release`. Matches `Schemas.Board`'s own name cap and stays well under the
   `varchar(255)` column.
   """
