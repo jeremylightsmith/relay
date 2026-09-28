@@ -96,6 +96,18 @@ defmodule Relay.CardsTasksTest do
     end
   end
 
+  describe "task_count/1" do
+    test "counts the card's tasks and nobody else's (RE357)", %{stage: stage, card: card} do
+      other = insert(:card, stage: stage)
+      assert Cards.task_count(card) == 0
+
+      {:ok, _} = Cards.add_tasks(card, [%{title: "A"}, %{title: "B"}])
+      {:ok, _} = Cards.add_tasks(other, [%{title: "C"}])
+
+      assert Cards.task_count(card) == 2
+    end
+  end
+
   describe "update_task/3" do
     test "changes only title/body on that one row and cannot flip done or move it", %{card: card} do
       [a, b] = add!(card, ["A", "B"])

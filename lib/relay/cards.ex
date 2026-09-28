@@ -618,6 +618,11 @@ defmodule Relay.Cards do
     Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: st.position)
   end
 
+  @doc "How many tasks (`sub_tasks` rows) `card` has — a count query, no bodies loaded."
+  def task_count(%Card{id: card_id}) do
+    Repo.aggregate(from(st in SubTask, where: st.card_id == ^card_id), :count)
+  end
+
   @doc """
   One of `card`'s tasks by id: `{:ok, %SubTask{}}`, or `{:error, :not_found}` when the id is
   not one of `card`'s rows (another card's task included).

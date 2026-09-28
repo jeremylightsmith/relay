@@ -6,6 +6,9 @@ defmodule Relay.Runs.RunServerTest do
   alias Schemas.NodeExecution
   alias Schemas.SubTask
 
+  # Seeds foreach runs through the legacy plan-parse fallback, which logs a deprecation (RE357).
+  @moduletag :capture_log
+
   setup do
     # Supervisor started FIRST, before any card/run exists: its boot-time `resume_all/0`
     # reconciliation task queries `:running` runs exactly once, asynchronously. Starting it

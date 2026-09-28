@@ -137,15 +137,17 @@ or `gate` node's evidence is its own `run` string. A file doctor cannot locate (
 | `spec` | `relay spec` |
 | `acceptance_criteria` | `relay criteria` |
 | `plan` | `relay plan` |
-| `sub_tasks` | `relay sub-tasks` |
+| `sub_tasks` | `relay tasks add` (legacy: `relay sub-tasks`) |
 | `branch` | `relay branch` |
 | `pr_url` | `relay pr` |
 | `ai_result` | `relay result` |
 
-**Read evidence is card-level, not per-field.** `relay card <ref>` (in any form) shows the node
-reads the card, but not *which* field it uses. Say so in the report rather than claiming
-precision you don't have: a node with any `reads` declared is confirmed by a single `relay card`
-occurrence.
+**Read evidence is card-level, not per-field — with one exception.** `relay card <ref>` (in any
+form) shows the node reads the card, but not *which* field it uses. Say so in the report rather
+than claiming precision you don't have: a node with any `reads` declared is confirmed by a single
+`relay card` occurrence. The exception is `sub_tasks`: a card's task bodies are not in
+`relay card`, so `relay task show` or `relay tasks list` is the **read** evidence for `sub_tasks`
+(and also confirms the node reads the card).
 
 ## Board health (the audit)
 

@@ -1,6 +1,8 @@
 defmodule Relay.RunsTest do
   use Relay.DataCase, async: true
 
+  import ExUnit.CaptureLog
+
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
   alias Schemas.Card
@@ -8,6 +10,9 @@ defmodule Relay.RunsTest do
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.SubTask
+
+  # Seeds foreach runs through the legacy plan-parse fallback, which logs a deprecation (RE357).
+  @moduletag :capture_log
 
   setup do
     FakeDispatcher.register(self())
@@ -1136,7 +1141,80 @@ defmodule Relay.RunsTest do
     %{board: board, flow: flow, card: card}
   end
 
+  defp question_on(card) do
+    [body] =
+      for %Schemas.Comment{kind: :question, body: body} <- Relay.Activity.list_timeline(Repo.get!(Card, card.id)),
+          do: body
+
+    body
+  end
+
   describe "foreach: the engine owns the task list (W13)" do
+    test "a foreach job's vars carry {sub_task_id}, the bound task's id (RE357)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+
+      capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
+
+      run = Repo.one!(from r in Run, where: r.card_id == ^card.id)
+      alpha = Repo.one!(from st in SubTask, where: st.card_id == ^card.id and st.title == "Alpha")
+      vars = Runs.active_job(run).payload["vars"]
+
+      assert vars["sub_task_id"] == alpha.id
+
+      # The runner's render/2 substitutes every var as str(value); mirror it to prove the
+      # placeholder resolves to the id, as a string.
+      rendered =
+        Enum.reduce(vars, "./relay task show {ref} {sub_task_id}", fn {k, v}, acc ->
+          if is_nil(v), do: acc, else: String.replace(acc, "{#{k}}", to_string(v))
+        end)
+
+      assert rendered == "./relay task show #{vars["ref"]} #{alpha.id}"
+    end
+
+    test "the legacy plan-parse fallback still seeds, and logs a deprecation (RE357)" do
+      %{board: board, flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+
+      log = capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
+
+      assert ["Alpha"] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, select: st.title)
+      assert log =~ "deprecated"
+      assert log =~ "relay tasks add"
+      assert log =~ "/relay-doctor"
+      assert log =~ Relay.Cards.ref(board, card)
+      assert log =~ flow.key
+    end
+
+    test "a card with pre-written tasks never parses the plan and logs no deprecation (RE357)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "# Goal\n\nHeader only.\n")
+      {:ok, _tasks} = Relay.Cards.add_tasks(card, [%{title: "Alpha", body: "Do alpha."}])
+
+      log = capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
+
+      refute log =~ "deprecated"
+    end
+
+    test "the no-tasks block names the fix when a plan is present (RE357)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "# Just prose\n\nNo tasks in here.")
+
+      assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
+
+      question = question_on(card)
+      assert question =~ "relay tasks add"
+      assert question =~ "/relay-doctor"
+      assert question =~ "`## Task N:` headings"
+    end
+
+    test "the no-tasks block names the fix when the plan is blank (RE357)" do
+      %{flow: flow, card: card} = setup_foreach(plan: nil)
+
+      assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
+
+      question = question_on(card)
+      assert question =~ "no plan"
+      assert question =~ "relay tasks add"
+      assert question =~ "/relay-doctor"
+    end
+
     test "start_run parses the card's plan into sub_tasks" do
       %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
 

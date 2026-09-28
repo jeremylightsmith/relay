@@ -54,6 +54,19 @@ defmodule Relay.TalkTest do
     assert Enum.any?(session.seed_fields, &(&1["label"] == "plan"))
   end
 
+  test "a header-only plan counts the card's tasks, not its headings (RE357)", ctx do
+    card =
+      insert(:card,
+        board: ctx.board,
+        stage: ctx.stage,
+        plan: "# Goal\n\nShip it.\n\n## Verification\n- Gate: `mix precommit`\n"
+      )
+
+    for title <- ~w(A B C), do: insert(:sub_task, card: card, title: title)
+
+    assert Talk.session_for_card(card).seed_summary =~ "plan 3 steps"
+  end
+
   # RE268 whole-branch review — the drawer hands `session_for_card/1` the LIGHT card
   # (`Cards.get_card_light_by_ref/2`) until its async body fill lands, and the light projection
   # nils exactly the four heavy fields `build_seed/1` reads. Pressing `t` in that window used to

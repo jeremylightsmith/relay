@@ -26,6 +26,9 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   alias Schemas.NodeJob
   alias Schemas.SubTask
 
+  # Seeds foreach runs through the legacy plan-parse fallback, which logs a deprecation (RE357).
+  @moduletag :capture_log
+
   @runner_name "code-e2e-runner"
   @capacity %{"shared_clean" => 0, "exclusive" => 1}
 

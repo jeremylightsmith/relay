@@ -445,7 +445,7 @@ defmodule Relay.Talk do
       )
 
     runs = Runs.list_runs(card)
-    steps = Runs.plan_task_count(card.plan)
+    steps = plan_steps(card)
 
     summary =
       [
@@ -465,6 +465,15 @@ defmodule Relay.Talk do
         ]
 
     %{summary: summary, fields: rows}
+  end
+
+  # RE357: a planned card's steps are its tasks — its plan is only a header now. A legacy card
+  # with no tasks still counts the `## Task N:` headings of its monolithic plan.
+  defp plan_steps(card) do
+    case Cards.task_count(card) do
+      0 -> Runs.plan_task_count(card.plan)
+      count -> count
+    end
   end
 
   # The seed line is the first thing a person reads in the pane, so "1 fields" is a small lie in

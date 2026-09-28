@@ -172,7 +172,7 @@ class ClaimContractKeysTest(unittest.TestCase):
 
     TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars"}
-    VARS = {"ref", "branch", "prior_detail", "findings", "sub_task"}
+    VARS = {"ref", "branch", "prior_detail", "findings", "sub_task", "sub_task_id"}
 
     def test_every_claim_case_has_exactly_the_keys_the_runner_reads(self):
         for case, payload in CONTRACT["claim"].items():

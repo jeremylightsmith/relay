@@ -187,7 +187,7 @@ defmodule Relay.FlowsSeedTest do
 
     write_plan = Enum.find(Flows.get_flow(ctx.board, "plan").nodes, &(&1.key == "write_plan"))
     assert write_plan.reads == [:spec, :acceptance_criteria]
-    assert write_plan.writes == [:plan]
+    assert write_plan.writes == [:plan, :sub_tasks]
 
     code = Flows.get_flow(ctx.board, "code")
     assert Enum.find(code.nodes, &(&1.key == "branch")).writes == [:branch]
