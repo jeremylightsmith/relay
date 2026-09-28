@@ -9289,6 +9289,152 @@ class TalkOutcomeTest(unittest.TestCase):
         self.assertEqual(self.posted[0][2]["status"], "stopped")
 
 
+class TaskCommandsTest(unittest.TestCase):
+    """RE355 — relay tasks add|list, relay task show|update|rm: the request each verb sends and
+    what it prints. Every fake response is taken from the contract fixture's `tasks` section,
+    which RunnerContractTest records off the real routes — never a hand-typed dict."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        t = CONTRACT["tasks"]
+        responses = {
+            ("POST", True): t["create_response"],
+            ("GET", True): t["list_response"],
+            ("GET", False): t["show_response"],
+            ("PATCH", False): t["update_response"],
+            ("DELETE", False): t["delete_response"],
+        }
+
+        def fake(method, path, body=None, **k):
+            self.sent.append((method, path, body))
+            return copy.deepcopy(responses[(method, path.endswith("/tasks"))])
+
+        relay.api = fake
+
+    def _run(self, argv):
+        args = relay.build_parser().parse_args(argv)
+        return capture(args.func, args)
+
+    def _file(self, text):
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(text)
+        self.addCleanup(os.unlink, f.name)
+        return "@" + f.name
+
+    @staticmethod
+    def _line(t):
+        return f"[{'x' if t['done'] else ' '}] #{t['id']}  {t['title']}"
+
+    def test_tasks_add_sends_one_post_with_every_pair_in_argument_order(self):
+        fenced = 'Run it:\n\n```elixir\nIO.puts("hi")\n```\nSay "quoted" \\ back.\n'
+        self._run(["tasks", "add", "RE1",
+                   "--task", "One", self._file(fenced),
+                   "--task", "Two", "two body",
+                   "--task", "Three", self._file("third\n")])
+        self.assertEqual(self.sent, [("POST", "/api/cards/RE1/tasks", {"tasks": [
+            {"title": "One", "body": fenced},
+            {"title": "Two", "body": "two body"},
+            {"title": "Three", "body": "third\n"},
+        ]})])
+
+    def test_tasks_add_sends_the_contract_request_key_set(self):
+        self._run(["tasks", "add", "RE1", "--task", "One", "x"])
+        self.assertEqual(set(self.sent[0][2]), set(CONTRACT["tasks"]["create_request"]))
+        self.assertEqual(set(self.sent[0][2]["tasks"][0]),
+                         set(CONTRACT["tasks"]["create_request"]["tasks"][0]))
+
+    def test_tasks_add_prints_one_line_per_created_task(self):
+        out = self._run(["tasks", "add", "RE1", "--task", "One", "x"])
+        created = CONTRACT["tasks"]["create_response"]["data"]
+        self.assertEqual(out.splitlines(), [f"#{t['id']}  {t['title']}" for t in created])
+
+    def test_tasks_add_refuses_two_stdin_bodies_before_any_request(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self._run(["tasks", "add", "RE1", "--task", "A", "-", "--task", "B", "-"])
+        self.assertEqual(self.sent, [])
+
+    def test_tasks_add_needs_at_least_one_task(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            relay.build_parser().parse_args(["tasks", "add", "RE1"])
+
+    def test_tasks_list_gets_the_collection_and_prints_one_line_per_task(self):
+        listed = CONTRACT["tasks"]["list_response"]["data"]
+        out = self._run(["tasks", "list", "RE1"])
+        self.assertEqual(self.sent, [("GET", "/api/cards/RE1/tasks", None)])
+        self.assertEqual(out.splitlines(), [self._line(t) for t in listed])
+
+    def test_tasks_list_never_prints_a_body_even_if_the_server_sent_one(self):
+        leaked = copy.deepcopy(CONTRACT["tasks"]["show_response"]["data"])
+        relay.api = lambda method, path, body=None, **k: {"data": [leaked]}
+        out = self._run(["tasks", "list", "RE1"])
+        self.assertEqual(out.splitlines(), [self._line(leaked)])
+        self.assertNotIn(leaked["body"].splitlines()[0], out)
+
+    def test_the_contract_list_shape_carries_no_body_and_show_does(self):
+        for t in CONTRACT["tasks"]["list_response"]["data"]:
+            self.assertEqual(set(t), {"id", "title", "done", "position"})
+        self.assertEqual(set(CONTRACT["tasks"]["show_response"]["data"]),
+                         {"id", "title", "done", "position", "body"})
+
+    def test_task_show_prints_the_title_line_then_the_body_verbatim(self):
+        task = CONTRACT["tasks"]["show_response"]["data"]
+        out = self._run(["task", "show", "RE1", "7"])
+        self.assertEqual(self.sent, [("GET", "/api/cards/RE1/tasks/7", None)])
+        self.assertEqual(out, self._line(task) + "\n\n" + task["body"])
+
+    def test_task_update_patches_only_the_given_keys(self):
+        self._run(["task", "update", "RE1", "7", "--title", "New"])
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE1/tasks/7", {"title": "New"})])
+
+    def test_task_update_reads_the_body_raw_from_a_file(self):
+        fenced = '```python\nprint("x")\n```\n'
+        self._run(["task", "update", "RE1", "7", "--title", "T", "--body", self._file(fenced)])
+        self.assertEqual(self.sent[0][2], {"title": "T", "body": fenced})
+        self.assertEqual(set(self.sent[0][2]), set(CONTRACT["tasks"]["update_request"]))
+
+    def test_task_update_prints_the_updated_line(self):
+        task = CONTRACT["tasks"]["update_response"]["data"]
+        out = self._run(["task", "update", "RE1", "7", "--title", "New"])
+        self.assertEqual(out.strip(), f"updated #{task['id']}  {task['title']}")
+
+    def test_task_update_with_no_flag_fails_before_any_request(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self._run(["task", "update", "RE1", "7"])
+        self.assertEqual(self.sent, [])
+
+    def test_task_rm_deletes_and_prints_removed(self):
+        gone = CONTRACT["tasks"]["delete_response"]["data"]
+        out = self._run(["task", "rm", "RE1", "7"])
+        self.assertEqual(self.sent, [("DELETE", "/api/cards/RE1/tasks/7", None)])
+        self.assertEqual(out.strip(), f"removed #{gone['id']}  {gone['title']}")
+
+    def test_every_verb_takes_json_and_field(self):
+        out = self._run(["tasks", "list", "RE1", "--json"])
+        self.assertEqual(json.loads(out), CONTRACT["tasks"]["list_response"]["data"])
+        out = self._run(["task", "show", "RE1", "7", "--field", "title"])
+        self.assertEqual(out.strip(), CONTRACT["tasks"]["show_response"]["data"]["title"])
+        for argv in (["tasks", "add", "RE1", "--task", "T", "b", "--json"],
+                     ["task", "update", "RE1", "7", "--title", "T", "--json"],
+                     ["task", "rm", "RE1", "7", "--json"]):
+            json.loads(self._run(argv))
+
+    def test_each_verb_dispatches_to_its_own_handler(self):
+        p = relay.build_parser()
+        self.assertIs(p.parse_args(["tasks", "list", "RE1"]).func, relay.cmd_tasks_list)
+        self.assertIs(p.parse_args(["tasks", "add", "RE1", "--task", "T", "b"]).func, relay.cmd_tasks_add)
+        self.assertIs(p.parse_args(["task", "show", "RE1", "7"]).func, relay.cmd_task_show)
+        self.assertIs(p.parse_args(["task", "update", "RE1", "7", "--title", "T"]).func,
+                      relay.cmd_task_update)
+        self.assertIs(p.parse_args(["task", "rm", "RE1", "7"]).func, relay.cmd_task_rm)
+
+    def test_a_bare_tasks_or_task_is_a_usage_error(self):
+        for argv in (["tasks"], ["task"], ["tasks", "RE1"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                relay.build_parser().parse_args(argv)
+
+
 if __name__ == "__main__":
     # buffer=True captures each test's stdout/stderr and replays it only if that test fails.
     # These tests drive the real `relay` CLI through error/scenario paths, so without buffering

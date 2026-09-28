@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 69
-RUNNER_FINGERPRINT = "77414fb59ef30a1711f1d2e2516dc9f8598606d1d555b8d10a649fea6a8d45f4"
+RUNNER_VERSION = 70
+RUNNER_FINGERPRINT = "b1c61bec867142ae8dab0823a21af3564fb6c108c677405882a513dfad5261e2"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -604,6 +604,47 @@ def _parse_sub_tasks(text):
 
 def set_sub_task_done(ref, sub_task_id, done):
     return api("PATCH", f"/api/cards/{ref}/sub-tasks/{sub_task_id}", {"done": done})["data"]
+
+
+# ---- RE355: a card's tasks as addressable objects ----
+
+def task_ref_line(t):
+    """`#<id>  <title>` — the ONE rendering of a task's identity; every task verb's human output
+    is built from it."""
+    return f"#{t['id']}  {t['title']}"
+
+
+def task_line(t):
+    return f"[{'x' if t['done'] else ' '}] {task_ref_line(t)}"
+
+
+def list_tasks(ref):
+    return api("GET", f"/api/cards/{ref}/tasks")["data"]
+
+
+def add_tasks(ref, pairs):
+    """`pairs` is argparse's `--task TITLE BODY` list, in argument order. ONE POST carries every
+    task, so the batch lands atomically, appended after the card's last task. Each BODY goes
+    through read_arg, so it travels as the raw file content — nobody escapes JSON by hand."""
+    if sum(1 for _title, body in pairs if body == "-") > 1:
+        die("tasks add: at most one BODY may be '-' (stdin can be read only once)")
+    tasks = [{"title": title, "body": read_arg(body)} for title, body in pairs]
+    return api("POST", f"/api/cards/{ref}/tasks", {"tasks": tasks})["data"]
+
+
+def show_task(ref, task_id):
+    return api("GET", f"/api/cards/{ref}/tasks/{task_id}")["data"]
+
+
+def update_task(ref, task_id, title=None, body=None):
+    changes = {key: value for key, value in (("title", title), ("body", body)) if value is not None}
+    if not changes:
+        die("task update needs --title and/or --body")
+    return api("PATCH", f"/api/cards/{ref}/tasks/{task_id}", changes)["data"]
+
+
+def remove_task(ref, task_id):
+    return api("DELETE", f"/api/cards/{ref}/tasks/{task_id}")["data"]
 
 
 def set_result(ref, text):
@@ -1328,6 +1369,41 @@ def cmd_needs_input(args):
         die("needs-input needs a QUESTION argument or --questions")
     card = needs_input(args.ref, question, questions_raw)
     emit(args, card, card_line(card))
+
+
+def cmd_tasks_add(args):
+    tasks = add_tasks(args.ref, args.task)
+    emit(args, tasks, "\n".join(task_ref_line(t) for t in tasks))
+
+
+def cmd_tasks_list(args):
+    """Titles and metadata only — never a body. Isolation by default: an implementer sees THAT
+    other tasks exist, not their content. `relay task show` is the one way to read a body."""
+    tasks = list_tasks(args.ref)
+    emit(args, tasks, "\n".join(task_line(t) for t in tasks) or "(no tasks)")
+
+
+def cmd_task_show(args):
+    task = show_task(args.ref, args.id)
+
+    def human():
+        print(task_line(task))
+        print()
+        # Verbatim: print() would append a newline the body never had.
+        sys.stdout.write(task.get("body") or "")
+
+    emit(args, task, human)
+
+
+def cmd_task_update(args):
+    body = read_arg(args.body) if args.body is not None else None
+    task = update_task(args.ref, args.id, title=args.title, body=body)
+    emit(args, task, f"updated {task_ref_line(task)}")
+
+
+def cmd_task_rm(args):
+    task = remove_task(args.ref, args.id)
+    emit(args, task, f"removed {task_ref_line(task)}")
 
 
 def cmd_comment(args):
@@ -5238,6 +5314,8 @@ COMMANDS = (
     ("Cards", "sub-tasks", "replace a card's sub-tasks"),
     ("Cards", "check", "tick one of a card's sub-tasks"),
     ("Cards", "uncheck", "untick one of a card's sub-tasks"),
+    ("Cards", "tasks", "list or add a card's tasks"),
+    ("Cards", "task", "show, update or remove one of a card's tasks"),
     ("Cards", "branch", "record a card's git branch"),
     ("Cards", "pr", "record a card's pull-request URL"),
     ("Cards", "result", "set a card's AI result"),
@@ -5333,6 +5411,13 @@ def build_parser():
                                 description=HELP_DESCRIPTION, epilog=HELP_EPILOG, **kwargs)
     sub = p.add_subparsers(dest="cmd", metavar="<command>", help=argparse.SUPPRESS)
 
+    def json_flags(sp):
+        sp.add_argument("--json", action="store_true", help="print machine-readable JSON")
+        # --field rides alongside --json on every JSON-returning command: a selector
+        # available on only some of them is the inconsistency this card exists to kill.
+        sp.add_argument("--field", metavar="PATH",
+                        help="print one dotted-path value (e.g. status, owners.0.name)")
+
     def add(name, fn, *pos, json_flag=False):
         # helps[name] raising KeyError is the other half of the table guard: a command that is
         # registered here but missing from COMMANDS never builds.
@@ -5341,13 +5426,24 @@ def build_parser():
             arg, text = a if isinstance(a, tuple) else (a, ARG_HELP[a])
             sp.add_argument(arg, help=text)
         if json_flag:
-            sp.add_argument("--json", action="store_true", help="print machine-readable JSON")
-            # --field rides alongside --json on every JSON-returning command: a selector
-            # available on only some of them is the inconsistency this card exists to kill.
-            sp.add_argument("--field", metavar="PATH",
-                            help="print one dotted-path value (e.g. status, owners.0.name)")
+            json_flags(sp)
         sp.set_defaults(func=fn)
         return sp
+
+    # RE355 — the first nested verbs (`relay tasks add|list`, `relay task show|update|rm`). The
+    # parent command's func is None; each verb's set_defaults overrides it, and `required=True`
+    # makes a bare `relay tasks` a usage error before anything could call it.
+    def verbs(parent):
+        return parent.add_subparsers(dest="verb", metavar="<verb>", required=True,
+                                     help="the verb to run")
+
+    def verb(group, name, fn, text, *pos):
+        vp = group.add_parser(name, help=text, description=text, **kwargs)
+        for arg, arg_text in pos:
+            vp.add_argument(arg, help=arg_text)
+        json_flags(vp)
+        vp.set_defaults(func=fn)
+        return vp
 
     # ---- Cards ----
     bd = add("board", cmd_board, json_flag=True)
@@ -5375,6 +5471,19 @@ def build_parser():
     add("sub-tasks", _simple(lambda a: set_sub_tasks(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("check", _simple(lambda a: set_sub_task_done(a.ref, a.id, True)), "ref", "id", json_flag=True)
     add("uncheck", _simple(lambda a: set_sub_task_done(a.ref, a.id, False)), "ref", "id", json_flag=True)
+    ref_arg, id_arg = ("ref", ARG_HELP["ref"]), ("id", "the task id")
+    many = verbs(add("tasks", None))
+    ta = verb(many, "add", cmd_tasks_add,
+              "append tasks after the card's last task, in argument order, in one call", ref_arg)
+    ta.add_argument("--task", nargs=2, action="append", required=True, metavar=("TITLE", "BODY"),
+                    help='a task\'s title and body ("-" for stdin, @path, or text); repeat for more')
+    verb(many, "list", cmd_tasks_list, "list a card's tasks: titles and metadata, never bodies", ref_arg)
+    one = verbs(add("task", None))
+    verb(one, "show", cmd_task_show, "show one task with its full body", ref_arg, id_arg)
+    tu = verb(one, "update", cmd_task_update, "retitle a task and/or replace its body", ref_arg, id_arg)
+    tu.add_argument("--title", help="the new title")
+    tu.add_argument("--body", help='the new body, "-" for stdin, or @path')
+    verb(one, "rm", cmd_task_rm, "remove a task (later tasks move up one)", ref_arg, id_arg)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
     add("result", _simple(lambda a: set_result(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
