@@ -709,6 +709,49 @@ textarea.commit-field-input { min-height: 64px; }
   -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
   mask-image: linear-gradient(180deg, #000 62%, transparent);
 }
+/* RE356 — the Plan section's task bodies (Relay Card Detail v5 · Running fine · DE4). An open
+   body past the clamp threshold caps at 280px behind a fade (only the gradient's alpha is read —
+   #000 is a mask channel, not a color); CodeBlockCopy inserts a .code-block-strip before each
+   pre, which then joins it as one bordered block. */
+.task-body-clamped {
+  max-height: 280px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
+}
+.task-body .code-block-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0.6em 0 0;
+  padding: 5px 8px 5px 11px;
+  border: 1px solid var(--color-base-300);
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+.task-body .code-block-strip + pre {
+  margin-top: 0;
+  border: 1px solid var(--color-base-300);
+  border-radius: 0 0 7px 7px;
+}
+.task-body .code-block-lang {
+  font-weight: 600;
+  color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+}
+.task-body .code-block-lines {
+  flex: 1;
+  color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+}
+.task-body .code-block-copy {
+  font-weight: 600;
+  color: var(--color-primary);
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+}
 /* RE237 — .commit-pill's shadow blurs behind a floating pill. Light: 13% base-content matches
    the swept literal (oklch(0.5 0.03 255 / 0.18)) alpha-faithfully — Rule N maps L 0.5 to P 70,
    so 70% of the original 18% alpha is ~13%. Dark: mixing with base-content instead would read as

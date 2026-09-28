@@ -35,6 +35,7 @@ import InlineNameInput from "./hooks/inline_name_input"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 import SubmitOnEnter from "./hooks/submit_on_enter"
 import FlowFocus from "./hooks/flow_focus"
+import CodeBlockCopy from "./hooks/code_block_copy"
 import initImageLightbox from "./image_lightbox"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
@@ -61,6 +62,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     SubmitOnCmdEnter,
     SubmitOnEnter,
     FlowFocus,
+    CodeBlockCopy,
   },
 })
 

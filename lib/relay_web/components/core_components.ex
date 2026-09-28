@@ -39,6 +39,10 @@ defmodule RelayWeb.CoreComponents do
   alias Schemas.Activity
   alias Schemas.Card
 
+  # RE356 — an open task body longer than this many lines is clamped (280px + fade) behind
+  # "Show all N lines" (Relay Card Detail v5 · Running fine · DE4). Defined once, here.
+  @task_clamp_lines 16
+
   @doc """
   Renders flash notices.
 
@@ -2107,6 +2111,239 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  RE356 — the card drawer's one **Plan** section (`docs/designs/Relay Card Detail v5.dc.html`,
+  scenario "Running fine · DE4", annotation #17 "Plan is a header plus tasks, written together").
+
+  The header row is the violet accent bar, `PLAN`, and — when there are tasks — the `done/total`
+  count and green progress bar. Under it, the card's `plan` text is the section header, clamped
+  behind the existing measured Expand/Collapse (`expanded_plan` / `toggle_plan`) and editable in
+  place (`edit_plan` / `save_card_plan` / `cancel_plan`); an archived card renders it read-only.
+  With no plan and no tasks the dashed box explains the empty state.
+
+  Then the tasks, as an accordion: one open at a time (`open_task_id`). A row's head holds two
+  sibling buttons — the checkbox (`toggle_sub_task`) and the disclosure (`toggle_task_open`) —
+  and shows the task's derived meta (`Relay.Cards.task_body_meta/1`); a body-less task has no
+  meta, no chevron and nothing to open. The open row's head is sticky; its markdown body is
+  clamped past #{@task_clamp_lines} lines behind `Show all N lines` / `Collapse`
+  (`toggle_task_full`, state `task_full?`). The row whose id is `in_flight_task_id` is tinted
+  violet with an `AGENT IS HERE` chip. The `CodeBlockCopy` hook decorates each code block with a
+  language / line-count / copy strip.
+
+  ## Examples
+
+      <.plan_tasks
+        plan={@card.plan}
+        tasks={@card.sub_tasks}
+        progress={Relay.Cards.sub_task_progress(@card)}
+        open_task_id={@open_task_id}
+        task_full?={@task_full?}
+        in_flight_task_id={@in_flight_task_id}
+      />
+  """
+  attr :id, :string, default: "card-plan"
+  attr :plan, :string, default: nil
+  attr :tasks, :list, default: [], doc: "position-ordered tasks: maps with :id, :title, :done and an optional :body"
+  attr :progress, :map, required: true, doc: "`Relay.Cards.sub_task_progress/1` — %{done, total}"
+  attr :open_task_id, :any, default: nil, doc: "the single open task's id, or nil"
+  attr :task_full?, :boolean, default: false, doc: "whether the open task's clamp is released"
+  attr :in_flight_task_id, :any, default: nil, doc: "`Relay.Runs.in_flight_sub_task_id/1`"
+  attr :archived, :boolean, default: false, doc: "render the plan header read-only"
+  attr :editing_plan, :boolean, default: false
+  attr :expanded_plan, :boolean, default: false
+  attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+
+  def plan_tasks(assigns) do
+    ~H"""
+    <section id={@id} class="space-y-2">
+      <.boxed_field
+        :if={!@archived}
+        id={@id}
+        value={@plan}
+        editing={@editing_plan}
+        form={@plan_form}
+        field={:plan}
+        edit_event="edit_plan"
+        save_event="save_card_plan"
+        cancel_event="cancel_plan"
+        placeholder={plan_placeholder(@tasks)}
+        label="Plan"
+        accent={:secondary}
+        collapsible
+        expanded={@expanded_plan}
+        toggle_event="toggle_plan"
+        markdown
+        multiline
+        rows="16"
+      >
+        <:header_extra :if={@tasks != []}>
+          <.plan_progress id={@id} progress={@progress} />
+        </:header_extra>
+      </.boxed_field>
+      <div :if={@archived} class="commit-field-header">
+        <span class="commit-field-accent bg-secondary"></span>
+        <.section_label>Plan</.section_label>
+        <.plan_progress :if={@tasks != []} id={@id} progress={@progress} />
+      </div>
+      <div
+        :if={@archived && @plan}
+        id={"#{@id}-body"}
+        class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+      >
+        {Relay.Markdown.to_html(@plan)}
+      </div>
+      <ul :if={@tasks != []} id={"#{@id}-tasks"} class="flex flex-col gap-1.5">
+        <.task_row
+          :for={task <- @tasks}
+          task={task}
+          open={task.id == @open_task_id}
+          full={@task_full?}
+          in_flight={task.id == @in_flight_task_id}
+        />
+      </ul>
+    </section>
+    """
+  end
+
+  defp plan_placeholder([]), do: "No plan yet — the Plan stage writes a short header and its tasks together. Add a plan…"
+
+  defp plan_placeholder(_tasks), do: "Add a plan header…"
+
+  attr :id, :string, required: true
+  attr :progress, :map, required: true
+
+  defp plan_progress(assigns) do
+    ~H"""
+    <span id={"#{@id}-count"} class="font-mono text-[10px] text-base-content/60">
+      {@progress.done}/{@progress.total}
+    </span>
+    <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
+      <div
+        class="h-full rounded-full bg-success transition-all"
+        style={"width:#{Cards.sub_task_pct(@progress) || 0}%"}
+      />
+    </div>
+    """
+  end
+
+  attr :task, :map, required: true
+  attr :open, :boolean, default: false
+  attr :full, :boolean, default: false
+  attr :in_flight, :boolean, default: false
+
+  defp task_row(assigns) do
+    meta = Cards.task_body_meta(Map.get(assigns.task, :body))
+
+    assigns =
+      assigns
+      |> assign(:meta, meta)
+      |> assign(:open?, assigns.open and meta != nil)
+      |> assign(:long?, meta != nil and meta.lines > @task_clamp_lines)
+
+    ~H"""
+    <li
+      id={"sub-task-#{@task.id}"}
+      data-in-flight={to_string(@in_flight)}
+      data-open={to_string(@open?)}
+      class={["rounded-lg border", task_row_tone(@in_flight)]}
+    >
+      <div
+        id={"sub-task-#{@task.id}-head"}
+        class={["flex items-center gap-2 rounded-lg px-2 py-1.5", task_head_tone(@open?)]}
+      >
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-check"}
+          phx-click="toggle_sub_task"
+          phx-value-id={@task.id}
+          aria-label={if(@task.done, do: "Mark incomplete", else: "Mark complete")}
+          class={[
+            "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+            if(@task.done,
+              do: "border-success bg-success text-success-content",
+              else: "border-base-300 bg-base-100 hover:border-base-content/30"
+            )
+          ]}
+        >
+          <.icon :if={@task.done} name="hero-check" class="size-3" />
+        </button>
+        <.dynamic_tag
+          tag_name={if(@meta, do: "button", else: "div")}
+          type={@meta && "button"}
+          id={"sub-task-#{@task.id}-toggle"}
+          phx-click={@meta && "toggle_task_open"}
+          phx-value-id={@meta && @task.id}
+          aria-expanded={@meta && to_string(@open?)}
+          class="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <span class={[
+            "min-w-0 flex-1 truncate text-sm leading-snug",
+            if(@task.done, do: "text-base-content/55 line-through", else: "text-base-content")
+          ]}>
+            {@task.title}
+          </span>
+          <%!-- phx-no-format keeps the chip and meta text flush — no stray whitespace in their text --%>
+          <span
+            :if={@in_flight}
+            id={"sub-task-#{@task.id}-agent-here"}
+            class="shrink-0 rounded bg-secondary/10 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold tracking-[0.04em] text-secondary"
+            phx-no-format
+          >AGENT IS HERE</span>
+          <span
+            :if={@meta}
+            id={"sub-task-#{@task.id}-meta"}
+            class="shrink-0 whitespace-nowrap font-mono text-[10px] text-base-content/50"
+            phx-no-format
+          >{task_meta_label(@meta)}</span>
+          <.icon
+            :if={@meta}
+            name={if(@open?, do: "hero-chevron-up", else: "hero-chevron-down")}
+            class="size-3 shrink-0 text-base-content/50"
+          />
+        </.dynamic_tag>
+      </div>
+      <div
+        :if={@open?}
+        id={"sub-task-#{@task.id}-body"}
+        phx-hook="CodeBlockCopy"
+        class={["task-body md py-3 pr-3.5 pl-8", task_clamp_class(@long?, @full)]}
+      >
+        {Relay.Markdown.to_html(@task.body)}
+      </div>
+      <div :if={@open? and @long?} class="pt-0.5 pr-3 pb-[11px] pl-9">
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-full"}
+          phx-click="toggle_task_full"
+          class="flex items-center gap-1 text-xs font-semibold text-primary"
+        >
+          {if(@full, do: "Collapse", else: "Show all #{@meta.lines} lines")}
+          <.icon name={if(@full, do: "hero-chevron-up", else: "hero-chevron-down")} class="size-3" />
+        </button>
+      </div>
+    </li>
+    """
+  end
+
+  defp task_row_tone(true), do: "border-secondary/40 bg-secondary/5"
+  defp task_row_tone(false), do: "border-base-300 bg-base-200"
+
+  defp task_head_tone(true), do: "sticky top-0 drawer:-top-5 z-[2] border-b border-base-300 bg-base-100"
+  defp task_head_tone(false), do: nil
+
+  defp task_clamp_class(true, false), do: "task-body-clamped"
+  defp task_clamp_class(_long?, _full), do: nil
+
+  defp task_meta_label(%{lines: lines, code_blocks: blocks}) do
+    line_part = if lines == 1, do: "1 line", else: "#{lines} lines"
+
+    case blocks do
+      0 -> line_part
+      1 -> "#{line_part} · 1 code block"
+      n -> "#{line_part} · #{n} code blocks"
+    end
+  end
+
+  @doc """
   Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
   plus a right-side panel with the card's stage chip (stage name in the
   Human/AI owner color), its ref, an editable title, the plain-text
@@ -2129,7 +2366,7 @@ defmodule RelayWeb.CoreComponents do
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
-  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state),
+  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state), `"toggle_sub_task"` (phx-value id) / `"toggle_task_open"` (phx-value id) / `"toggle_task_full"` from the Plan section's task rows (RE356, see `plan_tasks/1`),
   `"toggle_ai_result"` (flip the AI Result box between its summary and Show more detail),
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
@@ -2195,6 +2432,12 @@ defmodule RelayWeb.CoreComponents do
   attr :editing_plan, :boolean, default: false
   attr :expanded_spec, :boolean, default: false
   attr :expanded_plan, :boolean, default: false
+  attr :open_task_id, :any, default: nil, doc: "RE356 the Plan section's single open task id, or nil"
+  attr :task_full?, :boolean, default: false, doc: "RE356 whether the open task's clamp is released"
+
+  attr :in_flight_task_id, :any,
+    default: nil,
+    doc: "RE356 the task the agent is on (`Relay.Runs.in_flight_sub_task_id/1`), or nil"
 
   attr :expanded_ai_result, :boolean,
     default: false,
@@ -3161,82 +3404,21 @@ defmodule RelayWeb.CoreComponents do
                   <.section_label>Plan</.section_label>
                   <div id="card-plan-skeleton" class="skeleton h-40 w-full rounded-lg"></div>
                 </section>
-                <section :if={!@body_loading and !@archived} id="card-plan" class="space-y-2">
-                  <.boxed_field
-                    id="card-plan"
-                    value={@card.plan}
-                    editing={@editing_plan}
-                    form={@plan_form}
-                    field={:plan}
-                    edit_event="edit_plan"
-                    save_event="save_card_plan"
-                    cancel_event="cancel_plan"
-                    placeholder="Add a plan…"
-                    label="Plan"
-                    accent={:secondary}
-                    collapsible
-                    expanded={@expanded_plan}
-                    toggle_event="toggle_plan"
-                    markdown
-                    multiline
-                    rows="16"
-                  />
-                </section>
-                <section
-                  :if={(!@body_loading and @archived) && @card.plan}
-                  id="card-plan-archived"
-                  class="space-y-2"
-                >
-                  <.section_label>Plan</.section_label>
-                  <div
-                    id="card-plan-body"
-                    class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
-                  >
-                    {Relay.Markdown.to_html(@card.plan)}
-                  </div>
-                </section>
-
-                <section :if={@card.sub_tasks != []} id="sub-tasks" class="space-y-2">
-                  <div class="flex items-center gap-2">
-                    <.section_label>Sub-tasks</.section_label>
-                    <span id="sub-tasks-count" class="font-mono text-[10px] text-base-content/65">
-                      {@sub_task_progress.done}/{@sub_task_progress.total}
-                    </span>
-                    <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
-                      <div
-                        class="h-full rounded-full bg-success transition-all"
-                        style={"width:#{Cards.sub_task_pct(@sub_task_progress) || 0}%"}
-                      />
-                    </div>
-                  </div>
-                  <ul class="space-y-1.5">
-                    <li :for={st <- @card.sub_tasks} id={"sub-task-#{st.id}"}>
-                      <button
-                        type="button"
-                        phx-click="toggle_sub_task"
-                        phx-value-id={st.id}
-                        aria-label={if(st.done, do: "Mark incomplete", else: "Mark complete")}
-                        class="flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left transition-colors hover:border-base-content/20"
-                      >
-                        <span class={[
-                          "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-                          if(st.done,
-                            do: "border-success bg-success text-success-content",
-                            else: "border-base-300"
-                          )
-                        ]}>
-                          <.icon :if={st.done} name="hero-check" class="size-3" />
-                        </span>
-                        <span class={[
-                          "text-sm leading-snug",
-                          st.done && "text-base-content/55 line-through"
-                        ]}>
-                          {st.title}
-                        </span>
-                      </button>
-                    </li>
-                  </ul>
-                </section>
+                <.plan_tasks
+                  :if={
+                    !@body_loading and (!@archived or not is_nil(@card.plan) or @card.sub_tasks != [])
+                  }
+                  plan={@card.plan}
+                  tasks={@card.sub_tasks}
+                  progress={@sub_task_progress}
+                  open_task_id={@open_task_id}
+                  task_full?={@task_full?}
+                  in_flight_task_id={@in_flight_task_id}
+                  archived={@archived}
+                  editing_plan={@editing_plan}
+                  expanded_plan={@expanded_plan}
+                  plan_form={@plan_form}
+                />
                 <section id={"#{@id}-notes"} class="space-y-3 border-t border-base-300 pt-4">
                   <div class="flex items-center gap-2">
                     <span class="h-[13px] w-[3px] shrink-0 rounded-sm bg-primary"></span>
@@ -5291,12 +5473,14 @@ defmodule RelayWeb.CoreComponents do
   attr :value, :string, default: nil
   attr :toggle_event, :string, default: nil
   attr :edit_event, :string, default: nil
+  attr :header_extra, :list, default: [], doc: "slot entries rendered right after the label (RE356)"
 
   defp field_header(assigns) do
     ~H"""
     <div class="commit-field-header">
       <span :if={@accent} class={["commit-field-accent", accent_bar_class(@accent)]}></span>
       <.section_label>{@label}</.section_label>
+      {render_slot(@header_extra)}
       <span class="flex-1"></span>
       <button
         :if={@toggle?}
@@ -5364,6 +5548,9 @@ defmodule RelayWeb.CoreComponents do
   attr :rest, :global, include: ~w(autocomplete)
   slot :hidden
 
+  slot :header_extra,
+    doc: "RE356 — extra header-row content after the label (the Plan section's done/total count + bar)"
+
   def boxed_field(%{commit: :form} = assigns) do
     ~H"""
     <.input
@@ -5381,7 +5568,14 @@ defmodule RelayWeb.CoreComponents do
   def boxed_field(%{commit: :self, editing: true} = assigns) do
     ~H"""
     <div class="commit-field-section">
-      <.field_header :if={@label} id={@id} label={@label} accent={@accent} toggle?={false} />
+      <.field_header
+        :if={@label}
+        id={@id}
+        label={@label}
+        accent={@accent}
+        toggle?={false}
+        header_extra={@header_extra}
+      />
       <.form
         for={@form}
         id={"#{@id}-form"}
@@ -5429,6 +5623,7 @@ defmodule RelayWeb.CoreComponents do
         value={@value}
         toggle_event={@toggle_event}
         edit_event={@edit_event}
+        header_extra={@header_extra}
       />
       <%!-- empty: dashed Add box --%>
       <div

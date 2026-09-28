@@ -34,12 +34,12 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
-    assert has_element?(view, "#sub-tasks-count", "0/2")
+    assert has_element?(view, "#card-plan-count", "0/2")
     assert has_element?(view, "#sub-task-#{first.id}", "First")
 
-    view |> element("#sub-task-#{first.id} button") |> render_click()
+    view |> element("#sub-task-#{first.id}-check") |> render_click()
 
-    assert has_element?(view, "#sub-tasks-count", "1/2")
+    assert has_element?(view, "#card-plan-count", "1/2")
     assert Relay.Repo.get!(SubTask, first.id).done
   end
 

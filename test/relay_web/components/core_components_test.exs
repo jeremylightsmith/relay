@@ -1145,65 +1145,65 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "lg:w-[min(760px,94vw)]"
     end
 
-    test "sub-tasks header puts label, count and a capped inline bar on one row" do
+    test "plan and tasks are one Plan section: header count + bar, then the task rows (RE356)" do
       attrs =
         drawer_attrs(
-          %{sub_tasks: [%{id: 1, title: "a", done: true}, %{id: 2, title: "b", done: false}]},
+          %{plan: "Short header.", sub_tasks: [%{id: 1, title: "a", done: true}, %{id: 2, title: "b", done: false}]},
           %{}
         )
 
+      doc = (&CoreComponents.card_drawer/1) |> render_component(attrs) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#card-plan .commit-field-accent.bg-secondary") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#card-plan-count") |> LazyHTML.text() =~ "1/2"
+      assert doc |> LazyHTML.query("#card-plan #card-plan-view") |> LazyHTML.text() =~ "Short header."
+      assert doc |> LazyHTML.query("#card-plan #card-plan-tasks #sub-task-1") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#card-plan #card-plan-tasks #sub-task-2") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#sub-tasks") |> Enum.count() == 0
+    end
+
+    test "the plan header's progress bar keeps the capped inline 4px green bar" do
+      attrs = drawer_attrs(%{sub_tasks: [%{id: 1, title: "a", done: true}, %{id: 2, title: "b", done: false}]}, %{})
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
-      # Header is a single inline row: label · count · bar (no justify-between).
-      assert html =~ ~s(<div class="flex items-center gap-2">)
-      assert html =~ ~s(id="sub-tasks-count")
-      # The progress bar is inline in that row: flex-1 but capped at 120px, 4px, green fill.
       assert html =~ "h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300"
       assert html =~ "h-full rounded-full bg-success"
       assert html =~ "width:50%"
     end
 
-    test "each sub-task renders as a boxed, bordered, whole-row toggle button" do
-      attrs = drawer_attrs(%{sub_tasks: [%{id: 1, title: "a", done: false}]}, %{})
+    test "no plan and no tasks shows the dashed empty-state copy and no task list" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{sub_tasks: [], plan: nil}, %{}))
 
-      html = render_component(&CoreComponents.card_drawer/1, attrs)
-
-      # The row <li> keeps its stable id...
-      assert html =~ ~s(id="sub-task-1")
-      # ...and the whole boxed row is a full-width button carrying the toggle plumbing.
-      assert html =~ ~s(phx-click="toggle_sub_task")
-      assert html =~ ~s(phx-value-id="1")
-
-      assert html =~
-               "flex w-full items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-2 py-1.5 text-left"
+      assert html =~ "No plan yet — the Plan stage writes a short header and its tasks together."
+      assert html =~ "commit-field-placeholder"
+      refute html =~ ~s(id="card-plan-tasks")
+      refute html =~ ~s(id="card-plan-count")
     end
 
-    test "a done sub-task shows a filled green check and struck-through muted label" do
+    test "an archived card renders the plan read-only in #card-plan-body, tasks still listed" do
       attrs =
         drawer_attrs(
-          %{
-            sub_tasks: [
-              %{id: 1, title: "done one", done: true},
-              %{id: 2, title: "open one", done: false}
-            ]
-          },
-          %{}
+          %{plan: "Archived **plan**", sub_tasks: [%{id: 1, title: "a", done: false}]},
+          %{archived: true}
         )
 
-      html = render_component(&CoreComponents.card_drawer/1, attrs)
+      doc = (&CoreComponents.card_drawer/1) |> render_component(attrs) |> LazyHTML.from_fragment()
 
-      # Done check box is filled green; done label is muted + struck through.
-      assert html =~ "border-success bg-success text-success-content"
-      assert html =~ "text-base-content/55 line-through"
-      assert html =~ "hero-check"
+      assert doc |> LazyHTML.query("#card-plan #card-plan-body.md strong") |> LazyHTML.text() == "plan"
+      assert doc |> LazyHTML.query("#card-plan-display") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#card-plan #sub-task-1") |> Enum.count() == 1
     end
 
-    test "no sub-tasks section when the card has none" do
-      attrs = drawer_attrs(%{sub_tasks: []}, %{})
+    test "the drawer forwards open/full/in-flight state to the task rows" do
+      tasks = [%{id: 1, title: "a", done: false, body: "Open body"}, %{id: 2, title: "b", done: false, body: "x"}]
 
-      html = render_component(&CoreComponents.card_drawer/1, attrs)
+      attrs =
+        drawer_attrs(%{sub_tasks: tasks}, %{open_task_id: 1, task_full?: false, in_flight_task_id: 2})
 
-      refute html =~ ~s(id="sub-tasks")
+      doc = (&CoreComponents.card_drawer/1) |> render_component(attrs) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#sub-task-1-body") |> LazyHTML.text() =~ "Open body"
+      assert doc |> LazyHTML.query("#sub-task-2[data-in-flight=true] #sub-task-2-agent-here") |> Enum.count() == 1
     end
 
     test "the acceptance-criteria section renders before spec, labelled, on the teal accent bar" do
@@ -1722,6 +1722,150 @@ defmodule RelayWeb.CoreComponentsTest do
         |> List.first()
 
       assert label =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60"
+    end
+  end
+
+  describe "plan_tasks/1 (RE356 — Relay Card Detail v5 · Running fine · DE4)" do
+    @fence String.duplicate("`", 3)
+
+    defp long_body, do: Enum.map_join(1..20, "\n", &"line #{&1}")
+
+    defp code_body, do: "Intro.\n\n#{@fence}elixir\nx = 1\n#{@fence}\n\n#{@fence}\ny\n#{@fence}\n"
+
+    defp tasks do
+      [
+        %{id: 1, title: "Done one", done: true, body: "Shipped."},
+        %{id: 2, title: "Long one", done: false, body: long_body()},
+        %{id: 3, title: "Code one", done: false, body: code_body()},
+        %{id: 4, title: "Body-less", done: false, body: nil}
+      ]
+    end
+
+    defp render_plan(extra \\ %{}) do
+      attrs = Map.merge(%{plan: "Header text", tasks: tasks(), progress: %{done: 1, total: 4}}, extra)
+      (&CoreComponents.plan_tasks/1) |> render_component(attrs) |> LazyHTML.from_fragment()
+    end
+
+    defp q(doc, selector), do: LazyHTML.query(doc, selector)
+    defp count(doc, selector), do: doc |> q(selector) |> Enum.count()
+    defp classes(doc, selector), do: doc |> q(selector) |> LazyHTML.attribute("class") |> List.first("")
+
+    test "collapsed rows show the derived meta and a down chevron; a body-less row has neither" do
+      doc = render_plan()
+
+      assert doc |> q("#sub-task-2-meta") |> LazyHTML.text() == "20 lines"
+      assert doc |> q("#sub-task-3-meta") |> LazyHTML.text() == "9 lines · 2 code blocks"
+      assert doc |> q("#sub-task-1-meta") |> LazyHTML.text() == "1 line"
+      assert count(doc, "#sub-task-2-toggle .hero-chevron-down") == 1
+      assert count(doc, "#sub-task-4-meta") == 0
+      assert count(doc, "#sub-task-4 .hero-chevron-down") == 0
+      assert count(doc, "button#sub-task-4-toggle") == 0
+      assert count(doc, "div#sub-task-4-toggle") == 1
+      assert count(doc, "[id$='-body']") == 0
+    end
+
+    test "the meta line's classes match the artboard" do
+      assert classes(render_plan(), "#sub-task-2-meta") =~
+               "shrink-0 whitespace-nowrap font-mono text-[10px] text-base-content/50"
+    end
+
+    test "a row is a bordered box whose head holds two sibling buttons: checkbox and disclosure" do
+      doc = render_plan()
+
+      assert classes(doc, "#sub-task-2") =~ "rounded-lg border border-base-300 bg-base-200"
+      assert classes(doc, "#sub-task-2-head") =~ "flex items-center gap-2 rounded-lg px-2 py-1.5"
+
+      assert doc |> q("#sub-task-2-head > button#sub-task-2-check") |> LazyHTML.attribute("phx-click") == [
+               "toggle_sub_task"
+             ]
+
+      assert doc |> q("#sub-task-2-check") |> LazyHTML.attribute("phx-value-id") == ["2"]
+
+      assert doc |> q("#sub-task-2-head > button#sub-task-2-toggle") |> LazyHTML.attribute("phx-click") == [
+               "toggle_task_open"
+             ]
+
+      assert doc |> q("#sub-task-2-toggle") |> LazyHTML.attribute("phx-value-id") == ["2"]
+      assert doc |> q("#sub-task-2-toggle") |> LazyHTML.attribute("aria-expanded") == ["false"]
+      assert count(doc, "button button") == 0
+    end
+
+    test "a done task has the green filled check and a muted struck-through title" do
+      doc = render_plan()
+
+      assert classes(doc, "#sub-task-1-check") =~ "border-success bg-success text-success-content"
+      assert count(doc, "#sub-task-1-check .hero-check") == 1
+      assert classes(doc, "#sub-task-1-toggle > span:first-child") =~ "text-base-content/55 line-through"
+      assert count(doc, "#sub-task-2-check .hero-check") == 0
+    end
+
+    test "the open row renders its markdown body under a sticky opaque head, chevron up" do
+      doc = render_plan(%{open_task_id: 3})
+
+      assert classes(doc, "#sub-task-3-body") =~ "task-body md py-3 pr-3.5 pl-8"
+      assert doc |> q("#sub-task-3-body") |> LazyHTML.attribute("phx-hook") == ["CodeBlockCopy"]
+      assert count(doc, "#sub-task-3-body pre code.language-elixir") == 1
+      assert classes(doc, "#sub-task-3-head") =~ "sticky top-0 drawer:-top-5 z-[2] border-b border-base-300 bg-base-100"
+      assert count(doc, "#sub-task-3-toggle .hero-chevron-up") == 1
+      assert doc |> q("#sub-task-3") |> LazyHTML.attribute("data-open") == ["true"]
+      assert doc |> q("#sub-task-3-toggle") |> LazyHTML.attribute("aria-expanded") == ["true"]
+      # one open at a time: every other row is collapsed
+      assert count(doc, "[id$='-body']") == 1
+      refute classes(doc, "#sub-task-2-head") =~ "sticky"
+    end
+
+    test "a short open body has no clamp and no Show all toggle" do
+      doc = render_plan(%{open_task_id: 3})
+
+      refute classes(doc, "#sub-task-3-body") =~ "task-body-clamped"
+      assert count(doc, "#sub-task-3-full") == 0
+    end
+
+    test "a >16-line open body is clamped behind Show all N lines" do
+      doc = render_plan(%{open_task_id: 2})
+
+      assert classes(doc, "#sub-task-2-body") =~ "task-body-clamped"
+      assert doc |> q("#sub-task-2-full") |> LazyHTML.text() =~ "Show all 20 lines"
+      assert doc |> q("#sub-task-2-full") |> LazyHTML.attribute("phx-click") == ["toggle_task_full"]
+      assert classes(doc, "#sub-task-2-full") =~ "flex items-center gap-1 text-xs font-semibold text-primary"
+      assert count(doc, "#sub-task-2-full .hero-chevron-down") == 1
+    end
+
+    test "a released clamp shows the full body and a Collapse toggle" do
+      doc = render_plan(%{open_task_id: 2, task_full?: true})
+
+      refute classes(doc, "#sub-task-2-body") =~ "task-body-clamped"
+      assert doc |> q("#sub-task-2-full") |> LazyHTML.text() =~ "Collapse"
+      assert count(doc, "#sub-task-2-full .hero-chevron-up") == 1
+    end
+
+    test "the in-flight row is tinted violet and carries the AGENT IS HERE chip" do
+      doc = render_plan(%{in_flight_task_id: 3})
+
+      assert classes(doc, "#sub-task-3") =~ "border-secondary/40 bg-secondary/5"
+      assert doc |> q("#sub-task-3") |> LazyHTML.attribute("data-in-flight") == ["true"]
+      assert doc |> q("#sub-task-3-agent-here") |> LazyHTML.text() == "AGENT IS HERE"
+
+      assert classes(doc, "#sub-task-3-agent-here") =~
+               "shrink-0 rounded bg-secondary/10 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold tracking-[0.04em] text-secondary"
+
+      assert count(doc, "#sub-task-2-agent-here") == 0
+      refute classes(doc, "#sub-task-2") =~ "bg-secondary/5"
+    end
+
+    test "opening a body-less task renders nothing to open" do
+      doc = render_plan(%{open_task_id: 4})
+
+      assert count(doc, "#sub-task-4-body") == 0
+      assert doc |> q("#sub-task-4") |> LazyHTML.attribute("data-open") == ["false"]
+    end
+
+    test "plan text with no tasks shows just the header — no count, no list" do
+      doc = render_plan(%{tasks: [], progress: %{done: 0, total: 0}})
+
+      assert doc |> q("#card-plan-view") |> LazyHTML.text() =~ "Header text"
+      assert count(doc, "#card-plan-count") == 0
+      assert count(doc, "#card-plan-tasks") == 0
     end
   end
 
