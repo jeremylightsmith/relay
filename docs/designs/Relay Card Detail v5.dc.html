@@ -171,26 +171,72 @@
 
             <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:9px;max-width:660px;">
               <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">Sub-tasks</span>
+                <span style="width:3px;height:13px;border-radius:2px;background:oklch(0.56 0.16 292);flex:0 0 auto;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:oklch(0.26 0.02 255/0.6);">Plan</span>
                 <sc-if value="{{ hasSubs }}" hint-placeholder-val="{{ true }}">
                   <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.6);">{{ subCount }}</span>
                   <div style="flex-grow:1;flex-basis:0;height:4px;max-width:120px;border-radius:999px;background:oklch(0.92 0.006 255);overflow:hidden;">
                     <div style="{{ subFill }}"></div>
                   </div>
+                  <span style="flex:1;"></span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.4px;color:oklch(0.26 0.02 255/0.5);">WRITTEN IN PLAN · 3H AGO</span>
                 </sc-if>
-                <span style="flex:1;"></span>
-                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;letter-spacing:0.4px;color:oklch(0.26 0.02 255/0.5);">DERIVED FROM PLAN</span>
               </div>
               <sc-if value="{{ hasSubs }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;flex-direction:column;gap:4px;padding:0 2px 4px 2px;">
+                  <div ref="{{ planHead.ref }}" style="{{ planHead.style }}">{{ card.plan }}</div>
+                  <sc-if value="{{ planHead.hasToggle }}" hint-placeholder-val="{{ false }}">
+                    <button onClick="{{ planHead.onToggle }}" style="align-self:flex-start;display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:oklch(0.5 0.13 250);background:transparent;border:none;padding:2px 0;">{{ planHead.label }}<span style="{{ planHead.chev }}"></span></button>
+                  </sc-if>
+                </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
-                  <sc-for list="{{ subs }}" as="s" hint-placeholder-count="4">
-                    <button onClick="{{ s.onClick }}" style="{{ s.rowStyle }}">
-                      <span style="{{ s.boxStyle }}"><span style="{{ s.tickStyle }}"></span></span>
-                      <span style="{{ s.textStyle }}">{{ s.t }}</span>
-                      <sc-if value="{{ s.current }}" hint-placeholder-val="{{ false }}">
-                        <span style="{{ s.currentChip }}">AGENT IS HERE</span>
+                  <sc-for list="{{ tasks }}" as="r" hint-placeholder-count="4">
+                    <div style="{{ r.wrap }}">
+                      <div style="{{ r.head }}">
+                        <button onClick="{{ r.onCheck }}" style="{{ r.box }}"><span style="{{ r.tick }}"></span></button>
+                        <button onClick="{{ r.onToggle }}" style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:transparent;border:none;padding:0;text-align:left;color:inherit;">
+                          <span style="{{ r.title }}">{{ r.t }}</span>
+                          <sc-if value="{{ r.current }}" hint-placeholder-val="{{ false }}">
+                            <span style="{{ r.currentChip }}">AGENT IS HERE</span>
+                          </sc-if>
+                          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.5);flex:0 0 auto;white-space:nowrap;">{{ r.meta }}</span>
+                          <span style="{{ r.chev }}"></span>
+                        </button>
+                      </div>
+                      <sc-if value="{{ r.open }}" hint-placeholder-val="{{ false }}">
+                        <div style="{{ r.bodyStyle }}">
+                          <sc-for list="{{ r.blocks }}" as="b" hint-placeholder-count="3">
+                            <sc-if value="{{ b.isH }}" hint-placeholder-val="{{ false }}">
+                              <span style="font-size:13px;font-weight:600;line-height:18px;margin-top:6px;">{{ b.t }}</span>
+                            </sc-if>
+                            <sc-if value="{{ b.isP }}" hint-placeholder-val="{{ true }}">
+                              <span style="font-size:13px;line-height:20.15px;color:oklch(0.26 0.02 255/0.85);text-wrap:pretty;"><sc-for list="{{ b.segs }}" as="g" hint-placeholder-count="1"><span style="{{ g.style }}">{{ g.t }}</span></sc-for></span>
+                            </sc-if>
+                            <sc-if value="{{ b.isLi }}" hint-placeholder-val="{{ false }}">
+                              <div style="display:flex;gap:9px;align-items:flex-start;">
+                                <span style="width:4px;height:4px;border-radius:50%;background:oklch(0.26 0.02 255/0.4);flex:0 0 auto;margin-top:8px;"></span>
+                                <span style="font-size:13px;line-height:20.15px;color:oklch(0.26 0.02 255/0.85);"><sc-for list="{{ b.segs }}" as="g" hint-placeholder-count="1"><span style="{{ g.style }}">{{ g.t }}</span></sc-for></span>
+                              </div>
+                            </sc-if>
+                            <sc-if value="{{ b.isCode }}" hint-placeholder-val="{{ false }}">
+                              <div style="border:1px solid oklch(0.91 0.006 255);border-radius:7px;background:oklch(0.98 0.003 255);overflow:hidden;">
+                                <div style="display:flex;align-items:center;gap:8px;padding:5px 8px 5px 11px;border-bottom:1px solid oklch(0.93 0.005 255);">
+                                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;color:oklch(0.26 0.02 255/0.6);">{{ b.lang }}</span>
+                                  <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:oklch(0.26 0.02 255/0.45);flex:1;">{{ b.count }}</span>
+                                  <button onClick="{{ b.onCopy }}" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;background:transparent;border:none;padding:2px 4px;color:oklch(0.5 0.13 250);">{{ b.copyLabel }}</button>
+                                </div>
+                                <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;line-height:18px;white-space:pre;overflow-x:auto;padding:10px 12px;color:oklch(0.3 0.02 255);">{{ b.code }}</div>
+                              </div>
+                            </sc-if>
+                          </sc-for>
+                        </div>
+                        <sc-if value="{{ r.showMore }}" hint-placeholder-val="{{ false }}">
+                          <div style="padding:2px 12px 11px 36px;">
+                            <button onClick="{{ r.onFull }}" style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:oklch(0.5 0.13 250);background:transparent;border:none;padding:0;">{{ r.fullLabel }}<span style="{{ r.fullChev }}"></span></button>
+                          </div>
+                        </sc-if>
                       </sc-if>
-                    </button>
+                    </div>
                   </sc-for>
                 </div>
               </sc-if>
@@ -423,12 +469,138 @@ const SVG = {
   chevD: 'm19.5 8.25-7.5 7.5-7.5-7.5',
   chevU: 'm4.5 15.75 7.5-7.5 7.5 7.5',
   check: 'm4.5 12.75 6 6 9-13.5',
+  chevR: 'm8.25 4.5 7.5 7.5-7.5 7.5',
   term: 'm6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z'
 };
 function mask(k, size, color) {
   const u = 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 fill=%22none%22 viewBox=%220 0 24 24%22 stroke-width=%221.6%22 stroke=%22black%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 d=%22' + SVG[k] + '%22/%3E%3C/svg%3E")';
   return { display: 'block', flex: '0 0 auto', width: size + 'px', height: size + 'px', backgroundColor: color, maskImage: u, WebkitMaskImage: u, maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat', maskSize: 'contain', WebkitMaskSize: 'contain' };
 }
+
+const FENCE = '```';
+const TASK_BODIES = [
+`Add a streaming variant next to the buffered \`board_csv/2\`. It returns a lazy \`Stream\` of iodata chunks, so callers decide where the bytes go.
+
+${FENCE}elixir
+def stream_board_csv(%Board{} = board, opts \\\\ []) do
+  every = Keyword.get(opts, :chunk_every, 500)
+
+  board
+  |> Cards.export_query()
+  |> Repo.stream(max_rows: every)
+  |> Stream.map(&to_row/1)
+  |> CSV.encode(headers: @headers)
+  |> Stream.chunk_every(every)
+end
+${FENCE}
+
+## Tests
+- Output is byte-identical to \`board_csv/2\` for the 40k fixture
+- Must be called inside \`Repo.transaction/2\` — raises otherwise`,
+`Replace the buffered \`send_download/3\` in \`ExportController.board_csv/2\` with a chunked response that pulls rows from \`Relay.Exports.stream_board_csv/2\` inside a transaction.
+
+## Why chunked, not send_download
+\`send_download\` needs the whole binary up front — that is the 20k-row ceiling. \`Plug.Conn.chunk/2\` lets the socket apply backpressure, which is what keeps us under 80MB resident.
+
+## Scope check
+The read check must run before \`send_chunked/2\`. Once headers are sent we can no longer return a 403, so authorisation cannot live inside the stream.
+
+${FENCE}elixir
+def board_csv(conn, %{"board_id" => board_id}) do
+  user = conn.assigns.current_user
+
+  with {:ok, board} <- Boards.fetch(board_id),
+       :ok <- Policy.authorize(user, :read, board) do
+    conn =
+      conn
+      |> put_resp_content_type("text/csv")
+      |> put_resp_header("content-disposition", disposition(board))
+      |> send_chunked(200)
+
+    Repo.transaction(
+      fn ->
+        board
+        |> Exports.stream_board_csv(chunk_every: 500)
+        |> Enum.reduce_while(conn, fn chunk, conn ->
+          case chunk(conn, chunk) do
+            {:ok, conn} -> {:cont, conn}
+            {:error, :closed} -> {:halt, conn}
+          end
+        end)
+      end,
+      timeout: :infinity
+    )
+    |> case do
+      {:ok, conn} -> conn
+      {:error, _} -> conn
+    end
+  else
+    {:error, :not_found} -> send_resp(conn, 404, "")
+    {:error, :forbidden} -> send_resp(conn, 403, "")
+  end
+end
+${FENCE}
+
+## Cancellation
+If the client disconnects, \`chunk/2\` returns \`{:error, :closed}\`. Halting the reduce ends the stream and the transaction rolls back, so nothing is left idle in transaction (criterion 3).
+
+## Tests
+- 403 before any bytes are sent, for a user without read
+- 40k fixture completes under 80MB resident
+- Closing the socket mid-stream leaves no idle-in-transaction backend
+
+${FENCE}elixir
+test "closing mid-stream leaves no open transaction", %{conn: conn, board: board} do
+  task = Task.async(fn -> get(conn, ~p"/boards/#{board.id}/export.csv") end)
+  Process.sleep(50)
+  Task.shutdown(task, :brutal_kill)
+
+  %{rows: [[open]]} =
+    Repo.query!("""
+    select count(*) from pg_stat_activity
+    where state = 'idle in transaction'
+    """)
+
+  assert open == 0
+end
+${FENCE}
+
+## Out of scope
+- Changing the CSV columns
+- Rate limiting exports`,
+`Add “Export CSV” to the board overflow menu. Render it only when \`Policy.can?(user, :read, board)\` — the same check the controller runs, so the menu never offers an export that 403s.`,
+`One page under docs/architecture covering why the endpoint streams, where backpressure comes from, and why authorisation happens before headers are sent.
+
+## Include
+- The sequence: authorise → send_chunked → transaction → stream
+- What happens on client disconnect
+- The 80MB ceiling and how the 40k fixture proves it`
+];
+
+function parseBody(md) {
+  const L = md.split('\n'); const out = []; let i = 0;
+  while (i < L.length) {
+    const l = L[i];
+    if (l.startsWith(FENCE)) {
+      const lang = l.slice(3).trim() || 'text'; const buf = []; i++;
+      while (i < L.length && !L[i].startsWith(FENCE)) { buf.push(L[i]); i++; }
+      i++; out.push({ k: 'code', lang, lines: buf }); continue;
+    }
+    if (l.startsWith('## ')) { out.push({ k: 'h', t: l.slice(3) }); i++; continue; }
+    if (l.startsWith('- ')) { out.push({ k: 'li', t: l.slice(2) }); i++; continue; }
+    if (!l.trim()) { i++; continue; }
+    const buf = [l]; i++;
+    while (i < L.length && L[i].trim() && !(L[i].startsWith(FENCE) || L[i].startsWith('## ') || L[i].startsWith('- '))) { buf.push(L[i]); i++; }
+    out.push({ k: 'p', t: buf.join(' ') });
+  }
+  return out;
+}
+function bodyMeta(md) {
+  const n = md.split('\n').length, c = (md.split(FENCE).length - 1) / 2;
+  return { lines: n, meta: n + ' lines' + (c ? ' · ' + c + (c === 1 ? ' code block' : ' code blocks') : '') };
+}
+const INLINE_CODE = { fontFamily: MONO, fontSize: '11.5px', background: 'oklch(0.26 0.02 255/0.06)', borderRadius: '4px', padding: '1px 4px' };
+const segs = (t) => t.split('`').map((x, j) => ({ t: x, style: j % 2 ? INLINE_CODE : {} })).filter(x => x.t);
 
 const CARDS = {
   blocked: {
@@ -452,7 +624,7 @@ const CARDS = {
     seedLines: [
       ['description', 'Export buffers the whole result set and falls over above ~20k rows.'],
       ['acceptance', '3 criteria · 80MB resident ceiling · byte-identical output'],
-      ['plan', '4 steps · on step 2 (stream the query)'],
+      ['plan', 'header + 4 tasks · on task 2 (chunked controller)'],
       ['runs', 'spec ✓ · plan ✓ · implement ×6 · review ×2 rejected'],
       ['notes', '1 from Dana Koss, 2h ago'],
       ['flow', 'v4 · implement → review']
@@ -460,7 +632,7 @@ const CARDS = {
     desc: 'The CSV export buffers the whole result set in memory and falls over above ~20k rows. Stream it row by row instead.',
     ac: ['A 40,000-row export completes without exceeding 80MB resident.', 'The downloaded file is byte-identical to the buffered implementation.', 'Cancelling mid-download does not leave an open transaction.'],
     spec: 'Wrap the query in a stream and pipe through a chunked CSV encoder. Backpressure comes from the socket. No change to the endpoint’s contract.',
-    plan: '1 · CSV writer accepts a stream ✓   2 · Stream the query ◂ current   3 · 40k-row fixture test   4 · Snapshot diff in review'
+    plan: 'Stream the query through a chunked CSV encoder and let the socket supply backpressure. Authorise before any bytes go out — once send_chunked has run we can no longer return a 403. The query runs inside a transaction with no timeout, and a closed socket halts the reduce so the transaction rolls back rather than sitting idle. No change to the endpoint’s contract: same path, same columns, same content-disposition. The 40k-row fixture from Dana’s note is the proof for both the memory ceiling and byte-identical output; review compares parsed rows, not byte offsets, because chunk boundaries move.'
   }
 };
 
@@ -530,12 +702,13 @@ class Component extends DCLogic {
     subtasks: {
       blocked: [],
       healthy: [
-        { t: 'Relay.Exports.stream_board_csv/2 + tests', done: true },
-        { t: 'Chunked ExportController + scope check', done: true },
-        { t: 'Board menu entry behind the read check', done: false },
-        { t: 'Docs: architecture page for the export endpoint', done: false }
+        { t: 'Relay.Exports.stream_board_csv/2 + tests', done: true, body: TASK_BODIES[0] },
+        { t: 'Chunked ExportController + scope check', done: false, body: TASK_BODIES[1] },
+        { t: 'Board menu entry behind the read check', done: false, body: TASK_BODIES[2] },
+        { t: 'Docs: architecture page for the export endpoint', done: false, body: TASK_BODIES[3] }
       ]
     },
+    taskOpen: 1, taskFull: false, copied: null,
     noteDraft: '',
     notes: {
       blocked: [
@@ -547,6 +720,12 @@ class Component extends DCLogic {
       ]
     }
   };
+
+  copyCode(key, text) {
+    try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
+    this.setState({ copied: key });
+    clearTimeout(this.ct); this.ct = setTimeout(() => this.setState({ copied: null }), 1400);
+  }
 
   toggleSub(i) {
     const sc = this.state.scenario;
@@ -586,7 +765,7 @@ class Component extends DCLogic {
   componentDidUpdate() { this.measure(); }
 
   setScenario(s) {
-    this.setState({ scenario: s, tab: 'Detail', answered: false, askDraft: '', lines: [], draft: '', busy: false, seedOpen: false, resumed: false, stageOpen: false, menuOpen: false, expanded: { ac: false, spec: false, plan: false }, overflow: { ac: true, spec: true, plan: true } });
+    this.setState({ scenario: s, tab: 'Detail', answered: false, askDraft: '', lines: [], draft: '', busy: false, seedOpen: false, resumed: false, stageOpen: false, menuOpen: false, expanded: { ac: false, spec: false, plan: false }, overflow: { ac: true, spec: true, plan: true }, taskOpen: 1, taskFull: false });
   }
 
   openTalk(seed) {
@@ -624,8 +803,7 @@ class Component extends DCLogic {
     const secs = [
       { key: 'desc', label: 'Description', color: null, toggle: false, lines: [card.desc] },
       { key: 'ac', label: 'Acceptance criteria', color: 'oklch(0.62 0.13 195)', toggle: true, lines: card.ac },
-      { key: 'spec', label: 'Spec', color: BLUE, toggle: true, lines: [card.spec] },
-      { key: 'plan', label: 'Plan', color: VIOLET, toggle: true, lines: [card.plan] }
+      { key: 'spec', label: 'Spec', color: BLUE, toggle: true, lines: [card.spec] }
     ];
 
     const lines = this.state.lines.map(m => ({
@@ -774,37 +952,69 @@ class Component extends DCLogic {
           style: { fontFamily: MONO, fontSize: '11px', lineHeight: '18px', color: k === 'notes' ? 'oklch(0.78 0.1 150)' : 'oklch(0.6 0.025 262)', whiteSpace: 'pre-wrap' }
         })),
 
-      subs: subs.map((x, i) => {
-        const current = i === curIdx && !awaiting;
+      planHead: (() => {
+        const open = !!this.state.expanded.plan;
+        const over = this.state.overflow.plan !== false;
+        const fade = over && !open ? 'linear-gradient(black 55%,transparent)' : 'none';
         return {
-          t: x.t, done: x.done, current,
-          onClick: () => this.toggleSub(i),
-          rowStyle: {
-            display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
-            padding: '6px 8px', borderRadius: '8px', background: current ? 'oklch(0.98 0.018 292)' : 'oklch(0.985 0.004 250)',
-            border: '1px solid ' + (current ? 'oklch(0.86 0.06 292)' : 'oklch(0.92 0.006 255)')
+          ref: (el) => { this.boxes.plan = el; },
+          style: { fontSize: '13px', lineHeight: '20.15px', color: BODY, textWrap: 'pretty', maxHeight: open ? 'none' : '62px', overflow: 'hidden', maskImage: fade, WebkitMaskImage: fade },
+          hasToggle: over || open,
+          label: open ? 'Less' : 'More',
+          chev: mask(open ? 'chevU' : 'chevD', 12, BLUE),
+          onToggle: () => this.setState(st => ({ expanded: { ...st.expanded, plan: !st.expanded.plan } }))
+        };
+      })(),
+      tasks: subs.map((x, i) => {
+        const current = i === curIdx && !awaiting;
+        const open = this.state.taskOpen === i;
+        const m = bodyMeta(x.body || '');
+        const long = m.lines > 16;
+        const clamp = open && long && !this.state.taskFull;
+        const fade = clamp ? 'linear-gradient(black 70%,transparent)' : 'none';
+        return {
+          t: x.t, current, open, meta: m.meta,
+          onCheck: () => this.toggleSub(i),
+          onToggle: () => this.setState(s => ({ taskOpen: s.taskOpen === i ? null : i, taskFull: false })),
+          wrap: { borderRadius: '8px', background: current ? 'oklch(0.98 0.018 292)' : 'oklch(0.985 0.004 250)', border: '1px solid ' + (current ? 'oklch(0.86 0.06 292)' : 'oklch(0.92 0.006 255)') },
+          head: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '8px', position: open ? 'sticky' : 'static', top: '-20px', zIndex: 2, background: open ? 'oklch(1 0 0)' : 'transparent', borderBottom: open ? '1px solid oklch(0.94 0.005 255)' : 'none' },
+          box: {
+            display: 'flex', flexShrink: 0, justifyContent: 'center', alignItems: 'center', width: '16px', height: '16px', padding: 0,
+            borderRadius: '4px', background: x.done ? 'oklch(0.6 0.13 155)' : 'oklch(1 0 0)',
+            border: '1px solid ' + (x.done ? 'oklch(0.6 0.13 155)' : 'oklch(0.88 0.008 255)')
           },
-          boxStyle: {
-            display: 'flex', flexShrink: 0, justifyContent: 'center', alignItems: 'center', width: '16px', height: '16px',
-            borderRadius: '4px', color: 'oklch(1 0 0)',
-            background: x.done ? 'oklch(0.6 0.13 155)' : 'transparent',
-            border: '1px solid ' + (x.done ? 'oklch(0.6 0.13 155)' : 'oklch(0.92 0.006 255)')
-          },
-          tickStyle: x.done ? mask('check', 12, 'oklch(1 0 0)') : { display: 'none' },
-          textStyle: {
+          tick: x.done ? mask('check', 12, 'oklch(1 0 0)') : { display: 'none' },
+          title: {
             display: 'block', fontSize: '14px', lineHeight: '19.25px', flex: 1, minWidth: 0,
             color: x.done ? 'oklch(0.26 0.02 255/0.5)' : 'oklch(0.26 0.02 255)',
             textDecorationLine: x.done ? 'line-through' : 'none',
             textDecorationColor: 'oklch(0.26 0.02 255/0.5)'
           },
-          currentChip: { fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.4px', flex: '0 0 auto', color: 'oklch(0.46 0.14 292)', background: 'oklch(0.96 0.03 292)', borderRadius: '4px', padding: '2px 6px' }
+          currentChip: { fontFamily: MONO, fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.4px', flex: '0 0 auto', color: 'oklch(0.46 0.14 292)', background: 'oklch(0.96 0.03 292)', borderRadius: '4px', padding: '2px 6px' },
+          chev: mask(open ? 'chevU' : 'chevD', 12, 'oklch(0.26 0.02 255/0.5)'),
+          blocks: open ? parseBody(x.body || '').map((bl, bi) => {
+            const key = i + '-' + bi;
+            return {
+              isH: bl.k === 'h', isP: bl.k === 'p', isLi: bl.k === 'li', isCode: bl.k === 'code',
+              t: bl.t || '', segs: bl.t ? segs(bl.t) : [],
+              lang: bl.lang || '', count: bl.lines ? bl.lines.length + ' lines' : '',
+              code: bl.lines ? bl.lines.join('\n') : '',
+              copyLabel: this.state.copied === key ? 'copied' : 'copy',
+              onCopy: () => this.copyCode(key, (bl.lines || []).join('\n'))
+            };
+          }) : [],
+          bodyStyle: { display: 'flex', flexDirection: 'column', gap: '9px', padding: '12px 14px 12px 32px', maxHeight: clamp ? '280px' : 'none', overflow: 'hidden', maskImage: fade, WebkitMaskImage: fade },
+          showMore: open && long,
+          fullLabel: this.state.taskFull ? 'Collapse' : 'Show all ' + m.lines + ' lines',
+          fullChev: mask(this.state.taskFull ? 'chevU' : 'chevD', 12, BLUE),
+          onFull: () => this.setState(s => ({ taskFull: !s.taskFull }))
         };
       }),
       hasSubs: subs.length > 0,
       noSubs: subs.length === 0,
       subCount: subDone + '/' + subs.length,
       subFill: { width: subs.length ? Math.round((subDone / subs.length) * 100) + '%' : '0%', height: '100%', borderRadius: '999px', background: 'oklch(0.6 0.13 155)' },
-      subEmptyText: 'Sub-tasks are pulled out of the plan when it lands, then worked one at a time. Spec is still paused, so there is no plan to derive them from yet.',
+      subEmptyText: 'The plan stage writes a short header and its tasks together. Spec is still paused, so there is no plan yet.',
 
       notes: notes.map(n => ({
         who: n.who, name: n.name, ago: n.ago, text: n.text,
@@ -844,7 +1054,7 @@ class Component extends DCLogic {
         { label: 'task · the ask', c: AMBER },
         { label: 'notes · card content', c: 'oklch(0.42 0.1 255)' },
         { label: 'chrome · v2 fixes', c: 'oklch(0.26 0.02 255/0.45)' },
-        { label: 'sub-tasks', c: 'oklch(0.42 0.11 155)' },
+        { label: 'plan · tasks', c: 'oklch(0.42 0.11 155)' },
         { label: 'polish · roll these back', c: 'oklch(0.44 0.11 195)' }
       ].map(l => ({
         label: l.label,
@@ -900,9 +1110,9 @@ class Component extends DCLogic {
         { n: '16', tag: 'chrome', title: 'One expand affordance, driven by measured overflow',
           body: 'The header toggle and the inner “Show more” merge into a single More / Less that owns the fade. It is rendered only when the box actually overflows its 62px — measured, not guessed from character count — so no dead buttons and no silent truncation.',
           where: 'Detail · every long section' },
-        { n: '17', tag: 'subtasks', title: 'Sub-tasks keep their shape, and say who is on them',
-          body: 'Unchanged from the capture: the Sub-tasks label, the n/m count, the 120px progress bar, 16px checkboxes, and line-through on completed rows. Two additions. The row the agent is currently working carries an AGENT IS HERE chip and a violet border, so the list reads as a live position rather than a static checklist — that is the part that was invisible before. And when there is no plan yet the section states plainly that sub-tasks get pulled out of the plan once it lands, instead of rendering an empty box.',
-          where: 'Detail · after Plan, before Notes', btn: 'Show them on DE4', act: 'subs' },
+        { n: '17', tag: 'subtasks', title: 'Plan is a header plus tasks, written together',
+          body: 'Plan is no longer a paragraph that tasks get pulled out of. The plan stage writes one short header and the tasks at the same time, so they render as one section: the header, then the tasks. The header clamps at three lines behind the same measured More / Less as the other long fields. Each task has a title and a markdown body that can run to 200 lines with fenced code. Tasks are an accordion — one open at a time, the body clamps at 280px behind “Show all n lines”, and the open title row sticks to the top of the scroll so collapsing is one click from anywhere. Rows carry line and code-block counts so you know what you are opening; code blocks get a language label and copy. The task the agent is on keeps its AGENT IS HERE chip.',
+          where: 'Detail · replaces Plan + Sub-tasks, before Notes', btn: 'Show them on DE4', act: 'subs' },
         { n: '18', tag: 'polish', title: 'Vertical rhythm: one spacing scale in the card body',
           body: 'The capture mixes 8px, 12px and 16px gaps between sections with per-element margin-bottom. Here the body column is a flex column with a single 21px gap and 9px inside each section between its label and its box — no margins on children at all. That is why it reads as a document rather than a stack of boxes, and it survives adding a section (sub-tasks, notes) without retuning anything.',
           where: 'card body column · gap only, no child margins' },
