@@ -261,24 +261,24 @@ sharing behavior.
   is parked on `:needs_input`), `first_pass_runs` (no failed `:check` execution) and the
   foreach's `clean_copies`. Approximations: `ai_enabled` and node roles are read as they are now.
 - **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
-  `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryTask` (the backbone,
+  `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryStep` (the backbone,
   ordered within an activity; `board_id` denormalized so every read is one board-scoped
   `where`), and `Schemas.Release` (the swimlanes — a **new axis orthogonal to stage**; every
   board is seeded with `Schemas.Release.seed_names/0` by `Boards.create_board/2`, every
   pre-existing board by the `backfill_story_map_releases` migration, which carries the one
   deliberately frozen copy of that list). Cards carry three nilable FKs —
-  `story_activity_id`, `story_task_id`, `release_id` — plus (RE262) `story_map_position`, all
+  `story_activity_id`, `story_step_id`, `release_id` — plus (RE262) `story_map_position`, all
   cast only through `Schemas.Card.story_map_changeset/2`, starting fully UNMAPPED, with release
-  independent of activity/task. *A set `story_task_id` implies the matching `story_activity_id`*, enforced by
-  derivation in `assign_card/2` (the task supplies its activity; a conflicting one passed
-  alongside is ignored), by `update_task/2` (moving a task to another activity rewrites its
+  independent of activity/step. *A set `story_step_id` implies the matching `story_activity_id`*, enforced by
+  derivation in `assign_card/2` (the step supplies its activity; a conflicting one passed
+  alongside is ignored), by `update_step/2` (moving a step to another activity rewrites its
   mapped cards' `story_activity_id` in the same transaction), and by the changeset as a
   backstop. Deleting structure **unmaps**
-  cards, never deletes them (`cards → structure` is `nilify_all`, `activity → its tasks` is
+  cards, never deletes them (`cards → structure` is `nilify_all`, `activity → its steps` is
   `delete_all`). **Deleting is refused outright (`{:error, :not_empty}`) while any non-archived
   card still points at the structure (RE261)** — checked in the delete's own transaction, so
-  the cascade above is now only reachable for an already-empty structure. `move_task/3` is the
-  single task-repositioning entry point (activity change + renumber, one transaction, one
+  the cascade above is now only reachable for an already-empty structure. `move_step/3` is the
+  single step-repositioning entry point (activity change + renumber, one transaction, one
   broadcast); `insert_before/3` is the pure "remove and re-insert before the target" ordering
   rule every header drop shares.
   Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
@@ -291,7 +291,7 @@ sharing behavior.
   handlers live in `BoardLive`; a separate LiveView could only honour that by duplicating them
   or extracting the drawer's whole state machine. The grid itself is isolated: the pure,
   unit-tested `RelayWeb.StoryMapGrid.build/7`
-  (`(activities, tasks, releases, cards, draft, hide_tasks?, collapsed)` → bands, columns,
+  (`(activities, steps, releases, cards, draft, hide_steps?, collapsed)` → bands, columns,
   lanes, cells, unmapped —
   every card accounted for exactly once in one of three places: a `cells` entry, the tray, or
   the `count` of exactly one collapsed stub column; an activity-less card in the tray, a
@@ -300,13 +300,13 @@ sharing behavior.
   `RelayWeb.StoryMapComponents` for the render.
   `RelayWeb.CoreComponents.board_view_tabs/1` is the Board ↔ Story map switch.
   **Create (RE263):** three affordances — a trailing `＋` add-activity column, a per-activity
-  `＋ Add task`, and an `＋ Release` row — all committing through one `inline_name_input/1`.
+  `＋ Add step`, and an `＋ Release` row — all committing through one `inline_name_input/1`.
   Which one is open is the single `:story_map_draft` assign on `BoardLive`
-  (`nil | :activity | :release | {:task, activity_id}`, one draft at a time board-wide), and it
+  (`nil | :activity | :release | {:step, activity_id}`, one draft at a time board-wide), and it
   is the `draft` argument to `build/7`: the draft materializes a `"draft:<activity_id>"` column
   that carries no `cells`, and every column gains `bare?` / `draft?`. Names are trimmed and
   capped by `Schemas.StoryActivity.max_name_length/0` — the one definition, shared by
-  `StoryTask` and `Release`, so an over-long paste is an error changeset rather than a Postgrex
+  `StoryStep` and `Release`, so an over-long paste is an error changeset rather than a Postgrex
   22001 crash. On an archived board the four write events are refused *and* the affordances are
   not rendered (`read_only`, the same attr name and behaviour as the stage column's compose
   `＋`).
@@ -330,7 +330,7 @@ sharing behavior.
   draggable kind (`.story-map-header[data-kind][data-id]`, dropping on
   `.story-map-header-drop`) that pushes `story_map_reorder` with **ids only**, and `BoardLive`
   computes the order with `StoryMap.insert_before/3` and writes through
-  `reorder_activities/2`, `move_task/3` or `reorder_releases/2`. Reordering releases moves the
+  `reorder_activities/2`, `move_step/3` or `reorder_releases/2`. Reordering releases moves the
   last-lane fallback with it, which is a display move only — no stored `release_id` changes.
   Every new event joins the `read_only?` guard list and none of the affordances render on an
   archived board.
@@ -340,12 +340,12 @@ sharing behavior.
   `RelayWeb.StoryMapComponents.zoom_levels/0` (`:map` | `:compact` | `:full`, defaulting to
   `:compact`) parsed off the wire by `parse_zoom/1`; it reaches only the renderer, which sizes
   the card face — Map is a title-only chip, Full adds the meta row and progress bar.
-  `:story_map_hide_tasks` is the sixth argument to `build/7`: it collapses each activity's task
+  `:story_map_hide_steps` is the sixth argument to `build/7`: it collapses each activity's step
   columns into one merged `"m:<activity_id>"` column (the fourth column-key shape
-  `decode_placement/2` parses, alongside `"t:"`, `"nt:"` and `"draft:"`). Dropping a card into a
-  merged column keeps its `story_task_id` when that task still belongs to the target activity —
-  a purely vertical drag changes release only and must not silently unset the task; the
-  activity is then derived from the task by `StoryMap.resolve_placement/2`.
+  `decode_placement/2` parses, alongside `"s:"`, `"ns:"` and `"draft:"`). Dropping a card into a
+  merged column keeps its `story_step_id` when that step still belongs to the target activity —
+  a purely vertical drag changes release only and must not silently unset the step; the
+  activity is then derived from the step by `StoryMap.resolve_placement/2`.
   **Filter & focus (RE259):** the artboard's filter bar plus two view-narrowing controls,
   four more keys of the shared view below. `RelayWeb.StoryMapFilter` is the pure model beside
   `StoryMapGrid`: it owns the **owner-key wire format** (`"agent"`, `"u:<user_id>"`) exactly
@@ -447,11 +447,11 @@ erDiagram
     Board ||--o{ Runner : "registered runners"
     Board ||--o{ Membership : has
     Board ||--o{ StoryActivity : "story map activities"
-    Board ||--o{ StoryTask : "story map tasks"
-    StoryActivity ||--o{ StoryTask : "backbone (cascade delete)"
+    Board ||--o{ StoryStep : "story map steps"
+    StoryActivity ||--o{ StoryStep : "backbone (cascade delete)"
     Board ||--o{ Release : "story map swimlanes"
     StoryActivity |o--o{ Card : "story_activity_id (nilified on delete)"
-    StoryTask |o--o{ Card : "story_task_id (nilified on delete)"
+    StoryStep |o--o{ Card : "story_step_id (nilified on delete)"
     Release |o--o{ Card : "release_id (nilified on delete)"
     User ||--o{ Membership : has
     Board ||--o{ ApiKey : "agent credentials"
@@ -470,7 +470,7 @@ A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_t
 context threaded through web and API entry points.
 
 A `Card` additionally carries an optional story-map placement — `story_activity_id`,
-`story_task_id` and `release_id`, all nilable, all nilified rather than cascaded when the
+`story_step_id` and `release_id`, all nilable, all nilified rather than cascaded when the
 structure they point at is deleted. Release is a **new axis orthogonal to stage**: a card has
 both.
 
