@@ -116,6 +116,24 @@ defmodule Relay.Runs do
     Repo.one(from r in Run, where: r.card_id == ^card_id and r.status in ^Run.active_statuses())
   end
 
+  @doc """
+  RE356 — the sub_task the card's agent is on right now: the latest binding of the foreach node
+  (`current_sub_task_id/2`) in the card's **active** run (`active_run/1`, i.e.
+  `Schemas.Run.active_statuses/0`). `nil` when there is no active run, the run's flow row is gone,
+  or its flow has no foreach node. A bound task that is already `done` still counts — the
+  iteration finished and the run has not advanced yet. The card drawer reads this to auto-open
+  the in-flight task and mark it `AGENT IS HERE`.
+  """
+  def in_flight_sub_task_id(%Card{} = card) do
+    with %Run{} = run <- active_run(card),
+         {:ok, flow} <- load_flow(run),
+         key when is_binary(key) <- foreach_node_key(flow) do
+      current_sub_task_id(run, key)
+    else
+      _none -> nil
+    end
+  end
+
   @doc "All of the card's runs, newest first."
   def list_runs(%Card{id: card_id}) do
     Repo.all(from r in Run, where: r.card_id == ^card_id, order_by: [desc: r.id])

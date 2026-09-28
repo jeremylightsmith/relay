@@ -851,7 +851,7 @@ defmodule RelayWeb.BoardLiveTest do
         card-drawer-description
         card-drawer-spec
         card-plan
-        sub-tasks
+        card-plan-tasks
         card-drawer-conversation
         card-drawer-activity
       )

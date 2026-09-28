@@ -38,4 +38,15 @@ defmodule RelayWeb.StorybookStoriesTest do
     assert src =~ ~s(style="width:214px;")
     assert src =~ "<.psb-variation/>"
   end
+
+  test "plan_tasks story covers the RE356 states and is indexed" do
+    src = read("plan_tasks.story.exs")
+
+    for id <- ~w(:collapsed :in_flight_open :long_body_clamped :clamp_released :done_task :body_less :empty) do
+      assert src =~ "id: #{id}", "plan_tasks story is missing variation #{id}"
+    end
+
+    assert src =~ "&RelayWeb.CoreComponents.plan_tasks/1"
+    assert read("_core_components.index.exs") =~ ~s|def entry("plan_tasks")|
+  end
 end

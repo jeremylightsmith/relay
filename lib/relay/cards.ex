@@ -35,6 +35,10 @@ defmodule Relay.Cards do
   # move_card/4 clamps this into range.
   @append_index 1_000_000
 
+  # RE356 — a markdown code fence. Built rather than typed so the fence never has to appear
+  # literally in source (it would close any markdown block quoting this file).
+  @code_fence String.duplicate("`", 3)
+
   # Every Card column EXCEPT the heavy text bodies (:description,
   # :acceptance_criteria, :spec, :plan).
   # list_cards/1,2 loads only these so a whole-board render (LiveView columns + the
@@ -1096,6 +1100,26 @@ defmodule Relay.Cards do
   def sub_task_pct(%{total: 0}), do: nil
   def sub_task_pct(%{done: done, total: total}), do: round(done * 100 / total)
   def sub_task_pct(_other), do: nil
+
+  @doc """
+  RE356 — the collapsed task row's meta, derived from a task `body` and never stored:
+  `%{lines: n, code_blocks: m}`, or `nil` for a nil/blank body (a row with nothing to open, so the
+  drawer shows no meta and no chevron). `lines` counts the body's lines once its trailing newline
+  is trimmed; `code_blocks` counts fence lines (a line whose trimmed start is three backticks) and
+  halves them, so an open/close pair is one block and an unclosed fence rounds down. Formatting
+  the numbers is the component's job.
+  """
+  def task_body_meta(body) when is_binary(body) do
+    if String.trim(body) == "" do
+      nil
+    else
+      lines = body |> String.trim_trailing() |> String.split(["\r\n", "\n"])
+      fences = Enum.count(lines, &(&1 |> String.trim_leading() |> String.starts_with?(@code_fence)))
+      %{lines: length(lines), code_blocks: div(fences, 2)}
+    end
+  end
+
+  def task_body_meta(_body), do: nil
 
   @doc """
   Whether a card's `ai_result` counts as not given — `nil` or an empty map (RE316). The one
