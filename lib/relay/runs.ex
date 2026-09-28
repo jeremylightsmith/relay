@@ -59,6 +59,8 @@ defmodule Relay.Runs do
   alias Schemas.Stage
   alias Schemas.SubTask
 
+  require Logger
+
   @pubsub Relay.PubSub
   @append_index 1_000_000
 
@@ -1173,19 +1175,25 @@ defmodule Relay.Runs do
 
   # No run is created, and the card blocks on a human: a `:needs_input` card is skipped by
   # the scheduler by rule, so this reports the defect once instead of the scheduler re-pulling
-  # a card it can never work.
+  # a card it can never work. The text is self-service (RE357): the usual cause is a planner
+  # that has not migrated to `relay tasks add`, and the owner can fix that themselves.
   defp block_on_unusable_plan(card, flow) do
-    {:ok, _card} =
-      Cards.request_input(
-        card,
-        "The #{flow.key} flow could not start: this card's plan produced no tasks. " <>
-          "Its `foreach` node iterates the plan's `## Task N: <name>` headings (two to four " <>
-          "hashes) and found none, so there is nothing to implement. Fix the plan's task " <>
-          "headings and move the card back to re-run.",
-        :agent
-      )
-
+    {:ok, _card} = Cards.request_input(card, unusable_plan_message(card, flow), :agent)
     {:error, :no_plan_tasks}
+  end
+
+  defp unusable_plan_message(card, flow) do
+    why =
+      if is_nil(card.plan) or String.trim(card.plan) == "" do
+        "this card has no tasks and no plan, so its `foreach` node has nothing to implement."
+      else
+        "this card has no tasks, and its plan has no `## Task N:` headings for the legacy " <>
+          "plan-parse fallback to read — the planner has not migrated to `relay tasks add`."
+      end
+
+    "The #{flow.key} flow could not start: #{why} Run `/relay-doctor` to migrate the planner, " <>
+      "then re-plan the card (or add its tasks directly with " <>
+      "`relay tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
   end
 
   defp start_seeded_run(card, flow, start_target, context) do
@@ -1236,10 +1244,10 @@ defmodule Relay.Runs do
     working
   end
 
-  # A `foreach` flow iterates the card's sub_tasks, so the server materializes them
-  # from the card's plan at RUN START (never on re-entry — that would wipe
-  # done-state). A card whose sub_tasks were already written (by the Plan stage, or
-  # by a human) is left alone: the authored list wins over the parsed one.
+  # A `foreach` flow iterates the card's sub_tasks. The planner writes them (`relay tasks add`,
+  # RE357); a card that has none falls back to parsing them out of `card.plan` at RUN START
+  # (never on re-entry — that would wipe done-state), with a deprecation warning. A card whose
+  # sub_tasks were already written is left alone: the authored list wins over the parsed one.
   #
   # Returns `{:error, :no_plan_tasks}` when the flow iterates the plan but no task list can
   # be produced. That case MUST NOT start the run (RLY-165): with zero sub_tasks the first
@@ -1259,12 +1267,26 @@ defmodule Relay.Runs do
         case PlanTasks.parse(card.plan) do
           [_ | _] = tasks ->
             {:ok, _card} = Cards.set_sub_tasks(card, tasks)
+            log_plan_parse_fallback(card, flow, length(tasks))
             :ok
 
           [] ->
             {:error, :no_plan_tasks}
         end
     end
+  end
+
+  # RE357: parsing `card.plan` is the LEGACY path — a migrated planner writes the tasks itself
+  # with `relay tasks add`, so the card already has sub_tasks and this never runs. It is kept
+  # for boards whose customized flows still write monolithic plans; the warning is how we
+  # learn when it is safe to delete.
+  defp log_plan_parse_fallback(card, flow, count) do
+    ref = Cards.ref(Repo.get!(Board, card.board_id), card)
+
+    Logger.warning(
+      "deprecated: #{ref} (#{flow.key} flow): seeded #{count} sub_tasks by parsing card.plan; " <>
+        "migrate the planner to `relay tasks add` (run /relay-doctor)"
+    )
   end
 
   defp insert_run(card, flow, start_target, context) do
@@ -4220,7 +4242,12 @@ defmodule Relay.Runs do
     Repo.get!(NodeJob, job.id)
   end
 
-  @doc "How many `## Task N:` steps a card's plan declares. Wraps `Relay.Runs.PlanTasks` so the Talk seed line reads the plan through the ONE parser the foreach node uses."
+  @doc """
+  LEGACY fallback: how many `## Task N:` headings a monolithic plan declares, via the same
+  `Relay.Runs.PlanTasks` parser the run-start fallback uses. `Relay.Talk`'s seed line calls it
+  only for a card with no tasks; a migrated plan is header-only and its steps are the card's
+  tasks (`Relay.Cards.task_count/1`, RE357).
+  """
   def plan_task_count(plan), do: plan |> PlanTasks.parse() |> length()
 
   # Exclusive runs have absolute runner affinity (ADR 0006 §5): the machine that
@@ -4373,7 +4400,8 @@ defmodule Relay.Runs do
         "branch" => card.branch || default_branch(board, card),
         "prior_detail" => opts[:prior_detail],
         "findings" => opts[:findings],
-        "sub_task" => sub_task_title(opts[:sub_task_id])
+        "sub_task" => sub_task_title(opts[:sub_task_id]),
+        "sub_task_id" => opts[:sub_task_id]
       })
 
     %{
@@ -4387,7 +4415,10 @@ defmodule Relay.Runs do
   end
 
   # {sub_task} lets a foreach node's prompt name the exact task it is working
-  # instead of saying "the next unchecked one".
+  # instead of saying "the next unchecked one"; {sub_task_id} lets it FETCH that
+  # task (`relay task show {ref} {sub_task_id}`, RE357). Both are nil outside a
+  # foreach binding, and the runner drops nil vars, so the placeholder survives
+  # literally there — use them only in nodes inside the loop.
   defp sub_task_title(nil), do: nil
 
   defp sub_task_title(sub_task_id) do

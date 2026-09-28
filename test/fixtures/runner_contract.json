@@ -16,7 +16,8 @@
         "findings": null,
         "prior_detail": null,
         "ref": "CB1",
-        "sub_task": null
+        "sub_task": null,
+        "sub_task_id": null
       }
     },
     "resumed_agent": {
@@ -35,7 +36,8 @@
         "findings": null,
         "prior_detail": null,
         "ref": "CA1",
-        "sub_task": null
+        "sub_task": null,
+        "sub_task_id": null
       }
     },
     "shared_clean_agent": {
@@ -54,7 +56,8 @@
         "findings": null,
         "prior_detail": null,
         "ref": "CA1",
-        "sub_task": null
+        "sub_task": null,
+        "sub_task_id": null
       }
     }
   },
