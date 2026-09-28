@@ -27,6 +27,15 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: "Invalid request")
   end
 
+  # RE355 — a malformed task request names what is wrong. 422 like the flow routes' document
+  # errors; the shared bare `:invalid_request` above stays 400 for its existing callers.
+  def call(conn, {:error, {:invalid_request, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_request", message: message)
+  end
+
   def call(conn, {:error, {:invalid_document, reason}}) do
     conn
     |> put_status(:unprocessable_entity)

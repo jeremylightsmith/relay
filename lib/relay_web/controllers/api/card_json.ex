@@ -2,6 +2,7 @@ defmodule RelayWeb.Api.CardJSON do
   @moduledoc "JSON representation of cards (shared across API controllers)."
 
   alias Relay.Cards
+  alias RelayWeb.Api.TaskJSON
 
   @doc """
   The shared card shape. `board` supplies the ref + key; `stages` (the board's in-memory stage
@@ -64,7 +65,7 @@ defmodule RelayWeb.Api.CardJSON do
         |> Map.put(:plan, card.plan)
         |> Map.put(:spec, card.spec)
         |> Map.put(:ai_result, card.ai_result)
-        |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &sub_task/1))
+        |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &TaskJSON.task/1))
         # RE93 — both directions, single-card only. data/3 (the index/summary shape) is
         # deliberately NOT extended: it would be an N+1 per card and no consumer needs it there.
         |> Map.put(:depends_on, Enum.map(Cards.list_dependencies(board, card), &dependency/1))
@@ -127,10 +128,6 @@ defmodule RelayWeb.Api.CardJSON do
       rejected_by: r.rejected_by,
       rejected_at: r.rejected_at
     }
-  end
-
-  defp sub_task(%Schemas.SubTask{} = st) do
-    %{id: st.id, title: st.title, done: st.done, position: st.position}
   end
 
   # Both directions are mapped key-by-key rather than passed through, so the wire shape stays a

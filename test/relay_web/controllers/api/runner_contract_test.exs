@@ -149,8 +149,43 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # first call.
     scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
 
+    # RE355 — the card-task routes are runner wire: `./relay tasks add|list` and
+    # `./relay task show|update|rm` build their requests and read their responses against these
+    # recorded shapes, so a renamed key breaks bin/test_relay.py instead of an agent's plan.
+    {:ok, tasks_card} = Relay.Cards.create_card(exclusive.next_up, %{title: "Tasks card"})
+    tasks_ref = Relay.Cards.ref(exclusive.board, tasks_card)
+
+    tasks_create_request = %{
+      "tasks" => [
+        %{"title" => "Schema", "body" => "Add the column.\n\n```elixir\nadd :body, :text\n```\n"},
+        %{"title" => "Routes", "body" => "Say \"hello\" to the router.\n"}
+      ]
+    }
+
+    tasks_create_response =
+      exclusive.conn
+      |> post(~p"/api/cards/#{tasks_ref}/tasks", Jason.encode!(tasks_create_request))
+      |> json_response(201)
+
+    [%{"id" => first_task_id}, %{"id" => second_task_id}] = tasks_create_response["data"]
+
+    tasks_list_response = exclusive.conn |> get(~p"/api/cards/#{tasks_ref}/tasks") |> json_response(200)
+
+    tasks_show_response =
+      exclusive.conn |> get(~p"/api/cards/#{tasks_ref}/tasks/#{first_task_id}") |> json_response(200)
+
+    tasks_update_request = %{"title" => "Routes (renamed)", "body" => "Renamed.\n"}
+
+    tasks_update_response =
+      exclusive.conn
+      |> patch(~p"/api/cards/#{tasks_ref}/tasks/#{second_task_id}", Jason.encode!(tasks_update_request))
+      |> json_response(200)
+
+    tasks_delete_response =
+      exclusive.conn |> delete(~p"/api/cards/#{tasks_ref}/tasks/#{first_task_id}") |> json_response(200)
+
     document = %{
-      "version" => 6,
+      "version" => 7,
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -207,6 +242,15 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "manifest_path" => "/api/scaffold",
         "file_path_example" => "/api/scaffold/relay",
         "manifest" => scaffold_placeholders(scaffold_manifest)
+      },
+      "tasks" => %{
+        "create_request" => tasks_create_request,
+        "create_response" => task_placeholders(tasks_create_response),
+        "list_response" => task_placeholders(tasks_list_response),
+        "show_response" => task_placeholders(tasks_show_response),
+        "update_request" => tasks_update_request,
+        "update_response" => task_placeholders(tasks_update_response),
+        "delete_response" => task_placeholders(tasks_delete_response)
       }
     }
 
@@ -323,6 +367,18 @@ defmodule RelayWeb.Api.RunnerContractTest do
         Map.merge(error, %{"required" => "<required-version>", "running" => "<running-version>", "message" => "<message>"})
     }
   end
+
+  # Task ids are serial and would churn the fixture; the contract is the key set and the
+  # values that are deterministic (titles, bodies, done, position).
+  defp task_placeholders(map) when is_map(map) do
+    Map.new(map, fn
+      {"id", _id} -> {"id", "<task-id>"}
+      {key, value} -> {key, task_placeholders(value)}
+    end)
+  end
+
+  defp task_placeholders(list) when is_list(list), do: Enum.map(list, &task_placeholders/1)
+  defp task_placeholders(other), do: other
 
   defp scaffold_placeholders(manifest) do
     %{
