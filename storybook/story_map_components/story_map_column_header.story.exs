@@ -10,13 +10,13 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
       %Variation{id: :idle, attributes: attrs(%{})},
       %Variation{
         id: :renaming,
-        attributes: attrs(%{edit: {:task, 10}, edit_name: "Sign in with SSO"})
+        attributes: attrs(%{edit: {:step, 10}, edit_name: "Sign in with SSO"})
       },
       %Variation{
         id: :delete_blocked,
         attributes: attrs(%{column: column(%{count: 3})})
       },
-      %Variation{id: :no_task_placeholder, attributes: attrs(%{column: no_task_column()})},
+      %Variation{id: :no_step_placeholder, attributes: attrs(%{column: no_step_column()})},
       %Variation{id: :read_only, attributes: attrs(%{read_only: true})}
     ]
   end
@@ -38,14 +38,14 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
   defp column(overrides) do
     Map.merge(
       %{
-        key: "t:10",
+        key: "s:10",
         activity: %Schemas.StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1},
-        task: %Schemas.StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1},
-        no_task?: false,
+        step: %Schemas.StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1},
+        no_step?: false,
         bare?: false,
         draft?: false,
         merged?: false,
-        task_count: 0,
+        step_count: 0,
         last_of_activity?: true,
         count: 0
       },
@@ -53,7 +53,7 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
     )
   end
 
-  defp no_task_column do
-    %{column(%{}) | key: "nt:1", task: nil, no_task?: true, bare?: false}
+  defp no_step_column do
+    %{column(%{}) | key: "ns:1", step: nil, no_step?: true, bare?: false}
   end
 end

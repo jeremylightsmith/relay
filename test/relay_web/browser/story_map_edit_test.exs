@@ -89,8 +89,8 @@ defmodule RelayWeb.Browser.StoryMapEditTest do
     session
     |> drag(
       "#story-map-card-#{Cards.ref(board, sso)}",
-      to: "#story-map-cell-t-#{sign_in.id}-r-#{later.id}"
+      to: "#story-map-cell-s-#{sign_in.id}-r-#{later.id}"
     )
-    |> assert_has("#story-map-cell-t-#{sign_in.id}-r-#{later.id} #story-map-card-#{Cards.ref(board, sso)}")
+    |> assert_has("#story-map-cell-s-#{sign_in.id}-r-#{later.id} #story-map-card-#{Cards.ref(board, sso)}")
   end
 end

@@ -9,7 +9,7 @@
 // from assigns, which is what makes a second tab follow along for free. Dropping a card back
 // where it already was is a no-op write that renders identically.
 //
-// RE261 adds a SECOND draggable kind — an activity band, a task column header or a release
+// RE261 adds a SECOND draggable kind — an activity band, a step column header or a release
 // label — alongside cards. The two worlds are kept strictly apart by dropZone(): a card only
 // ever targets a body cell or the tray, a header only ever targets another header. Anything
 // else resolves to null, so nothing highlights, nothing preventDefaults, and the browser

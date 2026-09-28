@@ -7,10 +7,10 @@ defmodule Storybook.StoryMapComponents.StoryMapToolbar do
 
   def variations do
     [
-      %Variation{id: :map_zoom, attributes: %{zoom: :map, hide_tasks: false}},
-      %Variation{id: :compact_zoom, attributes: %{zoom: :compact, hide_tasks: false}},
-      %Variation{id: :full_zoom, attributes: %{zoom: :full, hide_tasks: false}},
-      %Variation{id: :hiding_tasks, attributes: %{zoom: :compact, hide_tasks: true}}
+      %Variation{id: :map_zoom, attributes: %{zoom: :map, hide_steps: false}},
+      %Variation{id: :compact_zoom, attributes: %{zoom: :compact, hide_steps: false}},
+      %Variation{id: :full_zoom, attributes: %{zoom: :full, hide_steps: false}},
+      %Variation{id: :hiding_steps, attributes: %{zoom: :compact, hide_steps: true}}
     ]
   end
 end

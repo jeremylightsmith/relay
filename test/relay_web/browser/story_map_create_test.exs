@@ -13,7 +13,7 @@ defmodule RelayWeb.Browser.StoryMapCreateTest do
   The fix is `phx-click-away` in place of `phx-blur`: only a real click elsewhere cancels, and
   LiveView's own focus juggling is ignored. Only a real keypress in a real browser proves it,
   so this walks all five entry points with a real Enter: the empty panel's button, the trailing
-  ＋, the bare `＋ Add task` header, an activity header's ＋, and ＋ Release — and checks the
+  ＋, the bare `＋ Add step` header, an activity header's ＋, and ＋ Release — and checks the
   input comes back empty and still focused, which is what lets a backbone be typed hands-free.
   """
   use PhoenixTest.Playwright.Case, async: false
@@ -62,14 +62,14 @@ defmodule RelayWeb.Browser.StoryMapCreateTest do
     |> assert_has("#story-map-grid", text: "Ship work with AI")
     |> press(@input, "Escape")
     |> refute_has(@input)
-    # The bare `＋ Add task` header: "Onboard & access" has no tasks yet.
-    |> click("#story-map-no-task-#{onboard.id}")
+    # The bare `＋ Add step` header: "Onboard & access" has no steps yet.
+    |> click("#story-map-no-step-#{onboard.id}")
     |> assert_has(@input)
     |> commit("Watch it live")
     |> assert_has("#story-map-grid", text: "Watch it live")
     |> press(@input, "Escape")
-    # The activity header's ＋, now that the activity has a real task column.
-    |> click("#story-map-add-task-#{onboard.id}")
+    # The activity header's ＋, now that the activity has a real step column.
+    |> click("#story-map-add-step-#{onboard.id}")
     |> assert_has(@input)
     |> commit("Run big changes")
     |> assert_has("#story-map-grid", text: "Run big changes")

@@ -3,7 +3,7 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
   RE261 — the guard-vs-display invariant, pinned in the ONE direction that matters.
 
   The greyed ✕ is driven by `RelayWeb.StoryMapGrid`'s counts; the refusal is driven by
-  `Relay.StoryMap`'s own non-archived count. They agree exactly for activities and tasks. For
+  `Relay.StoryMap`'s own non-archived count. They agree exactly for activities and steps. For
   RELEASES the grid count is larger: a mapped card with no release **displays** in the last
   lane, which the server's `release_id == id` check does not see. That direction is the safe
   one — the UI may block a delete the server would allow (harmless: the button is greyed and
@@ -72,7 +72,7 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
     assert {:ok, _} = StoryMap.delete_activity(ctx.a3)
   end
 
-  test "activities and tasks agree exactly — a non-zero count is a refusal", ctx do
+  test "activities and steps agree exactly — a non-zero count is a refusal", ctx do
     assert band_count(ctx.grid, ctx.a1.id) > 0
     assert {:error, :not_empty} = StoryMap.delete_activity(ctx.a1)
 
@@ -96,8 +96,8 @@ defmodule RelayWeb.StoryMapDeleteGuardTest do
     Enum.find_value(grid.bands, fn band -> band.activity.id == activity_id && band.count end)
   end
 
-  defp column_count(grid, task_id) do
-    Enum.find_value(grid.columns, fn column -> column.key == "t:#{task_id}" && column.count end)
+  defp column_count(grid, step_id) do
+    Enum.find_value(grid.columns, fn column -> column.key == "s:#{step_id}" && column.count end)
   end
 
   defp lane_count(grid, release_id) do
