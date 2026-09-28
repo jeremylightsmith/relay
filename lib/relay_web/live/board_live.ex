@@ -519,6 +519,9 @@ defmodule RelayWeb.BoardLive do
         editing_plan={@editing_plan}
         expanded_spec={@expanded_spec?}
         expanded_plan={@expanded_plan?}
+        open_task_id={@open_task_id}
+        task_full?={@task_full?}
+        in_flight_task_id={@in_flight_task_id}
         expanded_ai_result={@expanded_ai_result?}
         spec_form={@spec_form}
         plan_form={@plan_form}
@@ -1043,6 +1046,11 @@ defmodule RelayWeb.BoardLive do
       |> assign(:members, Members.list_members(board))
       |> assign(:reassign_open, false)
       |> assign(:unused_fields_open, false)
+      # RE356 — the drawer Plan section's accordion: the one open task, whether its clamp is
+      # released, and the last computed in-flight task (see assign_in_flight_task/3).
+      |> assign(:open_task_id, nil)
+      |> assign(:task_full?, false)
+      |> assign(:in_flight_task_id, nil)
       |> assign(:overflow_open, false)
       |> assign(:stage_menu_open, false)
       |> assign(:stage_filter, "")
@@ -1162,6 +1170,7 @@ defmodule RelayWeb.BoardLive do
          |> assign(:answer_values, %{})
          |> assign_review(card)
          |> assign(:card_runs, runs)
+         |> assign_in_flight_task(card, :refresh)
          |> assign(:drawer_tab, default_tab)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
@@ -2155,6 +2164,24 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("toggle_sub_task", _params, socket), do: {:noreply, socket}
 
+  # RE356 — the Plan section's accordion: one task open at a time; clicking the open one
+  # collapses it. Either way the newly shown body starts clamped. View-only state, so it is
+  # allowed on a read-only board.
+  def handle_event("toggle_task_open", %{"id" => id}, socket) do
+    case Integer.parse(id) do
+      {task_id, ""} ->
+        open = if socket.assigns.open_task_id == task_id, do: nil, else: task_id
+        {:noreply, assign(socket, open_task_id: open, task_full?: false)}
+
+      _invalid ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_task_open", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_task_full", _params, socket), do: {:noreply, update(socket, :task_full?, &(!&1))}
+
   def handle_event("toggle_reassign", _params, socket) do
     {:noreply, update(socket, :reassign_open, &(not &1))}
   end
@@ -3049,8 +3076,13 @@ defmodule RelayWeb.BoardLive do
           end
 
         case socket.assigns.selected_card do
-          %Card{id: ^card_id} -> assign(socket, :card_runs, Runs.list_runs_for_card(card))
-          _other -> socket
+          %Card{id: ^card_id} ->
+            socket
+            |> assign(:card_runs, Runs.list_runs_for_card(card))
+            |> assign_in_flight_task(card, :refresh)
+
+          _other ->
+            socket
         end
 
       nil ->
@@ -3419,10 +3451,29 @@ defmodule RelayWeb.BoardLive do
     |> assign_review(card)
     # the card may have parked/resumed a run since the last refresh
     |> assign(:card_runs, Runs.list_runs_for_card(card))
+    |> assign_in_flight_task(card, :refresh)
     |> stream_notes(Activity.list_conversation(card))
     |> stream(:activity, activity, reset: true)
     |> assign_card_dependencies(card)
     |> stream_insert(stream_name(card.stage_id), card)
+  end
+
+  # RE356 — the baton at task level. `:open` (a fresh drawer) opens exactly the in-flight task,
+  # so no active run means everything collapsed. `:refresh` (any card/run refresh) moves the open
+  # task only when the in-flight task CHANGED — the new one opens, the finished one collapses —
+  # and otherwise leaves the reader's own open/closed choice alone. Either move re-clamps.
+  defp assign_in_flight_task(socket, %Card{} = card, :open) do
+    id = Runs.in_flight_sub_task_id(card)
+    assign(socket, in_flight_task_id: id, open_task_id: id, task_full?: false)
+  end
+
+  defp assign_in_flight_task(socket, %Card{} = card, :refresh) do
+    current = socket.assigns.in_flight_task_id
+
+    case Runs.in_flight_sub_task_id(card) do
+      ^current -> socket
+      id -> assign(socket, in_flight_task_id: id, open_task_id: id, task_full?: false)
+    end
   end
 
   # RE93 — the drawer's two rails plus the add-input's datalist. The two rails are cheap indexed
@@ -4344,6 +4395,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:editing_plan, false)
           |> assign(:expanded_spec?, false)
           |> assign(:expanded_plan?, false)
+          |> assign_in_flight_task(card, :open)
           |> assign(:expanded_ai_result?, false)
           |> assign(:spec_form, nil)
           |> assign(:plan_form, nil)
@@ -4391,6 +4443,9 @@ defmodule RelayWeb.BoardLive do
           editing_plan: false,
           expanded_spec?: false,
           expanded_plan?: false,
+          open_task_id: nil,
+          task_full?: false,
+          in_flight_task_id: nil,
           expanded_ai_result?: false,
           spec_form: nil,
           plan_form: nil,
