@@ -74,4 +74,35 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "`relay tasks list`"
     end
   end
+
+  describe "write-plan writes a header plus tasks, never a document to parse (RE357)" do
+    setup do
+      {:ok, doc: File.read!(@write_plan)}
+    end
+
+    test "writes every task in ONE relay tasks add call", %{doc: doc} do
+      assert doc =~ ~s(./relay tasks add <ref> --task "<title>" @)
+    end
+
+    test "writes only the header with relay plan", %{doc: doc} do
+      assert doc =~ "./relay plan <ref> @"
+      assert doc =~ "header"
+    end
+
+    test "drops the machine-parsed heading contract and the checkbox-flipping note", %{doc: doc} do
+      refute doc =~ "## Task N"
+      refute doc =~ "PlanTasks"
+      refute doc =~ "em-dash"
+      refute doc =~ "flips them"
+    end
+
+    test "clears stale tasks before a re-plan so it never appends duplicates", %{doc: doc} do
+      assert doc =~ "./relay task rm <ref> <id>"
+      assert doc =~ "appends"
+    end
+
+    test "self-review checks the written task list", %{doc: doc} do
+      assert doc =~ "./relay tasks list <ref>"
+    end
+  end
 end

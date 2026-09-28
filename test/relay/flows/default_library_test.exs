@@ -365,7 +365,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     assert declared == %{
              {"spec", "brainstorm"} => {[:description], [:spec, :acceptance_criteria]},
-             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan]},
+             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan, :sub_tasks]},
              {"code", "branch"} => {[:plan], [:branch]},
              {"code", "implement"} => {[:sub_tasks], []},
              {"code", "spec_review"} => {[:sub_tasks], []},
@@ -390,12 +390,14 @@ defmodule Relay.Flows.DefaultLibraryTest do
     end
   end
 
-  # RLY-165: sub_tasks are seeded server-side at Code-run start from card.plan, so no node
-  # may claim to write them — a declared write is ENFORCED and would fail write_plan.
-  test "no shipped node declares it writes sub_tasks" do
-    for flow <- DefaultLibrary.all(), node <- flow.nodes do
-      refute :sub_tasks in node.writes, "#{flow.key}/#{node.key} must not declare sub_tasks"
-    end
+  # RE357: the planner writes the tasks itself (`relay tasks add`), so write_plan declares
+  # sub_tasks and the writes guard fails a planner that leaves them blank — at the Plan stage,
+  # not two stages later. No other shipped node may claim the field: a declared write is enforced.
+  test "only write_plan declares it writes sub_tasks" do
+    writers =
+      for flow <- DefaultLibrary.all(), node <- flow.nodes, :sub_tasks in node.writes, do: {flow.key, node.key}
+
+    assert writers == [{"plan", "write_plan"}]
   end
 
   test "the branch node records the branch on the card, last in the chain (RE244 §5)" do

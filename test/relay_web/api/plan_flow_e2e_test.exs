@@ -59,7 +59,7 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
   # The scripted runner here runs no real skill, so a card that goes on to report
   # `succeeded` must already carry the fields the shipped Spec/Plan flows declare they write
   # (RE244) — the Spec e2e card carries `spec` + `acceptance_criteria`, the Plan e2e card
-  # carries `spec` + `acceptance_criteria` + `plan` — otherwise the guard rewrites that
+  # carries `spec` + `acceptance_criteria` + `plan` + tasks — otherwise the guard rewrites that
   # `succeeded` to `failed`.
   defp card_in(board, stage_name, attrs) do
     {:ok, card} = Cards.create_card(stage(board, stage_name), Map.take(attrs, [:title]))
@@ -129,6 +129,11 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
           spec: "# An approved spec\n\nDo the thing.",
           plan: "A plan (pre-seeded, RE244)."
         })
+
+      # RE357: write_plan declares `writes: [plan, sub_tasks]`, and this scripted runner runs no
+      # real skill, so the card carries its tasks up front — otherwise the writes guard rewrites
+      # the `succeeded` below to `failed`.
+      {:ok, _tasks} = Cards.add_tasks(card, [%{title: "Only task", body: "Do the thing."}])
 
       ref = Cards.ref(board, card)
 
@@ -215,6 +220,9 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
           spec: "# Approved",
           plan: "A plan (pre-seeded, RE244)."
         })
+
+      # RE357: write_plan also writes sub_tasks, so the pre-seeded card carries its tasks too.
+      {:ok, _tasks} = Cards.add_tasks(plan_card, [%{title: "Only task", body: "Do the thing."}])
 
       announce(conn, board, %{shared_clean: 2, exclusive: 0})
       server = start_scheduler(board)
