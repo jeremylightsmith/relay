@@ -6,6 +6,7 @@ defmodule RelayWeb.Api.CardController do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Runs
+  alias RelayWeb.Api.Params
 
   action_fallback RelayWeb.Api.FallbackController
 
@@ -260,7 +261,7 @@ defmodule RelayWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
-         {:ok, sub_task_id} <- parse_int_id(id),
+         {:ok, sub_task_id} <- Params.parse_int_id(id),
          {:ok, card} <- Cards.set_sub_task_done(card, sub_task_id, done) do
       render(conn, :show,
         board: board,
@@ -276,17 +277,6 @@ defmodule RelayWeb.Api.CardController do
   end
 
   def toggle_sub_task(_conn, _params), do: {:error, :invalid_request}
-
-  # An id that doesn't cast to an integer can't match any sub_task; treat it as
-  # not-found rather than letting Ecto raise a CastError.
-  defp parse_int_id(id) when is_integer(id), do: {:ok, id}
-
-  defp parse_int_id(id) when is_binary(id) do
-    case Integer.parse(id) do
-      {int, ""} -> {:ok, int}
-      _ -> :error
-    end
-  end
 
   def comments(conn, %{"ref" => ref, "body" => body}) do
     board = conn.assigns.current_board

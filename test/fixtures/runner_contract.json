@@ -235,7 +235,83 @@
       "turn_state": "done"
     }
   },
-  "version": 6,
+  "tasks": {
+    "create_request": {
+      "tasks": [
+        {
+          "body": "Add the column.\n\n```elixir\nadd :body, :text\n```\n",
+          "title": "Schema"
+        },
+        {
+          "body": "Say \"hello\" to the router.\n",
+          "title": "Routes"
+        }
+      ]
+    },
+    "create_response": {
+      "data": [
+        {
+          "done": false,
+          "id": "<task-id>",
+          "position": 0,
+          "title": "Schema"
+        },
+        {
+          "done": false,
+          "id": "<task-id>",
+          "position": 1,
+          "title": "Routes"
+        }
+      ]
+    },
+    "delete_response": {
+      "data": {
+        "done": false,
+        "id": "<task-id>",
+        "position": 0,
+        "title": "Schema"
+      }
+    },
+    "list_response": {
+      "data": [
+        {
+          "done": false,
+          "id": "<task-id>",
+          "position": 0,
+          "title": "Schema"
+        },
+        {
+          "done": false,
+          "id": "<task-id>",
+          "position": 1,
+          "title": "Routes"
+        }
+      ]
+    },
+    "show_response": {
+      "data": {
+        "body": "Add the column.\n\n```elixir\nadd :body, :text\n```\n",
+        "done": false,
+        "id": "<task-id>",
+        "position": 0,
+        "title": "Schema"
+      }
+    },
+    "update_request": {
+      "body": "Renamed.\n",
+      "title": "Routes (renamed)"
+    },
+    "update_response": {
+      "data": {
+        "body": "Renamed.\n",
+        "done": false,
+        "id": "<task-id>",
+        "position": 1,
+        "title": "Routes (renamed)"
+      }
+    }
+  },
+  "version": 7,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",

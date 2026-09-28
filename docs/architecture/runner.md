@@ -443,6 +443,16 @@ next" is **derived, never persisted**: `Relay.Runs.next_sub_task_id/1` returns t
 `sub_task` in position order whose `done` is false, so a crashed-and-resumed run recomputes the
 same answer with no cursor column.
 
+Those `sub_tasks` rows are also addressable one at a time (RE355):
+`GET /api/cards/:ref/tasks` (summaries — `id, title, done, position`, never `body`),
+`GET /api/cards/:ref/tasks/:id` (adds `body`), `POST /api/cards/:ref/tasks`
+(`{"tasks": [{title, body}, …]}` — one atomic append after the last task, argument order),
+`PATCH /api/cards/:ref/tasks/:id` (`title` / `body` only) and `DELETE /api/cards/:ref/tasks/:id`
+(later tasks move up one), wrapped by `relay tasks add|list` and `relay task show|update|rm`. None
+of them replaces the set, so a surviving row keeps its id — and every `node_executions.sub_task_id`
+bound to it. `done` is not writable there; the toggle route below owns it. Nothing in the engine
+calls these routes yet: `Relay.Runs.PlanTasks` still seeds the rows at run start.
+
 But `done` is not a private engine field. Three writers set it: the loop tail's check-off
 (`RunServer.check_off_sub_task/3`), the card drawer's checkbox, and `relay check <ref> <id>`
 (`PATCH /api/cards/:ref/sub-tasks/:id`) — which any agent in any node can call. So the derived

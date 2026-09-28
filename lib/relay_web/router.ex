@@ -219,6 +219,11 @@ defmodule RelayWeb.Router do
     put "/flows/:key", FlowController, :update
     patch "/cards/:ref", CardController, :update
     patch "/cards/:ref/sub-tasks/:id", CardController, :toggle_sub_task
+    get "/cards/:ref/tasks", TaskController, :index
+    get "/cards/:ref/tasks/:id", TaskController, :show
+    post "/cards/:ref/tasks", TaskController, :create
+    patch "/cards/:ref/tasks/:id", TaskController, :update
+    delete "/cards/:ref/tasks/:id", TaskController, :delete
     post "/cards/:ref/move", CardController, :move
     post "/cards/:ref/archive", CardController, :archive
     post "/cards/:ref/unarchive", CardController, :unarchive

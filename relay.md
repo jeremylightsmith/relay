@@ -102,6 +102,10 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `./relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
 | `./relay describe` · `./relay spec` · `./relay criteria` · `./relay plan` · `./relay sub-tasks RLY-12 @file` | Set description / spec / criteria / plan / checklist — `describe` and `spec` are **separate fields**, not synonyms |
 | `./relay check` · `./relay uncheck RLY-12 42` | Toggle one sub-task done by id |
+| `./relay tasks add RLY-12 --task "Title" @body.md [--task "Title" @body.md …]` | Append tasks (a title + a body each) in ONE atomic call, after the card's last task, in argument order. Bodies are raw files (`@path`, `-` for stdin — at most once — or literal text): no JSON escaping |
+| `./relay tasks list RLY-12` | The card's tasks as `[x]/[ ] #id  title` — titles and metadata, **never bodies** |
+| `./relay task show RLY-12 42` | One task with its full body — the only way to read a body |
+| `./relay task update RLY-12 42 --title T --body @file` · `./relay task rm RLY-12 42` | Edit one task's title/body (`done` stays with `check`/`uncheck`) · remove one (later tasks move up; other tasks' ids and done flags are untouched) |
 | `./relay branch` · `./relay pr` · `./relay result RLY-12 …` | Record branch / PR url / AI result blob — the blob has one shape, below |
 | `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` gives the `/attachments/…` path for a `screens` entry |
 | `./relay depends RLY-12 RLY-13 RLY-14` | Replace the card's blocker set — it stays undispatchable until every blocker reaches a top-level Done column. No BLOCKERs clears it. Refs may be separate args or comma-separated; `./relay create --depends-on RE12,RE13` sets them at creation |

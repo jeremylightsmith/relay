@@ -126,8 +126,16 @@ sharing behavior.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
   needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
-  run ends terminally — a separate path from `needs_input`'s genuine question. Card state ×
-  stage validity is governed by
+  run ends terminally — a separate path from `needs_input`'s genuine question.
+  **Tasks** (RE355) are addressable `sub_tasks` rows with a nullable markdown `body`:
+  `list_tasks/1`, `get_task/2`, `add_tasks/2`, `update_task/3` and `delete_task/2` write one row
+  at a time. `add_tasks/2` appends the batch atomically after the current last task, in argument
+  order; `delete_task/2` decrements every later row's `position` so positions stay `0..n-1`; both
+  take a `FOR UPDATE` lock on the card row first. No call rewrites another row's id, title, body
+  or `done` (`done` stays `set_sub_task_done/3`'s). `set_sub_tasks/2` remains the legacy
+  full-replace path (`PATCH /api/cards/:ref` with `sub_tasks`): it deletes and re-inserts every
+  row, nilifying each `node_executions.sub_task_id` bound to them — never use it for a per-task
+  edit. Card state × stage validity is governed by
   [ADR 0003](../adr/0003-card-state-stage-type-validity.md); ownership and the claim rule
   by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md) — a user owner must hold a
   resolved membership on the card's board, checked in `Relay.Cards` via
