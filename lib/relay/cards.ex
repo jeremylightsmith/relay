@@ -607,6 +607,99 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  A card's tasks — its `sub_tasks` rows — in `position` order (RE355).
+
+  Tasks are addressable one row at a time through `get_task/2`, `add_tasks/2`, `update_task/3`
+  and `delete_task/2`. None of them rewrites another row's id, title, body or `done`, so a
+  surviving row keeps every `node_executions.sub_task_id` bound to it — unlike
+  `set_sub_tasks/2`, the legacy full replace, which deletes and re-inserts the whole set.
+  """
+  def list_tasks(%Card{} = card) do
+    Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: st.position)
+  end
+
+  @doc """
+  One of `card`'s tasks by id: `{:ok, %SubTask{}}`, or `{:error, :not_found}` when the id is
+  not one of `card`'s rows (another card's task included).
+  """
+  def get_task(%Card{} = card, id) when is_integer(id) do
+    case Repo.get_by(SubTask, id: id, card_id: card.id) do
+      %SubTask{} = task -> {:ok, task}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Appends `attrs_list` (maps carrying `title` and an optional `body`; nothing else is read) to
+  `card`'s tasks in ONE transaction and broadcasts `{:card_upserted, card}`.
+
+  **Ordering:** the batch lands at `max(position) + 1 …` (0 on an empty card), in argument
+  order; existing rows are not touched. The card row is locked `FOR UPDATE` first, so two
+  concurrent appends cannot compute the same `max(position)`.
+
+  All-or-nothing: any invalid attrs (e.g. a blank title) rolls the whole batch back →
+  `{:error, changeset}`. `[]` → `{:error, :empty}` — nothing to add is a caller bug, not a
+  no-op. Returns `{:ok, tasks}`, the inserted rows in argument order.
+  """
+  def add_tasks(%Card{}, []), do: {:error, :empty}
+
+  def add_tasks(%Card{} = card, attrs_list) when is_list(attrs_list) do
+    result =
+      Repo.transaction(fn ->
+        lock_card!(card)
+
+        attrs_list
+        |> Enum.with_index(next_task_position(card))
+        |> Enum.map(fn {attrs, position} -> insert_sub_task!(card, task_attrs(attrs), position) end)
+      end)
+
+    notify_task_write(result, card)
+  end
+
+  @doc """
+  Updates ONLY the `title` and/or `body` of one of `card`'s tasks — `attrs` is filtered to those
+  two keys, so this path can neither flip `done` (that is `set_sub_task_done/3`) nor move
+  `position`. Broadcasts `{:card_upserted, card}`. Returns `{:ok, task}`,
+  `{:error, :not_found}`, or `{:error, changeset}` (e.g. a blank title).
+  """
+  def update_task(%Card{} = card, id, attrs) when is_integer(id) and is_map(attrs) do
+    with {:ok, task} <- get_task(card, id),
+         {:ok, updated} <- task |> SubTask.changeset(task_attrs(attrs)) |> Repo.update() do
+      :ok = notify_upserted(card)
+      {:ok, updated}
+    end
+  end
+
+  @doc """
+  Deletes one of `card`'s tasks and closes the gap: every row of `card` with a higher
+  `position` is decremented by 1 in the same transaction (under a `FOR UPDATE` lock on the card
+  row), so positions stay `0..n-1`. Executions bound to the deleted row get their
+  `sub_task_id` nilified by the FK — correct, the task is gone. Broadcasts
+  `{:card_upserted, card}`. Returns `{:ok, deleted_task}` (with its pre-delete `position`) or
+  `{:error, :not_found}`.
+  """
+  def delete_task(%Card{} = card, id) when is_integer(id) do
+    result =
+      Repo.transaction(fn ->
+        lock_card!(card)
+
+        with {:ok, task} <- get_task(card, id),
+             {:ok, deleted} <- Repo.delete(task) do
+          Repo.update_all(
+            from(st in SubTask, where: st.card_id == ^card.id and st.position > ^task.position),
+            inc: [position: -1]
+          )
+
+          deleted
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    notify_task_write(result, card)
+  end
+
+  @doc """
   Replaces `card`'s blocker set with the cards named by `refs` (board-scoped), mirroring
   `set_sub_tasks/2`: it is a FULL replace, and `[]` clears the set.
 
@@ -2439,8 +2532,8 @@ defmodule Relay.Cards do
   # always have what they render — no downstream re-fetch or NotLoaded guard.
   defp card_preloads, do: [owners: :user, sub_tasks: from(st in SubTask, order_by: st.position)]
 
-  # Inside set_sub_tasks/2's transaction: insert one checklist item with its
-  # programmatic card_id + position; a bad title rolls the whole replace-all back.
+  # Inside set_sub_tasks/2's or add_tasks/2's transaction: insert one task with its
+  # programmatic card_id + position; a bad title rolls the whole write back.
   defp insert_sub_task!(%Card{} = card, attrs, position) do
     %SubTask{card_id: card.id, position: position}
     |> SubTask.changeset(attrs)
@@ -2450,6 +2543,31 @@ defmodule Relay.Cards do
       {:error, changeset} -> Repo.rollback(changeset)
     end
   end
+
+  # The only fields a per-task write may set (RE355). `done` has its own path
+  # (set_sub_task_done/3) and `position` is programmatic, so neither rides in on a task write.
+  defp task_attrs(attrs), do: Map.take(attrs, [:title, :body, "title", "body"])
+
+  # Serializes position math on one card — add_tasks/2's max + 1 and delete_task/2's gap close —
+  # so two writers can't interleave. The lock is released when the transaction ends.
+  defp lock_card!(%Card{id: id}) do
+    Repo.one!(from c in Card, where: c.id == ^id, lock: "FOR UPDATE", select: c.id)
+  end
+
+  defp next_task_position(%Card{id: id}) do
+    case Repo.one(from st in SubTask, where: st.card_id == ^id, select: max(st.position)) do
+      nil -> 0
+      max_position -> max_position + 1
+    end
+  end
+
+  # After a per-task transaction commits: broadcast the reloaded card, pass the result through.
+  defp notify_task_write({:ok, _written} = result, %Card{} = card) do
+    :ok = notify_upserted(card)
+    result
+  end
+
+  defp notify_task_write({:error, _reason} = result, _card), do: result
 
   defp insert_owner_or_rollback(%Card{} = card, actor) do
     case insert_owner(card, actor) do
