@@ -443,6 +443,12 @@ next" is **derived, never persisted**: `Relay.Runs.next_sub_task_id/1` returns t
 `sub_task` in position order whose `done` is false, so a crashed-and-resumed run recomputes the
 same answer with no cursor column.
 
+The card drawer reads the *binding*, not the cursor: `Relay.Runs.in_flight_sub_task_id/1` returns
+`current_sub_task_id/2` for the foreach node of the card's active run (nil with no active run, no
+flow row, or no foreach node), and `RelayWeb.BoardLive` recomputes it on drawer open and on every
+card/run refresh to auto-open that task with an `AGENT IS HERE` chip (RE356). It is a read; no
+engine path calls it.
+
 Those `sub_tasks` rows are also addressable one at a time (RE355):
 `GET /api/cards/:ref/tasks` (summaries — `id, title, done, position`, never `body`),
 `GET /api/cards/:ref/tasks/:id` (adds `body`), `POST /api/cards/:ref/tasks`
