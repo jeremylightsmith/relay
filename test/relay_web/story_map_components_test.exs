@@ -17,7 +17,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   alias Schemas.Release
   alias Schemas.Stage
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
   alias Schemas.SubTask
 
   # Every helper lives at module level — a `defp` inside a `describe` block compiles, but
@@ -65,33 +65,33 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
   defp grid(draft \\ nil) do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
-    task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+    step = %StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
     StoryMapGrid.build(
       [activity],
-      [task],
+      [step],
       releases,
       [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100)
       ],
       draft
     )
   end
 
-  # One activity whose only column is the `— No task yet` placeholder, holding a task-less card:
+  # One activity whose only column is the `— No step yet` placeholder, holding a step-less card:
   # NOT `bare?` (that is `empty_activity_grid/1`), and the case the artboard gives a strong
   # (not dashed) header border.
-  defp no_task_cards_grid do
+  defp no_step_cards_grid do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
     StoryMapGrid.build([activity], [], releases, [card(1, story_activity_id: 1, release_id: 100)])
   end
 
-  # One activity with nothing under it at all — no tasks, no task-less cards. This is the
-  # artboard's `bare = !ntCount` (line ~450): the placeholder invites the first task.
+  # One activity with nothing under it at all — no steps, no step-less cards. This is the
+  # artboard's `bare = !ntCount` (line ~450): the placeholder invites the first step.
   defp empty_activity_grid(draft \\ nil) do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
@@ -188,7 +188,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
 
     test "the percentage is the card's sub-task progress, appended to the badge" do
-      with_tasks =
+      with_steps =
         card(1,
           sub_tasks: [
             %SubTask{id: 1, title: "a", done: true, position: 0},
@@ -196,7 +196,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
           ]
         )
 
-      face = StoryMapComponents.card_face(with_tasks, board(), stages(), MapSet.new())
+      face = StoryMapComponents.card_face(with_steps, board(), stages(), MapSet.new())
 
       assert face.pct == 50
       assert face.badge == "CODE · 50%"
@@ -321,52 +321,52 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "grid-row:1 / span 2"
       assert html =~ ~s(id="story-map-activity-1")
       assert html =~ "Onboard &amp; access"
-      assert html =~ ~s(id="story-map-no-task-1")
-      assert html =~ "— No task yet"
-      assert html =~ ~s(id="story-map-task-10")
+      assert html =~ ~s(id="story-map-no-step-1")
+      assert html =~ "— No step yet"
+      assert html =~ ~s(id="story-map-step-10")
       assert html =~ "Sign in"
       assert html =~ ~s(id="story-map-release-100")
       assert html =~ "MVP"
       assert html =~ "2 cards"
     end
 
-    test "the No task yet column is dashed and tinted, and the activity's last column is strong" do
+    test "the No step yet column is dashed and tinted, and the activity's last column is strong" do
       html = grid_html()
 
       # Anchored to the elements themselves: the bare `=~` forms passed even with the
       # `last_of_activity?` branches deleted, because the corner, lane rail and band all emit
       # the strong border unconditionally.
-      no_task = style_of(html, "#story-map-no-task-1")
+      no_step = style_of(html, "#story-map-no-step-1")
 
-      assert no_task =~
+      assert no_step =~
                "border-right:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
 
-      assert no_task =~ "background:var(--color-base-200)"
+      assert no_step =~ "background:var(--color-base-200)"
 
-      assert style_of(html, "#story-map-task-10") =~
+      assert style_of(html, "#story-map-step-10") =~
                "border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
     end
 
-    test "an activity with no tasks: its one column is the activity boundary, so strong" do
+    test "an activity with no steps: its one column is the activity boundary, so strong" do
       # Artboard line ~456: `border-right:'+(tasks.length ? '1px dashed …' : GL_STRONG)`, with
-      # `lastOfAct:!tasks.length` on line ~453. A zero-task activity is the normal shape for a
+      # `lastOfAct:!tasks.length` on line ~453. A zero-step activity is the normal shape for a
       # board just starting on the map.
-      html = grid_html(no_task_cards_grid())
+      html = grid_html(no_step_cards_grid())
 
-      assert style_of(html, "#story-map-no-task-1") =~
+      assert style_of(html, "#story-map-no-step-1") =~
                "border-right:2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
 
       # The body cell stays dashed — the artboard's cell branch (line ~524) has no such
       # condition.
-      assert style_of(html, "#story-map-cell-nt-1-r-100") =~
+      assert style_of(html, "#story-map-cell-ns-1-r-100") =~
                "border-right:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
     end
 
     test "each card renders in the cell its assignment implies" do
       html = grid_html()
 
-      assert html =~ ~s(id="story-map-cell-t-10-r-100")
-      assert html =~ ~s(id="story-map-cell-nt-1-r-100")
+      assert html =~ ~s(id="story-map-cell-s-10-r-100")
+      assert html =~ ~s(id="story-map-cell-ns-1-r-100")
       assert html =~ ~s(id="story-map-card-RLY1")
       assert html =~ ~s(id="story-map-card-RLY2")
     end
@@ -377,18 +377,18 @@ defmodule RelayWeb.StoryMapComponentsTest do
       cell =
         html
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#story-map-cell-t-10-r-100")
+        |> LazyHTML.query("#story-map-cell-s-10-r-100")
 
       assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
-      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-column") == ["s:10"]
       assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
 
-      no_task =
+      no_step =
         html
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#story-map-cell-nt-1-r-100")
+        |> LazyHTML.query("#story-map-cell-ns-1-r-100")
 
-      assert LazyHTML.attribute(no_task, "data-column") == ["nt:1"]
+      assert LazyHTML.attribute(no_step, "data-column") == ["ns:1"]
     end
   end
 
@@ -460,7 +460,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert html =~ ~s(id="story-map-empty")
       assert html =~ "Activities"
-      assert html =~ "Tasks"
+      assert html =~ "Steps"
       assert html =~ "Releases"
     end
   end
@@ -528,46 +528,46 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
   end
 
-  describe "RE263 — the add-task affordances" do
+  describe "RE263 — the add-step affordances" do
     test "the activity header's second line carries a spacer and a 12px ＋ (artboard iconStyle)" do
       html = grid_html()
 
-      assert style_of(html, "#story-map-add-task-1") ==
+      assert style_of(html, "#story-map-add-step-1") ==
                "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
 
-      assert html =~ ~s(title="Add task")
-      assert html =~ ~s(phx-click="story_map_add_task")
+      assert html =~ ~s(title="Add step")
+      assert html =~ ~s(phx-click="story_map_add_step")
       assert html =~ ~s(phx-value-activity-id="1")
       assert html =~ ~s(<span style="flex:1;">)
     end
 
-    test "a bare placeholder header reads ＋ Add task, is a button and is clickable" do
+    test "a bare placeholder header reads ＋ Add step, is a button and is clickable" do
       html = grid_html(empty_activity_grid())
 
       # A real <button>, not the <div> a labelled column renders — the WHOLE header is the
       # affordance (artboard line ~451, `onRename: bare ? (()=>this.addTask(actId)) : …`).
-      assert matches?(html, "button#story-map-no-task-1")
-      assert html =~ "＋ Add task"
-      refute html =~ "— No task yet"
-      assert style_of(html, "#story-map-no-task-1") =~ "cursor:pointer;"
+      assert matches?(html, "button#story-map-no-step-1")
+      assert html =~ "＋ Add step"
+      refute html =~ "— No step yet"
+      assert style_of(html, "#story-map-no-step-1") =~ "cursor:pointer;"
       assert html =~ ~s(phx-value-activity-id="1")
     end
 
-    test "a placeholder holding task-less cards still reads — No task yet and is not a button" do
+    test "a placeholder holding step-less cards still reads — No step yet and is not a button" do
       html = grid_html()
 
-      assert html =~ "— No task yet"
-      refute html =~ "＋ Add task"
-      refute matches?(html, "button#story-map-no-task-1")
-      refute style_of(html, "#story-map-no-task-1") =~ "cursor:pointer;"
+      assert html =~ "— No step yet"
+      refute html =~ "＋ Add step"
+      refute matches?(html, "button#story-map-no-step-1")
+      refute style_of(html, "#story-map-no-step-1") =~ "cursor:pointer;"
     end
 
     test "the draft column's header holds the input and its body cells are empty and dashed" do
-      html = grid_html(grid({:task, 1}), {:task, 1}, "Watch it live")
+      html = grid_html(grid({:step, 1}), {:step, 1}, "Watch it live")
 
       assert html =~ ~s(id="story-map-draft-1")
       assert html =~ ~s(id="story-map-draft-input")
-      assert html =~ ~s(placeholder="Task name… ↵")
+      assert html =~ ~s(placeholder="Step name… ↵")
       assert html =~ ~s(value="Watch it live")
 
       cell = style_of(html, "#story-map-cell-draft-1-r-100")
@@ -578,12 +578,12 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert cell =~ "background:var(--color-base-200)"
     end
 
-    test "on an activity with nothing under it the draft replaces the ＋ Add task placeholder" do
-      html = grid_html(empty_activity_grid({:task, 1}), {:task, 1}, "")
+    test "on an activity with nothing under it the draft replaces the ＋ Add step placeholder" do
+      html = grid_html(empty_activity_grid({:step, 1}), {:step, 1}, "")
 
       assert html =~ ~s(id="story-map-draft-1")
-      refute html =~ ~s(id="story-map-no-task-1")
-      refute html =~ "＋ Add task"
+      refute html =~ ~s(id="story-map-no-step-1")
+      refute html =~ "＋ Add step"
     end
   end
 
@@ -671,7 +671,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   end
 
   defp cell_column,
-    do: %{key: "t:10", activity: nil, task: nil, no_task?: false, bare?: false, draft?: false, last_of_activity?: true}
+    do: %{key: "s:10", activity: nil, step: nil, no_step?: false, bare?: false, draft?: false, last_of_activity?: true}
 
   defp cell_lane, do: %{key: "r:100", release: nil, count: 0}
 
@@ -694,7 +694,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
     test "an empty cell renders the dashed ＋ with the artboard's 7px padding" do
       html = cell_html(%{})
 
-      add = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-add-t-10-r-100")
+      add = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-add-s-10-r-100")
       style = add |> LazyHTML.attribute("style") |> List.first()
 
       # artboard addBtnStyle, line ~527
@@ -703,18 +703,18 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert style =~ "padding:7px"
       assert style =~ "color:color-mix(in oklab, var(--color-base-content) 40%, transparent)"
       assert LazyHTML.attribute(add, "phx-click") == ["compose_cell"]
-      assert LazyHTML.attribute(add, "phx-value-column") == ["t:10"]
+      assert LazyHTML.attribute(add, "phx-value-column") == ["s:10"]
       assert LazyHTML.attribute(add, "phx-value-lane") == ["r:100"]
       assert html =~ "＋"
     end
 
     test "a cell with cards tightens the ＋ padding to the artboard's 3px" do
-      html = cell_html(%{cards: [card(1, story_task_id: 10)]})
+      html = cell_html(%{cards: [card(1, story_step_id: 10)]})
 
       style =
         html
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query("#story-map-add-t-10-r-100")
+        |> LazyHTML.query("#story-map-add-s-10-r-100")
         |> LazyHTML.attribute("style")
         |> List.first()
 
@@ -730,8 +730,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
           compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
         })
 
-      refute html =~ ~s(id="story-map-add-t-10-r-100")
-      refute html =~ ~s(id="story-map-compose-t-10-r-100")
+      refute html =~ ~s(id="story-map-add-s-10-r-100")
+      refute html =~ ~s(id="story-map-compose-s-10-r-100")
       assert html =~ ~s(class="story-map-drop")
     end
 
@@ -742,9 +742,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
           compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
         })
 
-      refute html =~ ~s(id="story-map-add-t-10-r-100")
+      refute html =~ ~s(id="story-map-add-s-10-r-100")
 
-      form = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100")
+      form = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-s-10-r-100")
       style = form |> LazyHTML.attribute("style") |> List.first()
 
       # artboard composer, lines ~248-252
@@ -755,14 +755,14 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert LazyHTML.attribute(form, "phx-change") == ["validate_card"]
       assert LazyHTML.attribute(form, "phx-click-away") == ["cancel_compose_cell"]
 
-      input = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-t-10-r-100-input")
+      input = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-s-10-r-100-input")
       assert LazyHTML.attribute(input, "placeholder") == ["Add card… ↵"]
       assert LazyHTML.attribute(input, "name") == ["card[title]"]
       assert LazyHTML.attribute(input, "phx-key") == ["escape"]
 
       assert html
              |> LazyHTML.from_fragment()
-             |> LazyHTML.query("#story-map-compose-t-10-r-100-cancel")
+             |> LazyHTML.query("#story-map-compose-s-10-r-100-cancel")
              |> LazyHTML.attribute("phx-click") == ["cancel_compose_cell"]
 
       # the cell's placement travels with the submit
@@ -772,13 +772,13 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert html =~ "color:var(--color-primary);font-size:14px;line-height:1"
     end
 
-    test "the cell is still the drop zone Task 2 defined" do
+    test "the cell is still the drop zone Step 2 defined" do
       html = cell_html(%{})
 
-      cell = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-cell-t-10-r-100")
+      cell = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-cell-s-10-r-100")
 
       assert LazyHTML.attribute(cell, "class") == ["story-map-drop"]
-      assert LazyHTML.attribute(cell, "data-column") == ["t:10"]
+      assert LazyHTML.attribute(cell, "data-column") == ["s:10"]
       assert LazyHTML.attribute(cell, "data-lane") == ["r:100"]
     end
   end
@@ -909,25 +909,25 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert attr_of(toolbar(:compact, false), "#story-map-zoom", "aria-label") == "Zoom"
     end
 
-    test "Hide tasks is white when off and violet when on, and its label flips" do
+    test "Hide steps is white when off and violet when on, and its label flips" do
       off = toolbar(:compact, false)
       on = toolbar(:compact, true)
 
-      assert style_of(off, "#story-map-hide-tasks") ==
+      assert style_of(off, "#story-map-hide-steps") ==
                "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
                  "color:color-mix(in oklab, var(--color-base-content) 75%, transparent);background:var(--color-base-100);" <>
                  "border:1px solid var(--color-field-border);"
 
-      assert style_of(on, "#story-map-hide-tasks") ==
+      assert style_of(on, "#story-map-hide-steps") ==
                "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
                  "color:color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-content));" <>
                  "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));" <>
                  "border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100));"
 
-      assert off =~ "Hide tasks"
-      assert attr_of(off, "#story-map-hide-tasks", "aria-pressed") == "false"
-      assert on =~ "Show tasks"
-      assert attr_of(on, "#story-map-hide-tasks", "aria-pressed") == "true"
+      assert off =~ "Hide steps"
+      assert attr_of(off, "#story-map-hide-steps", "aria-pressed") == "false"
+      assert on =~ "Show steps"
+      assert attr_of(on, "#story-map-hide-steps", "aria-pressed") == "true"
     end
   end
 
@@ -1009,24 +1009,24 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
   describe "RE260 — zoom's two effects outside the card face" do
     test "the body cell's gap is 3px at Map and 7px elsewhere" do
-      assert style_of(grid_html_at(:map), "#story-map-cell-t-10-r-100") =~ "gap:3px;"
-      assert style_of(grid_html_at(:compact), "#story-map-cell-t-10-r-100") =~ "gap:7px;"
-      assert style_of(grid_html_at(:full), "#story-map-cell-t-10-r-100") =~ "gap:7px;"
+      assert style_of(grid_html_at(:map), "#story-map-cell-s-10-r-100") =~ "gap:3px;"
+      assert style_of(grid_html_at(:compact), "#story-map-cell-s-10-r-100") =~ "gap:7px;"
+      assert style_of(grid_html_at(:full), "#story-map-cell-s-10-r-100") =~ "gap:7px;"
     end
 
     test "the inline ＋ add-card is hidden at Map only" do
-      refute matches?(grid_html_at(:map), "#story-map-add-t-10-r-100")
-      assert matches?(grid_html_at(:compact), "#story-map-add-t-10-r-100")
-      assert matches?(grid_html_at(:full), "#story-map-add-t-10-r-100")
+      refute matches?(grid_html_at(:map), "#story-map-add-s-10-r-100")
+      assert matches?(grid_html_at(:compact), "#story-map-add-s-10-r-100")
+      assert matches?(grid_html_at(:full), "#story-map-add-s-10-r-100")
     end
   end
 
   describe "RE260 — the merged column" do
-    test "its header reads <n> tasks · merged, muted and smaller than a task header" do
+    test "its header reads <n> steps · merged, muted and smaller than a step header" do
       html = grid_html(merged_grid())
 
       assert matches?(html, "#story-map-merged-1")
-      assert html =~ "1 tasks · merged"
+      assert html =~ "1 steps · merged"
 
       assert style_of(html, "#story-map-merged-1") ==
                "grid-column:2;grid-row:2;position:sticky;top:56px;z-index:20;" <>
@@ -1035,15 +1035,15 @@ defmodule RelayWeb.StoryMapComponentsTest do
                  "color:color-mix(in oklab, var(--color-base-content) 55%, transparent);display:flex;align-items:center;gap:6px;"
     end
 
-    test "it is not a rename affordance, not a drag grip and not an add-task button" do
+    test "it is not a rename affordance, not a drag grip and not an add-step button" do
       html = grid_html(merged_grid())
 
       refute matches?(html, "button#story-map-merged-1")
       refute matches?(html, "#story-map-draft-input")
-      refute html =~ "＋ Add task"
+      refute html =~ "＋ Add step"
     end
 
-    test "it is 176px wide where a task column is 156px" do
+    test "it is 176px wide where a step column is 156px" do
       assert style_of(grid_html(merged_grid()), "#story-map-grid") =~
                "grid-template-columns:128px 176px 58px;"
 
@@ -1061,15 +1061,15 @@ defmodule RelayWeb.StoryMapComponentsTest do
   # RE260 — the same one-activity board as `grid/1`, merged.
   defp merged_grid do
     activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
-    task = %StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+    step = %StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
     releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
 
     StoryMapGrid.build(
       [activity],
-      [task],
+      [step],
       releases,
       [
-        card(1, story_activity_id: 1, story_task_id: 10, release_id: 100),
+        card(1, story_activity_id: 1, story_step_id: 10, release_id: 100),
         card(2, story_activity_id: 1, release_id: 100)
       ],
       nil,
@@ -1106,8 +1106,8 @@ defmodule RelayWeb.StoryMapComponentsTest do
     render_component(&StoryMapComponents.story_map_card/1, attrs)
   end
 
-  defp toolbar(zoom, hide_tasks) do
-    render_component(&StoryMapComponents.story_map_toolbar/1, zoom: zoom, hide_tasks: hide_tasks)
+  defp toolbar(zoom, hide_steps) do
+    render_component(&StoryMapComponents.story_map_toolbar/1, zoom: zoom, hide_steps: hide_steps)
   end
 
   # `style_of/2`'s companion for any other attribute.
@@ -1341,7 +1341,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert attr_of(on, "#story-map-hide-complete-filter", "phx-click") ==
                "toggle_story_map_hide_complete"
 
-      # Phrased to match `Hide tasks` next door, and NOT carrying Needs input's amber dot —
+      # Phrased to match `Hide steps` next door, and NOT carrying Needs input's amber dot —
       # that 6px marker belongs to that filter, not to the shared chrome.
       assert text_of(on, "#story-map-hide-complete-filter") == "Hide complete"
       assert style_of(on, "#story-map-hide-complete-filter span") == ""
@@ -1453,14 +1453,14 @@ defmodule RelayWeb.StoryMapComponentsTest do
         %StoryActivity{id: 2, board_id: 1, name: "Plan the backlog", position: 2}
       ]
 
-      tasks = [%StoryTask{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}]
+      steps = [%StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}]
       releases = [%Release{id: 100, board_id: 1, name: "MVP", position: 1}]
-      cards = [card(1, story_activity_id: 1, story_task_id: 10, release_id: 100)]
+      cards = [card(1, story_activity_id: 1, story_step_id: 10, release_id: 100)]
 
       grid =
         StoryMapGrid.build(
           activities,
-          tasks,
+          steps,
           releases,
           cards,
           nil,
@@ -1482,9 +1482,9 @@ defmodule RelayWeb.StoryMapComponentsTest do
 
       assert html =~ "story-map-stub-1"
       refute html =~ "story-map-activity-1"
-      refute html =~ "story-map-task-10"
+      refute html =~ "story-map-step-10"
       refute html =~ StoryMapGrid.cell_dom_id("c:1", "r:100")
-      refute html =~ StoryMapGrid.cell_dom_id("t:10", "r:100")
+      refute html =~ StoryMapGrid.cell_dom_id("s:10", "r:100")
 
       # The expanded neighbour is untouched.
       assert html =~ "story-map-activity-2"
@@ -1511,7 +1511,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   end
 
   describe "RE237 theme tokens" do
-    test "grid lines and the empty-task cell come from base tokens, not literals" do
+    test "grid lines and the empty-step cell come from base tokens, not literals" do
       src = File.read!("lib/relay_web/components/story_map_components.ex")
 
       # docs/designs/Relay Story Map.dc.html — the 1px grid Line and the 2px committed-row
@@ -1519,7 +1519,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
       assert src =~ ~s[@gl_light "1px solid var(--color-base-300)"]
       assert src =~ ~s[@gl_strong "2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"]
       assert src =~ ~s[@gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"]
-      assert src =~ ~s[@no_task_bg "var(--color-base-200)"]
+      assert src =~ ~s[@no_step_bg "var(--color-base-200)"]
 
       # RE259's owner chip reintroduced one oklch — `owner_chip_style/1`'s per-person/AI hue
       # tint — which now comes from `CoreComponents.identity_color_for_hue/1`, the single home

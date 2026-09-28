@@ -33,7 +33,7 @@ defmodule Schemas do
       Scope,
       Stage,
       StoryActivity,
-      StoryTask,
+      StoryStep,
       SubTask,
       TalkEvent,
       TalkSession,

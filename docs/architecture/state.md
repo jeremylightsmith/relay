@@ -39,7 +39,7 @@ The board's **shared story-map view settings** are a closed key set of the same 
 |---|---|---|---|
 | `tray_open` | `true` | boolean | `toggle_view/2` |
 | `zoom` | `"compact"` | string | `put_view/3` |
-| `hide_tasks` | `false` | boolean | `toggle_view/2` |
+| `hide_steps` | `false` | boolean | `toggle_view/2` |
 | `owner_filter` | `[]` | list of `RelayWeb.StoryMapFilter` owner keys | `toggle_view_member/4` |
 | `needs_input_filter` | `false` | boolean | `toggle_view/2` |
 | `collapsed` | `[]` | list of `story_activity` ids | `toggle_view_member/4` |
@@ -52,7 +52,7 @@ boolean (`{:error, :not_a_toggle}`) and `toggle_view_member/4` one whose default
 list (`{:error, :not_a_list}`), so a wrong call site cannot replace the `collapsed` list
 with `true` and break every viewer's map. All three writers compose the single
 `merge_view/2`, which validates every key, re-reads the committed row, writes once and
-broadcasts once — so a multi-key change ("expand this activity **and** turn Hide tasks
+broadcasts once — so a multi-key change ("expand this activity **and** turn Hide steps
 off") is atomic. They live in the `boards.story_map_view` jsonb column — a bag rather than
 a column per setting, which is why RE259 (filter & focus) added four keys and RE276
 (`hide_complete`) an eighth, all with no migration. Values are jsonb, so `zoom` is stored as
@@ -274,7 +274,7 @@ open conversation read as having an active run).
 
 `card_id` is set on **every** row, flow or talk, backfilled from the run for existing rows — it
 is the one board-scoping join both kinds share, the same deliberate denormalisation
-`story_tasks.board_id` already uses.
+`story_steps.board_id` already uses.
 
 A talk job never refreshes the card's `agent_heartbeat_at` (a talk turn is not the agent
 working the card — the baton does not move) and is never requeued by the orphan reaper (a

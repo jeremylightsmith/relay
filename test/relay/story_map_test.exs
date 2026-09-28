@@ -9,7 +9,7 @@ defmodule Relay.StoryMapTest do
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
 
   setup do
     board = insert(:board)
@@ -33,15 +33,15 @@ defmodule Relay.StoryMapTest do
       assert Enum.map(StoryMap.list_activities(board.id), & &1.id) == [activity.id]
     end
 
-    test "list_tasks/1 returns the board's tasks ordered by (activity, position)", %{board: board} do
+    test "list_steps/1 returns the board's steps ordered by (activity, position)", %{board: board} do
       a1 = insert(:story_activity, board: board, position: 1)
       a2 = insert(:story_activity, board: board, position: 2)
-      t2 = insert(:story_task, story_activity: a1, position: 2)
-      t1 = insert(:story_task, story_activity: a1, position: 1)
-      t3 = insert(:story_task, story_activity: a2, position: 1)
-      insert(:story_task, story_activity: insert(:story_activity, board: insert(:board)))
+      t2 = insert(:story_step, story_activity: a1, position: 2)
+      t1 = insert(:story_step, story_activity: a1, position: 1)
+      t3 = insert(:story_step, story_activity: a2, position: 1)
+      insert(:story_step, story_activity: insert(:story_activity, board: insert(:board)))
 
-      assert Enum.map(StoryMap.list_tasks(board), & &1.id) == [t1.id, t2.id, t3.id]
+      assert Enum.map(StoryMap.list_steps(board), & &1.id) == [t1.id, t2.id, t3.id]
     end
 
     test "list_releases/1 returns only this board's releases in position order", %{board: board} do
@@ -97,8 +97,8 @@ defmodule Relay.StoryMapTest do
       assert "should be at most 80 character(s)" in errors_on(activity_cs).name
 
       activity = insert(:story_activity, board: board)
-      assert {:error, task_cs} = StoryMap.create_task(activity, %{name: long, position: 1})
-      assert "should be at most 80 character(s)" in errors_on(task_cs).name
+      assert {:error, step_cs} = StoryMap.create_step(activity, %{name: long, position: 1})
+      assert "should be at most 80 character(s)" in errors_on(step_cs).name
 
       assert {:error, release_cs} = StoryMap.create_release(board, %{name: long, position: 1})
       assert "should be at most 80 character(s)" in errors_on(release_cs).name
@@ -111,8 +111,8 @@ defmodule Relay.StoryMapTest do
       assert {:ok, activity} = StoryMap.create_activity(board, %{name: "  Onboard  ", position: 1})
       assert activity.name == "Onboard"
 
-      assert {:ok, task} = StoryMap.create_task(activity, %{name: "  Sign in  ", position: 1})
-      assert task.name == "Sign in"
+      assert {:ok, step} = StoryMap.create_step(activity, %{name: "  Sign in  ", position: 1})
+      assert step.name == "Sign in"
 
       assert {:ok, release} = StoryMap.create_release(board, %{name: "  MVP 2  ", position: 9})
       assert release.name == "MVP 2"
@@ -144,44 +144,44 @@ defmodule Relay.StoryMapTest do
       assert Repo.get!(StoryActivity, foreign.id).position == 9
     end
 
-    test "create_task/2 takes board_id from the parent activity", %{board: board} do
+    test "create_step/2 takes board_id from the parent activity", %{board: board} do
       activity = insert(:story_activity, board: board)
 
-      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
 
-      assert task.board_id == board.id
-      assert task.story_activity_id == activity.id
+      assert step.board_id == board.id
+      assert step.story_activity_id == activity.id
     end
 
-    test "create_task/2 accepts an activity id", %{board: board} do
+    test "create_step/2 accepts an activity id", %{board: board} do
       activity = insert(:story_activity, board: board)
 
-      {:ok, task} = StoryMap.create_task(activity.id, %{name: "Sign in", position: 1})
+      {:ok, step} = StoryMap.create_step(activity.id, %{name: "Sign in", position: 1})
 
-      assert task.board_id == board.id
-      assert task.story_activity_id == activity.id
+      assert step.board_id == board.id
+      assert step.story_activity_id == activity.id
     end
 
-    test "update_task/2 moves a task to another activity on the same board", %{board: board} do
+    test "update_step/2 moves a step to another activity on the same board", %{board: board} do
       a1 = insert(:story_activity, board: board)
       a2 = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: a1)
+      step = insert(:story_step, story_activity: a1)
 
-      {:ok, moved} = StoryMap.update_task(task, %{story_activity_id: a2.id})
+      {:ok, moved} = StoryMap.update_step(step, %{story_activity_id: a2.id})
 
       assert moved.story_activity_id == a2.id
     end
 
-    test "update_task/2 drags mapped cards' story_activity_id along with the task", %{board: board, stage: stage} do
+    test "update_step/2 drags mapped cards' story_activity_id along with the step", %{board: board, stage: stage} do
       a1 = insert(:story_activity, board: board)
       a2 = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: a1)
+      step = insert(:story_step, story_activity: a1)
       card = insert(:card, board: board, stage: stage)
-      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: step.id})
       assert card.story_activity_id == a1.id
 
       Events.subscribe(board.id)
-      {:ok, _moved} = StoryMap.update_task(task, %{story_activity_id: a2.id})
+      {:ok, _moved} = StoryMap.update_step(step, %{story_activity_id: a2.id})
 
       assert Repo.get!(Card, card.id).story_activity_id == a2.id
       assert_receive {:card_upserted, %Card{id: id, story_activity_id: activity_id}}
@@ -189,44 +189,44 @@ defmodule Relay.StoryMapTest do
       assert activity_id == a2.id
     end
 
-    test "update_task/2 leaves cards mapped to other tasks alone", %{board: board, stage: stage} do
+    test "update_step/2 leaves cards mapped to other steps alone", %{board: board, stage: stage} do
       a1 = insert(:story_activity, board: board)
       a2 = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: a1)
-      other_task = insert(:story_task, story_activity: a1)
+      step = insert(:story_step, story_activity: a1)
+      other_step = insert(:story_step, story_activity: a1)
       other_card = insert(:card, board: board, stage: stage)
-      {:ok, other_card} = StoryMap.assign_card(other_card, %{story_task_id: other_task.id})
+      {:ok, other_card} = StoryMap.assign_card(other_card, %{story_step_id: other_step.id})
 
-      {:ok, _moved} = StoryMap.update_task(task, %{story_activity_id: a2.id})
+      {:ok, _moved} = StoryMap.update_step(step, %{story_activity_id: a2.id})
 
       assert Repo.get!(Card, other_card.id).story_activity_id == a1.id
     end
 
-    test "update_task/2 rejects a move to another board's activity", %{board: board} do
-      task = insert(:story_task, story_activity: insert(:story_activity, board: board))
+    test "update_step/2 rejects a move to another board's activity", %{board: board} do
+      step = insert(:story_step, story_activity: insert(:story_activity, board: board))
       foreign = insert(:story_activity, board: insert(:board))
 
-      assert {:error, changeset} = StoryMap.update_task(task, %{story_activity_id: foreign.id})
+      assert {:error, changeset} = StoryMap.update_step(step, %{story_activity_id: foreign.id})
       assert "must belong to the same board" in errors_on(changeset).story_activity_id
-      assert Repo.get!(StoryTask, task.id).story_activity_id == task.story_activity_id
+      assert Repo.get!(StoryStep, step.id).story_activity_id == step.story_activity_id
     end
 
-    test "delete_task/1 removes it", %{board: board} do
-      task = insert(:story_task, story_activity: insert(:story_activity, board: board))
+    test "delete_step/1 removes it", %{board: board} do
+      step = insert(:story_step, story_activity: insert(:story_activity, board: board))
 
-      assert {:ok, _} = StoryMap.delete_task(task)
-      assert Repo.get(StoryTask, task.id) == nil
+      assert {:ok, _} = StoryMap.delete_step(step)
+      assert Repo.get(StoryStep, step.id) == nil
     end
 
-    test "reorder_tasks/2 rewrites positions to 1..n", %{board: board} do
+    test "reorder_steps/2 rewrites positions to 1..n", %{board: board} do
       activity = insert(:story_activity, board: board)
-      a = insert(:story_task, story_activity: activity, position: 1)
-      b = insert(:story_task, story_activity: activity, position: 2)
+      a = insert(:story_step, story_activity: activity, position: 1)
+      b = insert(:story_step, story_activity: activity, position: 2)
 
-      assert :ok = StoryMap.reorder_tasks(board, [b.id, a.id])
+      assert :ok = StoryMap.reorder_steps(board, [b.id, a.id])
 
-      assert Repo.get!(StoryTask, b.id).position == 1
-      assert Repo.get!(StoryTask, a.id).position == 2
+      assert Repo.get!(StoryStep, b.id).position == 1
+      assert Repo.get!(StoryStep, a.id).position == 2
     end
 
     test "create/update/delete/reorder releases", %{board: board} do
@@ -270,12 +270,12 @@ defmodule Relay.StoryMapTest do
   describe "deleting a structure that still holds cards" do
     setup %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
+      step = insert(:story_step, story_activity: activity)
       release = insert(:release, board: board)
       card = insert(:card, board: board, stage: stage)
-      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: release.id})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: step.id, release_id: release.id})
 
-      %{activity: activity, task: task, release: release, card: card}
+      %{activity: activity, step: step, release: release, card: card}
     end
 
     test "delete_activity/1 refuses while a card points at it, and succeeds once it does not",
@@ -289,14 +289,14 @@ defmodule Relay.StoryMapTest do
       assert Repo.get(StoryActivity, ctx.activity.id) == nil
     end
 
-    test "delete_task/1 refuses while a card points at it, and succeeds once it does not", ctx do
-      assert {:error, :not_empty} = StoryMap.delete_task(ctx.task)
-      assert Repo.get(StoryTask, ctx.task.id)
+    test "delete_step/1 refuses while a card points at it, and succeeds once it does not", ctx do
+      assert {:error, :not_empty} = StoryMap.delete_step(ctx.step)
+      assert Repo.get(StoryStep, ctx.step.id)
 
       {:ok, _unmapped} = StoryMap.unassign_card(ctx.card)
 
-      assert {:ok, _deleted} = StoryMap.delete_task(ctx.task)
-      assert Repo.get(StoryTask, ctx.task.id) == nil
+      assert {:ok, _deleted} = StoryMap.delete_step(ctx.step)
+      assert Repo.get(StoryStep, ctx.step.id) == nil
     end
 
     test "delete_release/1 refuses while a card points at it, and succeeds once it does not",
@@ -304,7 +304,7 @@ defmodule Relay.StoryMapTest do
       assert {:error, :not_empty} = StoryMap.delete_release(ctx.release)
       assert Repo.get(Release, ctx.release.id)
 
-      {:ok, _cleared} = StoryMap.assign_card(ctx.card, %{story_task_id: ctx.task.id})
+      {:ok, _cleared} = StoryMap.assign_card(ctx.card, %{story_step_id: ctx.step.id})
 
       assert {:ok, _deleted} = StoryMap.delete_release(ctx.release)
       assert Repo.get(Release, ctx.release.id) == nil
@@ -315,13 +315,13 @@ defmodule Relay.StoryMapTest do
     # dead button.
     test "a structure holding only ARCHIVED cards deletes fine", %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
+      step = insert(:story_step, story_activity: activity)
       release = insert(:release, board: board)
       card = insert(:card, board: board, stage: stage)
-      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: task.id, release_id: release.id})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: step.id, release_id: release.id})
       {:ok, _archived} = Cards.archive_card(card)
 
-      assert {:ok, _} = StoryMap.delete_task(task)
+      assert {:ok, _} = StoryMap.delete_step(step)
       assert {:ok, _} = StoryMap.delete_activity(activity)
       assert {:ok, _} = StoryMap.delete_release(release)
     end
@@ -349,26 +349,26 @@ defmodule Relay.StoryMapTest do
     end
   end
 
-  describe "move_task/3 — the single task-repositioning entry point" do
-    test "moves a task to another activity, renumbers, and drags its mapped cards along",
+  describe "move_step/3 — the single step-repositioning entry point" do
+    test "moves a step to another activity, renumbers, and drags its mapped cards along",
          %{board: board, stage: stage} do
       a1 = insert(:story_activity, board: board, position: 1)
       a2 = insert(:story_activity, board: board, position: 2)
-      moving = insert(:story_task, story_activity: a1, position: 1)
-      first = insert(:story_task, story_activity: a2, position: 1)
-      second = insert(:story_task, story_activity: a2, position: 2)
+      moving = insert(:story_step, story_activity: a1, position: 1)
+      first = insert(:story_step, story_activity: a2, position: 1)
+      second = insert(:story_step, story_activity: a2, position: 2)
       card = insert(:card, board: board, stage: stage)
-      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: moving.id})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: moving.id})
       assert card.story_activity_id == a1.id
 
       Events.subscribe(board.id)
 
-      assert {:ok, moved} = StoryMap.move_task(moving, a2.id, [first.id, moving.id, second.id])
+      assert {:ok, moved} = StoryMap.move_step(moving, a2.id, [first.id, moving.id, second.id])
 
       assert moved.story_activity_id == a2.id
       assert moved.position == 2
-      assert Repo.get!(StoryTask, first.id).position == 1
-      assert Repo.get!(StoryTask, second.id).position == 3
+      assert Repo.get!(StoryStep, first.id).position == 1
+      assert Repo.get!(StoryStep, second.id).position == 3
       assert Repo.get!(Card, card.id).story_activity_id == a2.id
 
       assert_receive {:card_upserted, %Card{id: card_id, story_activity_id: activity_id}}
@@ -380,119 +380,119 @@ defmodule Relay.StoryMapTest do
 
     test "within one activity it is a pure renumber and moves no card", %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      a = insert(:story_task, story_activity: activity, position: 1)
-      b = insert(:story_task, story_activity: activity, position: 2)
+      a = insert(:story_step, story_activity: activity, position: 1)
+      b = insert(:story_step, story_activity: activity, position: 2)
       card = insert(:card, board: board, stage: stage)
-      {:ok, card} = StoryMap.assign_card(card, %{story_task_id: b.id})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: b.id})
 
       Events.subscribe(board.id)
 
-      assert {:ok, moved} = StoryMap.move_task(b, activity.id, [b.id, a.id])
+      assert {:ok, moved} = StoryMap.move_step(b, activity.id, [b.id, a.id])
 
       assert moved.story_activity_id == activity.id
       assert moved.position == 1
-      assert Repo.get!(StoryTask, a.id).position == 2
+      assert Repo.get!(StoryStep, a.id).position == 2
       assert Repo.get!(Card, card.id).story_activity_id == activity.id
       refute_receive {:card_upserted, _card}
     end
 
     test "it rejects a move to another board's activity and writes nothing", %{board: board} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity, position: 1)
+      step = insert(:story_step, story_activity: activity, position: 1)
       foreign = insert(:story_activity, board: insert(:board))
 
-      assert {:error, changeset} = StoryMap.move_task(task, foreign.id, [task.id])
+      assert {:error, changeset} = StoryMap.move_step(step, foreign.id, [step.id])
       assert "must belong to the same board" in errors_on(changeset).story_activity_id
 
-      reloaded = Repo.get!(StoryTask, task.id)
+      reloaded = Repo.get!(StoryStep, step.id)
       assert reloaded.story_activity_id == activity.id
       assert reloaded.position == 1
     end
 
     test "ids from another board are ignored by the renumber", %{board: board} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity, position: 1)
-      foreign = insert(:story_task, story_activity: insert(:story_activity, board: insert(:board)), position: 9)
+      step = insert(:story_step, story_activity: activity, position: 1)
+      foreign = insert(:story_step, story_activity: insert(:story_activity, board: insert(:board)), position: 9)
 
-      assert {:ok, _moved} = StoryMap.move_task(task, activity.id, [foreign.id, task.id])
+      assert {:ok, _moved} = StoryMap.move_step(step, activity.id, [foreign.id, step.id])
 
-      assert Repo.get!(StoryTask, foreign.id).position == 9
-      assert Repo.get!(StoryTask, task.id).position == 2
+      assert Repo.get!(StoryStep, foreign.id).position == 9
+      assert Repo.get!(StoryStep, step.id).position == 2
     end
   end
 
   describe "assign_card/2" do
     setup %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
+      step = insert(:story_step, story_activity: activity)
       release = insert(:release, board: board)
       card = insert(:card, stage: stage)
 
-      %{activity: activity, task: task, release: release, card: card}
+      %{activity: activity, step: step, release: release, card: card}
     end
 
-    test "sets all three columns", %{card: card, activity: activity, task: task, release: release} do
+    test "sets all three columns", %{card: card, activity: activity, step: step, release: release} do
       {:ok, assigned} =
         StoryMap.assign_card(card, %{
           story_activity_id: activity.id,
-          story_task_id: task.id,
+          story_step_id: step.id,
           release_id: release.id
         })
 
       assert assigned.story_activity_id == activity.id
-      assert assigned.story_task_id == task.id
+      assert assigned.story_step_id == step.id
       assert assigned.release_id == release.id
     end
 
-    test "derives the activity from the task, ignoring a conflicting one", %{
+    test "derives the activity from the step, ignoring a conflicting one", %{
       card: card,
-      task: task,
+      step: step,
       activity: activity,
       board: board
     } do
       conflicting = insert(:story_activity, board: board)
 
       {:ok, assigned} =
-        StoryMap.assign_card(card, %{story_task_id: task.id, story_activity_id: conflicting.id})
+        StoryMap.assign_card(card, %{story_step_id: step.id, story_activity_id: conflicting.id})
 
       assert assigned.story_activity_id == activity.id
-      assert assigned.story_task_id == task.id
+      assert assigned.story_step_id == step.id
     end
 
-    test "a task alone is enough — the activity comes from it", %{card: card, task: task, activity: activity} do
-      {:ok, assigned} = StoryMap.assign_card(card, %{story_task_id: task.id})
+    test "a step alone is enough — the activity comes from it", %{card: card, step: step, activity: activity} do
+      {:ok, assigned} = StoryMap.assign_card(card, %{story_step_id: step.id})
 
       assert assigned.story_activity_id == activity.id
     end
 
-    test "an activity with no task is the 'No task yet' state", %{card: card, activity: activity} do
+    test "an activity with no step is the 'No step yet' state", %{card: card, activity: activity} do
       {:ok, assigned} = StoryMap.assign_card(card, %{story_activity_id: activity.id})
 
       assert assigned.story_activity_id == activity.id
-      assert assigned.story_task_id == nil
+      assert assigned.story_step_id == nil
     end
 
-    test "a mapped card may have no release", %{card: card, task: task} do
-      {:ok, assigned} = StoryMap.assign_card(card, %{story_task_id: task.id})
+    test "a mapped card may have no release", %{card: card, step: step} do
+      {:ok, assigned} = StoryMap.assign_card(card, %{story_step_id: step.id})
 
       assert assigned.release_id == nil
     end
 
     test "omitted columns are cleared — assign_card/2 sets the whole placement", %{
       card: card,
-      task: task,
+      step: step,
       release: release,
       activity: activity
     } do
       {:ok, mapped} =
-        StoryMap.assign_card(card, %{story_task_id: task.id, release_id: release.id})
+        StoryMap.assign_card(card, %{story_step_id: step.id, release_id: release.id})
 
       assert mapped.release_id == release.id
 
       {:ok, remapped} = StoryMap.assign_card(mapped, %{story_activity_id: activity.id})
 
       assert remapped.story_activity_id == activity.id
-      assert remapped.story_task_id == nil
+      assert remapped.story_step_id == nil
       assert remapped.release_id == nil
     end
 
@@ -503,11 +503,11 @@ defmodule Relay.StoryMapTest do
       assert "does not belong to this card's board" in errors_on(changeset).story_activity_id
     end
 
-    test "rejects a task from another board", %{card: card} do
-      foreign = insert(:story_task, story_activity: insert(:story_activity, board: insert(:board)))
+    test "rejects a step from another board", %{card: card} do
+      foreign = insert(:story_step, story_activity: insert(:story_activity, board: insert(:board)))
 
-      assert {:error, changeset} = StoryMap.assign_card(card, %{story_task_id: foreign.id})
-      assert "does not belong to this card's board" in errors_on(changeset).story_task_id
+      assert {:error, changeset} = StoryMap.assign_card(card, %{story_step_id: foreign.id})
+      assert "does not belong to this card's board" in errors_on(changeset).story_step_id
     end
 
     test "rejects a release from another board", %{card: card} do
@@ -521,21 +521,21 @@ defmodule Relay.StoryMapTest do
   describe "unassign_card/1" do
     test "clears all three columns", %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
+      step = insert(:story_step, story_activity: activity)
       release = insert(:release, board: board)
 
       card =
         insert(:card,
           stage: stage,
           story_activity_id: activity.id,
-          story_task_id: task.id,
+          story_step_id: step.id,
           release_id: release.id
         )
 
       {:ok, cleared} = StoryMap.unassign_card(card)
 
       assert cleared.story_activity_id == nil
-      assert cleared.story_task_id == nil
+      assert cleared.story_step_id == nil
       assert cleared.release_id == nil
     end
   end
@@ -543,24 +543,24 @@ defmodule Relay.StoryMapTest do
   describe "story-map position" do
     setup %{board: board, stage: stage} do
       activity = insert(:story_activity, board: board)
-      task = insert(:story_task, story_activity: activity)
-      other_task = insert(:story_task, story_activity: activity, position: 2)
+      step = insert(:story_step, story_activity: activity)
+      other_step = insert(:story_step, story_activity: activity, position: 2)
       release = insert(:release, board: board)
 
-      %{activity: activity, task: task, other_task: other_task, release: release, stage: stage}
+      %{activity: activity, step: step, other_step: other_step, release: release, stage: stage}
     end
 
     test "without :position a card is appended last, and the whole cell is renumbered 1..n", ctx do
-      place(ctx.stage, "First", ctx.task, ctx.release)
-      place(ctx.stage, "Second", ctx.task, ctx.release)
-      third = place(ctx.stage, "Third", ctx.task, ctx.release)
+      place(ctx.stage, "First", ctx.step, ctx.release)
+      place(ctx.stage, "Second", ctx.step, ctx.release)
+      third = place(ctx.stage, "Third", ctx.step, ctx.release)
 
-      assert cell_order(ctx.task, ctx.release) == ["First", "Second", "Third"]
+      assert cell_order(ctx.step, ctx.release) == ["First", "Second", "Third"]
       assert third.story_map_position == 3
 
       positions =
         Card
-        |> where([c], c.story_task_id == ^ctx.task.id)
+        |> where([c], c.story_step_id == ^ctx.step.id)
         |> Repo.all()
         |> Enum.map(& &1.story_map_position)
         |> Enum.sort()
@@ -569,11 +569,11 @@ defmodule Relay.StoryMapTest do
     end
 
     test "with :position the card lands at that 0-based index", ctx do
-      place(ctx.stage, "First", ctx.task, ctx.release)
-      place(ctx.stage, "Second", ctx.task, ctx.release)
-      moved = place(ctx.stage, "Jumped", ctx.task, ctx.release, %{position: 1})
+      place(ctx.stage, "First", ctx.step, ctx.release)
+      place(ctx.stage, "Second", ctx.step, ctx.release)
+      moved = place(ctx.stage, "Jumped", ctx.step, ctx.release, %{position: 1})
 
-      assert cell_order(ctx.task, ctx.release) == ["First", "Jumped", "Second"]
+      assert cell_order(ctx.step, ctx.release) == ["First", "Jumped", "Second"]
       assert moved.story_map_position == 2
     end
 
@@ -584,62 +584,62 @@ defmodule Relay.StoryMapTest do
       # dropped it; renumbering the whole cell is what makes this land at the bottom.
       mapped = [
         story_activity_id: ctx.activity.id,
-        story_task_id: ctx.task.id,
+        story_step_id: ctx.step.id,
         release_id: ctx.release.id
       ]
 
       insert(:card, [stage: ctx.stage, title: "A", position: 1] ++ mapped)
       insert(:card, [stage: ctx.stage, title: "B", position: 2] ++ mapped)
 
-      dropped = place(ctx.stage, "Dropped", ctx.task, ctx.release, %{position: 2})
+      dropped = place(ctx.stage, "Dropped", ctx.step, ctx.release, %{position: 2})
 
-      assert cell_order(ctx.task, ctx.release) == ["A", "B", "Dropped"]
+      assert cell_order(ctx.step, ctx.release) == ["A", "B", "Dropped"]
       assert dropped.story_map_position == 3
     end
 
     test "an out-of-range index is clamped, not an error", ctx do
-      place(ctx.stage, "First", ctx.task, ctx.release)
-      high = place(ctx.stage, "High", ctx.task, ctx.release, %{position: 99})
-      low = place(ctx.stage, "Low", ctx.task, ctx.release, %{position: -5})
+      place(ctx.stage, "First", ctx.step, ctx.release)
+      high = place(ctx.stage, "High", ctx.step, ctx.release, %{position: 99})
+      low = place(ctx.stage, "Low", ctx.step, ctx.release, %{position: -5})
 
       assert high.story_map_position == 2
       assert low.story_map_position == 1
-      assert cell_order(ctx.task, ctx.release) == ["Low", "First", "High"]
+      assert cell_order(ctx.step, ctx.release) == ["Low", "First", "High"]
     end
 
     test "the renumber is scoped to the target cell", ctx do
-      other_column = place(ctx.stage, "Other column", ctx.other_task, ctx.release)
+      other_column = place(ctx.stage, "Other column", ctx.other_step, ctx.release)
       other_lane_release = insert(:release, board: ctx.board, position: 2)
-      other_lane = place(ctx.stage, "Other lane", ctx.task, other_lane_release)
+      other_lane = place(ctx.stage, "Other lane", ctx.step, other_lane_release)
 
-      place(ctx.stage, "Target A", ctx.task, ctx.release)
-      place(ctx.stage, "Target B", ctx.task, ctx.release, %{position: 0})
+      place(ctx.stage, "Target A", ctx.step, ctx.release)
+      place(ctx.stage, "Target B", ctx.step, ctx.release, %{position: 0})
 
       assert Repo.get!(Card, other_column.id).story_map_position == other_column.story_map_position
       assert Repo.get!(Card, other_lane.id).story_map_position == other_lane.story_map_position
-      assert cell_order(ctx.task, ctx.release) == ["Target B", "Target A"]
+      assert cell_order(ctx.step, ctx.release) == ["Target B", "Target A"]
     end
 
     test "unassign_card/1 nils story_map_position along with the three columns", ctx do
-      card = place(ctx.stage, "Mapped", ctx.task, ctx.release)
+      card = place(ctx.stage, "Mapped", ctx.step, ctx.release)
       assert card.story_map_position == 1
 
       {:ok, cleared} = StoryMap.unassign_card(card)
 
       assert cleared.story_activity_id == nil
-      assert cleared.story_task_id == nil
+      assert cleared.story_step_id == nil
       assert cleared.release_id == nil
       assert cleared.story_map_position == nil
     end
 
     test "a foreign id writes nothing at all — including no renumber", ctx do
-      first = place(ctx.stage, "First", ctx.task, ctx.release)
-      second = place(ctx.stage, "Second", ctx.task, ctx.release)
+      first = place(ctx.stage, "First", ctx.step, ctx.release)
+      second = place(ctx.stage, "Second", ctx.step, ctx.release)
       foreign = insert(:release, board: insert(:board))
       intruder = insert(:card, stage: ctx.stage, title: "Intruder")
 
       assert {:error, _changeset} =
-               StoryMap.assign_card(intruder, %{story_task_id: ctx.task.id, release_id: foreign.id})
+               StoryMap.assign_card(intruder, %{story_step_id: ctx.step.id, release_id: foreign.id})
 
       assert Repo.get!(Card, first.id).story_map_position == 1
       assert Repo.get!(Card, second.id).story_map_position == 2
@@ -651,8 +651,8 @@ defmodule Relay.StoryMapTest do
       # never shows — the Done column's render window (Cards.list_stage_cards/2) and everyone's
       # needs-you feed (Cards.needs_you_feed/1). A cell spans every stage by construction, so
       # re-stamping a sibling on a map drag would silently reorder both lenses.
-      sibling = place(ctx.stage, "Sibling", ctx.task, ctx.release)
-      moved = place(ctx.stage, "Moved", ctx.task, ctx.release)
+      sibling = place(ctx.stage, "Sibling", ctx.step, ctx.release)
+      moved = place(ctx.stage, "Moved", ctx.step, ctx.release)
 
       stale = ~U[2020-01-01 00:00:00Z]
 
@@ -661,7 +661,7 @@ defmodule Relay.StoryMapTest do
 
       {:ok, _} =
         StoryMap.assign_card(Repo.get!(Card, moved.id), %{
-          story_task_id: ctx.task.id,
+          story_step_id: ctx.step.id,
           release_id: ctx.release.id,
           position: 0
         })
@@ -674,12 +674,12 @@ defmodule Relay.StoryMapTest do
     end
 
     test "exactly one {:card_upserted, _} is broadcast per placement — the moved card", ctx do
-      place(ctx.stage, "First", ctx.task, ctx.release)
-      place(ctx.stage, "Second", ctx.task, ctx.release)
+      place(ctx.stage, "First", ctx.step, ctx.release)
+      place(ctx.stage, "Second", ctx.step, ctx.release)
 
       :ok = Events.subscribe(ctx.board.id)
 
-      moved = place(ctx.stage, "Third", ctx.task, ctx.release, %{position: 0})
+      moved = place(ctx.stage, "Third", ctx.step, ctx.release, %{position: 0})
       moved_id = moved.id
 
       assert_receive {:card_upserted, %Card{id: ^moved_id}}
@@ -702,10 +702,10 @@ defmodule Relay.StoryMapTest do
       {:ok, _} = StoryMap.update_activity(activity, %{name: "Onboarding"})
       assert_receive {:story_map_changed, ^board_id}
 
-      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
       assert_receive {:story_map_changed, ^board_id}
 
-      :ok = StoryMap.reorder_tasks(board, [task.id])
+      :ok = StoryMap.reorder_steps(board, [step.id])
       assert_receive {:story_map_changed, ^board_id}
 
       {:ok, _} = StoryMap.delete_activity(activity)
@@ -744,17 +744,17 @@ defmodule Relay.StoryMapTest do
 
   # The cell's cards in the order the grid would render them: story_map_position ascending
   # (nils last), ties broken by the board order list_cards/1 returns.
-  defp cell_order(task, release) do
+  defp cell_order(step, release) do
     Card
-    |> where([c], c.story_task_id == ^task.id and c.release_id == ^release.id)
+    |> where([c], c.story_step_id == ^step.id and c.release_id == ^release.id)
     |> order_by([c], asc: c.story_map_position, asc: c.stage_id, asc: c.position, asc: c.id)
     |> Repo.all()
     |> Enum.map(& &1.title)
   end
 
-  defp place(stage, title, task, release, attrs \\ %{}) do
+  defp place(stage, title, step, release, attrs \\ %{}) do
     card = insert(:card, stage: stage, title: title)
-    attrs = Map.merge(%{story_task_id: task.id, release_id: release.id}, attrs)
+    attrs = Map.merge(%{story_step_id: step.id, release_id: release.id}, attrs)
     {:ok, placed} = StoryMap.assign_card(card, attrs)
     placed
   end
@@ -774,7 +774,7 @@ defmodule Relay.StoryMapTest do
       assert StoryMap.view_defaults() == %{
                "tray_open" => true,
                "zoom" => "compact",
-               "hide_tasks" => false,
+               "hide_steps" => false,
                "owner_filter" => [],
                "needs_input_filter" => false,
                "collapsed" => [],
@@ -783,7 +783,7 @@ defmodule Relay.StoryMapTest do
              }
     end
 
-    test "filter_keys/0 is the FILTER subset — not collapse, focus, zoom, tray or hide_tasks" do
+    test "filter_keys/0 is the FILTER subset — not collapse, focus, zoom, tray or hide_steps" do
       assert StoryMap.filter_keys() == ["owner_filter", "needs_input_filter", "hide_complete"]
 
       # Every filter key is a real view key: `Clear` merges Map.take(view_defaults(), …) and a
@@ -796,7 +796,7 @@ defmodule Relay.StoryMapTest do
       refute "collapsed" in StoryMap.filter_keys()
       refute "focus" in StoryMap.filter_keys()
       refute "zoom" in StoryMap.filter_keys()
-      refute "hide_tasks" in StoryMap.filter_keys()
+      refute "hide_steps" in StoryMap.filter_keys()
       refute "tray_open" in StoryMap.filter_keys()
     end
 
@@ -813,7 +813,7 @@ defmodule Relay.StoryMapTest do
       # Collapse and focus narrow the view but are not filters — Clear does not clear them.
       refute StoryMap.filters_active?(%{defaults | "collapsed" => [7]})
       refute StoryMap.filters_active?(%{defaults | "focus" => 7})
-      refute StoryMap.filters_active?(%{defaults | "hide_tasks" => true})
+      refute StoryMap.filters_active?(%{defaults | "hide_steps" => true})
     end
 
     test "toggle_view/2 flips hide_complete off its default and back", %{board: board} do
@@ -900,9 +900,9 @@ defmodule Relay.StoryMapTest do
       assert StoryMap.view(Repo.get!(Board, board.id))["tray_open"] == true
     end
 
-    test "toggle_view/2 flips hide_tasks off its default and back", %{board: board} do
-      assert {:ok, %{"hide_tasks" => true}} = StoryMap.toggle_view(board, "hide_tasks")
-      assert {:ok, %{"hide_tasks" => false}} = StoryMap.toggle_view(board, "hide_tasks")
+    test "toggle_view/2 flips hide_steps off its default and back", %{board: board} do
+      assert {:ok, %{"hide_steps" => true}} = StoryMap.toggle_view(board, "hide_steps")
+      assert {:ok, %{"hide_steps" => false}} = StoryMap.toggle_view(board, "hide_steps")
     end
 
     test "toggle_view/2 rejects an unknown key and writes nothing", %{board: board} do
@@ -918,14 +918,14 @@ defmodule Relay.StoryMapTest do
       :ok = StoryMap.subscribe_view(board.id)
 
       assert {:ok, view} =
-               StoryMap.merge_view(board, %{"hide_tasks" => true, "focus" => 7})
+               StoryMap.merge_view(board, %{"hide_steps" => true, "focus" => 7})
 
-      assert view["hide_tasks"] == true
+      assert view["hide_steps"] == true
       assert view["focus"] == 7
 
       board_id = board.id
       assert_receive {:story_map_view_changed, ^board_id, %{"focus" => 7}}
-      # ONE broadcast, not one per key: "expand this activity AND turn Hide tasks off" is
+      # ONE broadcast, not one per key: "expand this activity AND turn Hide steps off" is
       # atomic, which is the whole reason this writer exists.
       refute_receive {:story_map_view_changed, ^board_id, _view}, 100
     end
@@ -934,7 +934,7 @@ defmodule Relay.StoryMapTest do
          %{board: board} do
       :ok = StoryMap.subscribe_view(board.id)
 
-      assert StoryMap.merge_view(board, %{"hide_tasks" => true, "shoe_size" => 11}) ==
+      assert StoryMap.merge_view(board, %{"hide_steps" => true, "shoe_size" => 11}) ==
                {:error, :unknown_key}
 
       assert Repo.get!(Board, board.id).story_map_view == %{}
@@ -1014,7 +1014,7 @@ defmodule Relay.StoryMapTest do
     end
 
     test "toggle_view_member/3 refuses a key whose default is not a list", %{board: board} do
-      assert StoryMap.toggle_view_member(board, "hide_tasks", true) == {:error, :not_a_list}
+      assert StoryMap.toggle_view_member(board, "hide_steps", true) == {:error, :not_a_list}
       assert StoryMap.toggle_view_member(board, "shoe_size", 1) == {:error, :unknown_key}
       assert Repo.get!(Board, board.id).story_map_view == %{}
     end

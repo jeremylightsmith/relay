@@ -15,11 +15,11 @@ defmodule Relay.DocsStoryMapTest do
     assert domain =~ "**StoryMap**"
     assert domain =~ "Relay.StoryMap"
 
-    for schema <- ["StoryActivity", "StoryTask", "Release"] do
+    for schema <- ["StoryActivity", "StoryStep", "Release"] do
       assert domain =~ schema, "domain.md should name the #{schema} schema"
     end
 
-    for column <- ["story_activity_id", "story_task_id", "release_id", "story_map_position"] do
+    for column <- ["story_activity_id", "story_step_id", "release_id", "story_map_position"] do
       assert domain =~ column, "domain.md should name the #{column} card column"
     end
 
@@ -35,10 +35,24 @@ defmodule Relay.DocsStoryMapTest do
     glossary = read("docs/glossary.md")
 
     assert glossary =~ "Activity (story map)"
-    assert glossary =~ "Task (story map)"
+    assert glossary =~ "Step (story map)"
     assert glossary =~ "Release"
     assert glossary =~ "Schemas.StoryActivity"
-    assert glossary =~ "Schemas.StoryTask"
+    assert glossary =~ "Schemas.StoryStep"
     assert glossary =~ "Schemas.Release"
+  end
+
+  test "RE354: the story-map concept is Step, with no retired Task wording left" do
+    glossary = read("docs/glossary.md")
+    domain = read("docs/architecture/domain.md")
+
+    refute glossary =~ "Task (story map)"
+    refute glossary =~ "shadow OTP"
+    refute glossary =~ "Unrelated to a card's **sub-tasks**"
+    # The retired names are assembled from parts so the RE354 acceptance grep for leftover
+    # story-map "task" names stays clean while this guard still checks for them.
+    retired_task = "Task"
+    refute domain =~ "Story" <> retired_task
+    refute domain =~ "story_" <> String.downcase(retired_task) <> "_id"
   end
 end

@@ -25,18 +25,16 @@ the MMF design specs).
   timeline row type (`:moved`, `:status_changed`, runner `:action` lines). When this glossary
   says "Activity" unqualified in a story-map context it means `Schemas.StoryActivity`; the
   timeline sense is always written "activity log" or "activity entry".
-- **Task (story map)** — one step under a story-map Activity — the *backbone* of the story map
-  (`Schemas.StoryTask`, RE265), ordered within its activity. Named `StoryTask` in code because
-  a bare `Schemas.Task` would shadow OTP's `Task`. Unrelated to a card's **sub-tasks**
-  (`Schemas.SubTask`, the card's own checklist).
+- **Step (story map)** — one step under a story-map Activity — the *backbone* of the story map
+  (`Schemas.StoryStep`, RE265), ordered within its activity.
 - **Release** — a story-map swimlane (`Schemas.Release`, RE265): a **new axis orthogonal to
   stage**, so a card has both a stage and (optionally) a release. Every board is seeded with
   MVP / Fast follow / Later (`Schemas.Release.seed_names/0`), all editable. A card's release is
   genuinely optional — it can be mapped to a cell with its release still undecided. Not to be
   confused with `Relay.Release`, the Phoenix release-task module.
-- **Story map** — the second lens on a board: Activities and their Tasks across the top,
+- **Story map** — the second lens on a board: Activities and their Steps across the top,
   Releases as swimlanes down the left, and real board cards filling the cells. Story-map cards
-  **are** board cards; a card is assigned to at most one Activity+Task and one Release, and
+  **are** board cards; a card is assigned to at most one Activity+Step and one Release, and
   starts **unmapped**.
 - **Value stream (stream state · lead time · flow efficiency)** — the level-1 view of a card's
   life from the **stream start** to Done (`Relay.ValueStream`, RE146). The stream start is

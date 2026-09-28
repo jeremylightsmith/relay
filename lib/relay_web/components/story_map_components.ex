@@ -4,11 +4,11 @@ defmodule RelayWeb.StoryMapComponents do
   `RelayWeb.StoryMapGrid`'s view model, matching `docs/designs/Relay Story Map.dc.html`.
 
   Full zoom, **except** the affordances that are live: RE263's three create affordances — the
-  trailing `＋` add-activity column, the `＋ Add task` on each activity header and on a bare
+  trailing `＋` add-activity column, the `＋ Add step` on each activity header and on a bare
   placeholder, and the `＋ Release` row — which this module renders and `RelayWeb.BoardLive`
   handles; RE262's drag and drop (below); RE262's inline `＋` add-card in every cell (below); and
   RE261's structure editing — the `⠿` grip, the click-to-rename name and the `✕` delete on the
-  activity band, the task column header and the release label. RE259 adds the FILTER bar
+  activity band, the step column header and the release label. RE259 adds the FILTER bar
   (owner chips, the Needs-input toggle, the `Clear` link and the count label), the band's `▾`
   collapse and `◎` focus buttons, and the collapsed stub column; RE276 adds the `Hide complete`
   toggle beside `Needs input`, in the same chrome and pressed by default. The artboard's `✦`
@@ -56,7 +56,7 @@ defmodule RelayWeb.StoryMapComponents do
   @gl_light "1px solid var(--color-base-300)"
   @gl_strong "2px solid color-mix(in oklab, var(--color-base-content) 25%, var(--color-base-100))"
   @gl_dashed "1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100))"
-  @no_task_bg "var(--color-base-200)"
+  @no_step_bg "var(--color-base-200)"
   @h1 56
   @h2 40
 
@@ -152,7 +152,7 @@ defmodule RelayWeb.StoryMapComponents do
 
   @doc """
   The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
-  the Hide tasks toggle. Both are keys of the board-wide shared view
+  the Hide steps toggle. Both are keys of the board-wide shared view
   (`Relay.StoryMap.view/1` plus `merge_view/2`, the one writer `put_view/3` and `toggle_view/2`
   compose) — they change the grid's geometry,
   which is the coordinate space RE257's raw-pixel cursors are measured in, so they are shared
@@ -163,7 +163,7 @@ defmodule RelayWeb.StoryMapComponents do
   so a level can only ever be added in one place.
   """
   attr :zoom, :atom, values: @zoom_levels, required: true
-  attr :hide_tasks, :boolean, required: true
+  attr :hide_steps, :boolean, required: true
 
   def story_map_toolbar(assigns) do
     assigns = assign(assigns, :levels, zoom_levels())
@@ -193,12 +193,12 @@ defmodule RelayWeb.StoryMapComponents do
       </div>
       <button
         type="button"
-        id="story-map-hide-tasks"
-        phx-click="toggle_story_map_hide_tasks"
-        aria-pressed={to_string(@hide_tasks)}
-        style={hide_tasks_style(@hide_tasks)}
+        id="story-map-hide-steps"
+        phx-click="toggle_story_map_hide_steps"
+        aria-pressed={to_string(@hide_steps)}
+        style={hide_steps_style(@hide_steps)}
       >
-        {hide_tasks_label(@hide_tasks)}
+        {hide_steps_label(@hide_steps)}
       </button>
     </div>
     """
@@ -212,7 +212,7 @@ defmodule RelayWeb.StoryMapComponents do
 
   Every control is a key of the board-wide shared view, so a click writes through
   `Relay.StoryMap` and the bar re-renders from that write's own broadcast — the clicker
-  included, exactly like ZOOM and Hide tasks above.
+  included, exactly like ZOOM and Hide steps above.
 
   Chips are drawn by `RelayWeb.CoreComponents.avatar/1`, the app's one definition of a
   person's circle, so a person looks the same here as in the member stack, the card owner
@@ -615,8 +615,8 @@ defmodule RelayWeb.StoryMapComponents do
   #
   # On a read-only board the span renders WITHOUT `phx-click` and without `cursor:text` — the
   # name is still shown, it is just not an affordance (matching how `read_only` already
-  # suppresses `＋ Add task`).
-  attr :kind, :string, required: true, values: ~w(activity task release)
+  # suppresses `＋ Add step`).
+  attr :kind, :string, required: true, values: ~w(activity step release)
   attr :id, :integer, required: true
   attr :name, :string, required: true
   attr :editing, :boolean, required: true
@@ -656,7 +656,7 @@ defmodule RelayWeb.StoryMapComponents do
   # It is deliberately a `disabled` button rather than an enabled one that no-ops: `disabled` is
   # what makes the state real for a screen reader and for the acceptance test. The server refuses
   # a non-empty delete anyway (`{:error, :not_empty}`) — the two together are defence in depth.
-  attr :kind, :string, required: true, values: ~w(activity task release)
+  attr :kind, :string, required: true, values: ~w(activity step release)
   attr :id, :integer, required: true
   attr :count, :integer, required: true
 
@@ -693,27 +693,27 @@ defmodule RelayWeb.StoryMapComponents do
   defp delete_style(_count),
     do: "font-size:10px;color:color-mix(in oklab, var(--color-base-content) 25%, transparent);cursor:not-allowed;"
 
-  # The ⠿ drag handle. The activity header's is one step larger than the task header's (artboard
+  # The ⠿ drag handle. The activity header's is one step larger than the step header's (artboard
   # lines ~176 and ~198; the artboard also had it a touch darker, but Rule N collapses that 0.02 L
   # step so both now emit base-content 40%); the release label's — this card's addition, which the
-  # artboard does not have — matches the task's.
+  # artboard does not have — matches the step's.
   defp grip_style(:activity),
     do: "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);cursor:grab;"
 
-  defp grip_style(_task_or_release),
+  defp grip_style(_step_or_release),
     do: "font-size:11px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);cursor:grab;"
 
   @doc """
   The CSS grid: sticky corner, the two backing header bands, lane striping, the sticky release
-  rail, the activity band, the task headers, and one body cell per column × lane.
+  rail, the activity band, the step headers, and one body cell per column × lane.
   """
   attr :grid, :any, required: true, doc: "a %RelayWeb.StoryMapGrid{}"
   attr :board, :any, required: true, doc: "the board, for Relay.Cards.ref/2"
   attr :stages, :list, required: true, doc: "board.stages, for the badge and Cards.done?/2"
   attr :stalled_ids, :any, required: true, doc: "MapSet of card ids whose run is stalled"
-  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
+  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:step, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
-  attr :edit, :any, default: nil, doc: "nil | {:activity, id} | {:task, id} | {:release, id}"
+  attr :edit, :any, default: nil, doc: "nil | {:activity, id} | {:step, id} | {:release, id}"
   attr :edit_name, :string, default: "", doc: "the open rename's text, tracked server-side"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :compose, :any, default: nil, doc: "the {column_key, lane_key} whose composer is open, or nil"
@@ -806,7 +806,7 @@ defmodule RelayWeb.StoryMapComponents do
           cancel="story_map_draft_cancel"
         />
       </div>
-      <%!-- RE263 — the add-activity column: 58px pinned past the last band, widening to a task
+      <%!-- RE263 — the add-activity column: 58px pinned past the last band, widening to a step
             column's 156px while its draft is open (artboard `addActStyle`, line ~513). --%>
       <div style={add_activity_style(@grid, @draft)}>
         <button
@@ -869,9 +869,9 @@ defmodule RelayWeb.StoryMapComponents do
           <button
             :if={not @read_only}
             type="button"
-            id={"story-map-add-task-#{band.activity.id}"}
-            title="Add task"
-            phx-click="story_map_add_task"
+            id={"story-map-add-step-#{band.activity.id}"}
+            title="Add step"
+            phx-click="story_map_add_step"
             phx-value-activity-id={band.activity.id}
             style={icon_style()}
           >
@@ -1194,7 +1194,7 @@ defmodule RelayWeb.StoryMapComponents do
   On a read-only (archived) board the button is not rendered, matching the stage column's
   `read_only` compose affordance.
   """
-  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:task, activity_id}"
+  attr :draft, :any, default: nil, doc: "nil | :activity | :release | {:step, activity_id}"
   attr :draft_name, :string, default: "", doc: "the open draft's text, tracked server-side"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
 
@@ -1211,7 +1211,7 @@ defmodule RelayWeb.StoryMapComponents do
         class="max-w-md"
         style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
       >
-        Activities and their Tasks form the backbone across the top; Releases are the swimlanes
+        Activities and their Steps form the backbone across the top; Releases are the swimlanes
         down the left, and your cards fill the grid where the two cross.
       </p>
       <button
@@ -1240,19 +1240,19 @@ defmodule RelayWeb.StoryMapComponents do
   # ---------- private renders ----------
 
   @doc """
-  One column header, in all four shapes: RE263's open draft input, the bare `＋ Add task`
-  invitation, a **real task column** (RE261's grip + click-to-rename name + ✕), and the plain
-  `— No task yet` label.
+  One column header, in all four shapes: RE263's open draft input, the bare `＋ Add step`
+  invitation, a **real step column** (RE261's grip + click-to-rename name + ✕), and the plain
+  `— No step yet` label.
 
-  Only a real task column is a structure, so only it gets a grip, a rename and a ✕ — the bare
-  placeholder keeps its shipped `＋ Add task` behaviour and the draft column is chrome. On a
+  Only a real step column is a structure, so only it gets a grip, a rename and a ✕ — the bare
+  placeholder keeps its shipped `＋ Add step` behaviour and the draft column is chrome. On a
   read-only board the bare column falls through to the plain label, so it keeps its place in
   the grid without inviting a click that only flashes an error.
   """
   attr :column, :map, required: true, doc: "one entry of the grid's `columns`"
   attr :index, :integer, required: true, doc: "0-based, for grid-column"
   attr :draft_name, :string, required: true
-  attr :edit, :any, required: true, doc: "nil | {:activity, id} | {:task, id} | {:release, id}"
+  attr :edit, :any, required: true, doc: "nil | {:activity, id} | {:step, id} | {:release, id}"
   attr :edit_name, :string, required: true
   attr :read_only, :boolean, required: true
 
@@ -1272,7 +1272,7 @@ defmodule RelayWeb.StoryMapComponents do
     >
       <.inline_name_input
         id="story-map-draft-input"
-        placeholder="Task name… ↵"
+        placeholder="Step name… ↵"
         value={@draft_name}
         submit="story_map_draft_submit"
         change="story_map_draft_change"
@@ -1283,41 +1283,41 @@ defmodule RelayWeb.StoryMapComponents do
       :if={not @column.draft? and @column.bare? and not @read_only}
       type="button"
       id={column_dom_id(@column)}
-      phx-click="story_map_add_task"
+      phx-click="story_map_add_step"
       phx-value-activity-id={@column.activity.id}
       style={column_header_style(@column, @index)}
     >
-      ＋ Add task
+      ＋ Add step
     </button>
     <div
-      :if={not @column.draft? and not @column.merged? and not is_nil(@column.task)}
+      :if={not @column.draft? and not @column.merged? and not is_nil(@column.step)}
       id={column_dom_id(@column)}
       class={[not @read_only && "story-map-header story-map-header-drop"]}
-      data-kind="task"
-      data-id={@column.task && @column.task.id}
-      draggable={to_string(not @read_only and @edit != {:task, @column.task && @column.task.id})}
+      data-kind="step"
+      data-id={@column.step && @column.step.id}
+      draggable={to_string(not @read_only and @edit != {:step, @column.step && @column.step.id})}
       style={column_header_style(@column, @index)}
     >
-      <span :if={not @read_only} style={grip_style(:task)}>⠿</span>
+      <span :if={not @read_only} style={grip_style(:step)}>⠿</span>
       <.header_name
-        kind="task"
-        id={@column.task && @column.task.id}
+        kind="step"
+        id={@column.step && @column.step.id}
         name={column_name(@column)}
-        editing={@edit == {:task, @column.task && @column.task.id}}
+        editing={@edit == {:step, @column.step && @column.step.id}}
         edit_name={@edit_name}
         read_only={@read_only}
         style="flex:1;"
       />
       <.delete_button
         :if={not @read_only}
-        kind="task"
-        id={@column.task && @column.task.id}
+        kind="step"
+        id={@column.step && @column.step.id}
         count={@column.count}
       />
     </div>
     <div
       :if={
-        not @column.draft? and not @column.merged? and is_nil(@column.task) and
+        not @column.draft? and not @column.merged? and is_nil(@column.step) and
           (not @column.bare? or @read_only)
       }
       id={column_dom_id(@column)}
@@ -1410,22 +1410,22 @@ defmodule RelayWeb.StoryMapComponents do
   defp zoom_label(:full), do: "Full"
 
   # Artboard `htBg` / `htFg` / `htBorder` (line ~569): violet while hiding, white while not.
-  defp hide_tasks_style(true) do
+  defp hide_steps_style(true) do
     "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
       "color:color-mix(in oklab, var(--color-secondary) 70%, var(--color-base-content));" <>
       "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));" <>
       "border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100));"
   end
 
-  defp hide_tasks_style(_hiding) do
+  defp hide_steps_style(_hiding) do
     "font-size:12px;font-weight:600;padding:5px 11px;border-radius:8px;" <>
       "color:color-mix(in oklab, var(--color-base-content) 75%, transparent);background:var(--color-base-100);" <>
       "border:1px solid var(--color-field-border);"
   end
 
   # Artboard `htLabel` (line ~568): the button says what the click will DO.
-  defp hide_tasks_label(true), do: "Show tasks"
-  defp hide_tasks_label(_hiding), do: "Hide tasks"
+  defp hide_steps_label(true), do: "Show steps"
+  defp hide_steps_label(_hiding), do: "Hide steps"
 
   # RE259 — HEEx's `:for` attribute accepts only a single generator (`pattern <- enumerable`),
   # not a comma-separated filter clause, so the stub loop and the header loop each narrow
@@ -1449,7 +1449,7 @@ defmodule RelayWeb.StoryMapComponents do
 
     # RE263 — the artboard's `colTemplate` ends `' 58px'` (line ~492) and `rowsTemplate` ends
     # `' 44px'` (line ~493): the add-activity column and the add-release row. The trailing
-    # column takes a task column's 156px while the activity draft is open, so there is room to
+    # column takes a step column's 156px while the activity draft is open, so there is room to
     # type; nothing else about the geometry moves.
     add_activity = if draft == :activity, do: "156px", else: "58px"
 
@@ -1549,20 +1549,20 @@ defmodule RelayWeb.StoryMapComponents do
 
   # The ONE owner of every column's DOM id — the plan's contract, which the tests and the card's
   # acceptance criteria both address. All three column shapes are here, so the draft and the
-  # bare `＋ Add task` header cannot drift from the plain label they replace.
+  # bare `＋ Add step` header cannot drift from the plain label they replace.
   defp column_dom_id(%{merged?: true, activity: activity}), do: "story-map-merged-#{activity.id}"
   defp column_dom_id(%{draft?: true, activity: activity}), do: "story-map-draft-#{activity.id}"
-  defp column_dom_id(%{no_task?: true, activity: activity}), do: "story-map-no-task-#{activity.id}"
-  defp column_dom_id(%{task: task}), do: "story-map-task-#{task.id}"
+  defp column_dom_id(%{no_step?: true, activity: activity}), do: "story-map-no-step-#{activity.id}"
+  defp column_dom_id(%{step: step}), do: "story-map-step-#{step.id}"
 
   # Artboard line ~442: always the plural, even at 1 — and `0 tasks · merged` for an activity
-  # with no tasks, which is the artboard's behaviour and left as is.
-  defp column_name(%{merged?: true, task_count: count}), do: "#{count} tasks · merged"
-  defp column_name(%{no_task?: true}), do: "— No task yet"
-  defp column_name(%{task: task}), do: task.name
+  # with no steps, which is the artboard's behaviour and left as is.
+  defp column_name(%{merged?: true, step_count: count}), do: "#{count} steps · merged"
+  defp column_name(%{no_step?: true}), do: "— No step yet"
+  defp column_name(%{step: step}), do: step.name
 
   # Artboard line ~443: the merged header is a LABEL — smaller, muted, no font-weight, no grip,
-  # no rename, no drop target. It names an activity, not a task, so there is nothing to edit.
+  # no rename, no drop target. It names an activity, not a step, so there is nothing to edit.
   defp column_header_style(%{merged?: true}, index) do
     "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
       "background:var(--color-base-200);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
@@ -1572,18 +1572,18 @@ defmodule RelayWeb.StoryMapComponents do
 
   defp column_header_style(column, index) do
     {background, border_right, color} =
-      if column.no_task? do
+      if column.no_step? do
         # Artboard line ~456: `tasks.length ? '1px dashed …' : GL_STRONG` — when the activity has
-        # no tasks at all this single column *is* the activity boundary, so it carries the strong
+        # no steps at all this single column *is* the activity boundary, so it carries the strong
         # separator. (The body cell, artboard line ~524, is dashed unconditionally.)
-        {@no_task_bg, if(column.last_of_activity?, do: @gl_strong, else: @gl_dashed),
+        {@no_step_bg, if(column.last_of_activity?, do: @gl_strong, else: @gl_dashed),
          "color-mix(in oklab, var(--color-base-content) 55%, transparent)"}
       else
         {"var(--color-base-100)", if(column.last_of_activity?, do: @gl_strong, else: @gl_light),
          "color-mix(in oklab, var(--color-base-content) 85%, transparent)"}
       end
 
-    # RE263 — the bare `＋ Add task` header is the one clickable column header (artboard line
+    # RE263 — the bare `＋ Add step` header is the one clickable column header (artboard line
     # ~457: `(bare ? 'cursor:pointer;' : '')`).
     cursor = if column.bare?, do: "cursor:pointer;", else: ""
 
@@ -1594,8 +1594,8 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   defp cell_style(column, column_index, lane_index, zoom) do
-    # RE263 — the draft column's body cells are empty and dashed, exactly like `— No task yet`.
-    placeholder? = column.no_task? or column.draft?
+    # RE263 — the draft column's body cells are empty and dashed, exactly like `— No step yet`.
+    placeholder? = column.no_step? or column.draft?
 
     border_right =
       cond do
@@ -1604,7 +1604,7 @@ defmodule RelayWeb.StoryMapComponents do
         true -> @gl_light
       end
 
-    background = if placeholder?, do: "background:#{@no_task_bg};", else: ""
+    background = if placeholder?, do: "background:#{@no_step_bg};", else: ""
 
     # Artboard line ~524: `gap:(z==='map'?'3px':'7px')`.
     gap = if zoom == :map, do: "3px", else: "7px"

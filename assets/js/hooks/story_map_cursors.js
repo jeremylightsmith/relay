@@ -13,7 +13,7 @@
 // viewer's raw pixel lands on the same card for every other viewer. That holds because EVERY
 // view setting that drives geometry is shared board-wide in `view_defaults/0`
 // (Relay.StoryMap.view/1): "tray_open", "zoom" — column widths and card heights via
-// cell_style/4 and card_shell/3 — "hide_tasks", which adds or removes whole task columns, and
+// cell_style/4 and card_shell/3 — "hide_steps", which adds or removes whole step columns, and
 // "collapsed" / "focus", which change geometry hardest of all: a collapsed activity (and under
 // focus, every activity but one) loses its band entirely and becomes a single 50px stub column
 // (StoryMapGrid.build/7). A geometry setting that went per-socket would put a viewer's cursor

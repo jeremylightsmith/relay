@@ -111,7 +111,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       html =
         render_hook(view, "assign_card", %{
           "ref" => "RLY-1",
-          "column" => "t:1",
+          "column" => "s:1",
           "lane" => "r:1",
           "index" => 0
         })
@@ -133,7 +133,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
     test "rejects compose_cell as read-only", %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      html = render_hook(view, "compose_cell", %{"column" => "t:1", "lane" => "r:1"})
+      html = render_hook(view, "compose_cell", %{"column" => "s:1", "lane" => "r:1"})
 
       assert html =~ "(read-only)"
     end
@@ -143,7 +143,7 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
 
       html =
         render_hook(view, "create_card_in_cell", %{
-          "column" => "t:1",
+          "column" => "s:1",
           "lane" => "r:1",
           "card" => %{"title" => "sneaky"}
         })
@@ -157,14 +157,14 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
     # only outcome is a "(read-only)" flash, the way the board hides its own add-work button.
     test "the story map renders no inline add button", %{conn: conn, board: board} do
       {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard", position: 1})
-      {:ok, task} = StoryMap.create_task(activity, %{name: "Sign in", position: 1})
+      {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
       [release | _rest] = StoryMap.list_releases(board)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
 
       # The grid itself renders — this is the read-only gate, not an empty story map.
-      assert has_element?(view, "#story-map-cell-t-#{task.id}-r-#{release.id}")
-      refute has_element?(view, "#story-map-add-t-#{task.id}-r-#{release.id}")
+      assert has_element?(view, "#story-map-cell-s-#{step.id}-r-#{release.id}")
+      refute has_element?(view, "#story-map-add-s-#{step.id}-r-#{release.id}")
       refute has_element?(view, "[id^='story-map-add-']")
     end
 

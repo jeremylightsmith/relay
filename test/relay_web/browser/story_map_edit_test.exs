@@ -25,13 +25,13 @@ defmodule RelayWeb.Browser.StoryMapEditTest do
     {:ok, board} = Boards.create_board(user, %{name: "Story map edit"})
     {:ok, onboard} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
     {:ok, plan} = StoryMap.create_activity(board, %{name: "Plan the backlog", position: 2})
-    {:ok, sign_in} = StoryMap.create_task(onboard, %{name: "Sign in", position: 1})
-    {:ok, _organize} = StoryMap.create_task(plan, %{name: "Organize cards", position: 1})
+    {:ok, sign_in} = StoryMap.create_step(onboard, %{name: "Sign in", position: 1})
+    {:ok, _organize} = StoryMap.create_step(plan, %{name: "Organize cards", position: 1})
     [mvp, _fast_follow, later] = StoryMap.list_releases(board)
 
     [backlog | _rest] = Boards.get_board!(user, board.slug).stages
     {:ok, sso} = Cards.create_card(backlog, %{title: "Add SSO"})
-    {:ok, _placed} = StoryMap.assign_card(sso, %{story_task_id: sign_in.id, release_id: mvp.id})
+    {:ok, _placed} = StoryMap.assign_card(sso, %{story_step_id: sign_in.id, release_id: mvp.id})
 
     session =
       conn
@@ -89,8 +89,8 @@ defmodule RelayWeb.Browser.StoryMapEditTest do
     session
     |> drag(
       "#story-map-card-#{Cards.ref(board, sso)}",
-      to: "#story-map-cell-t-#{sign_in.id}-r-#{later.id}"
+      to: "#story-map-cell-s-#{sign_in.id}-r-#{later.id}"
     )
-    |> assert_has("#story-map-cell-t-#{sign_in.id}-r-#{later.id} #story-map-card-#{Cards.ref(board, sso)}")
+    |> assert_has("#story-map-cell-s-#{sign_in.id}-r-#{later.id} #story-map-card-#{Cards.ref(board, sso)}")
   end
 end

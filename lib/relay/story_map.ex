@@ -1,25 +1,25 @@
 defmodule Relay.StoryMap do
   @moduledoc """
   The StoryMap context (RE265): the board's **second lens**, orthogonal to stages.
-  Activities and their Tasks form the backbone across the top, Releases are the swimlanes
+  Activities and their Steps form the backbone across the top, Releases are the swimlanes
   down the left, and real board cards fill the cells — story-map cards ARE board cards, not a
   separate entity.
 
-  Three board-scoped structures (`Schemas.StoryActivity`, `Schemas.StoryTask`,
+  Three board-scoped structures (`Schemas.StoryActivity`, `Schemas.StoryStep`,
   `Schemas.Release`), each ordered by `position` ascending with ties broken by `id`. Cards
   carry three nilable FKs and start fully **UNMAPPED**.
 
-  **The card→cell invariant** — if `story_task_id` is set, `story_activity_id` is set and
-  equals that task's activity — is enforced by *derivation*, not by trusting the caller:
-  `assign_card/2` looks the task up board-scoped and takes the activity from it, ignoring any
-  activity passed alongside; `update_task/2` closes the other half — moving a task to another
+  **The card→cell invariant** — if `story_step_id` is set, `story_activity_id` is set and
+  equals that step's activity — is enforced by *derivation*, not by trusting the caller:
+  `assign_card/2` looks the step up board-scoped and takes the activity from it, ignoring any
+  activity passed alongside; `update_step/2` closes the other half — moving a step to another
   activity drags its mapped cards' `story_activity_id` along in the same transaction.
   `Schemas.Card.story_map_changeset/2` rejects the half-state on
   the direct-changeset path. `release_id` is genuinely independent: a card can be mapped to a
   cell with no release, and the artboard's "an activity with no release renders in the last
   lane" is a *display* rule owned by the story-map view (RE264), never a stored default.
-  `move_task/3` is the single task-repositioning entry point the web layer calls — activity
-  change plus renumber in one transaction — and it composes `update_task/2`'s derivation
+  `move_step/3` is the single step-repositioning entry point the web layer calls — activity
+  change plus renumber in one transaction — and it composes `update_step/2`'s derivation
   rather than repeating it.
 
   **Two independent orderings (RE262).** `cards.position` orders a card within its stage
@@ -37,7 +37,7 @@ defmodule Relay.StoryMap do
 
   **Shared view settings (RE257, RE259).** The map's view state is board-wide, not per
   socket: `view_defaults/0` is the one definition of the key set (`"tray_open"`, `"zoom"`,
-  `"hide_tasks"`, `"owner_filter"`, `"needs_input_filter"`, `"collapsed"`, `"focus"`,
+  `"hide_steps"`, `"owner_filter"`, `"needs_input_filter"`, `"collapsed"`, `"focus"`,
   `"hide_complete"`), `filter_keys/0` is which of those are filters and `filters_active?/1`
   answers whether they differ from the defaults (RE276),
   `view/1` merges it under the stored `boards.story_map_view` column dropping unknown keys,
@@ -52,7 +52,7 @@ defmodule Relay.StoryMap do
   another tab's refresh can never eat what you are typing.
 
   **Deleting structure is refused while it still holds cards.** `delete_activity/1`,
-  `delete_task/1` and `delete_release/1` return `{:error, :not_empty}` when any **non-archived**
+  `delete_step/1` and `delete_release/1` return `{:error, :not_empty}` when any **non-archived**
   card on the board still points at them, checked inside the delete's own transaction. The
   `is_nil(archived_at)` filter is not optional: `Relay.Cards.list_cards/1` never shows archived
   cards, so a structure holding only archived ones renders an enabled ✕ that the server must
@@ -77,7 +77,7 @@ defmodule Relay.StoryMap do
   alias Schemas.Card
   alias Schemas.Release
   alias Schemas.StoryActivity
-  alias Schemas.StoryTask
+  alias Schemas.StoryStep
 
   @pubsub Relay.PubSub
 
@@ -87,9 +87,9 @@ defmodule Relay.StoryMap do
   # `toggle_view/2`, list keys flip a member through `toggle_view_member/4`, everything goes
   # through the one `merge_view/2` writer.
   #
-  # "zoom" and "hide_tasks" are RE260's chrome controls, shared for the same reason the tray
+  # "zoom" and "hide_steps" are RE260's chrome controls, shared for the same reason the tray
   # is: RE257's cursors ship raw pixel coordinates in the map's scroll space, and both
-  # settings change the grid's GEOMETRY — hide_tasks collapses each activity to one merged
+  # settings change the grid's GEOMETRY — hide_steps collapses each activity to one merged
   # column and zoom resizes every cell — so two viewers who disagree see each other's cursor
   # over the wrong card, not merely a few pixels off. The column is jsonb, so zoom is stored
   # as a STRING and comes back through `RelayWeb.StoryMapComponents.parse_zoom/1`, never
@@ -112,7 +112,7 @@ defmodule Relay.StoryMap do
   @view_defaults %{
     "tray_open" => true,
     "zoom" => "compact",
-    "hide_tasks" => false,
+    "hide_steps" => false,
     "owner_filter" => [],
     "needs_input_filter" => false,
     "collapsed" => [],
@@ -121,7 +121,7 @@ defmodule Relay.StoryMap do
   }
 
   # RE276 — which of the view keys are FILTERS: the subset `Clear` resets to `view_defaults/0`
-  # and the subset `filters_active?/1` compares against it. Collapse, focus, zoom, hide_tasks
+  # and the subset `filters_active?/1` compares against it. Collapse, focus, zoom, hide_steps
   # and the tray narrow or resize the view but are not filters — RE259 drew that line and it
   # stands. Written here so `RelayWeb.BoardLive`'s `clear_story_map_filters` stops re-typing a
   # literal of filter keys, which would be a second place to forget one.
@@ -134,12 +134,12 @@ defmodule Relay.StoryMap do
     Repo.all(from a in StoryActivity, where: a.board_id == ^id, order_by: [asc: a.position, asc: a.id])
   end
 
-  @doc "All of the board's tasks, ordered by `(story_activity_id, position)`."
-  def list_tasks(board) do
+  @doc "All of the board's steps, ordered by `(story_activity_id, position)`."
+  def list_steps(board) do
     id = board_id(board)
 
     Repo.all(
-      from t in StoryTask,
+      from t in StoryStep,
         where: t.board_id == ^id,
         order_by: [asc: t.story_activity_id, asc: t.position, asc: t.id]
     )
@@ -153,12 +153,12 @@ defmodule Relay.StoryMap do
   end
 
   @doc """
-  The `position` a newly appended activity, task or release takes: one past the highest in
+  The `position` a newly appended activity, step or release takes: one past the highest in
   `list`, or 1 when the list is empty. Ties are harmless — no structure has a unique index on
   `position` and every read breaks ties by `id`.
 
-  Pure and query-free: it is called with lists the caller has already loaded (for a task, with
-  **that activity's** tasks only). `create_activity/2`, `create_task/2` and `create_release/2`
+  Pure and query-free: it is called with lists the caller has already loaded (for a step, with
+  **that activity's** steps only). `create_activity/2`, `create_step/2` and `create_release/2`
   all *require* `position`, so this is the one definition of "goes at the end" — no call site
   re-types `max + 1`.
   """
@@ -170,7 +170,7 @@ defmodule Relay.StoryMap do
   index — i.e. immediately **before** the target — appending when the target is not in the
   list. Dropping something on itself is the identity.
 
-  All three header drops (activity, task, release) order through this, so the insert rule has
+  All three header drops (activity, step, release) order through this, so the insert rule has
   one home and no call site re-types it.
 
       insert_before([1, 2, 3], 3, 1) #=> [3, 1, 2]
@@ -209,7 +209,7 @@ defmodule Relay.StoryMap do
 
   @doc """
   Deletes an activity — **refused with `{:error, :not_empty}` while any non-archived card on
-  this board still points at it**. On success the database cascade deletes its tasks and
+  this board still points at it**. On success the database cascade deletes its steps and
   **unmaps** every card that pointed at either; `release_id` is untouched.
   """
   def delete_activity(%StoryActivity{} = activity) do
@@ -219,33 +219,33 @@ defmodule Relay.StoryMap do
   @doc "Rewrites the given activities' `position` to `1..n`; ids not on this board are ignored."
   def reorder_activities(board, ids) when is_list(ids), do: reorder(StoryActivity, board_id(board), ids)
 
-  @doc "Creates a task under `activity` (a struct or an id); `board_id` comes from the parent."
-  def create_task(%StoryActivity{} = activity, attrs) do
-    %StoryTask{board_id: activity.board_id, story_activity_id: activity.id}
-    |> StoryTask.changeset(attrs)
+  @doc "Creates a step under `activity` (a struct or an id); `board_id` comes from the parent."
+  def create_step(%StoryActivity{} = activity, attrs) do
+    %StoryStep{board_id: activity.board_id, story_activity_id: activity.id}
+    |> StoryStep.changeset(attrs)
     |> Repo.insert()
     |> broadcast_changed(activity.board_id)
   end
 
-  def create_task(activity_id, attrs) when is_integer(activity_id) do
-    create_task(Repo.get!(StoryActivity, activity_id), attrs)
+  def create_step(activity_id, attrs) when is_integer(activity_id) do
+    create_step(Repo.get!(StoryActivity, activity_id), attrs)
   end
 
   @doc """
-  Renames/repositions a task, and may move it to another activity **on the same board**.
+  Renames/repositions a step, and may move it to another activity **on the same board**.
   A cross-board move is rejected with `{:error, changeset}`.
 
-  A move drags every card mapped to this task along with it: their `story_activity_id` is
+  A move drags every card mapped to this step along with it: their `story_activity_id` is
   rewritten in the same transaction, so the card→cell invariant holds by derivation on this
   write path too. Each card that actually moved also gets its own `{:card_upserted, card}`
   (broadcast after the transaction commits) — `{:story_map_changed, board_id}` only tells
   receivers to refetch the *structure*.
   """
-  def update_task(%StoryTask{} = task, attrs) do
+  def update_step(%StoryStep{} = step, attrs) do
     changeset =
-      task
-      |> StoryTask.changeset(attrs)
-      |> validate_activity_on_board(task.board_id)
+      step
+      |> StoryStep.changeset(attrs)
+      |> validate_activity_on_board(step.board_id)
 
     result =
       Repo.transaction(fn ->
@@ -258,60 +258,60 @@ defmodule Relay.StoryMap do
     case result do
       {:ok, {updated, cards}} ->
         Enum.each(cards, &Cards.notify_upserted/1)
-        broadcast_changed({:ok, updated}, task.board_id)
+        broadcast_changed({:ok, updated}, step.board_id)
 
       {:error, failed} ->
         {:error, failed}
     end
   end
 
-  # The card→cell invariant is derived, never trusted: a task that changes activity drags its
+  # The card→cell invariant is derived, never trusted: a step that changes activity drags its
   # mapped cards' `story_activity_id` with it. `IS DISTINCT FROM` so a card left in the
-  # half-state (task set, activity nil) is repaired rather than skipped by NULL comparison.
-  defp resync_mapped_cards(%StoryTask{} = task) do
+  # half-state (step set, activity nil) is repaired rather than skipped by NULL comparison.
+  defp resync_mapped_cards(%StoryStep{} = step) do
     {_count, cards} =
       Repo.update_all(
         from(c in Card,
           where:
-            c.story_task_id == ^task.id and
-              fragment("? IS DISTINCT FROM ?", c.story_activity_id, ^task.story_activity_id),
+            c.story_step_id == ^step.id and
+              fragment("? IS DISTINCT FROM ?", c.story_activity_id, ^step.story_activity_id),
           select: c
         ),
-        set: [story_activity_id: task.story_activity_id, updated_at: DateTime.truncate(DateTime.utc_now(), :second)]
+        set: [story_activity_id: step.story_activity_id, updated_at: DateTime.truncate(DateTime.utc_now(), :second)]
       )
 
     cards
   end
 
   @doc """
-  Repositions a task, and may move it to another activity **on the same board** — the single
+  Repositions a step, and may move it to another activity **on the same board** — the single
   entry point the web layer calls, so no call site branches on "did the activity change".
 
-  `ordered_task_ids` is the TARGET activity's full desired task order, including the moved
-  task. In one transaction: the activity change (reusing `update_task/2`'s own
+  `ordered_step_ids` is the TARGET activity's full desired step order, including the moved
+  step. In one transaction: the activity change (reusing `update_step/2`'s own
   `resync_mapped_cards/1`, so the card→cell invariant keeps holding by derivation), then a
-  renumber of `ordered_task_ids` to `1..n`, board-scoped. Within one activity this degenerates
+  renumber of `ordered_step_ids` to `1..n`, board-scoped. Within one activity this degenerates
   to a pure renumber and moves no card.
 
   Broadcasts one `{:story_map_changed, board_id}` after commit, plus one
   `{:card_upserted, card}` per card the activity change actually moved — exactly the contract
-  `update_task/2` already honours. A cross-board target is rejected with `{:error, changeset}`
+  `update_step/2` already honours. A cross-board target is rejected with `{:error, changeset}`
   by `validate_activity_on_board/2`, which this inherits.
 
-  `reorder_tasks/2` stays the primitive this renumbers through.
+  `reorder_steps/2` stays the primitive this renumbers through.
   """
-  def move_task(%StoryTask{} = task, target_activity_id, ordered_task_ids) when is_list(ordered_task_ids) do
+  def move_step(%StoryStep{} = step, target_activity_id, ordered_step_ids) when is_list(ordered_step_ids) do
     changeset =
-      task
-      |> StoryTask.changeset(%{story_activity_id: target_activity_id})
-      |> validate_activity_on_board(task.board_id)
+      step
+      |> StoryStep.changeset(%{story_activity_id: target_activity_id})
+      |> validate_activity_on_board(step.board_id)
 
     result =
       Repo.transaction(fn ->
         case Repo.update(changeset) do
           {:ok, updated} ->
             cards = resync_mapped_cards(updated)
-            renumber(StoryTask, task.board_id, ordered_task_ids)
+            renumber(StoryStep, step.board_id, ordered_step_ids)
             # The renumber is an update_all, so the in-memory struct's position is stale.
             {Repo.reload!(updated), cards}
 
@@ -323,7 +323,7 @@ defmodule Relay.StoryMap do
     case result do
       {:ok, {updated, cards}} ->
         Enum.each(cards, &Cards.notify_upserted/1)
-        broadcast_changed({:ok, updated}, task.board_id)
+        broadcast_changed({:ok, updated}, step.board_id)
 
       {:error, failed} ->
         {:error, failed}
@@ -331,17 +331,17 @@ defmodule Relay.StoryMap do
   end
 
   @doc """
-  Deletes one task — **refused with `{:error, :not_empty}` while any non-archived card on this
+  Deletes one step — **refused with `{:error, :not_empty}` while any non-archived card on this
   board still points at it**. On success, cards that pointed at it would keep
-  `story_activity_id` and fall into that activity's "No task yet" column; the guard means there
+  `story_activity_id` and fall into that activity's "No step yet" column; the guard means there
   are none.
   """
-  def delete_task(%StoryTask{} = task) do
-    guarded_delete(task, :story_task_id, task.id, task.board_id)
+  def delete_step(%StoryStep{} = step) do
+    guarded_delete(step, :story_step_id, step.id, step.board_id)
   end
 
-  @doc "Rewrites the given tasks' `position` to `1..n`; ids not on this board are ignored."
-  def reorder_tasks(board, ids) when is_list(ids), do: reorder(StoryTask, board_id(board), ids)
+  @doc "Rewrites the given steps' `position` to `1..n`; ids not on this board are ignored."
+  def reorder_steps(board, ids) when is_list(ids), do: reorder(StoryStep, board_id(board), ids)
 
   @doc "Creates a release (swimlane) on `board`."
   def create_release(board, attrs) do
@@ -410,7 +410,7 @@ defmodule Relay.StoryMap do
 
   @doc """
   Places `card` on the story map. `attrs` is an atom-keyed map of `:story_activity_id`,
-  `:story_task_id` and `:release_id` — it sets the **whole** placement, so anything omitted is
+  `:story_step_id` and `:release_id` — it sets the **whole** placement, so anything omitted is
   cleared (`unassign_card/1` is the all-nil case) — plus an optional `:position`.
 
   `:position` is a **0-based index among the target cell's other cards** — the same contract
@@ -421,9 +421,9 @@ defmodule Relay.StoryMap do
   writing only the moved card's position would slam it to the top however far down the user
   dropped it.
 
-  `story_activity_id` is **derived** from `story_task_id` when a task is given, so a
+  `story_activity_id` is **derived** from `story_step_id` when a step is given, so a
   conflicting activity passed alongside is ignored rather than trusted. Every id is checked
-  against the card's own board; a foreign activity, task or release is rejected with
+  against the card's own board; a foreign activity, step or release is rejected with
   `{:error, changeset}` and nothing is written — including no renumber. Broadcasts
   `{:card_upserted, card}` via `Relay.Cards.notify_upserted/1` for the moved card **only**:
   every receiver's story-map refresh refetches the board's whole card list, so the renumbered
@@ -479,7 +479,7 @@ defmodule Relay.StoryMap do
     |> Enum.find(&(&1.id == moved_id))
   end
 
-  # The renumbered set is the **DB cell** — same board, same activity, same task, same release,
+  # The renumbered set is the **DB cell** — same board, same activity, same step, same release,
   # nil-safe (`IS NOT DISTINCT FROM`, matching the `IS DISTINCT FROM` already in
   # resync_mapped_cards/1). It is deliberately NOT the *display* cell: the last-lane fallback
   # for a release-less card is a display rule owned by RelayWeb.StoryMapGrid, and this context
@@ -498,7 +498,7 @@ defmodule Relay.StoryMap do
       where:
         c.board_id == ^card.board_id and c.id != ^card.id and is_nil(c.archived_at) and
           fragment("? IS NOT DISTINCT FROM ?", c.story_activity_id, type(^card.story_activity_id, :integer)) and
-          fragment("? IS NOT DISTINCT FROM ?", c.story_task_id, type(^card.story_task_id, :integer)) and
+          fragment("? IS NOT DISTINCT FROM ?", c.story_step_id, type(^card.story_step_id, :integer)) and
           fragment("? IS NOT DISTINCT FROM ?", c.release_id, type(^card.release_id, :integer)),
       order_by: [asc: c.story_map_position, asc: c.stage_id, asc: c.position, asc: c.id]
   end
@@ -536,17 +536,17 @@ defmodule Relay.StoryMap do
     end
   end
 
-  # Derivation, not trust: the task supplies its own activity, so the pair written to the card
+  # Derivation, not trust: the step supplies its own activity, so the pair written to the card
   # can never disagree. Each id is fetched board-scoped, which is also the cross-board check.
   defp resolve_placement(%Card{board_id: board_id}, attrs) do
-    with {:ok, task} <- fetch_scoped(StoryTask, Map.get(attrs, :story_task_id), board_id, :story_task_id),
+    with {:ok, step} <- fetch_scoped(StoryStep, Map.get(attrs, :story_step_id), board_id, :story_step_id),
          {:ok, activity} <-
            fetch_scoped(StoryActivity, Map.get(attrs, :story_activity_id), board_id, :story_activity_id),
          {:ok, release} <- fetch_scoped(Release, Map.get(attrs, :release_id), board_id, :release_id) do
       {:ok,
        %{
-         story_task_id: task && task.id,
-         story_activity_id: (task && task.story_activity_id) || (activity && activity.id),
+         story_step_id: step && step.id,
+         story_activity_id: (step && step.story_activity_id) || (activity && activity.id),
          release_id: release && release.id
        }}
     end
@@ -583,7 +583,7 @@ defmodule Relay.StoryMap do
     :ok
   end
 
-  # The renumber itself: no transaction, no broadcast, so `move_task/3` can compose it into its
+  # The renumber itself: no transaction, no broadcast, so `move_step/3` can compose it into its
   # own. A `where` on board_id means an id from another board simply matches nothing — no
   # error, no cross-board write.
   defp renumber(schema, board_id, ids) do
@@ -655,7 +655,7 @@ defmodule Relay.StoryMap do
   rather than trusted from the caller's struct: with eight keys in the set, merging into a
   stale in-memory view would silently clobber another session's write.
 
-  One write means "expand this activity **and** turn Hide tasks off" is atomic and sends ONE
+  One write means "expand this activity **and** turn Hide steps off" is atomic and sends ONE
   `{:story_map_view_changed, board_id, view}` on `"story_map_view:<board_id>"`, not three —
   deliberately NOT through `Relay.Events`, which bumps the board version on every call. A
   view change is not a domain mutation and must never make the CLI refetch the board.
@@ -736,7 +736,7 @@ defmodule Relay.StoryMap do
   defp known_keys?(keys), do: Enum.all?(keys, &Map.has_key?(@view_defaults, &1))
 
   # The DEFAULT's shape is what types a key, not the stored value: a row hand-edited to hold
-  # a string under "hide_tasks" must still toggle rather than be reclassified.
+  # a string under "hide_steps" must still toggle rather than be reclassified.
   defp expect_default(key, predicate, error) do
     if predicate.(Map.fetch!(@view_defaults, key)), do: :ok, else: {:error, error}
   end

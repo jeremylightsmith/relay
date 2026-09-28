@@ -1114,7 +1114,7 @@ defmodule RelayWeb.CoreComponents do
   clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and a
   breakpoint `BoardLive` picks PER VIEW: `hidden lg:block` on the board, `hidden xl:block` on
   the story map. The story-map bar carries five controls the board bar does not — `ZOOM`,
-  `Map`, `Compact`, `Full`, `Hide tasks` — so at `lg` it still has no budget: the box kept
+  `Map`, `Compact`, `Full`, `Hide steps` — so at `lg` it still has no budget: the box kept
   painting over the toggle from 1024px through 1136px until `xl` (RE198 smoke, second pass).
   Below those widths there is no room beside "Restart stalled" either, the same reason those
   controls drop their labels under `sm`. Callers with room of their own (the storybook page)
