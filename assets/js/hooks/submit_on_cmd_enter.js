@@ -4,9 +4,11 @@
 // focus, place the caret, or handle Escape.
 //
 // RE323 — the needs-input stepper reuses one textarea for every question, and
-// LiveView never overwrites a focused input's value, so after ⌘+Enter advances
-// to the next question the box would still hold the previous answer (and the
-// next ⌘+Enter would send it again). A textarea that opts in with `data-step`
+// LiveView never overwrites a focused input's value, so when the step changes
+// under a focused box (e.g. Back/Next by any means that keeps focus) it would
+// still hold the other question's text, and ⌘+Enter would commit it there.
+// (A ⌘+Enter submit itself is covered by LiveView's form lock/unlock, which
+// refreshes the box on ack.) A textarea that opts in with `data-step`
 // and `data-value` takes the server's text for the new step whenever its step
 // changes. Composers without `data-step` are untouched.
 const SubmitOnCmdEnter = {
