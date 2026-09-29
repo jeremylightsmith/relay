@@ -178,13 +178,13 @@ defmodule RelayWeb.Browser.TypingKeyGuardTest do
     |> assert_has("#card-drawer-description-input")
     |> unwrap(fn %{frame_id: frame_id} ->
       # A focusable non-text element inside the drawer. `press` focuses without clicking, so the
-      # editor's phx-click-away does not fire and the editor stays open.
+      # editor stays open.
       {:ok, _} =
         Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: "t", timeout: 2_000)
     end)
     # Ordered barrier: this click is handled after the keypress above, so the menu being open
-    # proves the tab assertions read a settled state. (The click also cancels the editor via
-    # phx-click-away — that is fine, the gate was consulted before it.)
+    # proves the tab assertions read a settled state. (Since RE362 the click leaves the
+    # Description editor open — boxed_field no longer cancels on click-away.)
     |> click("#card-drawer-stage-chip")
     |> assert_has("#card-drawer-stage-menu")
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
