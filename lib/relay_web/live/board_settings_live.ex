@@ -28,6 +28,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   import RelayWeb.CoreComponents, except: [section_label: 1]
 
+  alias Phoenix.LiveView.JS
   alias Relay.ApiKeys
   alias Relay.Boards
   alias Relay.Cards
@@ -37,6 +38,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Runs
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.FlowSettingsComponents
+  alias Schemas.ApiKey
   alias Schemas.Board
   alias Schemas.Membership
   alias Schemas.Stage
@@ -909,118 +911,166 @@ defmodule RelayWeb.BoardSettingsLive do
                 </span>
               </div>
 
-              <div :if={@revealed_token} id="api-key-reveal" style="margin-bottom:14px;">
+              <div id="api-key-list" style="display:flex;flex-direction:column;gap:12px;">
                 <div
-                  id="api-key-reveal-note"
-                  class="font-mono"
-                  style="font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));margin-bottom:6px;"
-                >
-                  Copy this key now — you won't be able to see it again.
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;background:var(--color-base-200);border:1px solid var(--color-base-300);border-radius:9px;padding:10px 12px;">
-                  <code
-                    id="api-key-secret"
-                    class="font-mono"
-                    style="flex:1;min-width:0;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                  >
-                    {@revealed_token}
-                  </code>
-                  <button
-                    id="copy-key"
-                    type="button"
-                    phx-hook=".CopyKey"
-                    data-target="api-key-secret"
-                    style="background:var(--color-field-hover);border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
-                  >
-                    Copy
-                  </button>
-                  <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyKey">
-                    export default {
-                      mounted() {
-                        this.el.addEventListener("click", () => {
-                          const target = document.getElementById(this.el.dataset.target)
-                          if (!target) return
-                          navigator.clipboard.writeText(target.textContent.trim())
-                          const label = this.el.dataset.label || this.el.textContent.trim()
-                          this.el.dataset.label = label
-                          this.el.textContent = "Copied ✓"
-                          this.el.style.background = "color-mix(in oklab, var(--color-success) 15%, var(--color-base-100))"
-                          this.el.style.borderColor = "color-mix(in oklab, var(--color-success) 50%, var(--color-base-100))"
-                          this.el.style.color = "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
-                          clearTimeout(this._t)
-                          this._t = setTimeout(() => {
-                            this.el.textContent = label
-                            this.el.style.background = "var(--color-field-hover)"
-                            this.el.style.borderColor = "var(--color-base-300)"
-                            this.el.style.color = "color-mix(in oklab, var(--color-base-content) 80%, transparent)"
-                          }, 1600)
-                        })
-                      }
-                    }
-                  </script>
-                </div>
-              </div>
-
-              <div style="display:flex;flex-direction:column;gap:12px;">
-                <div
-                  :if={@api_key}
-                  id="api-key-details"
+                  :for={key <- @api_keys}
+                  id={"api-key-#{key.id}"}
                   style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;"
                 >
                   <div style="display:flex;align-items:center;gap:10px;">
-                    <span
-                      id="api-key-name"
-                      style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);flex:1;"
-                    >
-                      {@api_key.name}
-                    </span>
+                    <div id={"api-key-name-#{key.id}"} style="flex:1;min-width:0;">
+                      <.boxed_field
+                        :if={!@read_only?}
+                        id={"api-key-name-#{key.id}"}
+                        form={@key_forms[key.id]}
+                        field={:name}
+                        input_class="font-semibold"
+                        save_event="rename_key"
+                        cancel_event="cancel_rename_key"
+                      >
+                        <:hidden><input type="hidden" name="key_id" value={key.id} /></:hidden>
+                      </.boxed_field>
+                      <span
+                        :if={@read_only?}
+                        style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+                      >
+                        {key.name}
+                      </span>
+                    </div>
                     <button
-                      id="regenerate-key"
+                      id={"regenerate-key-#{key.id}"}
                       type="button"
                       phx-click="regenerate_key"
+                      phx-value-id={key.id}
                       data-confirm="Regenerate the key? The current key stops working immediately."
-                      style="background:transparent;border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+                      style="background:transparent;border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
                     >
                       Regenerate
                     </button>
                     <button
-                      id="revoke-key"
+                      id={"revoke-key-#{key.id}"}
                       type="button"
                       phx-click="revoke_key"
+                      phx-value-id={key.id}
                       data-confirm="Revoke the key? Tools using it will lose access."
-                      style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;"
+                      style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
                     >
                       Revoke
                     </button>
                   </div>
+
+                  <div :if={@revealed && @revealed.key_id == key.id} id="api-key-reveal">
+                    <div
+                      id="api-key-reveal-note"
+                      class="font-mono"
+                      style="font-size:11.5px;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));margin-bottom:6px;"
+                    >
+                      Copy this key now — you won't be able to see it again.
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;background:var(--color-base-200);border:1px solid var(--color-base-300);border-radius:9px;padding:10px 12px;">
+                      <code
+                        id="api-key-secret"
+                        class="font-mono"
+                        style="flex:1;min-width:0;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                      >
+                        {@revealed.token}
+                      </code>
+                      <button
+                        id="copy-key"
+                        type="button"
+                        phx-hook=".CopyKey"
+                        data-target="api-key-secret"
+                        style="background:var(--color-field-hover);border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+
                   <div style="display:flex;align-items:center;gap:8px;background:var(--color-base-200);border:1px solid var(--color-base-300);border-radius:9px;padding:10px 12px;">
                     <span
-                      id="api-key-masked"
+                      id={"api-key-masked-#{key.id}"}
                       class="font-mono"
                       style="flex:1;min-width:0;font-size:13px;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                     >
-                      {masked(@api_key)}
+                      {masked(key)}
                     </span>
                   </div>
                   <div
                     class="font-mono"
                     style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                   >
-                    <span id="api-key-created">Created {format_time(@api_key.inserted_at)}</span>
-                    · <span id="api-key-last-used">last used {last_used(@api_key)}</span>
+                    <span id={"api-key-created-#{key.id}"}>
+                      Created {format_time(key.inserted_at)}
+                    </span>
+                    · <span id={"api-key-last-used-#{key.id}"}>last used {last_used(key)}</span>
                   </div>
                 </div>
-
-                <button
-                  :if={!@api_key}
-                  id="generate-key"
-                  type="button"
-                  phx-click="generate_key"
-                  style="border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;"
-                >
-                  + Create new key
-                </button>
               </div>
+
+              <button
+                :if={!@new_key_form}
+                id="generate-key"
+                type="button"
+                phx-click="new_key"
+                style="margin-top:14px;border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);border-radius:11px;padding:11px 16px;font-size:13px;font-weight:600;"
+              >
+                + Create new key
+              </button>
+              <.form
+                :if={@new_key_form}
+                for={@new_key_form}
+                id="new-key-form"
+                phx-submit="create_key"
+                style="margin-top:14px;display:flex;align-items:flex-start;gap:8px;max-width:520px;"
+              >
+                <div style="flex:1;min-width:0;">
+                  <.input
+                    field={@new_key_form[:name]}
+                    type="text"
+                    id="new-key-name"
+                    placeholder="e.g. Mac mini"
+                    autocomplete="off"
+                    phx-mounted={JS.focus()}
+                  />
+                </div>
+                <button type="submit" id="create-key-submit" class="btn btn-sm btn-primary">
+                  Create
+                </button>
+                <button
+                  type="button"
+                  id="cancel-new-key"
+                  phx-click="cancel_new_key"
+                  class="btn btn-sm"
+                >
+                  Cancel
+                </button>
+              </.form>
+
+              <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyKey">
+                export default {
+                  mounted() {
+                    this.el.addEventListener("click", () => {
+                      const target = document.getElementById(this.el.dataset.target)
+                      if (!target) return
+                      navigator.clipboard.writeText(target.textContent.trim())
+                      const label = this.el.dataset.label || this.el.textContent.trim()
+                      this.el.dataset.label = label
+                      this.el.textContent = "Copied ✓"
+                      this.el.style.background = "color-mix(in oklab, var(--color-success) 15%, var(--color-base-100))"
+                      this.el.style.borderColor = "color-mix(in oklab, var(--color-success) 50%, var(--color-base-100))"
+                      this.el.style.color = "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
+                      clearTimeout(this._t)
+                      this._t = setTimeout(() => {
+                        this.el.textContent = label
+                        this.el.style.background = "var(--color-field-hover)"
+                        this.el.style.borderColor = "var(--color-base-300)"
+                        this.el.style.color = "color-mix(in oklab, var(--color-base-content) 80%, transparent)"
+                      }, 1600)
+                    })
+                  }
+                }
+              </script>
 
               <div style="margin-top:26px;font-size:12.5px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
                 Keys are shown in full only right after they're created or regenerated. Store them
@@ -1044,8 +1094,9 @@ defmodule RelayWeb.BoardSettingsLive do
      socket
      |> assign(:page_title, "Board settings")
      |> assign(:board, board)
-     |> assign(:api_key, ApiKeys.get_key(board))
-     |> assign(:revealed_token, nil)
+     |> assign(:revealed, nil)
+     |> assign(:new_key_form, nil)
+     |> assign_keys(ApiKeys.list_keys(board))
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
      |> assign(:public_form, to_form(Board.public_settings_changeset(board, %{})))
@@ -1065,46 +1116,83 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_params(params, _uri, socket) do
     socket = assign(socket, :section, section(params))
     socket = if socket.assigns.section == :flows, do: assign_flows(socket), else: socket
+    socket = if socket.assigns.section == :keys, do: socket, else: assign(socket, :revealed, nil)
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("generate_key", _params, socket) do
-    case ApiKeys.create_key(socket.assigns.board, socket.assigns.current_scope.user) do
-      {:ok, %{api_key: key, token: token}} ->
-        {:noreply, socket |> assign(:api_key, key) |> assign(:revealed_token, token)}
-
-      {:error, :already_exists} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "This board already has an API key.")
-         |> assign(:api_key, ApiKeys.get_key(socket.assigns.board))}
-    end
-  end
-
-  def handle_event("regenerate_key", _params, socket) do
-    {:ok, %{api_key: key, token: token}} = ApiKeys.regenerate(socket.assigns.api_key)
-    {:noreply, socket |> assign(:api_key, key) |> assign(:revealed_token, token)}
-  end
-
-  def handle_event("revoke_key", _params, socket) do
-    {:ok, _key} = ApiKeys.revoke(socket.assigns.api_key)
-
-    {:noreply,
-     socket
-     |> assign(:api_key, nil)
-     |> assign(:revealed_token, nil)
-     |> put_flash(:info, "API key revoked.")}
-  end
-
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug save_board_key edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
         flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
-        flow_new flow_create_validate flow_create save_public_settings
+        flow_new flow_create_validate flow_create save_public_settings new_key create_key rename_key
+        regenerate_key revoke_key
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+  end
+
+  def handle_event("new_key", _params, socket) do
+    {:noreply, assign(socket, :new_key_form, new_key_form())}
+  end
+
+  def handle_event("cancel_new_key", _params, socket) do
+    {:noreply, assign(socket, :new_key_form, nil)}
+  end
+
+  def handle_event("create_key", %{"new_key" => %{"name" => name}}, socket) do
+    %{board: board, current_scope: scope} = socket.assigns
+
+    case ApiKeys.create_key(board, scope.user, name) do
+      {:ok, %{api_key: key, token: token}} ->
+        {:noreply,
+         socket
+         |> assign(:new_key_form, nil)
+         |> assign(:revealed, %{key_id: key.id, token: token})
+         |> assign_keys(ApiKeys.list_keys(board))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :new_key_form, to_form(changeset, as: :new_key))}
+    end
+  end
+
+  # The key id travels as `key_id`, not `id`: a form input named `id` shadows the
+  # form element's own `id` property, which LiveView's client relies on.
+  def handle_event("rename_key", %{"key_id" => id, "api_key" => %{"name" => name}}, socket) do
+    board = socket.assigns.board
+
+    case board |> ApiKeys.get_key!(id) |> ApiKeys.rename(name) do
+      {:ok, _key} ->
+        {:noreply, socket |> assign_keys(ApiKeys.list_keys(board)) |> put_flash(:info, "Key renamed.")}
+
+      {:error, %{data: key} = changeset} ->
+        {:noreply, update(socket, :key_forms, &Map.put(&1, key.id, to_form(changeset, as: :api_key)))}
+    end
+  end
+
+  def handle_event("cancel_rename_key", _params, socket) do
+    {:noreply, assign_keys(socket, socket.assigns.api_keys)}
+  end
+
+  def handle_event("regenerate_key", %{"id" => id}, socket) do
+    board = socket.assigns.board
+    {:ok, %{api_key: key, token: token}} = board |> ApiKeys.get_key!(id) |> ApiKeys.regenerate()
+
+    {:noreply,
+     socket
+     |> assign(:revealed, %{key_id: key.id, token: token})
+     |> assign_keys(ApiKeys.list_keys(board))}
+  end
+
+  def handle_event("revoke_key", %{"id" => id}, socket) do
+    board = socket.assigns.board
+    {:ok, _key} = board |> ApiKeys.get_key!(id) |> ApiKeys.revoke()
+
+    {:noreply,
+     socket
+     |> assign(:revealed, nil)
+     |> assign_keys(ApiKeys.list_keys(board))
+     |> put_flash(:info, "API key revoked.")}
   end
 
   def handle_event("save_public_settings", %{"board" => params}, socket) do
@@ -1768,6 +1856,16 @@ defmodule RelayWeb.BoardSettingsLive do
 
   defp category_dot_style(:complete),
     do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
+
+  defp assign_keys(socket, keys) do
+    socket
+    |> assign(:api_keys, keys)
+    |> assign(:key_forms, Map.new(keys, &{&1.id, key_form(&1)}))
+  end
+
+  defp key_form(key), do: to_form(ApiKey.name_changeset(key, %{}), as: :api_key)
+
+  defp new_key_form, do: to_form(%{"name" => ""}, as: :new_key)
 
   defp masked(key), do: "relay_#{key.token_prefix}_…#{key.last_four}"
 

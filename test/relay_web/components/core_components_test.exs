@@ -2010,6 +2010,27 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "commit-field-prefixed"
       assert html =~ ~s(id="bf-slug-input")
     end
+
+    test ":self always-editable renders the :hidden slot inside its form" do
+      assigns = %{form: Phoenix.Component.to_form(%{"name" => "Laptop"}, as: :api_key)}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.boxed_field
+          id="bf-key-name"
+          form={@form}
+          field={:name}
+          save_event="rename_key"
+          cancel_event="cancel_rename_key"
+        >
+          <:hidden><input type="hidden" name="key_id" value="42" /></:hidden>
+        </CoreComponents.boxed_field>
+        """)
+
+      form = html |> LazyHTML.from_fragment() |> LazyHTML.query("#bf-key-name-form")
+      assert form |> LazyHTML.query("input[type=hidden][name=key_id][value='42']") |> Enum.count() == 1
+      assert form |> LazyHTML.query("#bf-key-name-input[value='Laptop']") |> Enum.count() == 1
+    end
   end
 
   describe "boxed_field/1 editing commit affordance (RLY-58)" do

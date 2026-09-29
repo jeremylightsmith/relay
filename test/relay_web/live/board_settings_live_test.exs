@@ -6,6 +6,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
   alias Relay.ApiKeys
   alias Relay.Boards
   alias RelayWeb.BoardSettingsLive
+  alias Schemas.ApiKey
 
   describe "when logged out" do
     test "GET /board/:slug/settings redirects to the sign-in page", %{conn: conn} do
@@ -16,94 +17,246 @@ defmodule RelayWeb.BoardSettingsLiveTest do
   describe "API key pane" do
     setup :register_and_log_in_user
 
-    test "with no key, offers Generate and shows no secret or details", %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
+    defp open_keys(conn, board) do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-
-      assert has_element?(view, "#generate-key")
-      refute has_element?(view, "#api-key-secret")
-      refute has_element?(view, "#api-key-details")
+      view
     end
 
-    test "generate reveals the full secret once, with copy button and warning", %{conn: conn, user: user} do
+    defp create_via_ui(view, name) do
+      view |> element("#generate-key") |> render_click()
+      view |> form("#new-key-form", new_key: %{name: name}) |> render_submit()
+    end
+
+    test "with no keys, only the Create button shows", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
+      view = open_keys(conn, board)
+
+      assert has_element?(view, "#generate-key", "+ Create new key")
+      refute has_element?(view, "#api-key-list [id^='api-key-']")
+      refute has_element?(view, "#api-key-secret")
+      refute has_element?(view, "#new-key-form")
+    end
+
+    test "Create opens an inline name form; Cancel closes it", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      view = open_keys(conn, board)
 
       view |> element("#generate-key") |> render_click()
+
+      assert has_element?(view, "#new-key-form #new-key-name[placeholder='e.g. Mac mini']")
+      assert has_element?(view, "#create-key-submit")
+      refute has_element?(view, "#generate-key")
+
+      view |> element("#cancel-new-key") |> render_click()
+
+      refute has_element?(view, "#new-key-form")
+      assert has_element?(view, "#generate-key")
+      assert ApiKeys.list_keys(board) == []
+    end
+
+    test "creates a second named key while one exists; both are listed and Create stays", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: first}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
+
+      create_via_ui(view, "Mac mini")
+
+      assert [%{id: first_id}, second] = ApiKeys.list_keys(board)
+      assert first_id == first.id
+      assert second.name == "Mac mini"
+      assert has_element?(view, "#api-key-#{first.id}")
+      assert has_element?(view, "#api-key-#{second.id}")
+      assert has_element?(view, "#api-key-name-#{second.id}-input[value='Mac mini']")
+      assert has_element?(view, "#generate-key")
+      refute has_element?(view, "#new-key-form")
+    end
+
+    test "the new key's token is revealed once, inside its own card only", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: first}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
+
+      create_via_ui(view, "Mac mini")
+      [_first, second] = ApiKeys.list_keys(board)
+
+      assert has_element?(view, "#api-key-#{second.id} #api-key-reveal #api-key-secret")
+      assert has_element?(view, "#api-key-#{second.id} #copy-key")
+      assert has_element?(view, "#api-key-#{second.id} #api-key-reveal-note")
+      refute has_element?(view, "#api-key-#{first.id} #api-key-secret")
 
       secret = revealed_secret(view)
       assert secret =~ ~r/^relay_[0-9a-f]{12}_[0-9a-f]{64}$/
-      assert has_element?(view, "#copy-key")
-      assert has_element?(view, "#api-key-reveal-note")
-      refute has_element?(view, "#generate-key")
+      assert {:ok, authed} = ApiKeys.authenticate(secret)
+      assert authed.id == board.id
 
-      # the revealed token is the real key — it authenticates against this board
-      board = Boards.get_or_create_default_board(user)
-      assert {:ok, authed_board} = ApiKeys.authenticate(secret)
-      assert authed_board.id == board.id
-    end
-
-    test "on reload only the masked display shows — never the raw secret", %{conn: conn, user: user} do
-      board = Boards.get_or_create_default_board(user)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-      view |> element("#generate-key") |> render_click()
-      secret = revealed_secret(view)
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-
+      # reload: every key shows only its masked token
+      view = open_keys(conn, board)
       refute has_element?(view, "#api-key-secret")
       refute render(view) =~ secret
-
-      key = user |> Boards.get_or_create_default_board() |> ApiKeys.get_key()
-      masked = view |> element("#api-key-masked") |> render()
-      assert masked =~ key.token_prefix
-      assert masked =~ key.last_four
+      masked = view |> element("#api-key-masked-#{second.id}") |> render()
+      assert masked =~ second.token_prefix
+      assert masked =~ second.last_four
     end
 
-    test "shows name, masked value, created, and last-used; no second Generate", %{conn: conn, user: user} do
+    test "a blank name falls back to Key N", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-      {:ok, _created} = ApiKeys.create_key(board, user)
+      {:ok, _a} = ApiKeys.create_key(board, user)
+      {:ok, _b} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
+      create_via_ui(view, "   ")
 
-      assert has_element?(view, "#api-key-name", "Board API key")
-      assert has_element?(view, "#api-key-masked")
-      assert has_element?(view, "#api-key-created")
-      assert has_element?(view, "#api-key-last-used", "Never")
-      assert has_element?(view, "#regenerate-key")
-      assert has_element?(view, "#revoke-key")
-      refute has_element?(view, "#generate-key")
+      assert [_a, _b, third] = ApiKeys.list_keys(board)
+      assert third.name == "Key 3"
+      assert has_element?(view, "#api-key-name-#{third.id}-input[value='Key 3']")
     end
 
-    test "regenerate reveals a new secret once and invalidates the old one", %{conn: conn, user: user} do
+    test "a too-long name re-renders the form with the error and creates nothing", %{
+      conn: conn,
+      user: user
+    } do
       board = Boards.get_or_create_default_board(user)
-      {:ok, %{token: old_token}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-      view |> element("#regenerate-key") |> render_click()
+      create_via_ui(view, String.duplicate("x", ApiKey.name_max_length() + 1))
 
-      new_secret = revealed_secret(view)
-      assert new_secret =~ ~r/^relay_[0-9a-f]{12}_[0-9a-f]{64}$/
-      refute new_secret == old_token
-      assert :error = ApiKeys.authenticate(old_token)
-      assert {:ok, _board} = ApiKeys.authenticate(new_secret)
-
-      # reveal is once: a fresh mount shows only the masked display
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-      refute has_element?(view, "#api-key-secret")
+      assert has_element?(view, "#new-key-form", "should be at most")
+      assert ApiKeys.list_keys(board) == []
     end
 
-    test "revoke removes the key and offers Generate again", %{conn: conn, user: user} do
+    test "renames a key inline; the name persists and its token still works", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-      {:ok, %{token: token}} = ApiKeys.create_key(board, user)
+      {:ok, %{api_key: key, token: token}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
 
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
-      view |> element("#revoke-key") |> render_click()
+      view
+      |> form("#api-key-name-#{key.id}-form", api_key: %{name: "Laptop"})
+      |> render_submit()
 
+      assert ApiKeys.get_key!(board, key.id).name == "Laptop"
+      view = open_keys(conn, board)
+      assert has_element?(view, "#api-key-name-#{key.id}-input[value='Laptop']")
+      assert {:ok, _board} = ApiKeys.authenticate(token)
+    end
+
+    test "a blank rename shows the error and keeps the old name", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: key}} = ApiKeys.create_key(board, user, "Keep")
+      view = open_keys(conn, board)
+
+      view
+      |> form("#api-key-name-#{key.id}-form", api_key: %{name: "  "})
+      |> render_submit()
+
+      assert has_element?(view, "#api-key-name-#{key.id}-form", "can't be blank")
+      assert ApiKeys.get_key!(board, key.id).name == "Keep"
+    end
+
+    test "regenerate replaces only the targeted key and reveals it in that card", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: a, token: old_a}} = ApiKeys.create_key(board, user, "A")
+      {:ok, %{api_key: b, token: token_b}} = ApiKeys.create_key(board, user, "B")
+      view = open_keys(conn, board)
+
+      view |> element("#regenerate-key-#{a.id}") |> render_click()
+
+      assert has_element?(view, "#api-key-#{a.id} #api-key-secret")
+      refute has_element?(view, "#api-key-#{b.id} #api-key-secret")
+      new_a = revealed_secret(view)
+      refute new_a == old_a
+      assert :error = ApiKeys.authenticate(old_a)
+      assert {:ok, _board} = ApiKeys.authenticate(new_a)
+      assert {:ok, _board} = ApiKeys.authenticate(token_b)
+    end
+
+    test "revoke removes only the targeted key; the other keeps working", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: a, token: token_a}} = ApiKeys.create_key(board, user, "A")
+      {:ok, %{api_key: b, token: token_b}} = ApiKeys.create_key(board, user, "B")
+      view = open_keys(conn, board)
+
+      view |> element("#revoke-key-#{a.id}") |> render_click()
+
+      refute has_element?(view, "#api-key-#{a.id}")
+      assert has_element?(view, "#api-key-#{b.id}")
       assert has_element?(view, "#generate-key")
-      refute has_element?(view, "#api-key-details")
-      assert ApiKeys.get_key(board) == nil
-      assert :error = ApiKeys.authenticate(token)
+      assert Enum.map(ApiKeys.list_keys(board), & &1.id) == [b.id]
+      assert :error = ApiKeys.authenticate(token_a)
+      assert {:ok, _board} = ApiKeys.authenticate(token_b)
+    end
+
+    test "a forged id for another board's key is refused", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _mine} = ApiKeys.create_key(board, user)
+      {:ok, %{api_key: foreign, token: foreign_token}} = ApiKeys.create_key(Relay.Factory.insert(:board), user)
+      view = open_keys(conn, board)
+
+      # get_key!/2 raises inside the LiveView, crashing it — the foreign key is untouched
+      Process.flag(:trap_exit, true)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert catch_exit(render_click(view, "revoke_key", %{"id" => foreign.id}))
+      end)
+
+      assert {:ok, _board} = ApiKeys.authenticate(foreign_token)
+    end
+
+    test "each card carries name, Regenerate, Revoke, masked token, created and last-used", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: key}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
+
+      assert has_element?(view, "#api-key-name-#{key.id}-input[value='Key 1']")
+      assert has_element?(view, "#regenerate-key-#{key.id}", "Regenerate")
+      assert has_element?(view, "#revoke-key-#{key.id}", "Revoke")
+      assert has_element?(view, "#api-key-masked-#{key.id}")
+      assert has_element?(view, "#api-key-created-#{key.id}")
+      assert has_element?(view, "#api-key-last-used-#{key.id}", "Never")
+      assert has_element?(view, "#generate-key")
+    end
+
+    test "layout matches the Relay Board artboard (card, dashed Create below, no Reveal)", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: key}} = ApiKeys.create_key(board, user)
+      view = open_keys(conn, board)
+
+      # Relay Board.dc.html ~L537: card = 1px border, radius 12px, padding 16px 18px
+      assert has_element?(
+               view,
+               "#api-key-#{key.id}[style*='border:1px solid var(--color-base-300);border-radius:12px;padding:16px 18px']"
+             )
+
+      # ~L552: dashed Create button sits below the list with margin-top:14px
+      assert has_element?(view, "#generate-key[style*='margin-top:14px'][style*='1px dashed']")
+      refute has_element?(view, "#api-key-list #generate-key")
+      # tokens are hashed — there is no Reveal/Hide toggle
+      refute render(view) =~ ~r/>\s*(Reveal|Hide)\s*</
+    end
+
+    test "an archived board refuses key mutations as read-only", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, %{api_key: key}} = ApiKeys.create_key(board, user)
+      {:ok, _archived} = Boards.archive_board(board)
+      view = open_keys(conn, board)
+
+      render_click(view, "create_key", %{"new_key" => %{"name" => "Sneaky"}})
+      assert render(view) =~ "archived (read-only)"
+
+      render_click(view, "rename_key", %{"key_id" => key.id, "api_key" => %{"name" => "Sneaky"}})
+      render_click(view, "revoke_key", %{"id" => key.id})
+      render_click(view, "regenerate_key", %{"id" => key.id})
+
+      assert [%{name: "Key 1"}] = ApiKeys.list_keys(board)
+      refute has_element?(view, "#api-key-secret")
     end
 
     test "the board page links to settings", %{conn: conn, user: user} do

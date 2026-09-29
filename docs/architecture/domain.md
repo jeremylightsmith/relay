@@ -186,7 +186,10 @@ sharing behavior.
   tokens); user API tokens for `/api/all`.
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
-- **ApiKeys** — per-board agent credentials for the `/api` scope.
+- **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
+  per board (typically one per machine), each authenticating as Relay AI on its board.
+  `list_keys/1` (oldest first), board-scoped `get_key!/2`, `create_key/3` (blank name →
+  `Key N`), `rename/2`, `regenerate/1`, `revoke/1`, `authenticate/1` (RE361).
 - **Activity** — the card timeline: comments, activity entries, and runner log rows.
   `Activity.LogSink` batches ref-tagged runner lines into one insert per burst;
   `Activity.Pruner` ages `:action` chatter out after 14 days (RLY-112). Transition rows
