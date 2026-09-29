@@ -4469,13 +4469,17 @@ defmodule RelayWeb.CoreComponents do
           phx-submit="answer_commit"
         >
           <input type="hidden" name="answer[index]" value={@answer_step} />
-          <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. --%>
+          <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. data-step/data-value let SubmitOnCmdEnter reset the (focused, reused) box when the step changes. --%>
           <textarea
             id="needs-input-text"
             name="answer[text]"
             rows="3"
             autocomplete="off"
             phx-hook="SubmitOnCmdEnter"
+            data-step={@answer_step}
+            data-value={
+              stepper_custom_text(@answer_values, @answer_step, @stepper_question["options"])
+            }
             placeholder={
               if(@stepper_question["options"] == [],
                 do: "Type your answer…",

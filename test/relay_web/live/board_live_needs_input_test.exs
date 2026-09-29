@@ -472,6 +472,25 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
       assert Relay.Repo.reload!(calm).status == calm.status
       refute answer_comment(calm, "1. late")
     end
+
+    test "the textarea carries its step and the server text for that step, for the hook's reset",
+         %{conn: conn, board: board, code: code} do
+      {view, _card} = open_blocked(conn, board, code, structured_questions())
+
+      assert has_element?(view, ~s|textarea#needs-input-text[data-step="0"][data-value=""]|)
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "0", text: "Pacific"})
+      |> render_change()
+
+      assert has_element?(view, ~s|textarea#needs-input-text[data-step="0"][data-value="Pacific"]|)
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "0", text: "Pacific"})
+      |> render_submit()
+
+      assert has_element?(view, ~s|textarea#needs-input-text[data-step="1"][data-value=""]|)
+    end
   end
 
   describe "RE279 blocked strip" do
