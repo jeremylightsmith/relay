@@ -54,7 +54,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       refute has_element?(view, "#api-key-secret")
       refute render(view) =~ secret
 
-      key = user |> Boards.get_or_create_default_board() |> ApiKeys.get_key()
+      [key] = user |> Boards.get_or_create_default_board() |> ApiKeys.list_keys()
       masked = view |> element("#api-key-masked") |> render()
       assert masked =~ key.token_prefix
       assert masked =~ key.last_four
@@ -66,7 +66,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
 
-      assert has_element?(view, "#api-key-name", "Board API key")
+      assert has_element?(view, "#api-key-name", "Key 1")
       assert has_element?(view, "#api-key-masked")
       assert has_element?(view, "#api-key-created")
       assert has_element?(view, "#api-key-last-used", "Never")
@@ -102,7 +102,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
 
       assert has_element?(view, "#generate-key")
       refute has_element?(view, "#api-key-details")
-      assert ApiKeys.get_key(board) == nil
+      assert ApiKeys.list_keys(board) == []
       assert :error = ApiKeys.authenticate(token)
     end
 

@@ -1044,7 +1044,7 @@ defmodule RelayWeb.BoardSettingsLive do
      socket
      |> assign(:page_title, "Board settings")
      |> assign(:board, board)
-     |> assign(:api_key, ApiKeys.get_key(board))
+     |> assign(:api_key, board |> ApiKeys.list_keys() |> List.first())
      |> assign(:revealed_token, nil)
      |> assign(:lane_nonce, %{})
      |> assign(:general_form, to_form(Boards.change_board(board)))
@@ -1074,11 +1074,8 @@ defmodule RelayWeb.BoardSettingsLive do
       {:ok, %{api_key: key, token: token}} ->
         {:noreply, socket |> assign(:api_key, key) |> assign(:revealed_token, token)}
 
-      {:error, :already_exists} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "This board already has an API key.")
-         |> assign(:api_key, ApiKeys.get_key(socket.assigns.board))}
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not create the API key.")}
     end
   end
 
