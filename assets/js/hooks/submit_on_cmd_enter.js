@@ -2,8 +2,18 @@
 // submit composer textareas (comment, answer, review-reject, send-back) so the
 // "⌘+Enter commits text" reflex is universal. Unlike InlineEdit it does NOT
 // focus, place the caret, or handle Escape.
+//
+// RE323 — the needs-input stepper reuses one textarea for every question, and
+// LiveView never overwrites a focused input's value, so when the step changes
+// under a focused box (e.g. Back/Next by any means that keeps focus) it would
+// still hold the other question's text, and ⌘+Enter would commit it there.
+// (A ⌘+Enter submit itself is covered by LiveView's form lock/unlock, which
+// refreshes the box on ack.) A textarea that opts in with `data-step`
+// and `data-value` takes the server's text for the new step whenever its step
+// changes. Composers without `data-step` are untouched.
 const SubmitOnCmdEnter = {
   mounted() {
+    this.step = this.el.dataset.step
     this.onKeydown = e => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
@@ -11,6 +21,13 @@ const SubmitOnCmdEnter = {
       }
     }
     this.el.addEventListener("keydown", this.onKeydown)
+  },
+
+  updated() {
+    const step = this.el.dataset.step
+    if (step === undefined || step === this.step) return
+    this.step = step
+    this.el.value = this.el.dataset.value || ""
   },
 
   destroyed() {

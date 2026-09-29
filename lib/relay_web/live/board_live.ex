@@ -1196,7 +1196,7 @@ defmodule RelayWeb.BoardLive do
         save_card_description
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
-        answer_select answer_custom answer_next answer_back answer_goto answer_submit
+        answer_select answer_custom answer_commit answer_next answer_back answer_goto answer_submit
         review_approve review_reject retry_card retry_run advance_run confirm_move cancel_move
         archive_card restore_card toggle_sub_task restart_one
         story_map_add_activity story_map_add_step story_map_add_release story_map_draft_submit
@@ -2307,7 +2307,10 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("answer_input", _params, socket), do: {:noreply, socket}
 
-  # RLY-71 — stepper: record a picked option for the current step (single-select).
+  # RLY-71/RE323 — stepper: clicking an option records it for its step (single-select) and
+  # commits that step — the next question, or the whole batch sent on the last one. A click
+  # whose index is not the step on screen (a stale render) only records; it never advances or
+  # sends a different step.
   #
   # phx-value-option, not phx-value-value: "value" collides with the button's intrinsic DOM
   # .value property (empty for a value-less <button>), which wins over the phx-value-*
@@ -2318,34 +2321,44 @@ defmodule RelayWeb.BoardLive do
         %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
       ) do
     step = String.to_integer(index)
-    {:noreply, assign(socket, :answer_values, Map.put(socket.assigns.answer_values, step, option))}
+    socket = assign(socket, :answer_values, Map.put(socket.assigns.answer_values, step, option))
+    {:noreply, maybe_commit_step(socket, step)}
   end
 
   def handle_event("answer_select", _params, socket), do: {:noreply, socket}
 
-  # RLY-71 — stepper: a typed custom answer for the current step. Blank clears the step so Next
-  # stays disabled until the human picks or types something.
+  # RLY-71 — stepper: a typed custom answer for the current step (see record_text/3). Clearing
+  # the box unanswers the step so Next stays disabled until the human picks or types something.
   def handle_event(
         "answer_custom",
         %{"answer" => %{"index" => index, "text" => text}},
         %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
       ) do
     step = String.to_integer(index)
-
-    values =
-      if String.trim(text) == "",
-        do: Map.delete(socket.assigns.answer_values, step),
-        else: Map.put(socket.assigns.answer_values, step, text)
-
-    {:noreply, assign(socket, :answer_values, values)}
+    {:noreply, assign(socket, :answer_values, record_text(socket.assigns, step, text))}
   end
 
   def handle_event("answer_custom", _params, socket), do: {:noreply, socket}
 
+  # RE323 — ⌘/Ctrl+Enter in the stepper's textarea (phx-submit on #needs-input-text-form). The
+  # submitted text is recorded here rather than trusting that the last phx-change landed, then
+  # the step commits only if it now has an answer: a blank ⌘+Enter on an unanswered step is a
+  # no-op, and on a step with a picked option it commits that option.
+  def handle_event(
+        "answer_commit",
+        %{"answer" => %{"index" => index, "text" => text}},
+        %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
+      ) do
+    step = String.to_integer(index)
+    socket = assign(socket, :answer_values, record_text(socket.assigns, step, text))
+    {:noreply, maybe_commit_step(socket, step)}
+  end
+
+  def handle_event("answer_commit", _params, socket), do: {:noreply, socket}
+
   # RLY-71 — stepper navigation, clamped to the question range.
   def handle_event("answer_next", _params, %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket) do
-    %{answer_questions: questions, answer_step: step} = socket.assigns
-    {:noreply, assign(socket, :answer_step, min(step + 1, length(questions) - 1))}
+    {:noreply, advance_step(socket)}
   end
 
   def handle_event("answer_next", _params, socket), do: {:noreply, socket}
@@ -2373,21 +2386,8 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-71 — submit the batch: compose one numbered Q->A comment and reuse Cards.answer_input/3,
   # which records the comment, resumes the card, and logs one :input_answered (unchanged contract).
-  def handle_event(
-        "answer_submit",
-        _params,
-        %{
-          assigns: %{
-            selected_card: %Card{status: :needs_input} = card,
-            answer_questions: questions,
-            answer_values: values
-          }
-        } = socket
-      ) do
-    case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
-      {:ok, updated} -> {:noreply, after_answer(socket, updated)}
-      {:error, _changeset} -> {:noreply, socket}
-    end
+  def handle_event("answer_submit", _params, %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket) do
+    {:noreply, submit_answers(socket)}
   end
 
   def handle_event("answer_submit", _params, socket), do: {:noreply, socket}
@@ -3548,6 +3548,44 @@ defmodule RelayWeb.BoardLive do
 
   defp close_drawer_after_action(socket) do
     push_patch(socket, to: board_path(socket.assigns))
+  end
+
+  # RE323 — the one advance-or-send rule for the needs-input stepper: a non-final step moves on
+  # to the next question, the final step sends the batch. Next and Send to AI are the two halves.
+  defp commit_step(%{assigns: %{answer_questions: questions, answer_step: step}} = socket)
+       when step < length(questions) - 1, do: advance_step(socket)
+
+  defp commit_step(socket), do: submit_answers(socket)
+
+  # RE323 — commit `step` only when it is the step on screen and it now has an answer.
+  defp maybe_commit_step(%{assigns: %{answer_step: step, answer_values: values}} = socket, step)
+       when is_map_key(values, step), do: commit_step(socket)
+
+  defp maybe_commit_step(socket, _step), do: socket
+
+  defp advance_step(%{assigns: %{answer_questions: questions, answer_step: step}} = socket),
+    do: assign(socket, :answer_step, min(step + 1, length(questions) - 1))
+
+  # RLY-71 — compose one numbered Q->A comment and reuse Cards.answer_input/3, which records the
+  # comment, resumes the card, and logs one :input_answered (unchanged contract).
+  defp submit_answers(%{assigns: %{selected_card: card, answer_questions: questions, answer_values: values}} = socket) do
+    case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
+      {:ok, updated} -> after_answer(socket, updated)
+      {:error, _changeset} -> socket
+    end
+  end
+
+  # RLY-71/RE323 — the stepper's answer_values after typing `text` for `step`. Non-blank text is
+  # the answer. Blank clears a typed answer but keeps a picked option: the textarea shows "" for a
+  # picked option, so a blank ⌘+Enter there means "commit the option", not "unanswer the step".
+  defp record_text(%{answer_questions: questions, answer_values: values}, step, text) do
+    options = questions |> Enum.at(step, %{}) |> Map.get("options", [])
+
+    cond do
+      String.trim(text) != "" -> Map.put(values, step, text)
+      Map.get(values, step) in options -> values
+      true -> Map.delete(values, step)
+    end
   end
 
   # RLY-115 — an answered block resumes the card, so the drawer's job is done:

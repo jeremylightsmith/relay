@@ -4322,6 +4322,9 @@ defmodule RelayWeb.CoreComponents do
   unblocks the card, the Listener resumes the run in the same visit with the human's note as
   `findings` and the agent's Claude session restored.
 
+  In the structured stepper, a step commits in one action (RE323): clicking an option, or ⌘/Ctrl+Enter
+  in the textarea (`answer_commit`), moves on to the next question or sends the batch on the last one.
+
   Renders exactly once, on the drawer's Detail tab (RE279): the Run tab's parked banner that held a
   second copy is gone, and the blocked state itself — what asked, the one-line question, the wait
   time — is hoisted into `blocked_strip/1` above the tabs. That strip's **Answer** focuses the first
@@ -4463,13 +4466,20 @@ defmodule RelayWeb.CoreComponents do
           :if={@stepper_question["allow_text"]}
           id="needs-input-text-form"
           phx-change="answer_custom"
+          phx-submit="answer_commit"
         >
           <input type="hidden" name="answer[index]" value={@answer_step} />
+          <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. data-step/data-value let SubmitOnCmdEnter reset the (focused, reused) box when the step changes. --%>
           <textarea
             id="needs-input-text"
             name="answer[text]"
             rows="3"
             autocomplete="off"
+            phx-hook="SubmitOnCmdEnter"
+            data-step={@answer_step}
+            data-value={
+              stepper_custom_text(@answer_values, @answer_step, @stepper_question["options"])
+            }
             placeholder={
               if(@stepper_question["options"] == [],
                 do: "Type your answer…",

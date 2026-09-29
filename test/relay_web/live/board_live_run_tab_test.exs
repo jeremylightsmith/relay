@@ -180,8 +180,8 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     refute has_element?(view, "#card-drawer-tab-panel-run #needs-input-panel")
     assert has_element?(view, "#card-drawer-tab-panel-detail #needs-input-stepper")
 
+    # RE323 — on a single-question batch the option click itself sends the answer
     view |> element("#needs-input-option-0") |> render_click()
-    view |> element("#needs-input-send") |> render_click()
 
     card = Relay.Repo.reload!(card)
     assert card.status == :working
