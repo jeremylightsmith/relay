@@ -3797,13 +3797,17 @@ defmodule RelayWeb.CoreComponents do
                   phx-submit="add_dependency"
                   class="flex items-center gap-1"
                 >
+                  <%!-- RE363 — SubmitOnDatalistPick submits on a suggestion pick, so a click in
+                       the list saves the blocker; typed refs still wait for Enter. --%>
                   <input
                     type="text"
+                    id={"#{@id}-dependency-input"}
                     name="ref"
                     value={@dependency_input}
                     list={"#{@id}-dependency-options"}
                     placeholder="+ Add"
                     autocomplete="off"
+                    phx-hook="SubmitOnDatalistPick"
                     class="input input-xs w-full border border-dashed border-base-300 font-mono"
                   />
                   <datalist id={"#{@id}-dependency-options"}>
