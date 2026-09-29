@@ -516,6 +516,7 @@ defmodule RelayWeb.BoardLive do
         health={health_state(@health_by_card, @selected_card.id)}
         done={Cards.done?(@selected_card, @board.stages)}
         close_patch={board_path(assigns)}
+        hold_open={markdown_editor_open?(assigns)}
         title_form={@title_form}
         editing_title={@editing_title}
         editing_tag={@editing_tag}
@@ -4374,6 +4375,11 @@ defmodule RelayWeb.BoardLive do
     :editing_spec,
     :editing_plan
   ]
+
+  # RE362 — a drafted markdown editor is open, so the drawer's scrim must not close the drawer.
+  defp markdown_editor_open?(assigns) do
+    Enum.any?(@draftable_fields, fn {_field, {editing, _form}} -> Map.get(assigns, editing, false) end)
+  end
 
   defp drawer_text_entry_open?(%{assigns: assigns}) do
     Enum.any?(@drawer_text_entry_assigns, &Map.get(assigns, &1, false))

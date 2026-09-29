@@ -2416,6 +2416,13 @@ defmodule RelayWeb.CoreComponents do
     doc: "who holds the baton, derived from the card's owner list"
 
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
+
+  attr :hold_open, :boolean,
+    default: false,
+    doc:
+      "RE362: an editor holds unsaved text, so the scrim is inert — clicking the board behind " <>
+        "the drawer must not close it. The close button and Esc still close it."
+
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
   attr :editing_title, :boolean, default: false
 
@@ -2702,9 +2709,21 @@ defmodule RelayWeb.CoreComponents do
         aria-hidden="true"
       />
       <div class="drawer-side z-40">
-        <.link :if={!@embed} id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
+        <.link
+          :if={!@embed and !@hold_open}
+          id={"#{@id}-scrim"}
+          patch={@close_patch}
+          class="drawer-overlay"
+        >
           <span class="sr-only">Close</span>
         </.link>
+        <div
+          :if={!@embed and @hold_open}
+          id={"#{@id}-scrim"}
+          class="drawer-overlay"
+          aria-hidden="true"
+        >
+        </div>
         <aside
           id="card-drawer-panel"
           phx-hook={@card_nav_enabled && "ArrowKeyGuard"}

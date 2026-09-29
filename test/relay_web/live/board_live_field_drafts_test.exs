@@ -58,6 +58,24 @@ defmodule RelayWeb.BoardLiveFieldDraftsTest do
     refute has_element?(view, "#card-drawer-description-draft-restored")
   end
 
+  # Acceptance criterion 1: clicking the board background outside the drawer must not throw
+  # the open editor away. The scrim is a close link at rest, and inert while one is open.
+  test "the scrim does not close the drawer while a markdown editor is open", ctx do
+    %{conn: conn, board: board, first: first} = ctx
+    view = open(conn, board, first)
+    assert has_element?(view, "a#card-drawer-scrim")
+
+    render_click(view, "edit_description", %{})
+    type_description(view, "draft text 362")
+
+    refute has_element?(view, "a#card-drawer-scrim")
+    assert has_element?(view, "#card-drawer-scrim")
+    assert has_element?(view, "#card-drawer-description-input", "draft text 362")
+
+    view |> element("#card-drawer-description-form") |> render_submit(%{"card" => %{"description" => "x"}})
+    assert has_element?(view, "a#card-drawer-scrim")
+  end
+
   test "a Description draft survives switching cards and closing the drawer", ctx do
     %{conn: conn, board: board, first: first, second: second} = ctx
     view = open(conn, board, first)

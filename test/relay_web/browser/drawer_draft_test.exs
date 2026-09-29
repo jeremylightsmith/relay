@@ -54,6 +54,16 @@ defmodule RelayWeb.Browser.DrawerDraftTest do
     |> assert_has("#card-drawer-spec-toggle", text: "Collapse")
     |> assert_has("#card-drawer-description-input")
     |> assert_input_value("#card-drawer-description-input", "draft text 362")
+    # Then the empty board behind the drawer. At rest the scrim is a close link; with an editor
+    # open it must be inert. The follow-up Spec toggle round-trips over the same socket, so a
+    # close patch the scrim click had sent would already have landed by the time it settles.
+    |> unwrap(fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.click(frame_id, selector: "#card-drawer-scrim", position: %{x: 20, y: 20}, timeout: 2_000)
+    end)
+    |> click("#card-drawer-spec-toggle")
+    |> assert_has("#card-drawer-spec-toggle", text: "Expand")
+    |> assert_has("#card-drawer-panel")
+    |> assert_input_value("#card-drawer-description-input", "draft text 362")
     |> wait_for_debounce()
     |> click("#card-drawer-next")
     |> assert_drawer_shows(second)
