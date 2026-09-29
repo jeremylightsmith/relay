@@ -219,7 +219,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     refute has_element?(view, "#needs-input-send")
   end
 
-  test "selecting an option then Next advances to Q2, and Back returns preserving the selection",
+  test "clicking an option advances to Q2; Back returns with the pick highlighted, Next re-advances, and a new pick advances again (AC6)",
        %{conn: conn, code: code, user: user} do
     {:ok, card} = Cards.create_card(code, %{title: "Advance"})
     {:ok, _blocked} = Cards.request_input(card, structured_questions(), :agent)
@@ -229,7 +229,6 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     render_async(view)
 
     view |> element("#needs-input-option-1") |> render_click()
-    view |> element("#needs-input-next") |> render_click()
 
     assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
     assert has_element?(view, "#needs-input-question", "Any size limit?")
@@ -239,6 +238,17 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     assert has_element?(view, "#needs-input-progress", "Question 1 of 2")
     # the previously selected option keeps its selected marker
     assert has_element?(view, "#needs-input-option-1.needs-input-option-selected")
+
+    # Next still advances a step whose answer is already recorded, without re-picking
+    view |> element("#needs-input-next") |> render_click()
+    assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+
+    # and picking a different option after Back advances again
+    view |> element("#needs-input-back") |> render_click()
+    view |> element("#needs-input-option-0") |> render_click()
+    assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+    view |> element("#needs-input-back") |> render_click()
+    assert has_element?(view, "#needs-input-option-0.needs-input-option-selected")
   end
 
   test "typing a custom answer records it for the step and enables advancing",
@@ -265,9 +275,9 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
-    # Q1: pick an option, advance
+    # Q1: picking an option commits the step and advances
     view |> element("#needs-input-option-0") |> render_click()
-    view |> element("#needs-input-next") |> render_click()
+    assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
     # Q2 (free-text only): type an answer, send
     view
     |> form("#needs-input-text-form", answer: %{index: "1", text: "Under 10 MB"})
@@ -312,6 +322,156 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
 
     # single-question block: Send is on the first (only) step
     assert has_element?(view, "#needs-input-send[style*='background:var(--color-warning)']")
+  end
+
+  describe "RE323 commit a step in one action" do
+    defp open_blocked(conn, board, code, questions) do
+      {:ok, card} = Cards.create_card(code, %{title: "One action"})
+      {:ok, card} = Cards.request_input(card, questions, :agent)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+      {view, card}
+    end
+
+    defp answer_comment(card, body) do
+      card
+      |> Relay.Repo.reload!()
+      |> Activity.list_timeline()
+      |> Enum.find(&match?(%Comment{body: ^body}, &1))
+    end
+
+    defp answered_count(card) do
+      card
+      |> Relay.Repo.reload!()
+      |> Activity.list_timeline()
+      |> Enum.count(&match?(%Schemas.Activity{type: :input_answered}, &1))
+    end
+
+    test "the textarea commits on ⌘/Ctrl+Enter via phx-submit and the SubmitOnCmdEnter hook",
+         %{conn: conn, board: board, code: code} do
+      {view, _card} = open_blocked(conn, board, code, structured_questions())
+
+      assert has_element?(view, ~s|form#needs-input-text-form[phx-submit="answer_commit"]|)
+      assert has_element?(view, ~s|textarea#needs-input-text[phx-hook="SubmitOnCmdEnter"]|)
+    end
+
+    test "clicking an option on a single-question batch sends it (AC1)",
+         %{conn: conn, board: board, code: code} do
+      questions = [%{"prompt" => "Pick one", "options" => ["Alpha", "Beta"], "allow_text" => true}]
+      {view, card} = open_blocked(conn, board, code, questions)
+
+      view |> element("#needs-input-option-1") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert Relay.Repo.reload!(card).status == :working
+      assert answer_comment(card, "1. Pick one → Beta")
+      assert answered_count(card) == 1
+    end
+
+    test "on a two-question batch the first click advances and the second click sends (AC2)",
+         %{conn: conn, board: board, code: code} do
+      questions = [
+        %{"prompt" => "Which timezone?", "options" => ["Billing", "Viewer"], "allow_text" => true},
+        %{"prompt" => "Any size limit?", "options" => ["None", "10 MB"], "allow_text" => true}
+      ]
+
+      {view, card} = open_blocked(conn, board, code, questions)
+
+      view |> element("#needs-input-option-0") |> render_click()
+
+      assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+      assert Relay.Repo.reload!(card).status == :needs_input
+      assert answered_count(card) == 0
+
+      view |> element("#needs-input-option-1") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert answer_comment(card, "1. Which timezone? → Billing\n2. Any size limit? → 10 MB")
+      assert answered_count(card) == 1
+    end
+
+    test "answer_commit with text advances on a non-final step and sends on the last (AC3/AC4)",
+         %{conn: conn, board: board, code: code} do
+      {view, card} = open_blocked(conn, board, code, structured_questions())
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "0", text: "Pacific"})
+      |> render_submit()
+
+      assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+      assert answered_count(card) == 0
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "1", text: "Under 10 MB"})
+      |> render_submit()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert answer_comment(card, "1. Which timezone? → Pacific\n2. Any size limit? → Under 10 MB")
+      assert answered_count(card) == 1
+    end
+
+    test "a blank answer_commit on an unanswered step is a no-op (AC5)",
+         %{conn: conn, board: board, code: code} do
+      questions = [%{"prompt" => "Describe it.", "options" => [], "allow_text" => true}]
+      {view, card} = open_blocked(conn, board, code, questions)
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "0", text: "   "})
+      |> render_submit()
+
+      assert has_element?(view, "#needs-input-progress", "Question 1 of 1")
+      assert Relay.Repo.reload!(card).status == :needs_input
+      assert answered_count(card) == 0
+    end
+
+    test "a blank answer_commit on a step with a picked option commits that option",
+         %{conn: conn, board: board, code: code} do
+      {view, card} = open_blocked(conn, board, code, structured_questions())
+
+      # pick Viewer (advances), go Back: the pick is still recorded for Q1
+      view |> element("#needs-input-option-1") |> render_click()
+      view |> element("#needs-input-back") |> render_click()
+      assert has_element?(view, "#needs-input-option-1.needs-input-option-selected")
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "0", text: ""})
+      |> render_submit()
+
+      assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+
+      view
+      |> form("#needs-input-text-form", answer: %{index: "1", text: "None"})
+      |> render_submit()
+
+      assert answer_comment(card, "1. Which timezone? → Viewer\n2. Any size limit? → None")
+    end
+
+    test "a stale answer_select for an earlier step neither advances nor sends",
+         %{conn: conn, board: board, code: code} do
+      {view, card} = open_blocked(conn, board, code, structured_questions())
+
+      view |> element("#needs-input-option-0") |> render_click()
+      assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+
+      # a click rendered for step 0 arriving while step 1 is on screen
+      render_click(view, "answer_select", %{"index" => "0", "option" => "Viewer"})
+
+      assert has_element?(view, "#needs-input-progress", "Question 2 of 2")
+      assert Relay.Repo.reload!(card).status == :needs_input
+      assert answered_count(card) == 0
+    end
+
+    test "answer_commit on a card that no longer needs input does nothing",
+         %{conn: conn, board: board, code: code} do
+      {:ok, calm} = Cards.create_card(code, %{title: "Calm"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, calm)}")
+      render_async(view)
+
+      render_hook(view, "answer_commit", %{"answer" => %{"index" => "0", "text" => "late"}})
+
+      assert Relay.Repo.reload!(calm).status == calm.status
+      refute answer_comment(calm, "1. late")
+    end
   end
 
   describe "RE279 blocked strip" do
@@ -402,7 +562,6 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
       assert has_element?(view, "#card-drawer-blocked-strip-counter", "1/3")
 
       view |> element("#needs-input-option-0") |> render_click()
-      view |> element("#needs-input-next") |> render_click()
 
       assert has_element?(view, "#card-drawer-blocked-strip-question", "Any size limit?")
       refute has_element?(view, "#card-drawer-blocked-strip-question", "`")
