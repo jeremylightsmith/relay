@@ -5701,6 +5701,7 @@ defmodule RelayWeb.CoreComponents do
   def boxed_field(%{commit: :self} = assigns) do
     ~H"""
     <.form for={@form} id={"#{@id}-form"} phx-submit={@save_event} class="commit-field-form">
+      {render_slot(@hidden)}
       <div :if={@prefix} class="commit-field-prefixed">
         <span class="commit-field-prefix font-mono">{@prefix}</span>
         <input

@@ -15,7 +15,7 @@ runner config file. `./relay` knows the REST API and nothing about any board's c
 
 ## Setup
 
-1. **Mint a board API key:** Relay → `/board/settings` → **API keys** → Generate (shown once).
+1. **Mint a board API key:** Relay → `/board/<slug>/settings?section=keys` → **+ Create new key**, named for the machine that will use it (e.g. `Mac mini`) — one key per machine; the token is shown once.
    Every write is attributed to the board's AI agent ("Relay AI").
 2. **Set the environment** the agent's shell uses (e.g. gitignored `.envrc.local`):
    ```bash
