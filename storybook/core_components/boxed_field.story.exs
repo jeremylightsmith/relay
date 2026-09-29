@@ -72,6 +72,25 @@ defmodule Storybook.Components.CoreComponents.BoxedField do
         }
       },
       %Variation{
+        id: :self_editing_draft_restored,
+        description: "RE362 — editor reopened from an unsaved draft: the restored note with Discard",
+        attributes: %{
+          id: "bf-md-draft",
+          markdown: true,
+          multiline: true,
+          editing: true,
+          label: "Description",
+          field: :description,
+          form: Phoenix.Component.to_form(%{"description" => "unsaved **draft** text"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel",
+          change_event: "draft_field",
+          draft_restored: true,
+          discard_event: "discard_draft"
+        }
+      },
+      %Variation{
         id: :self_collapsed_preview,
         attributes: %{
           id: "bf-spec-collapsed",

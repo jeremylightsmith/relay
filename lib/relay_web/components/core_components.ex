@@ -2151,6 +2151,7 @@ defmodule RelayWeb.CoreComponents do
   attr :editing_plan, :boolean, default: false
   attr :expanded_plan, :boolean, default: false
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+  attr :plan_draft_restored, :boolean, default: false, doc: "RE362 — the Plan editor was reopened from a draft"
 
   def plan_tasks(assigns) do
     ~H"""
@@ -2165,6 +2166,9 @@ defmodule RelayWeb.CoreComponents do
         edit_event="edit_plan"
         save_event="save_card_plan"
         cancel_event="cancel_plan"
+        change_event="draft_field"
+        discard_event="discard_draft"
+        draft_restored={@plan_draft_restored}
         placeholder={plan_placeholder(@tasks)}
         label="Plan"
         accent={:secondary}
@@ -2412,6 +2416,13 @@ defmodule RelayWeb.CoreComponents do
     doc: "who holds the baton, derived from the card's owner list"
 
   attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
+
+  attr :hold_open, :boolean,
+    default: false,
+    doc:
+      "RE362: an editor holds unsaved text, so the scrim is inert — clicking the board behind " <>
+        "the drawer must not close it. The close button and Esc still close it."
+
   attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
   attr :editing_title, :boolean, default: false
 
@@ -2625,6 +2636,10 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RLY-69 a form for public_description; required when editing_public_desc"
 
+  attr :restored_drafts, :list,
+    default: [],
+    doc: "RE362 — field atoms whose editor was reopened from an unsaved draft (shows the restored note)"
+
   attr :card_nav_enabled, :boolean,
     default: false,
     doc:
@@ -2694,9 +2709,21 @@ defmodule RelayWeb.CoreComponents do
         aria-hidden="true"
       />
       <div class="drawer-side z-40">
-        <.link :if={!@embed} id={"#{@id}-scrim"} patch={@close_patch} class="drawer-overlay">
+        <.link
+          :if={!@embed and !@hold_open}
+          id={"#{@id}-scrim"}
+          patch={@close_patch}
+          class="drawer-overlay"
+        >
           <span class="sr-only">Close</span>
         </.link>
+        <div
+          :if={!@embed and @hold_open}
+          id={"#{@id}-scrim"}
+          class="drawer-overlay"
+          aria-hidden="true"
+        >
+        </div>
         <aside
           id="card-drawer-panel"
           phx-hook={@card_nav_enabled && "ArrowKeyGuard"}
@@ -3302,6 +3329,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_description"
                     save_event="save_card_description"
                     cancel_event="cancel_description"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:description in @restored_drafts}
                     placeholder="Add a description…"
                     markdown
                     multiline
@@ -3342,6 +3372,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_acceptance_criteria"
                     save_event="save_card_acceptance_criteria"
                     cancel_event="cancel_acceptance_criteria"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:acceptance_criteria in @restored_drafts}
                     placeholder="Add acceptance criteria…"
                     label="Acceptance Criteria"
                     accent={:accent}
@@ -3378,6 +3411,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_spec"
                     save_event="save_card_spec"
                     cancel_event="cancel_spec"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:spec in @restored_drafts}
                     placeholder="Add a spec…"
                     label="Spec"
                     accent={:primary}
@@ -3418,6 +3454,7 @@ defmodule RelayWeb.CoreComponents do
                   editing_plan={@editing_plan}
                   expanded_plan={@expanded_plan}
                   plan_form={@plan_form}
+                  plan_draft_restored={:plan in @restored_drafts}
                 />
                 <section id={"#{@id}-notes"} class="space-y-3 border-t border-base-300 pt-4">
                   <div class="flex items-center gap-2">
@@ -4028,12 +4065,15 @@ defmodule RelayWeb.CoreComponents do
                   for={@public_desc_form}
                   id="public-desc-form"
                   phx-submit="save_public_desc"
+                  phx-change="draft_field"
                 >
                   <textarea
+                    id="public-desc-input"
                     name="public_description"
+                    phx-debounce="300"
                     class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
-                  >{@public_description}</textarea>
-                  <div class="mt-2 flex gap-[7px]">
+                  >{Phoenix.HTML.Form.normalize_value("textarea", @public_desc_form[:public_description].value)}</textarea>
+                  <div class="mt-2 flex flex-wrap items-center gap-[7px]">
                     <button type="submit" class="btn btn-primary btn-xs">
                       Save
                     </button>
@@ -4044,6 +4084,22 @@ defmodule RelayWeb.CoreComponents do
                     >
                       Cancel
                     </button>
+                    <span
+                      :if={:public_description in @restored_drafts}
+                      id="public-desc-draft-restored"
+                      class="commit-field-hint"
+                    >
+                      Unsaved draft restored ·
+                      <button
+                        type="button"
+                        id="public-desc-discard"
+                        phx-click="discard_draft"
+                        phx-value-field="public_description"
+                        class="link link-hover font-semibold text-primary"
+                      >
+                        Discard
+                      </button>
+                    </span>
                   </div>
                 </.form>
               </div>
@@ -5523,6 +5579,9 @@ defmodule RelayWeb.CoreComponents do
   commit via ⌘/Ctrl+Enter or ✓, reverting on Esc/✕: with `edit_event` set it is a
   server-toggled rest↔edit field (markdown renders at rest); without `edit_event` it
   is always editable and the pill appears once dirty (board name/slug).
+  Editing never cancels on click-away (RE362): only Save commits and only Cancel/Esc
+  discard; pass change_event to receive debounced keystrokes, and
+  draft_restored/discard_event to show the "Unsaved draft restored · Discard" note.
   """
   attr :id, :string, required: true
   attr :commit, :atom, values: [:self, :form], default: :self
@@ -5537,6 +5596,19 @@ defmodule RelayWeb.CoreComponents do
   attr :edit_event, :string, default: nil
   attr :save_event, :string, default: nil
   attr :cancel_event, :string, default: nil
+
+  attr :change_event, :string,
+    default: nil,
+    doc: "RE362 — editing only: phx-change on the edit form (textarea debounced 300ms) so the parent can keep a draft"
+
+  attr :draft_restored, :boolean,
+    default: false,
+    doc: "RE362 — editing only: show the 'Unsaved draft restored · Discard' note"
+
+  attr :discard_event, :string,
+    default: nil,
+    doc: "RE362 — the note's Discard button event; sends phx-value-field={@field}"
+
   attr :edit_attrs, :map, default: %{}
   attr :prefix, :string, default: nil
   attr :input_class, :any, default: nil
@@ -5590,11 +5662,13 @@ defmodule RelayWeb.CoreComponents do
         toggle?={false}
         header_extra={@header_extra}
       />
+      <%!-- RE362 — no phx-click-away: clicking elsewhere must not throw the typed text away.
+           Save commits; Cancel and Esc (CommitField clicks Cancel) are the only discards. --%>
       <.form
         for={@form}
         id={"#{@id}-form"}
         phx-submit={@save_event}
-        phx-click-away={@cancel_event}
+        phx-change={@change_event}
         class="commit-field-form"
       >
         {render_slot(@hidden)}
@@ -5605,6 +5679,7 @@ defmodule RelayWeb.CoreComponents do
           rows={@multiline && @rows}
           class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
           phx-hook="CommitField"
+          phx-debounce={@change_event && "300"}
           data-field-role="edit"
           data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
           data-autofocus="true"
@@ -5615,6 +5690,18 @@ defmodule RelayWeb.CoreComponents do
           <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
             Cancel
           </button>
+          <span :if={@draft_restored} id={"#{@id}-draft-restored"} class="commit-field-hint">
+            Unsaved draft restored ·
+            <button
+              type="button"
+              id={"#{@id}-discard"}
+              phx-click={@discard_event}
+              phx-value-field={@field}
+              class="link link-hover font-semibold text-primary"
+            >
+              Discard
+            </button>
+          </span>
           <span class="commit-field-hint">
             Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
           </span>

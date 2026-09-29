@@ -2072,6 +2072,94 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  # RE362 — clicking away from a markdown editor used to cancel it (RLY-49) and throw the typed
+  # text away. The editor now only closes on Save, Cancel or Esc, reports keystrokes so the
+  # LiveView can keep a draft, and can show a "restored" note with a Discard.
+  describe "boxed_field/1 drafts (RE362)" do
+    defp draft_attrs(extra \\ []) do
+      Keyword.merge(
+        [
+          id: "bf",
+          commit: :self,
+          markdown: true,
+          multiline: true,
+          editing: true,
+          field: :description,
+          form: Phoenix.Component.to_form(%{"description" => "raw source"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        ],
+        extra
+      )
+    end
+
+    test "the editing form never cancels on click-away" do
+      html = render_component(&CoreComponents.boxed_field/1, draft_attrs())
+
+      refute html =~ "phx-click-away"
+      # Cancel stays wired to the button (and Esc, via data-cancel-id).
+      assert html =~ ~s(id="bf-cancel")
+      assert html =~ ~s(phx-click="cancel")
+      assert html =~ ~s(data-cancel-id="bf-cancel")
+    end
+
+    test "inline_field still cancels on click-away" do
+      html =
+        render_component(&CoreComponents.inline_field/1,
+          id: "if",
+          editing: true,
+          value: "Title",
+          field: :title,
+          form: Phoenix.Component.to_form(%{"title" => "Title"}, as: :card),
+          edit_event: "edit_title",
+          save_event: "save_title",
+          cancel_event: "cancel_title"
+        )
+
+      assert html =~ ~s(phx-click-away="cancel_title")
+    end
+
+    test "no change_event renders no phx-change and no debounce" do
+      html = render_component(&CoreComponents.boxed_field/1, draft_attrs())
+
+      refute html =~ "phx-change"
+      refute html =~ "phx-debounce"
+    end
+
+    test "change_event wires phx-change on the form and debounces the textarea" do
+      html = render_component(&CoreComponents.boxed_field/1, draft_attrs(change_event: "draft_field"))
+
+      assert html =~ ~s(phx-change="draft_field")
+      assert html =~ ~s(phx-debounce="300")
+    end
+
+    test "the restored note is absent by default" do
+      html = render_component(&CoreComponents.boxed_field/1, draft_attrs(discard_event: "discard_draft"))
+
+      refute html =~ "bf-draft-restored"
+      refute html =~ "Unsaved draft restored"
+      refute html =~ ~s(id="bf-discard")
+    end
+
+    test "draft_restored shows a hint-styled note whose Discard names the field" do
+      html =
+        render_component(
+          &CoreComponents.boxed_field/1,
+          draft_attrs(draft_restored: true, discard_event: "discard_draft")
+        )
+
+      assert html =~ ~s(id="bf-draft-restored")
+      assert html =~ "Unsaved draft restored"
+      assert html =~ ~s(id="bf-discard")
+      assert html =~ ~s(phx-click="discard_draft")
+      assert html =~ ~s(phx-value-field="description")
+
+      [note] = Regex.run(~r/<span[^>]*id="bf-draft-restored"[^>]*>/, html)
+      assert note =~ "commit-field-hint"
+    end
+  end
+
   describe "section_label/1" do
     # RE282 change 21 — the one micro-label recipe (Relay Card Detail v5.dc.html rail labels:
     # JetBrains Mono 10px / 600 / letter-spacing 0.6px / uppercase / ink at 0.6 alpha).
