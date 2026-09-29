@@ -5523,6 +5523,9 @@ defmodule RelayWeb.CoreComponents do
   commit via ⌘/Ctrl+Enter or ✓, reverting on Esc/✕: with `edit_event` set it is a
   server-toggled rest↔edit field (markdown renders at rest); without `edit_event` it
   is always editable and the pill appears once dirty (board name/slug).
+  Editing never cancels on click-away (RE362): only Save commits and only Cancel/Esc
+  discard; pass change_event to receive debounced keystrokes, and
+  draft_restored/discard_event to show the "Unsaved draft restored · Discard" note.
   """
   attr :id, :string, required: true
   attr :commit, :atom, values: [:self, :form], default: :self
@@ -5537,6 +5540,19 @@ defmodule RelayWeb.CoreComponents do
   attr :edit_event, :string, default: nil
   attr :save_event, :string, default: nil
   attr :cancel_event, :string, default: nil
+
+  attr :change_event, :string,
+    default: nil,
+    doc: "RE362 — editing only: phx-change on the edit form (textarea debounced 300ms) so the parent can keep a draft"
+
+  attr :draft_restored, :boolean,
+    default: false,
+    doc: "RE362 — editing only: show the 'Unsaved draft restored · Discard' note"
+
+  attr :discard_event, :string,
+    default: nil,
+    doc: "RE362 — the note's Discard button event; sends phx-value-field={@field}"
+
   attr :edit_attrs, :map, default: %{}
   attr :prefix, :string, default: nil
   attr :input_class, :any, default: nil
@@ -5590,11 +5606,13 @@ defmodule RelayWeb.CoreComponents do
         toggle?={false}
         header_extra={@header_extra}
       />
+      <%!-- RE362 — no phx-click-away: clicking elsewhere must not throw the typed text away.
+           Save commits; Cancel and Esc (CommitField clicks Cancel) are the only discards. --%>
       <.form
         for={@form}
         id={"#{@id}-form"}
         phx-submit={@save_event}
-        phx-click-away={@cancel_event}
+        phx-change={@change_event}
         class="commit-field-form"
       >
         {render_slot(@hidden)}
@@ -5605,6 +5623,7 @@ defmodule RelayWeb.CoreComponents do
           rows={@multiline && @rows}
           class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
           phx-hook="CommitField"
+          phx-debounce={@change_event && "300"}
           data-field-role="edit"
           data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
           data-autofocus="true"
@@ -5615,6 +5634,18 @@ defmodule RelayWeb.CoreComponents do
           <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
             Cancel
           </button>
+          <span :if={@draft_restored} id={"#{@id}-draft-restored"} class="commit-field-hint">
+            Unsaved draft restored ·
+            <button
+              type="button"
+              id={"#{@id}-discard"}
+              phx-click={@discard_event}
+              phx-value-field={@field}
+              class="link link-hover font-semibold text-primary"
+            >
+              Discard
+            </button>
+          </span>
           <span class="commit-field-hint">
             Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
           </span>
