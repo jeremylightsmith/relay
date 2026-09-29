@@ -3513,7 +3513,11 @@ defmodule RelayWeb.BoardLive do
 
     case Cards.set_dependencies(board, card, refs, actor) do
       {:ok, _card} ->
-        {:noreply, socket |> assign_card_dependencies(card) |> assign(:dependency_input, "")}
+        {:noreply,
+         socket
+         |> assign_card_dependencies(card)
+         |> assign(:dependency_input, "")
+         |> push_event("dependency_added", %{})}
 
       {:error, reason} ->
         {:noreply, assign(socket, :dependency_error, Cards.dependency_error_message(reason))}

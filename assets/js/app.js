@@ -34,6 +34,7 @@ import CommitField from "./hooks/commit_field"
 import InlineNameInput from "./hooks/inline_name_input"
 import SubmitOnCmdEnter from "./hooks/submit_on_cmd_enter"
 import SubmitOnEnter from "./hooks/submit_on_enter"
+import SubmitOnDatalistPick from "./hooks/submit_on_datalist_pick"
 import FlowFocus from "./hooks/flow_focus"
 import CodeBlockCopy from "./hooks/code_block_copy"
 import initImageLightbox from "./image_lightbox"
@@ -61,6 +62,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     InlineNameInput,
     SubmitOnCmdEnter,
     SubmitOnEnter,
+    SubmitOnDatalistPick,
     FlowFocus,
     CodeBlockCopy,
   },
