@@ -2151,6 +2151,7 @@ defmodule RelayWeb.CoreComponents do
   attr :editing_plan, :boolean, default: false
   attr :expanded_plan, :boolean, default: false
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+  attr :plan_draft_restored, :boolean, default: false, doc: "RE362 — the Plan editor was reopened from a draft"
 
   def plan_tasks(assigns) do
     ~H"""
@@ -2165,6 +2166,9 @@ defmodule RelayWeb.CoreComponents do
         edit_event="edit_plan"
         save_event="save_card_plan"
         cancel_event="cancel_plan"
+        change_event="draft_field"
+        discard_event="discard_draft"
+        draft_restored={@plan_draft_restored}
         placeholder={plan_placeholder(@tasks)}
         label="Plan"
         accent={:secondary}
@@ -2624,6 +2628,10 @@ defmodule RelayWeb.CoreComponents do
   attr :public_desc_form, :any,
     default: nil,
     doc: "RLY-69 a form for public_description; required when editing_public_desc"
+
+  attr :restored_drafts, :list,
+    default: [],
+    doc: "RE362 — field atoms whose editor was reopened from an unsaved draft (shows the restored note)"
 
   attr :card_nav_enabled, :boolean,
     default: false,
@@ -3302,6 +3310,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_description"
                     save_event="save_card_description"
                     cancel_event="cancel_description"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:description in @restored_drafts}
                     placeholder="Add a description…"
                     markdown
                     multiline
@@ -3342,6 +3353,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_acceptance_criteria"
                     save_event="save_card_acceptance_criteria"
                     cancel_event="cancel_acceptance_criteria"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:acceptance_criteria in @restored_drafts}
                     placeholder="Add acceptance criteria…"
                     label="Acceptance Criteria"
                     accent={:accent}
@@ -3378,6 +3392,9 @@ defmodule RelayWeb.CoreComponents do
                     edit_event="edit_spec"
                     save_event="save_card_spec"
                     cancel_event="cancel_spec"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:spec in @restored_drafts}
                     placeholder="Add a spec…"
                     label="Spec"
                     accent={:primary}
@@ -3418,6 +3435,7 @@ defmodule RelayWeb.CoreComponents do
                   editing_plan={@editing_plan}
                   expanded_plan={@expanded_plan}
                   plan_form={@plan_form}
+                  plan_draft_restored={:plan in @restored_drafts}
                 />
                 <section id={"#{@id}-notes"} class="space-y-3 border-t border-base-300 pt-4">
                   <div class="flex items-center gap-2">
@@ -4028,12 +4046,15 @@ defmodule RelayWeb.CoreComponents do
                   for={@public_desc_form}
                   id="public-desc-form"
                   phx-submit="save_public_desc"
+                  phx-change="draft_field"
                 >
                   <textarea
+                    id="public-desc-input"
                     name="public_description"
+                    phx-debounce="300"
                     class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
-                  >{@public_description}</textarea>
-                  <div class="mt-2 flex gap-[7px]">
+                  >{Phoenix.HTML.Form.normalize_value("textarea", @public_desc_form[:public_description].value)}</textarea>
+                  <div class="mt-2 flex flex-wrap items-center gap-[7px]">
                     <button type="submit" class="btn btn-primary btn-xs">
                       Save
                     </button>
@@ -4044,6 +4065,22 @@ defmodule RelayWeb.CoreComponents do
                     >
                       Cancel
                     </button>
+                    <span
+                      :if={:public_description in @restored_drafts}
+                      id="public-desc-draft-restored"
+                      class="commit-field-hint"
+                    >
+                      Unsaved draft restored ·
+                      <button
+                        type="button"
+                        id="public-desc-discard"
+                        phx-click="discard_draft"
+                        phx-value-field="public_description"
+                        class="link link-hover font-semibold text-primary"
+                      >
+                        Discard
+                      </button>
+                    </span>
                   </div>
                 </.form>
               </div>

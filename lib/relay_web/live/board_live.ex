@@ -161,6 +161,17 @@ defmodule RelayWeb.BoardLive do
   # popover, not a page: eight rows is what fits without becoming a second board.
   @search_result_limit 8
 
+  # RE362 — the drawer's multiline markdown editors whose unsaved text is kept as a draft, each
+  # mapped to its {editing flag, form} assigns. The ONE definition of the drafted-field set:
+  # every draft helper reads it, nothing re-types these five names.
+  @draftable_fields %{
+    description: {:editing_description, :description_form},
+    acceptance_criteria: {:editing_acceptance_criteria, :acceptance_criteria_form},
+    spec: {:editing_spec, :spec_form},
+    plan: {:editing_plan, :plan_form},
+    public_description: {:editing_public_desc, :public_desc_form}
+  }
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -576,6 +587,7 @@ defmodule RelayWeb.BoardLive do
         public_description={@selected_card.public_description}
         editing_public_desc={@editing_public_desc}
         public_desc_form={@public_desc_form}
+        restored_drafts={MapSet.to_list(@restored_drafts)}
       />
       <div
         :if={@archived_open}
@@ -1076,6 +1088,11 @@ defmodule RelayWeb.BoardLive do
       |> assign(:dependency_input, "")
       |> assign(:editing_public_desc, false)
       |> assign(:public_desc_form, nil)
+      # RE362 — unsaved drawer text, keyed {card_id, field}; survives card switches and drawer
+      # close for the life of this LiveView (never persisted). restored_drafts: which of the
+      # selected card's editors were reopened from a draft (drives the "restored" note).
+      |> assign(:field_drafts, %{})
+      |> assign(:restored_drafts, MapSet.new())
       |> assign(:dirty_run_cards, MapSet.new())
       |> assign(:run_flush_events, 0)
       |> assign(:run_flush_pending?, false)
@@ -1163,6 +1180,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> assign(:selected_card, card)
+         |> drop_unchanged_drafts(card)
          |> assign(:body_loading?, false)
          |> assign(:question, latest_question(card, activity))
          |> assign(:answer_questions, latest_questions(card, activity))
@@ -1193,7 +1211,7 @@ defmodule RelayWeb.BoardLive do
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card assign_card unassign_card compose_cell create_card_in_cell
         save_card_title save_card_tag
-        save_card_description
+        save_card_description draft_field discard_draft
         save_card_acceptance_criteria save_card_spec save_card_plan
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_commit answer_next answer_back answer_goto answer_submit
@@ -1713,16 +1731,13 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("edit_description", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_description, true)
-     |> assign(:description_form, to_form(%{"description" => card.description || ""}, as: :card))}
+    {:noreply, open_field_editor(socket, card, :description)}
   end
 
   def handle_event("edit_description", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel_description", _params, socket) do
-    {:noreply, assign(socket, editing_description: false, description_form: nil)}
+    {:noreply, close_field_editor(socket, :description)}
   end
 
   def handle_event(
@@ -1735,8 +1750,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> assign(:selected_card, card)
-         |> assign(:editing_description, false)
-         |> assign(:description_form, nil)
+         |> close_field_editor(:description)
          |> stream_insert(stream_name(card.stage_id), card)}
 
       {:error, changeset} ->
@@ -1751,13 +1765,12 @@ defmodule RelayWeb.BoardLive do
     # editor counts as in use), so the group collapses and reads its new, smaller count.
     {:noreply,
      socket
-     |> assign(:editing_public_desc, true)
      |> assign(:unused_fields_open, false)
-     |> assign(:public_desc_form, to_form(%{"public_description" => card.public_description || ""}))}
+     |> open_field_editor(card, :public_description)}
   end
 
   def handle_event("cancel_public_desc", _params, socket) do
-    {:noreply, assign(socket, :editing_public_desc, false)}
+    {:noreply, close_field_editor(socket, :public_description)}
   end
 
   def handle_event(
@@ -1770,23 +1783,17 @@ defmodule RelayWeb.BoardLive do
     {:noreply,
      socket
      |> assign(:selected_card, updated)
-     |> assign(:editing_public_desc, false)}
+     |> close_field_editor(:public_description)}
   end
 
   def handle_event("edit_acceptance_criteria", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_acceptance_criteria, true)
-     |> assign(
-       :acceptance_criteria_form,
-       to_form(%{"acceptance_criteria" => card.acceptance_criteria || ""}, as: :card)
-     )}
+    {:noreply, open_field_editor(socket, card, :acceptance_criteria)}
   end
 
   def handle_event("edit_acceptance_criteria", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel_acceptance_criteria", _params, socket) do
-    {:noreply, assign(socket, editing_acceptance_criteria: false, acceptance_criteria_form: nil)}
+    {:noreply, close_field_editor(socket, :acceptance_criteria)}
   end
 
   def handle_event(
@@ -1799,8 +1806,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> assign(:selected_card, card)
-         |> assign(:editing_acceptance_criteria, false)
-         |> assign(:acceptance_criteria_form, nil)
+         |> close_field_editor(:acceptance_criteria)
          |> stream_insert(stream_name(card.stage_id), card)}
 
       {:error, changeset} ->
@@ -1811,16 +1817,13 @@ defmodule RelayWeb.BoardLive do
   def handle_event("save_card_acceptance_criteria", _params, socket), do: {:noreply, socket}
 
   def handle_event("edit_spec", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_spec, true)
-     |> assign(:spec_form, to_form(%{"spec" => card.spec || ""}, as: :card))}
+    {:noreply, open_field_editor(socket, card, :spec)}
   end
 
   def handle_event("edit_spec", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel_spec", _params, socket) do
-    {:noreply, assign(socket, editing_spec: false, spec_form: nil)}
+    {:noreply, close_field_editor(socket, :spec)}
   end
 
   def handle_event("save_card_spec", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -1829,8 +1832,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> assign(:selected_card, card)
-         |> assign(:editing_spec, false)
-         |> assign(:spec_form, nil)
+         |> close_field_editor(:spec)
          |> stream_insert(stream_name(card.stage_id), card)}
 
       {:error, changeset} ->
@@ -1841,16 +1843,13 @@ defmodule RelayWeb.BoardLive do
   def handle_event("save_card_spec", _params, socket), do: {:noreply, socket}
 
   def handle_event("edit_plan", _params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    {:noreply,
-     socket
-     |> assign(:editing_plan, true)
-     |> assign(:plan_form, to_form(%{"plan" => card.plan || ""}, as: :card))}
+    {:noreply, open_field_editor(socket, card, :plan)}
   end
 
   def handle_event("edit_plan", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel_plan", _params, socket) do
-    {:noreply, assign(socket, editing_plan: false, plan_form: nil)}
+    {:noreply, close_field_editor(socket, :plan)}
   end
 
   def handle_event("save_card_plan", %{"card" => card_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
@@ -1859,8 +1858,7 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> assign(:selected_card, card)
-         |> assign(:editing_plan, false)
-         |> assign(:plan_form, nil)
+         |> close_field_editor(:plan)
          |> stream_insert(stream_name(card.stage_id), card)}
 
       {:error, changeset} ->
@@ -1869,6 +1867,42 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("save_card_plan", _params, socket), do: {:noreply, socket}
+
+  # RE362 — a debounced keystroke from a drafted editor. Only an OPEN editor's text is kept: a
+  # change that lands after Save/Cancel closed it (the 300ms debounce) must not resurrect a draft.
+  def handle_event("draft_field", params, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    with {field, text} <- draft_param(params),
+         {editing, form} = Map.fetch!(@draftable_fields, field),
+         true <- Map.get(socket.assigns, editing, false) do
+      {:noreply,
+       socket
+       |> update(:field_drafts, &Map.put(&1, {card.id, field}, text))
+       |> assign(form, field_form(field, text))}
+    else
+      _ignored -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("draft_field", _params, socket), do: {:noreply, socket}
+
+  # RE362 — Discard on the "Unsaved draft restored" note: drop the draft and reset the text to
+  # the saved value, leaving the editor open.
+  def handle_event("discard_draft", %{"field" => name}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    case draftable_field(name) do
+      nil ->
+        {:noreply, socket}
+
+      field ->
+        {_editing, form} = Map.fetch!(@draftable_fields, field)
+
+        {:noreply,
+         socket
+         |> drop_field_draft(field)
+         |> assign(form, field_form(field, saved_field_value(card, field)))}
+    end
+  end
+
+  def handle_event("discard_draft", _params, socket), do: {:noreply, socket}
 
   def handle_event("toggle_acceptance_criteria", _params, socket) do
     {:noreply, update(socket, :expanded_acceptance_criteria?, &(!&1))}
@@ -4345,6 +4379,100 @@ defmodule RelayWeb.BoardLive do
     Enum.any?(@drawer_text_entry_assigns, &Map.get(assigns, &1, false))
   end
 
+  # RE362 — open a drafted field's editor. A kept draft that differs from the saved text wins
+  # and is flagged restored; otherwise (none, or identical) the editor seeds from the saved text.
+  defp open_field_editor(socket, %Card{} = card, field) do
+    {editing, form} = Map.fetch!(@draftable_fields, field)
+    saved = saved_field_value(card, field)
+
+    case Map.fetch(socket.assigns.field_drafts, {card.id, field}) do
+      {:ok, draft} when draft != saved ->
+        socket
+        |> assign(editing, true)
+        |> assign(form, field_form(field, draft))
+        |> update(:restored_drafts, &MapSet.put(&1, field))
+
+      _none_or_unchanged ->
+        socket
+        |> drop_field_draft(field)
+        |> assign(editing, true)
+        |> assign(form, field_form(field, saved))
+    end
+  end
+
+  # Save / Cancel / Esc: close the editor and forget its draft.
+  defp close_field_editor(socket, field) do
+    {editing, form} = Map.fetch!(@draftable_fields, field)
+
+    socket
+    |> assign(editing, false)
+    |> assign(form, nil)
+    |> drop_field_draft(field)
+  end
+
+  defp drop_field_draft(%{assigns: %{selected_card: %Card{id: card_id}}} = socket, field) do
+    socket
+    |> update(:field_drafts, &Map.delete(&1, {card_id, field}))
+    |> update(:restored_drafts, &MapSet.delete(&1, field))
+  end
+
+  defp drop_field_draft(socket, _field), do: socket
+
+  # Called by assign_selected_card/2 AFTER it has reset every editor: reopen one per draft this
+  # card has. The light card's heavy text is nil, so "is it unchanged?" waits for the body load
+  # (drop_unchanged_drafts/2).
+  defp restore_field_drafts(socket, %Card{id: card_id}) do
+    Enum.reduce(socket.assigns.field_drafts, assign(socket, :restored_drafts, MapSet.new()), fn
+      {{^card_id, field}, draft}, acc ->
+        {editing, form} = Map.fetch!(@draftable_fields, field)
+
+        acc
+        |> assign(editing, true)
+        |> assign(form, field_form(field, draft))
+        |> update(:restored_drafts, &MapSet.put(&1, field))
+
+      _other_card, acc ->
+        acc
+    end)
+  end
+
+  # Once the full card is loaded: a restored draft identical to the saved text is not a draft —
+  # drop it and close its editor, so no "restored" note appears.
+  defp drop_unchanged_drafts(socket, %Card{id: card_id} = card) do
+    Enum.reduce(socket.assigns.restored_drafts, socket, fn field, acc ->
+      if Map.get(acc.assigns.field_drafts, {card_id, field}) == saved_field_value(card, field),
+        do: close_field_editor(acc, field),
+        else: acc
+    end)
+  end
+
+  # boxed_field editors post `card[<field>]`; the public description's hand-rolled form posts a
+  # bare `public_description`. Returns {field, text} for the first drafted field present.
+  defp draft_param(params) do
+    source =
+      case params do
+        %{"card" => %{} = card_params} -> card_params
+        other -> other
+      end
+
+    Enum.find_value(@draftable_fields, fn {field, _assigns} ->
+      case Map.fetch(source, Atom.to_string(field)) do
+        {:ok, text} when is_binary(text) -> {field, text}
+        _missing -> nil
+      end
+    end)
+  end
+
+  # A client-sent field name → its atom, only if it is drafted (never String.to_atom on input).
+  defp draftable_field(name) do
+    @draftable_fields |> Map.keys() |> Enum.find(&(Atom.to_string(&1) == name))
+  end
+
+  defp field_form(:public_description, text), do: to_form(%{"public_description" => text})
+  defp field_form(field, text), do: to_form(%{Atom.to_string(field) => text}, as: :card)
+
+  defp saved_field_value(%Card{} = card, field), do: Map.get(card, field) || ""
+
   defp submit_talk(socket, raw_text) do
     text = String.trim(raw_text || "")
 
@@ -4458,6 +4586,9 @@ defmodule RelayWeb.BoardLive do
           |> reset_talk()
           |> stream_notes([])
           |> stream(:activity, [], reset: true)
+          # RE362 — field_drafts is deliberately NOT reset: coming back to a card reopens its
+          # drafted editors, after the resets above.
+          |> restore_field_drafts(card)
 
         maybe_start_body_load(socket, card, ref, connected?(socket))
 
@@ -4477,6 +4608,7 @@ defmodule RelayWeb.BoardLive do
           description_form: nil,
           editing_public_desc: false,
           public_desc_form: nil,
+          restored_drafts: MapSet.new(),
           unused_fields_open: false,
           editing_acceptance_criteria: false,
           expanded_acceptance_criteria?: false,
