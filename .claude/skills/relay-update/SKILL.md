@@ -93,6 +93,16 @@ fine — say what you're doing and do that.
   `chore(relay): update scaffold to a3f9c81b20d4`.
 - **Never push.** Pushing is the human's call and is not part of this skill.
 
+### 5. Nudge toward the doctor
+
+This is the last step. When step 2 wrote at least one file, end with this line — the files you
+just installed can carry a factory migration that this repo's own agents and skills have not
+picked up, and nothing else will tell the human to look:
+
+> Tooling changed — run `/relay-doctor` to check your factory against it.
+
+Skip it when step 1's `--check` said current — you stopped there and nothing changed.
+
 ## Blast radius
 
 The six files above, `.relay/scaffold.json`, and one commit if the human asked for one. Never
