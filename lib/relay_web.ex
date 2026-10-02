@@ -37,6 +37,14 @@ defmodule RelayWeb do
   defdelegate attachment_path?(path), to: Schemas.Attachment, as: :path?
 
   @doc """
+  RE370 — the framed full-size viewer for an HTML mockup (`MockupViewerLive`): Relay chrome and
+  a banner naming the card over a sandboxed iframe of `attachment_path/1`. The drawer's
+  **Open full size** links here — never to the raw HTML as a top-level page.
+  `RelayWeb.AttachmentPathTest` pins it to the router.
+  """
+  def attachment_view_path(id), do: attachment_path(id) <> "/view"
+
+  @doc """
   RE370 — the sandbox token list an HTML mockup runs under: scripts on, and nothing else — no
   `allow-same-origin` (opaque origin: no cookies, no parent access), no `allow-top-navigation`,
   `allow-popups` or `allow-forms`. The ONE definition: `AttachmentController.html_csp/0` puts it

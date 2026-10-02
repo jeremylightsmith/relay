@@ -1784,6 +1784,56 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  One HTML mockup (RE370): its caption, an **Open full size** link to the framed viewer
+  (`RelayWeb.attachment_view_path/1`), and the mockup itself in a fixed-height, full-width
+  sandboxed iframe. `sandbox` is `RelayWeb.mockup_sandbox/0` — the same token list the
+  attachment's CSP grants — so the mockup's scripts run but it can never reach Relay's origin
+  or the network. Never link to `src` directly: Relay never shows a mockup as a bare top-level
+  page.
+
+  ## Examples
+
+      <.mockup_preview
+        id="card-drawer-mockup-0"
+        src="/attachments/135e5539-…"
+        view_href="/attachments/135e5539-…/view"
+        caption="Empty state"
+      />
+  """
+  attr :id, :string, required: true
+  attr :src, :string, required: true, doc: "the attachment path the iframe loads"
+  attr :view_href, :string, required: true, doc: "the framed full-size viewer page"
+  attr :caption, :string, default: nil
+
+  def mockup_preview(assigns) do
+    ~H"""
+    <figure id={@id} class="space-y-1.5">
+      <div class="flex items-center justify-between gap-3">
+        <figcaption id={"#{@id}-caption"} class="min-w-0 truncate text-[13px] font-medium">
+          {@caption || "Mockup"}
+        </figcaption>
+        <.link
+          id={"#{@id}-open"}
+          navigate={@view_href}
+          class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          <.icon name="hero-arrows-pointing-out" class="size-3.5" /> Open full size
+        </.link>
+      </div>
+      <iframe
+        id={"#{@id}-frame"}
+        src={@src}
+        sandbox={RelayWeb.mockup_sandbox()}
+        title={@caption || "Mockup"}
+        loading="lazy"
+        class="block h-[360px] w-full rounded-lg border border-base-300 bg-base-100"
+      >
+      </iframe>
+    </figure>
+    """
+  end
+
+  @doc """
   An icon button that copies `text` to the clipboard (RE324), then flips to a success check for
   ~1.6s before reverting. The one shared copy control — use it instead of hand-writing another
   clipboard hook. The copied state is a `data-copied="true"` attribute the colocated hook sets,
@@ -3309,6 +3359,27 @@ defmodule RelayWeb.CoreComponents do
                     >
                       {if @expanded_ai_result, do: "Show less", else: "Show more"}
                     </button>
+                  </div>
+                </section>
+                <%!-- RE370 — the card's HTML mockups. No artboard governs this section (Relay Card
+                Detail v5 has none); it follows the drawer's section styling. Map.get because the
+                drawer's `card` is any card-shaped map (Storybook passes plain maps). --%>
+                <section
+                  :if={!@body_loading and mockup_entries(Map.get(@card, :mockups)) != []}
+                  id={"#{@id}-mockups"}
+                  class="space-y-2"
+                >
+                  <.section_label>Mockups</.section_label>
+                  <div class="space-y-4">
+                    <.mockup_preview
+                      :for={
+                        {mockup, index} <- Enum.with_index(mockup_entries(Map.get(@card, :mockups)))
+                      }
+                      id={"#{@id}-mockup-#{index}"}
+                      src={RelayWeb.attachment_path(mockup.id)}
+                      view_href={RelayWeb.attachment_view_path(mockup.id)}
+                      caption={mockup.caption}
+                    />
                   </div>
                 </section>
                 <section id={"#{@id}-description"} class="space-y-2">
@@ -5893,6 +5964,17 @@ defmodule RelayWeb.CoreComponents do
   # the blob goes through one of these, so no shape can break the render.
   defp ai_text(value) when is_binary(value), do: value
   defp ai_text(_value), do: nil
+
+  # RE370 — `mockups` is validated on write (`Relay.Cards.set_mockups/2`), but like `ai_result`
+  # it is a jsonb column the drawer must never crash on: an entry not shaped like
+  # `%{"url" => "/attachments/<id>"}` is skipped rather than rendered.
+  defp mockup_entries(mockups) when is_list(mockups) do
+    for %{"url" => url} = mockup <- mockups, {:ok, id} <- [Schemas.Attachment.id_from_path(url)] do
+      %{id: id, caption: ai_text(mockup["caption"])}
+    end
+  end
+
+  defp mockup_entries(_mockups), do: []
 
   defp ai_list(value) when is_list(value), do: value
   defp ai_list(value) when value in [nil, ""], do: []

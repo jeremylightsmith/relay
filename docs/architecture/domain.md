@@ -152,6 +152,13 @@ sharing behavior.
   same card** (`422 invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
   distinct from `ai_result.screens` (run-result image screenshots).
+  The drawer renders mockups in a **Mockups** section (`CoreComponents.mockup_preview/1`: caption,
+  fixed-height `<iframe sandbox="allow-scripts">`, **Open full size**). Open full size goes to
+  `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) — an
+  authenticated, membership-scoped page in the `:require_authenticated` live_session that frames
+  the mockup under a banner "Mockup · <ref> <title>" linking back to the card; it 404s for a
+  non-member, an unknown id, or a non-HTML attachment. Relay's UI never links to a raw HTML
+  attachment as a top-level page.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
   `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with

@@ -24,6 +24,7 @@ defmodule Storybook.CoreComponents do
   def entry("list"), do: [icon: {:fa, "list", :thin}]
   def entry("member_stack"), do: [icon: {:fa, "people-group", :thin}]
   def entry("meta_label"), do: [icon: {:fa, "tag", :thin}]
+  def entry("mockup_preview"), do: [icon: {:fa, "window-maximize", :thin}]
   def entry("modal_scrim"), do: [icon: {:fa, "layer-group", :thin}]
   def entry("owner_avatars"), do: [icon: {:fa, "user-group", :thin}]
   def entry("owner_pill"), do: [icon: {:fa, "tag", :thin}]
