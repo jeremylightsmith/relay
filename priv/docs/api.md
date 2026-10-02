@@ -226,6 +226,22 @@ self-contained `text/html` page (5 MB cap). Requires `filename`, `content_type` 
 with `{"data": {"id": …, "url": "/attachments/<id>", "markdown": "![…](/attachments/<id>)"}}` —
 that `url` is what a screenshot's `screens[].url` should be.
 
+### GET /api/attachments/:id
+
+Download an attachment's raw bytes with the board API key — how `./relay mockups REF --pull`
+reads a card's HTML mockups back. `:id` is the last segment of the `/attachments/<id>` url the
+upload returned (and that a card's `mockups[].url` / `screens[].url` carry). Returns `200` with
+the stored bytes byte-for-byte and the stored `Content-Type` (HTML keeps its sandbox
+`Content-Security-Policy` and `X-Content-Type-Options: nosniff`), plus
+`Content-Disposition: attachment; filename="…"` and `Cache-Control: private, …`. Scoped to the
+key's board: an unknown or malformed id, or an attachment on **another board**, is `404`
+`not_found` — never `403`, so an id on another board is not revealed. Serves any attachment on
+the board (screenshots too), not only mockups.
+
+```
+curl -H "Authorization: Bearer $RELAY_KEY" -o mock.html https://relay.example/api/attachments/135e5539-…
+```
+
 ### POST /api/cards/:ref/move
 
 Move a card. `stage` is a stage **id or name**; `position` is **1-based** (omit to

@@ -11,7 +11,8 @@ defmodule Schemas.Attachment do
   (`html_type/0`, `html?/1` — the controller's sandboxed serving branch and `Relay.Cards`'
   mockup validation both ask here) and where an attachment is served (`path/1`,
   `id_from_path/1`, `path?/1` — domain-side so `Relay.Cards` can parse a mockup url without
-  calling the web layer; `RelayWeb.attachment_path/1` delegates here).
+  calling the web layer; `RelayWeb.attachment_path/1` delegates here) — plus where a board API
+  key downloads it (`api_path/1`, RE373).
   """
 
   use Ecto.Schema
@@ -23,6 +24,7 @@ defmodule Schemas.Attachment do
   @allowed_types @image_types ++ [@html_type]
   @max_bytes 5_242_880
   @path_prefix "/attachments/"
+  @api_path_prefix "/api/attachments/"
 
   @primary_key {:id, :binary_id, autogenerate: true}
   schema "attachments" do
@@ -69,6 +71,15 @@ defmodule Schemas.Attachment do
   `RelayWeb.AttachmentPathTest` pins the two together.
   """
   def path(id), do: @path_prefix <> to_string(id)
+
+  @doc """
+  RE373 — the path a board API key downloads an attachment's raw bytes from
+  (`RelayWeb.Api.AttachmentController.show`). The router's bearer-authed
+  `get "/attachments/:id"` inside `scope "/api"` is the only other spelling;
+  `RelayWeb.AttachmentPathTest` pins the two together, and `./relay` mirrors the prefix under
+  `runner_contract.json`'s `mockups.download_path`.
+  """
+  def api_path(id), do: @api_path_prefix <> to_string(id)
 
   @doc """
   The id in a path `path/1` builds — the prefix plus a non-empty, single-segment id — as

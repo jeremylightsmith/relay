@@ -119,4 +119,38 @@ defmodule Relay.AttachmentsTest do
       assert Attachments.get_attachment(insert(:user), attachment.id) == nil
     end
   end
+
+  describe "get_attachment_for_board/2 (RE373)" do
+    setup do
+      board = insert(:board)
+      card = insert(:card, stage: insert(:stage, board: board))
+
+      {:ok, attachment} =
+        Attachments.create_attachment(card, %{filename: "m.html", content_type: Attachment.html_type(), bytes: "<p>x</p>"})
+
+      {:ok, board: board, card: card, attachment: attachment}
+    end
+
+    test "returns the attachment, with its card and board preloaded, for the owning board", %{
+      board: board,
+      card: card,
+      attachment: attachment
+    } do
+      assert %Attachment{id: id, card: %Schemas.Card{id: card_id, board: %Schemas.Board{id: board_id}}} =
+               Attachments.get_attachment_for_board(board, attachment.id)
+
+      assert id == attachment.id
+      assert card_id == card.id
+      assert board_id == board.id
+    end
+
+    test "is nil for another board's attachment", %{attachment: attachment} do
+      assert Attachments.get_attachment_for_board(insert(:board), attachment.id) == nil
+    end
+
+    test "is nil for an unknown or malformed id", %{board: board} do
+      assert Attachments.get_attachment_for_board(board, Ecto.UUID.generate()) == nil
+      assert Attachments.get_attachment_for_board(board, "not-a-uuid") == nil
+    end
+  end
 end

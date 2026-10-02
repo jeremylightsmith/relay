@@ -231,6 +231,7 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/unarchive", CardController, :unarchive
     post "/cards/:ref/comments", CardController, :comments
     post "/cards/:ref/attachments", CardController, :attachments
+    get "/attachments/:id", AttachmentController, :show
     post "/cards/:ref/needs-input", CardController, :needs_input
     post "/cards/:ref/approve", CardController, :approve
     post "/cards/:ref/reject", CardController, :reject

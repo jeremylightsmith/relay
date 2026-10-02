@@ -67,4 +67,17 @@ defmodule RelayWeb.AttachmentPathTest do
       assert elem(info.phoenix_live_view, 0) == RelayWeb.MockupViewerLive
     end
   end
+
+  describe "Schemas.Attachment.api_path/1 (RE373)" do
+    test "builds the bearer-authed download path" do
+      assert Schemas.Attachment.api_path("abc-123") == "/api/attachments/abc-123"
+    end
+
+    test "the router serves exactly that path with Api.AttachmentController.show" do
+      path = Schemas.Attachment.api_path(Ecto.UUID.generate())
+
+      assert %{plug: RelayWeb.Api.AttachmentController, plug_opts: :show} =
+               Phoenix.Router.route_info(RelayWeb.Router, "GET", path, "localhost")
+    end
+  end
 end

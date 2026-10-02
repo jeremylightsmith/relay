@@ -219,7 +219,12 @@ sharing behavior.
 - **Attachments** — file uploads onto cards (images, and since RE370 self-contained HTML
   mockups; 5 MB cap), served same-origin by `AttachmentController` at `/attachments/:id`
   (`Schemas.Attachment.path/1` is the one definition of that path — domain-side so
-  `Relay.Cards` can parse it). Images are served under the app-wide CSP. **HTML** gets its own
+  `Relay.Cards` can parse it).
+  A REST API key reads the same bytes at the bearer-authed `GET /api/attachments/:id`
+  (`RelayWeb.Api.AttachmentController`, RE373; path `Schemas.Attachment.api_path/1`), scoped by
+  `Relay.Attachments.get_attachment_for_board/2` to the key's board — 404 for anything off-board —
+  sharing `AttachmentController.put_content_headers/2` and served `private` as a download. It is
+  how `./relay mockups REF --pull` hands mockups to the next agent on a card. Images are served under the app-wide CSP. **HTML** gets its own
   branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
   `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
   'unsafe-inline' https://fonts.googleapis.com; img-src data:; font-src data:

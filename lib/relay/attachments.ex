@@ -69,6 +69,21 @@ defmodule Relay.Attachments do
     end
   end
 
+  @doc """
+  Board-scoped (RE373): the metadata row for `id`, with `card: :board` preloaded, but only when
+  the attachment's card belongs to `board` — the board a REST API key is bound to. `nil` for an
+  unknown id, a non-UUID id, or another board's attachment, so the API can answer every miss
+  with the same 404. The board-key twin of `get_attachment/2`'s membership check.
+  """
+  def get_attachment_for_board(%Schemas.Board{id: board_id}, id) when is_binary(id) do
+    with %Attachment{} = attachment <- get_attachment(id),
+         %Attachment{card: %Card{board_id: ^board_id}} = preloaded <- Repo.preload(attachment, card: :board) do
+      preloaded
+    else
+      _ -> nil
+    end
+  end
+
   @doc "Reads the stored bytes for `attachment` from the storage adapter."
   def fetch_bytes(%Attachment{storage_key: key}), do: storage().get(key)
 

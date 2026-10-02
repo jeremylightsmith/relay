@@ -92,9 +92,14 @@ defmodule RelayWeb.AttachmentController do
     end
   end
 
-  # The two serving branches. `content_type` comes from the validated allow-list (see show/2).
+  @doc """
+  Sets the response's content type from the stored `attachment.content_type` and, for HTML
+  (RE370), REPLACES the CSP with `html_csp/0` and sets `nosniff`. Shared by this controller and
+  the bearer-authed `RelayWeb.Api.AttachmentController` (RE373) so the serving branches exist
+  once. `content_type` comes from the validated allow-list (see show/2).
+  """
   # sobelow_skip ["XSS.ContentType"]
-  defp put_content_headers(conn, %Attachment{} = attachment) do
+  def put_content_headers(conn, %Attachment{} = attachment) do
     if Attachment.html?(attachment) do
       conn
       |> put_resp_content_type(attachment.content_type, "utf-8")

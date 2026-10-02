@@ -1166,9 +1166,9 @@ class MockupsCommandTest(unittest.TestCase):
             f.write("<!doctype html><p>hi</p>")
         return path
 
-    def args(self, files, caption=None, clear=False, json=False):
+    def args(self, files, caption=None, clear=False, json=False, pull=None):
         return argparse.Namespace(ref="RLY-1", files=files, caption=caption, clear=clear,
-                                  json=json, field=None)
+                                  json=json, field=None, pull=pull)
 
     def test_uploads_each_file_as_html_then_sets_the_list_in_one_patch(self):
         a, b = self.html("a.html"), self.html("b.html")
@@ -1217,6 +1217,185 @@ class MockupsCommandTest(unittest.TestCase):
         self.assertEqual(set(body), set(CONTRACT["mockups"]["request"]))
         self.assertEqual(set(body["mockups"][0]), set(CONTRACT["mockups"]["request"]["mockups"][0]))
         self.assertEqual(set(CONTRACT["mockups"]["card_mockups"][0]), {"url", "caption"})
+
+
+class ApiBytesTest(unittest.TestCase):
+    """api_bytes(path) (RE373) — api()'s request/retry core without the JSON decode, so a
+    download comes back byte-for-byte."""
+
+    def _run(self, fn, urlopen):
+        env = {"RELAY_URL": "http://x/", "RELAY_API_KEY": "k"}
+        with unittest.mock.patch.object(urllib.request, "urlopen", urlopen), \
+                unittest.mock.patch.dict(os.environ, env):
+            return fn()
+
+    def test_returns_the_raw_body_with_the_board_key(self):
+        seen = []
+
+        def urlopen(req, **_kw):
+            seen.append(req)
+            return _FakeResp(b"<p>\x00not json\r\n</p>")
+
+        body = self._run(lambda: relay.api_bytes("/api/attachments/a1"), urlopen)
+
+        self.assertEqual(body, b"<p>\x00not json\r\n</p>")
+        self.assertEqual(seen[0].full_url, "http://x/api/attachments/a1")
+        self.assertEqual(seen[0].get_method(), "GET")
+        self.assertEqual(seen[0].get_header("Authorization"), "Bearer k")
+
+    def test_api_still_decodes_json_through_the_shared_core(self):
+        self.assertEqual(self._run(lambda: relay.api("GET", "/api/board"),
+                                   lambda req, **_kw: _FakeResp(b'{"data": 1}')), {"data": 1})
+        self.assertEqual(self._run(lambda: relay.api("GET", "/api/board"),
+                                   lambda req, **_kw: _FakeResp(b"")), {})
+
+    def test_a_404_dies_with_the_server_message(self):
+        def urlopen(req, **_kw):
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(
+                json.dumps({"error": {"code": "not_found", "message": "Not found"}}).encode()))
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            self._run(lambda: relay.api_bytes("/api/attachments/gone"), urlopen)
+        self.assertIn("API 404: Not found", err.getvalue())
+
+
+class MockupsPullTest(unittest.TestCase):
+    """relay mockups REF --pull [DIR] (RE373) — downloads every mockup on the card through
+    GET /api/attachments/<id>, byte-for-byte, into DIR as NN-<slug>.html, in card order."""
+
+    BYTES = {
+        "/api/attachments/id1": b"<!doctype html><p>one</p>\r\n\x00",
+        "/api/attachments/id2": "<p>deux — é</p>".encode(),
+        "/api/attachments/id3": b"<p>three</p>",
+    }
+
+    def setUp(self):
+        for name in ("api", "api_bytes"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.mockups = [{"url": "/attachments/id1", "caption": "Empty state"},
+                        {"url": "/attachments/id2", "caption": "Empty state"},
+                        {"url": "/attachments/id3", "caption": ""}]
+        self.sent, self.fetched = [], []
+
+        def fake_api(method, path, body=None, **_kw):
+            self.sent.append((method, path, body))
+            return {"data": {"ref": "RLY-1", "mockups": self.mockups}}
+
+        def fake_bytes(path):
+            self.fetched.append(path)
+            return self.BYTES[path]
+
+        relay.api, relay.api_bytes = fake_api, fake_bytes
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.dest = os.path.join(self.dir, "out")
+
+    def args(self, pull=True, files=None, caption=None, clear=False, json=False):
+        return argparse.Namespace(ref="RLY-1", files=files or [], caption=caption, clear=clear,
+                                  pull=pull, json=json, field=None)
+
+    def read(self, name):
+        with open(os.path.join(self.dest, name), "rb") as f:
+            return f.read()
+
+    def test_writes_every_mockup_byte_for_byte_in_card_order(self):
+        out = capture(relay.cmd_mockups, self.args(pull=self.dest))
+
+        self.assertEqual(self.sent, [("GET", "/api/cards/RLY-1", None)])
+        self.assertEqual(self.fetched, ["/api/attachments/id1", "/api/attachments/id2",
+                                        "/api/attachments/id3"])
+        names = ["01-empty-state.html", "02-empty-state.html", "03-mockup.html"]
+        self.assertEqual(sorted(os.listdir(self.dest)), names)
+        for name, path in zip(names, ["/api/attachments/id1", "/api/attachments/id2",
+                                      "/api/attachments/id3"]):
+            self.assertEqual(self.read(name), self.BYTES[path])
+        self.assertIn(f"RLY-1: 3 mockups pulled to {self.dest}", out)
+        self.assertIn(f"  Empty state  {os.path.join(self.dest, '01-empty-state.html')}", out)
+        self.assertIn(f"  -  {os.path.join(self.dest, '03-mockup.html')}", out)
+
+    def test_pulling_twice_overwrites_with_the_same_result(self):
+        capture(relay.cmd_mockups, self.args(pull=self.dest))
+        capture(relay.cmd_mockups, self.args(pull=self.dest))
+        self.assertEqual(len(os.listdir(self.dest)), 3)
+        self.assertEqual(self.read("01-empty-state.html"), self.BYTES["/api/attachments/id1"])
+
+    def test_json_lists_caption_url_and_path(self):
+        out = capture(relay.cmd_mockups, self.args(pull=self.dest, json=True))
+        self.assertEqual(json.loads(out)[0], {
+            "caption": "Empty state", "url": "/attachments/id1",
+            "path": os.path.join(self.dest, "01-empty-state.html")})
+        self.assertEqual(len(json.loads(out)), 3)
+
+    def test_bare_pull_defaults_to_tmp_ref_mockups_under_the_cwd(self):
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.dir)
+
+        out = capture(relay.cmd_mockups, self.args(pull=True, json=True))
+
+        expected = os.path.join("tmp", "RLY-1", "mockups", "01-empty-state.html")
+        self.assertEqual(json.loads(out)[0]["path"], expected)
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, expected)))
+
+    def test_no_mockups_prints_a_message_exits_zero_and_creates_nothing(self):
+        for mockups in ([], None):
+            self.mockups = mockups
+            self.assertEqual(capture(relay.cmd_mockups, self.args(pull=self.dest)),
+                             "RLY-1: no mockups\n")
+            self.assertEqual(capture(relay.cmd_mockups, self.args(pull=self.dest, json=True)),
+                             "[]\n")
+        self.assertFalse(os.path.exists(self.dest))
+        self.assertEqual(self.fetched, [])
+
+    def test_refuses_mixed_modes_before_any_request(self):
+        for args, conflict in ((self.args(files=["a.html"]), "FILE"),
+                               (self.args(caption=["X"]), "--caption"),
+                               (self.args(clear=True), "--clear")):
+            err = io.StringIO()
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+                relay.cmd_mockups(args)
+            self.assertIn("--pull", err.getvalue())
+            self.assertIn(conflict, err.getvalue())
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.fetched, [])
+
+    def test_a_failed_download_dies_naming_the_attachment_id_and_keeps_earlier_files(self):
+        def fake_bytes(path):
+            if path.endswith("/id2"):
+                relay.die("API 404: Not found")
+            return self.BYTES[path]
+
+        relay.api_bytes = fake_bytes
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err), \
+                contextlib.redirect_stdout(io.StringIO()):
+            relay.cmd_mockups(self.args(pull=self.dest))
+        self.assertIn("id2", err.getvalue())
+        self.assertEqual(os.listdir(self.dest), ["01-empty-state.html"])
+
+    def test_filenames_keep_order_and_stay_unique(self):
+        self.assertEqual(relay.mockup_filename(1, "Empty state"), "01-empty-state.html")
+        self.assertEqual(relay.mockup_filename(12, "  Full / Dark!  "), "12-full-dark.html")
+        self.assertEqual(relay.mockup_filename(3, ""), "03-mockup.html")
+        self.assertEqual(relay.mockup_filename(4, None), "04-mockup.html")
+        self.assertEqual(relay.mockup_filename(5, "!!!"), "05-mockup.html")
+
+    def test_download_path_matches_the_runner_contract(self):
+        url = CONTRACT["mockups"]["card_mockups"][0]["url"]
+        self.assertEqual(relay.mockup_download_path(url), CONTRACT["mockups"]["download_path"])
+        self.assertEqual(relay.attachment_id("/attachments/abc-123"), "abc-123")
+
+    def test_parser_pull_takes_an_optional_dir(self):
+        parse = relay.build_parser().parse_args
+        self.assertIsNone(parse(["mockups", "RLY-1", "a.html"]).pull)
+        self.assertIs(parse(["mockups", "RLY-1", "--pull"]).pull, True)
+        ns = parse(["mockups", "RLY-1", "--pull", "out"])
+        self.assertEqual((ns.pull, ns.files), ("out", []))
+        ns = parse(["mockups", "RLY-1", "--pull", "--json"])
+        self.assertEqual((ns.pull, ns.json), (True, True))
+        ns = parse(["mockups", "RLY-1", "a.html", "--pull"])
+        self.assertEqual((ns.files, ns.pull), (["a.html"], True))
 
 
 class LogForwarderTest(unittest.TestCase):

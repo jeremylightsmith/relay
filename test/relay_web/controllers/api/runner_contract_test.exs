@@ -190,10 +190,12 @@ defmodule RelayWeb.Api.RunnerContractTest do
     {:ok, mockups_card} = Relay.Cards.create_card(exclusive.next_up, %{title: "Mockups card"})
     mockups_ref = Relay.Cards.ref(exclusive.board, mockups_card)
 
+    mockup_html = "<!doctype html><p>Empty</p>"
+
     mockup_upload = %{
       "filename" => "empty.html",
       "content_type" => Schemas.Attachment.html_type(),
-      "data_base64" => Base.encode64("<!doctype html><p>Empty</p>")
+      "data_base64" => Base.encode64(mockup_html)
     }
 
     %{"data" => %{"url" => mockup_url}} =
@@ -208,9 +210,16 @@ defmodule RelayWeb.Api.RunnerContractTest do
       |> patch(~p"/api/cards/#{mockups_ref}", Jason.encode!(mockups_request))
       |> json_response(200)
 
+    # RE373 — `relay mockups --pull` turns each mockup url into its download path and GETs the
+    # raw bytes with the board key. The path comes from the one definition and is proven against
+    # the real route here, so the url shape and the download route can never drift apart.
+    {:ok, mockup_id} = Schemas.Attachment.id_from_path(mockup_url)
+    assert exclusive.conn |> get(Schemas.Attachment.api_path(mockup_id)) |> response(200) == mockup_html
+
     document = %{
-      "version" => 8,
+      "version" => 9,
       "mockups" => %{
+        "download_path" => Schemas.Attachment.api_path("<attachment-id>"),
         "request" => mockup_placeholders(mockups_request),
         "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"])
       },

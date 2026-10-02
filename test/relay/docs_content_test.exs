@@ -91,6 +91,10 @@ defmodule Relay.DocsContentTest do
     end
   end
 
+  test "api.md documents the bearer-authed attachment download (RE373)" do
+    assert read("api.md") =~ "### GET /api/attachments/:id"
+  end
+
   test "api.md documents every endpoint RLY-177 added" do
     api = read("api.md")
 
