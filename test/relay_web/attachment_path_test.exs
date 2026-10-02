@@ -39,4 +39,32 @@ defmodule RelayWeb.AttachmentPathTest do
       end
     end
   end
+
+  describe "the domain-side definition (RE370)" do
+    test "RelayWeb's helpers are the schema's, not a second copy" do
+      id = Ecto.UUID.generate()
+      assert RelayWeb.attachment_path(id) == Schemas.Attachment.path(id)
+      assert RelayWeb.attachment_path?(Schemas.Attachment.path(id))
+    end
+  end
+
+  describe "attachment_view_path/1 (RE370)" do
+    test "is the attachment path plus /view, which is not itself an attachment path" do
+      id = Ecto.UUID.generate()
+      assert RelayWeb.attachment_view_path(id) == RelayWeb.attachment_path(id) <> "/view"
+      refute RelayWeb.attachment_path?(RelayWeb.attachment_view_path(id))
+    end
+
+    test "the router serves it with MockupViewerLive" do
+      info =
+        Phoenix.Router.route_info(
+          RelayWeb.Router,
+          "GET",
+          RelayWeb.attachment_view_path(Ecto.UUID.generate()),
+          "localhost"
+        )
+
+      assert elem(info.phoenix_live_view, 0) == RelayWeb.MockupViewerLive
+    end
+  end
 end

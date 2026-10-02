@@ -65,6 +65,8 @@ defmodule RelayWeb.Api.CardJSON do
         |> Map.put(:plan, card.plan)
         |> Map.put(:spec, card.spec)
         |> Map.put(:ai_result, card.ai_result)
+        # RE370 — the card's HTML mockups; [] rather than null so a reader can always iterate.
+        |> Map.put(:mockups, card.mockups || [])
         |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &TaskJSON.task/1))
         # RE93 — both directions, single-card only. data/3 (the index/summary shape) is
         # deliberately NOT extended: it would be an N+1 per card and no consumer needs it there.

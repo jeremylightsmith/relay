@@ -199,9 +199,24 @@ shows — upload the file to `POST /api/cards/:ref/attachments` (`./relay attach
 `422 invalid_ai_result` and a message naming the key you used and the keys that exist; nothing
 is written.
 
+`mockups` is also set here (this is what `./relay mockups` calls). It **replaces** the card's
+whole list; `[]` or `null` clears it:
+
+```json
+{ "mockups": [{ "url": "/attachments/135e5539-…", "caption": "Empty state" }] }
+```
+
+Each entry takes only `url` (required) and `caption` (optional string). The `url` must be the
+`/attachments/<id>` path of an **HTML attachment on this same card** — upload it first with
+`POST /api/cards/:ref/attachments` (`content_type: "text/html"`). Anything else is refused with
+`422 invalid_mockups` naming the entry's index; nothing is written. `GET /api/cards/:ref`
+returns the list as `mockups` (`[]` when none). Mockups must be self-contained: they are served
+under a sandbox CSP with no network access (inline JS/CSS, `data:` assets only).
+
 ### POST /api/cards/:ref/attachments
 
-Upload a file to the card. Requires `filename`, `content_type` and `data_base64`. Returns `201`
+Upload a file to the card — an image (png/jpeg/webp/gif) or, for a mockup, a
+self-contained `text/html` page (5 MB cap). Requires `filename`, `content_type` and `data_base64`. Returns `201`
 with `{"data": {"id": …, "url": "/attachments/<id>", "markdown": "![…](/attachments/<id>)"}}` —
 that `url` is what a screenshot's `screens[].url` should be.
 

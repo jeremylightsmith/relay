@@ -121,6 +121,15 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid_ai_result", message: "ai_result: #{message}")
   end
 
+  # RE370 — like `invalid_ai_result`: the caller is an agent, so `Relay.Cards` names the entry
+  # and the rule it broke.
+  def call(conn, {:error, {:invalid_mockups, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_mockups", message: message)
+  end
+
   def call(conn, {:error, :not_in_review}) do
     conn
     |> put_status(:unprocessable_entity)

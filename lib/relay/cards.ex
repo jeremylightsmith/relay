@@ -20,6 +20,7 @@ defmodule Relay.Cards do
   alias Relay.Push
   alias Relay.Repo
   alias Relay.Votes
+  alias Schemas.Attachment
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.CardDependency
@@ -1078,6 +1079,121 @@ defmodule Relay.Cards do
 
   defp quoted(keys), do: Enum.map_join(keys, ", ", &~s("#{&1}"))
 
+  # RE370 — one mockup entry's vocabulary, spelled once (relay.md and priv/docs/api.md quote it).
+  @mockup_keys ~w(url caption)
+
+  @doc "The keys one entry of a card's `mockups` list may carry (RE370)."
+  def mockup_keys, do: @mockup_keys
+
+  @doc """
+  REPLACES the card's whole `mockups` list (RE370) with `mockups` — string-keyed maps
+  `%{"url" => "/attachments/<id>", "caption" => "…"}` (`caption` optional; blank → nil). `[]`
+  clears the field to `nil`. Attachments a previous list pointed at stay in storage.
+
+  Every entry is validated before anything is written: only `mockup_keys/0`, a string caption,
+  and a url that is an `/attachments/<id>` path (`Schemas.Attachment.id_from_path/1`) of an
+  **HTML attachment on this card**. The first offending entry is refused as
+  `{:error, {:invalid_mockups, message}}`, the message naming its index — the caller is an
+  agent that just wrote the list. On success returns `{:ok, card}` (owners preloaded) and
+  broadcasts `{:card_upserted, card}` so an open drawer updates live.
+  """
+  def set_mockups(%Card{} = card, mockups) when is_list(mockups) do
+    with {:ok, entries} <- validate_mockups(card, mockups) do
+      card
+      |> Ecto.Changeset.change(mockups: if(entries == [], do: nil, else: entries))
+      |> Repo.update()
+      |> preload_owners_result()
+      |> broadcast_upserted()
+    end
+  end
+
+  defp validate_mockups(%Card{} = card, mockups) do
+    with {:ok, entries} <- mockup_entries(mockups) do
+      html_ids = card_html_attachment_ids(card, Enum.map(entries, & &1.id))
+
+      case Enum.find(entries, &(&1.id not in html_ids)) do
+        nil ->
+          {:ok, Enum.map(entries, &%{"url" => &1.url, "caption" => &1.caption})}
+
+        %{index: index} ->
+          invalid_mockups(
+            ~s(mockups[#{index}]: "url" must be an HTML attachment on this card — upload it with `relay mockups` and use the /attachments/… path it prints)
+          )
+      end
+    end
+  end
+
+  defp mockup_entries(mockups) do
+    mockups
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {mockup, index}, {:ok, acc} ->
+      case mockup_entry(mockup, index) do
+        {:ok, entry} -> {:cont, {:ok, [entry | acc]}}
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, entries} -> {:ok, Enum.reverse(entries)}
+      error -> error
+    end
+  end
+
+  defp mockup_entry(%{} = mockup, index) do
+    with :ok <- validate_mockup_keys(mockup, index),
+         {:ok, id} <- mockup_attachment_id(Map.get(mockup, "url"), index),
+         {:ok, caption} <- mockup_caption(Map.get(mockup, "caption"), index) do
+      {:ok, %{index: index, id: id, url: Map.fetch!(mockup, "url"), caption: caption}}
+    end
+  end
+
+  defp mockup_entry(_mockup, index),
+    do: invalid_mockups("mockups[#{index}] must be an object with #{quoted(@mockup_keys)}")
+
+  defp validate_mockup_keys(mockup, index) do
+    case Map.keys(mockup) -- @mockup_keys do
+      [] ->
+        :ok
+
+      unknown ->
+        invalid_mockups(
+          "mockups[#{index}]: unknown #{key_word(unknown)} #{quoted(unknown)} — a mockup takes only #{quoted(@mockup_keys)}"
+        )
+    end
+  end
+
+  defp mockup_attachment_id(url, index) do
+    with {:ok, id} <- Attachment.id_from_path(url),
+         {:ok, uuid} <- Ecto.UUID.cast(id) do
+      {:ok, uuid}
+    else
+      _ ->
+        invalid_mockups(
+          ~s(mockups[#{index}]: "url" must be an /attachments/<id> path — upload the HTML with `relay mockups`)
+        )
+    end
+  end
+
+  defp mockup_caption(nil, _index), do: {:ok, nil}
+
+  defp mockup_caption(caption, _index) when is_binary(caption),
+    do: {:ok, if(String.trim(caption) == "", do: nil, else: caption)}
+
+  defp mockup_caption(_caption, index), do: invalid_mockups(~s(mockups[#{index}]: "caption" must be a string))
+
+  # The ids among `ids` that are HTML attachments on `card` — one query for the whole list.
+  defp card_html_attachment_ids(_card, []), do: []
+
+  defp card_html_attachment_ids(%Card{id: card_id}, ids) do
+    html_type = Attachment.html_type()
+
+    Attachment
+    |> where([a], a.card_id == ^card_id and a.id in ^ids and a.content_type == ^html_type)
+    |> select([a], a.id)
+    |> Repo.all()
+  end
+
+  defp invalid_mockups(message), do: {:error, {:invalid_mockups, message}}
+
   @doc """
   Pure helper: `%{done: d, total: t}` from a map with a **loaded** `sub_tasks` list
   (a Card struct or a plain map). Used by both the JSON and the drawer.
@@ -1149,6 +1265,7 @@ defmodule Relay.Cards do
 
   defp blank_contract_field?(%Card{sub_tasks: sub_tasks}, :tasks), do: sub_tasks == []
   defp blank_contract_field?(%Card{ai_result: ai_result}, :ai_result), do: ai_result_blank?(ai_result)
+  defp blank_contract_field?(%Card{mockups: mockups}, :mockups), do: mockups in [nil, []]
   defp blank_contract_field?(%Card{} = card, field), do: card |> Map.fetch!(field) |> blank_text?()
 
   defp blank_text?(nil), do: true

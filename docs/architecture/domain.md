@@ -146,6 +146,19 @@ sharing behavior.
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
+  A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
+  `%{"url", "caption"}` entries, written only through `Relay.Cards.set_mockups/2`: a full
+  REPLACE, validated so every url is an `/attachments/<id>` path of an **HTML attachment on the
+  same card** (`422 invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
+  `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
+  distinct from `ai_result.screens` (run-result image screenshots).
+  The drawer renders mockups in a **Mockups** section (`CoreComponents.mockup_preview/1`: caption,
+  fixed-height `<iframe sandbox="allow-scripts">`, **Open full size**). Open full size goes to
+  `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) — an
+  authenticated, membership-scoped page in the `:require_authenticated` live_session that frames
+  the mockup under a banner "Mockup · <ref> <title>" linking back to the card; it 404s for a
+  non-member, an unknown id, or a non-HTML attachment. Relay's UI never links to a raw HTML
+  attachment as a top-level page.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
   `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
@@ -202,7 +215,19 @@ sharing behavior.
   one notification path. See [runtime.md](runtime.md) for the topic/event vocabulary.
 - **BoardWatch** — per-board monotonic version counter in ETS; bumped on every
   `Events.broadcast/2`, polled by the CLI to cheaply detect change (RLY-12).
-- **Attachments** — file uploads onto cards, served by `AttachmentController`.
+- **Attachments** — file uploads onto cards (images, and since RE370 self-contained HTML
+  mockups; 5 MB cap), served same-origin by `AttachmentController` at `/attachments/:id`
+  (`Schemas.Attachment.path/1` is the one definition of that path — domain-side so
+  `Relay.Cards` can parse it). Images are served under the app-wide CSP. **HTML** gets its own
+  branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
+  `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
+  'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; frame-ancestors 'self'` —
+  plus `nosniff`. Threat model: no `allow-same-origin` (opaque origin — no cookies, no parent
+  access; `_relay_key` is `SameSite=Lax`), no network (`default-src 'none'`), no top
+  navigation/popups/forms. Residual risk is same-domain phishing, mitigated by never showing a
+  mockup as a bare top-level page from Relay's UI and by `frame-ancestors 'self'`; a separate
+  user-content origin is a documented follow-up. The sandbox token list is
+  `RelayWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
   change never waits on Apple (RLY-81).
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`

@@ -21,23 +21,37 @@ defmodule RelayWeb do
 
   def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 
-  @attachments_prefix "/attachments/"
-
   @doc """
-  RE322 — the one definition of where an uploaded attachment is served
-  (`AttachmentController.show`). `CardJSON` builds the `url` and `markdown` that `relay attach`
-  hands back with it, and the drawer's screenshots strip recognises those urls with
-  `attachment_path?/1`. The router's `get "/attachments/:id"` is the only other spelling (a route
-  can't call a function); `RelayWeb.AttachmentPathTest` pins the two together.
+  RE322 — where an uploaded attachment is served (`AttachmentController.show`). `CardJSON`
+  builds the `url` and `markdown` that `relay attach` hands back with it, and the drawer's
+  screenshots strip recognises those urls with `attachment_path?/1`. The one definition lives
+  domain-side on `Schemas.Attachment.path/1` (RE370 — `Relay.Cards` validates mockup urls and
+  may not call the web layer); `RelayWeb.AttachmentPathTest` pins it to the router.
   """
-  def attachment_path(id), do: @attachments_prefix <> to_string(id)
+  defdelegate attachment_path(id), to: Schemas.Attachment, as: :path
 
   @doc """
   Whether `path` is a path `attachment_path/1` builds: the prefix plus a non-empty, single-segment
   id. A bare `/attachments`, a nested path, or a non-string is not.
   """
-  def attachment_path?(@attachments_prefix <> id) when id != "", do: not String.contains?(id, "/")
-  def attachment_path?(_path), do: false
+  defdelegate attachment_path?(path), to: Schemas.Attachment, as: :path?
+
+  @doc """
+  RE370 — the framed full-size viewer for an HTML mockup (`MockupViewerLive`): Relay chrome and
+  a banner naming the card over a sandboxed iframe of `attachment_path/1`. The drawer's
+  **Open full size** links here — never to the raw HTML as a top-level page.
+  `RelayWeb.AttachmentPathTest` pins it to the router.
+  """
+  def attachment_view_path(id), do: attachment_path(id) <> "/view"
+
+  @doc """
+  RE370 — the sandbox token list an HTML mockup runs under: scripts on, and nothing else — no
+  `allow-same-origin` (opaque origin: no cookies, no parent access), no `allow-top-navigation`,
+  `allow-popups` or `allow-forms`. The ONE definition: `AttachmentController.html_csp/0` puts it
+  in the CSP `sandbox` directive and every mockup `<iframe sandbox=…>` (the drawer's
+  `CoreComponents.mockup_preview/1` and `MockupViewerLive`) uses it as the attribute value.
+  """
+  def mockup_sandbox, do: "allow-scripts"
 
   def router do
     quote do

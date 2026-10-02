@@ -22,7 +22,8 @@ defmodule Schemas.Card do
   (RLY-69) is the optional public-board copy, distinct from the internal
   `description`; nullable, cast like `description`. `posted_by_user_id`
   (RLY-225) records the public poster of an idea; nullable, never cast —
-  set programmatically on the public-posting path only.
+  set programmatically on the public-posting path only. `mockups` (RE370) is the card's HTML
+  mockup list — nullable, never cast here; written via `Relay.Cards.set_mockups/2`.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
   map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
@@ -61,6 +62,10 @@ defmodule Schemas.Card do
     field :plan, :string
     field :pr_url, :string
     field :ai_result, :map
+    # RE370 — HTML mockups: [%{"url" => "/attachments/<id>", "caption" => String | nil}], nil when
+    # none. Never cast by changeset/2 — written only through Relay.Cards.set_mockups/2, which
+    # validates every url is an HTML attachment on this card and REPLACES the whole list.
+    field :mockups, {:array, :map}
     field :public_description, :string
 
     belongs_to :board, Schemas.Board
@@ -214,6 +219,6 @@ defmodule Schemas.Card do
   `Schemas.Flow.Node.normalize_legacy/1` rewrites on the way in; it is not a value here.
   """
   def contract_fields do
-    [:description, :spec, :acceptance_criteria, :plan, :tasks, :branch, :pr_url, :ai_result]
+    [:description, :spec, :acceptance_criteria, :plan, :tasks, :branch, :pr_url, :ai_result, :mockups]
   end
 end

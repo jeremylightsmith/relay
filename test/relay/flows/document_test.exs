@@ -224,6 +224,19 @@ defmodule Relay.Flows.DocumentTest do
       assert [%{reads: [:spec], writes: [:plan]}] = attrs.nodes
     end
 
+    test "a node may declare mockups; a misspelling is refused (RE370)" do
+      ok =
+        put_in(@minimal, ["nodes"], [
+          %{"key" => "design", "type" => "agent", "writes" => ["mockups"], "reads" => ["mockups"]}
+        ])
+
+      assert {:ok, %{nodes: [%{reads: [:mockups], writes: [:mockups]}]}} = Document.decode(ok)
+
+      typo = put_in(@minimal, ["nodes"], [%{"key" => "design", "type" => "agent", "writes" => ["mockupz"]}])
+      assert {:error, msg} = Document.decode(typo)
+      assert msg =~ "mockupz"
+    end
+
     test "an unknown contract field is an error naming it, never a minted atom" do
       doc =
         put_in(@minimal, ["nodes"], [
