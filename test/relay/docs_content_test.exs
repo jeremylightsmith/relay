@@ -205,4 +205,33 @@ defmodule Relay.DocsContentTest do
     assert api =~ "### GET /api/runners"
     assert api =~ "runner_outdated"
   end
+
+  # RE372 — mockups are no longer fully offline: Google Fonts is the one network exception, and
+  # every passage describing the mockup sandbox must say so (and the privacy cost where noted).
+  test "mockup docs name the Google Fonts exception instead of calling mockups offline" do
+    style_host = URI.parse(RelayWeb.AttachmentController.google_fonts_style_origin()).host
+    font_host = URI.parse(RelayWeb.AttachmentController.google_fonts_font_origin()).host
+
+    api = read("api.md")
+    cli = read("cli.md")
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    domain = File.read!(Path.join(File.cwd!(), "docs/architecture/domain.md"))
+
+    for {name, doc} <- [{"api.md", api}, {"cli.md", cli}, {"relay.md", relay_md}, {"domain.md", domain}] do
+      assert doc =~ style_host, "#{name} should name #{style_host} as the mockup stylesheet exception"
+      assert doc =~ font_host, "#{name} should name #{font_host} as the mockup font exception"
+      refute doc =~ "no network access (inline JS/CSS", "#{name} still calls mockups fully offline"
+      refute doc =~ "every fetch blocked", "#{name} still says every fetch is blocked"
+    end
+
+    # The privacy cost is stated where the policy is documented in full.
+    for {name, doc} <- [{"api.md", api}, {"domain.md", domain}] do
+      assert doc =~ "request to Google", "#{name} should state that opening such a mockup sends a request to Google"
+    end
+
+    # The architecture page quotes the live policy verbatim (it wraps lines, so compare
+    # whitespace-normalized).
+    normalize = &String.replace(&1, ~r/\s+/, " ")
+    assert normalize.(domain) =~ RelayWeb.AttachmentController.html_csp()
+  end
 end
