@@ -12,8 +12,9 @@ defmodule Schemas.Run do
   construction. `retries` is the deliberate exception and is NOT an engine
   counter: it counts HUMAN retry interventions (RLY-189), which leave no
   trace in execution history and therefore cannot be derived from it. Only
-  `Relay.Runs.retry_run/2` ever increments it. All fields are written
-  programmatically by `Relay.Runs`, never cast from input.
+  `Relay.Runs.retry_run/2` ever increments it. `tasks_from_plan` is true when
+  this run's tasks were seeded by the legacy plan-parse fallback (RE368). All
+  fields are written programmatically by `Relay.Runs`, never cast from input.
   """
 
   use Ecto.Schema
@@ -31,6 +32,9 @@ defmodule Schemas.Run do
     field :context, :map, default: %{}
     field :failure_detail, :string
     field :retries, :integer, default: 0
+    # RE368: true when this run's tasks were seeded by the legacy plan-parse fallback — the
+    # fact `Relay.Runs.Audit`'s `:planner_not_migrated` check reads.
+    field :tasks_from_plan, :boolean, default: false
 
     field :resume_refused_since, :utc_datetime
 

@@ -1186,7 +1186,7 @@ defmodule Relay.Runs do
 
   defp do_start_run(card, flow, start_target, context) do
     case maybe_seed_sub_tasks(card, flow) do
-      :ok -> start_seeded_run(card, flow, start_target, context)
+      {:ok, source} -> start_seeded_run(card, flow, start_target, context, source == :plan_parse)
       {:error, :no_plan_tasks} -> block_on_unusable_plan(card, flow)
     end
   end
@@ -1214,11 +1214,11 @@ defmodule Relay.Runs do
       "`relay tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
   end
 
-  defp start_seeded_run(card, flow, start_target, context) do
+  defp start_seeded_run(card, flow, start_target, context, tasks_from_plan) do
     result =
       Repo.transaction(fn ->
         card = move_into_work_lane(card, flow)
-        run = insert_run(card, flow, start_target, context)
+        run = insert_run(card, flow, start_target, context, tasks_from_plan)
         sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
         execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
         job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
@@ -1267,6 +1267,10 @@ defmodule Relay.Runs do
   # (never on re-entry — that would wipe done-state), with a deprecation warning. A card whose
   # sub_tasks were already written is left alone: the authored list wins over the parsed one.
   #
+  # Returns `{:ok, :plan_parse}` when THIS call seeded the tasks from the plan — the run that
+  # starts is then marked `tasks_from_plan` (RE368), and the audit's `planner_not_migrated`
+  # check is the telemetry for deleting this path — and `{:ok, :existing}` otherwise.
+  #
   # Returns `{:error, :no_plan_tasks}` when the flow iterates the plan but no task list can
   # be produced. That case MUST NOT start the run (RLY-165): with zero sub_tasks the first
   # foreach guard reads `remaining == 0` as `:foreach_exhausted` and routes straight past
@@ -1276,17 +1280,17 @@ defmodule Relay.Runs do
   defp maybe_seed_sub_tasks(card, flow) do
     cond do
       not Enum.any?(flow.nodes, &(not is_nil(&1.foreach))) ->
-        :ok
+        {:ok, :existing}
 
       Repo.exists?(from st in SubTask, where: st.card_id == ^card.id) ->
-        :ok
+        {:ok, :existing}
 
       true ->
         case PlanTasks.parse(card.plan) do
           [_ | _] = tasks ->
             {:ok, _card} = Cards.set_sub_tasks(card, tasks)
             log_plan_parse_fallback(card, flow, length(tasks))
-            :ok
+            {:ok, :plan_parse}
 
           [] ->
             {:error, :no_plan_tasks}
@@ -1307,7 +1311,7 @@ defmodule Relay.Runs do
     )
   end
 
-  defp insert_run(card, flow, start_target, context) do
+  defp insert_run(card, flow, start_target, context, tasks_from_plan) do
     %Run{
       card_id: card.id,
       flow_id: flow.id,
@@ -1315,6 +1319,7 @@ defmodule Relay.Runs do
       status: :running,
       current_node: start_target,
       context: context,
+      tasks_from_plan: tasks_from_plan,
       started_at: now()
     }
     |> Run.changeset()
@@ -1476,7 +1481,7 @@ defmodule Relay.Runs do
   first rule — so the two always log the same text.
 
   Decided in ONE `run → card → stage` query (the same `leaked_runs_query/0` the sweep reads), so
-  the verdict is a single consistent snapshot. Atomic dispatch (`start_seeded_run/4` moves the
+  the verdict is a single consistent snapshot. Atomic dispatch (`start_seeded_run/5` moves the
   card into the work lane *before* inserting the run, in one transaction) guarantees no committed
   state ever pairs an active run with a card still at its (often `:done`-type) pull stage, so a
   freshly dispatched run is never a leak — only a genuinely stranded one is. Reading the card

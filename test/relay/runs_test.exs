@@ -163,6 +163,13 @@ defmodule Relay.RunsTest do
   end
 
   describe "start_run/3" do
+    test "a flow with no foreach node never marks its run tasks_from_plan (RE368)", %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+
+      assert {:ok, %Run{tasks_from_plan: false}} = Runs.start_run(card, flow)
+    end
+
     test "runs a spec-shaped flow start → done, moving the card and broadcasting each transition",
          %{board: board} do
       flow = enabled_spec_flow(board)
@@ -1182,6 +1189,21 @@ defmodule Relay.RunsTest do
       assert log =~ "/relay-doctor"
       assert log =~ Relay.Cards.ref(board, card)
       assert log =~ flow.key
+    end
+
+    test "a run whose tasks were seeded by the plan-parse fallback is marked tasks_from_plan (RE368)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+
+      capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
+
+      assert %Run{tasks_from_plan: true} = Repo.one!(from r in Run, where: r.card_id == ^card.id)
+    end
+
+    test "a run on a card that already had tasks is not marked tasks_from_plan (RE368)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      {:ok, _tasks} = Relay.Cards.add_tasks(card, [%{title: "Alpha", body: "Do alpha."}])
+
+      assert {:ok, %Run{tasks_from_plan: false}} = Runs.start_run(card, flow)
     end
 
     test "a card with pre-written tasks never parses the plan and logs no deprecation (RE357)" do
