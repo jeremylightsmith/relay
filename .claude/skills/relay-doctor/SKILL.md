@@ -137,16 +137,21 @@ or `gate` node's evidence is its own `run` string. A file doctor cannot locate (
 | `spec` | `relay spec` |
 | `acceptance_criteria` | `relay criteria` |
 | `plan` | `relay plan` |
-| `sub_tasks` | `relay tasks add` (legacy: `relay sub-tasks`) |
+| `tasks` | `relay tasks add` |
 | `branch` | `relay branch` |
 | `pr_url` | `relay pr` |
 | `ai_result` | `relay result` |
 
+`sub_tasks` is the legacy spelling of the `tasks` field (legacy `card.sub_tasks`, `{sub_task}`
+and `{sub_task_id}` likewise — all legacy): the board normalizes them to the `tasks` names when
+a flow is loaded or pushed, so a pulled flow never shows them — treat a legacy spelling in a
+repo-local flow file as `tasks`.
+
 **Read evidence is card-level, not per-field — with one exception.** `relay card <ref>` (in any
 form) shows the node reads the card, but not *which* field it uses. Say so in the report rather
 than claiming precision you don't have: a node with any `reads` declared is confirmed by a single
-`relay card` occurrence. The exception is `sub_tasks`: a card's task bodies are not in
-`relay card`, so `relay task show` or `relay tasks list` is the **read** evidence for `sub_tasks`
+`relay card` occurrence. The exception is `tasks`: a card's task bodies are not in
+`relay card`, so `relay task show` or `relay tasks list` is the **read** evidence for `tasks`
 (and also confirms the node reads the card).
 
 ## Board health (the audit)
@@ -157,7 +162,7 @@ the evidence, the fix — and split in two:
 
 | finding | means |
 |---|---|
-| `findings_dropped` (ERROR) | a review failed inside a `foreach` iteration and the loop-back target's next execution carried a **different** sub-task: the findings were never addressed |
+| `findings_dropped` (ERROR) | a review failed inside a `foreach` iteration and the loop-back target's next execution carried a **different** task: the findings were never addressed |
 | `verdict_flipped` (WARNING, ERROR at two nodes in one run) | the same node, same visit, same `git_sha` went `failed` → `succeeded` on a retry: a retry laundered a failure into a pass |
 | `ci_parity` (WARNING) | `.github/workflows/*.yml` requires a verify command that **no enabled flow's gate node runs** — every gate can pass and the PR still fails required CI |
 

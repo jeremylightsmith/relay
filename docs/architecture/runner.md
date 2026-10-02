@@ -440,11 +440,19 @@ that stays server-side.
 
 ## The foreach cursor (RE252)
 
-A `foreach` node iterates the card's `sub_tasks`, and every execution under it carries the
-`sub_task_id` of the iteration it belongs to (`node_executions.sub_task_id`). "Which task is
-next" is **derived, never persisted**: `Relay.Runs.next_sub_task_id/1` returns the first
-`sub_task` in position order whose `done` is false, so a crashed-and-resumed run recomputes the
-same answer with no cursor column.
+A `foreach` node (`foreach: card.tasks`) iterates the card's tasks — the `sub_tasks` rows — and
+every execution under it carries the id of the task its iteration is bound to
+(`node_executions.sub_task_id`). The job payload hands that binding to the node as the vars
+`task` (title) and `task_id` (id), which a prompt references as `{task}` / `{task_id}`. These are
+the canonical flow-contract names since RE367: the legacy spellings `card.sub_tasks`,
+`sub_tasks` (in `reads`/`writes`) and `{sub_task}` / `{sub_task_id}` are rewritten by
+`Schemas.Flow.Node.normalize_legacy/1` wherever a flow enters (`Schemas.Flow.Node.changeset/2`,
+`Relay.Flows.Document.decode/1`), and the RE367 data migration rewrote every stored `flows` /
+`flow_versions` row, so the engine only ever sees canonical names.
+
+"Which task is next" is **derived, never persisted**: `Relay.Runs.next_sub_task_id/1` returns
+the first `sub_task` in position order whose `done` is false, so a crashed-and-resumed run
+recomputes the same answer with no cursor column.
 
 The card drawer reads the *binding*, not the cursor: `Relay.Runs.in_flight_sub_task_id/1` returns
 `current_sub_task_id/2` for the foreach node of the card's active run (nil with no active run, no

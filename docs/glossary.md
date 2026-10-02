@@ -20,6 +20,15 @@ the MMF design specs).
   (`Schemas.Stage.default_status/1`). The values are generated from the schema into
   [`architecture/state.md`](architecture/state.md).
 - **Card** — a unit of work (`Schemas.Card`) that lives in exactly one stage/substage at a time.
+- **Task** — one independently implementable unit of a card's plan, worked one at a time by the
+  Code flow's `foreach` loop. Its **body is its spec**: read it with
+  `relay task show <ref> <id>` (`relay tasks list <ref>` lists titles only); write a card's tasks
+  with `relay tasks add`. In a flow it is the `tasks` contract field, the `card.tasks` foreach
+  source, and the `{task}` / `{task_id}` prompt placeholders. **This is the canonical name**:
+  `sub_task` / `SubTask` / `sub_tasks` / `card.sub_tasks` / `{sub_task_id}` are legacy
+  identifiers — the schema (`Schemas.SubTask`), table and `node_executions.sub_task_id` keep the
+  old name internally, and a flow still spelled the old way is accepted and normalized to
+  `tasks` on load (RE367).
 - **Activity (story map)** — a big user goal; one column group across the top of the story map
   (`Schemas.StoryActivity`, RE265). **Not** the card activity log: `Schemas.Activity` is the
   timeline row type (`:moved`, `:status_changed`, runner `:action` lines). When this glossary

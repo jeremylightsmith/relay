@@ -159,7 +159,7 @@ it yet.
 { "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "exclusive",
   "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
-  "nodes": { /* the 18 nodes of code.json — branch, implement (foreach: "card.sub_tasks"),
+  "nodes": { /* the 18 nodes of code.json — branch, implement (foreach: "card.tasks"),
                 spec_review, quality_review, precommit, final_review, final_fix,
                 smoke, smoke_fix, acceptance, acceptance_fix, post, merge. The next_task
                 grep-gate is GONE — "which task is next" is engine-derived (RLY-139). */ },
@@ -240,7 +240,7 @@ erDiagram
         string git_sha
         string session_id
         int attempt
-        int sub_task_id "nil outside a foreach (RLY-139)"
+        int sub_task_id "nil outside a foreach (RLY-139); legacy column name"
     }
     NodeJob {
         string state "queued | claimed | running | done | revoked"
@@ -280,7 +280,7 @@ Every row involved (abridged JSON; timestamps trimmed):
   "status": "running", "current_node": "implement", "started_at": "…T17:55:02Z" }
 
 // NodeExecution — the history so far (what RLY-137 renders on the card). branch is
-// unbound (sub_task_id nil); task 1's three iteration nodes are bound to 501 and
+// unbound (sub_task_id nil — legacy column name); task 1's three iteration nodes are bound to 501 and
 // already checked off at quality_review; task 2's implement/spec_review/quality_review
 // are bound to 502 — the failed quality_review is what looped back into implement.
 { "run": "run_7f3a", "node": "branch",         "attempt": 1, "sub_task_id": null, "outcome": "succeeded", "git_sha": "9c01d4e", "duration_s": 2 }
@@ -293,15 +293,15 @@ Every row involved (abridged JSON; timestamps trimmed):
   "detail": "export test asserts on private struct internals; assert on the CSV bytes instead" }
 
 // NodeJob — the work in flight right now (loop 1 of 3 back into implement, still
-// bound to sub_task 502; carrying the finding; session resumes so the implementer
+// bound to task 502; carrying the finding; session resumes so the implementer
 // keeps its context)
 { "id": "nj_c88", "run": "run_7f3a", "node": "implement", "state": "claimed",
   "runner_id": 3, "claimed_at": "…T18:41:55Z",
   "payload": { "isolation": "exclusive", "resume_session": "s_a41…", "agent": "plan-implementer",
-               "run": "Implement task {sub_task_id} (\"{sub_task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {sub_task_id}`. …",
+               "run": "Implement task {task_id} (\"{task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {task_id}`. …",
                "vars": { "ref": "RLY-150", "branch": "rly-150-csv-export",
-                         "sub_task_id": 502,
-                         "sub_task": "Wire the export button up",
+                         "task_id": 502,
+                         "task": "Wire the export button up",
                          "findings": "export test asserts on private struct internals; …" } } }
 ```
 

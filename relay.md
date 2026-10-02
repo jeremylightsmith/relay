@@ -55,7 +55,7 @@ flight at once; a card may be specced now and planned days later while others pa
 | **description** — the ask as stated | `describe` |
 | **spec** — the design spec authored at the Spec stage | `spec` |
 | **acceptance criteria** | `criteria` |
-| **plan** + **sub-task checklist** | `plan`, `sub-tasks` / `check` / `uncheck` |
+| **plan** + **tasks** | `plan`, `tasks add` / `task show` |
 | **branch**, **PR url**, **result** blob | `branch`, `pr`, `result` |
 | **blockers** — the cards this one waits on | `depends` |
 
@@ -100,12 +100,13 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 | `./relay title RLY-12 "New title"` | Retitle the card |
 | `./relay archive` · `./relay unarchive RLY-12` | Take the card off the board / put it back in its stage. A card with a live run refuses `archive` (409 `active_run`) — `cancel` it first |
 | `./relay status RLY-12 working` | Set status (`ready`\|`working`\|`needs_input`\|`in_review`) |
-| `./relay describe` · `./relay spec` · `./relay criteria` · `./relay plan` · `./relay sub-tasks RLY-12 @file` | Set description / spec / criteria / plan / checklist — `describe` and `spec` are **separate fields**, not synonyms |
-| `./relay check` · `./relay uncheck RLY-12 42` | Toggle one sub-task done by id |
+| `./relay describe` · `./relay spec` · `./relay criteria` · `./relay plan RLY-12 @file` | Set description / spec / criteria / plan header (tasks go through `tasks add`, below) — `describe` and `spec` are **separate fields**, not synonyms |
+| `./relay check` · `./relay uncheck RLY-12 42` | Toggle one task done by id |
 | `./relay tasks add RLY-12 --task "Title" @body.md [--task "Title" @body.md …]` | Append tasks (a title + a body each) in ONE atomic call, after the card's last task, in argument order. Bodies are raw files (`@path`, `-` for stdin — at most once — or literal text): no JSON escaping |
 | `./relay tasks list RLY-12` | The card's tasks as `[x]/[ ] #id  title` — titles and metadata, **never bodies** |
 | `./relay task show RLY-12 42` | One task with its full body — the only way to read a body |
 | `./relay task update RLY-12 42 --title T --body @file` · `./relay task rm RLY-12 42` | Edit one task's title/body (`done` stays with `check`/`uncheck`) · remove one (later tasks move up; other tasks' ids and done flags are untouched) |
+| `./relay sub-tasks RLY-12 @file` | Legacy verb: replace the card's whole task list in one call — prefer `tasks add` |
 | `./relay branch` · `./relay pr` · `./relay result RLY-12 …` | Record branch / PR url / AI result blob — the blob has one shape, below |
 | `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` gives the `/attachments/…` path for a `screens` entry |
 | `./relay depends RLY-12 RLY-13 RLY-14` | Replace the card's blocker set — it stays undispatchable until every blocker reaches a top-level Done column. No BLOCKERs clears it. Refs may be separate args or comma-separated; `./relay create --depends-on RE12,RE13` sets them at creation |
@@ -228,7 +229,11 @@ A board's flows — which stages are AI-enabled, what each node does, model/effo
 budgets — are edited in **Settings › Flows**, not in a repo config file. Two rules keep custom
 nodes safe: a node's command should start by checking out the card's branch (from `vars.branch`)
 and end by committing; and the Code flow's first node (`branch`, in the shipped `code.json`)
-materializes the card's `plan` into the per-card `$RELAY_PLAN` path for later nodes to work through.
+materializes only the plan **header** into the per-card `$RELAY_PLAN` path. The tasks are not in that file: the
+`implement` loop (`foreach: card.tasks`) binds one task per iteration, and each loop node fetches
+its task's body with `{relay} task show {ref} {task_id}` (`{task}` is its title). A flow written
+with the legacy `card.sub_tasks` / `sub_tasks` / `{sub_task_id}` names still runs — it is
+normalized to `tasks` when it is loaded or pushed.
 
 A flow is also readable and writable as data: `./relay flow code --json > code.json` pulls the
 canonical document (nodes, edges, trigger as stage **names**, isolation, version), and

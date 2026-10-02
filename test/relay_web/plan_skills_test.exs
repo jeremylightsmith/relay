@@ -67,9 +67,9 @@ defmodule Relay.PlanSkillsTest do
       refute doc =~ "## Task N"
     end
 
-    test "/relay-doctor counts the task verbs as sub_tasks evidence" do
+    test "/relay-doctor counts the task verbs as tasks evidence" do
       doc = File.read!(@doctor)
-      assert doc =~ "| `sub_tasks` | `relay tasks add`"
+      assert doc =~ "| `tasks` | `relay tasks add` |"
       assert doc =~ "`relay task show`"
       assert doc =~ "`relay tasks list`"
     end
