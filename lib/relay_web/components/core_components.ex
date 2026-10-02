@@ -1788,8 +1788,9 @@ defmodule RelayWeb.CoreComponents do
   (`RelayWeb.attachment_view_path/1`) in a new tab — leaving the board and drawer in place — and
   the mockup itself in a fixed-height, full-width sandboxed iframe. `sandbox` is
   `RelayWeb.mockup_sandbox/0` — the same token list the attachment's CSP grants — so the
-  mockup's scripts run but it can never reach Relay's origin or the network. Never link to
-  `src` directly: Relay never shows a mockup as a bare top-level page.
+  mockup's scripts run but it can never reach Relay's origin, and its only network access is
+  Google Fonts (`AttachmentController.html_csp/0`). Never link to `src` directly: Relay never
+  shows a mockup as a bare top-level page.
 
   ## Examples
 

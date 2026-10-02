@@ -210,8 +210,14 @@ Each entry takes only `url` (required) and `caption` (optional string). The `url
 `/attachments/<id>` path of an **HTML attachment on this same card** — upload it first with
 `POST /api/cards/:ref/attachments` (`content_type: "text/html"`). Anything else is refused with
 `422 invalid_mockups` naming the entry's index; nothing is written. `GET /api/cards/:ref`
-returns the list as `mockups` (`[]` when none). Mockups must be self-contained: they are served
-under a sandbox CSP with no network access (inline JS/CSS, `data:` assets only).
+returns the list as `mockups` (`[]` when none). Mockups are served under a sandbox CSP:
+inline JS/CSS and `data:` assets, plus **Google Fonts** as the only network exception —
+stylesheets from `https://fonts.googleapis.com` and font files from `https://fonts.gstatic.com`.
+Every other request (remote scripts and images, fetch/XHR/WebSocket/EventSource, frames, form
+submission) is blocked. Opening a mockup that
+links Google Fonts sends a request to Google, which sees the viewer's IP and the font URL
+(mockups are served with `Referrer-Policy: no-referrer` and run in an opaque origin, so no
+Relay host, path or cookie goes with it).
 
 ### POST /api/cards/:ref/attachments
 

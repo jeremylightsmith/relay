@@ -222,10 +222,15 @@ sharing behavior.
   `Relay.Cards` can parse it). Images are served under the app-wide CSP. **HTML** gets its own
   branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
   `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
-  'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; frame-ancestors 'self'` —
-  plus `nosniff`. Threat model: no `allow-same-origin` (opaque origin — no cookies, no parent
-  access; `_relay_key` is `SameSite=Lax`), no network (`default-src 'none'`), no top
-  navigation/popups/forms. Residual risk is same-domain phishing, mitigated by never showing a
+  'unsafe-inline' https://fonts.googleapis.com; img-src data:; font-src data:
+  https://fonts.gstatic.com; form-action 'none'; frame-ancestors 'self'` —
+  plus `nosniff` and `Referrer-Policy: no-referrer`. Threat model: no `allow-same-origin`
+  (opaque origin — no cookies, no parent access; `_relay_key` is `SameSite=Lax`), no network
+  except the Google Fonts style/font hosts (`default-src 'none'`; RE372 widens only
+  `style-src` and `font-src`, via `AttachmentController.google_fonts_style_origin/0` and
+  `google_fonts_font_origin/0`), no top navigation/popups/forms. Privacy cost (accepted,
+  RE372): opening a mockup that links Google Fonts sends a request to Google, exposing the
+  viewer's IP and the font URL — no referrer, cookie or card content. Residual risk is same-domain phishing, mitigated by never showing a
   mockup as a bare top-level page from Relay's UI and by `frame-ancestors 'self'`; a separate
   user-content origin is a documented follow-up. The sandbox token list is
   `RelayWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
