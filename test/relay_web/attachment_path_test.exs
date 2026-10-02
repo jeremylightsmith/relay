@@ -39,4 +39,12 @@ defmodule RelayWeb.AttachmentPathTest do
       end
     end
   end
+
+  describe "the domain-side definition (RE370)" do
+    test "RelayWeb's helpers are the schema's, not a second copy" do
+      id = Ecto.UUID.generate()
+      assert RelayWeb.attachment_path(id) == Schemas.Attachment.path(id)
+      assert RelayWeb.attachment_path?(Schemas.Attachment.path(id))
+    end
+  end
 end

@@ -202,7 +202,19 @@ sharing behavior.
   one notification path. See [runtime.md](runtime.md) for the topic/event vocabulary.
 - **BoardWatch** — per-board monotonic version counter in ETS; bumped on every
   `Events.broadcast/2`, polled by the CLI to cheaply detect change (RLY-12).
-- **Attachments** — file uploads onto cards, served by `AttachmentController`.
+- **Attachments** — file uploads onto cards (images, and since RE370 self-contained HTML
+  mockups; 5 MB cap), served same-origin by `AttachmentController` at `/attachments/:id`
+  (`Schemas.Attachment.path/1` is the one definition of that path — domain-side so
+  `Relay.Cards` can parse it). Images are served under the app-wide CSP. **HTML** gets its own
+  branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
+  `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
+  'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; frame-ancestors 'self'` —
+  plus `nosniff`. Threat model: no `allow-same-origin` (opaque origin — no cookies, no parent
+  access; `_relay_key` is `SameSite=Lax`), no network (`default-src 'none'`), no top
+  navigation/popups/forms. Residual risk is same-domain phishing, mitigated by never showing a
+  mockup as a bare top-level page from Relay's UI and by `frame-ancestors 'self'`; a separate
+  user-content origin is a documented follow-up. The sandbox token list is
+  `RelayWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
   change never waits on Apple (RLY-81).
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
