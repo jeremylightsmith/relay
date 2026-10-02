@@ -1,7 +1,8 @@
 defmodule RelayWeb.Browser.MockupsTest do
   @moduledoc """
   RE370 — real-browser check that the drawer frames a card's HTML mockup in a sandboxed iframe
-  and that Open full size lands on the framed viewer with its banner (not the raw HTML).
+  and that Open full size opens the framed viewer with its banner in a new tab (not the raw HTML,
+  not in place of the board).
   """
   use PhoenixTest.Playwright.Case, async: false
 
@@ -30,7 +31,9 @@ defmodule RelayWeb.Browser.MockupsTest do
     %{board: board, card: card, html: html, ref: Cards.ref(board, card)}
   end
 
-  test "the drawer frames the mockup and Open full size opens the banner viewer", ctx do
+  test "the drawer frames the mockup and Open full size opens the banner viewer in a new tab", ctx do
+    view_path = RelayWeb.attachment_view_path(ctx.html.id)
+
     ctx.conn
     |> visit("/dev/login")
     |> assert_has("body .phx-connected")
@@ -38,8 +41,11 @@ defmodule RelayWeb.Browser.MockupsTest do
     |> assert_has("#card-drawer-panel")
     |> assert_has("#card-drawer-mockups", text: "Empty state")
     |> assert_has(~s(iframe#card-drawer-mockup-0-frame[sandbox="#{RelayWeb.mockup_sandbox()}"]))
-    |> click_link("#card-drawer-mockup-0-open", "Open full size")
-    |> assert_path(RelayWeb.attachment_view_path(ctx.html.id))
+    |> assert_has(
+      ~s(a#card-drawer-mockup-0-open[href="#{view_path}"][target="_blank"][rel="noopener noreferrer"]),
+      text: "Open full size"
+    )
+    |> visit(view_path)
     |> assert_has("#mockup-viewer-banner", text: ctx.ref)
     |> assert_has("#mockup-viewer-banner", text: ctx.card.title)
     |> assert_has(~s(iframe#mockup-viewer-frame[src="#{RelayWeb.attachment_path(ctx.html.id)}"]))

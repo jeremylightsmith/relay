@@ -62,11 +62,15 @@ defmodule RelayWeb.BoardLiveMockupsTest do
 
     refute render(view) =~ "allow-same-origin"
 
+    # RE370 review: Open full size opens the framed viewer in a NEW tab, leaving the board put.
     assert has_element?(
              view,
-             ~s(#card-drawer-mockup-0-open[href="#{RelayWeb.attachment_view_path(a.id)}"]),
+             ~s(#card-drawer-mockup-0-open[href="#{RelayWeb.attachment_view_path(a.id)}"][target="_blank"][rel="noopener noreferrer"]),
              "Open full size"
            )
+
+    # A plain new-tab link, not a LiveView navigate (which would replace the board tab).
+    refute has_element?(view, "#card-drawer-mockup-0-open[data-phx-link]")
 
     refute has_element?(view, ~s(a[href="#{RelayWeb.attachment_path(a.id)}"]))
   end

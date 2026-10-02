@@ -1784,12 +1784,12 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  One HTML mockup (RE370): its caption, an **Open full size** link to the framed viewer
-  (`RelayWeb.attachment_view_path/1`), and the mockup itself in a fixed-height, full-width
-  sandboxed iframe. `sandbox` is `RelayWeb.mockup_sandbox/0` — the same token list the
-  attachment's CSP grants — so the mockup's scripts run but it can never reach Relay's origin
-  or the network. Never link to `src` directly: Relay never shows a mockup as a bare top-level
-  page.
+  One HTML mockup (RE370): its caption, an **Open full size** link that opens the framed viewer
+  (`RelayWeb.attachment_view_path/1`) in a new tab — leaving the board and drawer in place — and
+  the mockup itself in a fixed-height, full-width sandboxed iframe. `sandbox` is
+  `RelayWeb.mockup_sandbox/0` — the same token list the attachment's CSP grants — so the
+  mockup's scripts run but it can never reach Relay's origin or the network. Never link to
+  `src` directly: Relay never shows a mockup as a bare top-level page.
 
   ## Examples
 
@@ -1814,7 +1814,9 @@ defmodule RelayWeb.CoreComponents do
         </figcaption>
         <.link
           id={"#{@id}-open"}
-          navigate={@view_href}
+          href={@view_href}
+          target="_blank"
+          rel="noopener noreferrer"
           class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           <.icon name="hero-arrows-pointing-out" class="size-3.5" /> Open full size
