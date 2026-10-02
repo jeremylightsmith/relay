@@ -184,8 +184,36 @@ defmodule RelayWeb.Api.RunnerContractTest do
     tasks_delete_response =
       exclusive.conn |> delete(~p"/api/cards/#{tasks_ref}/tasks/#{first_task_id}") |> json_response(200)
 
+    # RE370 — `./relay mockups` uploads each file through the attachments route, then PATCHes the
+    # whole list in one call. Both ends are runner wire, so the request it builds and the list the
+    # card hands back are pinned like the task routes.
+    {:ok, mockups_card} = Relay.Cards.create_card(exclusive.next_up, %{title: "Mockups card"})
+    mockups_ref = Relay.Cards.ref(exclusive.board, mockups_card)
+
+    mockup_upload = %{
+      "filename" => "empty.html",
+      "content_type" => Schemas.Attachment.html_type(),
+      "data_base64" => Base.encode64("<!doctype html><p>Empty</p>")
+    }
+
+    %{"data" => %{"url" => mockup_url}} =
+      exclusive.conn
+      |> post(~p"/api/cards/#{mockups_ref}/attachments", Jason.encode!(mockup_upload))
+      |> json_response(201)
+
+    mockups_request = %{"mockups" => [%{"url" => mockup_url, "caption" => "Empty state"}]}
+
+    mockups_response =
+      exclusive.conn
+      |> patch(~p"/api/cards/#{mockups_ref}", Jason.encode!(mockups_request))
+      |> json_response(200)
+
     document = %{
-      "version" => 7,
+      "version" => 8,
+      "mockups" => %{
+        "request" => mockup_placeholders(mockups_request),
+        "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"])
+      },
       "vocabulary" => %{
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
@@ -379,6 +407,18 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
   defp task_placeholders(list) when is_list(list), do: Enum.map(list, &task_placeholders/1)
   defp task_placeholders(other), do: other
+
+  # Attachment ids are random UUIDs and would churn the fixture; the contract is the key set,
+  # the /attachments/ shape and the caption.
+  defp mockup_placeholders(map) when is_map(map) do
+    Map.new(map, fn
+      {"url", url} when is_binary(url) -> {"url", Schemas.Attachment.path("<attachment-id>")}
+      {key, value} -> {key, mockup_placeholders(value)}
+    end)
+  end
+
+  defp mockup_placeholders(list) when is_list(list), do: Enum.map(list, &mockup_placeholders/1)
+  defp mockup_placeholders(other), do: other
 
   defp scaffold_placeholders(manifest) do
     %{

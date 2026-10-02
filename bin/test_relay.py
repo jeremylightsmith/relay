@@ -415,6 +415,20 @@ class PrintCardTest(unittest.TestCase):
         text = capture(relay.print_card, card)
         self.assertNotIn("tag:", text)
 
+    def test_print_card_lists_mockups_with_caption_and_url(self):
+        card = {"ref": "RLY-1", "title": "Do it", "status": "queued", "active_owner": None,
+                "owners": [], "mockups": [{"url": "/attachments/abc", "caption": "Empty state"},
+                                          {"url": "/attachments/def", "caption": None}]}
+        text = capture(relay.print_card, card)
+        self.assertIn("--- mockups ---", text)
+        self.assertIn("Empty state  /attachments/abc", text)
+        self.assertIn("-  /attachments/def", text)
+
+    def test_print_card_omits_mockups_when_none(self):
+        card = {"ref": "RLY-1", "title": "Do it", "status": "queued", "active_owner": None,
+                "owners": [], "mockups": []}
+        self.assertNotIn("mockups", capture(relay.print_card, card))
+
 
 class SetTagTest(unittest.TestCase):
     """relay tag REF [VALUE] — PATCHes {"tag": value}, null when omitted/empty."""
@@ -1124,6 +1138,85 @@ class AttachTest(unittest.TestCase):
         out = capture(relay.cmd_attach, args)
 
         self.assertIn('"id": "abc"', out)
+
+
+class MockupsCommandTest(unittest.TestCase):
+    """relay mockups REF FILE… [--caption T…] | --clear (RE370) — uploads each file through the
+    attachments endpoint, then REPLACES the card's list with ONE PATCH."""
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+
+        def fake_api(method, path, body=None, **kwargs):
+            self.sent.append((method, path, body))
+            if path.endswith("/attachments"):
+                n = sum(1 for m, p, _b in self.sent if p.endswith("/attachments"))
+                return {"data": {"id": f"id{n}", "url": f"/attachments/id{n}", "markdown": "-"}}
+            return {"data": {"ref": "RLY-1", "mockups": body["mockups"]}}
+
+        relay.api = fake_api
+
+    def html(self, name):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        path = os.path.join(d, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("<!doctype html><p>hi</p>")
+        return path
+
+    def args(self, files, caption=None, clear=False, json=False):
+        return argparse.Namespace(ref="RLY-1", files=files, caption=caption, clear=clear,
+                                  json=json, field=None)
+
+    def test_uploads_each_file_as_html_then_sets_the_list_in_one_patch(self):
+        a, b = self.html("a.html"), self.html("b.html")
+
+        out = capture(relay.cmd_mockups, self.args([a, b], caption=["Empty state"]))
+
+        posts = [s for s in self.sent if s[0] == "POST"]
+        self.assertEqual([p[1] for p in posts], ["/api/cards/RLY-1/attachments"] * 2)
+        self.assertEqual({p[2]["content_type"] for p in posts}, {"text/html"})
+        self.assertEqual([p[2]["filename"] for p in posts], ["a.html", "b.html"])
+        self.assertEqual([s[0] for s in self.sent].count("PATCH"), 1)
+        self.assertEqual(self.sent[-1], ("PATCH", "/api/cards/RLY-1", {"mockups": [
+            {"url": "/attachments/id1", "caption": "Empty state"},
+            {"url": "/attachments/id2", "caption": "b.html"},
+        ]}))
+        self.assertIn("2 mockups", out)
+        self.assertIn("Empty state", out)
+
+    def test_clear_patches_an_empty_list_and_uploads_nothing(self):
+        out = capture(relay.cmd_mockups, self.args([], clear=True))
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RLY-1", {"mockups": []})])
+        self.assertIn("cleared", out)
+
+    def test_refuses_before_any_request(self):
+        a = self.html("a.html")
+        for args in (self.args([]),                              # nothing to do
+                     self.args([a], clear=True),                 # --clear with files
+                     self.args([a], caption=["One", "Two"])):    # more captions than files
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                relay.cmd_mockups(args)
+        self.assertEqual(self.sent, [])
+
+    def test_json_prints_the_card_s_mockups(self):
+        a = self.html("a.html")
+        out = capture(relay.cmd_mockups, self.args([a], json=True))
+        self.assertEqual(json.loads(out), [{"url": "/attachments/id1", "caption": "a.html"}])
+
+    def test_parser_takes_files_then_repeated_captions_and_clear(self):
+        parse = relay.build_parser().parse_args
+        ns = parse(["mockups", "RLY-1", "a.html", "b.html", "--caption", "A", "--caption", "B"])
+        self.assertEqual((ns.ref, ns.files, ns.caption, ns.clear), ("RLY-1", ["a.html", "b.html"], ["A", "B"], False))
+        self.assertTrue(parse(["mockups", "RLY-1", "--clear"]).clear)
+
+    def test_body_matches_the_runner_contract(self):
+        body = relay.mockups_body([("/attachments/x", "c")])
+        self.assertEqual(set(body), set(CONTRACT["mockups"]["request"]))
+        self.assertEqual(set(body["mockups"][0]), set(CONTRACT["mockups"]["request"]["mockups"][0]))
+        self.assertEqual(set(CONTRACT["mockups"]["card_mockups"][0]), {"url", "caption"})
 
 
 class LogForwarderTest(unittest.TestCase):

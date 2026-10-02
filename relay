@@ -55,8 +55,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 70
-RUNNER_FINGERPRINT = "b1c61bec867142ae8dab0823a21af3564fb6c108c677405882a513dfad5261e2"
+RUNNER_VERSION = 71
+RUNNER_FINGERPRINT = "e410baacfca03e66abe7586c537336e752390b2f2ef289761a9ce35627b14a8c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -695,6 +695,16 @@ def attach(ref, path):
     return api("POST", f"/api/cards/{ref}/attachments", body)["data"]
 
 
+def mockups_body(entries):
+    """PATCH body that REPLACES a card's mockups (RE370). `entries` is [(url, caption)]; an
+    empty list clears them. Key set pinned by runner_contract.json's `mockups.request`."""
+    return {"mockups": [{"url": url, "caption": caption} for url, caption in entries]}
+
+
+def set_mockups(ref, entries):
+    return api("PATCH", f"/api/cards/{ref}", mockups_body(entries))["data"]
+
+
 def needs_input_body(question, questions_raw):
     """POST body for needs-input: {"question": ...} for a plain ask, or a validated
     {"questions": [...]} from the JSON in questions_raw (already resolved from @file/stdin)."""
@@ -764,6 +774,11 @@ def print_card(c):
     if c.get("spec"):
         print("\n--- spec ---")
         print(c["spec"])
+    mockups = c.get("mockups") or []
+    if mockups:
+        print("\n--- mockups ---")
+        for m in mockups:
+            print(f'  {m.get("caption") or "-"}  {m.get("url", "")}')
     for e in c.get("timeline") or []:
         who = e.get("author", {}).get("name", "?")
         if e.get("kind") == "comment":
@@ -1416,6 +1431,38 @@ def cmd_attach(args):
     # --caption rewrites the alt text client-side; otherwise use the server's snippet.
     md = f"![{args.caption}]({data['url']})" if args.caption else data["markdown"]
     emit(args, {**data, "markdown": md}, md)
+
+
+def format_mockups(ref, mockups):
+    if not mockups:
+        return f"{ref}: mockups cleared"
+    noun = "mockup" if len(mockups) == 1 else "mockups"
+    lines = [f"{ref}: {len(mockups)} {noun} set"]
+    lines += [f'  {m.get("caption") or "-"}  {m.get("url", "")}' for m in mockups]
+    return "\n".join(lines)
+
+
+def cmd_mockups(args):
+    """relay mockups REF FILE… [--caption T…] | --clear (RE370).
+
+    Uploads each file through the attachments endpoint (`attach`, so the content type comes from
+    the extension — .html → text/html; the server refuses anything else), then REPLACES the
+    card's mockups with ONE PATCH. Captions pair with files in order; a file without one is
+    captioned with its filename. Every argument error dies before the first request, so a bad
+    call never leaves half-uploaded files behind."""
+    files, captions = args.files or [], args.caption or []
+    if args.clear and files:
+        die("--clear takes no files — it empties the card's mockups")
+    if not args.clear and not files:
+        die("name at least one .html file, or pass --clear")
+    if len(captions) > len(files):
+        die(f"{len(captions)} --caption for {len(files)} file(s) — captions pair with files in order")
+    entries = []
+    for i, path in enumerate(files):
+        url = attach(args.ref, path)["url"]
+        entries.append((url, captions[i] if i < len(captions) else os.path.basename(path)))
+    mockups = set_mockups(args.ref, entries).get("mockups") or []
+    emit(args, mockups, format_mockups(args.ref, mockups))
 
 
 # ============================ the runner ============================
@@ -5323,6 +5370,7 @@ COMMANDS = (
     ("Cards", "depends", "replace a card's blockers (none clears them)"),
     ("Cards", "comment", "comment on a card"),
     ("Cards", "attach", "upload a file to a card and print its markdown"),
+    ("Cards", "mockups", "attach HTML mockups to a card, replacing its list (--clear empties it)"),
     ("Cards", "needs-input", "park a card on questions for a human"),
     ("Cards", "own", "take the baton on a card"),
     ("Cards", "release", "let go of a card's baton"),
@@ -5495,6 +5543,11 @@ def build_parser():
     add("comment", cmd_comment, "ref", "text")
     at = add("attach", cmd_attach, "ref", ("file", "the file to upload"), json_flag=True)
     at.add_argument("--caption", help="alt text for the printed markdown image")
+    mk = add("mockups", cmd_mockups, "ref", json_flag=True)
+    mk.add_argument("files", nargs="*", help="self-contained .html files, uploaded in order")
+    mk.add_argument("--caption", action="append",
+                    help="a caption, paired with the files in order (repeat; default: the filename)")
+    mk.add_argument("--clear", action="store_true", help="empty the card's mockups instead")
     ni = add("needs-input", cmd_needs_input, "ref", json_flag=True)
     ni.add_argument("question", nargs="?", help='one question, "-" for stdin, or @path')
     ni.add_argument("--questions",

@@ -40,6 +40,7 @@ exits non-zero.
 | `./relay check RLY-12 42` / `uncheck RLY-12 42` | Toggle one sub-task done/undone by id |
 | `./relay result RLY-12 @result.json` | Set the card's AI result blob — one fixed shape, see [The AI result blob](#the-ai-result-blob) |
 | `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` prints the `/attachments/<id>` path alone |
+| `./relay mockups RLY-12 empty.html full.html --caption "Empty state" --caption "Full"` | Upload HTML mockups and **replace** the card's list in one call (captions pair with files in order; default = filename). `./relay mockups RLY-12 --clear` empties it. Mockups must be **self-contained static HTML** — inline `<style>`/`<script>`, `data:` images/fonts, no network: they run in a sandbox with scripts on and every fetch blocked. Humans review them in the drawer's **Mockups** section; agents read the HTML straight from the file |
 | `./relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `./relay own RLY-12` / `release RLY-12` | Claim for the AI / hand back |
 | `./relay approve RLY-12` / `reject RLY-12 "note"` | Gate: advance / send back |

@@ -123,6 +123,22 @@
       "want_capabilities": false
     }
   },
+  "mockups": {
+    "card_mockups": [
+      {
+        "caption": "Empty state",
+        "url": "/attachments/<attachment-id>"
+      }
+    ],
+    "request": {
+      "mockups": [
+        {
+          "caption": "Empty state",
+          "url": "/attachments/<attachment-id>"
+        }
+      ]
+    }
+  },
   "outcome": {
     "request": {
       "detail": "asked the human",
@@ -314,7 +330,7 @@
       }
     }
   },
-  "version": 7,
+  "version": 8,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",
