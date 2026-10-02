@@ -57,6 +57,23 @@ defmodule RelayWeb.Api.AuditControllerTest do
     assert finding["run_id"] == run.id
   end
 
+  test "serves planner_not_migrated for a fallback-seeded run", %{conn: conn, board: board} do
+    audit_flow(board)
+    card = insert(:card, board: board, stage: insert(:stage, board: board))
+    run = insert(:run, card: card, flow_key: "code", status: :done, tasks_from_plan: true)
+
+    data = conn |> get(~p"/api/flows/code/audit") |> json_response(200) |> Map.fetch!("data")
+
+    assert [finding] = data["findings"]
+    assert Enum.sort(Map.keys(finding)) == Enum.sort(@finding_keys)
+    assert finding["check"] == "planner_not_migrated"
+    assert finding["severity"] == "warning"
+    assert finding["node_key"] == nil
+    assert finding["run_id"] == run.id
+    assert finding["summary"] =~ Relay.Cards.ref(board, card)
+    assert finding["fix"] =~ "/relay-doctor"
+  end
+
   test "honors an explicit window and echoes it", %{conn: conn, board: board} do
     audit_flow(board)
 

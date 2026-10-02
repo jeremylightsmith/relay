@@ -638,9 +638,10 @@ defmodule Relay.Runs do
 
   @doc """
   The flow's runs within `opts[:window]` (one of `metric_windows/0`, default `default_window/0`)
-  with `:node_executions` preloaded, ordered `started_at` ASC then `id` ASC, executions ordered
-  by `id`. `Relay.Runs.Audit` reasons about "the next execution", so a stable order is part of
-  the contract, not a convenience.
+  with `:node_executions` and `card: :board` preloaded, ordered `started_at` ASC then `id` ASC,
+  executions ordered by `id`. `Relay.Runs.Audit` reasons about "the next execution", so a stable
+  order is part of the contract, not a convenience. The card and board let `Relay.Runs.Audit`
+  name cards (`Relay.Cards.ref/2`) without a query.
   """
   def recent_runs_for_flow(%Flow{} = flow, opts \\ []) do
     since = opts |> Keyword.get(:window, default_window()) |> metric_window_since()
@@ -651,7 +652,7 @@ defmodule Relay.Runs do
       on: c.id == r.card_id,
       where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
       order_by: [asc: r.started_at, asc: r.id],
-      preload: [node_executions: ^executions]
+      preload: [node_executions: ^executions, card: :board]
     )
     |> filter_runs_since(since)
     |> Repo.all()

@@ -213,8 +213,11 @@ never 403s):
   `Relay.Runs.audit/2` (`Relay.Runs.Audit.findings/2` over `Relay.Runs.recent_runs_for_flow/2`).
   Returns `flow_key`, the echoed `window`, the `runs` count examined, and a `findings` array of
   `severity` / `check` / `flow_key` / `node_key` / `run_id` / `summary` / `evidence` / `fix`.
-  Two checks today: `findings_dropped` (a foreach cursor advanced past a failed review) and
-  `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`). The
+  Three checks today: `findings_dropped` (a foreach cursor advanced past a failed review),
+  `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`), and
+  `planner_not_migrated` (RE368 — one WARNING per flow when a run's tasks were seeded by the
+  legacy plan-parse fallback, read from `runs.tasks_from_plan`; names the affected-card count
+  and most recent refs, fix `/relay-doctor`). The
   other half of `relay audit` — CI parity — is computed in `./relay`, because the server has
   no checkout of any board's repo. Read-only, board-scoped, advisory.
 - `GET /api/flows` (`RelayWeb.Api.FlowController.index/2`) — every flow on the board, fully

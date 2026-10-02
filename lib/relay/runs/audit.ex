@@ -7,8 +7,8 @@ defmodule Relay.Runs.Audit do
   "this flow can *start*", not "this board's history is clean". These checks ask the second
   question, from history the server already stores.
 
-  Pure by construction: `findings/2` takes the flow and its runs with `:node_executions`
-  preloaded and returns findings — no queries — which is what makes it testable from fixtures.
+  Pure by construction: `findings/2` takes the flow and its runs with `:node_executions` and
+  `card: :board` preloaded and returns findings — no queries — which is what makes it testable from fixtures.
   `Relay.Runs.recent_runs_for_flow/2` does the loading and `Relay.Runs.audit/2` composes them.
 
   ## The checks
@@ -19,11 +19,17 @@ defmodule Relay.Runs.Audit do
     * `:verdict_flipped` (WARNING; ERROR for every flip in a run where two distinct nodes
       flipped) — same node, same visit, same `git_sha`, `failed` on one attempt and `succeeded`
       on the next: a retry laundered a failure into a pass.
+    * `:planner_not_migrated` (WARNING; one per flow) — at least one run in the window had its
+      tasks seeded by the legacy plan-parse fallback (`runs.tasks_from_plan`, RE368): the plan
+      node's skill doesn't write tasks with `relay tasks add`. Names the affected-card count and
+      the most recent few; the fix is `/relay-doctor`. Also the telemetry for deleting the
+      fallback — when no board reports it, it is safe to remove.
 
-  Both are deliberately conservative. A missing subsequent execution, a nil `sub_task_id` or a
+  The first two are deliberately conservative. A missing subsequent execution, a nil `sub_task_id` or a
   nil `git_sha` produces NO finding: a false "your gates are lying" is worse than a miss.
   """
 
+  alias Relay.Cards
   alias Schemas.Flow
   alias Schemas.NodeExecution
   alias Schemas.Run
@@ -31,15 +37,19 @@ defmodule Relay.Runs.Audit do
   # Ordered most severe first — `severity_rank/1` and every report's ordering read this list,
   # and it is pinned on the wire by test/fixtures/runner_contract.json.
   @severities [:error, :warning]
-  @checks [:findings_dropped, :verdict_flipped]
+  @checks [:findings_dropped, :verdict_flipped, :planner_not_migrated]
 
   # Policy: one node getting lucky on a retry is noise; two distinct nodes flipping in one run
   # is a pattern, so every flip in that run escalates.
   @escalate_at_distinct_nodes 2
 
+  # Policy: how many affected cards the planner finding names, most recent first; the count in
+  # the summary covers the rest.
+  @planner_cards_named 3
+
   @type finding :: %{
           severity: :error | :warning,
-          check: :findings_dropped | :verdict_flipped,
+          check: :findings_dropped | :verdict_flipped | :planner_not_migrated,
           flow_key: String.t(),
           node_key: String.t() | nil,
           run_id: integer() | nil,
@@ -55,7 +65,8 @@ defmodule Relay.Runs.Audit do
   def checks, do: @checks
 
   @doc """
-  Findings for `flow` over `runs` (each with `:node_executions` preloaded), errors first.
+  Findings for `flow` over `runs` (each with `:node_executions` and `card: :board` preloaded),
+  errors first.
 
   Executions are ordered by `id` here rather than trusting the preload's order: both checks
   reason about "the next execution", so the order is part of the check, not of the query.
@@ -67,6 +78,7 @@ defmodule Relay.Runs.Audit do
       executions = Enum.sort_by(run.node_executions, & &1.id)
       dropped_findings(flow, run, executions) ++ flipped_findings(flow, run, executions)
     end)
+    |> Kernel.++(planner_findings(flow, runs))
     |> Enum.sort_by(&{severity_rank(&1.severity), &1.run_id, &1.check})
   end
 
@@ -178,4 +190,43 @@ defmodule Relay.Runs.Audit do
   end
 
   defp short_sha(sha), do: String.slice(sha, 0, 7)
+
+  # ---- C3: planner not migrated --------------------------------------------
+
+  # One finding per flow, not per run: the defect is the flow's plan node, and every affected
+  # card is a symptom of it. `runs` arrive oldest-first, so reversing before `uniq_by` keeps
+  # each card's most recent marked run and orders the cards most recent first.
+  defp planner_findings(flow, runs) do
+    affected = runs |> Enum.filter(& &1.tasks_from_plan) |> Enum.reverse() |> Enum.uniq_by(& &1.card_id)
+
+    case affected do
+      [] -> []
+      [latest | _] -> [planner_finding(flow, latest, affected)]
+    end
+  end
+
+  defp planner_finding(flow, latest, affected) do
+    %{
+      severity: :warning,
+      check: :planner_not_migrated,
+      flow_key: flow.key,
+      # The server cannot know which node's skill wrote the plan.
+      node_key: nil,
+      run_id: latest.id,
+      summary:
+        planner_summary(affected) <>
+          " — the plan node's skill doesn't write tasks with `relay tasks add`",
+      evidence: "relay runs <ref> --json — run #{latest.id}",
+      fix: "Run `/relay-doctor` to migrate the planner to `relay tasks add`, then re-plan affected cards"
+    }
+  end
+
+  defp planner_summary([only]), do: "#{card_ref(only)}'s tasks came from the legacy plan-parse fallback"
+
+  defp planner_summary(affected) do
+    named = affected |> Enum.take(@planner_cards_named) |> Enum.map_join(", ", &card_ref/1)
+    "#{length(affected)} cards' tasks came from the legacy plan-parse fallback (most recent: #{named})"
+  end
+
+  defp card_ref(%Run{card: card}), do: Cards.ref(card.board, card)
 end
