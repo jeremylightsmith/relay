@@ -153,7 +153,8 @@ sharing behavior.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
   distinct from `ai_result.screens` (run-result image screenshots).
   The drawer renders mockups in a **Mockups** section (`CoreComponents.mockup_preview/1`: caption,
-  fixed-height `<iframe sandbox="allow-scripts">`, **Open full size**). Open full size goes to
+  fixed-height `<iframe sandbox="allow-scripts">`, **Open full size**). Open full size opens, in a
+  new browser tab (`target="_blank"`, leaving the board and drawer in place),
   `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) — an
   authenticated, membership-scoped page in the `:require_authenticated` live_session that frames
   the mockup under a banner "Mockup · <ref> <title>" linking back to the card; it 404s for a

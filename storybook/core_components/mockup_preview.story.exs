@@ -10,7 +10,7 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
     [
       %Variation{
         id: :captioned,
-        description: "RE370 — the drawer's Mockups entry: caption, Open full size, sandboxed iframe.",
+        description: "RE370 — the drawer's Mockups entry: caption, Open full size (new tab), sandboxed iframe.",
         attributes: %{
           id: "mockup-preview-story-captioned",
           src: "/images/logo_light_128.png",
