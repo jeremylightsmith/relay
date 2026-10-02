@@ -195,7 +195,7 @@ defmodule Relay.Runs.NoOpGuardTest do
         lands_on_stage_id: lands.id,
         nodes: [
           %{key: "seed", type: :shell, run: "true"},
-          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.sub_tasks"}
+          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"}
         ],
         edges: [
           %{from: "start", to: "seed"},
@@ -248,7 +248,7 @@ defmodule Relay.Runs.NoOpGuardTest do
     lands = Enum.find(board.stages, &(&1.name == "Plan"))
 
     impl = %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true}
-    impl = if foreach?, do: Map.put(impl, :foreach, "card.sub_tasks"), else: impl
+    impl = if foreach?, do: Map.put(impl, :foreach, "card.tasks"), else: impl
 
     loop_edges =
       if foreach? do

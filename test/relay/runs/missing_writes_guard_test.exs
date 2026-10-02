@@ -121,8 +121,8 @@ defmodule Relay.Runs.MissingWritesGuardTest do
     assert outcome_of(job).outcome == :succeeded
   end
 
-  test "a nil ai_result and an empty sub_tasks list both count as blank", ctx do
-    flow = contract_flow(ctx.board, %{writes: [:ai_result, :sub_tasks]})
+  test "a nil ai_result and an empty tasks list both count as blank", ctx do
+    flow = contract_flow(ctx.board, %{writes: [:ai_result, :tasks]})
     job = start_work(ctx.board, flow, %{})
 
     {:ok, _run} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "ok"})
@@ -130,7 +130,7 @@ defmodule Relay.Runs.MissingWritesGuardTest do
     exec = outcome_of(job)
     assert exec.outcome == :failed
     assert exec.detail =~ "`ai_result`"
-    assert exec.detail =~ "`sub_tasks`"
+    assert exec.detail =~ "`tasks`"
   end
 
   # From here it is an ordinary failure: existing edges route it, no engine change.

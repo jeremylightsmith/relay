@@ -131,10 +131,11 @@ became comment-free JSON (RLY-241). Keyed by node.
   `test/relay/flows/default_library_test.exs`.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's tasks. The `next_task` grep-gate is **gone** —
-  "which task is next" is derived server-side; `{sub_task}` names the task in the prompt and
-  `{sub_task_id}` lets the node fetch its body with `relay task show {ref} {sub_task_id}`
-  (RE357). `implement`, `spec_review`, `quality_review` and `fix_findings` all declare
-  `reads: [sub_tasks]`.
+  "which task is next" is derived server-side; `{task}` names the task in the prompt and
+  `{task_id}` lets the node fetch its body with `relay task show {ref} {task_id}` (RE357;
+  canonical since RE367 — the legacy `{sub_task}` / `{sub_task_id}` / `card.sub_tasks`
+  spellings are normalized on load). `implement`, `spec_review`, `quality_review` and
+  `fix_findings` all declare `reads: [tasks]`.
 - **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the runner appends
   `--agent <name>` to `claude -p`, so the file supplies the system prompt while `run` stays the
   user prompt. `post` has no agent file and keeps a bare prompt. `final-fixer` backs two nodes:
@@ -202,10 +203,11 @@ became comment-free JSON (RLY-241). Keyed by node.
   *separate* contract from `expects_commits`, which stays the commit guard's own field;
   `commits` is not a legal contract value. What the shipped flows declare: `spec·brainstorm`
   reads `description`, writes `spec` + `acceptance_criteria`; `plan·write_plan` reads `spec` +
-  `acceptance_criteria`, writes `plan`; `code·branch` reads `plan`, writes `branch`;
+  `acceptance_criteria`, writes `plan` + `tasks`; `code·branch` reads `plan`, writes `branch`;
   `code·post` writes `ai_result`; `code·merge` writes `pr_url`. Every other node declares
-  neither — its output is commits. `sub_tasks` is never declared: it is seeded server-side at
-  Code-run start from `card.plan` (RLY-165). Existing boards pick the contract up automatically:
+  neither — its output is commits. The four per-task Code nodes read `tasks`; nothing in the
+  Code flow writes it (the legacy plan-parse fallback still seeds tasks from `card.plan` at run
+  start for a planner that has not migrated, RLY-165). Existing boards pick the contract up automatically:
   `Relay.Flows.sync_defaults!/0` runs at deploy (`Relay.Release.migrate/0`) and re-syncs every
   **library-managed** (`version == 1`) flow to the new default, so the contract and the run
   strings that satisfy it land together in one transaction. A **hand-customized** flow

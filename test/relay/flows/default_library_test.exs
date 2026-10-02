@@ -365,12 +365,12 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     assert declared == %{
              {"spec", "brainstorm"} => {[:description], [:spec, :acceptance_criteria]},
-             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan, :sub_tasks]},
+             {"plan", "write_plan"} => {[:spec, :acceptance_criteria], [:plan, :tasks]},
              {"code", "branch"} => {[:plan], [:branch]},
-             {"code", "implement"} => {[:sub_tasks], []},
-             {"code", "spec_review"} => {[:sub_tasks], []},
-             {"code", "quality_review"} => {[:sub_tasks], []},
-             {"code", "fix_findings"} => {[:sub_tasks], []},
+             {"code", "implement"} => {[:tasks], []},
+             {"code", "spec_review"} => {[:tasks], []},
+             {"code", "quality_review"} => {[:tasks], []},
+             {"code", "fix_findings"} => {[:tasks], []},
              {"code", "post"} => {[], [:ai_result]},
              {"code", "merge"} => {[], [:pr_url]}
            }
@@ -383,19 +383,25 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     for key <- ~w(implement spec_review quality_review fix_findings) do
       node = Enum.find(code.nodes, &(&1.key == key))
-      assert node.run =~ "{sub_task_id}", "#{key} must name its task by id"
+      assert node.run =~ "{task_id}", "#{key} must name its task by id"
       assert node.run =~ "relay task show", "#{key} must say which command fetches the task"
-      assert node.run =~ "{relay} task show {ref} {sub_task_id}", "#{key} must give the exact command"
-      assert :sub_tasks in node.reads, "#{key} must declare it reads sub_tasks"
+      assert node.run =~ "{relay} task show {ref} {task_id}", "#{key} must give the exact command"
+      assert :tasks in node.reads, "#{key} must declare it reads tasks"
+    end
+  end
+
+  test "the shipped flow files spell the contract canonically (RE367)" do
+    for path <- Path.wildcard("docs/designs/flows/*.json") do
+      refute File.read!(path) =~ "sub_task", "#{path} still uses a legacy sub_task spelling"
     end
   end
 
   # RE357: the planner writes the tasks itself (`relay tasks add`), so write_plan declares
-  # sub_tasks and the writes guard fails a planner that leaves them blank — at the Plan stage,
+  # tasks and the writes guard fails a planner that leaves them blank — at the Plan stage,
   # not two stages later. No other shipped node may claim the field: a declared write is enforced.
-  test "only write_plan declares it writes sub_tasks" do
+  test "only write_plan declares it writes tasks" do
     writers =
-      for flow <- DefaultLibrary.all(), node <- flow.nodes, :sub_tasks in node.writes, do: {flow.key, node.key}
+      for flow <- DefaultLibrary.all(), node <- flow.nodes, :tasks in node.writes, do: {flow.key, node.key}
 
     assert writers == [{"plan", "write_plan"}]
   end

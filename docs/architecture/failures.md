@@ -68,7 +68,7 @@ closed** (the burden of proof is on the claimant).
 
 | # | Failure | Trigger | Handling | Ends as |
 | --- | --- | --- | --- | --- |
-| B1 | **Empty plan** | flow has a `foreach`, the card has no sub_tasks, and the legacy plan-parse fallback (`PlanTasks.parse`) finds no `## Task N:` headings | **no run created**; `block_on_unusable_plan` calls `request_input` telling the owner the planner has not migrated to `relay tasks add` and to run `/relay-doctor`, re-plan (or `relay tasks add`), and move the card back — prevents merging an empty branch as "done". When the fallback DOES seed, `maybe_seed_sub_tasks` logs a `deprecated:` warning naming the card and flow (RE357) and the run is marked `tasks_from_plan`, which `relay audit` reports as `planner_not_migrated` (RE368) | card `needs_input`, no run |
+| B1 | **Empty plan** | flow has a `foreach`, the card has no tasks, and the legacy plan-parse fallback (`PlanTasks.parse`) finds no `## Task N:` headings | **no run created**; `block_on_unusable_plan` calls `request_input` telling the owner the planner has not migrated to `relay tasks add` and to run `/relay-doctor`, re-plan (or `relay tasks add`), and move the card back — prevents merging an empty branch as "done". When the fallback DOES seed, `maybe_seed_sub_tasks` logs a `deprecated:` warning naming the card and flow (RE357) and the run is marked `tasks_from_plan`, which `relay audit` reports as `planner_not_migrated` (RE368) | card `needs_input`, no run |
 
 ## C. Scheduling & capacity (diagnostic — the card waits, no run fails)
 

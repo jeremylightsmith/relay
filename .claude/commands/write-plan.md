@@ -175,7 +175,7 @@ Then, in this order:
    in order, with no leftovers; spot-check one body with `./relay task show <ref> <id>`, and
    `./relay card <ref> --json` must show a `plan` that is the header alone.
 
-The Plan flow's `write_plan` node declares that it writes both `plan` and `sub_tasks`: a run
+The Plan flow's `write_plan` node declares that it writes both `plan` and `tasks`: a run
 that reports success with either still empty is failed by the engine at the Plan stage.
 
 ## Headless / runner use (no human to dialogue with)

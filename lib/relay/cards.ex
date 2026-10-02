@@ -1134,18 +1134,20 @@ defmodule Relay.Cards do
   "changed during the node": a delta check would fail an honest re-entry (a brainstorm returning
   from `needs-input` and concluding the existing spec still stands).
 
-  `fields` come from `Schemas.Card.contract_fields/0`. `:sub_tasks` requires the association
+  `fields` come from `Schemas.Card.contract_fields/0`. `:tasks` requires the `sub_tasks` association
   preloaded — an unloaded one raises rather than silently reporting "blank".
   """
   def blank_contract_fields(%Card{} = card, fields) when is_list(fields) do
     Enum.filter(fields, &blank_contract_field?(card, &1))
   end
 
-  defp blank_contract_field?(%Card{sub_tasks: %Ecto.Association.NotLoaded{}}, :sub_tasks) do
-    raise ArgumentError, "Relay.Cards.blank_contract_fields/2 requires :sub_tasks to be preloaded"
+  # `:tasks` (RE367) is the contract name for the `sub_tasks` association.
+  defp blank_contract_field?(%Card{sub_tasks: %Ecto.Association.NotLoaded{}}, :tasks) do
+    raise ArgumentError,
+          "Relay.Cards.blank_contract_fields/2 requires :sub_tasks to be preloaded for the :tasks contract field"
   end
 
-  defp blank_contract_field?(%Card{sub_tasks: sub_tasks}, :sub_tasks), do: sub_tasks == []
+  defp blank_contract_field?(%Card{sub_tasks: sub_tasks}, :tasks), do: sub_tasks == []
   defp blank_contract_field?(%Card{ai_result: ai_result}, :ai_result), do: ai_result_blank?(ai_result)
   defp blank_contract_field?(%Card{} = card, field), do: card |> Map.fetch!(field) |> blank_text?()
 
@@ -1156,7 +1158,7 @@ defmodule Relay.Cards do
   # set and this runs inside `RunServer.apply_outcome/5`: a missing clause would crash the run
   # server on an outcome report instead of producing a legible node failure. A present
   # non-string value counts as written; a field needing its own blank rule (as `:ai_result` and
-  # `:sub_tasks` do) gets its own `blank_contract_field?/2` clause above.
+  # `:tasks` do) gets its own `blank_contract_field?/2` clause above.
   defp blank_text?(_present), do: false
 
   @doc """

@@ -208,8 +208,12 @@ defmodule Schemas.Card do
   (RE244) — the ONE definition; `Schemas.Flow.Node`'s two contract enums are its only
   consumers. `commits` is deliberately absent: "this node must produce commits" is
   `Schemas.Flow.Node.expects_commits`, a separate field with a separate guard (RLY-194).
+
+  `:tasks` (RE367) is the contract name for the card's `sub_tasks` association — the schema and
+  table keep their legacy name. The old contract spelling `sub_tasks` is a deprecated alias that
+  `Schemas.Flow.Node.normalize_legacy/1` rewrites on the way in; it is not a value here.
   """
   def contract_fields do
-    [:description, :spec, :acceptance_criteria, :plan, :sub_tasks, :branch, :pr_url, :ai_result]
+    [:description, :spec, :acceptance_criteria, :plan, :tasks, :branch, :pr_url, :ai_result]
   end
 end

@@ -79,7 +79,7 @@ defmodule Relay.FlowsSeedTest do
 
     # The next_task grep-gate is gone: "which task is next" is engine-derived now.
     refute Enum.any?(code.nodes, &(&1.key == "next_task"))
-    assert %{foreach: "card.sub_tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
+    assert %{foreach: "card.tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
 
     implement = Enum.find(code.nodes, &(&1.key == "implement"))
     assert %{type: :agent, model: "opus", effort: "high"} = implement
@@ -104,7 +104,7 @@ defmodule Relay.FlowsSeedTest do
     assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
              ["final_fix", "fix_findings", "implement"]
 
-    assert Enum.find(code.nodes, &(&1.key == "implement")).foreach == "card.sub_tasks"
+    assert Enum.find(code.nodes, &(&1.key == "implement")).foreach == "card.tasks"
 
     assert code.edges
            |> Enum.filter(&(&1.from == "quality_review" and &1.on == :succeeded))
@@ -187,7 +187,7 @@ defmodule Relay.FlowsSeedTest do
 
     write_plan = Enum.find(Flows.get_flow(ctx.board, "plan").nodes, &(&1.key == "write_plan"))
     assert write_plan.reads == [:spec, :acceptance_criteria]
-    assert write_plan.writes == [:plan, :sub_tasks]
+    assert write_plan.writes == [:plan, :tasks]
 
     code = Flows.get_flow(ctx.board, "code")
     assert Enum.find(code.nodes, &(&1.key == "branch")).writes == [:branch]

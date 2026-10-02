@@ -312,7 +312,7 @@ defmodule Relay.Runs.EngineTest do
   defp foreach_flow do
     flow(
       [
-        [key: "head", type: :agent, foreach: "card.sub_tasks"],
+        [key: "head", type: :agent, foreach: "card.tasks"],
         [key: "tail", type: :gate]
       ],
       [
@@ -341,7 +341,7 @@ defmodule Relay.Runs.EngineTest do
   test "an unguarded edge is the fallback when no guard is satisfied" do
     flow =
       flow(
-        [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "other", type: :agent]],
+        [[key: "head", type: :agent, foreach: "card.tasks"], [key: "other", type: :agent]],
         [
           [from: "start", to: "head"],
           [from: "head", to: "head", on: :succeeded, when: :foreach_remaining],
@@ -380,7 +380,7 @@ defmodule Relay.Runs.EngineTest do
   # implement <-> review lap, in miniature.
   defp lap_flow do
     flow(
-      [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "tail", type: :gate]],
+      [[key: "head", type: :agent, foreach: "card.tasks"], [key: "tail", type: :gate]],
       [
         [from: "start", to: "head"],
         [from: "head", to: "head", on: :failed, max_loops: 3],
@@ -415,7 +415,7 @@ defmodule Relay.Runs.EngineTest do
     # global count (3) would fail, the iteration-scoped count (1) must not.
     flow =
       flow(
-        [[key: "head", type: :agent, foreach: "card.sub_tasks"], [key: "mid", type: :agent]],
+        [[key: "head", type: :agent, foreach: "card.tasks"], [key: "mid", type: :agent]],
         [
           [from: "start", to: "head"],
           [from: "head", to: "mid", on: :succeeded],

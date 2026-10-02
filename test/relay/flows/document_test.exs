@@ -335,4 +335,39 @@ defmodule Relay.Flows.DocumentTest do
       assert msg =~ ~s(role "review")
     end
   end
+
+  describe "legacy sub_tasks spellings (RE367)" do
+    @legacy_node %{
+      "key" => "a",
+      "type" => "agent",
+      "run" => "work {sub_task} ({sub_task_id})",
+      "foreach" => "card.sub_tasks",
+      "reads" => ["sub_tasks"],
+      "writes" => ["plan", "sub_tasks"]
+    }
+
+    test "decode/1 normalizes every legacy alias to canonical" do
+      assert {:ok, %{nodes: [node]}} = Document.decode(Map.put(@minimal, "nodes", [@legacy_node]))
+
+      assert node.foreach == "card.tasks"
+      assert node.reads == [:tasks]
+      assert node.writes == [:plan, :tasks]
+      assert node.run == "work {task} ({task_id})"
+    end
+
+    test "a legacy document, saved, encodes back canonical" do
+      board = library_board()
+      doc = Map.put(@minimal, "nodes", [@legacy_node])
+
+      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "tiny", doc)
+
+      encoded = encoded(board, "tiny")
+      refute Jason.encode!(encoded) =~ "sub_task"
+
+      assert [%{"foreach" => "card.tasks", "reads" => ["tasks"], "writes" => ["plan", "tasks"], "run" => run}] =
+               encoded["nodes"]
+
+      assert run == "work {task} ({task_id})"
+    end
+  end
 end

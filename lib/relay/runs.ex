@@ -4424,8 +4424,8 @@ defmodule Relay.Runs do
         "branch" => card.branch || default_branch(board, card),
         "prior_detail" => opts[:prior_detail],
         "findings" => opts[:findings],
-        "sub_task" => sub_task_title(opts[:sub_task_id]),
-        "sub_task_id" => opts[:sub_task_id]
+        "task" => sub_task_title(opts[:sub_task_id]),
+        "task_id" => opts[:sub_task_id]
       })
 
     %{
@@ -4438,11 +4438,13 @@ defmodule Relay.Runs do
     }
   end
 
-  # {sub_task} lets a foreach node's prompt name the exact task it is working
-  # instead of saying "the next unchecked one"; {sub_task_id} lets it FETCH that
-  # task (`relay task show {ref} {sub_task_id}`, RE357). Both are nil outside a
-  # foreach binding, and the runner drops nil vars, so the placeholder survives
-  # literally there — use them only in nodes inside the loop.
+  # {task} lets a foreach node's prompt name the exact task it is working
+  # instead of saying "the next unchecked one"; {task_id} lets it FETCH that
+  # task (`relay task show {ref} {task_id}`, RE357; canonical names since RE367 —
+  # the legacy {sub_task}/{sub_task_id} are rewritten on flow load, so no stored
+  # flow still uses them). Both are nil outside a foreach binding, and the runner
+  # drops nil vars, so the placeholder survives literally there — use them only in
+  # nodes inside the loop.
   defp sub_task_title(nil), do: nil
 
   defp sub_task_title(sub_task_id) do

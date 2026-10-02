@@ -151,6 +151,56 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
   defp progress(board, card), do: Cards.sub_task_progress(Repo.preload(Cards.get_card(board, card.id), :sub_tasks))
 
+  # RE367: re-push the board's Code flow with every canonical contract name swapped back to its
+  # legacy alias — exactly what a board customized before the rename still carries.
+  defp legacy_spelled_code_flow!(board) do
+    legacy =
+      board
+      |> Flows.get_flow_with_stages("code")
+      |> Relay.Flows.Document.encode()
+      |> Jason.encode!()
+      |> String.replace("card.tasks", "card.sub_tasks")
+      |> String.replace(~s("tasks"), ~s("sub_tasks"))
+      |> String.replace("{task_id}", "{sub_task_id}")
+      |> String.replace("{task}", "{sub_task}")
+      |> Jason.decode!()
+
+    assert Jason.encode!(legacy) =~ "{sub_task_id}"
+    assert {:ok, _tag, _flow} = Flows.upsert_from_document(board, "code", legacy)
+  end
+
+  # Drive branch → implement and prove the first implement job's `run` renders with the bound
+  # task's id in place of {task_id} — mirroring ./relay's render/2, which substitutes every
+  # non-nil var as a string. Then finish the run so the scheduler settles cleanly.
+  defp assert_task_id_rendered(conn, board) do
+    %{card: card, run: run, server: server} = launch(conn, board, ["Alpha"])
+    [alpha] = sub_tasks(card)
+
+    assert %{"node_id" => "branch"} = branch = Exec.claim(conn, @runner_name, @capacity)
+    Exec.outcome(conn, branch["id"], %{"outcome" => "succeeded", "detail" => "ok"})
+
+    assert %{"node_id" => "implement"} = impl = Exec.claim(conn, @runner_name, @capacity)
+    refute impl["run"] =~ "sub_task"
+    assert impl["vars"]["task_id"] == alpha.id
+    assert impl["vars"]["task"] == "Alpha"
+
+    rendered =
+      Enum.reduce(impl["vars"], impl["run"], fn {k, v}, acc ->
+        if is_nil(v), do: acc, else: String.replace(acc, "{#{k}}", to_string(v))
+      end)
+
+    assert rendered =~ "task show #{impl["vars"]["ref"]} #{alpha.id}"
+    refute rendered =~ "{task_id}"
+
+    Exec.outcome(conn, impl["id"], %{"outcome" => "succeeded", "detail" => "ok"})
+    drive(conn, %{})
+
+    assert Runs.get_run!(run.id).status == :done
+    assert_receive {:run_finished, %{id: finished_id}}, 5_000
+    assert finished_id == run.id
+    settle(server)
+  end
+
   describe "the Code flow, end to end" do
     test "a 3-task plan is iterated, each task is checked off, and the run reaches :done",
          %{conn: conn, board: board} do
@@ -196,7 +246,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
       # Each implement carried the sub_task it was working, in order.
       assert ["Alpha", "Beta", "Gamma"] =
-               claimed |> Enum.filter(&(&1["node_id"] == "implement")) |> Enum.map(& &1["vars"]["sub_task"])
+               claimed |> Enum.filter(&(&1["node_id"] == "implement")) |> Enum.map(& &1["vars"]["task"])
 
       # ...and each iteration's executions are stamped with that sub_task's id.
       ids = Enum.map(sub_tasks(card), & &1.id)
@@ -251,7 +301,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       # and the task it belongs to.
       assert %{"node_id" => "fix_findings"} = again = Exec.claim(conn, @runner_name, @capacity)
       assert again["vars"]["findings"] == "the second assertion is missing"
-      assert again["vars"]["sub_task"] == "Alpha"
+      assert again["vars"]["task"] == "Alpha"
 
       # The task is NOT checked off — the box means "reviewed", not "attempted".
       assert [%{done: false}] = sub_tasks(card)
@@ -359,6 +409,16 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       assert_receive {:run_finished, %{id: finished_id}}, 5_000
       assert finished_id == run.id
       settle(server)
+    end
+
+    test "the canonical Code flow binds the task and renders {task_id} (RE367)", %{conn: conn, board: board} do
+      assert_task_id_rendered(conn, board)
+    end
+
+    test "a Code flow pushed with the legacy sub_tasks names runs unchanged and renders {task_id} (RE367)",
+         %{conn: conn, board: board} do
+      legacy_spelled_code_flow!(board)
+      assert_task_id_rendered(conn, board)
     end
   end
 end

@@ -72,7 +72,7 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
     end
 
     before = contract.(Flows.get_flow!(board, "plan"))
-    assert before == {[:spec, :acceptance_criteria], [:plan, :sub_tasks]}
+    assert before == {[:spec, :acceptance_criteria], [:plan, :tasks]}
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/plan")
 

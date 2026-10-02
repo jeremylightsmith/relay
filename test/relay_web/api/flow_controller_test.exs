@@ -63,6 +63,33 @@ defmodule RelayWeb.Api.FlowControllerTest do
   end
 
   describe "PUT /api/flows/:key" do
+    test "a push spelled with the legacy sub_tasks names saves and pulls back canonical (RE367)", %{conn: conn} do
+      legacy =
+        conn
+        |> pull("code")
+        |> Map.delete("version")
+        |> Map.put("key", "legacy-code")
+        |> Jason.encode!()
+        |> String.replace("card.tasks", "card.sub_tasks")
+        |> String.replace(~s("tasks"), ~s("sub_tasks"))
+        |> String.replace("{task_id}", "{sub_task_id}")
+        |> String.replace("{task}", "{sub_task}")
+        |> Jason.decode!()
+
+      assert Jason.encode!(legacy) =~ "card.sub_tasks"
+      assert Jason.encode!(legacy) =~ "{sub_task_id}"
+
+      assert conn |> push_doc("legacy-code", legacy) |> json_response(201)
+
+      pulled = pull(conn, "legacy-code")
+      refute Jason.encode!(pulled) =~ "sub_task"
+
+      implement = Enum.find(pulled["nodes"], &(&1["key"] == "implement"))
+      assert implement["foreach"] == "card.tasks"
+      assert "tasks" in implement["reads"]
+      assert implement["run"] =~ "{task_id}"
+    end
+
     test "an unchanged push is a no-op: same version, no new snapshot row", %{conn: conn, board: board} do
       doc = pull(conn, "spec")
       before_rows = version_rows(board, "spec")

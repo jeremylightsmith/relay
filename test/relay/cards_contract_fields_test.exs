@@ -41,12 +41,12 @@ defmodule Relay.CardsContractFieldsTest do
     refute Cards.ai_result_blank?(%{"changes" => ["changed A"]})
   end
 
-  test "sub_tasks is blank when empty and satisfied once seeded" do
+  test "tasks is blank when empty and satisfied once seeded" do
     card = card()
-    assert Cards.blank_contract_fields(card, [:sub_tasks]) == [:sub_tasks]
+    assert Cards.blank_contract_fields(card, [:tasks]) == [:tasks]
 
     {:ok, _} = Cards.set_sub_tasks(card, [%{title: "Alpha"}])
-    assert Cards.blank_contract_fields(Repo.preload(card, :sub_tasks, force: true), [:sub_tasks]) == []
+    assert Cards.blank_contract_fields(Repo.preload(card, :sub_tasks, force: true), [:tasks]) == []
   end
 
   # The fallback clause pipes any not-specially-handled field through `blank_text?/1`, and that
@@ -65,11 +65,11 @@ defmodule Relay.CardsContractFieldsTest do
   # `Cards.create_card/2` always preloads `sub_tasks` (cards travel with theirs), so an
   # unloaded association only shows up on a card fetched without that preload — build the
   # struct directly via the factory rather than through `Cards.create_card/2`.
-  test "an unloaded sub_tasks association raises rather than reporting blank" do
+  test "an unloaded sub_tasks association raises for the :tasks field rather than reporting blank" do
     card = insert(:card)
 
-    assert_raise ArgumentError, ~r/sub_tasks/, fn ->
-      Cards.blank_contract_fields(card, [:sub_tasks])
+    assert_raise ArgumentError, ~r/:sub_tasks to be preloaded for the :tasks contract field/, fn ->
+      Cards.blank_contract_fields(card, [:tasks])
     end
   end
 end
