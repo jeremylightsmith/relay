@@ -7,6 +7,12 @@ defmodule Relay.OnboardSkillTest do
     {:ok, doc: File.read!(@skill)}
   end
 
+  defp phase(doc, n) do
+    [_, from] = String.split(doc, "## Phase #{n}", parts: 2)
+    [body, _] = String.split(from, "## Phase #{n + 1}", parts: 2)
+    String.replace(body, ~r/\s+/, " ")
+  end
+
   test "the skill directory holds exactly SKILL.md — the scaffold build copies nothing else" do
     assert File.ls!(Path.dirname(@skill)) == ["SKILL.md"]
   end
@@ -122,6 +128,49 @@ defmodule Relay.OnboardSkillTest do
        %{doc: doc} do
     refute doc =~ "the publish task"
     assert doc =~ "Scaffold.items"
+  end
+
+  # RE369: a factory authored today should start out on the tasks contract the shipped flows
+  # declare, and the doctor's tasks-cutover recipe is the one spec for it.
+  describe "the migrated shape" do
+    test "the Seed path says a seeded factory takes the migrated shape", %{doc: doc} do
+      [overview, _] = String.split(doc, "## When to Use", parts: 2)
+
+      assert String.replace(overview, ~r/\s+/, " ") =~ "takes the **migrated shape**"
+    end
+
+    test "Phase 3's author-one guidance names the tasks verbs and points at the doctor's recipe",
+         %{doc: doc} do
+      phase3 = phase(doc, 3)
+
+      assert phase3 =~ "**Author the migrated shape.**"
+      assert phase3 =~ "relay tasks add"
+      assert phase3 =~ "relay task show"
+      assert phase3 =~ ~s(writes: ["plan", "tasks"])
+      assert phase3 =~ ~s(reads: ["tasks"])
+      assert phase3 =~ "`tasks-cutover`"
+      assert phase3 =~ "**Factory migrations**"
+    end
+
+    test "Phase 3 does not restate the recipe's mechanics", %{doc: doc} do
+      phase3 = phase(doc, 3)
+
+      refute phase3 =~ "tasks list"
+      refute phase3 =~ "task rm"
+      refute phase3 =~ "$RELAY_PLAN"
+    end
+
+    test "Phase 4 also loops until no migration is pending", %{doc: doc} do
+      assert phase(doc, 4) =~ "no migration pending"
+    end
+
+    # Phase 5 is the last phase, so it runs to `## Common mistakes`, not `## Phase 6`.
+    test "the closing summary lists skipped migrations", %{doc: doc} do
+      [_, phase5] = String.split(doc, "## Phase 5", parts: 2)
+      [phase5, _] = String.split(phase5, "## Common mistakes", parts: 2)
+
+      assert String.replace(phase5, ~r/\s+/, " ") =~ "any migration the human skipped"
+    end
   end
 
   describe "discoverability" do

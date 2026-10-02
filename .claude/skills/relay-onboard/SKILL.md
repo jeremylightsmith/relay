@@ -17,6 +17,7 @@ Three legitimate paths, and the human picks one:
 - **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
   names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `./relay`
   and the four `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
+  A seeded factory takes the **migrated shape** from the start — see Phase 3.
 - **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
 - **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
 
@@ -24,7 +25,8 @@ Three legitimate paths, and the human picks one:
 they never block and are never chased.
 
 **This skill adds no checks of its own.** `/relay-doctor` owns the check list and the report
-format; onboarding consumes its `ERROR` / `WARNING` lines and its `N errors, M warnings` summary.
+format; onboarding consumes its `ERROR` / `WARNING` / `MIGRATION` lines and its
+`N errors, M warnings, K migrations pending` summary.
 Restating a check here would be a second copy of it, and the copy would drift. The doctor is a
 **skill**, invoked with the `Skill` tool — there is no `relay doctor` subcommand.
 
@@ -148,6 +150,15 @@ human's choice:
   when it applies — that string is the whole basis for choosing it. Or
 - **drop the node** — remove it from the flow and re-point its edges.
 
+**Author the migrated shape.** A planner or task-scoped agent you author for a seeded node starts
+out current: the planner writes the header with `relay plan` and the tasks with
+`relay tasks add`; the agents behind task nodes (`implement`, the reviewers, the fixer) fetch
+their task with `relay task show`. The shipped flows already declare `writes: ["plan", "tasks"]`
+on the plan node and `reads: ["tasks"]` on the task nodes, and `writes` is enforced at run time,
+so a planner that does anything else fails on its first card. The spec for those files is the
+doctor's `tasks-cutover` migration recipe (`/relay-doctor`, **Factory migrations**) — follow it
+there rather than restating it here.
+
 Never auto-map. The user is the authority on their own factory.
 
 ## Phase 4 — Apply → re-check → repeat
@@ -159,6 +170,9 @@ Apply **one** step, re-run `/relay-doctor`, show the delta (`6 errors → 3`), r
 - **Termination.** Stop at **zero errors**. Also stop when **two consecutive passes** fail to
   reduce the error count, and say plainly what is left and why: a stall is a report, not a retry
   loop.
+- **Migrations too.** The loop also runs until the doctor reports no migration pending — each
+  one offered, then applied or skipped by the human. A skipped migration does not block green or
+  enabling; it goes in the closing summary.
 - **Warnings are reported, not chased.** They go in the closing summary as a human checklist
   ("start `./relay start`", "this agent file is named by no enabled flow").
 
@@ -178,7 +192,8 @@ means the board starts pulling real cards into this repo. Then push it:
 closing summary then says where to turn them on by hand (`$RELAY_URL/board/<slug>/settings`
 → **Flows**).
 
-Close with a summary: what changed, what the doctor now reports, and the remaining human checklist.
+Close with a summary: what changed, what the doctor now reports, any migration the human skipped,
+and the remaining human checklist.
 
 ## Common mistakes
 
