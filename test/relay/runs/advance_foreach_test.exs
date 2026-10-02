@@ -37,7 +37,7 @@ defmodule Relay.Runs.AdvanceForeachTest do
         lands_on_stage_id: lands.id,
         nodes: [
           %{key: "seed", type: :shell, run: "true"},
-          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.sub_tasks"},
+          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"},
           %{key: "review", type: :agent, run: "review {ref}"},
           %{key: "wrap", type: :shell, run: "true"}
         ],

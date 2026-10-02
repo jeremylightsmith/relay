@@ -32,7 +32,7 @@ defmodule RelayWeb.Api.RunAdvanceTest do
         works_in_stage_id: works.id,
         lands_on_stage_id: lands.id,
         nodes: [
-          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.sub_tasks"},
+          %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"},
           %{key: "review", type: :agent, run: "review {ref}"},
           %{key: "wrap", type: :shell, run: "true"}
         ],

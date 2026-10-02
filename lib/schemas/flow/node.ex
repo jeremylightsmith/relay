@@ -9,7 +9,22 @@ defmodule Schemas.Flow.Node do
 
   `foreach` (nil = not a loop head) makes the node a `foreach` LOOP HEAD:
   each entry into it begins one iteration bound to one of the card's
-  sub_tasks. `"card.sub_tasks"` is the only source W13 accepts.
+  tasks. `foreach_sources/0` (`"card.tasks"`) is the only accepted source. Nodes inside the
+  loop name the bound task with the `{task}` (title) and `{task_id}` (id) placeholders.
+
+  ## Legacy aliases (RE367)
+
+  `tasks` is the canonical flow-contract name for a card's plan units. The pre-RE367 spellings
+  are accepted as **deprecated aliases** and rewritten to canonical by `normalize_legacy/1`,
+  which runs wherever a flow enters the system (`changeset/2`, `Relay.Flows.Document.decode/1`),
+  so a stored or served flow is always canonical:
+
+  | concept | canonical | legacy alias |
+  |---|---|---|
+  | contract field in `reads` / `writes` | `tasks` | `sub_tasks` |
+  | `foreach` source | `card.tasks` | `card.sub_tasks` |
+  | `run` placeholder: task title | `{task}` | `{sub_task}` |
+  | `run` placeholder: task id | `{task_id}` | `{sub_task_id}` |
 
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
   runner appends `--agent <name>` to its `claude -p` call, so the file supplies
@@ -61,6 +76,13 @@ defmodule Schemas.Flow.Node do
   ]
   @types [:agent, :shell, :gate, :parallel, :human]
   @roles [:do, :check, :fix]
+  @foreach_sources ["card.tasks"]
+
+  # RE367 — legacy spelling → canonical spelling, the ONE copy of the alias table (the data
+  # migration that rewrote stored rows carries its own frozen copy, by migration convention).
+  @legacy_contract_fields [sub_tasks: :tasks]
+  @legacy_foreach_sources %{"card.sub_tasks" => "card.tasks"}
+  @legacy_placeholders %{"{sub_task}" => "{task}", "{sub_task_id}" => "{task_id}"}
 
   @primary_key false
   embedded_schema do
@@ -104,15 +126,52 @@ defmodule Schemas.Flow.Node do
   """
   def runnable_types, do: [:agent, :shell, :gate]
 
+  @doc "The closed set of accepted `foreach` sources (RE367: `\"card.tasks\"`). Read by `changeset/2` and the docs."
+  def foreach_sources, do: @foreach_sources
+
+  @doc """
+  A node attrs map (string or atom keys, as given) with every legacy alias rewritten to its
+  canonical spelling — see the moduledoc's alias table. Canonical input and unrelated text are
+  returned unchanged; `run` is rewritten only at the exact-brace placeholder literals. A struct is
+  returned as-is (it was already cast).
+  """
+  def normalize_legacy(%_{} = struct), do: struct
+
+  def normalize_legacy(attrs) when is_map(attrs) do
+    Map.new(attrs, fn {key, value} -> {key, normalize_attr(to_string(key), value)} end)
+  end
+
+  defp normalize_attr(key, values) when key in ["reads", "writes"] and is_list(values),
+    do: Enum.map(values, &canonical_contract_field/1)
+
+  defp normalize_attr("foreach", source) when is_binary(source), do: Map.get(@legacy_foreach_sources, source, source)
+
+  defp normalize_attr("run", run) when is_binary(run),
+    do: String.replace(run, Map.keys(@legacy_placeholders), &Map.fetch!(@legacy_placeholders, &1))
+
+  defp normalize_attr(_key, value), do: value
+
+  defp canonical_contract_field(field) do
+    Enum.find_value(@legacy_contract_fields, field, fn {legacy, canonical} ->
+      cond do
+        field == legacy -> canonical
+        field == Atom.to_string(legacy) -> Atom.to_string(canonical)
+        true -> nil
+      end
+    end)
+  end
+
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(attrs, @fields)
+    |> cast(normalize_legacy(attrs), @fields)
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done", "needs_input"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)
     |> validate_number(:timeout_minutes, greater_than: 0)
-    |> validate_inclusion(:foreach, ["card.sub_tasks"], message: ~s(must be "card.sub_tasks"))
+    |> validate_inclusion(:foreach, @foreach_sources,
+      message: "must be #{Enum.map_join(@foreach_sources, " or ", &inspect/1)}"
+    )
     |> validate_agent_only_on_agent_nodes()
     |> validate_expects_commits_only_on_agent_nodes()
   end

@@ -28,7 +28,7 @@ defmodule Relay.Runs.RunServerTest do
       isolation: :shared_clean,
       nodes: [
         %{key: "branch", type: :shell, run: "true"},
-        %{key: "implement", type: :agent, run: "implement {sub_task}", foreach: "card.sub_tasks"},
+        %{key: "implement", type: :agent, run: "implement {task}", foreach: "card.tasks"},
         %{key: "spec_review", type: :agent, run: "spec review"},
         %{key: "quality_review", type: :agent, run: "quality review"},
         %{key: "precommit", type: :gate, run: "true"}

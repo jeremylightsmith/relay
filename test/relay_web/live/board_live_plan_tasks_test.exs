@@ -49,7 +49,7 @@ defmodule RelayWeb.BoardLivePlanTasksTest do
       insert(:flow,
         board: board,
         nodes: [
-          %Node{key: "impl", type: :agent, run: "impl {ref}", foreach: "card.sub_tasks"},
+          %Node{key: "impl", type: :agent, run: "impl {ref}", foreach: "card.tasks"},
           %Node{key: "review", type: :agent, run: "review {ref}"}
         ]
       )

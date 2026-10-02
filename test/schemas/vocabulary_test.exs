@@ -114,8 +114,12 @@ defmodule Schemas.VocabularyTest do
 
     known = Schemas.Card.__schema__(:fields) ++ Schemas.Card.__schema__(:associations)
 
+    # RE367: the `:tasks` contract field is backed by the card's `sub_tasks` association.
+    backing = %{tasks: :sub_tasks}
+
     for field <- Schemas.Card.contract_fields() do
-      assert field in known, "#{field} is not a Schemas.Card field or association"
+      source = Map.get(backing, field, field)
+      assert source in known, "#{field} is not backed by a Schemas.Card field or association"
     end
   end
 

@@ -9,7 +9,7 @@
       "run": "/write-plan {ref}",
       "max_retries": 1,
       "reads": ["spec", "acceptance_criteria"],
-      "writes": ["plan", "sub_tasks"]
+      "writes": ["plan", "tasks"]
     }
   ],
   "edges": [

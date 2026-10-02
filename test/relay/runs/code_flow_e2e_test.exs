@@ -196,7 +196,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
 
       # Each implement carried the sub_task it was working, in order.
       assert ["Alpha", "Beta", "Gamma"] =
-               claimed |> Enum.filter(&(&1["node_id"] == "implement")) |> Enum.map(& &1["vars"]["sub_task"])
+               claimed |> Enum.filter(&(&1["node_id"] == "implement")) |> Enum.map(& &1["vars"]["task"])
 
       # ...and each iteration's executions are stamped with that sub_task's id.
       ids = Enum.map(sub_tasks(card), & &1.id)
@@ -251,7 +251,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
       # and the task it belongs to.
       assert %{"node_id" => "fix_findings"} = again = Exec.claim(conn, @runner_name, @capacity)
       assert again["vars"]["findings"] == "the second assertion is missing"
-      assert again["vars"]["sub_task"] == "Alpha"
+      assert again["vars"]["task"] == "Alpha"
 
       # The task is NOT checked off — the box means "reviewed", not "attempted".
       assert [%{done: false}] = sub_tasks(card)

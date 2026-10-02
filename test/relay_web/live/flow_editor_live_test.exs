@@ -63,7 +63,7 @@ defmodule RelayWeb.FlowEditorLiveTest do
         key: "loopy",
         isolation: :shared_clean,
         nodes: [
-          %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+          %{key: "work", type: :agent, run: "a", foreach: "card.tasks"},
           %{key: "after", type: :gate, run: "true"}
         ],
         edges: [

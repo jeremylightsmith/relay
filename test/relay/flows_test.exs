@@ -95,7 +95,7 @@ defmodule Relay.FlowsTest do
       attrs =
         valid_attrs(%{
           nodes: [
-            %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+            %{key: "work", type: :agent, run: "a", foreach: "card.tasks"},
             %{key: "after", type: :gate, run: "true"}
           ],
           edges: [
@@ -107,8 +107,29 @@ defmodule Relay.FlowsTest do
         })
 
       assert {:ok, flow} = Flows.create_flow(board, attrs)
-      assert %{foreach: "card.sub_tasks"} = Enum.find(flow.nodes, &(&1.key == "work"))
+      assert %{foreach: "card.tasks"} = Enum.find(flow.nodes, &(&1.key == "work"))
       assert %{when: :foreach_remaining} = Enum.find(flow.edges, &(&1.to == "work" and &1.from == "work"))
+    end
+
+    test "a flow created with legacy sub_tasks spellings is stored canonical (RE367)" do
+      %{board: board} = board_with_stages()
+
+      attrs =
+        valid_attrs(%{
+          nodes: [
+            %{key: "work", type: :agent, run: "a {sub_task_id}", foreach: "card.sub_tasks", reads: [:sub_tasks]},
+            %{key: "after", type: :gate, run: "true"}
+          ],
+          edges: [
+            %{from: "start", to: "work"},
+            %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+            %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+            %{from: "after", to: "done", on: :succeeded}
+          ]
+        })
+
+      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert %{foreach: "card.tasks", reads: [:tasks], run: "a {task_id}"} = Enum.find(flow.nodes, &(&1.key == "work"))
     end
 
     test "still rejects two UNGUARDED edges on one route" do
@@ -150,7 +171,7 @@ defmodule Relay.FlowsTest do
       attrs = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", foreach: "card.comments"}]})
 
       assert {:error, changeset} = Flows.create_flow(board, attrs)
-      assert %{nodes: [%{foreach: [~s(must be "card.sub_tasks")]}]} = errors_on(changeset)
+      assert %{nodes: [%{foreach: [~s(must be "card.tasks")]}]} = errors_on(changeset)
     end
 
     test "an agent node may name its .claude/agents definition; other node types may not" do
@@ -231,7 +252,7 @@ defmodule Relay.FlowsTest do
     defp foreach_attrs do
       valid_attrs(%{
         nodes: [
-          %{key: "work", type: :agent, run: "a", foreach: "card.sub_tasks"},
+          %{key: "work", type: :agent, run: "a", foreach: "card.tasks"},
           %{key: "after", type: :gate, run: "true"}
         ],
         edges: [
@@ -248,7 +269,7 @@ defmodule Relay.FlowsTest do
       {:ok, original} = Flows.create_flow(board, foreach_attrs())
 
       assert {:ok, copy} = Flows.duplicate_flow(original)
-      assert %{foreach: "card.sub_tasks"} = Enum.find(copy.nodes, &(&1.key == "work"))
+      assert %{foreach: "card.tasks"} = Enum.find(copy.nodes, &(&1.key == "work"))
       assert %{when: :foreach_remaining} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "work"))
       assert %{when: :foreach_exhausted} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "after"))
     end
@@ -258,10 +279,10 @@ defmodule Relay.FlowsTest do
       {:ok, flow} = Flows.create_flow(board, foreach_attrs())
 
       assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
-      assert %{foreach: "card.sub_tasks"} = Enum.find(updated.nodes, &(&1.key == "work"))
+      assert %{foreach: "card.tasks"} = Enum.find(updated.nodes, &(&1.key == "work"))
 
       snapshot = Flows.get_version(updated, updated.version)
-      assert %{foreach: "card.sub_tasks"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
+      assert %{foreach: "card.tasks"} = Enum.find(snapshot.nodes, &(&1.key == "work"))
       assert %{when: :foreach_remaining} = Enum.find(snapshot.edges, &(&1.from == "work" and &1.to == "work"))
     end
 

@@ -22,6 +22,10 @@ defmodule Relay.Flows.Document do
   genuine no-op. RE244's `reads`/`writes` follow the same law: they encode as string arrays, an
   empty one is omitted, and an absent or null one decodes back to `[]`.
 
+  `decode/1` also rewrites the pre-RE367 legacy spellings (`sub_tasks`, `card.sub_tasks`,
+  `{sub_task}`, `{sub_task_id}`) to canonical via `Schemas.Flow.Node.normalize_legacy/1`, so
+  `encode/1` only ever emits the canonical `tasks` names.
+
   String→atom conversion is driven by the schemas' own source functions
   (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`, `Schemas.Flow.Node.roles/0`,
   `Schemas.NodeExecution.routable_outcomes/0`, `Schemas.Flow.Edge.when_values/0`) — never
@@ -203,7 +207,11 @@ defmodule Relay.Flows.Document do
 
   defp cast_item(_item, _caster, key, index), do: {:error, "#{key}[#{index}] must be an object"}
 
-  defp node_attrs(node) do
+  # RE367: legacy contract spellings (`sub_tasks`, `card.sub_tasks`, `{sub_task_id}`) are
+  # normalized BEFORE validation, so a pushed legacy flow saves — and pulls back — canonical.
+  defp node_attrs(raw) do
+    node = Flow.Node.normalize_legacy(raw)
+
     with :ok <- reject_unknown(Map.keys(node), field_names(Flow.Node.fields()), "node field"),
          {:ok, _key} <- required_string(node, "key"),
          {:ok, type} <- required_enum(node, "type", Flow.Node.types()),

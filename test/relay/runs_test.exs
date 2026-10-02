@@ -1113,7 +1113,7 @@ defmodule Relay.RunsTest do
       key: "loopy",
       isolation: :exclusive,
       nodes: [
-        %{key: "head", type: :agent, run: "work {sub_task}", foreach: "card.sub_tasks", max_retries: head_max_retries},
+        %{key: "head", type: :agent, run: "work {task}", foreach: "card.tasks", max_retries: head_max_retries},
         %{key: "after", type: :gate, run: "true"}
       ],
       edges: [
@@ -1157,7 +1157,7 @@ defmodule Relay.RunsTest do
   end
 
   describe "foreach: the engine owns the task list (W13)" do
-    test "a foreach job's vars carry {sub_task_id}, the bound task's id (RE357)" do
+    test "a foreach job's vars carry {task} and {task_id} for the bound task (RE357, RE367)" do
       %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
 
       capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
@@ -1166,12 +1166,15 @@ defmodule Relay.RunsTest do
       alpha = Repo.one!(from st in SubTask, where: st.card_id == ^card.id and st.title == "Alpha")
       vars = Runs.active_job(run).payload["vars"]
 
-      assert vars["sub_task_id"] == alpha.id
+      assert vars["task_id"] == alpha.id
+      assert vars["task"] == "Alpha"
+      refute Map.has_key?(vars, "sub_task")
+      refute Map.has_key?(vars, "sub_task_id")
 
       # The runner's render/2 substitutes every var as str(value); mirror it to prove the
       # placeholder resolves to the id, as a string.
       rendered =
-        Enum.reduce(vars, "./relay task show {ref} {sub_task_id}", fn {k, v}, acc ->
+        Enum.reduce(vars, "./relay task show {ref} {task_id}", fn {k, v}, acc ->
           if is_nil(v), do: acc, else: String.replace(acc, "{#{k}}", to_string(v))
         end)
 
@@ -1291,7 +1294,7 @@ defmodule Relay.RunsTest do
       assert execution.sub_task_id == alpha.id
 
       job = Runs.active_job(run)
-      assert job.payload["vars"]["sub_task"] == "Alpha"
+      assert job.payload["vars"]["task"] == "Alpha"
     end
 
     test "the loop tail checks the sub_task off, then routes on the recomputed remaining count" do
@@ -1309,7 +1312,7 @@ defmodule Relay.RunsTest do
       second = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
       assert second.node_key == "head"
       assert second.sub_task_id == beta.id
-      assert Runs.active_job(run).payload["vars"]["sub_task"] == "Beta"
+      assert Runs.active_job(run).payload["vars"]["task"] == "Beta"
 
       # Iteration 2 exhausts the list: the exhausted guard leaves the loop, unbound.
       {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done beta"})
@@ -1378,7 +1381,7 @@ defmodule Relay.RunsTest do
 
       assert_receive {:node_started, %Run{}, %NodeExecution{node_key: "head"} = execution}
       assert execution.sub_task_id == beta.id
-      assert Runs.active_job(run).payload["vars"]["sub_task"] == "Beta"
+      assert Runs.active_job(run).payload["vars"]["task"] == "Beta"
     end
 
     test "a failed iteration that retries (the :retry inherit path) stays bound to the same sub_task" do

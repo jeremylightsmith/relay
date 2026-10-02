@@ -300,7 +300,7 @@ defmodule RelayWeb.FlowLayoutTest do
     end
 
     test "a foreach head's self-loop is routed and labelled clear of its node" do
-      nodes = [%{key: "head", type: :agent, foreach: "card.sub_tasks"}, %{key: "tail", type: :gate}]
+      nodes = [%{key: "head", type: :agent, foreach: "card.tasks"}, %{key: "tail", type: :gate}]
 
       edges = [
         %{from: "start", to: "head", on: nil},

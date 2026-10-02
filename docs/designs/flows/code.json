@@ -17,10 +17,10 @@
       "effort": "high",
       "max_retries": 1,
       "expects_commits": true,
-      "foreach": "card.sub_tasks",
+      "foreach": "card.tasks",
       "agent": "plan-implementer",
-      "reads": ["sub_tasks"],
-      "run": "Implement task {sub_task_id} (\"{sub_task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {sub_task_id}`. Read `$RELAY_PLAN` only for the card's header (Global Constraints, `## Verification`). This task only. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing."
+      "reads": ["tasks"],
+      "run": "Implement task {task_id} (\"{task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {task_id}`. Read `$RELAY_PLAN` only for the card's header (Global Constraints, `## Verification`). This task only. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing."
     },
     {
       "key": "spec_review",
@@ -28,8 +28,8 @@
       "role": "check",
       "model": "sonnet",
       "agent": "spec-reviewer",
-      "reads": ["sub_tasks"],
-      "run": "Review task {sub_task_id} (\"{sub_task}\"), just implemented, against its spec — the task's body, fetched with the relay task show command: `{relay} task show {ref} {sub_task_id}`. Nothing missing, nothing extra."
+      "reads": ["tasks"],
+      "run": "Review task {task_id} (\"{task}\"), just implemented, against its spec — the task's body, fetched with the relay task show command: `{relay} task show {ref} {task_id}`. Nothing missing, nothing extra."
     },
     {
       "key": "quality_review",
@@ -37,8 +37,8 @@
       "role": "check",
       "model": "opus",
       "agent": "quality-reviewer",
-      "reads": ["sub_tasks"],
-      "run": "Judge whether the change for task {sub_task_id} (\"{sub_task}\") is well-built: clean, conventional, meaningfully tested. Its spec is the task's body — fetch it with the relay task show command, `{relay} task show {ref} {sub_task_id}`, when you need to know what the change was for."
+      "reads": ["tasks"],
+      "run": "Judge whether the change for task {task_id} (\"{task}\") is well-built: clean, conventional, meaningfully tested. Its spec is the task's body — fetch it with the relay task show command, `{relay} task show {ref} {task_id}`, when you need to know what the change was for."
     },
     {
       "key": "fix_findings",
@@ -47,8 +47,8 @@
       "max_retries": 1,
       "agent": "final-fixer",
       "expects_commits": true,
-      "reads": ["sub_tasks"],
-      "run": "A reviewer rejected task {sub_task_id} (\"{sub_task}\"), which you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from its body (the relay task show command, `{relay} task show {ref} {sub_task_id}`, is there only to look up what a finding refers to), and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure."
+      "reads": ["tasks"],
+      "run": "A reviewer rejected task {task_id} (\"{task}\"), which you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from its body (the relay task show command, `{relay} task show {ref} {task_id}`, is there only to look up what a finding refers to), and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure."
     },
     {
       "key": "sync",

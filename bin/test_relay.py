@@ -166,13 +166,13 @@ class ClaimContractKeysTest(unittest.TestCase):
     """The exact key set the runner reads off a claim, spelled out here on purpose.
 
     This is the backstop: job() only catches a rename for fields some test overrides, but the
-    runner reads `agent`, `node_id`, `sub_task` and friends without any test naming them.
+    runner reads `agent`, `node_id`, `task` and friends without any test naming them.
     Spelling the sets out means renaming ANY server field fails this suite immediately.
     """
 
     TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars"}
-    VARS = {"ref", "branch", "prior_detail", "findings", "sub_task", "sub_task_id"}
+    VARS = {"ref", "branch", "prior_detail", "findings", "task", "task_id"}
 
     def test_every_claim_case_has_exactly_the_keys_the_runner_reads(self):
         for case, payload in CONTRACT["claim"].items():
@@ -183,7 +183,7 @@ class ClaimContractKeysTest(unittest.TestCase):
         """./relay documents that prior_detail/findings arrive as nil. Dropping them from
         the fixture would let that behaviour drift silently, so pin their presence."""
         for case, payload in CONTRACT["claim"].items():
-            for key in ("prior_detail", "findings", "sub_task"):
+            for key in ("prior_detail", "findings", "task"):
                 self.assertIn(key, payload["vars"], f"{case}.{key}")
 
     def test_a_shared_clean_job_carries_a_branch_var(self):
@@ -7839,7 +7839,7 @@ class FlowPullPushTest(unittest.TestCase):
         "nodes": [
             {"key": "branch", "type": "shell", "run": "{relay} git-fetch && git checkout -B {branch} origin/main"},
             {"key": "implement", "type": "agent", "model": "sonnet", "agent": "plan-implementer",
-             "expects_commits": True, "run": "Implement the task named {sub_task} …"},
+             "expects_commits": True, "run": "Implement the task named {task} …"},
         ],
         "edges": [
             {"from": "start", "to": "branch"},
