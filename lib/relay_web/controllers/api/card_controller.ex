@@ -61,6 +61,7 @@ defmodule RelayWeb.Api.CardController do
          {:ok, card} <- update_status(card, params),
          {:ok, card} <- update_owners(card, owners),
          {:ok, card} <- update_ai_result(card, params),
+         {:ok, card} <- update_mockups(card, params),
          {:ok, card} <- update_sub_tasks(card, params),
          {:ok, card} <- update_dependencies(board, card, params) do
       render(conn, :show,
@@ -108,6 +109,14 @@ defmodule RelayWeb.Api.CardController do
 
   defp update_sub_tasks(_card, %{"sub_tasks" => _}), do: :error
   defp update_sub_tasks(card, _params), do: {:ok, card}
+
+  # RE370 — a FULL REPLACE, like "sub_tasks": a list sets it ([] clears), null clears, the key
+  # absent leaves it untouched, anything else is an invalid request. The url rule lives in
+  # Relay.Cards.set_mockups/2.
+  defp update_mockups(card, %{"mockups" => mockups}) when is_list(mockups), do: Cards.set_mockups(card, mockups)
+  defp update_mockups(card, %{"mockups" => nil}), do: Cards.set_mockups(card, [])
+  defp update_mockups(_card, %{"mockups" => _}), do: :error
+  defp update_mockups(card, _params), do: {:ok, card}
 
   # RE93 — a FULL REPLACE of the blocker set, mirroring "sub_tasks": [] clears it, the key absent
   # leaves it untouched, anything else is an invalid request. Ref resolution, the all-or-nothing

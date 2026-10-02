@@ -146,6 +146,12 @@ sharing behavior.
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
+  A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
+  `%{"url", "caption"}` entries, written only through `Relay.Cards.set_mockups/2`: a full
+  REPLACE, validated so every url is an `/attachments/<id>` path of an **HTML attachment on the
+  same card** (`422 invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
+  `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
+  distinct from `ai_result.screens` (run-result image screenshots).
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
   `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
