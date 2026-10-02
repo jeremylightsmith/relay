@@ -115,9 +115,7 @@ sharing behavior.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
   `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
   private builder, so the summary shape is defined exactly once. Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)). The four metrics roll-ups (`node_metrics_for_flow/2`, `node_waits_for_flow/2`, `execution_spans_for_flow/2`, `flow_metrics_summary/2`) take `card_id:` (one card, RE235) or `card_ids:` (a list — RE349's Last-N population, `card_id:` winning when both are given); either drops the window. `first_node_queue_wait/2` (RE349) is the mean `claimed_at − inserted_at` of the `NodeJob.flow_kinds/0` job bound to each in-population run's first execution — the value stream's queue triangle.
-  **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a
-  pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0`
-  vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory.
+  **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a pure function over runs (`:node_executions` and `card: :board` preloaded) on the metrics' `metric_windows/0` vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory. Three checks — `findings_dropped`, `verdict_flipped`, and `planner_not_migrated` (RE368), the last reading the `runs.tasks_from_plan` fact `start_run` sets when the legacy plan-parse fallback seeded the card's tasks.
   **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour, resolved through `Relay.Runs.Instance` (`config :relay, :runs_dispatcher` in production, a per-test instance under test — RE298 / ADR 0009).
   Card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
   Run/node/job statuses are in [state.md](state.md); dispatch, the runner, worktrees and the

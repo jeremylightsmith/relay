@@ -28,12 +28,20 @@ defmodule Relay.Runs.AuditTest do
   end
 
   defp run_for(board, opts \\ []) do
-    card = insert(:card, board: board, stage: insert(:stage, board: board))
+    card = Keyword.get_lazy(opts, :card, fn -> card_on(board) end)
     now = DateTime.truncate(DateTime.utc_now(), :second)
     started_at = Keyword.get(opts, :started_at, DateTime.add(now, -60))
 
-    insert(:run, card: card, flow_key: "code", status: :done, started_at: started_at)
+    insert(:run,
+      card: card,
+      flow_key: "code",
+      status: :done,
+      started_at: started_at,
+      tasks_from_plan: Keyword.get(opts, :tasks_from_plan, false)
+    )
   end
+
+  defp card_on(board), do: insert(:card, board: board, stage: insert(:stage, board: board))
 
   defp exec(run, node, opts) do
     insert(:node_execution,
@@ -171,7 +179,75 @@ defmodule Relay.Runs.AuditTest do
     end
   end
 
+  describe "planner_not_migrated (C3)" do
+    test "is silent when no run's tasks came from the plan-parse fallback" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run_for(board)
+      run_for(board)
+
+      assert findings(flow) == []
+    end
+
+    test "warns once, naming the card, when one run's tasks came from the fallback" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      card = card_on(board)
+      run = run_for(board, card: card, tasks_from_plan: true)
+      run_for(board)
+
+      assert [finding] = findings(flow)
+      assert finding.severity == :warning
+      assert finding.check == :planner_not_migrated
+      assert finding.flow_key == "code"
+      assert finding.node_key == nil
+      assert finding.run_id == run.id
+      ref = Relay.Cards.ref(board, card)
+      assert String.starts_with?(finding.summary, "#{ref}'s tasks came from the legacy plan-parse fallback")
+      assert finding.evidence =~ "run #{run.id}"
+    end
+
+    test "one finding per flow: counts distinct cards and names the most recent three" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      [a, b, c, d] = for _ <- 1..4, do: card_on(board)
+
+      run_for(board, card: a, tasks_from_plan: true, started_at: DateTime.add(now, -400))
+      run_for(board, card: b, tasks_from_plan: true, started_at: DateTime.add(now, -300))
+      run_for(board, card: c, tasks_from_plan: true, started_at: DateTime.add(now, -200))
+      run_for(board, card: d, tasks_from_plan: true, started_at: DateTime.add(now, -100))
+      latest = run_for(board, card: a, tasks_from_plan: true, started_at: DateTime.add(now, -50))
+
+      assert [finding] = findings(flow)
+      assert finding.run_id == latest.id
+      assert finding.summary =~ "4 cards' tasks came from the legacy plan-parse fallback"
+
+      refs = Enum.map([a, d, c], &Relay.Cards.ref(board, &1))
+      assert finding.summary =~ "(most recent: #{Enum.join(refs, ", ")})"
+      refute finding.summary =~ Relay.Cards.ref(board, b)
+    end
+
+    test "names the fix in task vocabulary" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run_for(board, tasks_from_plan: true)
+
+      assert [finding] = findings(flow)
+      text = Enum.join([finding.summary, finding.evidence, finding.fix], "\n")
+      assert text =~ "/relay-doctor"
+      assert text =~ "relay tasks add"
+      assert text =~ "tasks"
+      refute text =~ "sub_tasks"
+      refute text =~ "sub_task"
+    end
+  end
+
   describe "findings/2" do
+    test "checks/0 is the closed set of check ids, including planner_not_migrated" do
+      assert Audit.checks() == [:findings_dropped, :verdict_flipped, :planner_not_migrated]
+    end
+
     test "sorts errors before warnings and only emits known severities and checks" do
       board = insert(:board)
       flow = audit_flow(board)
@@ -213,6 +289,7 @@ defmodule Relay.Runs.AuditTest do
       assert first.id == older.id
       assert second.id == newer.id
       assert Enum.map(second.node_executions, & &1.node_key) == ["implement", "spec_review"]
+      assert second.card.board.id == board.id
     end
 
     test "the 7d window excludes an older run, and garbage falls back to the default" do

@@ -191,6 +191,11 @@ human can. A retry revives the SAME run row rather than starting a new one, so t
 stay append-only and "it failed here, then a human retried" is fully reconstructable from
 `node_executions` plus the `retries` counter.
 
+`tasks_from_plan` (RE368) is a second non-engine fact on the run row: `true` only on the run
+whose start seeded the card's tasks through the legacy plan-parse fallback. A later run on the
+same card finds the tasks already present and stays `false`. It feeds the audit's
+`planner_not_migrated` check.
+
 A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
 stage (`Schemas.Stage.terminal_types/0`) **or is archived** (`archived_at` set, RE335) while the
 run is still active (`running`/`parked`, any `parked_reason`, RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
