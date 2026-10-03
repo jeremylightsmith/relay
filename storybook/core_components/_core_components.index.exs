@@ -12,6 +12,7 @@ defmodule Storybook.CoreComponents do
   def entry("breadcrumbs"), do: [icon: {:fa, "angles-right", :thin}]
   def entry("button"), do: [icon: {:fa, "rectangle-ad", :thin}]
   def entry("card_search"), do: [icon: {:fa, "magnifying-glass", :thin}]
+  def entry("compact_card_row"), do: [icon: {:fa, "list", :thin}]
   def entry("controls"), do: [icon: {:fa, "sliders", :thin}]
   def entry("copy_button"), do: [icon: {:fa, "clipboard", :thin}]
   def entry("dependency_list"), do: [icon: {:fa, "link", :thin}]

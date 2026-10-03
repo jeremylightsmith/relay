@@ -325,14 +325,25 @@ defmodule RelayWeb.BoardLive do
             </div>
             <div class="board-pager-chips">
               <button
-                :for={stage <- flat_stages(@stage_groups)}
+                :for={
+                  {stage, collapsed?} <-
+                    pager_chips(
+                      @stage_groups,
+                      @stage_counts,
+                      @sublanes_by_parent,
+                      @force_open,
+                      @stage_force_closed
+                    )
+                }
                 type="button"
                 id={"stage-chip-#{stage.id}"}
                 class="board-pager-chip"
                 data-chip-stage-id={stage.id}
                 data-stage-name={stage.name}
                 data-ai={to_string(stage.ai_enabled)}
+                data-collapsed={to_string(collapsed?)}
               >
+                <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
                 <span class="board-pager-chip-dot"></span>
                 {stage.name}
                 <span class="board-pager-chip-count">
@@ -380,15 +391,15 @@ defmodule RelayWeb.BoardLive do
                   category={category}
                   stage_id={stage.id}
                   collapsed={
-                    not @pager_mode and
-                      stage_collapsed?(
-                        stage,
-                        @stage_counts,
-                        @sublanes_by_parent,
-                        @force_open,
-                        @stage_force_closed
-                      )
+                    stage_collapsed?(
+                      stage,
+                      @stage_counts,
+                      @sublanes_by_parent,
+                      @force_open,
+                      @stage_force_closed
+                    )
                   }
+                  pager={@pager_mode}
                   main_collapsed={
                     lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
                   }
@@ -1594,14 +1605,26 @@ defmodule RelayWeb.BoardLive do
   end
 
   # RLY-94 — the BoardPager hook reports whether the phone-width pager is active
-  # (below --breakpoint-drawer). In pager mode every stage renders as a full snap
-  # page: stage collapse (RLY-111) is a desktop-only behavior.
+  # (below --breakpoint-drawer). RE377: a collapsed stage stays collapsed in pager mode
+  # but renders as a compact row list, whose stream containers the desktop strip never
+  # had — so turning the pager on (false → true) restreams every collapsed stage's lanes
+  # (stream items are consumed at render time; see expand_stage, RLY-145). A repeat, or
+  # turning it off (strips render no cards), needs no restream.
   def handle_event("pager", %{"active" => active}, socket) when is_boolean(active) do
-    {:noreply, assign(socket, :pager_mode, active)}
+    turning_on? = active and not socket.assigns.pager_mode
+    socket = assign(socket, :pager_mode, active)
+
+    if turning_on? do
+      {:noreply, restream_lanes(socket, collapsed_lane_ids(socket))}
+    else
+      {:noreply, socket}
+    end
   end
 
   # RLY-111/RLY-145 — clicking an expanded stage's name collapses it for this
   # session, without a reload. Works on every stage; complementary to expand_stage.
+  # RE377: in pager mode the collapsed stage renders compact rows from its streams,
+  # so re-send its lanes (the same restream expand_stage does).
   def handle_event("collapse_stage", %{"stage-id" => stage_id}, socket) do
     case parse_int(stage_id) do
       nil ->
@@ -1611,7 +1634,8 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> update(:force_open, &MapSet.delete(&1, id))
-         |> update(:stage_force_closed, &MapSet.put(&1, id))}
+         |> update(:stage_force_closed, &MapSet.put(&1, id))
+         |> restream_lanes([id | sublane_ids(socket, id)])}
     end
   end
 
@@ -3191,6 +3215,13 @@ defmodule RelayWeb.BoardLive do
     for {_category, stages} <- stage_groups, stage <- stages, do: stage
   end
 
+  # RE377 — each chip paired with its stage's collapse state (dashed ▸ treatment).
+  defp pager_chips(stage_groups, stage_counts, sublanes_by_parent, force_open, stage_force_closed) do
+    for stage <- flat_stages(stage_groups) do
+      {stage, stage_collapsed?(stage, stage_counts, sublanes_by_parent, force_open, stage_force_closed)}
+    end
+  end
+
   # Children grouped under their parent's id, each list ordered Review→Done.
   defp sublanes_by_parent(stages) do
     stages
@@ -3809,6 +3840,8 @@ defmodule RelayWeb.BoardLive do
   # hidden were consumed at render time and dropped, so revealing a lane must
   # re-send its cards. Goes through stream_stage/4 (via restream_stage/3) so
   # the RLY-53 Done window still holds.
+  defp restream_lanes(socket, []), do: socket
+
   defp restream_lanes(socket, stage_ids) do
     cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
     Enum.reduce(stage_ids, socket, &restream_stage(&2, &1, cards_by_stage))
@@ -3816,6 +3849,17 @@ defmodule RelayWeb.BoardLive do
 
   defp sublane_ids(socket, stage_id) do
     socket.assigns.sublanes_by_parent |> Map.get(stage_id, []) |> Enum.map(& &1.id)
+  end
+
+  # RE377 — every lane (main + sub-lanes) of every stage that currently renders collapsed.
+  defp collapsed_lane_ids(socket) do
+    %{stage_counts: counts, sublanes_by_parent: subs, force_open: open, stage_force_closed: closed} =
+      socket.assigns
+
+    for stage <- flat_stages(socket.assigns.stage_groups),
+        stage_collapsed?(stage, counts, subs, open, closed),
+        id <- [stage.id | sublane_ids(socket, stage.id)],
+        do: id
   end
 
   # RLY-4 — a card was archived (locally or via broadcast): drop it from its

@@ -5040,6 +5040,12 @@ defmodule RelayWeb.CoreComponents do
   collapse control (RLY-145): clicking it emits `"collapse_stage"`
   (`phx-value-stage-id`), completing the strip's expand/collapse toggle on every stage.
 
+  When `collapsed` and `pager` (RE377 — the phone-width pager is active), the stage renders
+  instead as a compact page: header with a `collapsed` badge and a **Show cards** button
+  (`"expand_stage"`), then one-line `compact_card_row/1` rows (main lane, then each sub-lane),
+  and for the terminal stage a "N more" button (`"show_more_done"`). In pager mode an expanded
+  stage's header carries **Show as list** (`"collapse_stage"`).
+
   ## Examples
 
       <.stage_column id="stage-col-1" name="Backlog" type={:queue} stage_id={1} />
@@ -5080,6 +5086,12 @@ defmodule RelayWeb.CoreComponents do
   attr :collapsed, :boolean,
     default: false,
     doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
+
+  attr :pager, :boolean,
+    default: false,
+    doc:
+      "RE377 — the phone-width pager is active: a collapsed stage renders as its compact " <>
+        "row page instead of the 44px strip, and an expanded one gains a Show as list button"
 
   attr :main_collapsed, :boolean,
     default: false,
@@ -5144,224 +5156,248 @@ defmodule RelayWeb.CoreComponents do
       )
 
     ~H"""
-    <%= if @collapsed do %>
-      <section
-        id={"stage-strip-#{@stage_id}"}
-        class="stage-column stage-strip stage-drop"
-        data-stage-id={@stage_id}
-        phx-click="expand_stage"
-        phx-value-stage-id={@stage_id}
-        aria-label={"Expand stage #{@name}"}
-        style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:var(--color-field-hover);border:1px dashed var(--color-field-border);cursor:pointer;box-sizing:border-box;"
-      >
-        <.stage_type_icon type={@type} />
-        <h3
-          class="stage-strip-name"
-          style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);white-space:nowrap;"
+    <%= cond do %>
+      <% @collapsed and @pager -> %>
+        <.stage_compact_page
+          id={@id}
+          name={@name}
+          stage_id={@stage_id}
+          board_key={@board_key}
+          total_count={@total_count}
+          count={@count}
+          terminal={@terminal}
+          revealed={@revealed}
+          cards={@cards}
+          sublanes={@sublanes}
+        />
+      <% @collapsed -> %>
+        <section
+          id={"stage-strip-#{@stage_id}"}
+          class="stage-column stage-strip stage-drop"
+          data-stage-id={@stage_id}
+          phx-click="expand_stage"
+          phx-value-stage-id={@stage_id}
+          aria-label={"Expand stage #{@name}"}
+          style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:var(--color-field-hover);border:1px dashed var(--color-field-border);cursor:pointer;box-sizing:border-box;"
         >
-          {@name}
-        </h3>
-        <span
-          class="stage-count"
-          style="font-size:10px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
-        >
-          {@total_count}
-        </span>
-      </section>
-    <% else %>
-      <section
-        id={@id}
-        class="stage-column"
-        data-stage-id={@stage_id}
-        data-wip={@wip_state}
-        style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 6%, transparent);"}
-      >
-        <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
           <.stage_type_icon type={@type} />
           <h3
-            id={"#{@id}-name"}
-            class="stage-name"
-            phx-click="collapse_stage"
-            phx-value-stage-id={@stage_id}
-            aria-label={"Collapse stage #{@name}"}
-            style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);cursor:pointer;"
+            class="stage-strip-name"
+            style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);white-space:nowrap;"
           >
             {@name}
           </h3>
           <span
-            :if={@ai_enabled and @category != :complete}
-            id={"#{@id}-ai-listening"}
-            title="Relay AI is listening on this stage"
-            style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));padding:2px 6px;border-radius:5px;flex:0 0 auto;"
+            class="stage-count"
+            style="font-size:10px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
           >
-            <span style="width:10px;height:10px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+            {@total_count}
+          </span>
+        </section>
+      <% true -> %>
+        <section
+          id={@id}
+          class="stage-column"
+          data-stage-id={@stage_id}
+          data-wip={@wip_state}
+          style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 6%, transparent);"}
+        >
+          <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
+            <.stage_type_icon type={@type} />
+            <h3
+              id={"#{@id}-name"}
+              class="stage-name"
+              phx-click="collapse_stage"
+              phx-value-stage-id={@stage_id}
+              aria-label={"Collapse stage #{@name}"}
+              style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);cursor:pointer;"
+            >
+              {@name}
+            </h3>
+            <span
+              :if={@ai_enabled and @category != :complete}
+              id={"#{@id}-ai-listening"}
+              title="Relay AI is listening on this stage"
+              style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));padding:2px 6px;border-radius:5px;flex:0 0 auto;"
+            >
+              <span style="width:10px;height:10px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
               <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);"></span>
             </span>AI
-          </span>
-          <span
-            :if={@count}
-            class="stage-count"
-            style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
-          >
-            {@count}
-          </span>
-          <span
-            :if={@wip_limit}
-            class="stage-wip"
-            data-over={@total_count > @wip_limit}
-            data-wip={@wip_state}
-            style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@wip_state)}"}
-          >
-            wip {@total_count}/{@wip_limit}
-          </span>
-          <span style="flex:1;"></span>
-          <button
-            :if={@composable and !@composing and !@read_only}
-            type="button"
-            id={"#{@id}-new-card"}
-            class="stage-compose"
-            phx-click="compose"
-            phx-value-stage-id={@stage_id}
-            title="Add work"
-            aria-label="New card"
-            style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
-          >
-            +
-          </button>
-        </header>
-        <div class="stage-lanes" style="display:flex;gap:0;flex:1;min-height:0;">
-          <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
-          <%= if @main_collapsed do %>
-            <div
-              id={"#{@id}-main-strip"}
-              class="main-lane-strip stage-drop"
-              data-stage-id={@stage_id}
-              phx-click="toggle_collapse"
+            </span>
+            <span
+              :if={@count}
+              class="stage-count"
+              style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+            >
+              {@count}
+            </span>
+            <span
+              :if={@wip_limit}
+              class="stage-wip"
+              data-over={@total_count > @wip_limit}
+              data-wip={@wip_state}
+              style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@wip_state)}"}
+            >
+              wip {@total_count}/{@wip_limit}
+            </span>
+            <span style="flex:1;"></span>
+            <button
+              :if={@pager}
+              type="button"
+              id={"#{@id}-show-as-list"}
+              phx-click="collapse_stage"
               phx-value-stage-id={@stage_id}
-              aria-label="Expand In progress lane"
-              style="flex:0 0 44px;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;box-sizing:border-box;cursor:pointer;border-right:1px solid var(--color-base-300);"
+              class="btn btn-ghost btn-sm min-h-11 px-2 text-[12px] text-primary"
             >
-              <span style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};white-space:nowrap;"}>
-                In progress
-              </span>
-              <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;flex:0 0 auto;"}>
-                {@count}
-              </span>
-            </div>
-          <% else %>
-            <div
-              class="stage-main-lane"
-              style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;"
+              Show as list
+            </button>
+            <button
+              :if={@composable and !@composing and !@read_only}
+              type="button"
+              id={"#{@id}-new-card"}
+              class="stage-compose"
+              phx-click="compose"
+              phx-value-stage-id={@stage_id}
+              title="Add work"
+              aria-label="New card"
+              style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
             >
+              +
+            </button>
+          </header>
+          <div class="stage-lanes" style="display:flex;gap:0;flex:1;min-height:0;">
+            <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
+            <%= if @main_collapsed do %>
               <div
-                :if={@labeled}
-                id={"#{@id}-main-lane-header"}
+                id={"#{@id}-main-strip"}
+                class="main-lane-strip stage-drop"
+                data-stage-id={@stage_id}
                 phx-click="toggle_collapse"
                 phx-value-stage-id={@stage_id}
-                aria-label="Collapse In progress lane"
-                style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
+                aria-label="Expand In progress lane"
+                style="flex:0 0 44px;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;box-sizing:border-box;cursor:pointer;border-right:1px solid var(--color-base-300);"
               >
-                <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                <span style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};white-space:nowrap;"}>
                   In progress
                 </span>
-                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;flex:0 0 auto;"}>
                   {@count}
                 </span>
               </div>
+            <% else %>
               <div
-                id={"#{@id}-scroll"}
-                style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}
+                class="stage-main-lane"
+                style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;"
               >
                 <div
-                  :if={@composing}
-                  id={"#{@id}-composer"}
-                  phx-click-away="cancel_compose"
-                  style="background:var(--color-base-100);border:1px solid var(--color-primary);border-radius:9px;padding:9px;box-shadow:0 2px 8px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
+                  :if={@labeled}
+                  id={"#{@id}-main-lane-header"}
+                  phx-click="toggle_collapse"
+                  phx-value-stage-id={@stage_id}
+                  aria-label="Collapse In progress lane"
+                  style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
                 >
-                  <.form
-                    for={@compose_form}
-                    id={"#{@id}-compose-form"}
-                    phx-change="validate_card"
-                    phx-submit="create_card"
-                    class="flex flex-col gap-2"
-                  >
-                    <input type="hidden" name="stage_id" value={@stage_id} />
-                    <textarea
-                      id={"#{@id}-compose-title"}
-                      name="card[title]"
-                      rows="2"
-                      placeholder={@compose_placeholder}
-                      autofocus
-                      autocomplete="off"
-                      phx-hook="SubmitOnEnter"
-                      phx-keydown="cancel_compose"
-                      phx-key="escape"
-                      class="w-full resize-none border-none bg-transparent p-0 text-[13px] leading-[1.4] text-base-content outline-none focus:outline-none"
-                    >{Phoenix.HTML.Form.normalize_value("textarea", @compose_form[:title].value)}</textarea>
-                    <div class="flex items-center gap-1.5">
-                      <button
-                        type="submit"
-                        id={"#{@id}-compose-submit"}
-                        class="btn btn-xs min-h-[44px] border-none font-semibold text-primary-content"
-                        style="background:var(--color-primary);"
-                      >
-                        {@compose_cta}
-                      </button>
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs min-h-[44px]"
-                        style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
-                        phx-click="cancel_compose"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </.form>
+                  <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                    In progress
+                  </span>
+                  <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+                    {@count}
+                  </span>
                 </div>
                 <div
-                  id={"#{@id}-drop"}
-                  class="stage-drop"
-                  data-stage-id={@stage_id}
-                  style="flex:1 1 auto;min-height:100%;display:flex;flex-direction:column;gap:8px;"
+                  id={"#{@id}-scroll"}
+                  style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}
                 >
                   <div
-                    id={"#{@id}-cards"}
-                    phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
-                    class="stage-cards"
-                    style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;"
+                    :if={@composing}
+                    id={"#{@id}-composer"}
+                    phx-click-away="cancel_compose"
+                    style="background:var(--color-base-100);border:1px solid var(--color-primary);border-radius:9px;padding:9px;box-shadow:0 2px 8px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
+                  >
+                    <.form
+                      for={@compose_form}
+                      id={"#{@id}-compose-form"}
+                      phx-change="validate_card"
+                      phx-submit="create_card"
+                      class="flex flex-col gap-2"
+                    >
+                      <input type="hidden" name="stage_id" value={@stage_id} />
+                      <textarea
+                        id={"#{@id}-compose-title"}
+                        name="card[title]"
+                        rows="2"
+                        placeholder={@compose_placeholder}
+                        autofocus
+                        autocomplete="off"
+                        phx-hook="SubmitOnEnter"
+                        phx-keydown="cancel_compose"
+                        phx-key="escape"
+                        class="w-full resize-none border-none bg-transparent p-0 text-[13px] leading-[1.4] text-base-content outline-none focus:outline-none"
+                      >{Phoenix.HTML.Form.normalize_value("textarea", @compose_form[:title].value)}</textarea>
+                      <div class="flex items-center gap-1.5">
+                        <button
+                          type="submit"
+                          id={"#{@id}-compose-submit"}
+                          class="btn btn-xs min-h-[44px] border-none font-semibold text-primary-content"
+                          style="background:var(--color-primary);"
+                        >
+                          {@compose_cta}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs min-h-[44px]"
+                          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                          phx-click="cancel_compose"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </.form>
+                  </div>
+                  <div
+                    id={"#{@id}-drop"}
+                    class="stage-drop"
+                    data-stage-id={@stage_id}
+                    style="flex:1 1 auto;min-height:100%;display:flex;flex-direction:column;gap:8px;"
                   >
                     <div
-                      id={"#{@id}-empty"}
-                      class="stage-empty hidden only:block"
-                      style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+                      id={"#{@id}-cards"}
+                      phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                      class="stage-cards"
+                      style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;"
                     >
-                      No cards yet
+                      <div
+                        id={"#{@id}-empty"}
+                        class="stage-empty hidden only:block"
+                        style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+                      >
+                        No cards yet
+                      </div>
+                      <.board_card
+                        :for={{dom_id, card} <- @cards}
+                        {card_log_attrs(@health, card.id)}
+                        id={dom_id}
+                        title={card.title}
+                        tag={card.tag}
+                        ref={Cards.format_ref(@board_key, card.ref_number)}
+                        status={card.status}
+                        stage_type={@type}
+                        done={@terminal and card.status == :ready}
+                        question={Map.get(@questions, card.id)}
+                        progress={Cards.sub_task_pct(card)}
+                        owners={card.owners}
+                        active_owner={Cards.active_owner_type(card)}
+                        lane={:main}
+                        category={@category}
+                        run={Map.get(@runs, card.id)}
+                        progress_at={run_meta_at(@run_meta, card.id)}
+                        stalled?={run_meta_stalled?(@run_meta, card.id)}
+                        rate_limited={run_meta_rate_limited(@run_meta, card.id)}
+                        vote_count={Map.get(@vote_counts, card.id, 0)}
+                        blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                      />
                     </div>
-                    <.board_card
-                      :for={{dom_id, card} <- @cards}
-                      {card_log_attrs(@health, card.id)}
-                      id={dom_id}
-                      title={card.title}
-                      tag={card.tag}
-                      ref={Cards.format_ref(@board_key, card.ref_number)}
-                      status={card.status}
-                      stage_type={@type}
-                      done={@terminal and card.status == :ready}
-                      question={Map.get(@questions, card.id)}
-                      progress={Cards.sub_task_pct(card)}
-                      owners={card.owners}
-                      active_owner={Cards.active_owner_type(card)}
-                      lane={:main}
-                      category={@category}
-                      run={Map.get(@runs, card.id)}
-                      progress_at={run_meta_at(@run_meta, card.id)}
-                      stalled?={run_meta_stalled?(@run_meta, card.id)}
-                      rate_limited={run_meta_rate_limited(@run_meta, card.id)}
-                      vote_count={Map.get(@vote_counts, card.id, 0)}
-                      blocked_count={length(Map.get(@blocked_by, card.id, []))}
-                    />
-                  </div>
-                  <%!--
+                    <%!--
                     RLY-116 — the .stage-drop wrapper owns the droppable region: it keeps the
                     min-height:100% stretch so a column's empty space stays a drop target
                     (RLY-1), while the .stage-cards list above is natural-height so this
@@ -5369,118 +5405,275 @@ defmodule RelayWeb.CoreComponents do
                     footer). The button must stay OUTSIDE the -cards div: that is a
                     phx-update="stream" container and may only hold stream items.
                   --%>
-                  <button
-                    :if={(@terminal and @revealed) && @count > @revealed}
-                    type="button"
-                    id={"#{@id}-show-more-done"}
-                    phx-click="show_more_done"
-                    phx-value-stage-id={@stage_id}
-                    class="stage-show-more"
-                    style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
-                  >
-                    Show
-                    <span style="font-family:var(--font-mono);">
-                      {min(@page_size, @count - @revealed)}
-                    </span>
-                    more
-                  </button>
+                    <button
+                      :if={(@terminal and @revealed) && @count > @revealed}
+                      type="button"
+                      id={"#{@id}-show-more-done"}
+                      phx-click="show_more_done"
+                      phx-value-stage-id={@stage_id}
+                      class="stage-show-more"
+                      style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+                    >
+                      Show
+                      <span style="font-family:var(--font-mono);">
+                        {min(@page_size, @count - @revealed)}
+                      </span>
+                      more
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          <% end %>
-          <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
-          <%= for sub <- @sublanes do %>
-            <div
-              :if={sub.collapsed}
-              id={"sublane-#{sub.id}-strip"}
-              class="sublane-strip stage-drop"
-              data-stage-id={sub.id}
-              phx-click="toggle_collapse"
-              phx-value-stage-id={sub.id}
-              aria-label={"Expand #{sub.name} lane"}
-              style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
-            >
-              <span
-                class="sublane-strip-dot"
-                style={"width:6px;height:6px;border-radius:50%;background:#{lane_color(sub.lane)};opacity:0.6;flex:0 0 auto;"}
-              >
-              </span>
-              <span
-                class="sublane-strip-name"
-                style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};white-space:nowrap;"}
-              >
-                {sub.name}
-              </span>
-              <span
-                class="sublane-strip-count"
-                style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;flex:0 0 auto;"}
-              >
-                {sub.count}
-              </span>
-            </div>
-            <div
-              :if={!sub.collapsed}
-              id={"sublane-#{sub.id}"}
-              class="sublane"
-              style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
-            >
+            <% end %>
+            <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
+            <%= for sub <- @sublanes do %>
               <div
-                id={"sublane-#{sub.id}-header"}
+                :if={sub.collapsed}
+                id={"sublane-#{sub.id}-strip"}
+                class="sublane-strip stage-drop"
+                data-stage-id={sub.id}
                 phx-click="toggle_collapse"
                 phx-value-stage-id={sub.id}
-                aria-label={"Collapse #{sub.name} lane"}
-                style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;cursor:pointer;"
+                aria-label={"Expand #{sub.name} lane"}
+                style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
               >
-                <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+                <span
+                  class="sublane-strip-dot"
+                  style={"width:6px;height:6px;border-radius:50%;background:#{lane_color(sub.lane)};opacity:0.6;flex:0 0 auto;"}
+                >
+                </span>
+                <span
+                  class="sublane-strip-name"
+                  style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};white-space:nowrap;"}
+                >
                   {sub.name}
                 </span>
-                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+                <span
+                  class="sublane-strip-count"
+                  style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;flex:0 0 auto;"}
+                >
                   {sub.count}
                 </span>
               </div>
               <div
-                id={"sublane-#{sub.id}-cards"}
-                phx-update="stream"
-                data-stage-id={sub.id}
-                class="stage-cards stage-drop"
-                style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+                :if={!sub.collapsed}
+                id={"sublane-#{sub.id}"}
+                class="sublane"
+                style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
               >
                 <div
-                  id={"sublane-#{sub.id}-empty"}
-                  class="stage-empty hidden only:block"
-                  style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 40%, transparent);"
+                  id={"sublane-#{sub.id}-header"}
+                  phx-click="toggle_collapse"
+                  phx-value-stage-id={sub.id}
+                  aria-label={"Collapse #{sub.name} lane"}
+                  style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;cursor:pointer;"
                 >
-                  Empty
+                  <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+                    {sub.name}
+                  </span>
+                  <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+                    {sub.count}
+                  </span>
                 </div>
-                <.board_card
-                  :for={{dom_id, card} <- sub.cards}
-                  {card_log_attrs(@health, card.id)}
-                  id={dom_id}
-                  title={card.title}
-                  tag={card.tag}
-                  ref={Cards.format_ref(@board_key, card.ref_number)}
-                  status={card.status}
-                  stage_type={sub.lane}
-                  done={false}
-                  question={Map.get(@questions, card.id)}
-                  progress={Cards.sub_task_pct(card)}
-                  owners={card.owners}
-                  active_owner={Cards.active_owner_type(card)}
-                  lane={sub.lane}
-                  category={@category}
-                  run={Map.get(@runs, card.id)}
-                  progress_at={run_meta_at(@run_meta, card.id)}
-                  stalled?={run_meta_stalled?(@run_meta, card.id)}
-                  rate_limited={run_meta_rate_limited(@run_meta, card.id)}
-                  vote_count={Map.get(@vote_counts, card.id, 0)}
-                  blocked_count={length(Map.get(@blocked_by, card.id, []))}
-                />
+                <div
+                  id={"sublane-#{sub.id}-cards"}
+                  phx-update="stream"
+                  data-stage-id={sub.id}
+                  class="stage-cards stage-drop"
+                  style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+                >
+                  <div
+                    id={"sublane-#{sub.id}-empty"}
+                    class="stage-empty hidden only:block"
+                    style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 40%, transparent);"
+                  >
+                    Empty
+                  </div>
+                  <.board_card
+                    :for={{dom_id, card} <- sub.cards}
+                    {card_log_attrs(@health, card.id)}
+                    id={dom_id}
+                    title={card.title}
+                    tag={card.tag}
+                    ref={Cards.format_ref(@board_key, card.ref_number)}
+                    status={card.status}
+                    stage_type={sub.lane}
+                    done={false}
+                    question={Map.get(@questions, card.id)}
+                    progress={Cards.sub_task_pct(card)}
+                    owners={card.owners}
+                    active_owner={Cards.active_owner_type(card)}
+                    lane={sub.lane}
+                    category={@category}
+                    run={Map.get(@runs, card.id)}
+                    progress_at={run_meta_at(@run_meta, card.id)}
+                    stalled?={run_meta_stalled?(@run_meta, card.id)}
+                    rate_limited={run_meta_rate_limited(@run_meta, card.id)}
+                    vote_count={Map.get(@vote_counts, card.id, 0)}
+                    blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                  />
+                </div>
               </div>
-            </div>
-          <% end %>
-        </div>
-      </section>
+            <% end %>
+          </div>
+        </section>
     <% end %>
+    """
+  end
+
+  @doc """
+  RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup
+  "B — collapsed stage stays a page, rendered as a compact one-line list"): a baton/status
+  dot · the mono ref (fixed width) · the title, which truncates with an ellipsis and never
+  wraps. At least 44px tall. Tapping it emits `"select_card"` (`phx-value-ref`), exactly
+  like a `board_card/1` face. Not draggable — the pager does not drag between pages.
+
+  ## Examples
+
+      <.compact_card_row id="stage_cards_9-1" ref="RE376" title="Ship it" status={:ready} done />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RE376"
+  attr :title, :string, required: true
+
+  attr :status, :atom,
+    values: Card.statuses() ++ [nil],
+    default: nil
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton (Cards.active_owner_type/1); colors the dot when no status does"
+
+  attr :done, :boolean, default: false, doc: "derived Done (a :ready card at the terminal stage)"
+
+  def compact_card_row(assigns) do
+    assigns = assign(assigns, :dot_class, compact_row_dot_class(assigns))
+
+    ~H"""
+    <li
+      id={@id}
+      class="compact-card-row flex min-h-11 cursor-pointer items-center gap-2.5 border-b border-base-300 px-3"
+      role="button"
+      tabindex="0"
+      data-ref={@ref}
+      phx-click="select_card"
+      phx-value-ref={@ref}
+    >
+      <span class={"compact-card-row-dot size-1.5 flex-none rounded-full #{@dot_class}"}></span>
+      <span class="compact-card-row-ref w-12 flex-none font-mono text-[10px] text-base-content/50">
+        {@ref}
+      </span>
+      <span class="compact-card-row-title min-w-0 flex-1 truncate text-[13px]">{@title}</span>
+    </li>
+    """
+  end
+
+  # RE377 — the compact row's dot: Done green, then the card's status (failed rose,
+  # needs-you amber, working violet), then the baton holder (Human = blue, AI = violet).
+  defp compact_row_dot_class(%{done: true}), do: "bg-success"
+  defp compact_row_dot_class(%{status: :failed}), do: "bg-error"
+  defp compact_row_dot_class(%{status: :needs_input}), do: "bg-warning"
+  defp compact_row_dot_class(%{status: :in_review}), do: "bg-warning"
+  defp compact_row_dot_class(%{status: :working}), do: "bg-secondary"
+  defp compact_row_dot_class(%{active_owner: :ai}), do: "bg-secondary"
+  defp compact_row_dot_class(%{active_owner: :human}), do: "bg-primary"
+  defp compact_row_dot_class(_assigns), do: "bg-base-300"
+
+  # RE377 — a collapsed stage's phone page (card mockup "B — collapsed stage stays a page,
+  # rendered as a compact one-line list"). Still a `.stage-column[data-stage-id]` so the
+  # BoardPager hook treats it as a snap page. Each lane is its own stream list, stacked so
+  # they read as one list. The bordered box keeps its stream containers in the DOM even when
+  # empty (hidden), so a card streamed into an empty collapsed stage is never dropped.
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :stage_id, :any, required: true
+  attr :board_key, :string, required: true
+  attr :total_count, :integer, required: true
+  attr :count, :integer, default: nil
+  attr :terminal, :boolean, default: false
+  attr :revealed, :integer, default: nil
+  attr :cards, :any, default: []
+  attr :sublanes, :list, default: []
+
+  defp stage_compact_page(assigns) do
+    ~H"""
+    <section
+      id={@id}
+      class="stage-column stage-compact flex h-full flex-col overflow-y-auto bg-base-100"
+      data-stage-id={@stage_id}
+      data-collapsed="true"
+    >
+      <header id={"#{@id}-compact-header"} class="flex flex-none items-center gap-2 px-3 pb-2 pt-2.5">
+        <h3 class="stage-name text-[13px] font-semibold">{@name}</h3>
+        <span class="stage-count font-mono text-[10.5px] text-base-content/45">{@total_count}</span>
+        <span
+          id={"#{@id}-collapsed-badge"}
+          class="badge badge-ghost badge-sm gap-1 border-dashed border-base-content/25 font-mono text-[9.5px] text-base-content/60"
+        >
+          collapsed
+        </span>
+        <span class="flex-1"></span>
+        <button
+          type="button"
+          id={"#{@id}-show-cards"}
+          phx-click="expand_stage"
+          phx-value-stage-id={@stage_id}
+          class="btn btn-ghost btn-sm min-h-11 px-2 text-[12px] text-primary"
+        >
+          Show cards
+        </button>
+      </header>
+      <p
+        :if={@total_count == 0}
+        id={"#{@id}-compact-empty"}
+        class="mx-3 rounded-[10px] border border-dashed border-base-300 py-4 text-center font-mono text-[11px] text-base-content/45"
+      >
+        No cards yet
+      </p>
+      <div
+        id={"#{@id}-list"}
+        class={[
+          "mx-3 flex-none overflow-hidden rounded-[10px] border-x border-t border-base-300 bg-base-100",
+          @total_count == 0 && "hidden"
+        ]}
+      >
+        <ul id={"#{@id}-rows"} phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}>
+          <.compact_card_row
+            :for={{dom_id, card} <- @cards}
+            id={dom_id}
+            ref={Cards.format_ref(@board_key, card.ref_number)}
+            title={card.title}
+            status={card.status}
+            active_owner={Cards.active_owner_type(card)}
+            done={@terminal and card.status == :ready}
+          />
+        </ul>
+        <ul
+          :for={sub <- @sublanes}
+          id={"#{@id}-rows-#{sub.id}"}
+          phx-update={is_struct(sub.cards, Phoenix.LiveView.LiveStream) && "stream"}
+        >
+          <.compact_card_row
+            :for={{dom_id, card} <- sub.cards}
+            id={dom_id}
+            ref={Cards.format_ref(@board_key, card.ref_number)}
+            title={card.title}
+            status={card.status}
+            active_owner={Cards.active_owner_type(card)}
+          />
+        </ul>
+      </div>
+      <button
+        :if={(@terminal and @revealed) && @count > @revealed}
+        type="button"
+        id={"#{@id}-rows-more"}
+        phx-click="show_more_done"
+        phx-value-stage-id={@stage_id}
+        class="btn btn-ghost btn-sm mx-3 my-2 flex-none font-mono text-[11px] text-base-content/65"
+      >
+        {@count - @revealed} more
+      </button>
+    </section>
     """
   end
 

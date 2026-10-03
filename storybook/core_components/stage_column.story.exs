@@ -37,6 +37,106 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :collapsed_pager,
+        description:
+          "RE377 — collapsed, pager: at phone width a collapsed stage is a compact page — " <>
+            "collapsed badge, Show cards, one-line rows — instead of the 44px strip",
+        attributes: %{
+          id: "story-stage-collapsed-pager",
+          name: "Code",
+          type: :work,
+          ai_enabled: true,
+          stage_id: 10,
+          count: 2,
+          category: :in_progress,
+          board_key: "RLY",
+          collapsed: true,
+          pager: true,
+          cards: [
+            {"story-card-pager-1",
+             %{
+               id: 12,
+               title: "Wire up Google sign-in",
+               tag: "auth",
+               ref_number: 12,
+               status: :working,
+               progress: 61,
+               owners: [%{actor_type: :agent}]
+             }},
+            {"story-card-pager-2",
+             %{
+               id: 13,
+               title: "Render the stage columns",
+               tag: "ui",
+               ref_number: 13,
+               status: :ready,
+               progress: nil,
+               owners: []
+             }}
+          ]
+        }
+      },
+      %Variation{
+        id: :collapsed_pager_done_more,
+        description:
+          "RE377 — collapsed Done stage, pager: the compact rows page the terminal stage like " <>
+            "the desktop column — a 'N more' button reveals the next page of Done rows",
+        attributes: %{
+          id: "story-stage-collapsed-pager-done",
+          name: "Done",
+          type: :done,
+          stage_id: 12,
+          count: 3,
+          category: :complete,
+          board_key: "RLY",
+          collapsed: true,
+          pager: true,
+          terminal: true,
+          revealed: 1,
+          cards: [
+            {"story-card-pager-done-1",
+             %{
+               id: 15,
+               title: "Ship the board",
+               tag: nil,
+               ref_number: 15,
+               status: :ready,
+               progress: nil,
+               owners: []
+             }}
+          ]
+        }
+      },
+      %Variation{
+        id: :pager_expanded,
+        description:
+          "RE377 — pager, expanded (Show as list): after Show cards the page shows full card " <>
+            "faces and a Show as list button that folds it back to rows",
+        attributes: %{
+          id: "story-stage-pager-expanded",
+          name: "Code",
+          type: :work,
+          ai_enabled: true,
+          stage_id: 11,
+          count: 1,
+          category: :in_progress,
+          board_key: "RLY",
+          pager: true,
+          cards: [
+            {"story-card-pager-3",
+             %{
+               id: 14,
+               title: "Wire up Google sign-in",
+               tag: "auth",
+               ref_number: 14,
+               status: :working,
+               progress: 61,
+               owners: [%{actor_type: :agent}]
+             }}
+          ]
+        }
+      },
+      %Variation{
         id: :expanded_name_collapses,
         description:
           "RLY-145 — every expanded stage's name is the collapse control: clicking it collapses the stage to its 44px strip",

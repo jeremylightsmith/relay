@@ -891,6 +891,22 @@ textarea.commit-field-input { min-height: 64px; }
 .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-count {
   color: color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content));
 }
+/* RE377 — a collapsed stage's chip: dashed outline + leading ▸ caret. The caret is
+   rendered only while collapsed, so it is gone from the DOM after Show cards. */
+.board-pager-chip-caret {
+  font-size: 9px;
+  color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+.board-pager-chip[data-collapsed="true"] {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--color-base-content) 25%, transparent);
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+/* Active + collapsed keeps the dash on the existing active fill (--color-field-hover). */
+.board-pager-chip[data-collapsed="true"][data-active] {
+  color: var(--color-base-content);
+  border-color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+}
 .board-pager-fade {
   position: absolute; right: 0; top: 0; bottom: 9px; width: 28px;
   background: linear-gradient(90deg, transparent, var(--color-base-100));

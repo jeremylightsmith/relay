@@ -38,6 +38,39 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "80px square live miniature"
   end
 
+  test "GET /storybook/core_components/stage_column shows the RE377 compact pager page and Show as list",
+       %{conn: conn} do
+    html = conn |> get("/storybook/core_components/stage_column") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    # Storybook rewrites each variation's id to "stage-column-single-<variation>".
+    # Collapsed + pager: the compact page — collapsed badge, Show cards, one-line rows.
+    assert doc |> LazyHTML.query("#stage-column-single-collapsed-pager-collapsed-badge") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("#stage-column-single-collapsed-pager-show-cards") |> Enum.count() == 1
+    assert doc |> LazyHTML.query("#stage-column-single-collapsed-pager-rows .compact-card-row") |> Enum.count() == 2
+
+    # The terminal Done stage pages its rows with an "N more" button.
+    more = LazyHTML.query(doc, "#stage-column-single-collapsed-pager-done-more-rows-more")
+    assert Enum.count(more) == 1
+    assert more |> LazyHTML.text() |> String.trim() == "2 more"
+
+    # Expanded in pager mode: Show as list folds it back to rows.
+    assert doc |> LazyHTML.query("#stage-column-single-pager-expanded-show-as-list") |> Enum.count() == 1
+  end
+
+  test "GET /storybook/core_components/compact_card_row renders the RE377 one-line rows", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/compact_card_row") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    assert doc |> LazyHTML.query("#compact-card-row-single-long-title-truncates .compact-card-row-title") |> Enum.count() ==
+             1
+
+    assert doc |> LazyHTML.query("#compact-card-row-single-done .compact-card-row-dot.bg-success") |> Enum.count() == 1
+
+    assert doc |> LazyHTML.query("#compact-card-row-single-needs-input .compact-card-row-dot.bg-warning") |> Enum.count() ==
+             1
+  end
+
   test "GET /storybook/flow_metrics/verdict_bar shows the RE235 actual-counts variations", %{conn: conn} do
     conn = get(conn, "/storybook/flow_metrics/verdict_bar")
     html = html_response(conn, 200)

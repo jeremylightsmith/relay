@@ -1,7 +1,7 @@
 // RLY-94 · BOARD-01 — the phone-width stage pager's client half. LiveView owns all
 // DOM content (no phx-update="ignore"); this hook only reads scroll position and
-// scrolls, plus reports "is the pager active?" so the server can disable the
-// desktop-only stage collapse (every stage gets a page in pager mode).
+// scrolls, plus reports "is the pager active?" so the server can render a collapsed
+// stage as its compact row page instead of the desktop strip (RE377).
 //
 // Mounted on #board-pager-nav (the chip strip). Pages are the .stage-column
 // sections inside #board-bands, addressed by data-stage-id.
@@ -26,7 +26,7 @@ const BoardPager = {
     this.observePages()
 
     // The pager round-trip (reportMode → server sets @pager_mode → collapsed
-    // strips re-render as .stage-column pages) patches #board-bands, not this
+    // strips re-render as compact .stage-column pages) patches #board-bands, not this
     // hook's own element (#board-pager-nav) — so `updated()` below never fires
     // for it. Watch the pages container directly so newly-expanded pages get
     // observed as soon as LiveView patches them in.
