@@ -225,8 +225,9 @@ defmodule RelayWeb.BoardLivePagerTest do
       done = Boards.terminal_stage(board.stages)
       {:ok, _} = Boards.update_stage(done, %{collapsed_by_default: true})
       done_col = "stage-col-#{done.position}"
+      page = Cards.done_page_size()
 
-      for i <- 1..12 do
+      for i <- 1..(page + 4) do
         insert(:card,
           stage: done,
           title: "Done #{i}",
@@ -237,12 +238,12 @@ defmodule RelayWeb.BoardLivePagerTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       pager_on(view)
 
-      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == 8
+      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == page
       assert has_element?(view, "##{done_col}-rows-more", "4 more")
 
       view |> element("##{done_col}-rows-more") |> render_click()
 
-      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == 12
+      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == page + 4
       refute has_element?(view, "##{done_col}-rows-more")
     end
 

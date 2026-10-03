@@ -5536,7 +5536,7 @@ defmodule RelayWeb.CoreComponents do
   attr :title, :string, required: true
 
   attr :status, :atom,
-    values: [:ready, :working, :needs_input, :in_review, :failed, nil],
+    values: Card.statuses() ++ [nil],
     default: nil
 
   attr :active_owner, :atom,

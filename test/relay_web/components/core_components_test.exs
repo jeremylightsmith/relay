@@ -659,6 +659,9 @@ defmodule RelayWeb.CoreComponentsTest do
       assert dot.(status: :ready, active_owner: :ai) == "bg-secondary"
       assert dot.(status: :ready, active_owner: :human) == "bg-primary"
       assert dot.(status: :ready) == "bg-base-300"
+      # a status with no dot of its own falls through to the baton holder
+      assert dot.(status: :queued, active_owner: :ai) == "bg-secondary"
+      assert dot.(status: :queued, active_owner: :human) == "bg-primary"
     end
   end
 
