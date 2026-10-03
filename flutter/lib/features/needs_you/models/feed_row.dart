@@ -230,8 +230,8 @@ class InboxGroup {
 ///   an older server or an odd row still renders.
 ///
 /// The feed spans **every** board the user belongs to, so same-named stages on different
-/// boards **merge into one group** — [InboxRow]'s board chip is what tells them apart, so
-/// no group is duplicated per board. If merged rows disagree on `type` or `position`, the
+/// boards **merge into one group** rather than being duplicated per board (Needs you now
+/// shows one board's rows at a time, RE376). If merged rows disagree on `type` or `position`, the
 /// first row wins: deterministic, and cosmetic only.
 List<InboxGroup> groupRowsByStage(List<FeedRow> rows) {
   final order = <String>[]; // first-appearance order — the tie-breaker

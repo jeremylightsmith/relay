@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
@@ -130,6 +131,7 @@ class StagedFeedRepository implements FeedRepository {
 ({ProviderContainer container, FakeAuthController auth}) harness({
   required DecisionApi api,
   FeedRepository? feed,
+  BoardPrefs? boardPrefs,
 }) {
   final auth = FakeAuthController(
     const AuthState(status: AuthStatus.signedIn, token: 'relayu_t'),
@@ -139,6 +141,7 @@ class StagedFeedRepository implements FeedRepository {
       decisionApiProvider.overrideWithValue(api),
       feedRepositoryProvider.overrideWithValue(feed ?? FakeFeedRepository()),
       authProvider.overrideWith(() => auth),
+      boardPrefsProvider.overrideWithValue(boardPrefs ?? InMemoryBoardPrefs()),
     ],
   );
   addTearDown(container.dispose);
@@ -912,6 +915,66 @@ void main() {
       await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
 
       expect(feed.calls, 0);
+    },
+  );
+
+  test(
+    'the end-of-snapshot re-snapshot stays on the current board (RE376)',
+    () async {
+      final feed = FakeFeedRepository([
+        page([
+          row('MKT-2', slug: 'mkt'),
+          row('DAT-1', slug: 'dat'),
+          row('MKT-3', slug: 'mkt'),
+        ]),
+      ]);
+      final h = harness(
+        api: FakeDecisionApi(),
+        feed: feed,
+        boardPrefs: InMemoryBoardPrefs('mkt'),
+      );
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(
+        rows: [row('MKT-1', slug: 'mkt')],
+        atRef: 'MKT-1',
+      );
+
+      final dest = await queue.approveCurrent(
+        cardRef: 'MKT-1',
+        boardSlug: 'mkt',
+      );
+
+      expect(dest, '/cards/MKT-2?board=mkt&kind=in_review');
+      expect(h.container.read(reviewQueueProvider).items.map((i) => i.ref), [
+        'MKT-2',
+        'MKT-3',
+      ]);
+    },
+  );
+
+  test(
+    'only other boards\' rows left: the walk lands on the inbox (RE376)',
+    () async {
+      final feed = FakeFeedRepository([
+        page([row('DAT-1', slug: 'dat')]),
+      ]);
+      final h = harness(
+        api: FakeDecisionApi(),
+        feed: feed,
+        boardPrefs: InMemoryBoardPrefs('mkt'),
+      );
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(
+        rows: [row('MKT-1', slug: 'mkt')],
+        atRef: 'MKT-1',
+      );
+
+      final dest = await queue.approveCurrent(
+        cardRef: 'MKT-1',
+        boardSlug: 'mkt',
+      );
+
+      expect(dest, '/needs-you');
     },
   );
 }

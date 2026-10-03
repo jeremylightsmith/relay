@@ -63,8 +63,7 @@ void main() {
   });
 
   test('same-named stages on different boards merge into one group', () {
-    // The feed spans every board; the per-row board chip is what tells them apart,
-    // so a group is never duplicated per board.
+    // The feed spans every board; a group is never duplicated per board.
     final groups = groupRowsByStage([
       row('AAA-1', group: 'Code', slug: 'alpha'),
       row('BBB-1', group: 'Code', slug: 'beta'),

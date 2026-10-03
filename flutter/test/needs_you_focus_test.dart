@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
@@ -48,6 +49,7 @@ Future<void> pumpFocusShell(
         boardsRepositoryProvider.overrideWithValue(FakeBoardsRepository()),
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue('relayu_test'),
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs()),
         clockProvider.overrideWithValue(clock),
         decisionApiProvider.overrideWithValue(FakeDecisionApi()),
       ],

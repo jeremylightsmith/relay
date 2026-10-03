@@ -8,17 +8,9 @@ import '../models/feed_row.dart';
 ///
 /// Sizes are the artboard's px × 1.585 (the 248×536 frame is ~63% of a 393×852 device).
 class InboxRow extends StatelessWidget {
-  const InboxRow({
-    super.key,
-    required this.row,
-    required this.showBoardChip,
-    required this.onTap,
-  });
+  const InboxRow({super.key, required this.row, required this.onTap});
 
   final FeedRow row;
-
-  /// D3: only true when the loaded feed spans more than one board.
-  final bool showBoardChip;
 
   final VoidCallback onTap;
 
@@ -71,10 +63,6 @@ class InboxRow extends StatelessWidget {
                                   color: RelayTheme.relayBlocked,
                                 ),
                               ),
-                              if (showBoardChip) ...[
-                                const SizedBox(width: 10),
-                                _boardChip(scheme),
-                              ],
                               const Spacer(),
                               Text(
                                 formatAge(row.blockedAt),
@@ -124,26 +112,6 @@ class InboxRow extends StatelessWidget {
         fontSize: 13, // artboard 8
         fontWeight: FontWeight.w600,
         color: Colors.white,
-      ),
-    ),
-  );
-
-  /// D3's addition to the artboard: the board key, so two same-titled cards on
-  /// different boards are tellable apart.
-  Widget _boardChip(ColorScheme scheme) => Container(
-    key: Key('board_chip_${row.ref}'),
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Text(
-      row.board.key,
-      style: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        fontFamily: 'monospace',
-        color: scheme.onSurfaceVariant,
       ),
     ),
   );

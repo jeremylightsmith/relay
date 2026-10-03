@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
 import '../auth/auth_controller.dart';
+import '../boards/current_board.dart';
 import '../needs_you/feed_controller.dart';
 import '../needs_you/feed_repository.dart';
 import '../needs_you/models/feed_row.dart';
@@ -266,12 +267,17 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     if (ref.exists(feedControllerProvider)) {
       ref.read(feedControllerProvider.notifier).applyFeed(page);
     }
-    if (page.rows.isEmpty) {
+    // RE376: the walk never leaves the current board — the inbox it came from
+    // only lists that board's rows, so the re-snapshot doesn't either.
+    final board = ref.read(currentBoardProvider.notifier);
+    await board.ready;
+    final rows = rowsForBoard(page.rows, ref.read(currentBoardProvider).slug);
+    if (rows.isEmpty) {
       state = ReviewQueueState(banner: banner);
       return '/needs-you';
     }
 
-    final items = page.rows.map(QueueItem.fromRow).toList(growable: false);
+    final items = rows.map(QueueItem.fromRow).toList(growable: false);
     state = ReviewQueueState(items: items, banner: banner);
     return routeFor(items.first);
   }

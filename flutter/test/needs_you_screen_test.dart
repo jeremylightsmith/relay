@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 import 'package:relay_mobile/features/needs_you/needs_you_screen.dart';
 import 'package:relay_mobile/features/needs_you/widgets/caught_up.dart';
 import 'package:relay_mobile/features/needs_you/widgets/working_strip.dart';
+
+import 'support/fake_boards.dart';
 
 /// A repository that answers from memory and counts calls — no network, no Dio.
 class FakeFeedRepository implements FeedRepository {
@@ -47,12 +51,22 @@ Future<void> pumpInbox(
   WidgetTester tester, {
   required FakeFeedRepository repo,
   String? token = 'relayu_test',
+  String? boardSlug,
+  FakeBoardsRepository? boards,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue(token),
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs(boardSlug)),
+        // The remembered board must be in the list, or reconcile clears it.
+        boardsRepositoryProvider.overrideWithValue(
+          boards ??
+              FakeBoardsRepository(
+                boards: boardSlug == null ? const [] : [makeBoard(boardSlug)],
+              ),
+        ),
       ],
       child: MaterialApp(
         theme: RelayTheme.light,
@@ -118,41 +132,134 @@ void main() {
     expect(find.byKey(const Key('inbox_row_RLY-1')), findsNothing);
   });
 
-  testWidgets('the board chip is absent when the feed spans one board', (
-    tester,
-  ) async {
-    final repo = FakeFeedRepository(
-      page: FeedPage(
-        rows: [
-          makeRow(ref: 'RLY-1'),
-          makeRow(ref: 'RLY-2'),
-        ],
-        meta: const FeedMeta(count: 2),
-      ),
-    );
-    await pumpInbox(tester, repo: repo);
+  FeedPage twoBoards() => FeedPage(
+    rows: [
+      makeRow(ref: 'MKT-1', boardKey: 'MKT'),
+      makeRow(ref: 'MKT-2', boardKey: 'MKT'),
+      makeRow(ref: 'DAT-1', boardKey: 'DAT'),
+    ],
+    meta: const FeedMeta(count: 3),
+  );
 
-    expect(find.byKey(const Key('board_chip_RLY-1')), findsNothing);
-    expect(find.byKey(const Key('board_chip_RLY-2')), findsNothing);
+  testWidgets(
+    'only the current board\'s rows: no board chip, nothing about other boards (RE376)',
+    (tester) async {
+      await pumpInbox(
+        tester,
+        repo: FakeFeedRepository(page: twoBoards()),
+        boardSlug: 'mkt',
+      );
+
+      expect(find.byKey(const Key('inbox_row_MKT-1')), findsOneWidget);
+      expect(find.byKey(const Key('inbox_row_MKT-2')), findsOneWidget);
+      expect(find.byKey(const Key('inbox_row_DAT-1')), findsNothing);
+      expect(find.byKey(const Key('board_chip_MKT-1')), findsNothing);
+      expect(find.text('MKT'), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('needs_you_subtitle'))).data,
+        '2 decisions waiting',
+      );
+    },
+  );
+
+  testWidgets('caught up (EMPTY-01) is judged per board', (tester) async {
+    await pumpInbox(
+      tester,
+      repo: FakeFeedRepository(
+        page: FeedPage(
+          rows: [makeRow(ref: 'DAT-1', boardKey: 'DAT')],
+          meta: const FeedMeta(count: 1),
+        ),
+      ),
+      boardSlug: 'mkt',
+    );
+
+    expect(find.byType(CaughtUp), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('needs_you_subtitle'))).data,
+      'nothing waiting',
+    );
   });
 
-  testWidgets('the board chip shows the key when the feed spans two boards', (
+  // INBOX-01 + SWITCH-01 · card mockup "B — always in one board, switch from the title".
+  testWidgets(
+    'the header title is "<board> ▾"; it opens Switch board, and a pick re-scopes the list',
+    (tester) async {
+      await pumpInbox(
+        tester,
+        repo: FakeFeedRepository(page: twoBoards()),
+        boardSlug: 'mkt',
+        boards: FakeBoardsRepository(
+          boards: [
+            makeBoard('mkt', name: 'Marketing site', needsYou: 2),
+            makeBoard('dat', name: 'Data pipeline', needsYou: 1),
+            makeBoard('sup', name: 'Support triage'),
+          ],
+        ),
+      );
+
+      final name = tester.widget<Text>(
+        find.byKey(const Key('board_switcher_name')),
+      );
+      expect(name.data, 'Marketing site');
+      expect(name.style?.fontSize, 34);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_caret'))).data,
+        '▾',
+      );
+
+      await tester.tap(find.byKey(const Key('board_switcher_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_title'))).data,
+        'Switch board',
+      );
+      expect(find.byKey(const Key('board_row_current_mkt')), findsOneWidget);
+      expect(find.byKey(const Key('board_row_current_dat')), findsNothing);
+      expect(find.text('2 needs you'), findsOneWidget);
+      expect(find.text('1 needs you'), findsOneWidget);
+      expect(find.byKey(const Key('board_row_needs_you_sup')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('board_row_dat')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('board_switcher_title')), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+        'Data pipeline',
+      );
+      expect(find.byKey(const Key('inbox_row_DAT-1')), findsOneWidget);
+      expect(find.byKey(const Key('inbox_row_MKT-1')), findsNothing);
+    },
+  );
+
+  testWidgets('the sheet shows an inline Retry when the board list fails', (
     tester,
   ) async {
-    final repo = FakeFeedRepository(
-      page: FeedPage(
-        rows: [
-          makeRow(ref: 'RLY-1', boardKey: 'RLY'),
-          makeRow(ref: 'MKT-1', boardKey: 'MKT'),
-        ],
-        meta: const FeedMeta(count: 2),
-      ),
+    final boards = FakeBoardsRepository(
+      boards: [makeBoard('mkt', name: 'Marketing site')],
     );
-    await pumpInbox(tester, repo: repo);
+    await pumpInbox(
+      tester,
+      repo: FakeFeedRepository(page: twoBoards()),
+      boardSlug: 'mkt',
+      boards: boards,
+    );
 
-    expect(find.byKey(const Key('board_chip_RLY-1')), findsOneWidget);
-    expect(find.byKey(const Key('board_chip_MKT-1')), findsOneWidget);
-    expect(find.text('MKT'), findsOneWidget);
+    boards.error = const ApiException('offline');
+    await tester.tap(find.byKey(const Key('board_switcher_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('board_switcher_error')), findsOneWidget);
+    // The tab keeps working on the remembered board underneath.
+    expect(find.byKey(const Key('inbox_row_MKT-1')), findsOneWidget);
+
+    boards.error = null;
+    await tester.tap(find.byKey(const Key('board_switcher_retry')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('board_row_mkt')), findsOneWidget);
   });
 
   testWidgets(

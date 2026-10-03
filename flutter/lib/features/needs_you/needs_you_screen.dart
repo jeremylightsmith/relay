@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
+import '../boards/board_switcher.dart';
+import '../boards/boards_controller.dart';
 import '../card/card_nav_context.dart';
 import '../decisions/review_queue.dart';
 import 'feed_controller.dart';
@@ -94,6 +96,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.read(feedControllerProvider.notifier).refresh();
+      unawaited(ref.read(boardsProvider.notifier).refresh());
     }
   }
 
@@ -108,8 +111,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
   /// method's awaited push anyway), and D2's per-decision reconcile already
   /// updated the feed.
   void _openCard(FeedRow row) {
-    final rows =
-        ref.read(feedControllerProvider).value?.rows ?? const <FeedRow>[];
+    final rows = ref.read(scopedFeedProvider).value?.rows ?? const <FeedRow>[];
     ref.read(reviewQueueProvider.notifier).enter(rows: rows, atRef: row.ref);
     final navContext = CardNavContext.seed(
       items: rows
@@ -127,7 +129,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
 
   @override
   Widget build(BuildContext context) {
-    final feed = ref.watch(feedControllerProvider);
+    final feed = ref.watch(scopedFeedProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -160,7 +162,8 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
   }
 }
 
-/// HOME-01 / EMPTY-01's in-page header (not an AppBar): 22px title over a live subtitle.
+/// HOME-01 / EMPTY-01's in-page header (not an AppBar): the current board's
+/// switcher title (RE376) over a live subtitle.
 class _Header extends StatelessWidget {
   const _Header({required this.subtitle});
 
@@ -185,15 +188,8 @@ class _Header extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Needs you',
-            style: TextStyle(
-              fontSize: 34, // artboard 22 × 1.585 ≈ the iOS large-title size
-              fontWeight: FontWeight.w600,
-              letterSpacing: -1.0, // artboard -0.03em
-              color: scheme.onSurface,
-            ),
-          ),
+          // RE376 · INBOX-01 — artboard 22 × 1.585 ≈ the iOS large-title size
+          const BoardSwitcherTitle(fontSize: 34),
           Text(
             subtitle,
             key: const Key('needs_you_subtitle'),
@@ -223,7 +219,11 @@ class _Loaded extends ConsumerWidget {
     final showWorking = working != null && working > 0;
 
     return RefreshIndicator(
-      onRefresh: () => ref.read(feedControllerProvider.notifier).refresh(),
+      // RE376: the switcher's per-board counts refresh with the feed.
+      onRefresh: () async {
+        unawaited(ref.read(boardsProvider.notifier).refresh());
+        await ref.read(feedControllerProvider.notifier).refresh();
+      },
       child: ListView(
         key: const Key('inbox_list'),
         // AlwaysScrollable so a short/empty list can still be pulled.
@@ -247,11 +247,7 @@ class _Loaded extends ConsumerWidget {
                 ...group.rows.map(
                   (row) => Padding(
                     padding: const EdgeInsets.only(bottom: 14), // artboard 9
-                    child: InboxRow(
-                      row: row,
-                      showBoardChip: state.multiBoard,
-                      onTap: () => onOpen(row),
-                    ),
+                    child: InboxRow(row: row, onTap: () => onOpen(row)),
                   ),
                 ),
                 const SizedBox(height: 10),

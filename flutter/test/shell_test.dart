@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
@@ -15,11 +16,19 @@ import 'support/fake_boards.dart';
 /// auth_test.dart; here we assert the three-tab shell itself. The inbox's repository
 /// is faked — the shell watches the feed count for its badge (D6), so pumping the
 /// shell would otherwise fire a real request.
-Future<void> pumpApp(WidgetTester tester, {FakeFeedRepository? repo}) async {
+Future<void> pumpApp(
+  WidgetTester tester, {
+  FakeFeedRepository? repo,
+  String? boardSlug,
+  FakeBoardsRepository? boards,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        boardsRepositoryProvider.overrideWithValue(FakeBoardsRepository()),
+        boardsRepositoryProvider.overrideWithValue(
+          boards ?? FakeBoardsRepository(),
+        ),
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs(boardSlug)),
         feedRepositoryProvider.overrideWithValue(repo ?? FakeFeedRepository()),
         authTokenProvider.overrideWithValue('relayu_test'),
       ],
@@ -119,6 +128,80 @@ void main() {
 
     await tester.tap(find.byKey(const Key('nav_settings')));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Settings'), findsOneWidget);
+    expect(find.byKey(const Key('settings_log_out')), findsOneWidget);
+  });
+
+  testWidgets(
+    'switching from the sheet keeps the tab — Needs you and Settings (RE376)',
+    (tester) async {
+      await pumpApp(
+        tester,
+        boardSlug: 'mkt',
+        boards: FakeBoardsRepository(
+          boards: [
+            makeBoard('mkt', name: 'Marketing site'),
+            makeBoard('dat', name: 'Data pipeline'),
+          ],
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('board_switcher_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('board_row_dat')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('needs_you_header')), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+        'Data pipeline',
+      );
+
+      await tester.tap(find.byKey(const Key('nav_settings')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('board_switcher_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('board_row_mkt')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('settings_log_out')), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+        'Marketing site',
+      );
+    },
+  );
+
+  testWidgets('the tab dot counts only the current board (RE376)', (
+    tester,
+  ) async {
+    await pumpApp(
+      tester,
+      boardSlug: 'mkt',
+      boards: FakeBoardsRepository(
+        boards: [makeBoard('mkt'), makeBoard('dat')],
+      ),
+      repo: FakeFeedRepository(
+        page: FeedPage(
+          rows: [makeRow(ref: 'DAT-1', boardKey: 'DAT')],
+          meta: const FeedMeta(count: 1),
+        ),
+      ),
+    );
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('nav_needs_you')),
+        matching: find.byType(Badge),
+      ),
+      findsNothing,
+    );
   });
 }

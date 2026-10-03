@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
+import '../boards/current_board.dart';
 import 'feed_repository.dart';
 import 'models/feed_row.dart';
 
@@ -13,9 +14,6 @@ class FeedState {
   final FeedMeta meta;
 
   int get count => meta.count;
-
-  /// D3: the board chip appears only when the loaded feed spans >1 board.
-  bool get multiBoard => rows.map((r) => r.board.key).toSet().length > 1;
 
   bool get caughtUp => rows.isEmpty;
 }
@@ -144,8 +142,38 @@ final feedControllerProvider = AsyncNotifierProvider<FeedController, FeedState>(
   retry: (_, _) => null,
 );
 
-/// The in-app tab badge count (D6). 0 while loading or errored — an unknown queue
-/// must not light the "you have work" dot.
-final needsYouCountProvider = Provider<int>(
-  (ref) => ref.watch(feedControllerProvider).value?.count ?? 0,
-);
+/// RE376: [rows] on board [slug] only. Null (nothing chosen) passes every row
+/// through. In production the router never shows a tab without a board, so this
+/// only happens in the ungated test shell and in the few milliseconds before the
+/// launch Keychain read lands.
+List<FeedRow> rowsForBoard(List<FeedRow> rows, String? slug) => slug == null
+    ? rows
+    : rows.where((r) => r.board.slug == slug).toList(growable: false);
+
+/// The Needs-you inbox for the **current board only** (RE376 §4): the existing
+/// cross-board `/api/all/feed`, filtered on the client. Other boards' waiting
+/// work appears only as counts in the board switcher, never here.
+final scopedFeedProvider = Provider<AsyncValue<FeedState>>((ref) {
+  final slug = ref.watch(currentBoardProvider.select((s) => s.slug));
+  return ref.watch(feedControllerProvider).whenData((s) {
+    final rows = rowsForBoard(s.rows, slug);
+    return FeedState(
+      rows: rows,
+      meta: FeedMeta(count: rows.length, workingCount: s.meta.workingCount),
+    );
+  });
+});
+
+/// The in-app tab badge count (D6), now the **current board's** count only
+/// (RE376). It is 0 while loading or errored, because an unknown queue must not
+/// light the "you have work" dot. The OS app-icon badge from push stays cross-board.
+///
+/// Derived straight from [feedControllerProvider] rather than through
+/// [scopedFeedProvider]: a provider → provider → provider chain gets flushed
+/// mid-build when Needs you's paused subscription resumes on a pop-back, and
+/// Riverpod then marks the scope dirty during build (needs_you_focus_test).
+final needsYouCountProvider = Provider<int>((ref) {
+  final slug = ref.watch(currentBoardProvider.select((s) => s.slug));
+  final rows = ref.watch(feedControllerProvider).value?.rows;
+  return rows == null ? 0 : rowsForBoard(rows, slug).length;
+});

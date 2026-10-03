@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../widgets/relay_avatar.dart';
 import '../auth/auth_controller.dart';
+import '../boards/board_switcher.dart';
 import 'logout_confirm_dialog.dart';
 
 /// SET-01 Settings (RLY-90): the identity block + the outlined destructive
@@ -24,7 +25,8 @@ class SettingsScreen extends ConsumerWidget {
     final avatarUrl = user['avatar_url'] as String?;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      // RE376: the board name is every tab's title; Settings' own content is unchanged.
+      appBar: AppBar(title: const BoardSwitcherTitle()),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 24),
         children: [

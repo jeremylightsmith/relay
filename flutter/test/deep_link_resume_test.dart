@@ -214,7 +214,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'Settings'), findsNothing);
+    expect(find.byKey(const Key('settings_log_out')), findsNothing);
     // back in the tab shell at the default landing (pumpLaunch does not fake
     // the feed, so assert the shell rather than the inbox's loaded state)
     expect(find.byType(NavigationBar), findsOneWidget);
