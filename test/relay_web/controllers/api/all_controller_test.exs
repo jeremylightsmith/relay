@@ -134,15 +134,26 @@ defmodule RelayWeb.Api.AllControllerTest do
       assert b["ai_active"] == false
     end
 
-    test "needs_you_count is the two-type count (ADR 0005), from the shared summary",
+    test "needs_you_count is the two-type count (ADR 0005), never the web's three-type sum",
          %{conn: conn, user: user} do
       board = member_board(user, "AAA", "alpha")
-      [summary] = Cards.list_board_summaries(user)
+      code = work_stage(board)
+      human = insert(:stage, board: board, name: "Polish", type: :work, ai_enabled: false, position: 2)
+      review = insert(:stage, board: board, name: "Review", type: :review, position: 3)
+
+      insert(:card, stage: code, status: :needs_input)
+      insert(:card, stage: review, status: :in_review)
+      # agent_stalled (RLY-148): counted.
+      stalled = insert(:card, stage: code, status: :working)
+      insert(:card_owner, card: stalled)
+      insert(:activity, card: stalled, type: :failure, text: "agent stopped")
+      # Ready-and-awaiting-human: the web's third type — NOT on the wire.
+      insert(:card, stage: human, status: :ready)
 
       [row] = conn |> get(~p"/api/all/boards") |> json_response(200) |> Map.fetch!("data")
 
       assert row["slug"] == board.slug
-      assert row["needs_you_count"] == summary.needs_you_two_type
+      assert row["needs_you_count"] == 3
     end
 
     test "401 without a bearer token" do

@@ -19,12 +19,20 @@ defmodule Relay.CardsBoardSummariesTest do
   test "one row per member board, with the summary facts", %{user: user} do
     alpha = member_board(user, "AAA", "alpha")
     code = insert(:stage, board: alpha, name: "Code", type: :work, ai_enabled: true, position: 1)
-    review = insert(:stage, board: alpha, name: "Review", type: :review, position: 2)
+    human = insert(:stage, board: alpha, name: "Polish", type: :work, ai_enabled: false, position: 2)
+    review = insert(:stage, board: alpha, name: "Review", type: :review, position: 3)
     # A substage never counts toward stage_count — only top-level stages do.
-    insert(:stage, board: alpha, parent_id: code.id, name: "Code Review", type: :review, position: 3)
+    insert(:stage, board: alpha, parent_id: code.id, name: "Code Review", type: :review, position: 4)
 
     insert(:card, stage: code, status: :needs_input)
     insert(:card, stage: review, status: :in_review)
+    # Ready in a human, non-terminal work stage: awaiting-human — the web's third type,
+    # which the two-type (mobile, ADR 0005) count must leave out.
+    insert(:card, stage: human, status: :ready)
+    # A stopped agent card: agent_stalled (RLY-148), counted by BOTH sums.
+    stalled = insert(:card, stage: code, status: :working)
+    insert(:card_owner, card: stalled)
+    insert(:activity, card: stalled, type: :failure, text: "agent stopped")
     working = insert(:card, stage: code, status: :working)
     insert(:card_owner, card: working)
     # Archived cards are not counted.
@@ -36,11 +44,13 @@ defmodule Relay.CardsBoardSummariesTest do
     assert row.slug == "alpha"
     assert row.name == "Board AAA"
     assert row.key == "AAA"
-    assert row.stage_count == 2
-    assert row.card_count == 3
+    assert row.stage_count == 3
+    assert row.card_count == 5
     assert row.ai_active? == true
-    assert row.needs_you_two_type == 2
-    assert row.needs_you_count == 2
+    # needs_input + in_review + agent_stalled
+    assert row.needs_you_two_type == 3
+    # ... + awaiting_human
+    assert row.needs_you_count == 4
   end
 
   test "an idle board with no AI-owned working card is not ai_active?", %{user: user} do
