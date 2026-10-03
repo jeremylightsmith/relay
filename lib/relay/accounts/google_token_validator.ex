@@ -1,7 +1,7 @@
 defmodule Relay.Accounts.GoogleTokenValidator do
   @moduledoc """
   Validates a Google ID token from native sign-in and returns normalized
-  provider claims for `Relay.Accounts.upsert_user_from_provider/1`.
+  provider claims for `Relay.Accounts.upsert_user_from_provider/2`.
 
   Calls Google's `tokeninfo` endpoint with `Req` (the app's first `Req` use).
   Tests inject a `Req.Test` stub via `:google_tokeninfo_req_options`, so no
@@ -77,10 +77,10 @@ defmodule Relay.Accounts.GoogleTokenValidator do
   defp verify_issuer(_), do: {:error, :invalid_issuer}
 
   @doc """
-  The one definition of "Google says this email is verified" (RE343), shared by
-  native sign-in (`validate_token/1`) and web sign-in
-  (`Relay.Accounts.upsert_user_from_google/1`). `claims` is a Google claims /
-  userinfo map with string keys. Returns `true` only when `"email_verified"` is
+  The one definition of "the provider says this email is verified" (RE343),
+  shared by Google native sign-in (`validate_token/1`), Google web sign-in
+  (`Relay.Accounts.upsert_user_from_google/1`) and Apple sign-in (RE106).
+  `claims` is a Google or Apple claims / userinfo map with string keys. Returns `true` only when `"email_verified"` is
   `true` or `"true"`. A missing claim, any other value, or a non-map is `false`.
   """
   def email_verified?(%{"email_verified" => verified}) when verified in [true, "true"], do: true

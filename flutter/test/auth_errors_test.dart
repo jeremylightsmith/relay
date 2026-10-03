@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/auth/auth_errors.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 DioException _dioError(DioExceptionType type) => DioException(
   requestOptions: RequestOptions(path: '/api/auth/native/google'),
@@ -67,4 +69,42 @@ void main() {
       );
     },
   );
+
+  test('a cancelled Apple sheet stays silent', () {
+    expect(
+      signInErrorMessage(
+        const SignInWithAppleAuthorizationException(
+          code: AuthorizationErrorCode.canceled,
+          message: 'x',
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('a non-cancel Apple failure falls back rather than staying silent', () {
+    expect(
+      signInErrorMessage(
+        const SignInWithAppleAuthorizationException(
+          code: AuthorizationErrorCode.failed,
+          message: 'x',
+        ),
+      ),
+      'Something went wrong signing you in. Please try again.',
+    );
+  });
+
+  test('an Apple rejection names the Apple ID', () {
+    expect(
+      signInErrorMessage(const SignInRejected(401, method: SignInMethod.apple)),
+      "Relay couldn't sign you in with that Apple ID.",
+    );
+  });
+
+  test('a rejection defaults to the Google wording', () {
+    expect(
+      signInErrorMessage(const SignInRejected(403)),
+      "Relay couldn't sign you in with that Google account.",
+    );
+  });
 }

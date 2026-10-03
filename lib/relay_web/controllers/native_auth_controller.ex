@@ -1,7 +1,7 @@
 defmodule RelayWeb.NativeAuthController do
   @moduledoc """
-  Native (Flutter) sign-in: exchanges a provider ID token for a Phoenix
-  session and returns JSON. The response carries the `Set-Cookie: _relay_key=…`
+  Native (Flutter) sign-in: exchanges a provider ID token (Google, or an Apple
+  identity token plus its raw nonce) for a Phoenix session and returns JSON. The response carries the `Set-Cookie: _relay_key=…`
   header the native shell injects into its embedded webviews. This IS the login,
   so it is unauthenticated (runs under the `:native_auth` pipeline, which fetches
   the session so the cookie can be written).
@@ -10,12 +10,43 @@ defmodule RelayWeb.NativeAuthController do
   use RelayWeb, :controller
 
   alias Relay.Accounts
+  alias Relay.Accounts.AppleTokenValidator
   alias Relay.Accounts.GoogleTokenValidator
   alias RelayWeb.Auth
 
   def google(conn, %{"id_token" => id_token}) do
-    with {:ok, claims} <- GoogleTokenValidator.validate_token(id_token),
-         {:ok, user} <- Accounts.upsert_user_from_provider(claims),
+    sign_in(conn, GoogleTokenValidator.validate_token(id_token), [])
+  end
+
+  def google(conn, _params) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{success: false, error: "Missing id_token parameter"})
+  end
+
+  @doc """
+  Sign in with Apple (RE106). Takes the identity token and the **raw** nonce whose
+  SHA-256 the app handed Apple. Apple sends the user's name only on the first
+  authorization, and only to the app, so the app forwards `given_name` /
+  `family_name`; the joined name is used only when a new user is created.
+  """
+  def apple(conn, %{"identity_token" => identity_token, "nonce" => nonce} = params)
+      when is_binary(identity_token) and is_binary(nonce) do
+    sign_in(conn, AppleTokenValidator.validate_token(identity_token, nonce),
+      name: display_name(params["given_name"], params["family_name"])
+    )
+  end
+
+  def apple(conn, _params) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{success: false, error: "Missing identity_token parameter"})
+  end
+
+  # The post-validation tail shared by every provider, so their responses cannot drift.
+  defp sign_in(conn, validated, upsert_opts) do
+    with {:ok, claims} <- validated,
+         {:ok, user} <- Accounts.upsert_user_from_provider(claims, upsert_opts),
          {:ok, token} <- mint_token(user) do
       conn
       |> Auth.put_user_session(user)
@@ -34,11 +65,15 @@ defmodule RelayWeb.NativeAuthController do
     end
   end
 
-  def google(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{success: false, error: "Missing id_token parameter"})
+  defp display_name(given, family) do
+    case String.trim("#{name_part(given)} #{name_part(family)}") do
+      "" -> nil
+      name -> name
+    end
   end
+
+  defp name_part(part) when is_binary(part), do: part
+  defp name_part(_part), do: ""
 
   @doc """
   Session verify for the native shell. The app restores its persisted `_relay_key`
@@ -89,7 +124,7 @@ defmodule RelayWeb.NativeAuthController do
     end
   end
 
-  # Shared with google/2 so the two responses cannot drift.
+  # Shared by sign-in and me/2 so the responses cannot drift.
   defp user_json(user), do: %{id: user.id, name: user.name, email: user.email, avatar_url: user.avatar_url}
 
   defp translate_errors(changeset) do

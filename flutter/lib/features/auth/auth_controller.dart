@@ -1,7 +1,9 @@
-// F2 auth: native Google sign-in → backend token exchange → Phoenix session.
+// F2 auth: native Google / Apple sign-in → backend token exchange → Phoenix session.
 //
 // Flow: google_sign_in (v7) yields a Google ID token → POST it to the backend's
-// `/api/auth/native/google` (RelayWeb.NativeAuthController) → the response carries
+// `/api/auth/native/google` (RelayWeb.NativeAuthController); on iOS, RE106's
+// sign_in_with_apple yields a nonce-bound Apple identity token → POST it with the
+// raw nonce to `/api/auth/native/apple`. Either response carries
 // `Set-Cookie: _relay_key=…`, which dio's cookie jar captures. We then inject that
 // cookie into flutter_inappwebview's store so embedded LiveView renders signed-in.
 //
@@ -19,6 +21,7 @@ import '../../config.dart';
 import '../board/board_prefs.dart';
 import '../boards/current_board.dart';
 import '../push/push_service.dart';
+import 'apple_credential.dart';
 import 'auth_errors.dart';
 import 'http_providers.dart';
 import 'session_store.dart';
@@ -33,12 +36,16 @@ const relaySessionCookie = '_relay_key';
 /// deep link bounced to Welcome before the Keychain read even returned (RLY-86 §4).
 enum AuthStatus { restoring, signedOut, signingIn, signedIn }
 
+/// The sign-in providers — the one definition of that set on the client.
+enum SignInMethod { google, apple }
+
 class AuthState {
   const AuthState({
     this.status = AuthStatus.restoring,
     this.user,
     this.error,
     this.token,
+    this.method,
   });
 
   final AuthStatus status;
@@ -51,6 +58,11 @@ class AuthState {
   /// storing this. Null means the inbox honestly cannot load — see
   /// MissingTokenException — rather than an empty "all caught up" queue.
   final String? token;
+
+  /// Which provider is in flight while [signingIn], or which one just failed on
+  /// a `signedOut` state carrying [error] — so the screen spins the right button
+  /// and "Try again" retries the right provider. Null otherwise.
+  final SignInMethod? method;
 
   bool get signedIn => status == AuthStatus.signedIn;
   bool get signingIn => status == AuthStatus.signingIn;
@@ -124,7 +136,8 @@ class AuthController extends Notifier<AuthState> {
   }
 
   Future<void> signInWithGoogle() async {
-    state = const AuthState(status: AuthStatus.signingIn);
+    const method = SignInMethod.google;
+    state = const AuthState(status: AuthStatus.signingIn, method: method);
     try {
       if (!_googleInitialized) {
         await _google.initialize(
@@ -153,28 +166,80 @@ class AuthController extends Notifier<AuthState> {
         '/api/auth/native/google',
         data: {'id_token': idToken},
       );
-      final ok =
-          resp.statusCode == 200 &&
-          (resp.data is Map) &&
-          resp.data['success'] == true;
-      if (!ok) {
-        throw SignInRejected(resp.statusCode);
+      await _completeSignIn(resp, method);
+    } catch (e) {
+      _failSignIn(e, method);
+    }
+  }
+
+  /// RE106: Sign in with Apple (iOS). Apple embeds sha256(raw nonce) in the
+  /// identity token; Relay gets the raw nonce and checks the two agree.
+  Future<void> signInWithApple() async {
+    const method = SignInMethod.apple;
+    state = const AuthState(status: AuthStatus.signingIn, method: method);
+    try {
+      final rawNonce = generateRawNonce();
+      final credential = await ref.read(appleCredentialRequestProvider)(
+        sha256Hex(rawNonce),
+      );
+
+      final identityToken = credential.identityToken;
+      if (identityToken == null) {
+        throw Exception('Apple returned no identity token');
       }
 
-      final cookies = await _jar.loadForRequest(Uri.parse(AppConfig.baseUrl));
-      await _injectSessionIntoWebviews(cookies);
-      await persistSession();
-      state = AuthState(
-        status: AuthStatus.signedIn,
-        user: Map<String, dynamic>.from(resp.data['user'] as Map),
-        token: resp.data['token'] as String?,
+      // Apple sends the name only on the first authorization (null after);
+      // the server uses it only when it creates the account.
+      final resp = await _dio.post(
+        '/api/auth/native/apple',
+        data: {
+          'identity_token': identityToken,
+          'nonce': rawNonce,
+          'given_name': credential.givenName,
+          'family_name': credential.familyName,
+        },
       );
+      await _completeSignIn(resp, method);
     } catch (e) {
-      // The raw error stays debuggable here and never reaches the UI.
-      debugPrint('Sign-in failed: $e');
-      final message = signInErrorMessage(e);
-      state = AuthState(status: AuthStatus.signedOut, error: message);
+      _failSignIn(e, method);
     }
+  }
+
+  /// The post-exchange tail every provider shares: check the backend said yes,
+  /// then hand the session cookie to the webviews and the Keychain.
+  Future<void> _completeSignIn(
+    Response<dynamic> resp,
+    SignInMethod method,
+  ) async {
+    final ok =
+        resp.statusCode == 200 &&
+        (resp.data is Map) &&
+        resp.data['success'] == true;
+    if (!ok) {
+      throw SignInRejected(resp.statusCode, method: method);
+    }
+
+    final cookies = await _jar.loadForRequest(Uri.parse(AppConfig.baseUrl));
+    await _injectSessionIntoWebviews(cookies);
+    await persistSession();
+    state = AuthState(
+      status: AuthStatus.signedIn,
+      user: Map<String, dynamic>.from(resp.data['user'] as Map),
+      token: resp.data['token'] as String?,
+    );
+  }
+
+  void _failSignIn(Object error, SignInMethod method) {
+    // The raw error stays debuggable here and never reaches the UI.
+    debugPrint('Sign-in failed: $error');
+    final message = signInErrorMessage(error);
+    // A cancel (null message) is a clean slate; a failure remembers its provider
+    // so "Try again" retries the same one.
+    state = AuthState(
+      status: AuthStatus.signedOut,
+      error: message,
+      method: message == null ? null : method,
+    );
   }
 
   /// Persist whatever session cookie the jar currently holds, so the next cold

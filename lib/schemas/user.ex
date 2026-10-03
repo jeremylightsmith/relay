@@ -1,8 +1,10 @@
 defmodule Schemas.User do
   @moduledoc """
-  A person who signed in. Identity is keyed on `provider_uid`
-  (Google's stable `sub` claim); `provider` and `provider_uid` are set
-  programmatically, never cast from input.
+  A person who signed in. Identity is keyed on `provider_uid` first (the
+  provider's stable `sub` claim — Google or Apple), then on the normalized
+  verified `email` (see `Relay.Accounts.upsert_user_from_provider/2`).
+  `provider` and `provider_uid` record the first provider the user signed in
+  with; they are set programmatically, never cast from input.
   """
 
   use Ecto.Schema
@@ -28,12 +30,18 @@ defmodule Schemas.User do
   def changeset(user, attrs) do
     user
     |> cast(attrs, [:email, :name, :avatar_url])
-    |> update_change(:email, &normalize/1)
+    |> update_change(:email, &normalize_email/1)
     |> validate_required([:email])
     |> unique_constraint(:email)
     |> unique_constraint(:provider_uid)
   end
 
-  defp normalize(nil), do: nil
-  defp normalize(email), do: email |> String.trim() |> String.downcase()
+  @doc """
+  The one email normalization (trim + downcase); `nil` stays `nil`. The
+  changeset applies it, and account lookups by email go through it so a
+  differently-cased claim still matches the stored row.
+  """
+  @spec normalize_email(String.t() | nil) :: String.t() | nil
+  def normalize_email(nil), do: nil
+  def normalize_email(email), do: email |> String.trim() |> String.downcase()
 end

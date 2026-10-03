@@ -80,6 +80,10 @@ config :relay, RelayWeb.Endpoint,
   pubsub_server: Relay.PubSub,
   live_view: [signing_salt: "c7EFJnnN"]
 
+# Sign in with Apple (RE106): the identity-token `aud` allowlist — the iOS bundle id.
+# This is the one definition of the default; config/runtime.exs overrides it only
+# when APPLE_CLIENT_IDS is set (comma-separated).
+config :relay, :apple_client_ids, ["com.jeremylightsmith.Relay"]
 config :relay, :runs_dispatcher, Relay.Runs.NoopDispatcher
 
 config :relay,

@@ -11,7 +11,10 @@ class FakeAuthController extends AuthController {
   ]);
 
   final AuthState initial;
+
+  /// Google taps (kept under its original name).
   int signInCalls = 0;
+  int appleSignInCalls = 0;
   int signOutCalls = 0;
 
   @override
@@ -20,6 +23,11 @@ class FakeAuthController extends AuthController {
   @override
   Future<void> signInWithGoogle() async {
     signInCalls++;
+  }
+
+  @override
+  Future<void> signInWithApple() async {
+    appleSignInCalls++;
   }
 
   @override
