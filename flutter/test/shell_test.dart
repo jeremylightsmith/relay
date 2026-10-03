@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
+import 'support/fake_boards.dart';
 
 /// The tab shell in isolation (ungated). The auth gate is exercised separately in
 /// auth_test.dart; here we assert the three-tab shell itself. The inbox's repository
@@ -17,6 +19,7 @@ Future<void> pumpApp(WidgetTester tester, {FakeFeedRepository? repo}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        boardsRepositoryProvider.overrideWithValue(FakeBoardsRepository()),
         feedRepositoryProvider.overrideWithValue(repo ?? FakeFeedRepository()),
         authTokenProvider.overrideWithValue('relayu_test'),
       ],

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
@@ -12,6 +13,7 @@ import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 import 'review_queue_test.dart' show FakeDecisionApi;
+import 'support/fake_boards.dart';
 
 Future<void> pumpShell(
   WidgetTester tester,
@@ -22,6 +24,7 @@ Future<void> pumpShell(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        boardsRepositoryProvider.overrideWithValue(FakeBoardsRepository()),
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue('relayu_test'),
         decisionApiProvider.overrideWithValue(decisionApi ?? FakeDecisionApi()),

@@ -6,6 +6,8 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
+import '../features/boards/choose_board_screen.dart';
+import '../features/boards/current_board.dart';
 import '../features/card/card_nav_context.dart';
 import '../features/card/card_screen.dart';
 import '../features/decisions/reject_note_screen.dart';
@@ -16,6 +18,10 @@ import '../features/push/push_service.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
 import 'pending_deep_link.dart';
+
+/// The tab-shell roots. Every one of them is about the current board (RE376), so
+/// the redirect sends a signed-in user with no board to Choose a board instead.
+const _tabRoots = {'/needs-you', '/board', '/settings'};
 
 /// Builds the app's GoRouter. Kept as a plain function so tests can construct the
 /// tab shell directly (ungated). Production wraps it with the auth gate via
@@ -72,6 +78,12 @@ GoRouter buildRouter({
             },
           ),
         ),
+      ),
+      // RE376 · BOARDS-00 — outside the shell: there is no board to put in a tab
+      // title yet. Reached only through routerProvider's redirect.
+      GoRoute(
+        path: '/choose-board',
+        builder: (context, state) => const ChooseBoardScreen(),
       ),
       // The card-detail host (RLY-87). Both entry paths land here: the inbox tap and a
       // notification tap. `board` and `kind` ride as query params — `extra` would not
@@ -146,9 +158,9 @@ final boardBodyBuilderProvider = Provider<WidgetBuilder?>((ref) => null);
 /// and the router parks on `/splash` — so a cold-start deep link survives the Keychain
 /// read, and then survives sign-in if the session turns out to be gone.
 final routerProvider = Provider<GoRouter>((ref) {
-  // Status, not `signedIn`: the restoring → signedOut transition must re-run the
-  // redirect too, or the app parks on the splash forever.
-  final refresh = ValueNotifier<AuthStatus>(ref.read(authProvider).status);
+  // Status *or* current board: the restoring → signedOut transition must re-run
+  // the redirect, and so must a board switch, clear or launch restore (RE376).
+  final refresh = ValueNotifier<int>(0);
   ref.onDispose(refresh.dispose);
 
   // Whether the most recent signedIn arrived via an *interactive* sign-in
@@ -170,8 +182,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     if (previous?.signedIn == true && next.status == AuthStatus.signedOut) {
       justSignedOut = true;
     }
-    refresh.value = next.status;
+    refresh.value++;
   });
+
+  // RE376: the board decides between /needs-you and /choose-board, so its
+  // restore, switch and clear re-run the redirect too.
+  ref.listen(currentBoardProvider, (_, _) => refresh.value++);
 
   return buildRouter(
     refreshListenable: refresh,
@@ -196,6 +212,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(authProvider);
       final pending = ref.read(pendingDeepLinkProvider);
+      final board = ref.read(currentBoardProvider);
       final loc = state.matchedLocation;
       final atAuth = loc.startsWith('/welcome');
       final atSplash = loc == '/splash';
@@ -204,7 +221,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       // `pending` non-null even with nothing to resume, indistinguishable
       // from a real deep link. It's also already the fallback below, so
       // skipping it here changes nothing about where a plain launch lands.
-      final isDefaultLanding = loc == '/needs-you';
+      // Choose a board (RE376) is a landing too, not a deep link to resume.
+      final isDefaultLanding = loc == '/needs-you' || loc == '/choose-board';
 
       // Still reading the Keychain: hold the destination, show the splash.
       if (auth.restoring) {
@@ -233,8 +251,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           interactiveSignIn = false;
           return '/push-permission';
         }
-        return '/needs-you';
+        return board.needsChoice ? '/choose-board' : '/needs-you';
       }
+      // RE376 §3: the tabs are always about one board. Restored with none (first
+      // sign-in, or BoardsController cleared a dead one) → Choose a board; and once
+      // a board is chosen (picked, or auto-selected for a one-board user), Choose a
+      // board moves on to its Needs you. `restored` keeps the launch-time Keychain
+      // read from flashing the picker.
+      if (board.needsChoice && _tabRoots.contains(loc)) return '/choose-board';
+      if (loc == '/choose-board' && board.slug != null) return '/needs-you';
       return null;
     },
   );

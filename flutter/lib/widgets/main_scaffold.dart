@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../app/theme.dart';
+import '../features/boards/boards_controller.dart';
 import '../features/needs_you/feed_controller.dart';
 
 /// Bottom-nav shell: Needs you · Board · Settings. The current tab is derived from
@@ -27,6 +28,10 @@ class MainScaffold extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // RE376 §3: keep the board list loaded whenever a tab is showing. Each load
+    // reconciles the current board, so a deleted board or a revoked membership is
+    // noticed here and the router moves on to Choose a board.
+    ref.listen(boardsProvider, (_, _) {});
     final scheme = Theme.of(context).colorScheme;
     final count = ref.watch(needsYouCountProvider);
 
