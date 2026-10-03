@@ -610,6 +610,232 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "compact_card_row/1 (RE377)" do
+    test "renders one 44px line: dot · mono ref · truncating title, tappable to open the card" do
+      html =
+        render_component(&CoreComponents.compact_card_row/1,
+          id: "stage_cards_7-1",
+          ref: "RE376",
+          title: "Retrieve a card's HTML mockups from the API",
+          status: :ready,
+          done: true
+        )
+
+      assert html =~ ~s(id="stage_cards_7-1")
+      assert html =~ "compact-card-row"
+      # mockup B row: flex min-h-11 items-center gap-2.5 border-b border-base-300 px-3
+      assert html =~ "min-h-11"
+      assert html =~ "gap-2.5"
+      assert html =~ "border-b border-base-300"
+      assert html =~ ~s(phx-click="select_card")
+      assert html =~ ~s(phx-value-ref="RE376")
+      # dot: size-1.5 rounded-full, Done → bg-success
+      assert html =~ "compact-card-row-dot size-1.5 flex-none rounded-full bg-success"
+      # ref: w-12 mono 10px
+      assert html =~ "compact-card-row-ref w-12 flex-none font-mono text-[10px] text-base-content/50"
+      assert html =~ "RE376"
+      # title: truncates on one line
+      assert html =~ "compact-card-row-title min-w-0 flex-1 truncate text-[13px]"
+      assert html =~ "Retrieve a card&#39;s HTML mockups from the API"
+      refute html =~ ~s(draggable="true")
+    end
+
+    test "the dot follows status first, then the baton holder" do
+      dot = fn attrs ->
+        html =
+          render_component(
+            &CoreComponents.compact_card_row/1,
+            Keyword.merge([id: "r", ref: "RE1", title: "T"], attrs)
+          )
+
+        [_, class] = Regex.run(~r/compact-card-row-dot size-1\.5 flex-none rounded-full ([\w-]+)/, html)
+        class
+      end
+
+      assert dot.(status: :failed) == "bg-error"
+      assert dot.(status: :needs_input) == "bg-warning"
+      assert dot.(status: :in_review) == "bg-warning"
+      assert dot.(status: :working) == "bg-secondary"
+      assert dot.(status: :ready, active_owner: :ai) == "bg-secondary"
+      assert dot.(status: :ready, active_owner: :human) == "bg-primary"
+      assert dot.(status: :ready) == "bg-base-300"
+    end
+  end
+
+  describe "stage_column/1 in pager mode (RE377)" do
+    @compact_cards [
+      {"stage_cards_9-1",
+       %{id: 1, title: "First compact", tag: nil, ref_number: 1, status: :ready, sub_tasks: [], owners: []}},
+      {"stage_cards_9-2",
+       %{id: 2, title: "Second compact", tag: nil, ref_number: 2, status: :working, sub_tasks: [], owners: []}}
+    ]
+
+    test "collapsed + pager renders the compact page (mockup B), not the strip" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 2,
+          collapsed: true,
+          pager: true,
+          cards: @compact_cards
+        )
+
+      refute html =~ "stage-strip"
+      assert html =~ ~s(id="stage-col-3")
+      assert html =~ "stage-column stage-compact"
+      assert html =~ ~s(data-stage-id="9")
+      assert html =~ ~s(data-collapsed="true")
+
+      # header: name · count · dashed collapsed badge · Show cards (≥44px)
+      assert html =~ ~s(id="stage-col-3-compact-header")
+      assert html =~ "flex flex-none items-center gap-2 px-3 pb-2 pt-2.5"
+      assert html =~ "text-[13px] font-semibold"
+      assert html =~ "font-mono text-[10.5px] text-base-content/45"
+
+      assert html =~
+               "badge badge-ghost badge-sm gap-1 border-dashed border-base-content/25 font-mono text-[9.5px] text-base-content/60"
+
+      assert html =~ ~s(id="stage-col-3-collapsed-badge")
+      assert html =~ ~s(id="stage-col-3-show-cards")
+      assert html =~ ~s(phx-click="expand_stage")
+      assert html =~ "btn btn-ghost btn-sm min-h-11 px-2 text-[12px] text-primary"
+      assert html =~ "Show cards"
+
+      # one bordered rounded list with a row per card
+      assert html =~ ~s(id="stage-col-3-list")
+      assert html =~ "rounded-[10px]"
+      assert html =~ ~s(id="stage-col-3-rows")
+      assert html =~ ~s(id="stage_cards_9-1")
+      assert html =~ "RE1"
+      assert html =~ "First compact"
+      assert html =~ "RE2"
+
+      # not a compose target, no full faces, no empty state
+      refute html =~ ~s(id="stage-col-3-new-card")
+      refute html =~ "board-card"
+      refute html =~ ~s(id="stage-col-3-compact-empty")
+    end
+
+    test "a collapsed terminal stage with more cards than revealed shows the 'N more' button" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 42,
+          terminal: true,
+          revealed: 9,
+          collapsed: true,
+          pager: true,
+          cards: @compact_cards
+        )
+
+      assert html =~ ~s(id="stage-col-3-rows-more")
+      assert html =~ ~s(phx-click="show_more_done")
+      assert html =~ "btn btn-ghost btn-sm mx-3 my-2 flex-none font-mono text-[11px] text-base-content/65"
+      assert html =~ ~r/33\s*more/
+    end
+
+    test "a non-terminal collapsed stage shows no 'N more' button" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Code",
+          type: :work,
+          stage_id: 9,
+          count: 2,
+          collapsed: true,
+          pager: true,
+          cards: @compact_cards
+        )
+
+      refute html =~ "-rows-more"
+    end
+
+    test "an empty collapsed stage in pager mode shows the empty note" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-1",
+          name: "Backlog",
+          type: :queue,
+          stage_id: 1,
+          count: 0,
+          collapsed: true,
+          pager: true
+        )
+
+      assert html =~ ~s(id="stage-col-1-compact-empty")
+      assert html =~ "No cards yet"
+    end
+
+    test "sub-lane cards are listed as rows too, in their own stream lists" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-5",
+          name: "Code",
+          type: :work,
+          stage_id: 4,
+          count: 0,
+          collapsed: true,
+          pager: true,
+          sublanes: [
+            %{
+              id: 41,
+              name: "Review",
+              lane: :review,
+              owner: :human,
+              count: 1,
+              cards: [
+                {"stage_cards_41-7",
+                 %{id: 7, title: "In review row", tag: nil, ref_number: 7, status: :in_review, sub_tasks: [], owners: []}}
+              ]
+            }
+          ]
+        )
+
+      assert html =~ ~s(id="stage-col-5-rows-41")
+      assert html =~ "In review row"
+      refute html =~ ~s(id="stage-col-5-compact-empty")
+    end
+
+    test "collapsed without pager is still the desktop strip" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          count: 2,
+          collapsed: true,
+          cards: @compact_cards
+        )
+
+      assert html =~ ~s(id="stage-strip-9")
+      refute html =~ "stage-compact"
+      refute html =~ "compact-card-row"
+    end
+
+    test "an expanded stage shows Show as list only in pager mode" do
+      base = [id: "stage-col-3", name: "Done", type: :done, stage_id: 9, count: 2, cards: @compact_cards]
+
+      pager_html = render_component(&CoreComponents.stage_column/1, Keyword.put(base, :pager, true))
+      assert pager_html =~ ~s(id="stage-col-3-show-as-list")
+      assert pager_html =~ ~s(phx-click="collapse_stage")
+      assert pager_html =~ "Show as list"
+      assert pager_html =~ "board-card"
+      refute pager_html =~ "collapsed-badge"
+
+      desktop_html = render_component(&CoreComponents.stage_column/1, base)
+      refute desktop_html =~ "show-as-list"
+    end
+  end
+
   describe "status_badge/1" do
     test "renders each status with its colour token and label" do
       for {status, class, label} <- [
