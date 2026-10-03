@@ -1784,13 +1784,19 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  One HTML mockup (RE370): its caption, an **Open full size** link that opens the framed viewer
-  (`RelayWeb.attachment_view_path/1`) in a new tab — leaving the board and drawer in place — and
-  the mockup itself in a fixed-height, full-width sandboxed iframe. `sandbox` is
-  `RelayWeb.mockup_sandbox/0` — the same token list the attachment's CSP grants — so the
-  mockup's scripts run but it can never reach Relay's origin, and its only network access is
-  Google Fonts (`AttachmentController.html_csp/0`). Never link to `src` directly: Relay never
-  shows a mockup as a bare top-level page.
+  One HTML mockup as a small square tile (RE370, RE374): a live miniature of the mockup that is
+  itself a link to the framed full-size viewer (`RelayWeb.attachment_view_path/1`), opened in a
+  new tab, so the board and drawer stay in place. The miniature is the same sandboxed iframe,
+  rendered at a 1280×1280 desktop viewport and CSS-scaled down to the 80px square (80/1280 =
+  0.0625, origin top-left). It is inert (`pointer-events-none`, `tabindex="-1"`, `aria-hidden`), so
+  every click lands on the link. `sandbox` is `RelayWeb.mockup_sandbox/0`, the same token list the
+  attachment's CSP grants: the mockup's scripts run, but it can never reach Relay's origin, and its
+  only network access is Google Fonts (`AttachmentController.html_csp/0`).
+
+  The caption doesn't fit in 80px. It becomes the tile's `title` (hover tooltip) and `aria-label`,
+  plus a `sr-only` `\#{id}-caption`. It falls back to "Mockup". Never link to `src` directly: Relay
+  never shows a mockup as a bare top-level page. The drawer lays tiles out in a
+  `flex flex-wrap gap-2` row.
 
   ## Examples
 
@@ -1802,37 +1808,36 @@ defmodule RelayWeb.CoreComponents do
       />
   """
   attr :id, :string, required: true
-  attr :src, :string, required: true, doc: "the attachment path the iframe loads"
-  attr :view_href, :string, required: true, doc: "the framed full-size viewer page"
+  attr :src, :string, required: true, doc: "the attachment path the miniature iframe loads"
+  attr :view_href, :string, required: true, doc: "the framed full-size viewer page the tile opens"
   attr :caption, :string, default: nil
 
   def mockup_preview(assigns) do
+    assigns = assign(assigns, :label, assigns.caption || "Mockup")
+
     ~H"""
-    <figure id={@id} class="space-y-1.5">
-      <div class="flex items-center justify-between gap-3">
-        <figcaption id={"#{@id}-caption"} class="min-w-0 truncate text-[13px] font-medium">
-          {@caption || "Mockup"}
-        </figcaption>
-        <.link
-          id={"#{@id}-open"}
-          href={@view_href}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
-        >
-          <.icon name="hero-arrows-pointing-out" class="size-3.5" /> Open full size
-        </.link>
-      </div>
+    <.link
+      id={"#{@id}-open"}
+      href={@view_href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={@label}
+      aria-label={"Open mockup: #{@label} (new tab)"}
+      class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 transition hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <span id={"#{@id}-caption"} class="sr-only">{@label}</span>
       <iframe
         id={"#{@id}-frame"}
         src={@src}
         sandbox={RelayWeb.mockup_sandbox()}
-        title={@caption || "Mockup"}
+        title={@label}
         loading="lazy"
-        class="block h-[360px] w-full rounded-lg border border-base-300 bg-base-100"
+        tabindex="-1"
+        aria-hidden="true"
+        class="pointer-events-none absolute top-0 left-0 block h-[1280px] w-[1280px] origin-top-left scale-[0.0625] border-0"
       >
       </iframe>
-    </figure>
+    </.link>
     """
   end
 
@@ -3364,16 +3369,17 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                 </section>
-                <%!-- RE370 — the card's HTML mockups. No artboard governs this section (Relay Card
-                Detail v5 has none); it follows the drawer's section styling. Map.get because the
-                drawer's `card` is any card-shaped map (Storybook passes plain maps). --%>
+                <%!-- RE370 / RE374 — the card's HTML mockups as small square tiles in a wrapping
+                row (the Screenshots strip's `flex flex-wrap gap-2`). No artboard governs this
+                section (Relay Card Detail v5 has none). Map.get because the drawer's `card` is any
+                card-shaped map (Storybook passes plain maps). --%>
                 <section
                   :if={!@body_loading and mockup_entries(Map.get(@card, :mockups)) != []}
                   id={"#{@id}-mockups"}
                   class="space-y-2"
                 >
                   <.section_label>Mockups</.section_label>
-                  <div class="space-y-4">
+                  <div id={"#{@id}-mockup-tiles"} class="flex flex-wrap gap-2">
                     <.mockup_preview
                       :for={
                         {mockup, index} <- Enum.with_index(mockup_entries(Map.get(@card, :mockups)))
