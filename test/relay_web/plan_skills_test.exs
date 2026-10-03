@@ -105,4 +105,92 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "./relay tasks list <ref>"
     end
   end
+
+  describe "plans are contract + behaviors, not code (RE378)" do
+    test "write-plan's task body is a contract + behaviors, in named sections" do
+      doc = File.read!(@write_plan)
+
+      for section <- [
+            "**Files**",
+            "**Interfaces**",
+            "**Consumes**",
+            "**Produces**",
+            "**Patterns to follow**",
+            "**Test scenarios**",
+            "**Risks / gotchas**",
+            "**Steps**",
+            "**Deliverable**"
+          ] do
+        assert doc =~ section, "write-plan.md must name the #{section} task-body section"
+      end
+
+      assert doc =~ "Given/When/Then"
+    end
+
+    test "write-plan forbids code beyond the contract" do
+      doc = File.read!(@write_plan)
+
+      assert doc =~ "No function bodies, no test code, no fenced implementation blocks"
+      refute doc =~ "ACTUAL test code"
+      refute doc =~ "diff target"
+    end
+
+    test "write-plan reconnoitres the repo before authoring, recording file:line pointers" do
+      doc = File.read!(@write_plan)
+
+      {recon, _} = :binary.match(doc, "**Reconnaissance.**")
+      {author, _} = :binary.match(doc, "**Author the plan**")
+      assert recon < author, "the reconnaissance step must come before authoring"
+
+      assert doc =~ "file:line"
+      assert doc =~ "docs/architecture/"
+      assert doc =~ "magic value is defined exactly once"
+    end
+
+    test "write-plan's self-review checks pointers and scenario coverage" do
+      [_, self_review] = String.split(File.read!(@write_plan), "### Self-review", parts: 2)
+      [self_review | _] = String.split(self_review, "## Writing it to the card", parts: 2)
+
+      assert self_review =~ "pointer"
+      assert self_review =~ "scenario"
+      assert self_review =~ "acceptance criterion"
+      assert self_review =~ "no code"
+    end
+
+    test "plan-implementer writes its tests from the task's scenarios" do
+      doc = File.read!(Path.join(@agents_dir, "plan-implementer.md"))
+
+      assert doc =~ "The tests come from the scenarios"
+      assert doc =~ "Given/When/Then"
+      assert doc =~ "at least one test per"
+      assert doc =~ "Produces signatures and data shapes are binding"
+      assert doc =~ "Scenario → test map"
+      refute doc =~ "real code and tests"
+      refute doc =~ "code as written"
+    end
+
+    test "plan-implementer escalates a contradictory or impossible scenario" do
+      doc = File.read!(Path.join(@agents_dir, "plan-implementer.md"))
+
+      assert doc =~ "Escalate, don't guess"
+      assert doc =~ "Consumes signature doesn't exist"
+    end
+
+    test "spec-reviewer checks scenarios, interfaces, files and nothing extra" do
+      doc = File.read!(Path.join(@agents_dir, "spec-reviewer.md"))
+
+      for check <- ["**Scenarios:**", "**Interfaces:**", "**Files:**", "**Nothing extra:**"] do
+        assert doc =~ check, "spec-reviewer.md must check #{check}"
+      end
+
+      assert doc =~ "Produces"
+      assert doc =~ "scenario → test"
+      refute doc =~ "line-by-line"
+    end
+
+    test "the implement and spec_review models are unchanged" do
+      assert File.read!(Path.join(@agents_dir, "plan-implementer.md")) =~ ~r/^model: opus$/m
+      assert File.read!(Path.join(@agents_dir, "spec-reviewer.md")) =~ ~r/^model: sonnet$/m
+    end
+  end
 end

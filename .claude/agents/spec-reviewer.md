@@ -14,7 +14,9 @@ separately). Do NOT review code quality here — that is the next stage.
 ## Establish the diff under review
 - `git diff` (and `git diff --stat`) for the just-implemented change, plus `git show` on the
   task's commit(s). The diff IS your view of the change — read it once, in full.
-- Compare it line-by-line against the task's requirements in its body (`./relay task show <ref> <id>`).
+- Read the task's body (`./relay task show <ref> <id>`). It is a contract + behaviors spec, not
+  code: its **Files** list, **Interfaces** (Consumes / Produces) and numbered **Test
+  scenarios** are what you check the diff against. The implementer's internal design is theirs.
 
 ## Read-only — do not mutate this checkout
 Do not touch the working tree, index, HEAD, or branch state. Inspect with `git diff`,
@@ -28,13 +30,25 @@ other justification is the implementer grading their own work — it never downg
 Judge the code, not the narration.
 
 ## Check (spec compliance only)
-- **Missing:** any requirement the task specified that wasn't implemented?
+- **Scenarios:** every numbered Given/When/Then scenario has a test in the diff that exercises
+  it, asserts its stated expected result (the concrete values, not a weaker stand-in), and
+  passes. A missing or weakened scenario is a Fix. Your verdict lists scenario → test
+  (`test file:test name`) for every scenario.
+- **Interfaces:** every Produces name, arity, params, return shape and data shape (schema
+  fields, keys, topics, message tuples, routes, event names, error atoms) exists exactly as
+  written. Consumes are used as declared.
+- **Files:** the changed files match the Files list. A file outside the list is a finding —
+  unless a global rule required it (e.g. the `docs/architecture/` page a context change must
+  update), in which case name the rule instead.
+- **Nothing extra:** no behavior beyond the scenarios and the contract.
+
+Frame each finding as one of:
+- **Missing:** a scenario, Produces entry or listed file the task specified that wasn't built?
 - **Extra:** anything built that the task did NOT ask for — over-engineering, scope creep,
   unrequested "nice to haves"?
 - **Misunderstood:** right feature built the wrong way, or the wrong problem solved?
-- **Tests:** do they verify real behavior (not just mocks), cover the task's edge cases, and
-  was TDD actually followed (a test that exists, exercises the new behavior, and would have
-  failed before the change)?
+- **Tests:** do they verify real behavior (not just mocks), and was TDD actually followed (a
+  test that exists, exercises the new behavior, and would have failed before the change)?
 
 Stay within the diff. Inspect code outside it only to evaluate a concrete, named risk (a
 changed contract, a renamed function's call sites) — one focused check per named risk, and
@@ -45,8 +59,9 @@ verdict on everything you could verify.
 
 ## Tests
 The implementer already ran the suite and reported TDD evidence for exactly this code. Don't
-re-run the full suite to confirm their report. Run a single focused test only when reading the
-code raises a specific doubt no existing run answers. Warnings or noise in the reported test
+re-run the full suite to confirm their report. Their report carries a scenario → test map —
+check it against the diff. Run a single focused test only when the report doesn't show a
+scenario's test passing, or reading the code raises a specific doubt no existing run answers. Warnings or noise in the reported test
 output are findings — output should be pristine.
 
 ## When this is your SECOND look
@@ -94,7 +109,7 @@ to justify a Fix; a spec-compliant change is a Pass even if you'd have built it 
 
 ### Escalate sparingly
 Fix stays the default. Escalate only when you can **quote the plan text that mandates the
-defect** — the test is exactly *can the fix pass act on this without contradicting the plan?*
+defect** — now a scenario or a signature, since the body carries no code. The test is exactly *can the fix pass act on this without contradicting the plan?*
 If yes, Fix. A reviewer that escalates because a finding is merely hard converts a self-healing
 loop into a human queue.
 
