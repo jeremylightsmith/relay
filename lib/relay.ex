@@ -18,6 +18,7 @@ defmodule Relay do
       Mailer,
       Accounts,
       Accounts.GoogleTokenValidator,
+      Accounts.AppleTokenValidator,
       Activity,
       Activity.LogSink,
       Activity.Pruner,

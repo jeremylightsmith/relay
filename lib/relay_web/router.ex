@@ -158,6 +158,7 @@ defmodule RelayWeb.Router do
     pipe_through :native_auth
 
     post "/google", NativeAuthController, :google
+    post "/apple", NativeAuthController, :apple
     get "/me", NativeAuthController, :me
   end
 

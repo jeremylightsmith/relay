@@ -87,6 +87,7 @@ flowchart LR
 | `boundary` | compile-time layer enforcement (ADR 0002) |
 | `req` (+ its `finch`) | the only sanctioned HTTP client; a dedicated h2 Finch pool exists for APNs |
 | `ueberauth` + `ueberauth_google` | Google sign-in |
+| `jose` | APNs JWT signing; Apple identity-token verification |
 | `swoosh` | mail |
 | `esbuild`, `tailwind` (+ daisyUI in `assets/`) | asset pipeline; daisyUI is the component kit |
 | `heroicons` | the `<.icon>` component |
@@ -113,7 +114,8 @@ outside the `boundary` graph — `boundary` governs modules inside this project 
 | Service | Role | Notes |
 | --- | --- | --- |
 | Fly.io | hosting: app `relayboard`, unmanaged Postgres `relayboard-db` | deploy target |
-| Google OAuth | the only sign-in path (web + native token validation) | |
+| Google OAuth | web sign-in + native token validation | |
+| Sign in with Apple | native iOS sign-in; identity tokens verified against Apple's JWKS (appleid.apple.com/auth/keys) | iOS only, no caching |
 | APNs | iOS push | h2-only, hence the dedicated Finch pool |
 | App Store / TestFlight | mobile shell distribution | crash-feedback fetch script (RLY-99) |
 | GitHub (`gh`) | PRs + squash-merge in the Code stage | driven by the runner, not the app |

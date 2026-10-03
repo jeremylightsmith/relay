@@ -1,6 +1,8 @@
 defmodule RelayWeb.NativeAuthControllerTest do
   use RelayWeb.ConnCase, async: true
 
+  import Relay.AppleTokenFixtures
+
   # Bad-token cases log `[error] Google tokeninfo failed` on purpose; capture it (shown only on
   # failure) so it doesn't clutter the suite output.
   alias Relay.Accounts.GoogleTokenValidator
@@ -117,6 +119,151 @@ defmodule RelayWeb.NativeAuthControllerTest do
       assert id == existing.id
       assert get_session(conn, :user_id) == existing.id
       assert Repo.get!(User, existing.id).provider_uid == "someone-else"
+    end
+  end
+
+  describe "POST /api/auth/native/apple" do
+    setup do
+      key = signing_key()
+      stub_jwks(key, "test-kid")
+      %{key: key}
+    end
+
+    test "happy path signs in, sets the cookie, and returns the user and a working bearer",
+         %{conn: conn, key: key} do
+      token = apple_token(key, "test-kid", %{})
+
+      conn =
+        post(conn, ~p"/api/auth/native/apple", %{
+          identity_token: token,
+          nonce: "raw-nonce-1",
+          given_name: "Alice",
+          family_name: "Apple"
+        })
+
+      user = Repo.get_by!(User, provider_uid: "apple-sub-1")
+      assert user.provider == "apple"
+      body = json_response(conn, 200)
+      assert body["success"] == true
+
+      assert body["user"] == %{
+               "id" => user.id,
+               "name" => "Alice Apple",
+               "email" => "alice@example.com",
+               "avatar_url" => nil
+             }
+
+      assert get_session(conn, :user_id) == user.id
+      assert Map.has_key?(conn.resp_cookies, "_relay_key")
+      assert String.starts_with?(body["token"], "relayu_")
+
+      authed =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{body["token"]}")
+        |> get(~p"/api/all/feed")
+
+      assert json_response(authed, 200)
+    end
+
+    test "no given/family name creates a user with a nil name", %{conn: conn, key: key} do
+      token = apple_token(key, "test-kid", %{})
+
+      conn = post(conn, ~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+
+      assert json_response(conn, 200)["success"] == true
+      assert Repo.get_by!(User, provider_uid: "apple-sub-1").name == nil
+    end
+
+    test "a blank given name and nil family name create a user with a nil name",
+         %{conn: conn, key: key} do
+      token = apple_token(key, "test-kid", %{})
+
+      conn =
+        post(conn, ~p"/api/auth/native/apple", %{
+          identity_token: token,
+          nonce: "raw-nonce-1",
+          given_name: "  ",
+          family_name: nil
+        })
+
+      assert json_response(conn, 200)["success"] == true
+      assert Repo.get_by!(User, provider_uid: "apple-sub-1").name == nil
+    end
+
+    test "an Apple sign-in for a Google user's email signs in that user", %{conn: conn, key: key} do
+      google_user = insert(:user, email: "alice@example.com", provider: "google", provider_uid: "google-sub-alice")
+      token = apple_token(key, "test-kid", %{})
+
+      conn = post(conn, ~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+
+      assert json_response(conn, 200)["user"]["id"] == google_user.id
+      assert Repo.aggregate(User, :count) == 1
+      assert Repo.get!(User, google_user.id).provider_uid == "google-sub-alice"
+    end
+
+    test "a Google sign-in for an Apple user's email signs in that user", %{conn: conn, key: key} do
+      token = apple_token(key, "test-kid", %{})
+      apple = post(conn, ~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+      apple_id = json_response(apple, 200)["user"]["id"]
+
+      stub_google(%{@tokeninfo | "email" => "alice@example.com", "sub" => "google-sub-x"})
+      google = post(build_conn(), ~p"/api/auth/native/google", %{id_token: "tok"})
+
+      assert json_response(google, 200)["user"]["id"] == apple_id
+      assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "resolves pending invites on Apple sign-in", %{conn: conn, key: key} do
+      membership = insert(:membership, email: "alice@example.com", user: nil)
+      token = apple_token(key, "test-kid", %{})
+
+      post(conn, ~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+
+      user = Repo.get_by!(User, provider_uid: "apple-sub-1")
+      assert Repo.get!(Membership, membership.id).user_id == user.id
+    end
+
+    test "forged, foreign, expired or replayed tokens return 401 and create no user",
+         %{key: key} do
+      cases = [
+        {apple_token(new_signing_key(), "test-kid", %{}), "raw-nonce-1", "invalid_token"},
+        {apple_token(key, "test-kid", %{aud: "com.attacker.App"}), "raw-nonce-1", "invalid_audience"},
+        {apple_token(key, "test-kid", %{iss: "https://evil.example.com"}), "raw-nonce-1", "invalid_issuer"},
+        {apple_token(key, "test-kid", %{exp: System.os_time(:second) - 60}), "raw-nonce-1", "token_expired"},
+        {apple_token(key, "test-kid", %{}), "wrong", "invalid_nonce"}
+      ]
+
+      for {token, nonce, reason} <- cases do
+        conn = post(build_conn(), ~p"/api/auth/native/apple", %{identity_token: token, nonce: nonce})
+
+        assert json_response(conn, 401) == %{
+                 "success" => false,
+                 "error" => "Invalid token",
+                 "reason" => reason
+               }
+
+        refute get_session(conn, :user_id)
+        assert Repo.aggregate(User, :count) == 0
+      end
+    end
+
+    test "a missing or non-string identity_token or nonce returns 400", %{key: key} do
+      token = apple_token(key, "test-kid", %{})
+
+      for params <- [
+            %{nonce: "raw-nonce-1"},
+            %{identity_token: token},
+            %{identity_token: %{"x" => 1}, nonce: "raw-nonce-1"}
+          ] do
+        conn = post(build_conn(), ~p"/api/auth/native/apple", params)
+
+        assert json_response(conn, 400) == %{
+                 "success" => false,
+                 "error" => "Missing identity_token parameter"
+               }
+
+        refute get_session(conn, :user_id)
+      end
     end
   end
 

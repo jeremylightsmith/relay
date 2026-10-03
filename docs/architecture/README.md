@@ -29,12 +29,14 @@ flowchart LR
     end
     pg[("Postgres<br/>Fly 'relayboard-db'")]
     google["Google OAuth"]
+    apple["Sign in with Apple"]
     apns["APNs push"]
     browser <--> web
     mobile <--> web
     agents -- "board-key REST /api" --> web
     domain --> pg
     web --> google
+    web --> apple
     domain --> apns
 ```
 

@@ -65,6 +65,10 @@ config :relay, RelayWeb.Endpoint,
 # so no real Apple contact happens in the suite.
 config :relay, :apns_req_options, plug: {Req.Test, Relay.Push.Delivery.APNS}
 
+# Sign in with Apple (RE106): a Req.Test plug so AppleTokenValidator fetches its JWKS
+# from an in-process stub instead of real Apple. `:apple_client_ids` is inherited.
+config :relay, :apple_keys_req_options, plug: {Req.Test, Relay.Accounts.AppleTokenValidator}
+
 # Native-auth Google token validator: static dummy client id + a Req.Test plug
 # so GoogleTokenValidator hits an in-process stub instead of real Google.
 config :relay, :google_client_id, "test-google-client-id"
