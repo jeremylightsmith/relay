@@ -891,14 +891,13 @@ textarea.commit-field-input { min-height: 64px; }
 .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-count {
   color: color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content));
 }
-/* RE377 — a collapsed stage's chip: dashed outline + leading ▸ glyph. The glyph is
-   always rendered and only shown while collapsed, so it disappears after Show cards. */
-.board-pager-chip-glyph { display: none; font-size: 9px; }
+/* RE377 — a collapsed stage's chip: dashed outline + leading ▸ caret. The caret is
+   rendered only while collapsed, so it is gone from the DOM after Show cards. */
+.board-pager-chip-caret { font-size: 9px; }
 .board-pager-chip[data-collapsed="true"] {
   border-style: dashed;
   border-color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
 }
-.board-pager-chip[data-collapsed="true"] .board-pager-chip-glyph { display: inline; }
 .board-pager-chip[data-collapsed="true"][data-active] {
   color: var(--color-base-content);
   background: var(--color-base-200);

@@ -53,6 +53,9 @@ defmodule RelayWeb.Browser.BoardCollapsedPagerTest do
             const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5;
             return {
               rows: rows.length,
+              chipBorderStyle: getComputedStyle(
+                document.querySelector('#stage-chip-#{code.id}')
+              ).borderTopStyle,
               rowHeight: row.getBoundingClientRect().height,
               titleHeight: title.getBoundingClientRect().height,
               lineHeight: lineHeight,
@@ -76,8 +79,12 @@ defmodule RelayWeb.Browser.BoardCollapsedPagerTest do
       assert m["titleHeight"] <= m["lineHeight"] + 1,
              "row title wrapped past one line: #{inspect(m)}"
 
-      # min-h-11 = 44px; a wrapped title would grow the row past it.
+      # min-h-11 = 44px: a tap target at least 44px tall, and a wrapped title would grow it past that.
+      assert m["rowHeight"] >= 44, "the row is shorter than a 44px tap target: #{inspect(m)}"
       assert m["rowHeight"] <= 45, "the row grew past its 44px one-line height: #{inspect(m)}"
+
+      assert m["chipBorderStyle"] == "dashed",
+             "a collapsed stage's chip should have a dashed outline: #{inspect(m)}"
     end)
   end
 end

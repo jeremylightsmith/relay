@@ -77,6 +77,37 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :collapsed_pager_done_more,
+        description:
+          "RE377 — collapsed Done stage, pager: the compact rows page the terminal stage like " <>
+            "the desktop column — a 'N more' button reveals the next page of Done rows",
+        attributes: %{
+          id: "story-stage-collapsed-pager-done",
+          name: "Done",
+          type: :done,
+          stage_id: 12,
+          count: 3,
+          category: :complete,
+          board_key: "RLY",
+          collapsed: true,
+          pager: true,
+          terminal: true,
+          revealed: 1,
+          cards: [
+            {"story-card-pager-done-1",
+             %{
+               id: 15,
+               title: "Ship the board",
+               tag: nil,
+               ref_number: 15,
+               status: :ready,
+               progress: nil,
+               owners: []
+             }}
+          ]
+        }
+      },
+      %Variation{
         id: :pager_expanded,
         description:
           "RE377 — pager, expanded (Show as list): after Show cards the page shows full card " <>

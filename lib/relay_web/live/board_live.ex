@@ -324,33 +324,32 @@ defmodule RelayWeb.BoardLive do
               </button>
             </div>
             <div class="board-pager-chips">
-              <button
-                :for={stage <- flat_stages(@stage_groups)}
-                type="button"
-                id={"stage-chip-#{stage.id}"}
-                class="board-pager-chip"
-                data-chip-stage-id={stage.id}
-                data-stage-name={stage.name}
-                data-ai={to_string(stage.ai_enabled)}
-                data-collapsed={
-                  to_string(
-                    stage_collapsed?(
-                      stage,
-                      @stage_counts,
-                      @sublanes_by_parent,
-                      @force_open,
-                      @stage_force_closed
-                    )
-                  )
-                }
-              >
-                <span class="board-pager-chip-glyph" aria-hidden="true">▸</span>
-                <span class="board-pager-chip-dot"></span>
-                {stage.name}
-                <span class="board-pager-chip-count">
-                  {total_count(stage, @stage_counts, @sublanes_by_parent)}
-                </span>
-              </button>
+              <%= for stage <- flat_stages(@stage_groups) do %>
+                <% collapsed? =
+                  stage_collapsed?(
+                    stage,
+                    @stage_counts,
+                    @sublanes_by_parent,
+                    @force_open,
+                    @stage_force_closed
+                  ) %>
+                <button
+                  type="button"
+                  id={"stage-chip-#{stage.id}"}
+                  class="board-pager-chip"
+                  data-chip-stage-id={stage.id}
+                  data-stage-name={stage.name}
+                  data-ai={to_string(stage.ai_enabled)}
+                  data-collapsed={to_string(collapsed?)}
+                >
+                  <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
+                  <span class="board-pager-chip-dot"></span>
+                  {stage.name}
+                  <span class="board-pager-chip-count">
+                    {total_count(stage, @stage_counts, @sublanes_by_parent)}
+                  </span>
+                </button>
+              <% end %>
             </div>
             <span class="board-pager-fade" aria-hidden="true"></span>
           </nav>

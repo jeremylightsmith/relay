@@ -187,11 +187,13 @@ defmodule RelayWeb.BoardLivePagerTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       pager_on(view)
 
-      assert has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="true"] .board-pager-chip-glyph), "▸")
+      assert has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="true"] .board-pager-chip-caret), "▸")
 
       view |> element("##{col}-show-cards") |> render_click()
 
       assert has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="false"]))
+      refute has_element?(view, "#stage-chip-#{code.id} .board-pager-chip-caret")
+      refute render(element(view, "#stage-chip-#{code.id}")) =~ "▸"
       refute has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="true"]))
     end
 
