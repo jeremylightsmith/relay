@@ -9,6 +9,8 @@ defmodule RelayWeb.BoardLivePagerBackTest do
   # phone-width pager header row is `‹ back · board name` — the ‹ navigates to
   # /boards?from=<slug> (the only route back once embed hides the top bar), and
   # the header card count RLY-94 shipped is dropped per the updated artboard.
+  # RE376: embedded (?embed=1) the ‹ and static title give way to a native
+  # board-switcher title button; plain web keeps the ‹.
 
   setup :register_and_log_in_user
 
@@ -44,10 +46,26 @@ defmodule RelayWeb.BoardLivePagerBackTest do
     refute has_element?(view, "#board-pager-header .board-pager-count")
   end
 
-  test "the back button renders on the embedded board too — one rule for all phone width",
+  test "embedded, the ‹ link and static title give way to the board-switcher title (RE376)",
        %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
 
+    refute has_element?(view, "#board-pager-back")
+    assert has_element?(view, ~s(#board-switch-board[data-board="#{board.slug}"]), board.name)
+
+    button = view |> element("#board-switch-board") |> render()
+    assert button =~ "board-pager-title"
+    assert button =~ "▾"
+    # The "+" stays beside it (BOARD-01 in card mockup "B — always in one board, switch from the title").
+    assert has_element?(view, "#board-pager-header #board-create-card")
+  end
+
+  test "plain phone-width web keeps its ‹ and static title, and has no switcher button",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
     assert has_element?(view, "#board-pager-back")
+    assert has_element?(view, "#board-pager-header .board-pager-title", board.name)
+    refute has_element?(view, "#board-switch-board")
   end
 end

@@ -58,6 +58,15 @@ const BoardPager = {
         current: active?.dataset.stageName || stages[0],
       })
     })
+
+    // RE376 · BOARD-01 — embedded, the board name is the switcher: hand the tap to
+    // the native shell, which opens its "Switch board" sheet. No handler in a plain
+    // browser (the button only renders in embed mode anyway): the tap is a no-op.
+    this.el.addEventListener("click", e => {
+      const sw = e.target.closest("#board-switch-board")
+      if (!sw || !window.flutter_inappwebview) return
+      window.flutter_inappwebview.callHandler("relayOpenBoardSwitcher", {board: sw.dataset.board})
+    })
   },
 
   // LiveView patches to this hook's own element (chip count updates) drop the

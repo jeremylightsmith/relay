@@ -1,8 +1,8 @@
 defmodule RelayWeb.Api.AllController do
   @moduledoc """
   The native app's cross-board decision surface (RLY-80): the aggregated needs-you feed
-  the inbox renders, the human's approve/reject/answer actions, and (RLY-126) the native
-  New-card sheet's create path. Authenticated by `RelayWeb.ApiUserAuth` (user bearer token),
+  the inbox renders, the human's approve/reject/answer actions, (RLY-126) the native
+  New-card sheet's create path, and (RE376) the board switcher's list. Authenticated by `RelayWeb.ApiUserAuth` (user bearer token),
   acting as `{:user, id}` — never as the agent.
   """
 
@@ -11,6 +11,7 @@ defmodule RelayWeb.Api.AllController do
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Cards
+  alias RelayWeb.Api.BoardListJSON
   alias RelayWeb.Api.CardJSON
   alias RelayWeb.Api.FeedJSON
 
@@ -36,6 +37,16 @@ defmodule RelayWeb.Api.AllController do
     conn
     |> put_view(json: FeedJSON)
     |> render(:feed, rows: rows)
+  end
+
+  # RE376 — the native board switcher's list: the user's boards with the same summary
+  # facts the web boards home shows. A narrow addition to this ADR-0001-scoped surface.
+  def boards(conn, _params) do
+    summaries = Cards.list_board_summaries(conn.assigns.current_user)
+
+    conn
+    |> put_view(json: BoardListJSON)
+    |> render(:boards, summaries: summaries)
   end
 
   # RLY-98: the native card screen's mount fetch — the light card shape (incl. pr_url),

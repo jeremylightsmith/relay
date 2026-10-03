@@ -847,6 +847,17 @@ textarea.commit-field-input { min-height: 64px; }
   font-size: 15px; line-height: 1;
   text-decoration: none;
 }
+/* RE376 · BOARD-01 — embed-only board-switcher title: the board name + a muted ▾,
+   a bare button (no chrome) that the BoardPager hook bridges to the native sheet. */
+.board-pager-switch {
+  display: flex; align-items: center; gap: 6px;
+  min-width: 0; padding: 0;
+  background: transparent; border: none; cursor: pointer;
+}
+.board-pager-caret {
+  font-size: 11px; line-height: 1;
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
 /* RLY-126 · BOARD-04 — embed-only header "+" (artboard line ~401): 26px blue rounded
    square, white +, right end of the header row. */
 .board-pager-create {
