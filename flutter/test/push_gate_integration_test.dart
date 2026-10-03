@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/push/push_platform.dart';
 import 'package:relay_mobile/features/push/push_prefs.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
@@ -38,6 +39,7 @@ Future<(ScriptedAuthController, RecordingAdapter)> pumpLaunch(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs('b1')),
         authProvider.overrideWith(() => auth),
         pushPlatformProvider.overrideWithValue(platform),
         pushPrefsProvider.overrideWithValue(

@@ -180,23 +180,11 @@ defmodule RelayWeb.BoardsLive do
     {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/settings")}
   end
 
+  # RE376: the summary facts come from the one domain definition the native switcher
+  # (GET /api/all/boards) also reads; only the member stack is web-specific.
   defp load_boards(user) do
-    for board <- Boards.list_boards(user) do
-      rollup = Cards.needs_you_rollup(board)
-      cards = Cards.list_cards(board)
-      stages = Boards.list_stages(board)
-
-      %{
-        slug: board.slug,
-        name: board.name,
-        updated_at: board.updated_at,
-        card_count: length(cards),
-        stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
-        ai_active?: Enum.any?(cards, &(&1.status == :working and Cards.active_owner_type(&1) == :ai)),
-        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
-        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled,
-        members: Members.list_members(board)
-      }
+    for summary <- Cards.list_board_summaries(user) do
+      Map.put(summary, :members, Members.list_members(summary.board))
     end
   end
 

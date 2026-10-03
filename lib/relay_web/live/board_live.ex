@@ -295,11 +295,27 @@ defmodule RelayWeb.BoardLive do
             class="board-pager-nav drawer:hidden"
             aria-label="Stages"
           >
-            <%!-- RLY-95 · BOARD-01 — `‹ back · board name`: the ‹ is the route back to
-                  /boards once embed hides the web top bar. ?from= drives the CURRENT
-                  badge on the list. The updated artboard drops the card count. --%>
+            <%!-- RLY-95 · BOARD-01 — plain web: ‹ back · board name (the ‹ is the route
+                  back to /boards; ?from= drives the CURRENT badge). RE376: embedded, the
+                  native shell owns board switching, so the name becomes the switcher
+                  title instead. --%>
             <div id="board-pager-header" class="board-pager-header">
+              <%!-- RE376 · BOARD-01 — embedded, the board name is the switcher: the BoardPager
+                    hook bridges a tap to the native shell (relayOpenBoardSwitcher), which
+                    opens the native "Switch board" sheet. Plain web keeps ‹ + title. --%>
+              <button
+                :if={@embed}
+                type="button"
+                id="board-switch-board"
+                class="board-pager-switch"
+                aria-label="Switch board"
+                data-board={@board.slug}
+              >
+                <span class="board-pager-title">{@board.name}</span>
+                <span class="board-pager-caret" aria-hidden="true">▾</span>
+              </button>
               <.link
+                :if={not @embed}
                 id="board-pager-back"
                 navigate={~p"/boards?from=#{@board.slug}"}
                 class="board-pager-back"
@@ -307,7 +323,7 @@ defmodule RelayWeb.BoardLive do
               >
                 ‹
               </.link>
-              <span class="board-pager-title">{@board.name}</span>
+              <span :if={not @embed} class="board-pager-title">{@board.name}</span>
               <%!-- RLY-126 · BOARD-04 — embed-only: opens the NATIVE New-card sheet via the
                     BoardPager hook's relayCreateCard bridge. Plain web has no native handler,
                     so the button does not render outside embed mode. --%>

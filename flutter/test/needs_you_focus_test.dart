@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
@@ -13,6 +15,7 @@ import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 import 'review_queue_test.dart' show FakeDecisionApi;
+import 'support/fake_boards.dart';
 
 /// Answers the first fetch; leaves every later one hanging, so a test can look
 /// at the list *while* a focus refresh is in flight (D3: silent presentation).
@@ -43,8 +46,10 @@ Future<void> pumpFocusShell(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        boardsRepositoryProvider.overrideWithValue(FakeBoardsRepository()),
         feedRepositoryProvider.overrideWithValue(repo),
         authTokenProvider.overrideWithValue('relayu_test'),
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs()),
         clockProvider.overrideWithValue(clock),
         decisionApiProvider.overrideWithValue(FakeDecisionApi()),
       ],

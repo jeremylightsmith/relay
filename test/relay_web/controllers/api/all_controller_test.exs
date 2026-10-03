@@ -98,4 +98,68 @@ defmodule RelayWeb.Api.AllControllerTest do
       assert body["pr_url"] == "https://github.com/acme/relay/pull/9"
     end
   end
+
+  describe "boards" do
+    test "lists exactly the user's boards with the switcher's fields", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", "alpha")
+      _beta = member_board(user, "BBB", "beta")
+      _foreign = member_board(insert(:user), "ZZZ", "zeta")
+
+      code = work_stage(alpha)
+      insert(:card, stage: code, status: :needs_input)
+      working = insert(:card, stage: code, status: :working)
+      insert(:card_owner, card: working)
+
+      data =
+        conn
+        |> get(~p"/api/all/boards")
+        |> json_response(200)
+        |> Map.fetch!("data")
+
+      assert Enum.map(data, & &1["slug"]) == ["alpha", "beta"]
+
+      [a, b] = data
+
+      assert a == %{
+               "name" => alpha.name,
+               "slug" => "alpha",
+               "key" => "AAA",
+               "needs_you_count" => 1,
+               "stage_count" => 1,
+               "card_count" => 2,
+               "ai_active" => true
+             }
+
+      assert b["needs_you_count"] == 0
+      assert b["ai_active"] == false
+    end
+
+    test "needs_you_count is the two-type count (ADR 0005), never the web's three-type sum",
+         %{conn: conn, user: user} do
+      board = member_board(user, "AAA", "alpha")
+      code = work_stage(board)
+      human = insert(:stage, board: board, name: "Polish", type: :work, ai_enabled: false, position: 2)
+      review = insert(:stage, board: board, name: "Review", type: :review, position: 3)
+
+      insert(:card, stage: code, status: :needs_input)
+      insert(:card, stage: review, status: :in_review)
+      # agent_stalled (RLY-148): counted.
+      stalled = insert(:card, stage: code, status: :working)
+      insert(:card_owner, card: stalled)
+      insert(:activity, card: stalled, type: :failure, text: "agent stopped")
+      # Ready-and-awaiting-human: the web's third type — NOT on the wire.
+      insert(:card, stage: human, status: :ready)
+
+      [row] = conn |> get(~p"/api/all/boards") |> json_response(200) |> Map.fetch!("data")
+
+      assert row["slug"] == board.slug
+      assert row["needs_you_count"] == 3
+    end
+
+    test "401 without a bearer token" do
+      assert build_conn()
+             |> get(~p"/api/all/boards")
+             |> json_response(401)
+    end
+  end
 end

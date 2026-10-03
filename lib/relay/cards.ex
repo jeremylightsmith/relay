@@ -1658,6 +1658,39 @@ defmodule Relay.Cards do
     }) in [:stale, :stopped]
   end
 
+  @doc """
+  One summary row per board the user belongs to (RE376), in `Boards.list_boards/1`
+  order: `%{board, slug, name, key, updated_at, card_count, stage_count, ai_active?,
+  needs_you_count, needs_you_two_type}`.
+
+  The ONE definition of these facts: the web boards home (`RelayWeb.BoardsLive`) and the
+  native board switcher (`GET /api/all/boards`) both render these rows, so their counts
+  can never drift. `stage_count` counts top-level stages only; `card_count` counts
+  non-archived cards; `ai_active?` is true when an agent-owned card is `:working`.
+  `needs_you_count` is the web's three-type sum; `needs_you_two_type` is the count the
+  mobile surfaces show (ADR 0005) — both include `agent_stalled` (RLY-148).
+  """
+  def list_board_summaries(%User{} = user) do
+    for board <- Boards.list_boards(user) do
+      rollup = needs_you_rollup(board)
+      cards = list_cards(board)
+      stages = Boards.list_stages(board)
+
+      %{
+        board: board,
+        slug: board.slug,
+        name: board.name,
+        key: board.key,
+        updated_at: board.updated_at,
+        card_count: length(cards),
+        stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
+        ai_active?: Enum.any?(cards, &(&1.status == :working and active_owner_type(&1) == :ai)),
+        needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
+        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled
+      }
+    end
+  end
+
   @feed_statuses [:needs_input, :in_review]
 
   @doc """

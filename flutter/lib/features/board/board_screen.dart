@@ -4,22 +4,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../config.dart';
+import '../boards/board_switcher.dart';
+import '../boards/current_board.dart';
 import '../card/card_nav_context.dart';
-import 'board_prefs.dart';
 import 'new_card_sheet.dart';
 
-/// The Board tab: the **embedded chromeless LiveView board** (RLY-94 · BOARD-01),
-/// opening on the remembered board (RLY-95 · BOARDS-00).
+/// The Board tab: the **embedded chromeless LiveView board** (RLY-94 · BOARD-01) for
+/// the app-wide **current board** (RE376).
 ///
-/// Cold start: the last-viewed slug is read from [BoardPrefs] — stored →
-/// `/board/<slug>?embed=1`, nothing stored → the boards list `/boards?embed=1`
-/// (never a server-picked default). The webview observes URL changes
-/// (onUpdateVisitedHistory): landing on exactly `/board/<slug>` persists the slug;
-/// visiting `/boards` does not clear it. If the remembered board fails to load
-/// (main-frame HTTP ≥ 400 — deleted board or revoked membership), the slug is
-/// cleared and the tab falls back to the boards list. No JS bridge for any of
-/// this — the LiveView owns the list and the switch (ADR 0001).
-class BoardScreen extends ConsumerStatefulWidget {
+/// The board is native state ([currentBoardProvider]), not something the webview
+/// remembers. The tab loads `/board/<current>?embed=1` and remounts (that is, reloads)
+/// when the current board changes. The embedded header's `<board> ▾` title bridges
+/// out (`relayOpenBoardSwitcher`) to the same native Switch-board sheet the other
+/// tabs use. If the board fails to load (main-frame HTTP ≥ 400: deleted board or
+/// revoked membership), it is forgotten and the app goes to Choose a board.
+class BoardScreen extends ConsumerWidget {
   const BoardScreen({super.key, this.bodyBuilder});
 
   /// Overrides the webview body — same test seam as CardScreen.bodyBuilder:
@@ -27,17 +26,11 @@ class BoardScreen extends ConsumerStatefulWidget {
   /// `flutter test` injects a stub. Null means the real webview.
   final WidgetBuilder? bodyBuilder;
 
-  /// The embedded boards list (BOARDS-00) — the no-slug cold start and the
-  /// dead-board fallback target.
-  static String boardsListUrl({String? baseUrl}) {
-    final base = baseUrl ?? AppConfig.baseUrl;
-    return '$base/boards?embed=1';
-  }
+  /// The JS bridge the embedded header's board title calls (board_pager.js).
+  static const openSwitcherHandler = 'relayOpenBoardSwitcher';
 
-  /// The Board tab's initial URL: the remembered board when [slug] is stored,
-  /// else the boards list (RLY-95 decision 4 — no server-picked default).
-  static String boardUrl({String? baseUrl, String? slug}) {
-    if (slug == null || slug.isEmpty) return boardsListUrl(baseUrl: baseUrl);
+  /// The Board tab's URL: [slug], embedded.
+  static String boardUrl({String? baseUrl, required String slug}) {
     final base = baseUrl ?? AppConfig.baseUrl;
     return '$base/board/$slug?embed=1';
   }
@@ -85,92 +78,77 @@ class BoardScreen extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<BoardScreen> createState() => _BoardScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final slug = ref.watch(currentBoardProvider.select((s) => s.slug));
+    final builder = bodyBuilder;
 
-class _BoardScreenState extends ConsumerState<BoardScreen> {
-  late final Future<String> _initialUrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _initialUrl = ref
-        .read(boardPrefsProvider)
-        .readLastBoardSlug()
-        .then((slug) => BoardScreen.boardUrl(slug: slug));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body:
-          widget.bodyBuilder?.call(context) ??
-          FutureBuilder<String>(
-            future: _initialUrl,
-            builder: (context, snapshot) {
-              final url = snapshot.data;
-              // One or two frames while the Keychain read lands — blank beats
-              // loading /boards and immediately swapping to the remembered board.
-              if (url == null) return const SizedBox.shrink();
-              return InAppWebView(
-                key: const Key('board_webview'),
-                initialUrlRequest: URLRequest(url: WebUri(url)),
-                onWebViewCreated: (controller) {
-                  controller.addJavaScriptHandler(
-                    handlerName: 'relayCardTap',
-                    callback: (args) {
-                      final payload = args.isNotEmpty && args.first is Map
-                          ? args.first as Map
-                          : const <dynamic, dynamic>{};
-                      final path = BoardScreen.cardPathForTap(payload);
-                      if (path != null && context.mounted) {
-                        context.push(
-                          path,
-                          extra: BoardScreen.navContextForTap(payload),
-                        );
-                      }
-                    },
-                  );
-                  // RLY-126 · BOARD-04 — the board header "+" bubbles out of the
-                  // webview; the shell opens the native New-card sheet over the tab.
-                  controller.addJavaScriptHandler(
-                    handlerName: 'relayCreateCard',
-                    callback: (args) {
-                      final payload = args.isNotEmpty && args.first is Map
-                          ? args.first as Map
-                          : const <dynamic, dynamic>{};
-                      final request = CreateCardRequest.fromPayload(payload);
-                      if (request != null && context.mounted) {
-                        showNewCardSheet(context, request);
-                      }
-                    },
-                  );
-                },
-                onUpdateVisitedHistory: (controller, url, isReload) {
-                  final slug = BoardScreen.slugFromPath(url?.path ?? '');
-                  if (slug != null) {
-                    ref.read(boardPrefsProvider).writeLastBoardSlug(slug);
-                  }
-                },
-                onReceivedHttpError: (controller, request, errorResponse) {
-                  final status = errorResponse.statusCode ?? 0;
-                  final deadBoard =
-                      request.isForMainFrame == true &&
-                      status >= 400 &&
-                      BoardScreen.slugFromPath(request.url.path) != null;
-                  if (!deadBoard) return;
-                  // The remembered board is gone (deleted / membership revoked):
-                  // forget it and fall back to the list, or every launch re-fails.
-                  ref.read(boardPrefsProvider).clear();
-                  controller.loadUrl(
-                    urlRequest: URLRequest(
-                      url: WebUri(BoardScreen.boardsListUrl()),
-                    ),
-                  );
-                },
-              );
+    final Widget body;
+    if (builder != null) {
+      // Keyed by board so a switch remounts the body, as it does the webview.
+      body = KeyedSubtree(
+        key: ValueKey('board_body_${slug ?? ''}'),
+        child: builder(context),
+      );
+    } else if (slug == null) {
+      // No board: the router is already on its way to Choose a board.
+      body = const SizedBox.shrink();
+    } else {
+      body = InAppWebView(
+        // One key per board: initialUrlRequest only applies on mount, so a
+        // switch has to remount to load the new board.
+        key: ValueKey('board_webview_$slug'),
+        initialUrlRequest: URLRequest(url: WebUri(boardUrl(slug: slug))),
+        onWebViewCreated: (controller) {
+          controller.addJavaScriptHandler(
+            handlerName: 'relayCardTap',
+            callback: (args) {
+              final payload = args.isNotEmpty && args.first is Map
+                  ? args.first as Map
+                  : const <dynamic, dynamic>{};
+              final path = cardPathForTap(payload);
+              if (path != null && context.mounted) {
+                context.push(path, extra: navContextForTap(payload));
+              }
             },
-          ),
-    );
+          );
+          // RLY-126 · BOARD-04 — the board header "+" bubbles out of the
+          // webview; the shell opens the native New-card sheet over the tab.
+          controller.addJavaScriptHandler(
+            handlerName: 'relayCreateCard',
+            callback: (args) {
+              final payload = args.isNotEmpty && args.first is Map
+                  ? args.first as Map
+                  : const <dynamic, dynamic>{};
+              final request = CreateCardRequest.fromPayload(payload);
+              if (request != null && context.mounted) {
+                showNewCardSheet(context, request);
+              }
+            },
+          );
+          // RE376 · BOARD-01 — the embedded header's "<board> ▾" bubbles out;
+          // the shell opens the same native Switch-board sheet as every tab.
+          controller.addJavaScriptHandler(
+            handlerName: openSwitcherHandler,
+            callback: (_) {
+              if (context.mounted) showBoardSwitcherSheet(context);
+            },
+          );
+        },
+        onReceivedHttpError: (controller, request, errorResponse) {
+          final status = errorResponse.statusCode ?? 0;
+          final deadBoard =
+              request.isForMainFrame == true &&
+              status >= 400 &&
+              slugFromPath(request.url.path) != null;
+          if (!deadBoard) return;
+          // The current board is gone (deleted / membership revoked): forget it
+          // app-wide and choose another, or every launch re-fails.
+          ref.read(currentBoardProvider.notifier).clear();
+          if (context.mounted) context.go('/choose-board');
+        },
+      );
+    }
+
+    return Scaffold(body: body);
   }
 }

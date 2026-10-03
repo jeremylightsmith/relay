@@ -1,6 +1,6 @@
-// RLY-95: which board the Board tab shows. On-device only (decision 4) — the
-// pick is per-install state, cleared on sign-out so it never outlives the
-// session it was made in.
+// RLY-95 / RE376: the app-wide current board's slug (see features/boards/current_board.dart).
+// On-device only (decision 4) — the pick is per-install state, cleared on
+// sign-out so it never outlives the session it was made in.
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -16,9 +16,9 @@ abstract class BoardPrefs {
 /// The iOS Keychain, via flutter_secure_storage — the SecureSessionStore
 /// pattern, failure posture included: every method swallows platform errors and
 /// [readLastBoardSlug] returns null on failure, so a Keychain hiccup degrades to
-/// "show the boards list", never a crash. That also keeps widget tests that do
-/// not override [boardPrefsProvider] working: `flutter test` has no platform
-/// channel.
+/// "no remembered board" (Choose a board), never a crash. That also keeps widget
+/// tests that do not override [boardPrefsProvider] working: `flutter test` has no
+/// platform channel.
 class SecureBoardPrefs implements BoardPrefs {
   SecureBoardPrefs([FlutterSecureStorage? storage])
     : _storage = storage ?? const FlutterSecureStorage();

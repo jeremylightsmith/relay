@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
@@ -75,6 +76,7 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
   final container = ProviderContainer(
     overrides: [
       decisionApiProvider.overrideWithValue(api),
+      boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs()),
       feedRepositoryProvider.overrideWithValue(feed ?? FakeFeedRepository()),
       authProvider.overrideWith(
         () => FakeAuthController(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/push/push_prefs.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
@@ -32,6 +33,7 @@ Future<(ScriptedAuthController, FakePushPlatform)> pumpLaunch(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs('b1')),
         authProvider.overrideWith(() => auth),
         pushPlatformProvider.overrideWithValue(platform),
         // /push-permission gates itself on the OS status + deferral (RLY-84 §1).
@@ -212,7 +214,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'Settings'), findsNothing);
+    expect(find.byKey(const Key('settings_log_out')), findsNothing);
     // back in the tab shell at the default landing (pumpLaunch does not fake
     // the feed, so assert the shell rather than the inbox's loaded state)
     expect(find.byType(NavigationBar), findsOneWidget);

@@ -3,9 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/boards_repository.dart';
+import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/settings/settings_screen.dart';
 
+import 'needs_you_screen_test.dart' show FakeFeedRepository;
 import 'support/fake_auth.dart';
+import 'support/fake_boards.dart';
 
 const _user = {'id': 1, 'name': 'Dana Kim', 'email': 'dana@acme.co'};
 
@@ -14,11 +19,20 @@ Future<FakeAuthController> pumpSettings(
   Map<String, dynamic> user = _user,
 }) async {
   final auth = FakeAuthController(
-    AuthState(status: AuthStatus.signedIn, user: user),
+    AuthState(status: AuthStatus.signedIn, user: user, token: 'relayu_t'),
   );
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [authProvider.overrideWith(() => auth)],
+      overrides: [
+        authProvider.overrideWith(() => auth),
+        boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs('mkt')),
+        boardsRepositoryProvider.overrideWithValue(
+          FakeBoardsRepository(
+            boards: [makeBoard('mkt', name: 'Marketing site')],
+          ),
+        ),
+        feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
+      ],
       child: MaterialApp(theme: RelayTheme.light, home: const SettingsScreen()),
     ),
   );
@@ -62,11 +76,23 @@ void main() {
     },
   );
 
-  testWidgets('keeps the AppBar title the shell test asserts on', (
+  testWidgets('the AppBar title is the current board\'s switcher (RE376)', (
     tester,
   ) async {
     await pumpSettings(tester);
-    expect(find.widgetWithText(AppBar, 'Settings'), findsOneWidget);
+
+    expect(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byKey(const Key('board_switcher_button')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+      'Marketing site',
+    );
+    expect(find.widgetWithText(AppBar, 'Settings'), findsNothing);
   });
 
   testWidgets(

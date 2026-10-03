@@ -175,6 +175,14 @@ sharing behavior.
   cancelled.") only when the card has an active run. Unarchiving never revives that run. Both
   are idempotent through the domain functions (a repeat logs nothing), and neither is on the
   `/api/all` user-token scope.
+  The per-board summary — top-level `stage_count`, non-archived `card_count`, `ai_active?`,
+  and both needs-you counts (`needs_you_count`, the web's three-type sum, and
+  `needs_you_two_type`, the mobile count, ADR 0005) — is `Relay.Cards.list_board_summaries/1`
+  (RE376), the one definition both the web boards home (`RelayWeb.BoardsLive`) and the native
+  board switcher read. The switcher's list is **`GET /api/all/boards`** on the `/api/all`
+  user-token scope (`AllController.boards`, `RelayWeb.Api.BoardListJSON`), returning
+  `{data: [{name, slug, key, needs_you_count, stage_count, card_count, ai_active}]}` with
+  `needs_you_count` = the two-type count.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard
@@ -197,7 +205,7 @@ sharing behavior.
   (the kanban board renders no presence UI), and untracking is the tracked pid's exit.
   Humans only — no AI/agent avatar and no agent cursor.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
-  tokens); user API tokens for `/api/all`.
+  tokens); user API tokens for `/api/all` (the native feed, card actions, card create, and the board list).
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys

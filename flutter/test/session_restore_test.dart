@@ -9,6 +9,7 @@ import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/auth/http_providers.dart';
 import 'package:relay_mobile/features/auth/session_store.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
 import 'support/fake_push_platform.dart';
@@ -194,5 +195,24 @@ void main() {
 
     expect(boardPrefs.slug, isNull);
     expect(container.read(authProvider).status, AuthStatus.signedOut);
+  });
+
+  test('signing out also resets the in-memory current board (RE376)', () async {
+    final store = InMemorySessionStore('cookie-value');
+    final boardPrefs = InMemoryBoardPrefs('marketing-site');
+    final adapter = StubAdapter(body: {'success': true, 'user': _user});
+    final container = containerWith(
+      store: store,
+      adapter: adapter,
+      boardPrefs: boardPrefs,
+    );
+    await restore(container);
+    await container.read(currentBoardProvider.notifier).ready;
+    expect(container.read(currentBoardProvider).slug, 'marketing-site');
+
+    await container.read(authProvider.notifier).signOut();
+    await container.read(currentBoardProvider.notifier).ready;
+
+    expect(container.read(currentBoardProvider).needsChoice, isTrue);
   });
 }

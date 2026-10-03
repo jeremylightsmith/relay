@@ -17,6 +17,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../config.dart';
 import '../board/board_prefs.dart';
+import '../boards/current_board.dart';
 import '../push/push_service.dart';
 import 'auth_errors.dart';
 import 'http_providers.dart';
@@ -111,6 +112,9 @@ class AuthController extends Notifier<AuthState> {
       // A real answer, and it says no: the credential is dead. Drop it.
       await _clearSession();
       state = const AuthState(status: AuthStatus.signedOut);
+      // RE376: _clearSession already wiped the Keychain copy; drop the in-memory
+      // board too, so the next sign-in starts from "nothing remembered".
+      ref.invalidate(currentBoardProvider);
     } catch (e) {
       // We couldn't ask. Keep the cookie — a flaky network must not sign the user
       // out for good; the next launch retries.
@@ -223,7 +227,7 @@ class AuthController extends Notifier<AuthState> {
   }
 
   /// Forget the session everywhere it is held: dio's jar, the webview store, and
-  /// the Keychain — plus the Board tab's remembered pick (RLY-95): the next
+  /// the Keychain — plus the remembered current board (RLY-95 / RE376): the next
   /// account must cold-start on the boards list, not someone else's board.
   Future<void> _clearSession() async {
     await _jar.deleteAll();
@@ -248,6 +252,9 @@ class AuthController extends Notifier<AuthState> {
     } catch (_) {}
     await _clearSession();
     state = const AuthState(status: AuthStatus.signedOut);
+    // RE376: _clearSession already wiped the Keychain copy; drop the in-memory
+    // board too, so the next sign-in starts from "nothing remembered".
+    ref.invalidate(currentBoardProvider);
   }
 }
 

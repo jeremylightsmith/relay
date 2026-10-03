@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
+import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
@@ -273,4 +275,70 @@ void main() {
       );
     },
   );
+
+  group('scoped to the current board (RE376)', () {
+    ProviderContainer scopedHarness(FeedPage page, String? slug) {
+      final container = ProviderContainer(
+        overrides: [
+          feedRepositoryProvider.overrideWithValue(
+            FakeFeedRepository(page: page),
+          ),
+          authTokenProvider.overrideWithValue('relayu_test'),
+          boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs(slug)),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    test(
+      'only the current board\'s rows, and the badge counts only those',
+      () async {
+        final container = scopedHarness(
+          feedPage([
+            makeRow(ref: 'MKT-1', boardKey: 'MKT'),
+            makeRow(ref: 'MKT-2', boardKey: 'MKT'),
+            makeRow(ref: 'DAT-1', boardKey: 'DAT'),
+          ]),
+          'mkt',
+        );
+        await container.read(currentBoardProvider.notifier).ready;
+        await container.read(feedControllerProvider.future);
+
+        final scoped = container.read(scopedFeedProvider).value!;
+        expect(scoped.rows.map((r) => r.ref), ['MKT-1', 'MKT-2']);
+        expect(scoped.count, 2);
+        expect(container.read(needsYouCountProvider), 2);
+
+        await container.read(currentBoardProvider.notifier).switchTo('dat');
+
+        expect(
+          container.read(scopedFeedProvider).value!.rows.map((r) => r.ref),
+          ['DAT-1'],
+        );
+        expect(container.read(needsYouCountProvider), 1);
+      },
+    );
+
+    test('caught up is judged per board', () async {
+      final container = scopedHarness(
+        feedPage([makeRow(ref: 'DAT-1', boardKey: 'DAT')]),
+        'mkt',
+      );
+      await container.read(currentBoardProvider.notifier).ready;
+      await container.read(feedControllerProvider.future);
+
+      expect(container.read(scopedFeedProvider).value!.caughtUp, isTrue);
+      expect(container.read(needsYouCountProvider), 0);
+    });
+
+    test('rowsForBoard passes every row through when no board is chosen', () {
+      final rows = [
+        makeRow(ref: 'MKT-1', boardKey: 'MKT'),
+        makeRow(ref: 'DAT-1', boardKey: 'DAT'),
+      ];
+      expect(rowsForBoard(rows, null), rows);
+      expect(rowsForBoard(rows, 'dat').map((r) => r.ref), ['DAT-1']);
+    });
+  });
 }
