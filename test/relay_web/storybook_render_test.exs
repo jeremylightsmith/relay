@@ -24,6 +24,14 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "QUESTION"
   end
 
+  test "GET /storybook/core_components/mockup_preview shows the RE374 tiles in a wrapping row", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/mockup_preview") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    assert doc |> LazyHTML.query(".flex.flex-wrap.gap-2 a[id^='mockup-preview-wrapping-row-tile-']") |> Enum.count() == 5
+    assert html =~ "80px square thumbnail tile"
+  end
+
   test "GET /storybook/flow_metrics/verdict_bar shows the RE235 actual-counts variations", %{conn: conn} do
     conn = get(conn, "/storybook/flow_metrics/verdict_bar")
     html = html_response(conn, 200)

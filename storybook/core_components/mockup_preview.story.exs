@@ -10,7 +10,8 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
     [
       %Variation{
         id: :captioned,
-        description: "RE370 — the drawer's Mockups entry: caption, Open full size (new tab), sandboxed iframe.",
+        description:
+          "RE374 — the drawer's Mockups entry: an 80px square thumbnail tile (a scaled, sandboxed iframe); the caption is its tooltip and aria-label, and the tile opens the viewer in a new tab.",
         attributes: %{
           id: "mockup-preview-story-captioned",
           src: "/images/logo_light_128.png",
@@ -26,6 +27,26 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
           src: "/images/logo_light_128.png",
           view_href: "/storybook/core_components/mockup_preview"
         }
+      },
+      %VariationGroup{
+        id: :wrapping_row,
+        description: "Several mockups — the drawer lays the tiles out in a wrapping row (flex flex-wrap gap-2).",
+        template: """
+        <div class="flex flex-wrap gap-2 max-w-64" psb-code-hidden>
+          <.psb-variation-group />
+        </div>
+        """,
+        variations:
+          for {caption, n} <- Enum.with_index(["Empty state", "Board", "Drawer", "Settings", "Mobile"], 1) do
+            %Variation{
+              id: :"tile_#{n}",
+              attributes: %{
+                src: "/images/logo_light_128.png",
+                view_href: "/storybook/core_components/mockup_preview",
+                caption: caption
+              }
+            }
+          end
       }
     ]
   end
