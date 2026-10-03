@@ -332,7 +332,19 @@ defmodule RelayWeb.BoardLive do
                 data-chip-stage-id={stage.id}
                 data-stage-name={stage.name}
                 data-ai={to_string(stage.ai_enabled)}
+                data-collapsed={
+                  to_string(
+                    stage_collapsed?(
+                      stage,
+                      @stage_counts,
+                      @sublanes_by_parent,
+                      @force_open,
+                      @stage_force_closed
+                    )
+                  )
+                }
               >
+                <span class="board-pager-chip-glyph" aria-hidden="true">▸</span>
                 <span class="board-pager-chip-dot"></span>
                 {stage.name}
                 <span class="board-pager-chip-count">
