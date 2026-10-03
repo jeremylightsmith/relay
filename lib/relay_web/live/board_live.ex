@@ -324,32 +324,32 @@ defmodule RelayWeb.BoardLive do
               </button>
             </div>
             <div class="board-pager-chips">
-              <%= for stage <- flat_stages(@stage_groups) do %>
-                <% collapsed? =
-                  stage_collapsed?(
-                    stage,
-                    @stage_counts,
-                    @sublanes_by_parent,
-                    @force_open,
-                    @stage_force_closed
-                  ) %>
-                <button
-                  type="button"
-                  id={"stage-chip-#{stage.id}"}
-                  class="board-pager-chip"
-                  data-chip-stage-id={stage.id}
-                  data-stage-name={stage.name}
-                  data-ai={to_string(stage.ai_enabled)}
-                  data-collapsed={to_string(collapsed?)}
-                >
-                  <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
-                  <span class="board-pager-chip-dot"></span>
-                  {stage.name}
-                  <span class="board-pager-chip-count">
-                    {total_count(stage, @stage_counts, @sublanes_by_parent)}
-                  </span>
-                </button>
-              <% end %>
+              <button
+                :for={
+                  {stage, collapsed?} <-
+                    pager_chips(
+                      @stage_groups,
+                      @stage_counts,
+                      @sublanes_by_parent,
+                      @force_open,
+                      @stage_force_closed
+                    )
+                }
+                type="button"
+                id={"stage-chip-#{stage.id}"}
+                class="board-pager-chip"
+                data-chip-stage-id={stage.id}
+                data-stage-name={stage.name}
+                data-ai={to_string(stage.ai_enabled)}
+                data-collapsed={to_string(collapsed?)}
+              >
+                <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
+                <span class="board-pager-chip-dot"></span>
+                {stage.name}
+                <span class="board-pager-chip-count">
+                  {total_count(stage, @stage_counts, @sublanes_by_parent)}
+                </span>
+              </button>
             </div>
             <span class="board-pager-fade" aria-hidden="true"></span>
           </nav>
@@ -3213,6 +3213,13 @@ defmodule RelayWeb.BoardLive do
   # RLY-94 — the chip strip flattens category bands into one ordered stage list.
   defp flat_stages(stage_groups) do
     for {_category, stages} <- stage_groups, stage <- stages, do: stage
+  end
+
+  # RE377 — each chip paired with its stage's collapse state (dashed ▸ treatment).
+  defp pager_chips(stage_groups, stage_counts, sublanes_by_parent, force_open, stage_force_closed) do
+    for stage <- flat_stages(stage_groups) do
+      {stage, stage_collapsed?(stage, stage_counts, sublanes_by_parent, force_open, stage_force_closed)}
+    end
   end
 
   # Children grouped under their parent's id, each list ordered Review→Done.

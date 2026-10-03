@@ -188,13 +188,23 @@ defmodule RelayWeb.BoardLivePagerTest do
       pager_on(view)
 
       assert has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="true"] .board-pager-chip-caret), "▸")
+      assert has_element?(view, "#stage-chip-#{code.id} .board-pager-chip-count", "1")
 
       view |> element("##{col}-show-cards") |> render_click()
 
       assert has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="false"]))
       refute has_element?(view, "#stage-chip-#{code.id} .board-pager-chip-caret")
       refute render(element(view, "#stage-chip-#{code.id}")) =~ "▸"
-      refute has_element?(view, ~s(#stage-chip-#{code.id}[data-collapsed="true"]))
+    end
+
+    test "an expanded stage's chip is not marked collapsed",
+         %{conn: conn, board: board, spec: spec} do
+      {:ok, _} = Cards.create_card(spec, %{title: "Open"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      pager_on(view)
+
+      assert has_element?(view, ~s(#stage-chip-#{spec.id}[data-collapsed="false"]))
+      refute has_element?(view, "#stage-chip-#{spec.id} .board-pager-chip-caret")
     end
 
     test "phone and desktop share one collapse state",
