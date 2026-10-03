@@ -1,8 +1,9 @@
 defmodule RelayWeb.BoardLiveMockupsTest do
   @moduledoc """
-  RE370 — the drawer's Mockups section: caption, a sandboxed iframe of each HTML attachment, and
-  an Open full size link to the framed viewer (never the raw HTML). Rendered only when the card
-  has mockups, and live-updated on the `{:card_upserted, _}` echo.
+  RE370 / RE374 — the drawer's Mockups section: a wrapping row of small square tiles, each a live
+  miniature (sandboxed iframe) of an HTML attachment that is itself a new-tab link to the framed
+  viewer (never the raw HTML). Rendered only when the card has mockups, and live-updated on the
+  `{:card_upserted, _}` echo.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -38,7 +39,7 @@ defmodule RelayWeb.BoardLiveMockupsTest do
     view
   end
 
-  test "each mockup renders its caption, a sandboxed iframe and an Open full size link to the viewer",
+  test "each mockup is a small square tile linking to the viewer in a new tab, in a wrapping row",
        %{conn: conn, board: board, card: card, ref: ref} do
     a = upload(card, "a.html")
     b = upload(card, "b.html")
@@ -52,27 +53,41 @@ defmodule RelayWeb.BoardLiveMockupsTest do
     view = open(conn, board, ref)
 
     assert has_element?(view, "#card-drawer-mockups", "Mockups")
-    assert has_element?(view, "#card-drawer-mockup-0-caption", "Empty state")
-    assert has_element?(view, "#card-drawer-mockup-1-caption", "Mockup")
+
+    # RE374 — tiles sit side by side and wrap, like the AI result's Screenshots strip.
+    assert has_element?(view, "#card-drawer-mockups #card-drawer-mockup-tiles.flex.flex-wrap.gap-2")
+
+    # The whole 80px square tile is the link: the framed viewer, in a NEW tab, plain href.
+    assert has_element?(
+             view,
+             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-0-open.size-20[href="#{RelayWeb.attachment_view_path(a.id)}"][target="_blank"][rel="noopener noreferrer"][title="Empty state"][aria-label="Open mockup: Empty state (new tab)"]|
+           )
 
     assert has_element?(
              view,
-             ~s(iframe#card-drawer-mockup-0-frame[src="#{RelayWeb.attachment_path(a.id)}"][sandbox="#{RelayWeb.mockup_sandbox()}"])
+             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-1-open.size-20[href="#{RelayWeb.attachment_view_path(b.id)}"][target="_blank"][title="Mockup"][aria-label="Open mockup: Mockup (new tab)"]|
            )
 
-    refute render(view) =~ "allow-same-origin"
-
-    # RE370 review: Open full size opens the framed viewer in a NEW tab, leaving the board put.
-    assert has_element?(
-             view,
-             ~s(#card-drawer-mockup-0-open[href="#{RelayWeb.attachment_view_path(a.id)}"][target="_blank"][rel="noopener noreferrer"]),
-             "Open full size"
-           )
-
-    # A plain new-tab link, not a LiveView navigate (which would replace the board tab).
+    refute has_element?(view, "#card-drawer-mockup-2-open")
     refute has_element?(view, "#card-drawer-mockup-0-open[data-phx-link]")
+    refute has_element?(view, "#card-drawer-mockup-1-open[data-phx-link]")
+
+    # The caption is no longer visible text, but it stays addressable and announced.
+    assert has_element?(view, "#card-drawer-mockup-0-caption.sr-only", "Empty state")
+    assert has_element?(view, "#card-drawer-mockup-1-caption.sr-only", "Mockup")
+
+    # A live miniature: the same sandboxed iframe, inert (no pointer, no focus, hidden from AT).
+    assert has_element?(
+             view,
+             ~s(#card-drawer-mockup-0-open iframe#card-drawer-mockup-0-frame.pointer-events-none[src="#{RelayWeb.attachment_path(a.id)}"][sandbox="#{RelayWeb.mockup_sandbox()}"][title="Empty state"][loading="lazy"][tabindex="-1"][aria-hidden="true"])
+           )
+
+    html = render(view)
+    refute html =~ "allow-same-origin"
+    refute html =~ "Open full size"
 
     refute has_element?(view, ~s(a[href="#{RelayWeb.attachment_path(a.id)}"]))
+    refute has_element?(view, ~s(a[href="#{RelayWeb.attachment_path(b.id)}"]))
   end
 
   test "no mockups, no section", %{conn: conn, board: board, ref: ref} do
