@@ -30,8 +30,10 @@ defmodule RelayWeb.BoardLiveReviewTest do
     card
   end
 
-  test "no review panel renders for a card that is not in review", %{conn: conn, review: review, user: user} do
-    {:ok, _card} = Cards.create_card(review, %{title: "Still queued"})
+  # A card created in the Review stage is born :in_review (RE375), so "not in review" means a
+  # card outside the review lane.
+  test "no review panel renders for a card that is not in review", %{conn: conn, code: code, user: user} do
+    {:ok, _card} = Cards.create_card(code, %{title: "Still queued"})
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
@@ -262,15 +264,17 @@ defmodule RelayWeb.BoardLiveReviewTest do
   end
 
   test "review transitions from elsewhere update an open drawer live (MMF 18)",
-       %{conn: conn, review: review, user: user} do
-    {:ok, card} = Cards.create_card(review, %{title: "Live review"})
+       %{conn: conn, code: code, review: review, user: user} do
+    {:ok, card} = Cards.create_card(code, %{title: "Live review"})
 
     board = Boards.get_or_create_default_board(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
     refute has_element?(view, "#review-panel")
 
-    {:ok, card} = Cards.set_status(card, %{status: :in_review})
+    # Arriving in the Review lane snaps the card to :in_review (ADR 0003).
+    {:ok, card} = Cards.move_card(card, review, 0)
+    assert card.status == :in_review
     assert has_element?(view, "#review-panel", "READY FOR YOUR REVIEW")
 
     {:ok, _approved} = Cards.approve(card)

@@ -81,6 +81,13 @@ defmodule Schemas.Stage do
   def valid_status?(status, :done), do: status in [:ready, :queued]
 
   @doc """
+  The status a card holding `status` ends up in on arriving at a stage of `type` (ADR 0003):
+  `status` itself when `valid_status?/2` allows it there, otherwise `default_status/1`. The single
+  arrival rule — create, move, PATCH and stage-type changes all go through it.
+  """
+  def arrival_status(status, type), do: if(valid_status?(status, type), do: status, else: default_status(type))
+
+  @doc """
   The stage categories whose cards appear on the public board (RLY-69) — every
   non-`:complete` band. The single source of truth for "shown publicly"; the
   public-board query and its tests both call this (AGENTS.md magic-value rule).

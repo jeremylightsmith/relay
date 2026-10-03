@@ -47,6 +47,23 @@ defmodule Schemas.StageTest do
     refute Stage.valid_status?(:queued, :review)
   end
 
+  test "arrival_status keeps a status valid for the type, else takes the type's default (ADR 0003)" do
+    # valid → kept
+    assert Stage.arrival_status(:ready, :queue) == :ready
+    assert Stage.arrival_status(:queued, :queue) == :queued
+    assert Stage.arrival_status(:ready, :work) == :ready
+    assert Stage.arrival_status(:needs_input, :planning) == :needs_input
+    assert Stage.arrival_status(:in_review, :review) == :in_review
+    assert Stage.arrival_status(:ready, :done) == :ready
+
+    # invalid → the type's default
+    assert Stage.arrival_status(:working, :queue) == :ready
+    assert Stage.arrival_status(:in_review, :work) == :working
+    assert Stage.arrival_status(:queued, :planning) == :working
+    assert Stage.arrival_status(:ready, :review) == :in_review
+    assert Stage.arrival_status(:working, :done) == :ready
+  end
+
   test "ai_enabled is forced false unless the type is work or planning" do
     for type <- [:work, :planning] do
       changeset = main_changeset(%{name: "X", position: 1, category: :in_progress, type: type, ai_enabled: true})
