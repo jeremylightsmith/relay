@@ -100,6 +100,31 @@ defmodule Relay.CardsTest do
 
       assert Enum.sort(refs) == Enum.to_list(1..8)
     end
+
+    test "a card created in a review stage is born :in_review (ADR 0003 arrival snap)", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 20)
+
+      assert {:ok, card} = Cards.create_card(review, %{title: "Straight to review"})
+      assert card.status == :in_review
+      assert Repo.get!(Card, card.id).status == :in_review
+    end
+
+    test "a card created in a queue, work, planning or done stage is born :ready", %{board: board} do
+      for {type, pos} <- [queue: 21, work: 22, planning: 23, done: 24] do
+        stage = insert(:stage, board: board, type: type, position: pos)
+
+        assert {:ok, card} = Cards.create_card(stage, %{title: "In #{type}"})
+        assert card.status == :ready, "expected :ready when created in a #{type} stage"
+      end
+    end
+
+    test "creating into a review stage logs only :created — no :status_changed", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 25)
+
+      {:ok, card} = Cards.create_card(review, %{title: "Born reviewed"})
+
+      assert [%Schemas.Activity{type: :created}] = activities(card)
+    end
   end
 
   describe "list_cards/1" do

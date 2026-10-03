@@ -271,6 +271,19 @@ defmodule RelayWeb.Api.CardControllerTest do
       assert body["stage_id"] == other.id
     end
 
+    test "a card created into a review-lane stage is returned :in_review", %{conn: conn, board: board} do
+      review = insert(:stage, board: board, name: "Spec Review", type: :review, position: 3)
+
+      body =
+        conn
+        |> post(~p"/api/cards", %{title: "Into review", stage: review.id})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      assert body["stage_id"] == review.id
+      assert body["status"] == "in_review"
+    end
+
     test "created card appears in GET /api/cards", %{conn: conn} do
       conn |> post(~p"/api/cards", %{title: "Findable"}) |> json_response(201)
 

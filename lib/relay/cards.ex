@@ -1304,8 +1304,8 @@ defmodule Relay.Cards do
   @doc """
   Like `set_status/3`, but first coerces an externally-supplied status to one valid for
   the card's **current** stage type (RLY-75): the requested status is kept if
-  `Stage.valid_status?/2`, otherwise replaced with `Stage.default_status/1` — the same snap
-  rule `move_card/4` applies on arrival. A status value that isn't a real status enum is
+  `Stage.valid_status?/2`, otherwise replaced via `Stage.arrival_status/2` — the same arrival
+  rule `move_card/4` and `create_card/3` apply. A status value that isn't a real status enum is
   passed through unchanged so the delegated `set_status/3` returns its changeset error
   (400 at the API). Used by the untrusted `PATCH /api/cards/:ref` status path so a card can
   never persist a status its stage forbids. Same return contract as `set_status/3`.
@@ -1320,8 +1320,7 @@ defmodule Relay.Cards do
   defp snap_requested_status(attrs, type) do
     case normalize_status(attrs["status"] || attrs[:status]) do
       {:ok, status} ->
-        snapped = if Stage.valid_status?(status, type), do: status, else: Stage.default_status(type)
-        %{"status" => snapped}
+        %{"status" => Stage.arrival_status(status, type)}
 
       :error ->
         attrs
@@ -2004,10 +2003,12 @@ defmodule Relay.Cards do
   # ADR 0003 snap: keep the card's status if it's valid for the destination type, else set the
   # type's default. Only ever called on a cross-stage move.
   defp snap_status(%Card{} = card, %Stage{} = target, actor) do
-    if Stage.valid_status?(card.status, target.type) do
+    status = Stage.arrival_status(card.status, target.type)
+
+    if status == card.status do
       card
     else
-      {:ok, updated} = set_status(card, %{status: Stage.default_status(target.type)}, actor)
+      {:ok, updated} = set_status(card, %{status: status}, actor)
       updated
     end
   end
@@ -2065,8 +2066,10 @@ defmodule Relay.Cards do
     |> Repo.all()
     |> preload_owners()
     |> Enum.each(fn card ->
-      if !Stage.valid_status?(card.status, stage.type) do
-        {:ok, _} = set_status(card, %{status: Stage.default_status(stage.type)}, :agent)
+      status = Stage.arrival_status(card.status, stage.type)
+
+      if status != card.status do
+        {:ok, _} = set_status(card, %{status: status}, :agent)
       end
     end)
   end
@@ -2764,9 +2767,14 @@ defmodule Relay.Cards do
   end
 
   defp insert_card(%Stage{} = stage, ref_number, attrs) do
+    # ADR 0003 — a card is born with the arrival status for its stage (RE375): a review lane
+    # can't hold the schema default :ready. Set on the struct (status is never cast), so create
+    # stays one insert with no :status_changed entry or push.
+    status = Stage.arrival_status(%Card{}.status, stage.type)
+
     changeset =
       Card.changeset(
-        %Card{board_id: stage.board_id, stage_id: stage.id, position: 0, ref_number: ref_number},
+        %Card{board_id: stage.board_id, stage_id: stage.id, position: 0, ref_number: ref_number, status: status},
         attrs
       )
 
