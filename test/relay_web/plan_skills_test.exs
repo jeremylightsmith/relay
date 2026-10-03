@@ -156,5 +156,41 @@ defmodule Relay.PlanSkillsTest do
       assert self_review =~ "acceptance criterion"
       assert self_review =~ "no code"
     end
+
+    test "plan-implementer writes its tests from the task's scenarios" do
+      doc = File.read!(Path.join(@agents_dir, "plan-implementer.md"))
+
+      assert doc =~ "The tests come from the scenarios"
+      assert doc =~ "Given/When/Then"
+      assert doc =~ "at least one test per"
+      assert doc =~ "Produces signatures and data shapes are binding"
+      assert doc =~ "Scenario → test map"
+      refute doc =~ "real code and tests"
+      refute doc =~ "code as written"
+    end
+
+    test "plan-implementer escalates a contradictory or impossible scenario" do
+      doc = File.read!(Path.join(@agents_dir, "plan-implementer.md"))
+
+      assert doc =~ "Escalate, don't guess"
+      assert doc =~ "Consumes signature doesn't exist"
+    end
+
+    test "spec-reviewer checks scenarios, interfaces, files and nothing extra" do
+      doc = File.read!(Path.join(@agents_dir, "spec-reviewer.md"))
+
+      for check <- ["**Scenarios:**", "**Interfaces:**", "**Files:**", "**Nothing extra:**"] do
+        assert doc =~ check, "spec-reviewer.md must check #{check}"
+      end
+
+      assert doc =~ "Produces"
+      assert doc =~ "scenario → test"
+      refute doc =~ "line-by-line"
+    end
+
+    test "the implement and spec_review models are unchanged" do
+      assert File.read!(Path.join(@agents_dir, "plan-implementer.md")) =~ ~r/^model: opus$/m
+      assert File.read!(Path.join(@agents_dir, "spec-reviewer.md")) =~ ~r/^model: sonnet$/m
+    end
   end
 end
