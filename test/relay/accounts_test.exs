@@ -57,13 +57,15 @@ defmodule Relay.AccountsTest do
       assert Repo.aggregate(User, :count) == 1
     end
 
-    test "enforces email uniqueness across different google accounts" do
-      insert(:user, email: "taken@example.com")
+    test "links a different google account to the existing user that owns the verified email" do
+      existing = insert(:user, email: "taken@example.com")
 
-      assert {:error, changeset} =
+      assert {:ok, %User{} = user} =
                Accounts.upsert_user_from_google(google_auth(%{uid: "other-uid", email: "taken@example.com"}))
 
-      assert %{email: ["has already been taken"]} = errors_on(changeset)
+      assert user.id == existing.id
+      assert user.provider_uid == existing.provider_uid
+      assert Repo.aggregate(User, :count) == 1
     end
 
     test "normalizes the provider's email casing/whitespace so it matches invite lookups" do
@@ -114,7 +116,7 @@ defmodule Relay.AccountsTest do
     end
   end
 
-  describe "upsert_user_from_provider/1" do
+  describe "upsert_user_from_provider/2" do
     @claims %{
       provider: "google",
       provider_uid: "prov-uid-1",
@@ -155,6 +157,138 @@ defmodule Relay.AccountsTest do
                Accounts.upsert_user_from_provider(%{@claims | email: "  Grace@Example.com "})
 
       assert user.email == "grace@example.com"
+    end
+
+    test "an email match signs in the existing user without touching its identity or profile" do
+      existing =
+        insert(:user,
+          provider: "google",
+          provider_uid: "g-1",
+          email: "alice@example.com",
+          name: "Alice Google",
+          avatar_url: "https://example.com/a.png"
+        )
+
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(%{
+                 provider: "apple",
+                 provider_uid: "apple-sub-1",
+                 email: "alice@example.com",
+                 name: nil,
+                 avatar_url: nil
+               })
+
+      assert user.id == existing.id
+      assert user.provider == "google"
+      assert user.provider_uid == "g-1"
+      assert user.name == "Alice Google"
+      assert user.avatar_url == "https://example.com/a.png"
+      assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "an email match refreshes non-nil name and avatar but keeps the stored identity" do
+      existing =
+        insert(:user,
+          provider: "apple",
+          provider_uid: "apple-sub-1",
+          email: "bob@example.com",
+          name: "Bob Apple",
+          avatar_url: nil
+        )
+
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(%{
+                 provider: "google",
+                 provider_uid: "g-2",
+                 email: "bob@example.com",
+                 name: "Bob G",
+                 avatar_url: "https://example.com/b.png"
+               })
+
+      assert user.id == existing.id
+      assert user.provider == "apple"
+      assert user.provider_uid == "apple-sub-1"
+      assert user.name == "Bob G"
+      assert user.avatar_url == "https://example.com/b.png"
+      assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "the email match normalizes the claimed email" do
+      existing = insert(:user, email: "alice@example.com")
+
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(%{
+                 @claims
+                 | provider_uid: "new-uid",
+                   email: "  Alice@Example.COM "
+               })
+
+      assert user.id == existing.id
+      assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "a nil claim never wipes a stored value on a provider_uid match" do
+      insert(:user, provider: "apple", provider_uid: "apple-sub-1", name: "Carol", avatar_url: nil)
+
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(%{
+                 provider: "apple",
+                 provider_uid: "apple-sub-1",
+                 email: "carol@example.com",
+                 name: nil,
+                 avatar_url: nil
+               })
+
+      assert user.name == "Carol"
+      assert user.email == "carol@example.com"
+    end
+
+    test "the name opt is the inserted user's name when the claims carry none" do
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(
+                 %{provider: "apple", provider_uid: "apple-sub-9", email: "dan@example.com", name: nil, avatar_url: nil},
+                 name: "Dan Brown"
+               )
+
+      assert user.provider == "apple"
+      assert user.provider_uid == "apple-sub-9"
+      assert user.name == "Dan Brown"
+    end
+
+    test "the claims' own name wins over the name opt on insert" do
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(%{@claims | name: "Claims Name"}, name: "Opt Name")
+
+      assert user.name == "Claims Name"
+    end
+
+    test "the name opt is never applied to a user matched by email" do
+      existing = insert(:user, email: "eve@example.com", name: "Eve Original")
+
+      assert {:ok, %User{} = user} =
+               Accounts.upsert_user_from_provider(
+                 %{provider: "apple", provider_uid: "apple-sub-5", email: "eve@example.com", name: nil, avatar_url: nil},
+                 name: "Eve From Apple"
+               )
+
+      assert user.id == existing.id
+      assert user.name == "Eve Original"
+    end
+
+    test "a return visit whose new email belongs to someone else is rejected" do
+      insert(:user, provider_uid: "g-1", email: "one@example.com")
+      insert(:user, email: "two@example.com")
+
+      assert {:error, changeset} =
+               Accounts.upsert_user_from_provider(%{
+                 provider: "google",
+                 provider_uid: "g-1",
+                 email: "two@example.com",
+                 name: "X",
+                 avatar_url: nil
+               })
+
+      assert errors_on(changeset) == %{email: ["has already been taken"]}
     end
   end
 

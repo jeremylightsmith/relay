@@ -205,7 +205,10 @@ sharing behavior.
   (the kanban board renders no presence UI), and untracking is the tracked pid's exit.
   Humans only — no AI/agent avatar and no agent cursor.
 - **Accounts** — users and Google sign-in (`GoogleTokenValidator` verifies native mobile
-  tokens); user API tokens for `/api/all` (the native feed, card actions, card create, and the board list).
+  tokens). Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
+  user up by `provider_uid` first, then by normalized verified email (signing in that existing
+  user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
+  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, and the board list).
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys

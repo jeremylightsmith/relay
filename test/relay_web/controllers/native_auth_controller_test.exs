@@ -93,15 +93,30 @@ defmodule RelayWeb.NativeAuthControllerTest do
     end
 
     test "an upsert failure returns 422", %{conn: conn} do
-      # An existing user already owns this email; the new google sub collides on the
-      # unique email constraint, so the upsert changeset fails.
-      insert(:user, email: "ada@example.com", provider_uid: "someone-else")
+      # A return visit (sub g-1) whose new email already belongs to another user collides on
+      # the unique email constraint, so the profile refresh fails.
+      insert(:user, provider_uid: "g-1", email: "one@example.com")
+      insert(:user, email: "two@example.com")
+      stub_google(%{@tokeninfo | "sub" => "g-1", "email" => "two@example.com"})
+
+      conn = post(conn, ~p"/api/auth/native/google", %{id_token: "tok"})
+
+      assert %{"success" => false, "error" => "Could not save user", "details" => %{"email" => _}} =
+               json_response(conn, 422)
+
+      refute get_session(conn, :user_id)
+    end
+
+    test "a new google sub with an existing user's email signs in that user", %{conn: conn} do
+      existing = insert(:user, email: "ada@example.com", provider_uid: "someone-else")
       stub_google(@tokeninfo)
 
       conn = post(conn, ~p"/api/auth/native/google", %{id_token: "tok"})
 
-      assert %{"success" => false, "details" => %{"email" => _}} = json_response(conn, 422)
-      refute get_session(conn, :user_id)
+      assert %{"success" => true, "user" => %{"id" => id}} = json_response(conn, 200)
+      assert id == existing.id
+      assert get_session(conn, :user_id) == existing.id
+      assert Repo.get!(User, existing.id).provider_uid == "someone-else"
     end
   end
 
