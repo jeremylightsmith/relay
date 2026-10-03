@@ -29,7 +29,13 @@ defmodule RelayWeb.StorybookRenderTest do
     doc = LazyHTML.from_document(html)
 
     assert doc |> LazyHTML.query(".flex.flex-wrap.gap-2 a[id^='mockup-preview-wrapping-row-tile-']") |> Enum.count() == 5
-    assert html =~ "80px square thumbnail tile"
+
+    # The fifth tile has no caption, so it falls back to "Mockup".
+    assert doc
+           |> LazyHTML.query("a#mockup-preview-wrapping-row-tile-4-open[aria-label='Open mockup: Mockup (new tab)']")
+           |> Enum.count() == 1
+
+    assert html =~ "80px square live miniature"
   end
 
   test "GET /storybook/flow_metrics/verdict_bar shows the RE235 actual-counts variations", %{conn: conn} do

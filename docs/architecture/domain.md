@@ -152,9 +152,11 @@ sharing behavior.
   same card** (`422 invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
   distinct from `ai_result.screens` (run-result image screenshots).
-  The drawer renders mockups in a **Mockups** section (`CoreComponents.mockup_preview/1`: caption,
-  fixed-height `<iframe sandbox="allow-scripts">`, **Open full size**). Open full size opens, in a
-  new browser tab (`target="_blank"`, leaving the board and drawer in place),
+  The drawer renders mockups in a **Mockups** section above Description as a wrapping row of 80px
+  square tiles (`CoreComponents.mockup_preview/1`, RE374): each tile is a live miniature (an inert
+  `<iframe sandbox="allow-scripts">` rendered at 1280px and CSS-scaled down) with the caption as
+  its tooltip and aria-label. Clicking a tile opens, in a new browser tab (`target="_blank"`,
+  leaving the board and drawer in place),
   `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) — an
   authenticated, membership-scoped page in the `:require_authenticated` live_session that frames
   the mockup under a banner "Mockup · <ref> <title>" linking back to the card; it 404s for a
