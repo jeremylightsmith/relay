@@ -41,7 +41,8 @@ get approval before moving on.
    read the card first (above) for context.
 2. Ask clarifying questions ONE at a time (prefer multiple-choice). Understand purpose,
    constraints, success criteria. If the request is really several subsystems, decompose
-   first and brainstorm the first piece.
+   first and brainstorm the first piece — and when the design turns out too big for one
+   card, split it (see **Splitting a card that's too big**).
    - **Re-interview when the request contradicts a shipped decision.** If it conflicts with
      how an already-merged feature works, stop and interview the user about the intended
      behavior — don't silently re-litigate a shipped decision from a one-line request (this
@@ -60,6 +61,17 @@ get approval before moving on.
      `/write-plan` keys off; without it the planner won't chase a mockup). If **no** (it
      shouldn't track a mockup, the mockup is known-stale, or none fits): say so in the spec so
      nothing downstream tries to match one. Non-UI work skips this.
+   - **Card mockups from the Design stage are a design source too — the same explicit
+     decision applies.** If `./relay card <ref> --json` shows a non-empty `mockups` list, the
+     card came through Design: pull them (`./relay mockups <ref> --pull "<dir>"` — outside the
+     repo when headless, e.g. beside `$RELAY_NODE_SCRATCH`; skip the inlined `<style>` when
+     reading) and read the `## Design` section of the description, which records what the
+     Design rounds decided. Approved mockups are usually the design of record, so the default
+     is to match them — but say so: write **`Match card mockup "<caption>"`** (the caption
+     exactly as `mockups` lists it) and list the specific elements/states that must match,
+     exactly as for an artboard. That phrase is what `/write-plan` and the Code flow key off;
+     a mockup the spec doesn't name is never chased. If the spec deliberately departs from a
+     mockup, say which and why.
 3. Propose 2–3 approaches with trade-offs and a recommendation.
 4. Present the design in sections scaled to complexity (architecture, components, data
    flow, error handling, testing); get approval section by section. YAGNI ruthlessly.
@@ -121,18 +133,71 @@ get approval before moving on.
     call) is still authored: the tester returns `human-verify` for it, which does not block.
 - Self-review: placeholder scan, internal consistency, scope, ambiguity — fix inline. **For any
   UI feature, confirm the spec records an explicit artboard decision** — either "match
-  `docs/designs/<file>.dc.html`" naming the elements/states, or a deliberate "no mockup"
-  (with why: none fits / known-stale / not visual enough). A UI spec with *no* artboard
+  `docs/designs/<file>.dc.html`" or `Match card mockup "<caption>"` naming the
+  elements/states, or a deliberate "no mockup" (with why: none fits / known-stale / not visual
+  enough). A card that carries `mockups` and a spec that never mentions them is the same gap. A UI spec with *no* artboard
   decision is a gap: resolve it (ask the user if it's still open) before writing the spec.
   **Confirm the spec has acceptance criteria** in the required format: a spec written without
   them is a gap, not a style choice. Resolve it before writing.
 - Point the user to `/write-plan <ref>`. Do NOT start implementation or launch execution.
 
+## Splitting a card that's too big
+Split when the approved design is really **several independently shippable slices** — each
+one a user-observable increment with its own acceptance criteria, that could be planned,
+reviewed and merged without the others. A big-but-indivisible change is NOT a split; neither
+is "part 1 adds the schema, part 2 uses it" when part 1 alone shows a user nothing.
+
+Interactively, propose the slices (title + one line each) and get the user's OK first.
+Headless, split without asking when the seams are obvious; if *where* to cut is itself a
+judgment call, make it one of your `needs-input` questions.
+
+**The original card is slice 1.** It keeps its ref, its place and its history; its spec and
+criteria cover slice 1 **only**, and its spec ends with a `## Split` list naming every other
+slice as `[REF title]`. It reaches `Spec:Review` the normal way (the Spec flow lands it there
+headless; interactively it stays where the human put it).
+
+**Every later slice becomes a new card waiting in `Spec:Review`**, fully written before it
+arrives. For each, in this order:
+
+```bash
+ref="$(./relay create "<slice title>" --stage Backlog --description @"$d/desc.md" --field ref)"
+./relay spec "$ref" @"$d/spec.md"
+./relay criteria "$ref" @"$d/criteria.md"
+./relay mockups "$ref" "$d/mockups/02-empty-state.html" --caption "Empty state"   # only if it needs any
+./relay depends "$ref" <REF …>                                                    # only if it overlaps
+./relay move "$ref" "Spec:Review"
+```
+
+- **Create in Backlog, move last.** Not `Ready for Spec` — the Spec flow would pull the card
+  and brainstorm it again. Not straight into `Spec:Review` — `create` does not set a review
+  lane's `in_review` status, and a half-written card would sit in front of the reviewer.
+  `move` sets the arrival status.
+- **Description:** first line `Split from [<original ref> <original title>].`, then the
+  slice's own ask in a few sentences — it must make sense to someone who never opens the
+  original.
+- **Spec and criteria:** the same bar as any spec (the **After approval** rules, the artboard
+  decision included) — a slice is a full card, not a stub.
+- **Mockups:** re-upload only the ones the slice's spec names, from the files you pulled, with
+  the **same caption** — so its `Match card mockup "<caption>"` resolves on the new card.
+- **Dependencies only where files overlap.** A blocker clears only when it reaches the
+  top-level Done column, so chaining slices in narrative order serializes work that could run
+  in parallel. Add `./relay depends` (on the original or another slice) only where two slices
+  edit the same files and would conflict.
+- **Never duplicate.** Splitting is not idempotent, and a retried or re-entered run repeats
+  you. **Right after each `create`**, comment on the original `Split into [<new ref> <title>]`
+  (`./relay comment <ref> "…"`), so even a run that dies halfway leaves the trail. Before
+  creating anything, read the original's timeline (`./relay card <ref>`) for those comments;
+  a slice already there is **updated** (`describe`, `spec`, `criteria`, `mockups`), never
+  re-created. (`./relay search` matches titles only, so it can't find them by "Split from".)
+
 ## Headless / runner use (no human to dialogue with)
 **The work is pre-authorized.** A flow node invokes this skill on the board's behalf — proceed
 without asking for confirmation to begin. Your blast radius is this one card: **do not touch git,
-branches, or any other card.** And it is **terminal** — stop after writing the spec back to the
-card. Do not start implementation, do not run `/write-plan`, do not move the card. The board's
+branches, or any other card** — the one exception is **splitting** (see **Splitting a card
+that's too big**): creating the slice cards, writing them and moving them to `Spec:Review` is
+in scope; touching any card that isn't the original or one of its slices never is. And it is
+**terminal** — stop after writing the spec back to the card. Do not start implementation, do
+not run `/write-plan`, do not move the original card. The board's
 `Spec:Review` lane is the approval gate; landing there is the whole job.
 
 When the board runner invokes this skill there is no human to dialogue with in real time, but

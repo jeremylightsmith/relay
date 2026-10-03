@@ -39,9 +39,11 @@ body you need to judge coverage or a cross-task interface.
 
 - **Spec coverage:** every task / acceptance item actually implemented? List gaps.
 - **Design fidelity & consistency:** for any task whose body named a `docs/designs/*.dc.html`
-  artboard, confirm the built UI matches the elements/states it called out, and that tasks
-  touching the same component styled it one consistent way (per the mockup), not two competing
-  ways. Only judge what a task body named an artboard for — don't invent design findings elsewhere.
+  artboard or a `card mockup "<caption>"` (`./relay mockups <ref> --pull --json` downloads the
+  card's mockups into the gitignored `tmp/<ref>/mockups/`), confirm the built UI matches the
+  elements/states it called out, and that tasks touching the same component styled it one
+  consistent way (per the mockup), not two competing ways. Only judge what a task body named an
+  artboard or card mockup for — don't invent design findings elsewhere.
 - **Consistency:** one coherent pattern across the branch — no contradictory choices between
   tasks (two ways of doing the same thing, mismatched naming or error handling), and no closed
   set or policy number defined twice (`AGENTS.md`: "a magic value is defined exactly once").

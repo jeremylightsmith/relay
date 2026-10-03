@@ -49,12 +49,14 @@ the code on its merits.
   use the daisyUI semantic tokens.
 - A reusable component this change abstracts without a story under `storybook/` is **Minor**.
 
-**Design fidelity (only if the task's body named an artboard)**
-- If — and only if — this task's body named a `docs/designs/*.dc.html` artboard and the
-  elements/states that must match it, open that artboard and confirm the diff matches those
-  specific things (structure, daisyUI classes, tokens, px, the listed states), and that the
+**Design fidelity (only if the task's body named an artboard or card mockup)**
+- If — and only if — this task's body named a `docs/designs/*.dc.html` artboard or a
+  `card mockup "<caption>"` and the elements/states that must match it, open it — a card
+  mockup is HTML on the card: `./relay mockups <ref> --pull --json` downloads them into the
+  gitignored `tmp/<ref>/mockups/` and maps each caption to its file (skip the inlined
+  `<style>` block when reading) — and confirm the diff matches those specific things (structure, daisyUI classes, tokens, px, the listed states), and that the
   task's tests actually assert them. Flag concrete divergences from what the body called out.
-- If the body named no artboard, skip this entirely — do not invent design
+- If the body named neither, skip this entirely — do not invent design
   findings from your own reading of the mockups.
 
 Stay within the diff. Inspect surrounding code only to evaluate a concrete, named risk (e.g. a

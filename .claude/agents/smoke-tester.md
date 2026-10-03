@@ -76,6 +76,14 @@ the states you built, and obvious fidelity** — flag clear divergences (missing
 broken layout, wrong structure), not pixel nitpicks or copy differences. Save screenshots to
 `tmp/smoke/` (gitignored) with descriptive names and return their absolute paths.
 
+**Card mockups outrank artboards where the spec names one.** If the card's spec says
+`Match card mockup "<caption>"`, that mockup — HTML the Design stage uploaded to the card — is
+the comparison target for that UI: `./relay mockups <ref> --pull --json` downloads the card's
+mockups into the gitignored `tmp/<ref>/mockups/` and maps each caption to its file. Screenshot
+the named mockup with the same Playwright script (`page.goto('file://' + path)`, same viewport)
+and compare it side by side with the app's screenshot, judging the elements/states the spec
+lists. A mockup the spec doesn't name is not a target.
+
 ### Playwright recipe (verified to work in this repo)
 Write a throwaway CommonJS script under `tmp/smoke/` and run it with the module path set — do
 NOT `npm install` (Playwright + chromium are already present):

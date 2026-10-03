@@ -60,9 +60,14 @@ it fully. **Design fidelity is the spec's call, not yours** — artboards drift 
 app, so match a mockup only where the spec **explicitly** says a UI should match a named
 `docs/designs/*.dc.html` artboard (`/brainstorm` settles this with the human and records the
 decision in the spec). When the spec does name one, open that artboard and read the relevant
-section so its concrete values (classes, tokens, measurements, states) reach the plan. Where
-the spec does not tie a UI to an artboard, do **not** go hunting one — plan to the spec and the
-existing design system.
+section so its concrete values (classes, tokens, measurements, states) reach the plan. A spec
+can instead name a **card mockup** — `Match card mockup "<caption>"`, one of the HTML mockups
+the Design stage uploaded to the card. Pull them outside the repo (`./relay mockups <ref>
+--pull "$(dirname "$RELAY_NODE_SCRATCH")/mockups" --json` maps each caption to its file —
+interactively, with no `$RELAY_NODE_SCRATCH`, omit the DIR to get the gitignored
+`tmp/<ref>/mockups/`; skip the inlined `<style>` block when reading) and read the named one the same way. Where the spec
+does not tie a UI to an artboard or card mockup, do **not** go hunting one — even if the card
+carries mockups — plan to the spec and the existing design system.
 
 ### Task right-sizing
 Prefer **~3 coarse, vertical-slice tasks** for a typical MMF (measured cheaper: fewer tasks =
@@ -113,14 +118,16 @@ Each body carries:
   implementation code in fenced blocks — no placeholders, no "similar to". The body is the
   implementer's source of truth and the reviewer's diff target; write it in full.
 - **Design fidelity (only where the spec calls for it):** if the spec says this task's UI
-  must match a `docs/designs/*.dc.html` artboard, name that artboard file in the body and list
-  the **specific elements/states that must match it**, each with the mockup's concrete value
+  must match a `docs/designs/*.dc.html` artboard or a card mockup, name it in the body — the
+  artboard file, or `card mockup "<caption>"` with the caption exactly as the card lists it —
+  and list the **specific elements/states that must match it**, each with the mockup's concrete value
   (exact daisyUI classes, design tokens, px measurements, and the states the mockup shows).
   Fold those into the task's **test code as concrete assertions** (assert the exact class /
   token / px the mockup uses — see `core_components_test.exs`, which pins "44px dashed strip …
   Relay Board.dc.html lines ~75–81"), so "matches the mockup" is a checked deliverable, not a
   hope. The implementer and reviewers act only on what you name here — anything you leave out,
-  they won't match. Non-visual tasks, and UI with no governing artboard, skip this.
+  they won't match. Non-visual tasks, and UI with no governing artboard or card mockup, skip
+  this.
 - The independently testable **deliverable** and the **commit message** to use.
 
 The order you pass the tasks in is the order the Code flow works them.
@@ -133,7 +140,7 @@ step an engineer needs is in the header or the task's body.
 After writing the files, re-read them for: placeholder scan; internal consistency; scope
 (single coherent unit of work); ambiguity; **spec coverage** (point each spec requirement to
 a task — add a task for any gap); **design coverage** (every UI the spec ties to a
-`docs/designs/*.dc.html` artboard names that artboard and carries the mockup's concrete values
+`docs/designs/*.dc.html` artboard or a card mockup names it and carries the mockup's concrete values
 in the task body and its tests); **type/signature consistency** across tasks (a function
 defined as `clear_layers/1` in one task but called as `clear_full_layers/1` in another is a
 bug — the Consumes/Produces names must match exactly); and **no per-task content in the

@@ -40,11 +40,16 @@ something is genuinely missing, ask or escalate — don't guess.
   review treats a stale page as blocking.
 
 ## Design fidelity — only when the task says so
-If — and only if — your task explicitly names a `docs/designs/*.dc.html` artboard and the
-elements/states that must match it, open that artboard, match those specific things exactly,
-and assert their concrete values (classes, tokens, px, states) in your tests. Match only what
+If — and only if — your task explicitly names a `docs/designs/*.dc.html` artboard or a
+`card mockup "<caption>"` and the elements/states that must match it, open it, match those
+specific things exactly, and assert their concrete values (classes, tokens, px, states) in your tests. Match only what
 the task names — do not go hunting the mockup for anything it didn't call out. If the task
-names no artboard, there is nothing to match here; build to the task's code as written.
+names no artboard or card mockup, there is nothing to match here — even if the card carries
+mockups; build to the task's code as written.
+
+A card mockup is HTML on the card, not a repo file: `./relay mockups <ref> --pull --json`
+downloads them into the gitignored `tmp/<ref>/mockups/` and maps each caption to its file. Skip
+the inlined `<style>` block when reading — the body markup carries the design.
 
 ## If the task is already implemented
 Check before you build: if the named task is **already fully implemented** on this branch, say
