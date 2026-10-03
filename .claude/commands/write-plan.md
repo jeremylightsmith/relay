@@ -33,10 +33,26 @@ context, so authoring in-context is how those decisions reach the plan.
    rebuilding work that already shipped and passed. Because the new tasks then contain only the
    new work, the branch diff matches the plan and the Code flow's `final_review` node needs no
    special-casing.
-2. **Author the plan** in-context, following the guidance below: one header file and one body
+2. **Reconnaissance.** Before writing a word of the plan, read the code the spec touches —
+   the modules, their tests and the docs — so no implementer has to rediscover it. Open every
+   file you will point at; never cite one from memory. Collect each finding as `file:line` +
+   one line on why:
+   - **existing patterns to mirror** — the nearest function, LiveView, migration or test that
+     already does what a task needs;
+   - **modules and functions to reuse** rather than re-create;
+   - **the source-of-truth function for every closed set or policy number** the work touches
+     (AGENTS.md: "a magic value is defined exactly once") — consumers call it, never re-type it;
+   - **the `docs/architecture/` page** any context, PubSub topic, API endpoint or supervised
+     process change must update;
+   - **the existing test file and helpers/factories** each task's tests belong beside.
+
+   These pointers land in the task bodies (**Patterns to follow**, **Files**, **Risks /
+   gotchas**). Reconnaissance happens once, here in the planner, instead of in every
+   implementer.
+3. **Author the plan** in-context, following the guidance below: one header file and one body
    file per task, in your scratch directory (see "Writing it to the card").
-3. **Self-review** (checklist at the end), fixing inline.
-4. **Write the plan to the card** — clear stale tasks, write the header, add the tasks in ONE
+4. **Self-review** (checklist at the end), fixing inline.
+5. **Write the plan to the card** — clear stale tasks, write the header, add the tasks in ONE
    call, then check the result (see "Writing it to the card"). Do NOT leave a durable repo-root
    `plan.md` (the Code flow materializes the header per-run at `$RELAY_PLAN`).
 
@@ -51,8 +67,11 @@ context, so authoring in-context is how those decisions reach the plan.
 ## Plan authoring guidance
 
 You are writing an implementation plan to be executed autonomously by the Code flow (the
-server-side flow engine, ADR 0006 — `docs/designs/flows/code.json`). Assume the executing
-engineer has zero repo context and needs every detail.
+server-side flow engine, ADR 0006 — `docs/designs/flows/code.json`).
+The implementer is a capable engineer (Opus) with **no conversation context**: it sees the
+header, its own task body and the repo — nothing else. Hand it every **decision** and every
+**pointer**, but not code. The implementer designs and writes the code and its tests; the plan
+fixes what must be built, how it must behave, and where in the repo to look.
 
 ### Input
 The approved spec, read from the card's `spec` field (`./relay card <ref> --json`). Read
@@ -108,43 +127,72 @@ Each task is a card task with a short **title** (what a human scans on the card 
 log) and a **body** (the task's whole spec). The Code flow's `implement`, `spec_review`,
 `quality_review` and `fix_findings` nodes each fetch ONE task's body by id
 (`./relay task show <ref> <id>`) and see no other task's body, so a body must stand alone.
-Each body carries:
-- **Files** (exact create/modify/test paths) and **Interfaces** — split as **Consumes** (exact
-  signatures this task uses from earlier tasks) and **Produces** (exact function names, params,
-  and return types later tasks rely on). This block is how an implementer who sees only its own
-  task learns the names and types its neighbors use.
-- **Steps** as `- [ ]` checkboxes, each ONE action: write failing test → run it (expect fail) →
-  minimal implementation → run it (expect pass) → commit. Include the ACTUAL test code and
-  implementation code in fenced blocks — no placeholders, no "similar to". The body is the
-  implementer's source of truth and the reviewer's diff target; write it in full.
-- **Design fidelity (only where the spec calls for it):** if the spec says this task's UI
-  must match a `docs/designs/*.dc.html` artboard or a card mockup, name it in the body — the
+Each body carries these sections, in this order:
+- **Files** — exact create/modify/test paths.
+- **Interfaces** — split as **Consumes** (what this task uses from earlier tasks or existing
+  code) and **Produces** (what later tasks rely on). Every entry is exact: name, arity, params
+  and return shape, written as a one-line signature or `@spec`. List every cross-task **data
+  shape** too: schema fields and types, map/struct keys, PubSub topics and message tuples,
+  routes, event names, error atoms. Tasks are built separately, by implementers who never see
+  each other's bodies — this block is the only thing that keeps them consistent, so it must be
+  complete. Write "none" for an empty side.
+- **Patterns to follow** — the `file:line` pointers from reconnaissance, each with one line on
+  what to copy from it.
+- **Test scenarios** — numbered Given/When/Then cases, each naming the test file it belongs in.
+  Each carries concrete inputs and the concrete expected result — values, not "works
+  correctly". Edge and error cases are their own scenarios. Every scenario is a test the
+  implementer must write, and the spec reviewer checks that each one has a passing test. The
+  shape:
+
+      3. `test/<path>_test.exs` — **Given** <concrete state>, **When** <the call or event, with
+         its concrete arguments>, **Then** <the exact return value / rendered element / message>.
+
+- **Risks / gotchas** — known traps, ordering constraints, and things that look reusable but
+  aren't. "None found" is acceptable only after reconnaissance.
+- **Design fidelity (only where the spec calls for it)** — if the spec says this task's UI must
+  match a `docs/designs/*.dc.html` artboard or a card mockup, name it in the body — the
   artboard file, or `card mockup "<caption>"` with the caption exactly as the card lists it —
-  and list the **specific elements/states that must match it**, each with the mockup's concrete value
-  (exact daisyUI classes, design tokens, px measurements, and the states the mockup shows).
-  Fold those into the task's **test code as concrete assertions** (assert the exact class /
-  token / px the mockup uses — see `core_components_test.exs`, which pins "44px dashed strip …
-  Relay Board.dc.html lines ~75–81"), so "matches the mockup" is a checked deliverable, not a
-  hope. The implementer and reviewers act only on what you name here — anything you leave out,
-  they won't match. Non-visual tasks, and UI with no governing artboard or card mockup, skip
-  this.
-- The independently testable **deliverable** and the **commit message** to use.
+  and list the **specific elements/states that must match it**, each with the mockup's concrete
+  value (exact daisyUI classes, design tokens, px measurements, and the states the mockup
+  shows). Write those values into the **scenario expectations** (the **Then** names the exact
+  class / token / px the mockup uses — see `core_components_test.exs`, which pins "44px dashed
+  strip … Relay Board.dc.html lines ~75–81"), so "matches the mockup" is a checked deliverable,
+  not a hope. The implementer and reviewers act only on what you name here — anything you leave
+  out, they won't match. Non-visual tasks, and UI with no governing artboard or card mockup,
+  skip this.
+- **Steps** — a `- [ ]` checklist, one action each: write the failing tests for the scenarios →
+  run them (expect fail) → implement → run them (expect pass) → run the declared gate →
+  commit. No code inside the steps.
+- **Deliverable** — the independently testable result — and the **commit message** to use.
+
+**The only code a body may contain is the contract:** one-line signatures/`@spec`s, schema
+field lists, and exact literals (a class name, an error atom, a route, a message tuple).
+**No function bodies, no test code, no fenced implementation blocks.** The implementer writes
+those from the contract and the scenarios; a plan that pre-writes them gets reviewed as code
+text instead of as behavior.
 
 The order you pass the tasks in is the order the Code flow works them.
 
 ### No placeholders
-No "TBD", no "add error handling", no "write tests for the above" without the code. Every
-step an engineer needs is in the header or the task's body.
+No "TBD". Every scenario has concrete inputs and a concrete expected result. Every pointer
+resolves to a real `file:line` you opened. Nothing like "handle errors appropriately" or
+"write tests for the above" — name each error case and its expected result as its own
+scenario. Every decision an implementer needs is in the header or the task's body; only the
+code is left to them.
 
 ### Self-review
 After writing the files, re-read them for: placeholder scan; internal consistency; scope
-(single coherent unit of work); ambiguity; **spec coverage** (point each spec requirement to
-a task — add a task for any gap); **design coverage** (every UI the spec ties to a
-`docs/designs/*.dc.html` artboard or a card mockup names it and carries the mockup's concrete values
-in the task body and its tests); **type/signature consistency** across tasks (a function
-defined as `clear_layers/1` in one task but called as `clear_full_layers/1` in another is a
-bug — the Consumes/Produces names must match exactly); and **no per-task content in the
-header** (Files, steps, code and commit messages belong in bodies). Fix inline.
+(single coherent unit of work); ambiguity; **no code** beyond the allowed contract snippets
+(signatures, `@spec`s, field lists, literals — no function bodies, no test code); **spec
+coverage** (every spec requirement and every acceptance criterion maps to at least one
+scenario — add a scenario, or a task, for any gap); **pointer accuracy** (every `file:line`
+pointer was opened and says what you claim it does); **design coverage** (every UI the spec
+ties to a `docs/designs/*.dc.html` artboard or a card mockup names it and carries the mockup's
+concrete values in that task's scenarios); **type/signature consistency** across tasks (a
+function defined as `clear_layers/1` in one task but called as `clear_full_layers/1` in another
+is a bug — every Produces name a later task Consumes must match exactly); and **no per-task
+content in the header** (Files, scenarios, steps and commit messages belong in bodies). Fix
+inline.
 
 ## Writing it to the card
 

@@ -105,4 +105,56 @@ defmodule Relay.PlanSkillsTest do
       assert doc =~ "./relay tasks list <ref>"
     end
   end
+
+  describe "plans are contract + behaviors, not code (RE378)" do
+    test "write-plan's task body is a contract + behaviors, in named sections" do
+      doc = File.read!(@write_plan)
+
+      for section <- [
+            "**Files**",
+            "**Interfaces**",
+            "**Consumes**",
+            "**Produces**",
+            "**Patterns to follow**",
+            "**Test scenarios**",
+            "**Risks / gotchas**",
+            "**Steps**",
+            "**Deliverable**"
+          ] do
+        assert doc =~ section, "write-plan.md must name the #{section} task-body section"
+      end
+
+      assert doc =~ "Given/When/Then"
+    end
+
+    test "write-plan forbids code beyond the contract" do
+      doc = File.read!(@write_plan)
+
+      assert doc =~ "No function bodies, no test code, no fenced implementation blocks"
+      refute doc =~ "ACTUAL test code"
+      refute doc =~ "diff target"
+    end
+
+    test "write-plan reconnoitres the repo before authoring, recording file:line pointers" do
+      doc = File.read!(@write_plan)
+
+      {recon, _} = :binary.match(doc, "**Reconnaissance.**")
+      {author, _} = :binary.match(doc, "**Author the plan**")
+      assert recon < author, "the reconnaissance step must come before authoring"
+
+      assert doc =~ "file:line"
+      assert doc =~ "docs/architecture/"
+      assert doc =~ "magic value is defined exactly once"
+    end
+
+    test "write-plan's self-review checks pointers and scenario coverage" do
+      [_, self_review] = String.split(File.read!(@write_plan), "### Self-review", parts: 2)
+      [self_review | _] = String.split(self_review, "## Writing it to the card", parts: 2)
+
+      assert self_review =~ "pointer"
+      assert self_review =~ "scenario"
+      assert self_review =~ "acceptance criterion"
+      assert self_review =~ "no code"
+    end
+  end
 end
