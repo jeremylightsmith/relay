@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,8 @@ import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/board/board_screen.dart';
+import 'package:relay_mobile/features/boards/board_switcher.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
@@ -204,4 +208,34 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets(
+    'a switch from the Board tab reloads it onto the new board and stays on Board (RE376)',
+    (tester) async {
+      await pumpApp(
+        tester,
+        boardSlug: 'mkt',
+        boards: FakeBoardsRepository(
+          boards: [makeBoard('mkt'), makeBoard('dat')],
+        ),
+      );
+      await tester.tap(find.byKey(const Key('nav_board')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('board_body_mkt')), findsOneWidget);
+
+      // What the webview's relayOpenBoardSwitcher bridge does.
+      unawaited(
+        showBoardSwitcherSheet(tester.element(find.byType(BoardScreen))),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('board_row_dat')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('board_body_dat')), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+      );
+    },
+  );
 }

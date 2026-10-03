@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'app/messenger.dart';
+import 'app/push_tap.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
 import 'features/auth/auth_controller.dart';
@@ -57,26 +61,25 @@ class _RelayAppState extends ConsumerState<RelayApp> {
       theme: RelayTheme.light,
       darkTheme: RelayTheme.dark,
       routerConfig: router,
+      scaffoldMessengerKey: ref.watch(scaffoldMessengerKeyProvider),
       debugShowCheckedModeBanner: false,
     );
   }
 
   Future<void> _wirePush() async {
-    final router = ref.read(routerProvider);
     // The shared singleton — never `IosPushPlatform()` here: a second instance
     // would re-install the `relay/push` MethodCallHandler and steal taps.
     final platform = ref.read(pushPlatformProvider);
+    // RE376: one handler for both paths — it switches boards when the push is
+    // for another board, then routes to the card.
+    final pushTap = ref.read(pushTapHandlerProvider);
 
     // Warm: a tap while the app is running (foreground or background).
-    platform.onNotificationTap((payload) {
-      final path = pathForPayload(payload);
-      if (path != null) router.go(path);
-    });
+    platform.onNotificationTap((payload) => unawaited(pushTap.open(payload)));
 
     // Cold: the app was launched *by* a tap. Fire it at the router now, even if auth
     // is still restoring — the redirect holds it until there is somewhere to land.
     final cold = await platform.initialNotification();
-    final coldPath = cold == null ? null : pathForPayload(cold);
-    if (coldPath != null) router.go(coldPath);
+    if (cold != null) await pushTap.open(cold);
   }
 }

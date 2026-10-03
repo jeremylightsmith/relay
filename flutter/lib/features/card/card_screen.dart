@@ -206,8 +206,24 @@ class _CardScreenState extends ConsumerState<CardScreen> {
       );
     });
 
+    // RE376 · PUSH-01: a card opened from a push (router.go, warm or cold) is a
+    // root route with nothing to pop. Give it a way back to the now-current
+    // board's Needs you instead of a dead end.
+    final router = GoRouter.maybeOf(context);
+    final orphan = router != null && !router.canPop();
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.cardRef)),
+      appBar: AppBar(
+        title: Text(widget.cardRef),
+        leading: orphan
+            ? IconButton(
+                key: const Key('card_back'),
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
+                onPressed: () => context.go('/needs-you'),
+              )
+            : null,
+      ),
       // Advancing reuses this State (see didUpdateWidget) — and an *updated*
       // InAppWebView keeps the old card's page, since initialUrlRequest only
       // applies on mount. The per-card key remounts the body so the new card

@@ -1,12 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/board/board_screen.dart';
+import 'package:relay_mobile/features/boards/current_board.dart';
 
 void main() {
   group('boardUrl', () {
-    test('opens the remembered board when a slug is stored', () {
+    test('is the current board, embedded', () {
       expect(
         BoardScreen.boardUrl(
           baseUrl: 'https://relay.example',
@@ -15,19 +18,13 @@ void main() {
         'https://relay.example/board/marketing-site?embed=1',
       );
     });
+  });
 
-    test('falls back to the boards list when nothing is stored', () {
-      // RLY-95 decision 4: no server-picked default — BOARDS-00 precedes BOARD-01,
-      // so a fresh sign-in lands on the list, not /board's redirect.
-      expect(
-        BoardScreen.boardUrl(baseUrl: 'https://relay.example'),
-        'https://relay.example/boards?embed=1',
-      );
-      expect(
-        BoardScreen.boardUrl(baseUrl: 'https://relay.example', slug: ''),
-        'https://relay.example/boards?embed=1',
-      );
-    });
+  test('the switcher bridge name matches the BoardPager hook (RE376)', () {
+    // `flutter test` runs in flutter/, so the hook is one level up. This pins
+    // the cross-language contract: rename one side and this fails.
+    final js = File('../assets/js/hooks/board_pager.js').readAsStringSync();
+    expect(js, contains('callHandler("${BoardScreen.openSwitcherHandler}"'));
   });
 
   group('slugFromPath', () {
@@ -39,7 +36,7 @@ void main() {
     });
 
     test('ignores everything that is not exactly /board/<slug>', () {
-      // Visiting /boards must NOT clear or rebind the remembered pick.
+      // Only an exact board path is a board (the dead-board check).
       expect(BoardScreen.slugFromPath('/boards'), isNull);
       expect(BoardScreen.slugFromPath('/board'), isNull);
       expect(
@@ -132,4 +129,56 @@ void main() {
       expect(find.byType(AppBar), findsNothing);
     },
   );
+
+  testWidgets(
+    'a board switch remounts the body — the webview reloads onto the new board (RE376)',
+    (tester) async {
+      var mounts = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            boardPrefsProvider.overrideWithValue(InMemoryBoardPrefs('mkt')),
+          ],
+          child: MaterialApp(
+            home: BoardScreen(
+              bodyBuilder: (_) => _MountCounter(onMount: () => mounts++),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('board_body_mkt')), findsOneWidget);
+      final before = mounts;
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(BoardScreen)),
+      );
+      await container.read(currentBoardProvider.notifier).switchTo('dat');
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('board_body_dat')), findsOneWidget);
+      expect(mounts, before + 1);
+    },
+  );
+}
+
+class _MountCounter extends StatefulWidget {
+  const _MountCounter({required this.onMount});
+
+  final VoidCallback onMount;
+
+  @override
+  State<_MountCounter> createState() => _MountCounterState();
+}
+
+class _MountCounterState extends State<_MountCounter> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onMount();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      const Text('board body', key: Key('stub_board_body'));
 }
