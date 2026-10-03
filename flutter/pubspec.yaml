@@ -53,6 +53,10 @@ dependencies:
   url_launcher: ^6.3.2
   # Inject the session cookie into embedded webviews (proves the session end-to-end).
   flutter_inappwebview: ^6.1.5
+  # RE106: Sign in with Apple (iOS only) — the official button + Apple ID credential.
+  sign_in_with_apple: ^8.2.0
+  # RE106: SHA-256 of the Apple sign-in nonce (was transitive; imported directly now).
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

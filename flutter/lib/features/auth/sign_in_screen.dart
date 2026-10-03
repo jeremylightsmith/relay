@@ -1,11 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'auth_controller.dart';
 
-/// AUTH-02: the provider picker. Google works end-to-end; Apple holds RLY-106's
-/// slot, disabled — "Sign in with Apple" needs an Apple Developer capability and
-/// won't run on the simulator.
+/// AUTH-02: the provider picker. Google everywhere; on iOS, Apple's official
+/// `SignInWithAppleButton` under it (RE106) — a deliberate departure from the
+/// artboard's custom slot, since App Review expects Apple's own button. Android
+/// shows Google only.
 ///
 /// Matches `docs/designs/Relay Mobile.dc.html` artboard AUTH-02 (lines ~75–95)
 /// selectively: its GitHub button, "or" divider, email/password fields and
@@ -19,15 +22,28 @@ class SignInScreen extends ConsumerWidget {
   static const titleInk = Color(0xFF141B24); // oklch(0.22 0.02 255)
   static const googleBorder = Color(0xFFD5D8DB); // oklch(0.88 0.006 255)
   static const googleLabel = Color(0xFF272E38); // oklch(0.30 0.02 255)
-  static const appleFill = Color(0xFF13161B); // oklch(0.20 0.01 260)
   static const providerRadius = 11.0;
+
+  /// Both provider buttons draw at this height: Material 3's button minimum,
+  /// which is what Google renders at, and what Apple's button is told to be.
+  static const providerHeight = 40.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    void signIn() => ref.read(authProvider.notifier).signInWithGoogle();
+    final notifier = ref.read(authProvider.notifier);
+    final signInWithGoogle = notifier.signInWithGoogle;
+    final signInWithApple = notifier.signInWithApple;
+    // Retry whichever provider just failed (Google when unknown).
+    final retry = auth.method == SignInMethod.apple
+        ? signInWithApple
+        : signInWithGoogle;
+    // defaultTargetPlatform, not dart:io's Platform.isIOS: widget tests can
+    // override the former, and on a device they agree.
+    final showApple = defaultTargetPlatform == TargetPlatform.iOS;
+    final googleSpinning = auth.signingIn && auth.method != SignInMethod.apple;
 
     final providerShape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(providerRadius),
@@ -64,8 +80,15 @@ class SignInScreen extends ConsumerWidget {
               const SizedBox(height: 22),
               OutlinedButton(
                 key: const Key('sign_in_google'),
-                onPressed: auth.signingIn ? null : signIn,
+                onPressed: auth.signingIn ? null : signInWithGoogle,
                 style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(64, providerHeight),
+                  // Beside Apple's button, lay Google out at its drawn height
+                  // (no invisible tap-target padding) so the two match and sit
+                  // the artboard's 9px apart.
+                  tapTargetSize: showApple
+                      ? MaterialTapTargetSize.shrinkWrap
+                      : null,
                   backgroundColor: Colors.white,
                   foregroundColor: googleLabel,
                   side: const BorderSide(color: googleBorder),
@@ -76,7 +99,7 @@ class SignInScreen extends ConsumerWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (auth.signingIn)
+                    if (googleSpinning)
                       const SizedBox(
                         width: 16,
                         height: 16,
@@ -86,34 +109,34 @@ class SignInScreen extends ConsumerWidget {
                       const Icon(Icons.login, size: 16),
                     const SizedBox(width: 9),
                     Text(
-                      auth.signingIn ? 'Signing in…' : 'Continue with Google',
+                      googleSpinning ? 'Signing in…' : 'Continue with Google',
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 9),
-              FilledButton(
-                key: const Key('sign_in_apple'),
-                onPressed: null, // RLY-106
-                style: FilledButton.styleFrom(
-                  backgroundColor: appleFill,
-                  // Keep the artboard's dark slot rather than letting Flutter's
-                  // default disabled fill grey it away entirely.
-                  disabledBackgroundColor: appleFill.withValues(alpha: 0.38),
-                  disabledForegroundColor: Colors.white.withValues(alpha: 0.7),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: providerShape,
-                  textStyle: providerLabel,
+              if (showApple) ...[
+                const SizedBox(height: 9),
+                // The package's button has no disabled state, so fake one
+                // while any sign-in is in flight.
+                IgnorePointer(
+                  ignoring: auth.signingIn,
+                  child: Opacity(
+                    opacity: auth.signingIn ? 0.38 : 1.0,
+                    child: SignInWithAppleButton(
+                      key: const Key('sign_in_apple'),
+                      onPressed: signInWithApple,
+                      text: 'Continue with Apple',
+                      height: providerHeight,
+                      style: theme.brightness == Brightness.light
+                          ? SignInWithAppleButtonStyle.black
+                          : SignInWithAppleButtonStyle.white,
+                      borderRadius: const BorderRadius.all(
+                        Radius.circular(providerRadius),
+                      ),
+                    ),
+                  ),
                 ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.apple, size: 16),
-                    SizedBox(width: 9),
-                    Text('Sign in with Apple (soon)'),
-                  ],
-                ),
-              ),
+              ],
               if (auth.error != null) ...[
                 const SizedBox(height: 16),
                 Container(
@@ -137,7 +160,7 @@ class SignInScreen extends ConsumerWidget {
                         alignment: Alignment.centerRight,
                         child: TextButton(
                           key: const Key('sign_in_retry'),
-                          onPressed: signIn,
+                          onPressed: retry,
                           child: const Text('Try again'),
                         ),
                       ),
