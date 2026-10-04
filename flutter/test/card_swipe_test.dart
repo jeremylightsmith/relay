@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -21,7 +22,7 @@ const _items = [
 CardNavContext _ctx(String at) =>
     CardNavContext.seed(items: _items, currentRef: at)!;
 
-GoRouter _router() => GoRouter(
+GoRouter _router({WidgetBuilder? body}) => GoRouter(
   initialLocation: '/start',
   routes: [
     GoRoute(
@@ -36,7 +37,8 @@ GoRouter _router() => GoRouter(
         boardSlug: s.uri.queryParameters['board'] ?? '',
         kind: s.uri.queryParameters['kind'],
         navContext: s.extra as CardNavContext?,
-        bodyBuilder: (_) => const Text('card body', key: Key('stub_card_body')),
+        bodyBuilder:
+            body ?? (_) => const Text('card body', key: Key('stub_card_body')),
       ),
     ),
   ],
@@ -46,6 +48,7 @@ Future<GoRouter> _pump(
   WidgetTester tester, {
   required String at,
   bool withContext = true,
+  WidgetBuilder? body,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -59,7 +62,7 @@ Future<GoRouter> _pump(
     ],
   );
   addTearDown(container.dispose);
-  final router = _router();
+  final router = _router(body: body);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -77,6 +80,31 @@ Future<GoRouter> _pump(
 }
 
 Finder get _swipeArea => find.byKey(const Key('card_swipe_area'));
+
+/// Stands in for the webview's side of the gesture arena. A platform view feeds
+/// each pointer-down to the recognizers built from its `gestureRecognizers` and
+/// only gets the touch once one of them wins — so this stub does exactly that with
+/// the set the real InAppWebView is given, and counts the vertical drag updates
+/// that would reach the page's scroll.
+WidgetBuilder _webviewArenaStub(void Function() onVerticalUpdate) => (_) {
+  final recognizers = [
+    for (final f in CardScreen.webviewGestureRecognizers) f.constructor(),
+  ];
+  for (final r in recognizers) {
+    if (r is VerticalDragGestureRecognizer) {
+      r.onUpdate = (_) => onVerticalUpdate();
+    }
+  }
+  return Listener(
+    behavior: HitTestBehavior.opaque,
+    onPointerDown: (e) {
+      for (final r in recognizers) {
+        r.addPointer(e);
+      }
+    },
+    child: const SizedBox.expand(),
+  );
+};
 
 void main() {
   testWidgets('swipe left advances to the next card in the column', (
@@ -158,5 +186,37 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+  });
+
+  testWidgets('a vertical drag reaches the webview while the finger is down', (
+    tester,
+  ) async {
+    // Regression: with only the horizontal swipe recognizer in the arena, a
+    // vertical drag stayed unresolved until pointer-up, so the webview never got
+    // it and the card body (mostly) would not scroll.
+    var updates = 0;
+    await _pump(tester, at: 'RLY-2', body: _webviewArenaStub(() => updates++));
+
+    final gesture = await tester.startGesture(tester.getCenter(_swipeArea));
+    for (var i = 0; i < 5; i++) {
+      await gesture.moveBy(const Offset(0, -20));
+      await tester.pump();
+    }
+
+    expect(updates, greaterThan(0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+  });
+
+  testWidgets('a horizontal swipe still navigates over the webview', (
+    tester,
+  ) async {
+    await _pump(tester, at: 'RLY-2', body: _webviewArenaStub(() {}));
+
+    await tester.drag(_swipeArea, const Offset(-300, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
   });
 }
