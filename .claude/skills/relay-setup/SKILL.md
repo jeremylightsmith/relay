@@ -77,6 +77,13 @@ byte-identical: you curled `./relay` yourself in step 2, and the reader curled
 `.claude/skills/relay-setup/SKILL.md` to get this far. Four written is the healthy outcome; do
 not treat the other two as a failed install or re-run hunting for them.
 
+`./relay update` also creates `.relay/runner.json` when it is missing — a starter runner
+config documented inline with `//` comments, its `namespace` taken from this checkout's
+directory name. It is not one of the six served files, so it is never in `written` and never
+counted above; the report carries it separately as `config`. Report that value: `created`
+(the starter file was just written), `missing` (under `--check`: it would be created), or
+`present` (an existing file, left untouched — `update` never overwrites it).
+
 `./relay update` is the whole mechanism, and from here on **`/relay-update` owns it** — it
 wraps this same command and adds the judgment this skill deliberately skips (where these shared
 tooling files get committed). Nothing beyond the one command is re-implemented here.
@@ -90,6 +97,8 @@ skill list is rebuilt. Tell the human:
 > Relay is installed, uncommitted. **Restart Claude Code** (or start a fresh session), then run
 > `/relay-onboard` to wire this repo to your board's flows. These six are shared tooling files —
 > `/relay-update` runs the commit conversation with you any time after the restart.
+> `.relay/runner.json` is this project's own file, not shared tooling: tune it (capacity,
+> `base`, and uncomment the `worktrees` block once a prepare hook exists) and commit it.
 
 Then stop; setup is done. In that new session `/relay-onboard` reconciles the repo's agents and
 skills against the board's flows, loops until `/relay-doctor` reports zero errors, and closes
@@ -97,6 +106,7 @@ with the remaining human steps (start `relay start`, enable a flow in Settings �
 
 ## Blast radius
 
-`./relay`, the four `relay-*` skills, and `.relay/scaffold.json`. Never app code, never a
+`./relay`, the four `relay-*` skills, `.relay/scaffold.json`, and `.relay/runner.json`
+(created only if missing, never overwritten). Never app code, never a
 commit, never a push, never a card — `/relay-onboard` does its own work in its own session,
 under its own declared radius.

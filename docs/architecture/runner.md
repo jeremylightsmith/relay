@@ -257,8 +257,12 @@ key, and because these files were published openly regardless.
 user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
 `AGENTS.md`/`CLAUDE.md`, `.relay/runner.json`, flow documents) is out of scope and is never
-written by this surface;
-wiring those is `/relay-onboard`'s job.
+served by this surface; wiring those is `/relay-onboard`'s job. The one local exception
+(RE383): when `.relay/runner.json` is missing, `./relay update` renders a starter one from the
+runner's own template — no endpoint serves it — and reports it under the `config` key
+(`created`, `missing` under `--check`, or `present`). It is never overwritten, never part of
+the scaffold version or manifest, never touched by auto-update, and not behind the in-app-repo
+`--force` refusal.
 
 **The version is derived, never maintained.** `Relay.Scaffold.version/1` is the first 12 hex
 characters of the sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when
@@ -738,7 +742,15 @@ silently billed to the paid API.
   oldest is evicted, default 3), and two auto-update keys (RE185): `auto_update` (default
   `true`) and `auto_update_min_interval` (seconds between update attempts, default 300).
   Missing file → sensible defaults, including the auto-update keys; capacity is the field a
-  developer routinely edits.
+  developer routinely edits. The loader (`load_runner_config`) strips **full-line `//`
+  comments** (first non-whitespace characters `//`) before parsing, keeping each stripped line
+  as a blank line so JSON error line numbers match the file; trailing `//` and `/* */` are not
+  supported, and a string value containing `//` is never altered. `./relay update` creates the
+  file if missing (RE383, `ensure_runner_config`): `namespace` = the sanitized checkout-dir
+  name (fallback `project`), `cache_dir` = `~/.cache/relay/<namespace>`, starter capacity
+  `shared_clean` 3 / `exclusive` 2, limits 0.9 / 0.9, the `worktrees` block commented out, and
+  **no `name` key** (a tracked name would recreate the RE305 identity collision). The startup
+  line names `namespace <ns>`.
 
   > **`base` is the trunk every worktree is baselined to** — the ref a worktree is created at,
   > hard-reset to on re-baseline, refreshed to when the shared tree goes idle, and handed to the

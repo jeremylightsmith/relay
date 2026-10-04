@@ -29,6 +29,12 @@ runner config file. `./relay` knows the REST API and nothing about any board's c
    then offers to enable the flows.
    (Already wired and one node broke? Reach for `/relay-doctor` directly.)
 
+**Runner config.** `./relay update` creates `.relay/runner.json` when it is missing,
+documented inline: every key carries a comment, and the `worktrees` block starts commented out.
+A line whose first non-whitespace characters are `//` is a full-line comment and is ignored; a
+trailing `//` after a value and `/* */` block comments are not supported. The file is yours to
+tune and commit — `update` never overwrites it.
+
 **Usage limits.** `.relay/runner.json` can carry `"limits": {"max_five_hour": 0.9,
 "max_seven_day": 0.9}`. Once Claude usage passes that fraction of the five-hour or seven-day
 window, `relay start` stops claiming new work (running jobs finish), shows as **RATE LIMITED** on

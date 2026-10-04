@@ -74,8 +74,9 @@ self-heals via `./relay update` instead.
    Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
    and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
 
-   `.relay/runner.json` is **not** part of that floor — it is not a Relay-owned served file,
-   and authoring it for this repo is part of onboarding's own work below. `relay.md` **is**
+   `.relay/runner.json` is **not** part of that floor — it is not a Relay-owned served file —
+   but the `./relay update` you just ran creates a documented starter one when it is missing
+   (report key `config`), so onboarding reviews it rather than authors it. `relay.md` **is**
    served, so `update` installs it and you never author one.
 
 2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./relay board` must
@@ -121,12 +122,14 @@ is a repo-side job plus a gate adjustment, not "author a flow from nothing".
 
 Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
 
-- files to create or modify, each with its diff — including: if `.relay/runner.json` is
-  missing, author it for this repo as part of the shown plan (it is already inside this skill's
-  declared blast radius, and nothing else installs it). The file you author includes
-  `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` — `relay start` then stops claiming
-  new work once Claude usage passes 90% of the five-hour or seven-day window and resumes on its
-  own when the window resets;
+- files to create or modify, each with its diff — including a review of `.relay/runner.json`
+  with the human as part of the shown plan: its `capacity`, its `base`, and uncommenting the
+  `worktrees` block when the plan adds `.relay/prepare-worktree.sh` (the file is inside this
+  skill's declared blast radius, so those edits are yours to propose). If it is somehow
+  missing, run `./relay update` to create it — **never hand-write it**. The generated file
+  sets `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` — `relay start` then stops
+  claiming new work once Claude usage passes 90% of the five-hour or seven-day window and
+  resumes on its own when the window resets;
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 
