@@ -1,14 +1,11 @@
 defmodule RelayWeb.MockupViewerLive do
   @moduledoc """
-  RE370 — the full-size viewer for an HTML mockup at `/attachments/:id/view`
-  (`RelayWeb.attachment_view_path/1`). A persistent banner — "Mockup · <ref> <title>", linking
-  back to the card — sits over a full-viewport `<iframe sandbox="allow-scripts">`
-  (`RelayWeb.mockup_sandbox/0`) of the raw attachment, which `AttachmentController` serves under
-  the sandbox CSP.
+  The legacy RE370 mockup link, `/attachments/:id/view` (`RelayWeb.attachment_view_path/1`).
 
-  This page exists so Relay's UI never presents a mockup as a bare top-level page (the residual
-  same-domain-phishing risk in `AttachmentController`'s threat model): it is always framed under
-  Relay chrome that names where it came from.
+  RE380 made the mockup viewer a mode of `RelayWeb.BoardLive` — the card's drawer URL plus
+  `mockup=<attachment id>`, opened in the same tab with the card as a left sheet. This route
+  exists only so RE370-era links (in comments, notes, chat) keep working: it redirects a member to
+  `/board/:slug?card=<ref>&mockup=<id>` and renders nothing of its own.
 
   Membership-scoped through `Relay.Attachments.get_attachment/2`; an unknown id, a board the user
   can't see, or a non-HTML attachment all 404 — never leak the difference.
@@ -25,15 +22,7 @@ defmodule RelayWeb.MockupViewerLive do
       %Attachment{card: %Schemas.Card{board: board} = card} = attachment ->
         if Attachment.html?(attachment) do
           ref = Cards.ref(board, card)
-
-          {:ok,
-           assign(socket,
-             attachment: attachment,
-             board: board,
-             card: card,
-             ref: ref,
-             page_title: "Mockup · #{ref}"
-           )}
+          {:ok, push_navigate(socket, to: ~p"/board/#{board.slug}?card=#{ref}&mockup=#{attachment.id}")}
         else
           raise Ecto.NoResultsError, queryable: Attachment
         end
@@ -43,44 +32,7 @@ defmodule RelayWeb.MockupViewerLive do
     end
   end
 
+  # Never reached: mount/3 always redirects or raises.
   @impl true
-  def render(assigns) do
-    ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide embed={@embed}>
-      <:title>
-        <span id="mockup-viewer-title" class="truncate">Mockup</span>
-      </:title>
-      <div id="mockup-viewer" class="flex h-[calc(100vh-53px)] flex-col">
-        <div
-          id="mockup-viewer-banner"
-          role="note"
-          class="flex min-w-0 items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2 text-sm"
-        >
-          <.icon name="hero-eye" class="size-4 shrink-0 text-base-content/60" />
-          <span class="shrink-0 font-semibold">Mockup</span>
-          <span class="shrink-0 text-base-content/40">·</span>
-          <.link
-            id="mockup-viewer-card-link"
-            navigate={~p"/board/#{@board.slug}?card=#{@ref}"}
-            class="min-w-0 truncate hover:underline"
-          >
-            <span class="font-mono text-xs text-base-content/65">{@ref}</span>
-            <span class="font-medium">{@card.title}</span>
-          </.link>
-          <span class="ml-auto shrink-0 truncate text-xs text-base-content/60">
-            {@attachment.filename}
-          </span>
-        </div>
-        <iframe
-          id="mockup-viewer-frame"
-          src={RelayWeb.attachment_path(@attachment.id)}
-          sandbox={RelayWeb.mockup_sandbox()}
-          title={"Mockup for #{@ref}"}
-          class="block min-h-0 w-full flex-1 border-0 bg-base-100"
-        >
-        </iframe>
-      </div>
-    </Layouts.app>
-    """
-  end
+  def render(assigns), do: ~H""
 end

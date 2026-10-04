@@ -1,7 +1,8 @@
 defmodule RelayWeb.MockupViewerLiveTest do
   @moduledoc """
-  RE370 — `/attachments/:id/view` frames an HTML mockup under a banner naming its card, so Relay
-  never presents a mockup as a bare top-level page. Membership-scoped like the raw attachment.
+  RE370 / RE380 — `/attachments/:id/view` is the legacy RE370 viewer link. It now redirects a
+  member to BoardLive's same-tab mockup viewer (`/board/:slug?card=<ref>&mockup=<id>`), and is
+  membership-scoped like the raw attachment: anything else is 404.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -31,19 +32,28 @@ defmodule RelayWeb.MockupViewerLiveTest do
     %{board: board, card: card, html: html, png: png, ref: Cards.ref(board, card)}
   end
 
-  test "frames the mockup under a banner naming the card, linking back to it",
-       %{conn: conn, board: board, card: card, html: html, ref: ref} do
-    {:ok, view, _html} = live(conn, RelayWeb.attachment_view_path(html.id))
+  test "redirects a member to the board's same-tab mockup viewer",
+       %{conn: conn, board: board, html: html, ref: ref} do
+    target = "/board/#{board.slug}?card=#{ref}&mockup=#{html.id}"
 
-    assert has_element?(view, "#mockup-viewer-banner", "Mockup")
-    assert has_element?(view, "#mockup-viewer-banner", ref)
-    assert has_element?(view, "#mockup-viewer-banner", card.title)
-    assert has_element?(view, ~s(#mockup-viewer-card-link[href="/board/#{board.slug}?card=#{ref}"]))
+    assert {:error, {:live_redirect, %{to: ^target}}} =
+             live(conn, RelayWeb.attachment_view_path(html.id))
 
-    assert has_element?(
-             view,
-             ~s(iframe#mockup-viewer-frame[src="#{RelayWeb.attachment_path(html.id)}"][sandbox="#{RelayWeb.mockup_sandbox()}"])
-           )
+    conn = get(conn, RelayWeb.attachment_view_path(html.id))
+    assert redirected_to(conn, 302) == target
+  end
+
+  test "the redirect target opens BoardLive's viewer, with no RE370 banner",
+       %{conn: conn, card: card, html: html} do
+    {:ok, _card} =
+      Cards.set_mockups(card, [%{"url" => RelayWeb.attachment_path(html.id), "caption" => "Empty state"}])
+
+    {:error, {:live_redirect, %{to: target}}} = live(conn, RelayWeb.attachment_view_path(html.id))
+    {:ok, view, _html} = live(conn, target)
+
+    assert has_element?(view, "#mockup-viewer")
+    refute has_element?(view, "#mockup-viewer-banner")
+    refute render(view) =~ "mockup-viewer-banner"
   end
 
   test "a signed-in non-member gets 404", %{html: html} do

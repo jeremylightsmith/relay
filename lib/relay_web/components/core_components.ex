@@ -2082,7 +2082,14 @@ defmodule RelayWeb.CoreComponents do
         class="flex min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
       >
         <div class="min-h-0 flex-1 drawer:p-4">
-          <div class="h-full overflow-hidden bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm">
+          <%!-- Keyed by the mockup on screen, so switching REPLACES the iframe instead of
+          patching its src: a src change navigates the frame and pushes a joint-history entry
+          (browser Back would then step the frame, not leave the viewer), while a fresh
+          iframe's first load adds none. --%>
+          <div
+            id={"#{@id}-frame-box-#{@current_id}"}
+            class="h-full overflow-hidden bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm"
+          >
             <iframe
               id={"#{@id}-frame"}
               src={RelayWeb.attachment_path(@current_id)}

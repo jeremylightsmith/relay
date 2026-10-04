@@ -155,13 +155,19 @@ sharing behavior.
   The drawer renders mockups in a **Mockups** section above Description as a wrapping row of 80px
   square tiles (`CoreComponents.mockup_preview/1`, RE374): each tile is a live miniature (an inert
   `<iframe sandbox="allow-scripts">` rendered at 1280px and CSS-scaled down) with the caption as
-  its tooltip and aria-label. Clicking a tile opens, in a new browser tab (`target="_blank"`,
-  leaving the board and drawer in place),
-  `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) — an
-  authenticated, membership-scoped page in the `:require_authenticated` live_session that frames
-  the mockup under a banner "Mockup · <ref> <title>" linking back to the card; it 404s for a
-  non-member, an unknown id, or a non-HTML attachment. Relay's UI never links to a raw HTML
-  attachment as a top-level page.
+  its tooltip and aria-label. Clicking a tile opens, **in the same tab**, `RelayWeb.BoardLive`'s
+  mockup viewer mode (RE380): the `mockup=<attachment id>` param on the card's drawer URL
+  (`/board/:slug?card=<ref>&mockup=<id>`, `/board/:slug/story-map?card=…&mockup=…`, and
+  `/cards/:ref?board=<slug>&mockup=<id>` in the native host). The viewer shows a 340px left sheet
+  (the card's gate panel — review or question stepper — plus the Mockups tiles, the current one
+  ringed) and the sandboxed frame under the breadcrumb top bar, whose card crumb names the card;
+  on phones it is full screen under one bar with no review controls. Switching (a tile, ←/→,
+  ‹ ›, a swipe) replaces the history entry, so one browser Back, Esc or "← Back to card" returns
+  to the drawer; an invalid or stale `mockup` id falls back to the drawer.
+  `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) is the
+  legacy RE370 link: an authenticated, membership-scoped redirect to that viewer URL in the
+  `:require_authenticated` live_session; it 404s for a non-member, an unknown id, or a non-HTML
+  attachment. Relay's UI never links to a raw HTML attachment as a top-level page.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
   `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with

@@ -88,7 +88,8 @@ defmodule RelayWeb.Router do
           else: []
         ) ++ [{RelayWeb.Auth, :require_authenticated}, {RelayWeb.Auth, :mount_embed}] do
       live "/boards", BoardsLive
-      # RE370 — an HTML mockup framed under a banner naming its card (RelayWeb.attachment_view_path/1).
+      # RE370 legacy mockup link (RelayWeb.attachment_view_path/1): a membership-scoped redirect to
+      # BoardLive's same-tab mockup viewer, /board/:slug?card=<ref>&mockup=<id> (RE380).
       live "/attachments/:id/view", MockupViewerLive
       live "/board/:slug", BoardLive
       # RE264 — the story map is a second lens on the SAME board, and clicking a card must open
