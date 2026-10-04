@@ -2803,13 +2803,15 @@ defmodule RelayWeb.BoardLive do
   def handle_info({:card_upserted, %Card{} = card}, socket) do
     if find_stage_by_id(socket, card.stage_id) do
       cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+      placed = place_card(cards_by_stage, card)
 
       {:noreply,
        socket
        |> refresh_card_health(card.id)
        |> assign(:needs_input_questions, Cards.needs_input_questions(socket.assigns.board))
-       |> upsert_card_stream(card, cards_by_stage)
-       |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
+       |> delete_card_from_other_streams(card)
+       |> upsert_card_stream(card, placed)
+       |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, placed))
        |> assign_archived_count()
        |> refresh_blocked_by(cards_by_stage)
        |> refresh_face_runs(cards_by_stage)
@@ -3927,12 +3929,15 @@ defmodule RelayWeb.BoardLive do
     |> restream_lanes([card.stage_id, stage.id])
   end
 
+  # RE386 — the re-read can be stale (the event raced the commit), so the moved card
+  # is placed authoritatively: never in the source column, always in the target.
   defp apply_move(socket, source_stage_id, %Card{} = moved) do
-    cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
+    cards_by_stage =
+      socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id) |> place_card(moved)
 
     socket
     |> adjust_done_revealed(source_stage_id, moved.stage_id, cards_by_stage)
-    |> restream_stage(source_stage_id, cards_by_stage)
+    |> restream_source(source_stage_id, moved, cards_by_stage)
     |> restream_stage(moved.stage_id, cards_by_stage)
     |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
     |> refresh_selected_after_move(moved)
@@ -3994,6 +3999,50 @@ defmodule RelayWeb.BoardLive do
   defp restream_stage(socket, stage_id, cards_by_stage) do
     stream_stage(socket, stage_id, cards_by_stage, reset: true)
   end
+
+  # RE386 — a move's source column. The terminal Done window is read from the DB
+  # (stage_window/3), which may still hold the card that just left, so it is
+  # filtered out there too; a reorder (source == target) keeps it.
+  defp restream_source(socket, source_stage_id, %Card{} = moved, cards_by_stage) do
+    window =
+      socket
+      |> stage_window(source_stage_id, cards_by_stage)
+      |> Enum.reject(&(&1.id == moved.id and moved.stage_id != source_stage_id))
+
+    stream(socket, stream_name(source_stage_id), window, reset: true)
+  end
+
+  # RE386 — a card lives in exactly one column: drop its DOM id from every stage
+  # stream but its own (main lanes, sub-lanes and Done; deleting an absent id is a
+  # no-op). The target stream is left alone so a re-insert updates in place.
+  defp delete_card_from_other_streams(socket, %Card{} = card) do
+    socket.assigns.board.stages
+    |> Enum.reject(&(&1.id == card.stage_id))
+    |> Enum.reduce(socket, fn stage, acc ->
+      stream_delete_by_dom_id(acc, stream_name(stage.id), card_dom_id(stage.id, card))
+    end)
+  end
+
+  # RE386 — reconcile a (possibly stale) cards_by_stage read with the authoritative
+  # card from an event: remove it from every other stage, and replace it in place in
+  # its own stage, or insert it at its position order (appending as a fallback).
+  defp place_card(cards_by_stage, %Card{id: id, stage_id: stage_id} = card) do
+    cards_by_stage
+    |> Map.new(fn {sid, cards} -> {sid, Enum.reject(cards, &(&1.id == id and sid != stage_id))} end)
+    |> Map.update(stage_id, [card], &put_card(&1, card))
+  end
+
+  defp put_card(cards, %Card{id: id} = card) do
+    if Enum.any?(cards, &(&1.id == id)) do
+      Enum.map(cards, &if(&1.id == id, do: card, else: &1))
+    else
+      {before, rest} = Enum.split_while(cards, &before_position?(&1, card))
+      before ++ [card | rest]
+    end
+  end
+
+  defp before_position?(%Card{position: a}, %Card{position: b}) when is_integer(a) and is_integer(b), do: a <= b
+  defp before_position?(_other, _card), do: true
 
   # RLY-145 — refetch all board cards once and stream-reset each given lane.
   # Every expand gesture routes here: items streamed while a container was
@@ -4925,6 +4974,10 @@ defmodule RelayWeb.BoardLive do
   # per stage is safe.
   # sobelow_skip ["DOS.BinToAtom"]
   defp stream_name(stage_id), do: :"stage_cards_#{stage_id}"
+
+  # Phoenix's default stream DOM id for a card in a stage stream (no stream_configure
+  # is set for stage streams) — derived from stream_name/1 so the two never drift.
+  defp card_dom_id(stage_id, %Card{id: id}), do: "#{stream_name(stage_id)}-#{id}"
 
   # RE264 — the board URL this socket belongs to. On the story map, closing the drawer (or an
   # archive/review/answer that dismisses it) must land back on the map, not bounce the user to
