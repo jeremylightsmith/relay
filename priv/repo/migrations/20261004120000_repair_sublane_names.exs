@@ -15,6 +15,7 @@ defmodule Relay.Repo.Migrations.RepairSublaneNames do
   # Only rows with a parent are touched; a main stage never is.
 
   @doc "The data repair — one UPDATE, also exactly what its test executes."
+  @spec repair_sql() :: String.t()
   def repair_sql do
     """
     UPDATE stages AS child
