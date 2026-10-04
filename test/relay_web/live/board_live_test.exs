@@ -1613,6 +1613,34 @@ defmodule RelayWeb.BoardLiveTest do
       %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
     end
 
+    test "lists move targets with each substage directly under its parent, Review before Done",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      html = view |> element("#card-drawer-stage-chip") |> render_click()
+
+      names =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s{[id^="card-drawer-move-to-"]})
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim() |> String.replace_suffix("current", "") |> String.trim()))
+
+      assert names == [
+               "Backlog",
+               "Next up",
+               "Spec",
+               "Spec · Review",
+               "Spec · Done",
+               "Plan",
+               "Plan · Done",
+               "Code",
+               "Review",
+               "Deploy",
+               "Done"
+             ]
+    end
+
     test "labels a sub-lane target with the parent's name, not the raw composite Stage.name",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))

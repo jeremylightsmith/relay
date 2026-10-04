@@ -75,7 +75,7 @@ defmodule Relay.Boards do
   @doc """
   The board behind a public URL: returns `{:ok, board}` **only when
   `public_enabled` is true**, `:error` otherwise (disabled or unknown slug). Stages
-  are preloaded in position order. Non-scoped — public visitors have no membership.
+  are preloaded in hierarchical order (`order_stages/1`). Non-scoped — public visitors have no membership.
   """
   def get_public_board(slug) when is_binary(slug) do
     case Repo.one(
@@ -84,7 +84,7 @@ defmodule Relay.Boards do
              preload: [stages: ^from(s in Stage, order_by: s.position)]
          ) do
       nil -> :error
-      %Board{} = board -> {:ok, board}
+      %Board{} = board -> {:ok, order_board_stages(board)}
     end
   end
 
@@ -108,7 +108,7 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Returns the user's board with `stages` preloaded in `position` order,
+  Returns the user's board with `stages` preloaded in hierarchical order (`order_stages/1`),
   creating the board (unique slug derived from the user) and seeding the
   default 8-stage pipeline, the three story-map releases
   (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
@@ -122,7 +122,9 @@ defmodule Relay.Boards do
         [] -> create_default_board!(user)
       end
 
-    Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+    board
+    |> Repo.preload(stages: from(s in Stage, order_by: s.position))
+    |> order_board_stages()
   end
 
   @doc "The user's non-archived boards (member of), oldest first (stable inserted_at/id order)."
@@ -137,29 +139,31 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Membership-scoped board lookup by slug, with stages preloaded in position
-  order. Returns an archived board too (still loadable, read-only). nil when
+  Membership-scoped board lookup by slug, with stages preloaded in hierarchical
+  order (`order_stages/1`). Returns an archived board too (still loadable, read-only). nil when
   the user is not a member of a board with that slug.
   """
   def get_board(%User{id: user_id}, slug) when is_binary(slug) do
-    Repo.one(
-      from b in Board,
-        join: m in Membership,
-        on: m.board_id == b.id,
-        where: m.user_id == ^user_id and b.slug == ^slug,
-        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    from(b in Board,
+      join: m in Membership,
+      on: m.board_id == b.id,
+      where: m.user_id == ^user_id and b.slug == ^slug,
+      preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
+    |> Repo.one()
+    |> order_board_stages()
   end
 
   @doc "Like get_board/2 but raises Ecto.NoResultsError (→ 404) when not found."
   def get_board!(%User{id: user_id}, slug) when is_binary(slug) do
-    Repo.one!(
-      from b in Board,
-        join: m in Membership,
-        on: m.board_id == b.id,
-        where: m.user_id == ^user_id and b.slug == ^slug,
-        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    from(b in Board,
+      join: m in Membership,
+      on: m.board_id == b.id,
+      where: m.user_id == ^user_id and b.slug == ^slug,
+      preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
+    |> Repo.one!()
+    |> order_board_stages()
   end
 
   @doc """
@@ -169,7 +173,7 @@ defmodule Relay.Boards do
   (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes, and the three disabled default flows — all in one transaction.
   External callers pass only a name (`%{name: ...}` / `%{"name" => ...}`).
-  Returns the board with stages preloaded.
+  Returns the board with stages preloaded in hierarchical order (`order_stages/1`).
   """
   def create_board(%User{} = user, attrs) do
     name = fetch_name(attrs)
@@ -188,7 +192,10 @@ defmodule Relay.Boards do
           seed_releases!(board)
           seed_lanes_and_flows!(board)
           insert_owner_membership!(board, user)
-          Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+
+          board
+          |> Repo.preload(stages: from(s in Stage, order_by: s.position))
+          |> order_board_stages()
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -212,10 +219,34 @@ defmodule Relay.Boards do
     |> broadcast_board_updated(board.id)
   end
 
-  @doc "Returns the board's stages in position order."
+  @doc "Returns the board's stages in hierarchical order (`order_stages/1`)."
   def list_stages(%Board{id: board_id}) do
-    Repo.all(from s in Stage, where: s.board_id == ^board_id, order_by: s.position)
+    from(s in Stage, where: s.board_id == ^board_id, order_by: s.position)
+    |> Repo.all()
+    |> order_stages()
   end
+
+  @doc """
+  Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
+  `position`, each immediately followed by its substages in `Stage.sublane_rank/1` order
+  (Review before Done). Children whose parent is not in the list are appended at the end
+  by `position`, so nothing is dropped. Pure — no Repo access.
+  """
+  @spec order_stages([Stage.t()]) :: [Stage.t()]
+  def order_stages(stages) when is_list(stages) do
+    {mains, children} = Enum.split_with(stages, &is_nil(&1.parent_id))
+    mains = Enum.sort_by(mains, & &1.position)
+    main_ids = MapSet.new(mains, & &1.id)
+    {nested, orphans} = Enum.split_with(children, &MapSet.member?(main_ids, &1.parent_id))
+    by_parent = Enum.group_by(nested, & &1.parent_id)
+
+    Enum.flat_map(mains, fn main ->
+      [main | by_parent |> Map.get(main.id, []) |> Enum.sort_by(&{Stage.sublane_rank(&1.type), &1.position})]
+    end) ++ Enum.sort_by(orphans, & &1.position)
+  end
+
+  defp order_board_stages(nil), do: nil
+  defp order_board_stages(%Board{} = board), do: %{board | stages: order_stages(board.stages)}
 
   @doc "System-wide (non-scoped) board lookup by id, raising when missing. Used by Relay.Runs."
   def get_board_by_id!(id), do: Repo.get!(Board, id)

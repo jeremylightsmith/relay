@@ -49,6 +49,33 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#top-bar-crumb-boards")
   end
 
+  test "the works-in trigger picker lists each substage directly under its parent", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    html = render(view)
+
+    assert html
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query("#trigger-works-in option")
+           |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim())) ==
+             [
+               "—",
+               "Backlog",
+               "Next up",
+               "Spec",
+               "Spec:Review",
+               "Spec:Done",
+               "Plan",
+               "Plan:Done",
+               "Code",
+               "Review",
+               "Deploy",
+               "Done"
+             ]
+  end
+
   test "404s on an unknown flow key", %{conn: conn, board: board} do
     assert {:error, {:live_redirect, %{to: to}}} = live(conn, ~p"/board/#{board.slug}/flows/nope")
     assert to =~ "/board/#{board.slug}/settings"

@@ -7,8 +7,22 @@ defmodule Relay.BoardsTest do
   alias Schemas.Board
   alias Schemas.Stage
 
+  @default_hierarchical_names [
+    "Backlog",
+    "Next up",
+    "Spec",
+    "Spec:Review",
+    "Spec:Done",
+    "Plan",
+    "Plan:Done",
+    "Code",
+    "Review",
+    "Deploy",
+    "Done"
+  ]
+
   describe "get_or_create_default_board/1" do
-    test "creates a board with defaults and the seeded stage tree, in position order" do
+    test "creates a board with defaults and the seeded stage tree, in hierarchical order" do
       user = insert(:user, name: "Ada Lovelace")
 
       board = Boards.get_or_create_default_board(user)
@@ -22,15 +36,34 @@ defmodule Relay.BoardsTest do
                %Stage{name: "Backlog", position: 1, type: :queue, ai_enabled: false, category: :unstarted},
                %Stage{name: "Next up", position: 2, type: :queue, ai_enabled: false, category: :unstarted},
                %Stage{name: "Spec", position: 3, type: :planning, ai_enabled: true, category: :planning},
+               %Stage{name: "Spec:Review", position: 9, type: :review, ai_enabled: false, category: :planning},
+               %Stage{name: "Spec:Done", position: 10, type: :done, ai_enabled: false, category: :planning},
                %Stage{name: "Plan", position: 4, type: :planning, ai_enabled: true, category: :planning},
+               %Stage{name: "Plan:Done", position: 11, type: :done, ai_enabled: false, category: :planning},
                %Stage{name: "Code", position: 5, type: :work, ai_enabled: true, category: :in_progress},
                %Stage{name: "Review", position: 6, type: :review, ai_enabled: false, category: :in_progress},
                %Stage{name: "Deploy", position: 7, type: :work, ai_enabled: true, category: :in_progress},
-               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete},
-               %Stage{name: "Spec:Review", position: 9, type: :review, ai_enabled: false, category: :planning},
-               %Stage{name: "Spec:Done", position: 10, type: :done, ai_enabled: false, category: :planning},
-               %Stage{name: "Plan:Done", position: 11, type: :done, ai_enabled: false, category: :planning}
+               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete}
              ] = board.stages
+    end
+
+    test "board.stages lists each substage directly under its parent, Review before Done" do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+
+      expected = @default_hierarchical_names
+
+      assert Enum.map(board.stages, & &1.name) == expected
+      assert user |> Boards.get_board!(board.slug) |> Map.fetch!(:stages) |> Enum.map(& &1.name) == expected
+    end
+
+    test "position-based terminal/next-stage logic is unchanged by the hierarchical order" do
+      board = Boards.get_or_create_default_board(insert(:user))
+      stages = Boards.list_stages(board)
+      spec = Enum.find(stages, &(&1.name == "Spec"))
+
+      assert Boards.terminal_stage(stages).name == "Done"
+      assert Boards.next_main_stage(spec).name == "Plan"
     end
 
     test "is idempotent — a second call returns the same board with no duplicates" do
@@ -176,20 +209,7 @@ defmodule Relay.BoardsTest do
       assert board.key == "LA"
       assert length(board.stages) == 11
 
-      assert Enum.map(board.stages, & &1.name) ==
-               [
-                 "Backlog",
-                 "Next up",
-                 "Spec",
-                 "Plan",
-                 "Code",
-                 "Review",
-                 "Deploy",
-                 "Done",
-                 "Spec:Review",
-                 "Spec:Done",
-                 "Plan:Done"
-               ]
+      assert Enum.map(board.stages, & &1.name) == @default_hierarchical_names
     end
 
     test "accepts string-keyed params (the create form)" do
