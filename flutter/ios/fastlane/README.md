@@ -37,7 +37,15 @@ Build IPA for App Store
 [bundle exec] fastlane ios upload_testflight
 ```
 
-Upload IPA to TestFlight
+Upload IPA to TestFlight (no waiting for processing; internal testers only)
+
+### ios distribute_external
+
+```sh
+[bundle exec] fastlane ios distribute_external
+```
+
+Wait for an uploaded build to process, then submit it to the external beta group
 
 ### ios deploy
 
