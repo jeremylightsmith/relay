@@ -38,7 +38,8 @@ except ImportError:
 
 HERE = os.path.abspath(__file__)
 ROOT = os.path.dirname(HERE)
-RUNNER_CONFIG_PATH = os.path.join(ROOT, ".relay", "runner.json")
+RUNNER_CONFIG_REL = ".relay/runner.json"
+RUNNER_CONFIG_PATH = os.path.join(ROOT, RUNNER_CONFIG_REL)
 DRY = False
 FORWARDER = None
 RUN_IDS = {}   # ref -> run_id of the run currently working it (RLY-112)
@@ -55,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 72
-RUNNER_FINGERPRINT = "d5dfb39bf16662889b8a80bb53f3c80c707f9d91d2637f0550ad1dd805a38f22"
+RUNNER_VERSION = 73
+RUNNER_FINGERPRINT = "d3e858a255bcd005f56077043f8ca28f14f47966248d478e82bb3eef0dd07536"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1575,6 +1576,13 @@ def _name_part(s):
     return re.sub(r"[^A-Za-z0-9._-]+", "-", s or "").strip("-")
 
 
+def default_namespace():
+    """The sanitized checkout-directory basename (RE383) — the project part of the default
+    runner name AND the `namespace` a starter .relay/runner.json is written with, so the two
+    can never disagree about what this checkout is called."""
+    return _name_part(os.path.basename(ROOT.rstrip(os.sep))) or "project"
+
+
 def default_runner_name():
     """`<checkout-dir>@<short-host>` (RE305).
 
@@ -1590,7 +1598,7 @@ def default_runner_name():
     already show separately, so nothing is lost. Both parts are sanitized and have a
     fallback, so a directory with spaces or an empty `gethostname()` can never produce a
     blank or shell-hostile name."""
-    project = _name_part(os.path.basename(ROOT.rstrip(os.sep))) or "project"
+    project = default_namespace()
     host = _name_part(socket.gethostname().split(".")[0]) or "host"
     return f"{project}@{host}"
 
@@ -1718,10 +1726,11 @@ def _mark_identity_warned_here(name):
         pass
 
 
-def load_runner_config():
-    """Runner-local config from .relay/runner.json. Missing file → sensible defaults;
-    capacity is the only field a developer routinely edits (ADR 0006, table 1)."""
-    defaults = {
+def runner_config_defaults():
+    """The built-in value of every runner.json key — what load_runner_config falls back to and
+    what the starter template (render_runner_config) reads, so a default is typed once. A
+    function, not a constant: `name` depends on ROOT and the hostname."""
+    return {
         "name": default_runner_name(),
         "namespace": "exec",
         "capacity": {"shared_clean": 1, "exclusive": 1},
@@ -1741,9 +1750,30 @@ def load_runner_config():
         # (AUTO_UPDATE_DEFAULTS is defined further down, beside the rest of the auto-update code.)
         **AUTO_UPDATE_DEFAULTS,
     }
+
+
+def strip_json_comments(text):
+    """Blank every full-line `//` comment (RE383). Only lines whose first non-whitespace
+    characters are `//` — never a trailing comment, never `/* */` — so a string value holding
+    `//` (a URL, `"origin/main"`) is untouched. The line is blanked, not removed, so a JSON
+    error's line number still points into the file as written."""
+    return "".join(_blank_if_comment(ln) for ln in text.splitlines(keepends=True))
+
+
+def _blank_if_comment(line):
+    if not line.lstrip().startswith("//"):
+        return line
+    return line[len(line.rstrip("\r\n")):]   # keep only the line ending
+
+
+def load_runner_config():
+    """Runner-local config from .relay/runner.json. Missing file → sensible defaults;
+    capacity is the only field a developer routinely edits (ADR 0006, table 1). Full-line
+    `//` comments are skipped (RE383), so the documented starter file loads as written."""
+    defaults = runner_config_defaults()
     try:
         with open(RUNNER_CONFIG_PATH) as f:
-            cfg = json.load(f)
+            cfg = json.loads(strip_json_comments(f.read()))
     except FileNotFoundError:
         return defaults
     except json.JSONDecodeError as e:
@@ -1753,6 +1783,104 @@ def load_runner_config():
     merged["worktrees"] = {**defaults["worktrees"], **(cfg.get("worktrees") or {})}
     merged["limits"] = validate_limits(cfg.get("limits"))
     return merged
+
+
+# ---- the starter .relay/runner.json (RE383) ----
+#
+# `./relay update` writes this commented template when a project has no runner.json yet. Every
+# value that equals a built-in fallback is READ from runner_config_defaults() /
+# AUTO_UPDATE_DEFAULTS / PREPARE_HOOK_DEFAULT at render time (AGENTS.md: a value is defined
+# exactly once). These two are the deliberate exceptions — recommended starting points that
+# differ from the conservative fallbacks a config-less runner uses — so they are named here,
+# once, and nowhere else.
+STARTER_CAPACITY = {"shared_clean": 3, "exclusive": 2}
+STARTER_LIMIT = 0.9   # applied to every limit_key(w) for w in RATE_LIMIT_WINDOWS
+
+
+def _starter_key(lines, comments, key, value, last=False):
+    """Append `// comment` lines then `  "key": <json value>` (nested dicts over several lines)."""
+    lines += [f"  // {c}" for c in comments]
+    comma = "" if last else ","
+    if isinstance(value, dict):
+        lines.append(f"  {json.dumps(key)}: {{")
+        items = list(value.items())
+        lines += [f"    {json.dumps(k)}: {json.dumps(v)}" + ("," if i < len(items) - 1 else "")
+                  for i, (k, v) in enumerate(items)]
+        lines.append("  }" + comma)
+    else:
+        lines.append(f"  {json.dumps(key)}: {json.dumps(value)}{comma}")
+
+
+def render_runner_config(namespace):
+    """The full commented starter runner.json for `namespace`. Strict JSON once the full-line
+    `//` comments are stripped, and still strict JSON with the three `worktrees` lines
+    uncommented (the key before them keeps its comma; their closer carries one). Never writes
+    a `name`: the file is tracked, and a pinned name would recreate the RE305 collision."""
+    d = runner_config_defaults()
+    lines = [
+        "// Relay runner config — read by `./relay start`. Lines starting with // are comments.",
+        "// Docs: relay.md. Every key is optional; a missing key falls back to the runner's "
+        "default.",
+        "{",
+    ]
+    _starter_key(lines, ["Prefix for this project's worktrees under .claude/worktrees/ and for "
+                         "the runner lock.",
+                         "Must differ between projects that share a machine."],
+                 "namespace", namespace)
+    _starter_key(lines, ["How many node-jobs run at once, per isolation class: `shared_clean` "
+                         "jobs share one",
+                         "read-only checkout; `exclusive` jobs each get their own worktree."],
+                 "capacity", dict(STARTER_CAPACITY))
+    _starter_key(lines, ["The ref every pool worktree is created at and reset to. Change it for "
+                         "a repo on `master`,",
+                         "a fork tracking `upstream/main`, etc."],
+                 "base", d["base"])
+    _starter_key(lines, ["Scratch cache handed to worktree hooks as RELAY_CACHE_DIR."],
+                 "cache_dir", f"~/.cache/relay/{namespace}")
+    lines += [
+        "  // Per-worktree lifecycle hooks, run when a worktree is prepared / cleaned up",
+        "  // (e.g. install deps, create a test DB). Uncomment once the script exists and is "
+        "executable.",
+        '  // "worktrees": {',
+        f'  //   "prepare": {json.dumps(PREPARE_HOOK_DEFAULT)}',
+        "  // },",
+    ]
+    _starter_key(lines, ["How many failed runs' worktrees to keep on disk for inspection."],
+                 "max_retained_failed", d["max_retained_failed"])
+    _starter_key(lines, ["Long-poll wait (seconds) when asking the board for work."],
+                 "poll_timeout", d["poll_timeout"])
+    _starter_key(lines, ["Seconds between heartbeats to the board."],
+                 "heartbeat_interval", d["heartbeat_interval"])
+    _starter_key(lines, ["Re-install ./relay from the board when a newer one is served, "
+                         "between jobs."],
+                 "auto_update", AUTO_UPDATE_DEFAULTS["auto_update"])
+    _starter_key(lines, ["Minimum seconds between auto-update attempts."],
+                 "auto_update_min_interval", AUTO_UPDATE_DEFAULTS["auto_update_min_interval"])
+    _starter_key(lines, ["Stop claiming new work once Claude usage passes this fraction of the "
+                         "5-hour / 7-day",
+                         "window; resumes on its own when the window resets."],
+                 "limits", {limit_key(w): STARTER_LIMIT for w in RATE_LIMIT_WINDOWS}, last=True)
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def ensure_runner_config(check):
+    """Create the starter .relay/runner.json if it is missing (RE383): `"present"` (left
+    byte-identical, always), `"missing"` (`--check`: nothing written) or `"created"`.
+
+    The path is resolved from ROOT at CALL time, not RUNNER_CONFIG_PATH (computed at import),
+    so a repointed ROOT — every UpdateTest — never reads or writes this checkout's file. The
+    file is user-owned: not a scaffold item, never overwritten, never behind --force."""
+    path = os.path.join(ROOT, RUNNER_CONFIG_REL)
+    if os.path.exists(path):
+        return "present"
+    if check:
+        return "missing"
+    try:
+        _write_file(path, render_runner_config(default_namespace()), "644")
+    except OSError as e:
+        die(f"could not write {path}: {e}")
+    return "created"
 
 
 WORKTREES_DIR = os.path.join(ROOT, ".claude", "worktrees")
@@ -4927,6 +5055,7 @@ def cmd_start(args):
 
     log(f"runner {cfg['name']} v{RUNNER_VERSION} → "
         f"board {board_desc or 'UNREACHABLE'} at {env('RELAY_URL')} — "
+        f"namespace {cfg['namespace']} — "
         f"advertising {fmt_capacity(cfg['capacity'])}"
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
     if board_error:
@@ -5362,12 +5491,20 @@ def install_scaffold(status):
     return written
 
 
+def _format_config(report):
+    """The runner.json line for format_scaffold (RE383) — empty when the file was present."""
+    verb = {"created": "created", "missing": "would create"}.get(report.get("config"))
+    if not verb:
+        return []
+    return [f'  {verb} {RUNNER_CONFIG_REL} (namespace "{default_namespace()}")']
+
+
 def format_scaffold(report):
     lines = [f"scaffold: served {report['served_version']} · "
              f"local {report['local_version'] or '(none)'}"]
     if report["current"]:
         lines.append("  this project is current — nothing to do.")
-        return "\n".join(lines)
+        return "\n".join(lines + _format_config(report))
     verb = "updated" if report["applied"] else "would change"
     paths = report["written"] if report["applied"] else report["changed"]
     if paths:
@@ -5378,7 +5515,7 @@ def format_scaffold(report):
     lines += [f"  {removal_verb} {p} (moved to ./{RUNNER_REL})" for p in removals]
     if not report["applied"]:
         lines.append("  nothing written (--check). Run `./relay update` to apply.")
-    return "\n".join(lines)
+    return "\n".join(lines + _format_config(report))
 
 
 def cmd_update(args):
@@ -5400,7 +5537,11 @@ def cmd_update(args):
     nothing, and "what would change?" is a fair question to ask anywhere.
 
     It also removes a leftover Relay-owned bin/relay (RE319) after installing; `--check` reports
-    it as `obsolete` and removes nothing."""
+    it as `obsolete` and removes nothing.
+
+    Last, it creates a starter .relay/runner.json when there is none (RE383, report key
+    `config`). That file is user-owned — never overwritten, not a scaffold item, so `current`
+    stays scaffold-only — and the app-repo refusal does not cover it, since it overwrites nothing."""
     status = scaffold_status()
     obsolete = obsolete_scaffold()
     written, removed = [], []
@@ -5416,6 +5557,8 @@ def cmd_update(args):
         elif status["local_version"] != status["served_version"]:
             write_scaffold_state(status["served_version"])
         removed = remove_obsolete(obsolete)
+    # RE383: user-owned, so it sits after the scaffold work and outside the app-repo refusal.
+    config = ensure_runner_config(args.check)
     report = {"served_version": status["served_version"],
               "local_version": status["local_version"],
               "current": status["current"] and not obsolete,
@@ -5424,7 +5567,8 @@ def cmd_update(args):
               "obsolete": obsolete,
               "applied": not args.check,
               "written": written,
-              "removed": removed}
+              "removed": removed,
+              "config": config}
     emit(args, report, lambda: print(format_scaffold(report)))
     return report
 

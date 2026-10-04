@@ -1719,6 +1719,21 @@ class RunnerNameTest(unittest.TestCase):
         self._given("/", "")
         self.assertEqual(relay.default_runner_name(), "project@host")
 
+    # RE383: the starter runner.json's namespace and the runner name's project part share
+    # one source, default_namespace().
+    def test_default_namespace_is_the_sanitized_checkout_dir(self):
+        self._given("/x/My App!", "box")
+        self.assertEqual(relay.default_namespace(), "My-App")
+
+    def test_default_namespace_falls_back_to_project(self):
+        self._given("/", "box")
+        self.assertEqual(relay.default_namespace(), "project")
+
+    def test_the_runner_name_takes_its_project_part_from_default_namespace(self):
+        self._given("/Users/j/src/relay/", "box")
+        self.assertEqual(relay.default_runner_name(), relay.default_namespace() + "@box")
+        self.assertEqual(relay.default_runner_name(), "relay@box")
+
 
 class LegacyIdentityWarningTest(unittest.TestCase):
     """RE305: the default name moved from the bare hostname, and that name is a DURABLE key —
@@ -1862,6 +1877,45 @@ class RunnerConfigTest(unittest.TestCase):
         self.addCleanup(os.remove, path)
         relay.RUNNER_CONFIG_PATH = path
 
+    def _write_text(self, text):
+        """Raw text — a commented file is not json.dump-able (RE383)."""
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        self.addCleanup(os.remove, path)
+        relay.RUNNER_CONFIG_PATH = path
+
+    def test_full_line_comments_are_skipped(self):
+        self._write_text('// top\n{\n  // the ns\n  "namespace": "ns1",\n'
+                         '    // indented comment\n  "poll_timeout": 7\n}\n')
+        cfg = relay.load_runner_config()
+        self.assertEqual(cfg["namespace"], "ns1")
+        self.assertEqual(cfg["poll_timeout"], 7)
+
+    def test_a_double_slash_inside_a_string_survives(self):
+        self._write_text('{\n  "base": "https://x.test//a",\n  "cache_dir": "~/c//d"\n}')
+        cfg = relay.load_runner_config()
+        self.assertEqual(cfg["base"], "https://x.test//a")
+        self.assertEqual(cfg["cache_dir"], "~/c//d")
+
+    def test_a_comment_free_file_loads_as_before(self):
+        self._write_text('{"namespace": "plain", "capacity": {"exclusive": 4}}')
+        cfg = relay.load_runner_config()
+        self.assertEqual(cfg["namespace"], "plain")
+        self.assertEqual(cfg["capacity"], {"shared_clean": 1, "exclusive": 4})
+
+    def test_a_json_error_after_comments_reports_the_original_line_number(self):
+        self._write_text("// one\n// two\n// three\n{bad")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            relay.load_runner_config()
+        self.assertIn("line 4", err.getvalue())
+        self.assertIn("is not valid JSON", err.getvalue())
+
+    def test_strip_json_comments_blanks_comment_lines_and_keeps_newlines(self):
+        self.assertEqual(relay.strip_json_comments("a\n  // c\nb\n"), "a\n\nb\n")
+
     def test_missing_file_yields_defaults(self):
         relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
         cfg = relay.load_runner_config()
@@ -1908,6 +1962,7 @@ class RunnerConfigTest(unittest.TestCase):
         relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
         cfg = relay.load_runner_config()
         self.assertEqual(cfg["max_retained_failed"], 3)
+
         self.assertIsNone(cfg.get("cache_dir"))
         self.assertIsNone(cfg.get("prepare"))
 
@@ -1977,6 +2032,77 @@ class RunnerConfigTest(unittest.TestCase):
 
     def test_a_limits_value_that_is_not_an_object_refuses_to_start(self):
         self.assertIn("limits", self._dies([0.9]))
+
+
+class RunnerConfigTemplateTest(unittest.TestCase):
+    """RE383: the commented starter .relay/runner.json that `./relay update` writes."""
+
+    TOP_LEVEL_KEYS = ("namespace", "capacity", "base", "cache_dir", "max_retained_failed",
+                      "poll_timeout", "heartbeat_interval", "auto_update",
+                      "auto_update_min_interval", "limits")
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "RUNNER_CONFIG_PATH", relay.RUNNER_CONFIG_PATH)
+
+    def _load_text(self, text):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        self.addCleanup(os.remove, path)
+        relay.RUNNER_CONFIG_PATH = path
+        return relay.load_runner_config()
+
+    def test_the_rendered_template_loads_with_the_starter_values(self):
+        text = relay.render_runner_config("acme-app")
+        cfg = self._load_text(text)
+
+        self.assertEqual(cfg["namespace"], "acme-app")
+        self.assertEqual(cfg["capacity"], {"shared_clean": 3, "exclusive": 2})
+        self.assertEqual(cfg["limits"], {"max_five_hour": 0.9, "max_seven_day": 0.9})
+        self.assertEqual(cfg["worktrees"], {})
+        self.assertEqual(cfg["cache_dir"], "~/.cache/relay/acme-app")
+        self.assertEqual(cfg["base"], relay.DEFAULT_BASE)
+        self.assertIs(cfg["auto_update"], True)
+        self.assertEqual(cfg["auto_update_min_interval"],
+                         relay.AUTO_UPDATE_DEFAULTS["auto_update_min_interval"])
+        self.assertNotIn("name", json.loads(relay.strip_json_comments(text)))
+
+    def test_uncommenting_the_worktrees_block_yields_the_default_prepare_hook(self):
+        text = relay.render_runner_config("acme-app")
+        json.loads(relay.strip_json_comments(text))   # strict JSON once comments are gone
+
+        lines = text.split("\n")
+        targets = [i for i, ln in enumerate(lines)
+                   if ln.lstrip().startswith("//")
+                   and ('"worktrees"' in ln or '"prepare"' in ln or ln.strip() == "// },")]
+        self.assertEqual(len(targets), 3, targets)
+        for i in targets:
+            ln = lines[i]
+            indent = ln[:len(ln) - len(ln.lstrip())]
+            lines[i] = indent + ln.lstrip()[len("// "):]
+
+        cfg = self._load_text("\n".join(lines))
+        self.assertEqual(cfg["worktrees"], {"prepare": relay.PREPARE_HOOK_DEFAULT})
+
+    def test_every_top_level_key_is_documented_and_no_name_is_pinned(self):
+        text = relay.render_runner_config("acme-app")
+        lines = text.split("\n")
+        self.assertTrue(lines[0].startswith("//"))
+        self.assertTrue(lines[1].startswith("//"))
+        self.assertEqual(lines[2], "{")
+        self.assertTrue(text.endswith("}\n") and not text.endswith("}\n\n"))
+        for key in self.TOP_LEVEL_KEYS:
+            idx = [i for i, ln in enumerate(lines) if ln.startswith(f'  "{key}":')]
+            self.assertEqual(len(idx), 1, key)
+            self.assertTrue(lines[idx[0] - 1].lstrip().startswith("//"), key)
+        self.assertFalse(any('"name":' in ln for ln in lines))
+
+    def test_the_template_reads_the_built_in_defaults_rather_than_retyping_them(self):
+        real = relay.runner_config_defaults
+        self.addCleanup(setattr, relay, "runner_config_defaults", real)
+        relay.runner_config_defaults = lambda: dict(real(), poll_timeout=99)
+
+        self.assertIn('"poll_timeout": 99', relay.render_runner_config("p"))
 
 
 class RunnerPoolTest(unittest.TestCase):
@@ -6263,7 +6389,8 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertIn(
             f'runner box v{relay.RUNNER_VERSION} → board "Test Board" (TB) '
-            "at http://relay.test — advertising shared_clean=1 exclusive=0 — one job",
+            "at http://relay.test — namespace exec — advertising shared_clean=1 exclusive=0"
+            " — one job",
             lines)
 
     def test_an_unreachable_board_warns_with_the_cause_and_keeps_polling(self):
@@ -7716,13 +7843,88 @@ class UpdateTest(unittest.TestCase):
             self.assertTrue(rel in (relay.RUNNER_REL, relay.GUIDE_REL)
                             or rel.startswith(".claude/skills/relay-"), rel)
 
-    def test_nothing_outside_the_manifest_is_written(self):
+    def test_the_runner_config_is_the_one_file_written_outside_the_manifest(self):
         capture_ret(relay.cmd_update, self.args())
         found = set()
         for base, _dirs, files in os.walk(self.tmp):
             for f in files:
                 found.add(os.path.relpath(os.path.join(base, f), self.tmp))
-        self.assertEqual(found, set(self.served) | {".relay/scaffold.json"})
+        self.assertEqual(found, set(self.served) | {".relay/scaffold.json",
+                                                    ".relay/runner.json"})
+
+    # ---- RE383: the starter .relay/runner.json ----
+
+    def _runner_config(self):
+        return self.path(relay.RUNNER_CONFIG_REL)
+
+    def _sha(self, path):
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def test_update_creates_a_starter_runner_config_named_after_the_checkout(self):
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(report["config"], "created")
+        self.assertTrue(os.path.exists(self._runner_config()))
+        prev = relay.RUNNER_CONFIG_PATH
+        self.addCleanup(setattr, relay, "RUNNER_CONFIG_PATH", prev)
+        relay.RUNNER_CONFIG_PATH = self._runner_config()
+        self.assertEqual(relay.load_runner_config()["namespace"], relay.default_namespace())
+
+    def test_update_never_touches_an_existing_runner_config(self):
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"namespace": "mine"}\n')
+        before = self._sha(self._runner_config())
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(report["config"], "present")
+        self.assertEqual(self._sha(self._runner_config()), before)
+
+    def test_force_never_touches_an_existing_runner_config(self):
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"namespace": "mine"}\n')
+        before = self._sha(self._runner_config())
+
+        report = capture_ret(relay.cmd_update, self.args(force=True))
+
+        self.assertEqual(report["config"], "present")
+        self.assertEqual(self._sha(self._runner_config()), before)
+
+    def test_check_reports_a_missing_runner_config_and_writes_nothing(self):
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertEqual(report["config"], "missing")
+        self.assertFalse(os.path.exists(self._runner_config()))
+
+    def test_the_runner_config_is_created_in_the_app_repo_without_force(self):
+        self._make_app_repo()
+        self.make_current()
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(report["config"], "created")
+        self.assertTrue(os.path.exists(self._runner_config()))
+
+    def test_the_human_report_names_the_created_runner_config(self):
+        out = capture(relay.cmd_update, self.args())
+
+        self.assertIn(f'created .relay/runner.json (namespace "{relay.default_namespace()}")',
+                      out)
+
+    def test_a_current_project_still_hears_the_runner_config_would_be_created(self):
+        self.make_current()
+
+        out = capture(relay.cmd_update, self.args(check=True))
+
+        self.assertIn("this project is current", out)
+        self.assertIn(f'would create .relay/runner.json (namespace "{relay.default_namespace()}")',
+                      out)
+
+    def test_the_json_report_carries_config(self):
+        args = argparse.Namespace(check=False, force=False, json=True, field=None)
+
+        out = capture(relay.cmd_update, args)
+
+        self.assertEqual(json.loads(out)["config"], "created")
 
     def test_a_second_run_reports_current_and_writes_nothing(self):
         capture_ret(relay.cmd_update, self.args())
