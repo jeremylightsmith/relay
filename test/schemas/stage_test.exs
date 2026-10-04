@@ -105,4 +105,16 @@ defmodule Schemas.StageTest do
     good = Stage.changeset(child, %{name: "X", position: 2, category: :in_progress, type: :review})
     assert good.valid?
   end
+
+  describe "sub-lane vocabulary (RE385)" do
+    test "sublane_types/0 is exactly review then done" do
+      assert Stage.sublane_types() == [:review, :done]
+    end
+
+    test "sublane_rank/1 orders review, done, then anything else" do
+      assert Stage.sublane_rank(:review) == 0
+      assert Stage.sublane_rank(:done) == 1
+      assert Stage.sublane_rank(:work) == 2
+    end
+  end
 end

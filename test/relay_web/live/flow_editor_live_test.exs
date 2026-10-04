@@ -612,4 +612,17 @@ defmodule RelayWeb.FlowEditorLiveTest do
     # The in-page bar keeps the Editor/Metrics tabs and the version chip.
     assert has_element?(view, "#flow-editor-version-chip")
   end
+
+  test "trigger pickers show substages under a renamed parent's new name (RE385)", %{conn: conn, board: board} do
+    spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))
+    {:ok, _} = Boards.update_stage(spec, %{name: "Specify"})
+
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/spec")
+
+    assert has_element?(view, "#trigger-lands-on option[selected]", "Specify:Review")
+    assert has_element?(view, "#trigger-works-in option", "Specify:Review")
+    assert has_element?(view, "#trigger-works-in option", "Specify:Done")
+    refute html =~ "Spec:Review"
+    refute html =~ "Spec:Done"
+  end
 end

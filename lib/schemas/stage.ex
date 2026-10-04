@@ -6,7 +6,7 @@ defmodule Schemas.Stage do
   the default card state on entry (see ADR 0003). `category` suggests a default `type`
   (`default_type/1`) when a stage is created or crosses category, but any override is allowed.
 
-  A **sub-lane is a child stage**: `parent_id` set, `type in [:review, :done]`. `ai_enabled`
+  A **sub-lane is a child stage**: `parent_id` set, `type in sublane_types/0`. `ai_enabled`
   ("Relay AI listens here") is only meaningful for `:work`/`:planning` stages and is forced
   `false` for every other type. `board_id`/`parent_id` are set programmatically, never cast.
   `wip_limit` is the optional MMF 11 limit (`nil` = no limit). `collapsed_by_default`
@@ -20,6 +20,7 @@ defmodule Schemas.Stage do
 
   @types [:queue, :work, :planning, :review, :done]
   @work_types [:work, :planning]
+  @sublane_types [:review, :done]
 
   schema "stages" do
     field :name, :string
@@ -114,6 +115,23 @@ defmodule Schemas.Stage do
   """
   def work_types, do: @work_types
 
+  @doc """
+  The stage types a sub-lane (child stage) may have, in display order — Review before Done
+  (RE385). The single definition of the sub-lane closed set and its order; `sublane_rank/1`,
+  `Relay.Boards`' lane guards and every substage sort derive from it.
+  """
+  @spec sublane_types() :: [:review | :done]
+  def sublane_types, do: @sublane_types
+
+  @doc """
+  A sub-lane type's position in `sublane_types/0` (`:review` → 0, `:done` → 1). Any other type
+  ranks after every sub-lane type, so a stray/legacy child sorts last rather than raising.
+  """
+  @spec sublane_rank(atom()) :: non_neg_integer()
+  def sublane_rank(type) do
+    Enum.find_index(@sublane_types, &(&1 == type)) || length(@sublane_types)
+  end
+
   # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
   defp normalize_ai_enabled(changeset) do
     if get_field(changeset, :type) in @work_types do
@@ -125,7 +143,7 @@ defmodule Schemas.Stage do
 
   # A child stage (parent_id set) must be a review or done sub-lane.
   defp validate_child_type(changeset) do
-    if get_field(changeset, :parent_id) != nil and get_field(changeset, :type) not in [:review, :done] do
+    if get_field(changeset, :parent_id) != nil and get_field(changeset, :type) not in @sublane_types do
       add_error(changeset, :type, "sub-lane stages must be review or done")
     else
       changeset

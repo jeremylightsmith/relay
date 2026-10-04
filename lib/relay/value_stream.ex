@@ -328,7 +328,7 @@ defmodule Relay.ValueStream do
   defp with_substages(%Stage{id: id} = terminal, _subs, %Stage{id: id}), do: [terminal]
 
   defp with_substages(%Stage{} = main, subs, _terminal) do
-    [main | subs |> Map.get(main.id, []) |> Enum.sort_by(&substage_order/1)]
+    [main | subs |> Map.get(main.id, []) |> Enum.sort_by(&Stage.sublane_rank(&1.type))]
   end
 
   defp in_stream?(_stage, nil), do: true
@@ -338,9 +338,6 @@ defmodule Relay.ValueStream do
   end
 
   defp in_stream?(%Stage{}, _worked_ids), do: true
-
-  defp substage_order(%Stage{type: :review}), do: 0
-  defp substage_order(%Stage{}), do: 1
 
   defp stream_start_index(mains) do
     case Enum.find_index(mains, &(&1.type in Stage.work_types())) do

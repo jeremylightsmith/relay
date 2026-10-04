@@ -68,4 +68,21 @@ defmodule Relay.BoardsLanesTest do
     assert Boards.top_level_stage(review).name == "Code"
     assert Boards.top_level_stage(review).type == :work
   end
+
+  test "enable_lane after a rename names the child after the new parent name (RE385)" do
+    parent = main_stage(name: "Code")
+    {:ok, _} = Boards.update_stage(parent, %{name: "Build"})
+    reloaded = Relay.Repo.get!(Schemas.Stage, parent.id)
+
+    assert {:ok, child} = Boards.enable_lane(reloaded, :review)
+    assert child.name == "Build:Review"
+  end
+
+  test "sublanes/1 orders Review before Done whatever the creation order (RE385)" do
+    parent = main_stage()
+    {:ok, _} = Boards.enable_lane(parent, :done)
+    {:ok, _} = Boards.enable_lane(parent, :review)
+
+    assert parent |> Boards.sublanes() |> Enum.map(& &1.type) == [:review, :done]
+  end
 end

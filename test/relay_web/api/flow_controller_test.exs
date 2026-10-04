@@ -280,4 +280,22 @@ defmodule RelayWeb.Api.FlowControllerTest do
              |> json_response(401)
     end
   end
+
+  describe "after a stage rename (RE385)" do
+    test "pulled flows name the renamed substages", %{conn: conn, board: board} do
+      spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))
+      {:ok, _} = Boards.update_stage(spec, %{name: "Specify"})
+
+      docs = for key <- ["code", "plan", "spec"], into: %{}, do: {key, pull(conn, key)}
+
+      assert docs["spec"]["trigger"]["lands_on"] == "Specify:Review"
+      assert docs["plan"]["trigger"]["pulls_from"] == "Specify:Done"
+
+      for {_key, doc} <- docs do
+        encoded = Jason.encode!(doc)
+        refute encoded =~ "Spec:Review"
+        refute encoded =~ "Spec:Done"
+      end
+    end
+  end
 end

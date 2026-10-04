@@ -524,4 +524,26 @@ defmodule RelayWeb.Api.CardControllerTest do
       assert id == member.id
     end
   end
+
+  test "a card moves by the renamed substage's id from GET /api/board (RE385)", %{
+    conn: conn,
+    board: board,
+    stage: stage
+  } do
+    {:ok, _review} = Relay.Boards.enable_lane(stage, :review)
+    card = insert(:card, stage: stage)
+    {:ok, _} = Relay.Boards.update_stage(stage, %{name: "Specify"})
+
+    stages = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("stages")
+    refute Enum.any?(stages, &(&1["name"] == "Spec:Review"))
+    assert %{"id" => review_id} = Enum.find(stages, &(&1["name"] == "Specify:Review"))
+
+    moved =
+      conn
+      |> post(~p"/api/cards/#{ref(board, card)}/move", %{"stage" => review_id})
+      |> json_response(200)
+      |> Map.fetch!("data")
+
+    assert moved["stage_id"] == review_id
+  end
 end

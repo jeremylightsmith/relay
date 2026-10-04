@@ -34,6 +34,9 @@ defmodule Relay.Boards do
   # Board-progression order is the schema's declaration order — defined once on the schema.
   @category_order Stage.categories()
 
+  # The sub-lane closed set — defined once on the schema, usable in guards (RE385).
+  @sublane_types Stage.sublane_types()
+
   @doc """
   An unvalidated changeset for a board's user-editable attributes.
   Drives the settings "Board name" form.
@@ -331,7 +334,7 @@ defmodule Relay.Boards do
   creating the child stage with `type:` review/done and `ai_enabled: false`.
   Idempotent.
   """
-  def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in [:review, :done] do
+  def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
       %Stage{} = existing ->
         {:ok, existing}
@@ -339,7 +342,7 @@ defmodule Relay.Boards do
       nil ->
         %Stage{board_id: parent.board_id, parent_id: parent.id}
         |> Stage.changeset(%{
-          name: "#{parent.name}:#{lane_word(lane)}",
+          name: sublane_name(parent.name, lane),
           position: next_position(parent.board_id),
           category: parent.category,
           type: lane,
@@ -355,7 +358,7 @@ defmodule Relay.Boards do
   (empty) child is removed, `{:ok, :not_enabled}` when there is nothing to
   remove, or `{:error, :not_empty}` when the lane still holds cards.
   """
-  def disable_lane(%Stage{} = parent, lane) when lane in [:review, :done] do
+  def disable_lane(%Stage{} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
       nil ->
         {:ok, :not_enabled}
@@ -372,24 +375,58 @@ defmodule Relay.Boards do
 
   @doc "The stage's `:review`/`:done` children, ordered Review then Done."
   def sublanes(%Stage{} = parent) do
-    Repo.all(
-      from s in Stage,
-        where: s.parent_id == ^parent.id,
-        order_by: fragment("array_position(ARRAY['review','done'], ?)", s.type)
-    )
+    from(s in Stage, where: s.parent_id == ^parent.id)
+    |> Repo.all()
+    |> Enum.sort_by(&Stage.sublane_rank(&1.type))
   end
 
   @doc """
   Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit, reject_to).
   `ai_enabled` is normalized by the changeset; a changed `reject_to_stage_id` must be a main stage
-  on the same board. Broadcasts `{:stages_changed, board_id}`.
+  on the same board.
+
+  Renaming a **main** stage cascades the new name to its Review/Done sub-lanes
+  (`"<new name>:Review"` / `"<new name>:Done"`, RE385) in the same transaction — a substage's
+  name is its API identifier, so it must never drift from its parent. Nothing else cascades,
+  and renaming a sub-lane directly touches no other stage. Any failure rolls the whole write
+  back and returns `{:error, changeset}`. Broadcasts `{:stages_changed, board_id}` once on success.
   """
   def update_stage(%Stage{} = stage, attrs) do
-    stage
-    |> Stage.changeset(attrs)
-    |> validate_reject_to_stage(stage)
-    |> Repo.update()
-    |> broadcast_stages_changed(stage.board_id)
+    changeset =
+      stage
+      |> Stage.changeset(attrs)
+      |> validate_reject_to_stage(stage)
+
+    new_name = Changeset.get_change(changeset, :name)
+
+    if is_nil(stage.parent_id) and is_binary(new_name) do
+      changeset
+      |> rename_with_sublanes(new_name)
+      |> broadcast_stages_changed(stage.board_id)
+    else
+      changeset
+      |> Repo.update()
+      |> broadcast_stages_changed(stage.board_id)
+    end
+  end
+
+  defp rename_with_sublanes(changeset, new_name) do
+    Repo.transaction(fn ->
+      case Repo.update(changeset) do
+        {:ok, updated} ->
+          updated |> sublanes() |> Enum.each(&rename_sublane!(&1, new_name))
+          updated
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp rename_sublane!(%Stage{} = sublane, parent_name) do
+    sublane
+    |> Stage.changeset(%{name: sublane_name(parent_name, sublane.type)})
+    |> Repo.update!()
   end
 
   @doc """
@@ -662,6 +699,10 @@ defmodule Relay.Boards do
         end
     end
   end
+
+  # The one place a sub-lane's composite name is built (RE385) — enable_lane/2 and the
+  # update_stage/2 rename cascade both go through it.
+  defp sublane_name(parent_name, lane), do: "#{parent_name}:#{lane_word(lane)}"
 
   defp lane_word(:review), do: "Review"
   defp lane_word(:done), do: "Done"
