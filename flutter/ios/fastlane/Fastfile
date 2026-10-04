@@ -94,7 +94,7 @@ platform :ios do
     UI.important("📦 IPA location: build/relay.ipa")
   end
 
-  desc "Upload IPA to TestFlight"
+  desc "Upload IPA to TestFlight and submit it to the external beta group"
   lane :upload_testflight do
     ipa_path = "build/relay.ipa"
 
@@ -103,39 +103,49 @@ platform :ios do
       raise "Missing IPA"
     end
 
+    # Every upload goes to internal testers and is also submitted to Beta App
+    # Review for the external group (BETA_GROUP, created in App Store Connect).
+    # Distributing externally means waiting for Apple to finish processing the
+    # build. Set TESTFLIGHT_EXTERNAL=false to upload for internal testers only.
+    # Beta review contact/notes live in App Store Connect's TestFlight → Test
+    # Information page, not here.
+    external = ENV["TESTFLIGHT_EXTERNAL"] != "false"
+    changelog = ENV["TESTFLIGHT_CHANGELOG"].to_s.strip
+    changelog = last_git_commit[:message].to_s.lines.first.to_s.strip if changelog.empty?
+    changelog = "Bug fixes and improvements." if changelog.empty?
+
+    options = {
+      ipa: ipa_path,
+      app_platform: "ios",
+      app_identifier: APP_IDENTIFIER,
+      changelog: changelog,
+      skip_waiting_for_build_processing: !external,
+      skip_submission: !external,
+      distribute_external: external,
+      groups: external ? [ENV.fetch("BETA_GROUP", "Beta")] : nil,
+      notify_external_testers: external
+    }.compact
+
     if ENV["FASTLANE_API_KEY_PATH"] && ENV["APP_STORE_CONNECT_KEY_ID"] && ENV["APP_STORE_CONNECT_ISSUER_ID"]
       UI.important("📤 Uploading to TestFlight using App Store Connect API key...")
       # FASTLANE_API_KEY_PATH points at the raw .p8; build the key object from it
       # plus the key id + issuer id (upload_to_testflight's api_key_path expects a
       # JSON file, not a .p8 — this avoids that mismatch).
-      api_key = app_store_connect_api_key(
+      options[:api_key] = app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
         issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
         key_filepath: ENV["FASTLANE_API_KEY_PATH"]
       )
-      upload_to_testflight(
-        ipa: ipa_path,
-        api_key: api_key,
-        skip_waiting_for_build_processing: true,
-        skip_submission: true,
-        app_platform: "ios",
-        app_identifier: APP_IDENTIFIER
-      )
-      UI.success("✅ Successfully uploaded to TestFlight!")
     elsif ENV["FASTLANE_USER"] && ENV["FASTLANE_PASSWORD"]
       UI.important("📤 Uploading to TestFlight...")
-      upload_to_testflight(
-        ipa: ipa_path,
-        skip_waiting_for_build_processing: true,
-        skip_submission: true,
-        app_platform: "ios",
-        app_identifier: APP_IDENTIFIER
-      )
-      UI.success("✅ Successfully uploaded to TestFlight!")
     else
       UI.important("✅ IPA is ready at: build/relay.ipa")
       UI.important("📝 To upload, set FASTLANE_API_KEY_PATH or FASTLANE_USER/FASTLANE_PASSWORD, then run: fastlane upload_testflight")
+      next
     end
+
+    upload_to_testflight(**options)
+    UI.success(external ? "✅ Uploaded and submitted to external beta (#{options[:groups].first})!" : "✅ Uploaded to TestFlight (internal only)!")
   end
 
   desc "Build and upload to TestFlight"
