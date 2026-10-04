@@ -159,4 +159,27 @@ defmodule Schemas.CardTest do
       refute Card.awaiting_answer?(:in_review, false)
     end
   end
+
+  describe "mockup_entries/1" do
+    test "keeps only /attachments/<id> entries, in order, with a binary caption or nil" do
+      mockups = [
+        %{"url" => "/attachments/a1", "caption" => "Empty"},
+        %{"url" => "/attachments/b2"},
+        %{"url" => "https://x/y"},
+        %{"caption" => "no url"},
+        %{"url" => "/attachments/c3", "caption" => 7}
+      ]
+
+      assert Card.mockup_entries(mockups) == [
+               %{id: "a1", caption: "Empty"},
+               %{id: "b2", caption: nil},
+               %{id: "c3", caption: nil}
+             ]
+    end
+
+    test "a non-list value has no mockups" do
+      assert Card.mockup_entries(nil) == []
+      assert Card.mockup_entries("junk") == []
+    end
+  end
 end

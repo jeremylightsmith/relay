@@ -1829,15 +1829,19 @@ defmodule Relay.Cards do
   # (description/acceptance_criteria/spec/plan/ai_result). Derived from
   # @list_card_fields (RLY-67) minus :ai_result, so there is one source of
   # truth for the board's light projection and this even-lighter drawer
-  # projection never drifts from it.
-  @light_card_fields @list_card_fields -- [:ai_result]
+  # projection never drifts from it. RE380 adds back `:mockups` (a small
+  # list of `%{url, caption}`), which the board columns never need but the
+  # mockup viewer must validate `?mockup=<id>` against on a cold open.
+  @light_card_fields (@list_card_fields -- [:ai_result]) ++ [:mockups]
 
   @doc """
   Like `get_card_by_ref/2`, but selects only the card's light columns
   (everything except the heavy
   `description`/`acceptance_criteria`/`spec`/`plan`/`ai_result` text),
   still preloading `owners: :user` and position-ordered
-  `sub_tasks`. The heavy string fields come back `nil`. Powers the
+  `sub_tasks`. The heavy string fields come back `nil`; `mockups` is
+  selected (RE380), so the mockup viewer can validate its `?mockup=` id
+  from the first paint. Powers the
   optimistic card drawer's instant first paint (RLY-68); the drawer's
   async fill re-fetches the full card via `get_card_by_ref/2`.
   Board-scoped exactly like `get_card_by_ref/2`, so a ref can never

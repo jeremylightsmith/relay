@@ -55,7 +55,7 @@ defmodule RelayWeb.AttachmentPathTest do
       refute RelayWeb.attachment_path?(RelayWeb.attachment_view_path(id))
     end
 
-    test "the router serves it with MockupViewerLive" do
+    test "the router serves it with MockupViewerLive, which redirects to the BoardLive viewer" do
       info =
         Phoenix.Router.route_info(
           RelayWeb.Router,

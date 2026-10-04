@@ -57,6 +57,21 @@ defmodule Storybook.Components.CoreComponents.Breadcrumbs do
           id: "crumbs-flow",
           crumbs: scoped("flow", [boards, board, settings, flows])
         }
+      },
+      %Variation{
+        id: :card_mockups,
+        description:
+          "RE380 mockup viewer — Boards / <board> / <card title>, title \"Mockups\". The card " <>
+            "crumb carries `patch: true`, so it patches back to the drawer without a remount.",
+        attributes: %{
+          id: "crumbs-card-mockups",
+          crumbs:
+            scoped("card", [
+              boards,
+              board,
+              %{id: "top-bar-crumb-card", label: "Notification settings", to: "/board/payments?card=PA1", patch: true}
+            ])
+        }
       }
     ]
   end

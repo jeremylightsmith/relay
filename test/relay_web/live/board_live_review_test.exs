@@ -246,6 +246,38 @@ defmodule RelayWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-approve")
   end
 
+  # RE380 — the note is held server-side as it is typed, so a re-render (switching mockups in the
+  # viewer) never wipes a half-written note.
+  test "typing in the reject note keeps it server-side and leaves the panel open",
+       %{conn: conn, board: board, review: review} do
+    in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+    render_async(view)
+    view |> element("#review-request-changes") |> render_click()
+
+    view |> element("#review-reject-form") |> render_change(%{"reject" => %{"note" => "half typed"}})
+
+    assert view |> element("#review-request-note") |> render() =~ "half typed"
+    assert has_element?(view, "#review-reject-panel")
+  end
+
+  test "the drawer's review panel is unchanged by the compact mode (RE380)",
+       %{conn: conn, board: board, review: review} do
+    in_review_card(review)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+    render_async(view)
+
+    assert has_element?(view, "#review-approve", "Approve → Deploy")
+
+    view |> element("#review-request-changes") |> render_click()
+
+    assert has_element?(view, ~s(#review-request-note[rows="3"]))
+    refute has_element?(view, "#review-quote-caption")
+    refute has_element?(view, "#review-note-stays")
+  end
+
   test "the review and needs-input panels are mutually exclusive by status",
        %{conn: conn, review: review, user: user} do
     card = in_review_card(review)

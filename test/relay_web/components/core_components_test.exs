@@ -4081,5 +4081,338 @@ defmodule RelayWeb.CoreComponentsTest do
       refute crumb_class(doc, "#top-bar-crumb-board-segment") =~ "hidden"
       assert doc |> LazyHTML.query("#top-bar-crumb-ellipsis") |> Enum.count() == 0
     end
+
+    test "a crumb carrying patch: true renders a patch link; the rest still navigate (RE380)" do
+      doc =
+        crumbs_doc([
+          %{id: "c-root", label: "Boards", to: "/boards"},
+          %{id: "c-card", label: "Notif", to: "/x?card=1", patch: true}
+        ])
+
+      assert doc |> LazyHTML.query(~s(a#c-card[data-phx-link="patch"])) |> Enum.count() == 1
+      assert doc |> LazyHTML.query(~s(a#c-root[data-phx-link="redirect"])) |> Enum.count() == 1
+    end
+  end
+
+  describe "mockup_preview/1 same-tab tile (RE380)" do
+    defp tile_doc(extra) do
+      base = %{id: "t", src: "/attachments/x", view_href: "/board/b?card=RE1&mockup=x", caption: "Loaded"}
+
+      (&CoreComponents.mockup_preview/1)
+      |> render_component(Map.merge(base, extra))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp tile_attr(doc, attr), do: doc |> LazyHTML.query("a#t-open") |> LazyHTML.attribute(attr)
+
+    test "is a same-tab patch link with no target or rel, and no current treatment by default" do
+      doc = tile_doc(%{})
+
+      assert tile_attr(doc, "href") == ["/board/b?card=RE1&mockup=x"]
+      assert tile_attr(doc, "data-phx-link") == ["patch"]
+      assert tile_attr(doc, "target") == []
+      assert tile_attr(doc, "rel") == []
+      assert tile_attr(doc, "aria-label") == ["Open mockup: Loaded"]
+      assert tile_attr(doc, "aria-current") == []
+
+      [class] = tile_attr(doc, "class")
+      refute class =~ "ring-offset-2"
+      refute class =~ "opacity-80"
+    end
+
+    test "current: true rings the tile and marks it aria-current" do
+      doc = tile_doc(%{current: true})
+
+      assert tile_attr(doc, "aria-current") == ["true"]
+      [class] = tile_attr(doc, "class")
+      assert class =~ "ring-2 ring-primary ring-offset-2 ring-offset-base-100"
+    end
+
+    test "current: false dims the tile and leaves aria-current off" do
+      doc = tile_doc(%{current: false})
+
+      assert tile_attr(doc, "aria-current") == []
+      [class] = tile_attr(doc, "class")
+      assert class =~ "opacity-80"
+      assert class =~ "hover:ring-2 hover:ring-primary"
+    end
+
+    test "replace: true makes the patch replace the history entry" do
+      assert tile_attr(tile_doc(%{replace: true}), "data-phx-link-state") == ["replace"]
+    end
+  end
+
+  describe "card_mockups_section/1 (RE380)" do
+    @section_mockups [%{id: "m-a", caption: "A"}, %{id: "m-b", caption: "B"}, %{id: "m-c", caption: nil}]
+
+    defp section_doc(current) do
+      (&CoreComponents.card_mockups_section/1)
+      |> render_component(
+        id: "s",
+        tile_id: "t",
+        mockups: @section_mockups,
+        current: current,
+        mockup_href: &"/v/#{&1}"
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "with a current mockup: tiles link through mockup_href, one is current, and Viewing/keys show" do
+      doc = section_doc("m-b")
+
+      for {%{id: id}, n} <- Enum.with_index(@section_mockups) do
+        assert doc |> LazyHTML.query("a#t-#{n}-open") |> LazyHTML.attribute("href") == ["/v/#{id}"]
+      end
+
+      assert count(doc, ~s(a[aria-current="true"])) == 1
+      assert count(doc, ~s(a#t-1-open[aria-current="true"])) == 1
+
+      viewing = doc |> LazyHTML.query("#s-viewing") |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+      assert viewing == "Viewing B · 2 of 3"
+      assert doc |> LazyHTML.query("#s-keys") |> LazyHTML.text() =~ "back to card"
+      assert count(doc, "#s #t-tiles.flex.flex-wrap.gap-3") == 1
+    end
+
+    test "with no current mockup (the drawer): no Viewing line, no key hint, the gap-2 row" do
+      doc = section_doc(nil)
+
+      assert count(doc, "#s-viewing") == 0
+      assert count(doc, "#s-keys") == 0
+      assert count(doc, "#t-tiles.flex.flex-wrap.gap-2") == 1
+      assert count(doc, ~s(a[aria-current])) == 0
+    end
+  end
+
+  describe "card_review_panel/1 (RE380)" do
+    @gate %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}
+
+    defp review_doc(extra) do
+      base = %{
+        review_gate: @gate,
+        reject_open: false,
+        reject_form: to_form(%{"note" => ""}, as: :reject),
+        reject_error: nil
+      }
+
+      (&CoreComponents.card_review_panel/1)
+      |> render_component(Map.merge(base, extra))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+    defp attr_of(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+
+    test "the drawer mode labels Approve with the gate's label; compact says just Approve" do
+      doc = review_doc(%{compact: false})
+      assert text(doc, "#review-approve") == "Approve → Done"
+      assert count(doc, "#review-request-changes") == 1
+
+      assert text(review_doc(%{compact: true}), "#review-approve") == "Approve"
+    end
+
+    test "compact with the note open: short hint, 8-row note, quote button, stays-put line, phx-change" do
+      doc =
+        review_doc(%{
+          compact: true,
+          reject_open: true,
+          quote_caption: "B — two panes",
+          reject_form: to_form(%{"note" => "hi"}, as: :reject)
+        })
+
+      hint = text(doc, "#review-reject-panel")
+      assert hint =~ "Returns to"
+      assert hint =~ "Code"
+      refute hint =~ "the reject target set on this stage"
+
+      assert attr_of(doc, "#review-request-note", "rows") == ["8"]
+      assert text(doc, "#review-request-note") == "hi"
+
+      assert text(doc, "#review-quote-caption") == "+ Quote “B — two panes”"
+      assert attr_of(doc, "#review-quote-caption", "data-quote") == ["“B — two panes”"]
+      assert [hook] = attr_of(doc, "#review-quote-caption", "phx-hook")
+      assert hook =~ "QuoteCaption"
+
+      assert text(doc, "#review-note-stays") == "Your note stays put while you switch mockups."
+      assert attr_of(doc, "#review-reject-form", "phx-change") == ["review_reject_change"]
+    end
+
+    test "the drawer mode with the note open keeps the 3-row note and the long hint, and no compact extras" do
+      doc = review_doc(%{compact: false, reject_open: true})
+
+      assert count(doc, "#review-quote-caption") == 0
+      assert count(doc, "#review-note-stays") == 0
+      assert attr_of(doc, "#review-request-note", "rows") == ["3"]
+      assert doc |> LazyHTML.query("#review-reject-panel") |> LazyHTML.text() =~ " — the reject target set on this stage."
+      assert attr_of(doc, "#review-reject-form", "phx-change") == ["review_reject_change"]
+    end
+  end
+
+  describe "card_gate_panel/1 (RE380)" do
+    defp gate_doc(card, extra) do
+      base = %{
+        card: card,
+        archived: false,
+        runs: [],
+        run_flow: nil,
+        advance_available?: false,
+        question: nil,
+        answer_questions: nil,
+        answer_step: 0,
+        answer_values: %{},
+        answer_form: to_form(%{"body" => ""}, as: :answer),
+        body_loading: false,
+        review_gate: nil,
+        reject_open: false,
+        reject_form: to_form(%{"note" => ""}, as: :reject),
+        reject_error: nil
+      }
+
+      (&CoreComponents.card_gate_panel/1)
+      |> render_component(Map.merge(base, extra))
+      |> LazyHTML.from_fragment()
+    end
+
+    test "a needs_input card shows the question stepper and no review panel" do
+      doc =
+        gate_doc(%{status: :needs_input, blocked_since: nil}, %{
+          answer_questions: [%{"prompt" => "Which?", "options" => ["A", "B"], "allow_text" => true}]
+        })
+
+      assert doc |> LazyHTML.query("#needs-input-panel") |> LazyHTML.text() =~ "Which?"
+      assert count(doc, "#review-panel") == 0
+    end
+
+    test "an in_review card with a gate shows the review panel and no question panel" do
+      doc =
+        gate_doc(%{status: :in_review, blocked_since: nil}, %{
+          review_gate: %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}
+        })
+
+      assert count(doc, "#review-panel") == 1
+      assert count(doc, "#needs-input-panel") == 0
+    end
+  end
+
+  describe "card_drawer/1 hidden (RE380)" do
+    defp hidden_drawer_doc(hidden) do
+      (&CoreComponents.card_drawer/1)
+      |> render_component(
+        drawer_attrs(%{status: :in_review}, %{
+          hidden: hidden,
+          card_nav_enabled: true,
+          reject_form: to_form(%{"note" => ""}, as: :reject)
+        })
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "a hidden drawer is display:none, binds no window keys and renders no gate panel" do
+      doc = hidden_drawer_doc(true)
+
+      [class] = doc |> LazyHTML.query("#card-drawer") |> LazyHTML.attribute("class")
+      assert "hidden" in String.split(class)
+      assert count(doc, "#card-drawer[phx-window-keydown]") == 0
+      assert count(doc, "#review-panel") == 0
+      assert count(doc, "#card-drawer-tabs[phx-window-keydown]") == 0
+      assert count(doc, "[phx-window-keydown]") == 0
+    end
+
+    test "a visible drawer keeps its Esc binding and its review panel" do
+      doc = hidden_drawer_doc(false)
+
+      assert count(doc, ~s(#card-drawer[phx-window-keydown="close_drawer"])) == 1
+      assert count(doc, "#review-panel") == 1
+    end
+  end
+
+  describe "mockup_viewer_bar/1 (RE380)" do
+    defp bar_doc(index) do
+      (&CoreComponents.mockup_viewer_bar/1)
+      |> render_component(caption: "B — two panes", index: index, total: 3, back_patch: "/board/b?card=RE1")
+      |> LazyHTML.from_fragment()
+    end
+
+    test "a middle mockup: back link, caption, count, both arrows enabled" do
+      doc = bar_doc(2)
+
+      assert count(doc, ~s(#mockup-viewer-bar-back[aria-label="Back to card"][href="/board/b?card=RE1"])) == 1
+      assert text(doc, "#mockup-viewer-bar-caption") == "B — two panes"
+      assert text(doc, "#mockup-viewer-bar-count") == "2 / 3"
+      assert count(doc, "#mockup-viewer-bar-prev[disabled]") == 0
+      assert count(doc, "#mockup-viewer-bar-next[disabled]") == 0
+    end
+
+    test "the last mockup disables next; the first disables prev" do
+      assert count(bar_doc(3), "#mockup-viewer-bar-next[disabled]") == 1
+      assert count(bar_doc(1), "#mockup-viewer-bar-prev[disabled]") == 1
+    end
+  end
+
+  describe "card_mockup_viewer/1 (RE380)" do
+    test "sheet, framed mockup, key guard and key bindings — and no banner" do
+      first = "11111111-aaaa"
+      mockups = [%{id: first, caption: "Empty"}, %{id: "22222222-bbbb", caption: "Loaded"}]
+
+      assigns = %{mockups: mockups, first: first}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.card_mockup_viewer
+          ref="RE9"
+          card={%{title: "Notif"}}
+          stage_name="Design · Review"
+          stage_owner={:human}
+          mockups={@mockups}
+          current_id={@first}
+          back_patch="/board/b?card=RE9"
+          mockup_href={&"/v/#{&1}"}
+        >
+          <:gate>
+            <p id="gate-probe">g</p>
+          </:gate>
+        </CoreComponents.card_mockup_viewer>
+        """)
+
+      doc = LazyHTML.from_fragment(html)
+
+      sheet = LazyHTML.query(doc, "#mockup-viewer-sheet")
+      assert Enum.count(sheet) == 1
+      assert sheet |> LazyHTML.query("#mockup-viewer-back") |> LazyHTML.text() =~ "Back to card"
+
+      assert sheet |> LazyHTML.query("#mockup-viewer-stage-chip.badge-primary") |> LazyHTML.text() =~
+               "Design · Review"
+
+      assert text(sheet, "#mockup-viewer-card-title") == "Notif"
+      assert Enum.count(LazyHTML.query(sheet, "#gate-probe")) == 1
+
+      sheet_html = LazyHTML.to_html(sheet)
+
+      positions =
+        Enum.map(
+          [
+            ~s(id="mockup-viewer-back"),
+            ~s(id="mockup-viewer-stage-chip"),
+            ">RE9<",
+            ~s(id="mockup-viewer-card-title"),
+            ~s(id="gate-probe")
+          ],
+          fn needle -> sheet_html |> :binary.match(needle) |> elem(0) end
+        )
+
+      assert positions == Enum.sort(positions)
+
+      frame = LazyHTML.query(doc, "iframe#mockup-viewer-frame")
+      assert LazyHTML.attribute(frame, "sandbox") == [RelayWeb.mockup_sandbox()]
+      assert LazyHTML.attribute(frame, "src") == [RelayWeb.attachment_path(first)]
+
+      assert attr_of(doc, "#mockup-viewer", "phx-hook") == ["ArrowKeyGuard"]
+      assert attr_of(doc, "#mockup-viewer", "data-guard-keys") == ["ArrowLeft,ArrowRight,Escape"]
+
+      assert count(doc, ~s(#mockup-viewer-key-prev[phx-key="ArrowLeft"][phx-window-keydown="mockup_prev"])) == 1
+      assert count(doc, ~s(#mockup-viewer-key-next[phx-key="ArrowRight"][phx-window-keydown="mockup_next"])) == 1
+      assert count(doc, ~s(#mockup-viewer-key-back[phx-key="Escape"][phx-window-keydown="mockup_back"])) == 1
+
+      assert count(doc, "#mockup-viewer-banner") == 0
+    end
   end
 end

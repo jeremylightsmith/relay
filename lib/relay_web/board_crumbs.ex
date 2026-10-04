@@ -18,7 +18,8 @@ defmodule RelayWeb.BoardCrumbs do
           required(:id) => String.t(),
           required(:label) => String.t(),
           required(:to) => String.t(),
-          optional(:icon) => String.t()
+          optional(:icon) => String.t(),
+          optional(:patch) => boolean()
         }
 
   @doc "The board page: `Boards / <board>` — the board name is the page's title."
@@ -32,6 +33,16 @@ defmodule RelayWeb.BoardCrumbs do
   @doc "The flow editor and metrics: `Boards / <board> / Settings / Flows / <flow>`."
   @spec flows(%{name: String.t(), slug: String.t()}) :: [crumb()]
   def flows(board), do: settings_section(board) ++ [flows_crumb(board)]
+
+  @doc """
+  The mockup viewer (RE380): `Boards / <board> / <card title>` — the page's title is "Mockups".
+  The card crumb is a `patch` to `card_to` (the card's drawer URL), so it leaves the viewer
+  without remounting the board.
+  """
+  @spec card_mockups(%{name: String.t(), slug: String.t()}, %{title: String.t()}, String.t()) :: [crumb()]
+  def card_mockups(board, card, card_to) do
+    [boards(), board_crumb(board), %{id: "top-bar-crumb-card", label: card.title, to: card_to, patch: true}]
+  end
 
   defp boards do
     %{id: "top-bar-crumb-boards", label: "Boards", to: ~p"/boards", icon: "hero-squares-2x2"}

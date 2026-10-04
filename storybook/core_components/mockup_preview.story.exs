@@ -12,7 +12,7 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
         id: :captioned,
         description:
           "RE374 — the drawer's Mockups tile: an 80px square live miniature (sandboxed iframe, " <>
-            "scaled from 1280px) that opens the framed viewer in a new tab. Hover for the caption.",
+            "scaled from 1280px) that patches to the same-tab mockup viewer. Hover for the caption.",
         attributes: %{
           id: "mockup-preview-story-captioned",
           src: "/images/logo_light_128.png",
@@ -27,6 +27,30 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
           id: "mockup-preview-story-uncaptioned",
           src: "/images/logo_light_128.png",
           view_href: "/storybook/core_components/mockup_preview"
+        }
+      },
+      %Variation{
+        id: :current,
+        description:
+          "RE380 — in the viewer's left sheet, the mockup on screen: ringed (ring-2 ring-primary " <>
+            "ring-offset-2) and aria-current.",
+        attributes: %{
+          id: "mockup-preview-story-current",
+          src: "/images/logo_light_128.png",
+          view_href: "/storybook/core_components/mockup_preview",
+          caption: "Loaded",
+          current: true
+        }
+      },
+      %Variation{
+        id: :not_current,
+        description: "RE380 — another mockup in the sheet: dimmed to 80% until hovered.",
+        attributes: %{
+          id: "mockup-preview-story-not-current",
+          src: "/images/logo_light_128.png",
+          view_href: "/storybook/core_components/mockup_preview",
+          caption: "Error",
+          current: false
         }
       },
       %VariationGroup{
