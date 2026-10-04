@@ -14,6 +14,10 @@ kill_signal = 'SIGTERM'
   PHX_HOST = 'relayboard.fly.dev'
   PORT = '8080'
   ECTO_IPV6 = 'true'
+  APNS_KEY_ID = 'H3974Q3QVQ'
+  APNS_TEAM_ID = 'CR8KT24FBH'
+  APNS_TOPIC = 'com.jeremylightsmith.Relay'
+  APNS_ENV = 'production'
 
 [http_service]
   internal_port = 8080
