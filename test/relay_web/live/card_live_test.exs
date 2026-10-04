@@ -127,6 +127,42 @@ defmodule RelayWeb.CardLiveTest do
       refute has_element?(view, "#card-drawer-next")
     end
 
+    # RE380 — card mode hosts the same-tab mockup viewer too, keeping `board=` in every URL.
+    test "?mockup= opens the chromeless mockup viewer and steps / backs out within /cards/:ref",
+         %{conn: conn, board: board, card: card, ref: ref} do
+      [a, b] =
+        for name <- ~w(a b) do
+          {:ok, attachment} =
+            Relay.Attachments.create_attachment(card, %{
+              filename: "#{name}.html",
+              content_type: Schemas.Attachment.html_type(),
+              bytes: "<p>#{name}</p>"
+            })
+
+          attachment
+        end
+
+      {:ok, _card} =
+        Cards.set_mockups(card, [
+          %{"url" => RelayWeb.attachment_path(a.id), "caption" => "A"},
+          %{"url" => RelayWeb.attachment_path(b.id), "caption" => "B"}
+        ])
+
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}&mockup=#{a.id}")
+      render_async(view)
+
+      assert has_element?(view, "#mockup-viewer")
+      assert has_element?(view, "iframe#mockup-viewer-frame")
+      refute has_element?(view, "#top-bar")
+      refute view |> element("#mockup-viewer") |> render() =~ "drawer:top-[53px]"
+
+      render_hook(view, "mockup_next", %{})
+      assert_patch(view, ~p"/cards/#{ref}?board=#{board.slug}&mockup=#{b.id}")
+
+      view |> element("#mockup-viewer-bar-back") |> render_click()
+      assert_patch(view, ~p"/cards/#{ref}?board=#{board.slug}")
+    end
+
     test "the native card host does not mount the ArrowKeyGuard hook", %{conn: conn, board: board, ref: ref} do
       {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
       render_async(view)
