@@ -25,6 +25,11 @@ sharing behavior.
   flash and API alike). A stage's **type** changes only through `Relay.Cards.update_stage/2`,
   which wraps `update_stage/2` and re-snaps resident cards when the type changed (it lives in
   Cards because `Boards → Cards` would be a boundary cycle).
+  Over REST (`RelayWeb.Api.StageController`, any board key): `GET|POST /api/stages`,
+  `PATCH|DELETE /api/stages/:id`, `POST /api/stages/:id/place`, and
+  `PUT|DELETE /api/stages/:id/substages/:lane`; the refusals map to 409 (`last_stage`,
+  `not_empty` with `live`/`archived` counts, `in_use_by_flow` with `flows`, `public_intake`)
+  and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).

@@ -44,6 +44,34 @@ defmodule RelayWeb.Api.BoardControllerTest do
     assert sub["wip_limit"] == nil
   end
 
+  # RE384 — the board's stage objects carry the full /api/stages shape.
+  test "stage JSON carries description, collapsed_by_default, reject_to_stage_id and a substage display_name",
+       %{conn: conn, board: board} do
+    code =
+      insert(:stage,
+        board: board,
+        name: "Code",
+        type: :work,
+        position: 1,
+        description: "d",
+        collapsed_by_default: true
+      )
+
+    _review = insert(:stage, board: board, name: "Code:Review", type: :review, position: 2, parent: code)
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+
+    main = Enum.find(body["stages"], &(&1["name"] == "Code"))
+    assert main["description"] == "d"
+    assert main["collapsed_by_default"] == true
+    assert Map.has_key?(main, "reject_to_stage_id")
+    assert main["reject_to_stage_id"] == nil
+    assert main["display_name"] == "Code"
+
+    sub = Enum.find(body["stages"], &(&1["name"] == "Code:Review"))
+    assert sub["display_name"] == "Code · Review"
+  end
+
   test "stages list each substage directly under its parent", %{conn: conn, board: board} do
     code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     _ship = insert(:stage, board: board, name: "Ship", type: :work, position: 2)

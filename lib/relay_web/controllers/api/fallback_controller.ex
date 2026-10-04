@@ -2,6 +2,7 @@ defmodule RelayWeb.Api.FallbackController do
   @moduledoc "Maps context error tuples to JSON error responses."
   use RelayWeb, :controller
 
+  alias Relay.Boards
   alias Relay.Cards
   alias RelayWeb.Api.ErrorJSON
   alias RelayWeb.ChangesetErrors
@@ -90,6 +91,21 @@ defmodule RelayWeb.Api.FallbackController do
     |> put_view(json: ErrorJSON)
     |> render(:error, code: "owner_not_member", message: Cards.owner_error_message())
   end
+
+  # RE384 — the stage guard rails. Every sentence comes from `Relay.Boards.stage_refusal_message/1`,
+  # the one rendering Board Settings shares. Losing cards or breaking the board is a 409 conflict
+  # with the board's current state; a request that names the wrong kind of stage is a 422.
+  def call(conn, {:error, {:not_empty, %{live: live, archived: archived}} = reason}),
+    do: stage_refusal(conn, :conflict, "not_empty", reason, %{live: live, archived: archived})
+
+  def call(conn, {:error, {:in_use_by_flow, keys} = reason}),
+    do: stage_refusal(conn, :conflict, "in_use_by_flow", reason, %{flows: keys})
+
+  def call(conn, {:error, reason}) when reason in [:last_stage, :not_empty, :public_intake],
+    do: stage_refusal(conn, :conflict, Atom.to_string(reason), reason, %{})
+
+  def call(conn, {:error, reason}) when reason in [:invalid_anchor, :not_a_main_stage],
+    do: stage_refusal(conn, :unprocessable_entity, Atom.to_string(reason), reason, %{})
 
   def call(conn, {:error, :stale_version}) do
     conn
@@ -253,6 +269,13 @@ defmodule RelayWeb.Api.FallbackController do
     |> put_status(:unprocessable_entity)
     |> put_view(json: ErrorJSON)
     |> render(:error, code: "invalid_events", message: "events must be a list")
+  end
+
+  defp stage_refusal(conn, status, code, reason, details) do
+    conn
+    |> put_status(status)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: code, message: Boards.stage_refusal_message(reason), details: details)
   end
 
   # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see

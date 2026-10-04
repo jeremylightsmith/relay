@@ -131,7 +131,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert code.id == data["stage_id"]
   end
 
-  test "GET /api/board stage payloads carry type/ai_enabled, not owner/lane/approval_gate/reject_to_stage_id", %{
+  test "GET /api/board stage payloads carry type/ai_enabled/reject_to_stage_id, not owner/lane/approval_gate", %{
     conn: conn,
     review: review
   } do
@@ -143,6 +143,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     refute Map.has_key?(payload, "owner")
     refute Map.has_key?(payload, "approval_gate")
     refute Map.has_key?(payload, "lane")
-    refute Map.has_key?(payload, "reject_to_stage_id")
+    # RE384 — the shared stage shape (`/api/stages` too) exposes the configured reject target.
+    assert Map.has_key?(payload, "reject_to_stage_id")
   end
 end

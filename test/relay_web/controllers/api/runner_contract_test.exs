@@ -216,6 +216,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
     {:ok, mockup_id} = Schemas.Attachment.id_from_path(mockup_url)
     assert exclusive.conn |> get(Schemas.Attachment.api_path(mockup_id)) |> response(200) == mockup_html
 
+    # RE384 — `./relay stages` / `./relay stage …` read stage objects off `/api/stages`; the key
+    # set is recorded from the real route, never typed.
+    [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
+
     document = %{
       "version" => 9,
       "mockups" => %{
@@ -255,8 +259,13 @@ defmodule RelayWeb.Api.RunnerContractTest do
         # RE320 — `./relay` mirrors both as RATE_LIMIT_WINDOWS / RATE_LIMIT_REASONS; the server
         # stores nil for any value outside them, so a drift would silently erase the pause.
         "rate_limit_windows" => Schemas.Runner.rate_limit_windows(),
-        "rate_limit_reasons" => Schemas.Runner.rate_limit_reasons()
+        "rate_limit_reasons" => Schemas.Runner.rate_limit_reasons(),
+        # RE384 — `./relay stage lane|add|set` validate against these before calling the API.
+        "stage_lanes" => stringify(Schemas.Stage.sublane_types()),
+        "stage_types" => stringify(Schemas.Stage.types()),
+        "stage_categories" => stringify(Schemas.Stage.categories())
       },
+      "stages" => %{"stage_keys" => stage_object |> Map.keys() |> Enum.sort()},
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
         "shared_clean_agent" => normalize(shared_clean_agent),
