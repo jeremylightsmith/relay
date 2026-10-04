@@ -230,6 +230,13 @@ defmodule RelayWeb.Router do
     post "/cards/:ref/tasks", TaskController, :create
     patch "/cards/:ref/tasks/:id", TaskController, :update
     delete "/cards/:ref/tasks/:id", TaskController, :delete
+    get "/stages", StageController, :index
+    post "/stages", StageController, :create
+    patch "/stages/:id", StageController, :update
+    delete "/stages/:id", StageController, :delete
+    post "/stages/:id/place", StageController, :place
+    put "/stages/:id/substages/:lane", StageController, :enable_lane
+    delete "/stages/:id/substages/:lane", StageController, :disable_lane
     post "/cards/:ref/move", CardController, :move
     post "/cards/:ref/archive", CardController, :archive
     post "/cards/:ref/unarchive", CardController, :unarchive

@@ -2093,9 +2093,27 @@ defmodule Relay.Cards do
   end
 
   @doc """
+  The ONE entry point for editing a stage's configuration (RE384) — Board Settings and the
+  REST API both call it. Delegates to `Relay.Boards.update_stage/2` (same attrs, atom or
+  string keys) and, when the write changed the stage's `type`, re-snaps its resident cards
+  via `snap_cards_in/1`. Returns `Boards.update_stage/2`'s result unchanged. Lives here, not
+  in `Relay.Boards`, because `Boards → Cards` would be a boundary cycle.
+  """
+  def update_stage(%Stage{} = stage, attrs) do
+    case Boards.update_stage(stage, attrs) do
+      {:ok, %Stage{type: type} = updated} = result when type != stage.type ->
+        :ok = snap_cards_in(updated)
+        result
+
+      result ->
+        result
+    end
+  end
+
+  @doc """
   Re-snaps every card currently in `stage` to a status valid for the stage's `type` (ADR 0003):
   a card whose status is already valid is left alone; otherwise it takes the type's default via
-  `set_status/2` (broadcasting the change). Called after a stage's type changes in settings.
+  `set_status/2` (broadcasting the change). Run by `update_stage/2` when a stage's type changes.
   """
   def snap_cards_in(%Stage{} = stage) do
     Card

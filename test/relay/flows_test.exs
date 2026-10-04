@@ -633,6 +633,49 @@ defmodule Relay.FlowsTest do
     end
   end
 
+  describe "trigger_fields/0 and enabled_flow_keys_using/1 (RE384)" do
+    test "trigger_fields/0 lists the three trigger stage fields" do
+      assert Flows.trigger_fields() == [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
+    end
+
+    test "returns the sorted keys of enabled flows using any of the stages" do
+      board = insert(:board)
+      s1 = insert(:stage, board: board)
+      s2 = insert(:stage, board: board)
+      other = fn -> insert(:stage, board: board).id end
+
+      insert(:flow,
+        board: board,
+        key: "b",
+        enabled: true,
+        pulls_from_stage_id: s1.id,
+        works_in_stage_id: other.(),
+        lands_on_stage_id: other.()
+      )
+
+      insert(:flow,
+        board: board,
+        key: "a",
+        enabled: true,
+        pulls_from_stage_id: other.(),
+        works_in_stage_id: other.(),
+        lands_on_stage_id: s2.id
+      )
+
+      insert(:flow,
+        board: board,
+        key: "c",
+        enabled: false,
+        pulls_from_stage_id: other.(),
+        works_in_stage_id: s1.id,
+        lands_on_stage_id: other.()
+      )
+
+      assert Flows.enabled_flow_keys_using([s1.id, s2.id]) == ["a", "b"]
+      assert Flows.enabled_flow_keys_using([]) == []
+    end
+  end
+
   describe "delete_flow/1" do
     test "deletes a disabled flow and cascades its version snapshots" do
       ctx = board_with_stages()

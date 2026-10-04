@@ -31,6 +31,32 @@ defmodule Relay.Flows do
 
   @trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
 
+  @doc "The three trigger stage fields every flow carries (pulls from / works in / lands on)."
+  def trigger_fields, do: @trigger_fields
+
+  @doc """
+  Keys of the **enabled** flows any of whose trigger stages is in `stage_ids` — sorted and
+  deduped. The stage guard rails (`Relay.Boards.delete_stage/1`, `disable_lane/2`) refuse a
+  stage an enabled flow still uses; a disabled flow's trigger is simply nilified by the FK.
+  """
+  def enabled_flow_keys_using([]), do: []
+
+  def enabled_flow_keys_using(stage_ids) when is_list(stage_ids) do
+    uses_stage =
+      Enum.reduce(@trigger_fields, dynamic(false), fn field, acc ->
+        dynamic([f], ^acc or field(f, ^field) in ^stage_ids)
+      end)
+
+    Repo.all(
+      from f in Flow,
+        where: f.enabled == true,
+        where: ^uses_stage,
+        distinct: true,
+        order_by: f.key,
+        select: f.key
+    )
+  end
+
   @doc "The board's flows in stable `key` order, trigger stages preloaded."
   def list_flows(%Board{id: board_id}) do
     Repo.all(

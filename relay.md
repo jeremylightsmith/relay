@@ -91,6 +91,12 @@ no `jq`). Non-zero exit on any error. Long text args accept `-` (stdin) or `@pat
 |---|---|
 | `./relay board` | The board: stages with their cards |
 | `./relay card RLY-12` | One card: spec, plan, branch, timeline |
+| `./relay stages` | The board's stages in board order: position, name, category, type, `ai:`, `wip:`, `substages:` — substage rows indented beneath their main stage |
+| `./relay stage add "Triage" --after Spec [--type queue] [--description D] [--ai] [--wip N]` | Add a main stage beside an anchor (`--before`/`--after`, adopting the anchor's category) or at the end of a `--category` — exactly one of the three |
+| `./relay stage set Code [--name N] [--description D] [--type T] [--ai\|--no-ai] [--wip N\|none] [--collapsed\|--no-collapsed] [--reject-to STAGE\|none]` | Change a main stage's settings; at least one option. A `--type` change re-snaps its cards' statuses |
+| `./relay stage move Code --before Spec` | Place a main stage beside another (`--before`/`--after`); it adopts the anchor's category |
+| `./relay stage lane Code review on` · `./relay stage lane Code done off` | Turn a main stage's `review`/`done` substage on or off |
+| `./relay stage rm Triage` | Remove a main stage and its substages — refused (409, the server's sentence) when it can't be done safely; see *Restructuring a board* |
 | `./relay search "words"` | Find a card by ref or title — ref/bare number first, then title; `--archived`, `--limit` |
 | `./relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `./relay runs RLY-12` | The card's runs + node executions, full failure detail |
@@ -132,6 +138,24 @@ Full table with every flag: `$RELAY_URL/docs/cli`.
 **Create & place a card.** `create` drops it in `--stage` (default Backlog). Placement is
 positional: put it left of where the work starts; it becomes pullable when an AI column sits to
 its right. Add a `--tag` to group it.
+
+**Restructuring a board.** Start from `./relay stages`. Every `stage` verb addresses a
+**main** stage by its **exact name or numeric id** — a name two main stages share is refused
+with both ids (pass the id), and substages are reached only through `stage lane`. `stage add`
+and `stage move` place a stage `--before`/`--after` an anchor main stage and **adopt the
+anchor's category**; `stage add --category C` appends to the end of that category instead. A
+`stage set --type` change on a stage that holds cards is allowed and **re-snaps** their
+statuses to ones the new type allows. `stage rm` (and `stage lane … off`) refuses with the
+server's sentence and a non-zero exit — nothing is written — when the stage, or any of its
+substages:
+- holds cards, **live or archived** (the refusal counts both — move them out first);
+- is used by an **enabled** flow (pulls from, works in or lands on it — the refusal names the
+  flows; disable or re-point them first);
+- is the board's **public intake** stage (pick another in Public settings first);
+- is the board's **last** main stage.
+
+A stage that is another stage's **reject-to** target *may* be removed: the reject falls back to
+the previous main stage.
 
 **Depend one card on another.** Dependencies exist to head off *parallel implementations of the
 same thing*, which land as bad merges. Two shapes make one:

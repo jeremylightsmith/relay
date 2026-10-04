@@ -193,6 +193,22 @@
     },
     "manifest_path": "/api/scaffold"
   },
+  "stages": {
+    "stage_keys": [
+      "ai_enabled",
+      "category",
+      "collapsed_by_default",
+      "description",
+      "display_name",
+      "id",
+      "name",
+      "parent_id",
+      "position",
+      "reject_to_stage_id",
+      "type",
+      "wip_limit"
+    ]
+  },
   "talk_claim": {
     "first_turn": {
       "author": "Test User",
@@ -386,6 +402,23 @@
         "cancelled"
       ]
     },
+    "stage_categories": [
+      "unstarted",
+      "planning",
+      "in_progress",
+      "complete"
+    ],
+    "stage_lanes": [
+      "review",
+      "done"
+    ],
+    "stage_types": [
+      "queue",
+      "work",
+      "planning",
+      "review",
+      "done"
+    ],
     "talk_event_kinds": [
       "user",
       "tool",

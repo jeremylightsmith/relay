@@ -227,7 +227,7 @@ defmodule Relay.BoardsStageConfigTest do
       code = stage_named(board, "Code")
       insert(:card, stage: code)
 
-      assert {:error, :not_empty} = Boards.delete_stage(code)
+      assert {:error, {:not_empty, %{live: 1, archived: 0}}} = Boards.delete_stage(code)
       assert Boards.get_stage(board, code.id)
     end
 
@@ -237,7 +237,7 @@ defmodule Relay.BoardsStageConfigTest do
       {:ok, child} = Boards.enable_lane(code, :review)
       insert(:card, stage: child)
 
-      assert {:error, :not_empty} = Boards.delete_stage(code)
+      assert {:error, {:not_empty, %{live: 1, archived: 0}}} = Boards.delete_stage(code)
       assert Boards.get_stage(board, code.id)
       assert Boards.get_stage(board, child.id)
     end
@@ -247,6 +247,301 @@ defmodule Relay.BoardsStageConfigTest do
       only = insert(:stage, board: board, position: 1)
 
       assert {:error, :last_stage} = Boards.delete_stage(only)
+    end
+  end
+
+  describe "create_stage/2 with attrs (RE384)" do
+    test "inserts after an anchor, adopting its category" do
+      board = seeded_board()
+      spec = stage_named(board, "Spec")
+
+      assert {:ok, stage} = Boards.create_stage(board, %{name: "Triage", after: spec, type: :queue})
+      assert stage.category == :planning
+      assert stage.type == :queue
+
+      assert main_names(board) ==
+               ["Backlog", "Next up", "Spec", "Triage", "Plan", "Code", "Review", "Deploy", "Done"]
+    end
+
+    test "inserts before an anchor with the category's default type" do
+      board = seeded_board()
+
+      assert {:ok, stage} = Boards.create_stage(board, %{name: "Inbox", before: stage_named(board, "Backlog")})
+      assert stage.category == :unstarted
+      assert stage.type == :queue
+      assert hd(main_names(board)) == "Inbox"
+    end
+
+    test "without an anchor appends to its category with the given settings" do
+      board = seeded_board()
+
+      assert {:ok, stage} =
+               Boards.create_stage(board, %{
+                 name: "QA",
+                 category: :in_progress,
+                 description: "d",
+                 wip_limit: 2,
+                 ai_enabled: true,
+                 collapsed_by_default: true
+               })
+
+      assert stage.type == :work
+      assert stage.ai_enabled == true
+      assert stage.wip_limit == 2
+      assert stage.description == "d"
+      assert stage.collapsed_by_default == true
+
+      assert main_names(board) ==
+               ["Backlog", "Next up", "Spec", "Plan", "Code", "Review", "Deploy", "QA", "Done"]
+    end
+
+    test "a category that differs from the anchor's is a changeset error" do
+      board = seeded_board()
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Boards.create_stage(board, %{name: "X", category: :complete, after: stage_named(board, "Spec")})
+
+      assert "must match the anchor stage's category" in errors_on(changeset).category
+      assert length(main_names(board)) == 8
+    end
+
+    test "a string category equal to the anchor's is accepted" do
+      board = seeded_board()
+
+      assert {:ok, %{category: :planning}} =
+               Boards.create_stage(board, %{name: "X", category: "planning", after: stage_named(board, "Spec")})
+    end
+
+    test "invalid attrs insert nothing and broadcast nothing" do
+      board = seeded_board()
+      :ok = Relay.Events.subscribe(board.id)
+      before = length(Boards.list_stages(board))
+
+      assert {:error, blank} = Boards.create_stage(board, %{name: "  ", category: :planning})
+      assert errors_on(blank)[:name]
+
+      assert {:error, no_category} = Boards.create_stage(board, %{name: "X"})
+      assert "can't be blank" in errors_on(no_category).category
+
+      assert {:error, bad_wip} = Boards.create_stage(board, %{name: "X", category: :planning, wip_limit: 0})
+      assert errors_on(bad_wip)[:wip_limit]
+
+      assert length(Boards.list_stages(board)) == before
+      refute_receive {:stages_changed, _}
+    end
+
+    test "a substage or another board's stage is an invalid anchor" do
+      board = seeded_board()
+      other = Boards.get_or_create_default_board(insert(:user))
+      before = length(Boards.list_stages(board))
+
+      assert {:error, :invalid_anchor} =
+               Boards.create_stage(board, %{name: "X", after: stage_named(board, "Spec:Review")})
+
+      assert {:error, :invalid_anchor} =
+               Boards.create_stage(board, %{name: "X", after: stage_named(other, "Spec")})
+
+      assert length(Boards.list_stages(board)) == before
+    end
+
+    test "keeps positions unique with substages above every main stage" do
+      board = seeded_board()
+      assert {:ok, _} = Boards.create_stage(board, %{name: "Y", after: stage_named(board, "Plan")})
+
+      stages = Boards.list_stages(board)
+      positions = Enum.map(stages, & &1.position)
+      assert positions == Enum.uniq(positions)
+
+      {subs, mains} = Enum.split_with(stages, & &1.parent_id)
+      assert Enum.min(Enum.map(subs, & &1.position)) > Enum.max(Enum.map(mains, & &1.position))
+    end
+  end
+
+  describe "place_stage/2 (RE384)" do
+    test "moves a stage before an anchor, adopting its category but not changing its type" do
+      board = seeded_board()
+      board_id = board.id
+      :ok = Relay.Events.subscribe(board_id)
+
+      assert {:ok, moved} = Boards.place_stage(stage_named(board, "Deploy"), before: stage_named(board, "Backlog"))
+      assert moved.category == :unstarted
+      assert moved.type == :work
+      assert Enum.take(main_names(board), 2) == ["Deploy", "Backlog"]
+
+      positions =
+        board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.map(& &1.position)
+
+      assert positions == Enum.to_list(1..8)
+      assert_receive {:stages_changed, ^board_id}
+    end
+
+    test "moves a stage after an anchor in another category" do
+      board = seeded_board()
+
+      assert {:ok, moved} = Boards.place_stage(stage_named(board, "Backlog"), after: stage_named(board, "Plan"))
+      assert moved.category == :planning
+      assert main_names(board) == ["Next up", "Spec", "Plan", "Backlog", "Code", "Review", "Deploy", "Done"]
+    end
+
+    test "placing a stage where it already is writes and broadcasts nothing" do
+      board = seeded_board()
+      plan = stage_named(board, "Plan")
+      :ok = Relay.Events.subscribe(board.id)
+
+      assert {:ok, ^plan} = Boards.place_stage(plan, after: stage_named(board, "Spec"))
+      refute_receive {:stages_changed, _}
+    end
+
+    test "refuses itself, a substage or another board's stage as anchor" do
+      board = seeded_board()
+      other = Boards.get_or_create_default_board(insert(:user))
+      spec = stage_named(board, "Spec")
+
+      assert {:error, :invalid_anchor} = Boards.place_stage(spec, before: spec)
+      assert {:error, :invalid_anchor} = Boards.place_stage(spec, after: stage_named(board, "Spec:Done"))
+      assert {:error, :invalid_anchor} = Boards.place_stage(spec, after: stage_named(other, "Plan"))
+    end
+
+    test "refuses to move a substage" do
+      board = seeded_board()
+
+      assert {:error, :not_a_main_stage} =
+               Boards.place_stage(stage_named(board, "Spec:Done"), before: stage_named(board, "Backlog"))
+    end
+  end
+
+  describe "delete_stage/1 guard rails (RE384)" do
+    defp archived_card(stage), do: insert(:card, stage: stage, archived_at: DateTime.utc_now(:second))
+
+    # Each enabled flow needs its own pulls-from stage (one enabled flow per pulls-from stage).
+    defp enabled_flow(board, key, field, stage, pulls_from \\ "Backlog") do
+      triggers =
+        Map.put(
+          %{
+            pulls_from_stage_id: stage_named(board, pulls_from).id,
+            works_in_stage_id: stage_named(board, "Code").id,
+            lands_on_stage_id: stage_named(board, "Review").id
+          },
+          field,
+          stage.id
+        )
+
+      insert(:flow, Map.merge(%{board: board, key: key, enabled: true}, triggers))
+    end
+
+    test "an empty stage with no enabled flows is deleted" do
+      board = seeded_board()
+      deploy = stage_named(board, "Deploy")
+
+      assert {:ok, _} = Boards.delete_stage(deploy)
+      assert Boards.get_stage(board, deploy.id) == nil
+    end
+
+    test "archived cards count" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      archived_card(code)
+
+      assert {:error, {:not_empty, %{live: 0, archived: 1}}} = Boards.delete_stage(code)
+    end
+
+    test "counts live and archived cards across the stage and its substages" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      {:ok, review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: code)
+      insert(:card, stage: code)
+      archived_card(review)
+
+      assert {:error, {:not_empty, %{live: 2, archived: 1}}} = Boards.delete_stage(code)
+    end
+
+    test "refuses a stage an enabled flow works in" do
+      board = seeded_board()
+      deploy = stage_named(board, "Deploy")
+      flow = enabled_flow(board, "ship", :works_in_stage_id, deploy)
+
+      assert {:error, {:in_use_by_flow, ["ship"]}} = Boards.delete_stage(deploy)
+      assert Repo.reload!(flow).works_in_stage_id == deploy.id
+    end
+
+    test "refuses a stage whose substage enabled flows land on, naming them sorted" do
+      board = seeded_board()
+      plan_done = stage_named(board, "Plan:Done")
+      enabled_flow(board, "zeta", :lands_on_stage_id, plan_done)
+      enabled_flow(board, "alpha", :lands_on_stage_id, plan_done, "Next up")
+
+      assert {:error, {:in_use_by_flow, ["alpha", "zeta"]}} = Boards.delete_stage(stage_named(board, "Plan"))
+    end
+
+    test "a disabled flow does not block the delete and its trigger is nilified" do
+      board = seeded_board()
+      deploy = stage_named(board, "Deploy")
+
+      flow =
+        insert(:flow,
+          board: board,
+          key: "idle",
+          enabled: false,
+          works_in_stage_id: deploy.id
+        )
+
+      assert {:ok, _} = Boards.delete_stage(deploy)
+      assert Repo.reload!(flow).works_in_stage_id == nil
+    end
+
+    test "refuses the public intake stage" do
+      board = seeded_board()
+      deploy = stage_named(board, "Deploy")
+      {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: deploy.id})
+
+      assert {:error, :public_intake} = Boards.delete_stage(deploy)
+    end
+
+    test "a reject-to target may be deleted and the reference is nilified" do
+      board = seeded_board()
+      plan = stage_named(board, "Plan")
+      review = stage_named(board, "Review")
+      assert review.reject_to_stage_id == plan.id
+
+      assert {:ok, _} = Boards.delete_stage(plan)
+      assert Repo.reload!(review).reject_to_stage_id == nil
+    end
+
+    test "the last stage guard comes first" do
+      board = insert(:board)
+      only = insert(:stage, board: board, position: 1)
+      archived_card(only)
+
+      assert {:error, :last_stage} = Boards.delete_stage(only)
+    end
+
+    test "refuses a substage" do
+      board = seeded_board()
+      assert {:error, :not_a_main_stage} = Boards.delete_stage(stage_named(board, "Spec:Review"))
+    end
+  end
+
+  describe "stage_refusal_message/1 (RE384)" do
+    test "renders every refusal reason" do
+      assert Boards.stage_refusal_message(:last_stage) == "A board needs at least one stage."
+
+      assert Boards.stage_refusal_message({:not_empty, %{live: 2, archived: 1}}) ==
+               "That stage still holds 2 live and 1 archived card(s) — move them out first."
+
+      assert Boards.stage_refusal_message(:not_empty) == "That lane still has cards — move them out first."
+
+      assert Boards.stage_refusal_message({:in_use_by_flow, ["code", "plan"]}) ==
+               "Flow(s) code, plan use this stage — disable or re-point them first."
+
+      assert Boards.stage_refusal_message(:public_intake) ==
+               "This is the public intake stage — pick another in Public settings first."
+
+      assert Boards.stage_refusal_message(:invalid_anchor) ==
+               "before/after must name another main stage on this board."
+
+      assert Boards.stage_refusal_message(:not_a_main_stage) ==
+               "That is a substage — address its main stage instead (substages follow their parent)."
     end
   end
 
@@ -276,9 +571,34 @@ defmodule Relay.BoardsStageConfigTest do
       backlog = stage_named(board, "Backlog")
       insert(:card, stage: backlog)
 
-      {:error, :not_empty} = Boards.delete_stage(backlog)
+      {:error, {:not_empty, _counts}} = Boards.delete_stage(backlog)
       {:error, %Ecto.Changeset{}} = Boards.update_stage(backlog, %{name: ""})
       {:ok, _} = Boards.reorder_stage(backlog, :up)
+
+      refute_receive {:stages_changed, _board_id}
+    end
+
+    test "delete guard refusals stay silent (RE384)" do
+      board = seeded_board()
+      :ok = Relay.Events.subscribe(board.id)
+      code = stage_named(board, "Code")
+      insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      deploy = stage_named(board, "Deploy")
+
+      insert(:flow,
+        board: board,
+        key: "ship",
+        enabled: true,
+        pulls_from_stage_id: stage_named(board, "Backlog").id,
+        works_in_stage_id: deploy.id,
+        lands_on_stage_id: stage_named(board, "Done").id
+      )
+
+      {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: stage_named(board, "Next up").id})
+
+      {:error, {:not_empty, _}} = Boards.delete_stage(code)
+      {:error, {:in_use_by_flow, ["ship"]}} = Boards.delete_stage(deploy)
+      {:error, :public_intake} = Boards.delete_stage(stage_named(board, "Next up"))
 
       refute_receive {:stages_changed, _board_id}
     end

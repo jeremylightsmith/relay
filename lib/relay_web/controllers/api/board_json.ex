@@ -5,7 +5,7 @@ defmodule RelayWeb.Api.BoardJSON do
   def show(%{board: board, stages: stages, cards: cards}) do
     %{
       board: %{id: board.id, name: board.name, key: board.key},
-      stages: Enum.map(stages, &CardJSON.stage/1),
+      stages: Enum.map(stages, &CardJSON.stage(&1, stages)),
       cards: Enum.map(cards, &CardJSON.data(board, &1, stages)),
       needs_you: Cards.needs_you_rollup(board)
     }

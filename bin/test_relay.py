@@ -7098,6 +7098,13 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         self.assertEqual((relay.RATE_LIMIT_REASON_LIMIT, relay.RATE_LIMIT_REASON_REJECTED),
                          relay.RATE_LIMIT_REASONS)
 
+    def test_stage_vocabularies_match_the_fixture(self):
+        # RE384: `./relay stage` offers these as argparse choices; a drift would let the CLI
+        # refuse a value the server accepts (or send one it 422s).
+        self.assertEqual(relay.STAGE_LANES, tuple(self.vocab["stage_lanes"]))
+        self.assertEqual(relay.STAGE_TYPES, tuple(self.vocab["stage_types"]))
+        self.assertEqual(relay.STAGE_CATEGORIES, tuple(self.vocab["stage_categories"]))
+
 
 class RunnerIdentTest(unittest.TestCase):
     """The `runner` dict both claim and heartbeat put on the wire. Pure and named for the
@@ -9761,6 +9768,176 @@ class TalkOutcomeTest(unittest.TestCase):
     def test_a_revoked_turn_reports_stopped_not_failed(self):
         relay.report_talk_outcome(7, "stopped", None, "")
         self.assertEqual(self.posted[0][2]["status"], "stopped")
+
+
+class StageCommandsTest(unittest.TestCase):
+    """RE384 — relay stages and relay stage add|set|move|lane|rm: the requests each verb sends
+    (one GET /api/stages to resolve names, then the write) and what it prints."""
+
+    @staticmethod
+    def _stage(id, name, category="planning", type="planning", ai=False, wip=None, parent=None,
+               display_name=None, position=0):
+        return {"id": id, "name": name, "display_name": display_name or name,
+                "category": category, "type": type, "ai_enabled": ai, "position": position,
+                "wip_limit": wip, "parent_id": parent, "description": None,
+                "collapsed_by_default": False, "reject_to_stage_id": None}
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        self.stages = [
+            self._stage(1, "Backlog", "unstarted", "queue", position=0),
+            self._stage(3, "Spec", position=1),
+            self._stage(4, "Plan", position=2),
+            self._stage(5, "Code", "in_progress", "work", ai=True, wip=3, position=3),
+            self._stage(9, "Review", "in_progress", "review", parent=5,
+                        display_name="Code · Review", position=0),
+        ]
+        for s in self.stages:
+            self.assertEqual(set(s), set(CONTRACT["stages"]["stage_keys"]))
+        self.write_response = {"data": self.stages[3]}
+        self.fail_on = None
+
+        def fake(method, path, body=None, **k):
+            self.sent.append((method, path, body))
+            if method == self.fail_on:
+                raise relay.Died("API 409: refused")
+            if method == "GET" and path == "/api/stages":
+                return {"data": copy.deepcopy(self.stages)}
+            return copy.deepcopy(self.write_response)
+
+        relay.api = fake
+
+    def _run(self, argv):
+        args = relay.build_parser().parse_args(argv)
+        return capture(args.func, args)
+
+    def _refused(self, argv):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            self._run(argv)
+        return err.getvalue()
+
+    def _writes(self):
+        return [s for s in self.sent if s[0] != "GET"]
+
+    def test_add_after_resolves_the_anchor_then_posts(self):
+        self._run(["stage", "add", "Triage", "--after", "Spec", "--type", "queue"])
+        self.assertEqual(self.sent, [("GET", "/api/stages", None),
+                                     ("POST", "/api/stages",
+                                      {"name": "Triage", "after": 3, "type": "queue"})])
+
+    def test_add_with_category_sends_every_given_option(self):
+        self._run(["stage", "add", "QA", "--category", "in_progress", "--description", "d",
+                   "--ai", "--wip", "2"])
+        self.assertEqual(self._writes(), [("POST", "/api/stages", {
+            "name": "QA", "category": "in_progress", "description": "d", "ai_enabled": True,
+            "wip_limit": 2})])
+
+    def test_add_needs_exactly_one_placement(self):
+        self._refused(["stage", "add", "X"])
+        self._refused(["stage", "add", "X", "--category", "planning", "--after", "Spec"])
+        self.assertEqual(self.sent, [])
+
+    def test_set_patches_the_given_fields(self):
+        self._run(["stage", "set", "Code", "--name", "Build", "--wip", "3",
+                   "--description", "sort new asks"])
+        self.assertEqual(self._writes(), [("PATCH", "/api/stages/5", {
+            "name": "Build", "wip_limit": 3, "description": "sort new asks"})])
+
+    def test_set_clears_and_negates(self):
+        self._run(["stage", "set", "Code", "--wip", "none", "--reject-to", "none", "--no-ai",
+                   "--collapsed", "--type", "review"])
+        self.assertEqual(self._writes(), [("PATCH", "/api/stages/5", {
+            "wip_limit": None, "reject_to_stage_id": None, "ai_enabled": False,
+            "collapsed_by_default": True, "type": "review"})])
+
+    def test_set_reject_to_resolves_the_target(self):
+        self._run(["stage", "set", "Code", "--reject-to", "Plan"])
+        self.assertEqual(self._writes(), [("PATCH", "/api/stages/5", {"reject_to_stage_id": 4})])
+
+    def test_set_with_nothing_to_change_refuses_before_any_request(self):
+        err = self._refused(["stage", "set", "Code"])
+        self.assertIn("nothing to change", err)
+        self.assertEqual(self.sent, [])
+
+    def test_set_refuses_a_bad_wip_before_any_write(self):
+        for bad in ("0", "abc"):
+            err = self._refused(["stage", "set", "Code", "--wip", bad])
+            self.assertIn("--wip takes a positive integer or none", err)
+        self.assertEqual(self._writes(), [])
+
+    def test_set_addresses_a_stage_by_numeric_id(self):
+        self._run(["stage", "set", "5", "--name", "Build"])
+        self.assertEqual(self._writes(), [("PATCH", "/api/stages/5", {"name": "Build"})])
+
+    def test_move_places_before_the_anchor(self):
+        self._run(["stage", "move", "Code", "--before", "Backlog"])
+        self.assertEqual(self._writes(), [("POST", "/api/stages/5/place", {"before": 1})])
+
+    def test_move_needs_an_anchor(self):
+        self._refused(["stage", "move", "Code"])
+        self.assertEqual(self.sent, [])
+
+    def test_lane_on_puts_and_off_deletes(self):
+        self.write_response = {"data": self.stages[4]}
+        out = self._run(["stage", "lane", "Code", "review", "on"])
+        self.assertEqual(out.strip(), "Code · Review enabled")
+        self.write_response = {"data": {"lane": "done", "disabled": True}}
+        out = self._run(["stage", "lane", "Code", "done", "off"])
+        self.assertEqual(out.strip(), "Code · Done disabled")
+        writes = self._writes()
+        self.assertEqual([w[:2] for w in writes], [("PUT", "/api/stages/5/substages/review"),
+                                                   ("DELETE", "/api/stages/5/substages/done")])
+        self.assertIn(writes[0][2], (None, {}))
+
+    def test_lane_off_reports_a_missing_substage(self):
+        self.write_response = {"data": {"lane": "done", "disabled": False}}
+        out = self._run(["stage", "lane", "Code", "done", "off"])
+        self.assertEqual(out.strip(), "Code has no done substage")
+
+    def test_lane_refuses_an_unknown_lane(self):
+        self._refused(["stage", "lane", "Code", "bogus", "on"])
+        self.assertEqual(self.sent, [])
+
+    def test_rm_deletes_and_says_so(self):
+        out = self._run(["stage", "rm", "Code"])
+        self.assertEqual(self._writes(), [("DELETE", "/api/stages/5", None)])
+        self.assertEqual(out.strip(), "removed stage Code")
+
+    def test_rm_of_an_ambiguous_name_lists_the_ids(self):
+        self.stages.append(self._stage(7, "Spec", position=4))
+        err = self._refused(["stage", "rm", "Spec"])
+        self.assertIn("ambiguous", err)
+        self.assertIn("3", err)
+        self.assertIn("7", err)
+        self.assertEqual(self._writes(), [])
+
+    def test_rm_never_matches_a_missing_or_substage_name(self):
+        for token in ("Nope", "Code:Review", "Review", "9"):
+            err = self._refused(["stage", "rm", token])
+            self.assertIn("no main stage", err)
+        self.assertEqual(self._writes(), [])
+
+    def test_stages_prints_one_row_per_stage(self):
+        out = self._run(["stages"])
+        code = next(line for line in out.splitlines() if " Code " in line)
+        for part in ("in_progress", "work", "ai:yes", "wip:3", "substages:review"):
+            self.assertIn(part, code)
+        sub = [line for line in out.splitlines() if "Code · Review" in line]
+        self.assertEqual(len(sub), 1)
+        self.assertNotEqual(sub[0], code)
+        self.assertEqual(len(out.splitlines()), len(self.stages))
+
+    def test_stages_json_prints_the_list(self):
+        self.assertEqual(json.loads(self._run(["stages", "--json"])), self.stages)
+
+    def test_a_server_refusal_propagates_as_a_non_zero_exit(self):
+        self.fail_on = "DELETE"
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            self._run(["stage", "rm", "Code"])
+        self.assertNotIn(cm.exception.code, (0, None))
 
 
 class TaskCommandsTest(unittest.TestCase):

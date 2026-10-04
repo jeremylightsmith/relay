@@ -1,6 +1,7 @@
 defmodule RelayWeb.Api.CardJSON do
   @moduledoc "JSON representation of cards (shared across API controllers)."
 
+  alias Relay.Boards
   alias Relay.Cards
   alias RelayWeb.Api.TaskJSON
 
@@ -32,18 +33,37 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
-  @doc "The shared stage shape. type/ai_enabled drive behavior; parent_id/wip_limit let the CLI charge sub-lanes to their parent."
-  def stage(stage) do
+  @doc """
+  The shared stage shape (`GET /api/board`'s `stages`, every `/api/stages` route). type/ai_enabled
+  drive behavior; parent_id/wip_limit let the CLI charge sub-lanes to their parent. `stages` is
+  the board's in-memory stage list: a substage's `display_name` resolves its parent from it, with
+  no per-stage query; a parent missing from the list falls back to `Boards.stage_display_name/1`.
+  """
+  @spec stage(Schemas.Stage.t(), [Schemas.Stage.t()]) :: map()
+  def stage(stage, stages) do
     %{
       id: stage.id,
       name: stage.name,
+      display_name: display_name(stage, stages),
       category: stage.category,
       type: stage.type,
       ai_enabled: stage.ai_enabled,
       position: stage.position,
       wip_limit: stage.wip_limit,
-      parent_id: stage.parent_id
+      parent_id: stage.parent_id,
+      description: stage.description,
+      collapsed_by_default: stage.collapsed_by_default,
+      reject_to_stage_id: stage.reject_to_stage_id
     }
+  end
+
+  defp display_name(%Schemas.Stage{parent_id: nil} = stage, _stages), do: stage.name
+
+  defp display_name(%Schemas.Stage{parent_id: parent_id} = stage, stages) do
+    case Enum.find(stages, &(&1.id == parent_id)) do
+      nil -> Boards.stage_display_name(stage)
+      parent -> Boards.stage_display_name(stage, parent)
+    end
   end
 
   def index(%{board: board, stages: stages, cards: cards}) do

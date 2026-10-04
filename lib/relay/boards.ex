@@ -384,10 +384,15 @@ defmodule Relay.Boards do
     end
   end
 
+  def enable_lane(%Stage{}, lane) when lane in @sublane_types, do: {:error, :not_a_main_stage}
+
   @doc """
   Disables `parent`'s `lane` sub-lane. Returns `{:ok, :disabled}` when the
-  (empty) child is removed, `{:ok, :not_enabled}` when there is nothing to
-  remove, or `{:error, :not_empty}` when the lane still holds cards.
+  child is removed, `{:ok, :not_enabled}` when there is nothing to remove.
+  Refuses — writing and broadcasting nothing — in this order: the lane holds
+  any card, archived included (`:not_empty`); an enabled flow uses the lane
+  (`{:in_use_by_flow, keys}`); it is the board's public intake stage
+  (`:public_intake`). Render a refusal with `stage_refusal_message/1`.
   """
   def disable_lane(%Stage{} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
@@ -395,9 +400,9 @@ defmodule Relay.Boards do
         {:ok, :not_enabled}
 
       %Stage{} = child ->
-        if Repo.exists?(from c in Card, where: c.stage_id == ^child.id) do
-          {:error, :not_empty}
-        else
+        with :ok <- refuse_any_card(child),
+             :ok <- refuse_enabled_flows([child.id]),
+             :ok <- refuse_public_intake(parent.board_id, [child.id]) do
           {:ok, _} = Repo.delete(child)
           broadcast_stages_changed({:ok, :disabled}, parent.board_id)
         end
@@ -515,49 +520,222 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Appends a new main stage (name "New stage", the category's default type) at the end of
-  `category` — an empty category appends right after every earlier
-  category's stages. Broadcasts on success.
+  Creates a main stage.
+
+  With a category atom (Settings "+ Add"): appends a stage named "New stage" with the
+  category's default type at the end of `category` — an empty category appends right after
+  every earlier category's stages.
+
+  With an attrs map (atom keys — `:name`, `:category`, `:type`, `:description`,
+  `:ai_enabled`, `:wip_limit`, `:collapsed_by_default`, plus optionally ONE of `:before` /
+  `:after` naming an anchor `%Stage{}`; unknown keys are ignored): an anchored stage lands
+  directly before/after the anchor and adopts its category (a different `:category` is a
+  changeset error); without an anchor `:category` is required and the stage is appended as
+  above. `:type` defaults to the category's default type. An anchor that is not a main stage
+  on this board is `{:error, :invalid_anchor}`.
+
+  Errors insert nothing and broadcast nothing; success broadcasts `{:stages_changed, board_id}`.
   """
-  def create_stage(%Board{id: board_id}, category) when category in @category_order do
-    {:ok, stage} =
-      Repo.transaction(fn ->
-        position = append_position(board_id, category)
-        shift_positions_from(board_id, position)
-
-        %Stage{board_id: board_id}
-        |> Stage.changeset(%{
-          name: "New stage",
-          position: position,
-          category: category,
-          type: Stage.default_type(category),
-          ai_enabled: false
-        })
-        |> Repo.insert!()
-      end)
-
-    broadcast_stages_changed({:ok, stage}, board_id)
+  def create_stage(%Board{} = board, category) when category in @category_order do
+    create_stage(board, %{name: "New stage", category: category})
   end
 
+  def create_stage(%Board{id: board_id}, attrs) when is_map(attrs) do
+    with {:ok, anchor} <- create_anchor(board_id, attrs) do
+      changeset = new_stage_changeset(board_id, attrs, anchor)
+
+      if changeset.valid? do
+        board_id
+        |> insert_stage_at(changeset, anchor)
+        |> broadcast_stages_changed(board_id)
+      else
+        {:error, changeset}
+      end
+    end
+  end
+
+  @new_stage_fields [:name, :category, :type, :description, :ai_enabled, :wip_limit, :collapsed_by_default]
+
+  defp create_anchor(board_id, attrs) do
+    case {Map.get(attrs, :before), Map.get(attrs, :after)} do
+      {nil, nil} -> {:ok, nil}
+      {%Stage{} = anchor, nil} -> fetch_anchor(board_id, anchor, :before)
+      {nil, %Stage{} = anchor} -> fetch_anchor(board_id, anchor, :after)
+      _other -> {:error, :invalid_anchor}
+    end
+  end
+
+  # Reloads the anchor so its position is current; it must be a main stage on `board_id`.
+  defp fetch_anchor(board_id, %Stage{id: id}, side) do
+    case Repo.one(from s in Stage, where: s.id == ^id and s.board_id == ^board_id and is_nil(s.parent_id)) do
+      nil -> {:error, :invalid_anchor}
+      anchor -> {:ok, {side, anchor}}
+    end
+  end
+
+  # `position: 0` is a placeholder satisfying validate_required; the real position is
+  # computed inside the insert transaction. The category is compared AFTER casting, so a
+  # string "planning" matches an anchor's `:planning`.
+  defp new_stage_changeset(board_id, attrs, anchor) do
+    stage = %Stage{board_id: board_id, position: 0}
+    fields = attrs |> Map.take(@new_stage_fields) |> Map.put_new(:ai_enabled, false)
+    given = stage |> Changeset.cast(fields, [:category]) |> Changeset.get_field(:category)
+    category = given || anchor_category(anchor)
+
+    fields =
+      fields
+      |> Map.put_new(:category, category)
+      |> put_default_type(category)
+
+    stage
+    |> Stage.changeset(fields)
+    |> validate_anchor_category(given, anchor)
+  end
+
+  defp anchor_category(nil), do: nil
+  defp anchor_category({_side, %Stage{category: category}}), do: category
+
+  defp put_default_type(fields, category) when category in @category_order do
+    if is_nil(fields[:type]), do: Map.put(fields, :type, Stage.default_type(category)), else: fields
+  end
+
+  defp put_default_type(fields, _category), do: fields
+
+  defp validate_anchor_category(changeset, given, {_side, %Stage{category: category}})
+       when not is_nil(given) and given != category,
+       do: Changeset.add_error(changeset, :category, "must match the anchor stage's category")
+
+  defp validate_anchor_category(changeset, _given, _anchor), do: changeset
+
+  defp insert_stage_at(board_id, changeset, anchor) do
+    Repo.transaction(fn ->
+      position = new_stage_position(board_id, Changeset.get_field(changeset, :category), anchor)
+      shift_positions_from(board_id, position)
+
+      case changeset |> Changeset.put_change(:position, position) |> Repo.insert() do
+        {:ok, stage} -> stage
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp new_stage_position(board_id, category, nil), do: append_position(board_id, category)
+  defp new_stage_position(_board_id, _category, {:before, anchor}), do: anchor.position
+  defp new_stage_position(_board_id, _category, {:after, anchor}), do: anchor.position + 1
+
   @doc """
-  Deletes an empty main stage; its Review/Done children cascade via the
-  `parent_id` FK (they are guaranteed empty by the guard). Returns
-  `{:error, :not_empty}` when the stage or any of its sub-lanes holds
-  cards, `{:error, :last_stage}` for the board's only main stage. Sub-lane
-  children are never directly deletable (only via `disable_lane/2`).
+  Moves main stage `stage` directly before/after `anchor` (another main stage on the same
+  board), adopting the anchor's category — only the moved stage's category changes, never its
+  `type` (as `reorder_stage/2` crossing a category). Positions are renumbered 1..n.
+  Already in place (same order, same category) → `{:ok, stage}`, no write, no broadcast.
+  A bad anchor is `{:error, :invalid_anchor}`; a substage is `{:error, :not_a_main_stage}`.
+  """
+  def place_stage(%Stage{parent_id: parent_id}, _placement) when not is_nil(parent_id), do: {:error, :not_a_main_stage}
+
+  def place_stage(%Stage{} = stage, [{side, %Stage{id: anchor_id}}]) when side in [:before, :after] do
+    mains = main_stages(stage.board_id)
+    current = Enum.find(mains, &(&1.id == stage.id))
+    anchor = anchor_id != stage.id && Enum.find(mains, &(&1.id == anchor_id))
+
+    if current && anchor do
+      rest = Enum.reject(mains, &(&1.id == current.id))
+      index = Enum.find_index(rest, &(&1.id == anchor.id)) + if(side == :after, do: 1, else: 0)
+      ordered = List.insert_at(rest, index, current)
+
+      if Enum.map(ordered, & &1.id) == Enum.map(mains, & &1.id) and anchor.category == current.category do
+        {:ok, stage}
+      else
+        persist_order(ordered, current, anchor.category)
+      end
+    else
+      {:error, :invalid_anchor}
+    end
+  end
+
+  def place_stage(%Stage{}, _placement), do: {:error, :invalid_anchor}
+
+  @doc """
+  Deletes a main stage; its Review/Done children cascade via the `parent_id` FK. A disabled
+  flow's trigger and another stage's reject-to pointing here are nilified by their FKs.
+  Refuses — writing and broadcasting nothing — in this order:
+
+    1. the board's only main stage → `:last_stage`;
+    2. the stage or a substage holds cards, archived included →
+       `{:not_empty, %{live: n, archived: n}}`;
+    3. an **enabled** flow pulls from / works in / lands on the stage or a substage →
+       `{:in_use_by_flow, keys}`;
+    4. the stage or a substage is the board's public intake stage → `:public_intake`.
+
+  A substage is `{:error, :not_a_main_stage}` (only `disable_lane/2` removes one). Render a
+  refusal with `stage_refusal_message/1`.
   """
   def delete_stage(%Stage{parent_id: nil} = stage) do
-    cond do
-      length(main_stages(stage.board_id)) == 1 ->
-        {:error, :last_stage}
+    ids = [stage.id | stage |> sublanes() |> Enum.map(& &1.id)]
 
-      stage_holds_cards?(stage) ->
-        {:error, :not_empty}
-
-      true ->
-        {:ok, deleted} = Repo.delete(stage)
-        broadcast_stages_changed({:ok, deleted}, stage.board_id)
+    with :ok <- refuse_last_stage(stage),
+         :ok <- refuse_cards(ids),
+         :ok <- refuse_enabled_flows(ids),
+         :ok <- refuse_public_intake(stage.board_id, ids) do
+      {:ok, deleted} = Repo.delete(stage)
+      broadcast_stages_changed({:ok, deleted}, stage.board_id)
     end
+  end
+
+  def delete_stage(%Stage{}), do: {:error, :not_a_main_stage}
+
+  @doc """
+  The ONE human sentence for every stage refusal `create_stage/2`, `place_stage/2`,
+  `delete_stage/1`, `enable_lane/2` and `disable_lane/2` return — rendered by both Board
+  Settings and the REST API (the `Relay.Cards.dependency_error_message/1` precedent).
+  """
+  def stage_refusal_message(:last_stage), do: "A board needs at least one stage."
+
+  def stage_refusal_message({:not_empty, %{live: live, archived: archived}}),
+    do: "That stage still holds #{live} live and #{archived} archived card(s) — move them out first."
+
+  def stage_refusal_message(:not_empty), do: "That lane still has cards — move them out first."
+
+  def stage_refusal_message({:in_use_by_flow, keys}),
+    do: "Flow(s) #{Enum.join(keys, ", ")} use this stage — disable or re-point them first."
+
+  def stage_refusal_message(:public_intake),
+    do: "This is the public intake stage — pick another in Public settings first."
+
+  def stage_refusal_message(:invalid_anchor), do: "before/after must name another main stage on this board."
+
+  def stage_refusal_message(:not_a_main_stage),
+    do: "That is a substage — address its main stage instead (substages follow their parent)."
+
+  defp refuse_last_stage(%Stage{board_id: board_id}) do
+    if length(main_stages(board_id)) == 1, do: {:error, :last_stage}, else: :ok
+  end
+
+  defp refuse_cards(stage_ids) do
+    {live, archived} =
+      Repo.one(
+        from c in Card,
+          where: c.stage_id in ^stage_ids,
+          select: {filter(count(c.id), is_nil(c.archived_at)), filter(count(c.id), not is_nil(c.archived_at))}
+      )
+
+    if live + archived > 0, do: {:error, {:not_empty, %{live: live, archived: archived}}}, else: :ok
+  end
+
+  defp refuse_any_card(%Stage{id: id}) do
+    if Repo.exists?(from c in Card, where: c.stage_id == ^id), do: {:error, :not_empty}, else: :ok
+  end
+
+  defp refuse_enabled_flows(stage_ids) do
+    case Flows.enabled_flow_keys_using(stage_ids) do
+      [] -> :ok
+      keys -> {:error, {:in_use_by_flow, keys}}
+    end
+  end
+
+  defp refuse_public_intake(board_id, stage_ids) do
+    if Repo.exists?(from b in Board, where: b.id == ^board_id and b.public_intake_stage_id in ^stage_ids),
+      do: {:error, :public_intake},
+      else: :ok
   end
 
   @doc """
@@ -677,11 +855,6 @@ defmodule Relay.Boards do
 
     parked = from s in Stage, where: s.board_id == ^board_id and s.position >= ^@position_park_offset
     Repo.update_all(parked, inc: [position: -(@position_park_offset - 1)])
-  end
-
-  defp stage_holds_cards?(%Stage{} = stage) do
-    stage_ids = [stage.id | stage |> sublanes() |> Enum.map(& &1.id)]
-    Repo.exists?(from c in Card, where: c.stage_id in ^stage_ids)
   end
 
   # MMF 18: stage config changed — coarse event, receivers refetch stages.

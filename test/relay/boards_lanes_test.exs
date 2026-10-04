@@ -85,4 +85,48 @@ defmodule Relay.BoardsLanesTest do
 
     assert parent |> Boards.sublanes() |> Enum.map(& &1.type) == [:review, :done]
   end
+
+  describe "disable_lane/2 guard rails (RE384)" do
+    test "refuses a lane an enabled flow lands on" do
+      parent = main_stage()
+      {:ok, done} = Boards.enable_lane(parent, :done)
+      board = Relay.Repo.get!(Schemas.Board, parent.board_id)
+
+      insert(:flow,
+        board: board,
+        key: "code",
+        enabled: true,
+        pulls_from_stage_id: insert(:stage, board: board, position: 50).id,
+        works_in_stage_id: parent.id,
+        lands_on_stage_id: done.id
+      )
+
+      assert {:error, {:in_use_by_flow, ["code"]}} = Boards.disable_lane(parent, :done)
+      assert [%{type: :done}] = Boards.sublanes(parent)
+    end
+
+    test "refuses the public intake lane" do
+      parent = main_stage()
+      {:ok, review} = Boards.enable_lane(parent, :review)
+      board = Relay.Repo.get!(Schemas.Board, parent.board_id)
+      {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: review.id})
+
+      assert {:error, :public_intake} = Boards.disable_lane(parent, :review)
+    end
+
+    test "an archived card keeps the lane non-empty" do
+      parent = main_stage()
+      {:ok, review} = Boards.enable_lane(parent, :review)
+      insert(:card, stage: review, archived_at: DateTime.utc_now(:second))
+
+      assert {:error, :not_empty} = Boards.disable_lane(parent, :review)
+    end
+  end
+
+  test "enable_lane refuses a substage (RE384)" do
+    parent = main_stage()
+    {:ok, review} = Boards.enable_lane(parent, :review)
+
+    assert {:error, :not_a_main_stage} = Boards.enable_lane(review, :done)
+  end
 end

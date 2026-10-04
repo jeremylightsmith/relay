@@ -91,15 +91,21 @@ shape omits them. A card with an unsatisfied blocker is never *pulled* by a flow
 flight is unaffected: a running run is not cancelled by a dependency added mid-run, and a card
 sent back for changes re-enters its flow as usual.
 
-A **stage** (returned inside `GET /api/board`):
+A **stage** (returned inside `GET /api/board`'s `stages` and by every `/api/stages` route):
 
 ```json
 {
-  "id": 5, "name": "Plan", "category": "in_progress", "owner": "ai",
-  "position": 3, "approval_gate": false, "reject_to_stage_id": null,
-  "wip_limit": null, "lane": "main", "parent_id": null
+  "id": 9, "name": "Code:Review", "display_name": "Code · Review",
+  "category": "in_progress", "type": "review", "ai_enabled": false,
+  "position": 12, "wip_limit": null, "parent_id": 8,
+  "description": null, "collapsed_by_default": false, "reject_to_stage_id": null
 }
 ```
+
+`type` is one of `queue | work | planning | review | done`; `category` one of
+`unstarted | planning | in_progress | complete`. A substage (`parent_id` set) is a Review or
+Done lane of its main stage; its `name` is the composite `"<parent>:Review"` and its
+`display_name` the human `"<parent> · Review"` (a main stage's `display_name` is its `name`).
 
 ---
 
@@ -241,6 +247,79 @@ the board (screenshots too), not only mockups.
 ```
 curl -H "Authorization: Bearer $RELAY_KEY" -o mock.html https://relay.example/api/attachments/135e5539-…
 ```
+
+### Stages
+
+Any board key may manage the board's stages. Guard rails live in the domain, so Board Settings
+refuses the same things with the same sentence. A stage refusal carries extra keys in the
+`error` object where noted:
+
+| HTTP | code | when |
+| --- | --- | --- |
+| 404 | `not_found` | the path `:id` is unknown, not an integer, or another board's stage |
+| 409 | `last_stage` | deleting the board's only main stage |
+| 409 | `not_empty` | the stage (or a substage) holds cards, **archived included** — a stage delete adds `"live": n, "archived": m`; a lane disable carries no counts |
+| 409 | `in_use_by_flow` | an **enabled** flow pulls from / works in / lands on it — adds `"flows": [key]` |
+| 409 | `public_intake` | it is the board's public intake stage |
+| 422 | `invalid_anchor` | `before` / `after` doesn't name another main stage on this board (unknown, foreign or non-integer anchors included) |
+| 422 | `not_a_main_stage` | the route needs a main stage and `:id` is a substage |
+| 422 | `invalid` | the stage itself is invalid (blank name, unknown type, bad `reject_to_stage_id`, …) |
+| 422 | `invalid_request` | the body is malformed — the message says how |
+
+```json
+{ "error": { "code": "not_empty", "message": "That stage still holds 0 live and 1 archived card(s) — move them out first.", "live": 0, "archived": 1 } }
+```
+
+#### GET /api/stages
+
+The board's stages, each main stage followed by its substages (Review, then Done).
+
+```json
+{ "data": [ { "id": 1, "name": "Backlog", "…": "…" } ] }
+```
+
+#### POST /api/stages
+
+Create a main stage. Body: `name`, and either `category` (appends at the end of that category)
+or ONE of `before` / `after` (a main-stage id — the new stage lands beside it and adopts its
+category); optionally `type` (defaults from the category), `description`, `ai_enabled`,
+`wip_limit`, `collapsed_by_default`. **201** `{"data": stage}`. Both anchors →
+`422 invalid_request` (`"send before or after, not both"`).
+
+```
+curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Triage","after":3,"type":"queue"}' https://relay.example/api/stages
+```
+
+#### PATCH /api/stages/:id
+
+Configure a stage: any of `name`, `description`, `type`, `ai_enabled`, `wip_limit`,
+`collapsed_by_default`, `reject_to_stage_id` (a main stage). `"wip_limit": null` and
+`"reject_to_stage_id": null` clear. A type change re-snaps the statuses of the cards in it.
+Renaming a main stage renames its substages. **200** `{"data": stage}`. No recognised field →
+`422 invalid_request`.
+
+#### POST /api/stages/:id/place
+
+Move a main stage beside another: exactly one of `before` / `after` (a main-stage id). The
+stage adopts the anchor's category (its `type` is unchanged). **200** `{"data": stage}`.
+Neither or both → `422 invalid_request` (`"send exactly one of before or after"`).
+
+#### PUT /api/stages/:id/substages/:lane
+
+Enable the `review` or `done` lane on a main stage — idempotent. **200** `{"data": substage}`.
+Any other `:lane` → `422 invalid_request` (`"lane must be one of: review, done"`).
+
+#### DELETE /api/stages/:id/substages/:lane
+
+Disable a lane. **200** `{"data": {"lane": "review", "disabled": true}}` — `disabled: false`
+when the lane wasn't enabled. Refused with `not_empty`, `in_use_by_flow` or `public_intake`.
+
+#### DELETE /api/stages/:id
+
+Delete a main stage and its substages. **200** `{"data": stage}` (the deleted stage). Refused,
+in order, with `last_stage`, `not_empty` (with counts), `in_use_by_flow`, `public_intake`. A
+disabled flow's trigger and another stage's reject-to pointing here are cleared.
 
 ### POST /api/cards/:ref/move
 

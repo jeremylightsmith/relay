@@ -11,6 +11,25 @@ sharing behavior.
   `ai_enabled`); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
   `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
   order being `Schemas.Stage.sublane_types/0`. Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
+  Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
+  attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
+  new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
+  an anchor the same way (`reorder_stage/2` stays the ↑/↓ step). `delete_stage/1` refuses, in
+  order: the last main stage (`:last_stage`), any card in the stage or its substages —
+  archived included — (`{:not_empty, %{live:, archived:}}`), an **enabled** flow using any of
+  them (`{:in_use_by_flow, keys}`, via `Flows.enabled_flow_keys_using/1`; a disabled flow's
+  trigger and a reject-to target are still nilified by the FK), and the public intake stage
+  (`:public_intake`). `disable_lane/2` refuses the same three for the lane alone (bare
+  `:not_empty`); a substage passed to `delete_stage/1` / `place_stage/2` / `enable_lane/2` is
+  `:not_a_main_stage`. `stage_refusal_message/1` is the one rendering of every refusal (Settings
+  flash and API alike). A stage's **type** changes only through `Relay.Cards.update_stage/2`,
+  which wraps `update_stage/2` and re-snaps resident cards when the type changed (it lives in
+  Cards because `Boards → Cards` would be a boundary cycle).
+  Over REST (`RelayWeb.Api.StageController`, any board key): `GET|POST /api/stages`,
+  `PATCH|DELETE /api/stages/:id`, `POST /api/stages/:id/place`, and
+  `PUT|DELETE /api/stages/:id/substages/:lane`; the refusals map to 409 (`last_stage`,
+  `not_empty` with `live`/`archived` counts, `in_use_by_flow` with `flows`, `public_intake`)
+  and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).

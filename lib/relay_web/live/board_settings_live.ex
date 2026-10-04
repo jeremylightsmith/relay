@@ -1318,8 +1318,7 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event("set_type", %{"stage-id" => stage_id, "type" => type}, socket)
       when type in ~w(queue work planning review done) do
     stage = find_stage(socket, stage_id)
-    {:ok, updated} = Boards.update_stage(stage, %{type: String.to_existing_atom(type)})
-    :ok = Cards.snap_cards_in(updated)
+    {:ok, _updated} = Cards.update_stage(stage, %{type: String.to_existing_atom(type)})
     {:noreply, refresh_stages(socket)}
   end
 
@@ -1426,11 +1425,8 @@ defmodule RelayWeb.BoardSettingsLive do
       {:ok, _stage} ->
         {:noreply, refresh_stages(socket)}
 
-      {:error, :not_empty} ->
-        {:noreply, put_flash(socket, :error, "That stage still has cards — move them out first.")}
-
-      {:error, :last_stage} ->
-        {:noreply, put_flash(socket, :error, "A board needs at least one stage.")}
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, Boards.stage_refusal_message(reason))}
     end
   end
 
@@ -1745,8 +1741,7 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
-  defp lane_atom("review"), do: :review
-  defp lane_atom("done"), do: :done
+  defp lane_atom(lane), do: Enum.find(Stage.sublane_types(), &(Atom.to_string(&1) == lane))
 
   defp direction_atom("up"), do: :up
   defp direction_atom("down"), do: :down
@@ -1765,9 +1760,9 @@ defmodule RelayWeb.BoardSettingsLive do
   # corrected. Bumping the nonce changes the input's `id`, forcing the
   # client to swap in a freshly-parsed element (checked from the true
   # server state) instead of patching the one the user already toggled.
-  defp apply_lane_result(socket, {:error, :not_empty}, stage_id, lane) do
+  defp apply_lane_result(socket, {:error, reason}, stage_id, lane) do
     socket
-    |> put_flash(:error, "That lane still has cards — move them out first.")
+    |> put_flash(:error, Boards.stage_refusal_message(reason))
     |> update(:lane_nonce, &Map.update(&1, {stage_id, lane}, 1, fn n -> n + 1 end))
   end
 
