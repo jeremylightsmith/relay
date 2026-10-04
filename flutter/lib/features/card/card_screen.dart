@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -65,6 +67,16 @@ class CardScreen extends ConsumerStatefulWidget {
     final base = baseUrl ?? AppConfig.baseUrl;
     return '$base/cards/$cardRef?board=$boardSlug&embed=1';
   }
+
+  /// The webview's bid in Flutter's gesture arena. A platform view only receives a
+  /// touch once one of these wins, so without a vertical recognizer the swipe
+  /// GestureDetector's horizontal recognizer was the sole contender: a vertical drag
+  /// stayed unresolved until pointer-up and the card body would (mostly) not scroll.
+  /// Vertical claims vertical drags; horizontal ones still reach the swipe handler.
+  static final Set<Factory<OneSequenceGestureRecognizer>>
+  webviewGestureRecognizers = {
+    Factory<VerticalDragGestureRecognizer>(VerticalDragGestureRecognizer.new),
+  };
 
   @override
   ConsumerState<CardScreen> createState() => _CardScreenState();
@@ -230,9 +242,10 @@ class _CardScreenState extends ConsumerState<CardScreen> {
       // actually loads.
       body: GestureDetector(
         key: const Key('card_swipe_area'),
-        // Horizontal only: the webview owns vertical scroll, so the gesture arena keeps
-        // vertical drags with the scroll view and only a horizontal drag reaches these
-        // callbacks (RLY-234 — mirrors the web hook's |dx|>|dy| rule).
+        // Horizontal only: the webview owns vertical scroll via its
+        // [CardScreen.webviewGestureRecognizers], so the arena gives vertical drags to
+        // the page and only a horizontal drag reaches these callbacks (RLY-234 —
+        // mirrors the web hook's |dx|>|dy| rule).
         onHorizontalDragStart: (_) => _dragDx = 0,
         onHorizontalDragUpdate: (d) => _dragDx += d.delta.dx,
         onHorizontalDragEnd: (_) => _commitSwipe(),
@@ -242,6 +255,7 @@ class _CardScreenState extends ConsumerState<CardScreen> {
               widget.bodyBuilder?.call(context) ??
               InAppWebView(
                 key: const Key('card_webview'),
+                gestureRecognizers: CardScreen.webviewGestureRecognizers,
                 initialUrlRequest: URLRequest(
                   url: WebUri(
                     CardScreen.cardUrl(
