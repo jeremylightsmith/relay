@@ -44,4 +44,14 @@ defmodule RelayWeb.BoardCrumbsTest do
     [_root | rest] = BoardCrumbs.flows(@board)
     refute Enum.any?(rest, &Map.has_key?(&1, :icon))
   end
+
+  test "card_mockups/3 is Boards / <board> / <card title>, the card crumb a patch back to the drawer" do
+    card = %{title: "Notif"}
+
+    assert [
+             %{id: "top-bar-crumb-boards"},
+             %{id: "top-bar-crumb-board", to: "/board/payments"},
+             %{id: "top-bar-crumb-card", label: "Notif", to: "/board/payments?card=PA1", patch: true}
+           ] = BoardCrumbs.card_mockups(@board, card, "/board/payments?card=PA1")
+  end
 end

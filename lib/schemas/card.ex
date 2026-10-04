@@ -221,4 +221,24 @@ defmodule Schemas.Card do
   def contract_fields do
     [:description, :spec, :acceptance_criteria, :plan, :tasks, :branch, :pr_url, :ai_result, :mockups]
   end
+
+  @doc """
+  The card's HTML mockups as `[%{id, caption}]` (RE370, RE380) — the ONE reading of the `mockups`
+  jsonb column, shared by the drawer, the mockup viewer and `RelayWeb.BoardLive`.
+
+  `mockups` is validated on write (`Relay.Cards.set_mockups/2`), but it is still a jsonb column a
+  render must never crash on: an entry not shaped like `%{"url" => "/attachments/<id>"}` is
+  skipped, a non-binary caption reads as nil, and a non-list value has no mockups. Order is kept.
+  """
+  @spec mockup_entries(term()) :: [%{id: String.t(), caption: String.t() | nil}]
+  def mockup_entries(mockups) when is_list(mockups) do
+    for %{"url" => url} = mockup <- mockups, {:ok, id} <- [Schemas.Attachment.id_from_path(url)] do
+      %{id: id, caption: binary_or_nil(mockup["caption"])}
+    end
+  end
+
+  def mockup_entries(_mockups), do: []
+
+  defp binary_or_nil(value) when is_binary(value), do: value
+  defp binary_or_nil(_value), do: nil
 end

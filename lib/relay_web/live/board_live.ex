@@ -536,6 +536,7 @@ defmodule RelayWeb.BoardLive do
         next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
+        mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), &1)}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage)}
         stages={move_targets(@board, @selected_card)}
@@ -2547,6 +2548,12 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("review_open_reject", _params, socket) do
     {:noreply, assign(socket, reject_open: true, reject_form: empty_reject_form(), reject_error: nil)}
+  end
+
+  # RE380 — the reject note is held server-side as it is typed, so a re-render (switching mockups
+  # in the viewer) never wipes a half-written note. The panel's open state and error are untouched.
+  def handle_event("review_reject_change", %{"reject" => params}, socket) do
+    {:noreply, assign(socket, reject_form: to_form(params, as: :reject))}
   end
 
   def handle_event("review_cancel_reject", _params, socket) do
@@ -4772,6 +4779,16 @@ defmodule RelayWeb.BoardLive do
   defp card_path(%{live_action: :story_map, board: board}, ref), do: ~p"/board/#{board.slug}/story-map?card=#{ref}"
 
   defp card_path(%{board: board}, ref), do: ~p"/board/#{board.slug}?card=#{ref}"
+
+  # RE380 — the same-tab mockup viewer is the card's own drawer URL plus `mockup=<attachment id>`,
+  # on whichever host this socket is (board, story map, or the native `/cards/:ref` page). A
+  # Mockups tile patches here; a patch to another LiveView's route would not be a same-view patch.
+  defp viewer_path(%{live_action: :story_map, board: board}, ref, id),
+    do: ~p"/board/#{board.slug}/story-map?card=#{ref}&mockup=#{id}"
+
+  defp viewer_path(%{live_action: :card, board: board}, ref, id), do: ~p"/cards/#{ref}?board=#{board.slug}&mockup=#{id}"
+
+  defp viewer_path(%{board: board}, ref, id), do: ~p"/board/#{board.slug}?card=#{ref}&mockup=#{id}"
 
   # The header search's assigns, always set as a pair so query and rows can never disagree.
   # Archived cards are deliberately OUT of the UI search: they have their own dedicated

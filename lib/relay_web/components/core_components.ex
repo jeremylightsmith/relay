@@ -1005,7 +1005,9 @@ defmodule RelayWeb.CoreComponents do
 
   attr :crumbs, :list,
     required: true,
-    doc: "[%{id, label, to} + optional :icon], root first; the current page is not included"
+    doc:
+      "[%{id, label, to} + optional :icon and :patch], root first; the current page is not included. " <>
+        "A crumb with `patch: true` patches (same LiveView) instead of navigating (RE380)"
 
   def breadcrumbs(%{crumbs: []} = assigns), do: ~H""
 
@@ -1048,7 +1050,8 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <div id={"#{@crumb.id}-segment"} class={["items-center gap-[7px]", @class]}>
       <.link
-        navigate={@crumb.to}
+        navigate={!@crumb[:patch] && @crumb.to}
+        patch={@crumb[:patch] && @crumb.to}
         id={@crumb.id}
         title={@crumb.label}
         class="flex min-w-0 max-w-[160px] items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
@@ -1784,33 +1787,39 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  One HTML mockup as a small square tile (RE370, RE374): a live miniature of the mockup that is
-  itself a link to the framed full-size viewer (`RelayWeb.attachment_view_path/1`), opened in a
-  new tab, so the board and drawer stay in place. The miniature is the same sandboxed iframe,
-  rendered at a 1280×1280 desktop viewport and CSS-scaled down to the 80px square (80/1280 =
-  0.0625, origin top-left). It is inert (`pointer-events-none`, `tabindex="-1"`, `aria-hidden`), so
-  every click lands on the link. `sandbox` is `RelayWeb.mockup_sandbox/0`, the same token list the
-  attachment's CSP grants: the mockup's scripts run, but it can never reach Relay's origin, and its
-  only network access is Google Fonts (`AttachmentController.html_csp/0`).
+  One HTML mockup as a small square tile (RE370, RE374, RE380): a live miniature of the mockup
+  that is itself a same-tab `patch` link to the mockup viewer (`view_href` — on the board, the
+  card's own drawer URL plus `mockup=<id>`), so the board stays mounted underneath. The miniature
+  is the same sandboxed iframe, rendered at a 1280×1280 desktop viewport and CSS-scaled down to
+  the 80px square (80/1280 = 0.0625, origin top-left). It is inert (`pointer-events-none`,
+  `tabindex="-1"`, `aria-hidden`), so every click lands on the link. `sandbox` is
+  `RelayWeb.mockup_sandbox/0`, the same token list the attachment's CSP grants: the mockup's
+  scripts run, but it can never reach Relay's origin, and its only network access is Google Fonts
+  (`AttachmentController.html_csp/0`).
 
   The caption doesn't fit in 80px. It becomes the tile's `title` (hover tooltip) and `aria-label`,
   plus a `sr-only` `\#{id}-caption`. It falls back to "Mockup". Never link to `src` directly: Relay
-  never shows a mockup as a bare top-level page. The drawer lays tiles out in a
-  `flex flex-wrap gap-2` row.
+  never shows a mockup as a bare top-level page.
+
+  `current` is the viewer's sheet: `true` rings the tile and marks it `aria-current`, `false`
+  dims it, and `nil` (the drawer) does neither. `replace` makes the patch replace the history
+  entry, so switching mockups costs one Back, not one per switch.
 
   ## Examples
 
       <.mockup_preview
         id="card-drawer-mockup-0"
         src="/attachments/135e5539-…"
-        view_href="/attachments/135e5539-…/view"
+        view_href="/board/payments?card=PA1&mockup=135e5539-…"
         caption="Empty state"
       />
   """
   attr :id, :string, required: true
   attr :src, :string, required: true, doc: "the attachment path the miniature iframe loads"
-  attr :view_href, :string, required: true, doc: "the framed full-size viewer page the tile opens"
+  attr :view_href, :string, required: true, doc: "the same-tab viewer URL the tile patches to"
   attr :caption, :string, default: nil
+  attr :current, :boolean, default: nil, doc: "true = the mockup on screen, false = another one, nil = no viewer"
+  attr :replace, :boolean, default: false, doc: "replace the history entry instead of pushing one"
 
   def mockup_preview(assigns) do
     assigns = assign(assigns, :label, assigns.caption || "Mockup")
@@ -1818,12 +1827,16 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <.link
       id={"#{@id}-open"}
-      href={@view_href}
-      target="_blank"
-      rel="noopener noreferrer"
+      patch={@view_href}
+      replace={@replace}
       title={@label}
-      aria-label={"Open mockup: #{@label} (new tab)"}
-      class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 transition hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      aria-label={"Open mockup: #{@label}"}
+      aria-current={@current && "true"}
+      class={[
+        "relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 transition hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        @current == true && "ring-2 ring-primary ring-offset-2 ring-offset-base-100",
+        @current == false && "opacity-80"
+      ]}
     >
       <span id={"#{@id}-caption"} class="sr-only">{@label}</span>
       <iframe
@@ -1838,6 +1851,270 @@ defmodule RelayWeb.CoreComponents do
       >
       </iframe>
     </.link>
+    """
+  end
+
+  @doc """
+  A card's Mockups section (RE380): the "Mockups" label and a wrapping row of `mockup_preview/1`
+  tiles, each patching to `mockup_href.(attachment_id)`. Shared by the card drawer (`current`
+  nil: the `gap-2` row, nothing else) and the mockup viewer's left sheet, where `current` is the
+  attachment on screen: its tile is ringed, the row opens up to `gap-3`, and two lines follow —
+  "Viewing <caption> · n of m" (`\#{id}-viewing`) and the ← → / Esc key hint (`\#{id}-keys`).
+
+  Ids: the row is `\#{tile_id}-tiles` and tile N is `\#{tile_id}-N` (its link `\#{tile_id}-N-open`).
+  """
+  attr :id, :string, required: true, doc: "the section id"
+  attr :tile_id, :string, required: true, doc: "the tile id prefix"
+  attr :mockups, :list, required: true, doc: "[%{id, caption}] — `Schemas.Card.mockup_entries/1`"
+  attr :mockup_href, :any, required: true, doc: "attachment id -> the URL its tile patches to"
+  attr :current, :string, default: nil, doc: "the attachment id on screen in the viewer, or nil"
+  attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
+
+  def card_mockups_section(assigns) do
+    index = assigns.current && Enum.find_index(assigns.mockups, &(&1.id == assigns.current))
+
+    assigns =
+      assign(assigns,
+        current_index: index,
+        current_caption: index && (Enum.at(assigns.mockups, index).caption || "Mockup")
+      )
+
+    ~H"""
+    <section id={@id} class="space-y-2">
+      <.section_label>Mockups</.section_label>
+      <div
+        id={"#{@tile_id}-tiles"}
+        class={if(@current, do: "flex flex-wrap gap-3 p-0.5", else: "flex flex-wrap gap-2")}
+      >
+        <.mockup_preview
+          :for={{mockup, index} <- Enum.with_index(@mockups)}
+          id={"#{@tile_id}-#{index}"}
+          src={RelayWeb.attachment_path(mockup.id)}
+          view_href={@mockup_href.(mockup.id)}
+          caption={mockup.caption}
+          current={@current && mockup.id == @current}
+          replace={@replace}
+        />
+      </div>
+      <p :if={@current_index} id={"#{@id}-viewing"} class="text-xs text-base-content/60">
+        Viewing <b class="font-semibold text-base-content/80">{@current_caption}</b>
+        · {@current_index + 1} of {length(@mockups)}
+      </p>
+      <p
+        :if={@current_index}
+        id={"#{@id}-keys"}
+        class="flex items-center gap-1 text-xs text-base-content/50"
+      >
+        <kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd>
+        switch · <kbd class="kbd kbd-xs">Esc</kbd>
+        back to card
+      </p>
+    </section>
+    """
+  end
+
+  @doc """
+  The mockup viewer's one-bar header on phones (RE380): ← back to the card, the mockup's caption
+  over an "n / m" count, and ‹ › to step through the card's mockups (`mockup_prev` /
+  `mockup_next`, disabled at either end). `card_mockup_viewer/1` renders it first, `drawer:hidden`.
+  """
+  attr :id, :string, default: "mockup-viewer-bar"
+  attr :caption, :string, required: true
+  attr :index, :integer, required: true, doc: "1-based position of the mockup on screen"
+  attr :total, :integer, required: true
+  attr :back_patch, :string, required: true, doc: "the card's drawer URL"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_bar(assigns) do
+    ~H"""
+    <header
+      id={@id}
+      class={["flex items-center gap-1 border-b border-base-300 bg-base-100 px-1.5 py-1.5", @class]}
+    >
+      <.link
+        id={"#{@id}-back"}
+        patch={@back_patch}
+        aria-label="Back to card"
+        class="btn btn-ghost btn-sm btn-square text-base"
+      >
+        ←
+      </.link>
+      <div class="flex min-w-0 flex-1 flex-col px-1 leading-tight">
+        <span id={"#{@id}-caption"} class="truncate text-sm font-semibold">{@caption}</span>
+        <span id={"#{@id}-count"} class="font-mono text-[11px] text-base-content/55">
+          {@index} / {@total}
+        </span>
+      </div>
+      <button
+        type="button"
+        id={"#{@id}-prev"}
+        phx-click="mockup_prev"
+        aria-label="Previous mockup"
+        disabled={@index == 1}
+        class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-next"}
+        phx-click="mockup_next"
+        aria-label="Next mockup"
+        disabled={@index == @total}
+        class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
+      >
+        ›
+      </button>
+    </header>
+    """
+  end
+
+  @doc """
+  The same-tab mockup viewer (RE380): the card's mockup fills the right of the screen, framed in
+  the sandboxed iframe (`RelayWeb.mockup_sandbox/0`), and the card shrinks to a 340px left sheet —
+  ← Back to card, the stage chip, ref and title, the `:gate` slot (the caller's
+  `card_gate_panel/1`), then the Mockups section with the current tile ringed. There is no bar
+  over the mockup on desktop; the app's breadcrumb names the card. Below the `drawer:` breakpoint
+  the sheet is hidden and `mockup_viewer_bar/1` is the one top bar.
+
+  It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
+  `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
+  `ArrowKeyGuard` while typing), and a horizontal swipe on the frame does the same through the
+  colocated `.MockupSwipe` hook.
+  """
+  attr :id, :string, default: "mockup-viewer"
+  attr :ref, :string, required: true
+  attr :card, :any, required: true, doc: "needs `title`"
+  attr :stage_name, :string, required: true
+  attr :stage_owner, :atom, values: [:human, :ai], required: true
+  attr :mockups, :list, required: true, doc: "[%{id, caption}] — `Schemas.Card.mockup_entries/1`"
+  attr :current_id, :string, required: true, doc: "the attachment id on screen"
+  attr :back_patch, :string, required: true, doc: "the card's drawer URL"
+  attr :mockup_href, :any, required: true, doc: "attachment id -> that mockup's viewer URL"
+  attr :embed, :boolean, default: false, doc: "native host: no web top bar to sit under"
+
+  slot :gate, doc: "the card's gate panel (review or question), rendered at the top of the sheet"
+
+  def card_mockup_viewer(assigns) do
+    index = Enum.find_index(assigns.mockups, &(&1.id == assigns.current_id)) || 0
+    caption = (Enum.at(assigns.mockups, index) || %{caption: nil}).caption || "Mockup"
+    assigns = assign(assigns, index: index + 1, caption: caption)
+
+    ~H"""
+    <div
+      id={@id}
+      phx-hook="ArrowKeyGuard"
+      data-guard-keys="ArrowLeft,ArrowRight,Escape"
+      class={[
+        "fixed inset-0 z-50 flex flex-col bg-base-200 drawer:z-40 drawer:flex-row",
+        !@embed && "drawer:top-[53px]"
+      ]}
+    >
+      <div
+        id={"#{@id}-key-prev"}
+        class="hidden"
+        phx-window-keydown="mockup_prev"
+        phx-key="ArrowLeft"
+      >
+      </div>
+      <div
+        id={"#{@id}-key-next"}
+        class="hidden"
+        phx-window-keydown="mockup_next"
+        phx-key="ArrowRight"
+      >
+      </div>
+      <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
+      </div>
+      <.mockup_viewer_bar
+        id={"#{@id}-bar"}
+        caption={@caption}
+        index={@index}
+        total={length(@mockups)}
+        back_patch={@back_patch}
+        class="drawer:hidden"
+      />
+      <aside
+        id={"#{@id}-sheet"}
+        class="hidden w-[340px] shrink-0 flex-col bg-base-100 drawer:flex"
+      >
+        <div class="border-b border-base-300 px-3 py-2.5">
+          <.link
+            id={"#{@id}-back"}
+            patch={@back_patch}
+            class="btn btn-ghost btn-sm gap-1.5 px-2"
+          >
+            <span aria-hidden="true">←</span>Back to card
+          </.link>
+        </div>
+        <div class="flex flex-col gap-1.5 border-b border-base-300 px-4 py-3">
+          <div class="flex items-center gap-2">
+            <span
+              id={"#{@id}-stage-chip"}
+              class={[
+                "badge badge-sm h-5 rounded-[4px] border-none text-[12px]",
+                if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+              ]}
+            >
+              {@stage_name}
+            </span>
+            <span class="font-mono text-xs text-base-content/65">{@ref}</span>
+          </div>
+          <h2 id={"#{@id}-card-title"} class="text-base font-semibold leading-[1.3]">
+            {@card.title}
+          </h2>
+        </div>
+        <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-4">
+          {render_slot(@gate)}
+          <.card_mockups_section
+            id={"#{@id}-mockups"}
+            tile_id={"#{@id}-mockup"}
+            mockups={@mockups}
+            mockup_href={@mockup_href}
+            current={@current_id}
+            replace
+          />
+        </div>
+      </aside>
+      <main
+        id={"#{@id}-main"}
+        phx-hook=".MockupSwipe"
+        class="flex min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
+      >
+        <div class="min-h-0 flex-1 drawer:p-4">
+          <div class="h-full overflow-hidden bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm">
+            <iframe
+              id={"#{@id}-frame"}
+              src={RelayWeb.attachment_path(@current_id)}
+              sandbox={RelayWeb.mockup_sandbox()}
+              title={"Mockup: #{@caption} (#{@ref})"}
+              class="block h-full w-full border-0"
+            >
+            </iframe>
+          </div>
+        </div>
+      </main>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupSwipe">
+        export default {
+          mounted() {
+            this.el.addEventListener("touchstart", (e) => {
+              const t = e.changedTouches[0]
+              this.start = { x: t.clientX, y: t.clientY }
+            }, { passive: true })
+            this.el.addEventListener("touchend", (e) => {
+              if (!this.start) return
+              const t = e.changedTouches[0]
+              const dx = t.clientX - this.start.x
+              const dy = t.clientY - this.start.y
+              this.start = null
+              if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) {
+                this.pushEvent(dx < 0 ? "mockup_next" : "mockup_prev", {})
+              }
+            }, { passive: true })
+          }
+        }
+      </script>
+    </div>
     """
   end
 
@@ -2725,29 +3002,28 @@ defmodule RelayWeb.CoreComponents do
 
   attr :talk_events, :any, default: nil, doc: "RE268: the @streams.talk_events assign"
 
+  attr :mockup_href, :any,
+    default: &RelayWeb.attachment_view_path/1,
+    doc:
+      "RE380: attachment id -> the URL a Mockups tile patches to. BoardLive always passes its " <>
+        "viewer-URL closure; the default exists for Storybook and component tests"
+
+  attr :hidden, :boolean,
+    default: false,
+    doc:
+      "RE380: the mockup viewer covers the drawer. It stays mounted (its streams survive) but " <>
+        "is display:none, binds no window keys and renders no gate panel — the viewer's sheet " <>
+        "renders that, and both carry fixed DOM ids"
+
   def card_drawer(assigns) do
-    latest = List.first(assigns.runs)
-    # The card-status guard clears the blocked strip's run eyebrow and the panel's advance control
-    # the moment an answer flips the baton, before the engine's own run row update lands.
-    parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
-
-    # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
-    # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
-    # a park that is none of A1, A4 or A11 (e.g. a :runner_gone re-park of an already-blocked card).
-    # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
-    # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
-    # fall outside needs_input_panel's declared `values:`.
-    park_kind = (parked_run && Relay.Runs.park_kind(parked_run)) || :question
-
     assigns =
       assigns
+      |> assign_park_state()
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
       |> assign(:working_progress, Cards.sub_task_pct(assigns.card))
-      |> assign(:latest_run, latest)
-      |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
-      |> assign(:parked_run, parked_run)
-      |> assign(:park_kind, park_kind)
-      |> assign_blocked_state(parked_run, park_kind)
+      |> assign_blocked_state()
+      # Map.get because the drawer's `card` is any card-shaped map (Storybook passes plain maps).
+      |> assign(:mockup_entries, Card.mockup_entries(Map.get(assigns.card, :mockups)))
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
@@ -2757,7 +3033,12 @@ defmodule RelayWeb.CoreComponents do
       )
 
     ~H"""
-    <div id={@id} class="drawer drawer-end" phx-window-keydown="close_drawer" phx-key="escape">
+    <div
+      id={@id}
+      class={["drawer drawer-end", @hidden && "hidden"]}
+      phx-window-keydown={!@hidden && "close_drawer"}
+      phx-key={!@hidden && "escape"}
+    >
       <input
         id={"#{@id}-toggle"}
         type="checkbox"
@@ -2921,8 +3202,8 @@ defmodule RelayWeb.CoreComponents do
                 type="button"
                 id="card-drawer-prev"
                 phx-click="prev_card"
-                phx-window-keydown="prev_card"
-                phx-key="ArrowLeft"
+                phx-window-keydown={!@hidden && "prev_card"}
+                phx-key={!@hidden && "ArrowLeft"}
                 disabled={is_nil(@prev_ref)}
                 class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
                 aria-label="Previous card"
@@ -2933,8 +3214,8 @@ defmodule RelayWeb.CoreComponents do
                 type="button"
                 id="card-drawer-next"
                 phx-click="next_card"
-                phx-window-keydown="next_card"
-                phx-key="ArrowRight"
+                phx-window-keydown={!@hidden && "next_card"}
+                phx-key={!@hidden && "ArrowRight"}
                 disabled={is_nil(@next_ref)}
                 class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
                 aria-label="Next card"
@@ -3037,8 +3318,8 @@ defmodule RelayWeb.CoreComponents do
 
           <nav
             id="card-drawer-tabs"
-            phx-window-keydown="talk_shortcut"
-            phx-key="t"
+            phx-window-keydown={!@hidden && "talk_shortcut"}
+            phx-key={!@hidden && "t"}
             phx-hook="TypingKeyGuard"
             data-guard-keys="t"
             style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
@@ -3149,138 +3430,28 @@ defmodule RelayWeb.CoreComponents do
                     </div>
                   </div>
                 </section>
-                <.needs_input_panel
-                  :if={Card.awaiting_answer?(@card.status, @archived)}
+                <%!-- RE380 — the question stepper and the review panel, shared with the mockup
+                viewer's left sheet. Not rendered while the drawer is hidden behind the viewer: the
+                sheet renders its own copy, and both carry fixed DOM ids. --%>
+                <.card_gate_panel
+                  :if={!@hidden}
                   card={@card}
+                  archived={@archived}
+                  runs={@runs}
+                  run_flow={@run_flow}
+                  advance_available?={@advance_available?}
                   question={@question}
                   answer_questions={@answer_questions}
                   answer_step={@answer_step}
                   answer_values={@answer_values}
                   answer_form={@answer_form}
                   body_loading={@body_loading}
-                  park_kind={@park_kind}
-                  node={@latest_detail && @latest_detail.current_node}
-                  attempt={@latest_detail && @latest_detail.parked_attempt}
-                  failure_detail={@latest_detail && @latest_detail.last_failure_detail}
-                  advance_available?={@panel_advance_available?}
+                  review_gate={@review_gate}
+                  reject_open={@reject_open}
+                  reject_form={@reject_form}
+                  reject_error={@reject_error}
+                  embed={@embed}
                 />
-                <section
-                  :if={@card.status == :in_review and !@archived}
-                  id="review-panel"
-                  class="flex flex-col gap-3 rounded-[10px] p-3.5"
-                  style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
-                >
-                  <span
-                    class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                    style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
-                  >
-                    READY FOR YOUR REVIEW
-                  </span>
-                  <p
-                    class="text-[13px] leading-normal"
-                    style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
-                  >
-                    {review_hint(@review_gate)}
-                  </p>
-                  <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
-                    <button
-                      id="review-approve"
-                      type="button"
-                      phx-click="review_approve"
-                      class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-success-content"
-                      style="background:var(--color-success);"
-                    >
-                      {@review_gate.approve_label}
-                    </button>
-                    <button
-                      :if={@review_gate.can_reject}
-                      id="review-request-changes"
-                      type="button"
-                      phx-click="review_open_reject"
-                      class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
-                      style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
-                    >
-                      Request changes
-                    </button>
-                  </div>
-                  <div
-                    :if={@review_gate && @reject_open && !@embed}
-                    id="review-reject-panel"
-                    class="flex flex-col gap-2 rounded-lg bg-base-100 p-3"
-                    style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));"
-                  >
-                    <div
-                      class="flex items-center gap-2 rounded-lg px-3 py-2"
-                      style="background:color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));"
-                    >
-                      <span
-                        class="text-[13px] leading-none"
-                        style="color:color-mix(in oklab, var(--color-accent) 50%, var(--color-base-content));"
-                      >
-                        ↩
-                      </span>
-                      <span
-                        class="text-[12.5px] leading-normal"
-                        style="color:color-mix(in oklab, var(--color-accent) 35%, var(--color-base-content));"
-                      >
-                        Returns to
-                        <b style="color:color-mix(in oklab, var(--color-accent) 20%, var(--color-base-content));">
-                          {@review_gate.reject_target_name}
-                        </b>
-                        — the reject target set on this stage.
-                      </span>
-                    </div>
-                    <.form
-                      for={@reject_form}
-                      id="review-reject-form"
-                      class="flex flex-col gap-2"
-                      phx-submit="review_reject"
-                    >
-                      <%!-- RE306 — the panel opens on a button click, so without this the caret
-                      stays on "Request changes" and the first words of the note are typed at the
-                      window. `commit={:form}` renders a plain <.input>, which has no CommitField
-                      hook to honour `data-autofocus`, so the caret is moved the same way the
-                      Move-to filter does it. --%>
-                      <.boxed_field
-                        id="review-request-note"
-                        commit={:form}
-                        multiline
-                        rows="3"
-                        form={@reject_form}
-                        field={:note}
-                        placeholder="What needs to change? This note goes to the AI…"
-                        phx-mounted={JS.focus()}
-                        phx-hook="SubmitOnCmdEnter"
-                      />
-                      <p
-                        :if={@reject_error}
-                        id="review-note-error"
-                        class="text-xs text-error"
-                      >
-                        {@reject_error}
-                      </p>
-                      <div class="flex items-center gap-2">
-                        <button
-                          id="review-send-back"
-                          type="submit"
-                          class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
-                          style="background:var(--color-warning);"
-                        >
-                          Reject → {@review_gate.reject_target_name}
-                        </button>
-                        <button
-                          id="review-cancel-reject"
-                          type="button"
-                          phx-click="review_cancel_reject"
-                          class="btn btn-ghost btn-sm text-xs"
-                          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </.form>
-                  </div>
-                </section>
                 <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
                   <.section_label accent="text-secondary">AI Result</.section_label>
                   <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
@@ -3369,28 +3540,15 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                 </section>
-                <%!-- RE370 / RE374 — the card's HTML mockups as small square tiles in a wrapping
-                row (the Screenshots strip's `flex flex-wrap gap-2`). No artboard governs this
-                section (Relay Card Detail v5 has none). Map.get because the drawer's `card` is any
-                card-shaped map (Storybook passes plain maps). --%>
-                <section
-                  :if={!@body_loading and mockup_entries(Map.get(@card, :mockups)) != []}
+                <%!-- RE370 / RE374 / RE380 — the card's HTML mockups as small square tiles in a
+                wrapping row; each tile patches to the same-tab mockup viewer (`mockup_href`). --%>
+                <.card_mockups_section
+                  :if={!@body_loading and @mockup_entries != []}
                   id={"#{@id}-mockups"}
-                  class="space-y-2"
-                >
-                  <.section_label>Mockups</.section_label>
-                  <div id={"#{@id}-mockup-tiles"} class="flex flex-wrap gap-2">
-                    <.mockup_preview
-                      :for={
-                        {mockup, index} <- Enum.with_index(mockup_entries(Map.get(@card, :mockups)))
-                      }
-                      id={"#{@id}-mockup-#{index}"}
-                      src={RelayWeb.attachment_path(mockup.id)}
-                      view_href={RelayWeb.attachment_view_path(mockup.id)}
-                      caption={mockup.caption}
-                    />
-                  </div>
-                </section>
+                  tile_id={"#{@id}-mockup"}
+                  mockups={@mockup_entries}
+                  mockup_href={@mockup_href}
+                />
                 <section id={"#{@id}-description"} class="space-y-2">
                   <.section_label>Description</.section_label>
                   <div
@@ -4748,19 +4906,287 @@ defmodule RelayWeb.CoreComponents do
   defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
   defp attempt_label(_n), do: "1 attempt"
 
-  # RE279 — what the blocked strip and the Detail answer panel show, worked out ONCE from assigns
-  # the drawer already has. `park_kind` arrives with its nil → :question policy already applied
-  # (see card_drawer/1), and `parked_run` is nil/false or the parked run itself.
-  defp assign_blocked_state(assigns, parked_run, park_kind) do
-    parked? = parked_run not in [nil, false]
+  @doc """
+  The review gate's green panel (MMF 15, RE380): READY FOR YOUR REVIEW, Approve / Request changes,
+  and the in-place reject note. Extracted from `card_drawer/1` so the mockup viewer's left sheet
+  renders the very same control; the caller decides whether to render it (in review, not
+  archived). Its children's ids are fixed (`review-approve`, `review-reject-form`, …), so only one
+  copy may be on the page at a time.
+
+  `compact` is the left sheet's face: Approve says just "Approve", the returns-to hint drops its
+  explanatory suffix, the note gets 8 rows, and two lines sit under it — an optional
+  "+ Quote “caption”" button (`quote_caption`, wired by the colocated `.QuoteCaption` hook) and a
+  reminder that the note survives switching mockups. In both faces the form reports every
+  keystroke (`phx-change="review_reject_change"`), so the note is held server-side.
+
+  `embed` (the native host) drops the decision buttons and the reject note, as in the drawer.
+  """
+  attr :id, :string, default: "review-panel"
+
+  attr :review_gate, :any,
+    default: nil,
+    doc: "%{approve_label, reject_target_name, can_reject}, or nil for a stage that is not a review gate"
+
+  attr :reject_open, :boolean, default: false, doc: "whether the Request-changes note is expanded"
+  attr :reject_form, :any, default: nil, doc: "a Phoenix.HTML.Form for reject[note]"
+  attr :reject_error, :string, default: nil, doc: "inline prompt after an empty Send back"
+  attr :embed, :boolean, default: false, doc: "native host: no decision buttons, no note"
+  attr :compact, :boolean, default: false, doc: "the mockup viewer's left-sheet face"
+
+  attr :quote_caption, :string,
+    default: nil,
+    doc: "compact only: the current mockup's caption, offered as a one-click quote into the note"
+
+  def card_review_panel(assigns) do
+    ~H"""
+    <section
+      id={@id}
+      class="flex flex-col gap-3 rounded-[10px] p-3.5"
+      style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
+    >
+      <span
+        class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+        style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
+      >
+        READY FOR YOUR REVIEW
+      </span>
+      <p
+        class="text-[13px] leading-normal"
+        style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
+      >
+        {review_hint(@review_gate)}
+      </p>
+      <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
+        <button
+          id="review-approve"
+          type="button"
+          phx-click="review_approve"
+          class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-success-content"
+          style="background:var(--color-success);"
+        >
+          {if @compact, do: "Approve", else: @review_gate.approve_label}
+        </button>
+        <button
+          :if={@review_gate.can_reject}
+          id="review-request-changes"
+          type="button"
+          phx-click="review_open_reject"
+          class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
+          style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
+        >
+          Request changes
+        </button>
+      </div>
+      <div
+        :if={@review_gate && @reject_open && !@embed}
+        id="review-reject-panel"
+        class="flex flex-col gap-2 rounded-lg bg-base-100 p-3"
+        style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));"
+      >
+        <div
+          class="flex items-center gap-2 rounded-lg px-3 py-2"
+          style="background:color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));"
+        >
+          <span
+            class="text-[13px] leading-none"
+            style="color:color-mix(in oklab, var(--color-accent) 50%, var(--color-base-content));"
+          >
+            ↩
+          </span>
+          <span
+            class="text-[12.5px] leading-normal"
+            style="color:color-mix(in oklab, var(--color-accent) 35%, var(--color-base-content));"
+          >
+            Returns to
+            <b style="color:color-mix(in oklab, var(--color-accent) 20%, var(--color-base-content));">
+              {@review_gate.reject_target_name}
+            </b>
+            <%= if !@compact do %>
+              — the reject target set on this stage.
+            <% end %>
+          </span>
+        </div>
+        <.form
+          for={@reject_form}
+          id="review-reject-form"
+          class="flex flex-col gap-2"
+          phx-change="review_reject_change"
+          phx-submit="review_reject"
+        >
+          <%!-- RE306 — the panel opens on a button click, so without this the caret
+          stays on "Request changes" and the first words of the note are typed at the
+          window. `commit={:form}` renders a plain <.input>, which has no CommitField
+          hook to honour `data-autofocus`, so the caret is moved the same way the
+          Move-to filter does it. --%>
+          <.boxed_field
+            id="review-request-note"
+            commit={:form}
+            multiline
+            rows={if @compact, do: "8", else: "3"}
+            form={@reject_form}
+            field={:note}
+            placeholder="What needs to change? This note goes to the AI…"
+            phx-mounted={JS.focus()}
+            phx-hook="SubmitOnCmdEnter"
+          />
+          <button
+            :if={@compact && @quote_caption}
+            type="button"
+            id="review-quote-caption"
+            phx-hook=".QuoteCaption"
+            data-quote={"“#{@quote_caption}”"}
+            class="btn btn-ghost btn-xs justify-start gap-1 px-1 text-xs text-base-content/65"
+          >
+            + Quote “{@quote_caption}”
+          </button>
+          <p :if={@compact} id="review-note-stays" class="text-xs text-base-content/55">
+            Your note stays put while you switch mockups.
+          </p>
+          <p
+            :if={@reject_error}
+            id="review-note-error"
+            class="text-xs text-error"
+          >
+            {@reject_error}
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              id="review-send-back"
+              type="submit"
+              class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+              style="background:var(--color-warning);"
+            >
+              Reject → {@review_gate.reject_target_name}
+            </button>
+            <button
+              id="review-cancel-reject"
+              type="button"
+              phx-click="review_cancel_reject"
+              class="btn btn-ghost btn-sm text-xs"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+            >
+              Cancel
+            </button>
+          </div>
+        </.form>
+      </div>
+    </section>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".QuoteCaption">
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => {
+            const note = document.getElementById("review-request-note")
+            if (!note) return
+            const quote = this.el.dataset.quote
+            const start = note.selectionStart ?? note.value.length
+            const end = note.selectionEnd ?? note.value.length
+            note.value = note.value.slice(0, start) + quote + note.value.slice(end)
+            const caret = start + quote.length
+            note.focus()
+            note.setSelectionRange(caret, caret)
+            note.dispatchEvent(new Event("input", { bubbles: true }))
+          })
+        }
+      }
+    </script>
+    """
+  end
+
+  @doc """
+  The card's gate panel, as the drawer's Detail tab shows it (RE380): the needs-input panel
+  (question stepper, escalation or infrastructure face) while the card awaits an answer, then the
+  review panel while it is in review — never both, since the two statuses are exclusive. The park
+  facts (`park_kind`, the failed node, attempts, failure detail, the advance control) come from the
+  same private helper `card_drawer/1` uses, so the drawer and the mockup viewer's left sheet can
+  never disagree about which face a parked card wears.
+  """
+  attr :card, :any, required: true
+  attr :archived, :boolean, default: false
+  attr :runs, :list, default: [], doc: "the card's runs, newest-first"
+  attr :run_flow, :any, default: nil, doc: "the %Schemas.Flow{} the latest run belongs to"
+  attr :advance_available?, :boolean, default: false
+  attr :question, :string, default: nil
+  attr :answer_questions, :any, default: nil
+  attr :answer_step, :integer, default: 0
+  attr :answer_values, :map, default: %{}
+  attr :answer_form, :any, default: nil
+  attr :body_loading, :boolean, default: false
+  attr :review_gate, :any, default: nil
+  attr :reject_open, :boolean, default: false
+  attr :reject_form, :any, default: nil
+  attr :reject_error, :string, default: nil
+  attr :embed, :boolean, default: false
+  attr :compact, :boolean, default: false
+  attr :quote_caption, :string, default: nil
+
+  def card_gate_panel(assigns) do
+    assigns = assign_park_state(assigns)
+
+    ~H"""
+    <.needs_input_panel
+      :if={Card.awaiting_answer?(@card.status, @archived)}
+      card={@card}
+      question={@question}
+      answer_questions={@answer_questions}
+      answer_step={@answer_step}
+      answer_values={@answer_values}
+      answer_form={@answer_form}
+      body_loading={@body_loading}
+      park_kind={@park_kind}
+      node={@latest_detail && @latest_detail.current_node}
+      attempt={@latest_detail && @latest_detail.parked_attempt}
+      failure_detail={@latest_detail && @latest_detail.last_failure_detail}
+      advance_available?={@panel_advance_available?}
+    />
+    <.card_review_panel
+      :if={@card.status == :in_review and !@archived}
+      review_gate={@review_gate}
+      reject_open={@reject_open}
+      reject_form={@reject_form}
+      reject_error={@reject_error}
+      embed={@embed}
+      compact={@compact}
+      quote_caption={@quote_caption}
+    />
+    """
+  end
+
+  # RE253/RE279/RE310 — the park facts every reader of the latest run shares, worked out ONCE:
+  # `card_drawer/1` (blocked strip, Run tab) and `card_gate_panel/1` (the needs-input panel) both
+  # call this, so the drawer and the mockup viewer's sheet cannot drift apart.
+  defp assign_park_state(assigns) do
+    latest = List.first(assigns.runs)
+    # The card-status guard clears the blocked strip's run eyebrow and the panel's advance control
+    # the moment an answer flips the baton, before the engine's own run row update lands.
+    parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
+
+    # RE253 — which face the panel wears is decided by park provenance, and `Relay.Runs.park_kind/1`
+    # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
+    # a park that is none of A1, A4 or A11 (e.g. a :runner_gone re-park of an already-blocked card).
+    # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
+    # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
+    # fall outside needs_input_panel's declared `values:`.
+    park_kind = (parked_run && Relay.Runs.park_kind(parked_run)) || :question
+
+    assigns
+    |> assign(:latest_run, latest)
+    |> assign(:latest_detail, latest && Relay.Runs.run_detail(latest, assigns.run_flow))
+    |> assign(:parked_run, parked_run)
+    |> assign(:park_kind, park_kind)
+    # RE310's advance control used to sit only in the Run tab's parked banner; it now renders in
+    # the Detail panel, still only for a parked run. The rule itself stays in the LiveView.
+    |> assign(:panel_advance_available?, parked_run not in [nil, false] and assigns.advance_available?)
+  end
+
+  # RE279 — what the blocked strip shows, worked out ONCE from the park state
+  # `assign_park_state/1` already derived (with its nil → :question policy applied).
+  defp assign_blocked_state(assigns) do
+    parked? = assigns.parked_run not in [nil, false]
     node = assigns.latest_detail && assigns.latest_detail.current_node
 
     assigns
-    |> assign(:strip_eyebrow, blocked_strip_eyebrow(parked?, park_kind, node))
+    |> assign(:strip_eyebrow, blocked_strip_eyebrow(parked?, assigns.park_kind, node))
     |> assign(:strip_question, strip_question(assigns))
-    # RE310's advance control used to sit only in the Run tab's parked banner; it now renders in
-    # the Detail panel, still only for a parked run. The rule itself stays in the LiveView.
-    |> assign(:panel_advance_available?, parked? and assigns.advance_available?)
   end
 
   # RE279 — the strip's one-line question follows the stepper: the prompt of the step the human is
@@ -6166,17 +6592,6 @@ defmodule RelayWeb.CoreComponents do
   # the blob goes through one of these, so no shape can break the render.
   defp ai_text(value) when is_binary(value), do: value
   defp ai_text(_value), do: nil
-
-  # RE370 — `mockups` is validated on write (`Relay.Cards.set_mockups/2`), but like `ai_result`
-  # it is a jsonb column the drawer must never crash on: an entry not shaped like
-  # `%{"url" => "/attachments/<id>"}` is skipped rather than rendered.
-  defp mockup_entries(mockups) when is_list(mockups) do
-    for %{"url" => url} = mockup <- mockups, {:ok, id} <- [Schemas.Attachment.id_from_path(url)] do
-      %{id: id, caption: ai_text(mockup["caption"])}
-    end
-  end
-
-  defp mockup_entries(_mockups), do: []
 
   defp ai_list(value) when is_list(value), do: value
   defp ai_list(value) when value in [nil, ""], do: []

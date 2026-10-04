@@ -32,10 +32,19 @@ defmodule RelayWeb.StorybookRenderTest do
 
     # The fifth tile has no caption, so it falls back to "Mockup".
     assert doc
-           |> LazyHTML.query("a#mockup-preview-wrapping-row-tile-4-open[aria-label='Open mockup: Mockup (new tab)']")
+           |> LazyHTML.query("a#mockup-preview-wrapping-row-tile-4-open[aria-label='Open mockup: Mockup']")
            |> Enum.count() == 1
 
     assert html =~ "80px square live miniature"
+  end
+
+  test "GET the RE380 review panel, Mockups section and mobile viewer bar stories", %{conn: conn} do
+    for page <- ~w(card_review_panel card_mockups_section mockup_viewer_bar) do
+      assert conn |> get("/storybook/core_components/#{page}") |> html_response(200)
+    end
+
+    html = conn |> get("/storybook/core_components/card_mockups_section") |> html_response(200)
+    assert html =~ ~s(aria-current="true")
   end
 
   test "GET /storybook/core_components/stage_column shows the RE377 compact pager page and Show as list",

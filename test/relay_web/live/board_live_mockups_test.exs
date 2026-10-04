@@ -1,8 +1,8 @@
 defmodule RelayWeb.BoardLiveMockupsTest do
   @moduledoc """
   RE370 / RE374 — the drawer's Mockups section: a wrapping row of small square tiles, each a live
-  miniature (sandboxed iframe) of an HTML attachment that is itself a new-tab link to the framed
-  viewer (never the raw HTML). Rendered only when the card has mockups, and live-updated on the
+  miniature (sandboxed iframe) of an HTML attachment that is itself a same-tab patch link to the
+  card's mockup viewer URL (RE380; never the raw HTML). Rendered only when the card has mockups, and live-updated on the
   `{:card_upserted, _}` echo.
   """
   use RelayWeb.ConnCase, async: true
@@ -39,7 +39,7 @@ defmodule RelayWeb.BoardLiveMockupsTest do
     view
   end
 
-  test "each mockup is a small square tile linking to the viewer in a new tab, in a wrapping row",
+  test "each mockup is a small square tile patching to the same-tab viewer URL, in a wrapping row (RE380)",
        %{conn: conn, board: board, card: card, ref: ref} do
     a = upload(card, "a.html")
     b = upload(card, "b.html")
@@ -57,20 +57,25 @@ defmodule RelayWeb.BoardLiveMockupsTest do
     # RE374 — tiles sit side by side and wrap, like the AI result's Screenshots strip.
     assert has_element?(view, "#card-drawer-mockups #card-drawer-mockup-tiles.flex.flex-wrap.gap-2")
 
-    # The whole 80px square tile is the link: the framed viewer, in a NEW tab, plain href.
-    assert has_element?(
-             view,
-             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-0-open.size-20[href="#{RelayWeb.attachment_view_path(a.id)}"][target="_blank"][rel="noopener noreferrer"][title="Empty state"][aria-label="Open mockup: Empty state (new tab)"]|
-           )
+    # RE380 — the whole 80px square tile is a same-tab patch to the card's own drawer URL plus
+    # `mockup=<id>`: no new tab, and no current ring in the drawer.
+    a_href = "/board/#{board.slug}?card=#{ref}&mockup=#{a.id}"
 
     assert has_element?(
              view,
-             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-1-open.size-20[href="#{RelayWeb.attachment_view_path(b.id)}"][target="_blank"][title="Mockup"][aria-label="Open mockup: Mockup (new tab)"]|
+             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-0-open.size-20[href="#{a_href}"][data-phx-link="patch"][title="Empty state"][aria-label="Open mockup: Empty state"]|
+           )
+
+    refute has_element?(view, "#card-drawer-mockup-0-open[target]")
+    refute has_element?(view, "#card-drawer-mockup-0-open[rel]")
+    refute has_element?(view, "#card-drawer-mockup-0-open[aria-current]")
+
+    assert has_element?(
+             view,
+             ~s|#card-drawer-mockup-tiles a#card-drawer-mockup-1-open.size-20[href="/board/#{board.slug}?card=#{ref}&mockup=#{b.id}"][title="Mockup"][aria-label="Open mockup: Mockup"]|
            )
 
     refute has_element?(view, "#card-drawer-mockup-2-open")
-    refute has_element?(view, "#card-drawer-mockup-0-open[data-phx-link]")
-    refute has_element?(view, "#card-drawer-mockup-1-open[data-phx-link]")
 
     # The caption is no longer visible text, but it stays addressable and announced.
     assert has_element?(view, "#card-drawer-mockup-0-caption.sr-only", "Empty state")
