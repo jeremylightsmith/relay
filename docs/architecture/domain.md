@@ -8,7 +8,9 @@ sharing behavior.
 ## Contexts
 
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits,
-  `ai_enabled`). Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
+  `ai_enabled`); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
+  `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
+  order being `Schemas.Stage.sublane_types/0`. Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).

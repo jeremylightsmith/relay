@@ -466,6 +466,34 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     end
   end
 
+  describe "new-flow stage pickers (RE385)" do
+    test "the works-in picker lists each substage directly under its parent", %{
+      conn: conn,
+      board: board
+    } do
+      html = conn |> open_new_flow(board) |> render()
+
+      assert html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#new-flow-works-in option")
+             |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim())) ==
+               [
+                 "—",
+                 "Backlog",
+                 "Next up",
+                 "Spec",
+                 "Spec:Review",
+                 "Spec:Done",
+                 "Plan",
+                 "Plan:Done",
+                 "Code",
+                 "Review",
+                 "Deploy",
+                 "Done"
+               ]
+    end
+  end
+
   describe "creating a flow from scratch (RLY-158)" do
     test "clicking the button opens the panel with the key prefilled and isolation defaulted",
          %{conn: conn, board: board} do

@@ -283,4 +283,89 @@ defmodule Relay.BoardsStageConfigTest do
       refute_receive {:stages_changed, _board_id}
     end
   end
+
+  describe "update_stage/2 rename cascade (RE385)" do
+    defp children_of(board, parent) do
+      board
+      |> Boards.list_stages()
+      |> Enum.filter(&(&1.parent_id == parent.id))
+      |> Enum.sort_by(& &1.type)
+    end
+
+    test "renaming a main stage renames its Review and Done substages" do
+      board = seeded_board()
+      spec = stage_named(board, "Spec")
+      review = stage_named(board, "Spec:Review")
+      done = stage_named(board, "Spec:Done")
+
+      assert {:ok, %Schemas.Stage{name: "Specify"}} = Boards.update_stage(spec, %{name: "Specify"})
+
+      reloaded_review = Boards.get_stage(board, review.id)
+      reloaded_done = Boards.get_stage(board, done.id)
+      assert reloaded_review.name == "Specify:Review"
+      assert reloaded_review.type == :review
+      assert reloaded_done.name == "Specify:Done"
+      assert reloaded_done.type == :done
+    end
+
+    test "a stage with only a Done substage renames just that one" do
+      board = seeded_board()
+      plan = stage_named(board, "Plan")
+
+      assert {:ok, _} = Boards.update_stage(plan, %{name: "Design"})
+
+      assert [%{name: "Design:Done", type: :done}] = children_of(board, plan)
+      refute Enum.any?(Boards.list_stages(board), &(&1.name == "Design:Review"))
+    end
+
+    test "renaming a substage directly cascades nowhere" do
+      board = seeded_board()
+      review = stage_named(board, "Spec:Review")
+
+      assert {:ok, %{name: "Odd"}} = Boards.update_stage(review, %{name: "Odd"})
+
+      assert Boards.get_stage(board, stage_named(board, "Spec").id).name == "Spec"
+      assert Boards.get_stage(board, stage_named(board, "Spec:Done").id).name == "Spec:Done"
+    end
+
+    test "an update without a name change cascades nothing" do
+      board = seeded_board()
+      spec = stage_named(board, "Spec")
+
+      assert {:ok, _} = Boards.update_stage(spec, %{description: "write it down", wip_limit: 2})
+
+      for {name, id} <- [
+            {"Spec:Review", stage_named(board, "Spec:Review").id},
+            {"Spec:Done", stage_named(board, "Spec:Done").id}
+          ] do
+        child = Boards.get_stage(board, id)
+        assert child.name == name
+        assert child.description == nil
+        assert child.wip_limit == nil
+      end
+    end
+
+    test "an invalid rename changes nothing and broadcasts nothing" do
+      board = seeded_board()
+      :ok = Relay.Events.subscribe(board.id)
+      spec = stage_named(board, "Spec")
+
+      assert {:error, %Ecto.Changeset{}} = Boards.update_stage(spec, %{name: ""})
+
+      assert Boards.get_stage(board, spec.id).name == "Spec"
+      assert board |> children_of(spec) |> Enum.map(& &1.name) |> Enum.sort() == ["Spec:Done", "Spec:Review"]
+      refute_receive {:stages_changed, _board_id}
+    end
+
+    test "a cascading rename broadcasts exactly once" do
+      board = seeded_board()
+      board_id = board.id
+      :ok = Relay.Events.subscribe(board_id)
+
+      assert {:ok, _} = Boards.update_stage(stage_named(board, "Spec"), %{name: "Specify"})
+
+      assert_receive {:stages_changed, ^board_id}
+      refute_receive {:stages_changed, ^board_id}, 100
+    end
+  end
 end

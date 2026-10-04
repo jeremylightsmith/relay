@@ -44,6 +44,16 @@ defmodule RelayWeb.Api.BoardControllerTest do
     assert sub["wip_limit"] == nil
   end
 
+  test "stages list each substage directly under its parent", %{conn: conn, board: board} do
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
+    _ship = insert(:stage, board: board, name: "Ship", type: :work, position: 2)
+    _review = insert(:stage, board: board, name: "Code:Review", type: :review, position: 3, parent: code)
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+
+    assert Enum.map(body["stages"], & &1["name"]) == ["Code", "Code:Review", "Ship"]
+  end
+
   test "board card JSON omits heavy plan/spec text", %{conn: conn, board: board} do
     stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
     insert(:card, stage: stage, title: "Heavy", plan: "big plan text", spec: "big spec text")

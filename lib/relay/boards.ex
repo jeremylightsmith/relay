@@ -34,6 +34,9 @@ defmodule Relay.Boards do
   # Board-progression order is the schema's declaration order — defined once on the schema.
   @category_order Stage.categories()
 
+  # The sub-lane closed set — defined once on the schema, usable in guards (RE385).
+  @sublane_types Stage.sublane_types()
+
   @doc """
   An unvalidated changeset for a board's user-editable attributes.
   Drives the settings "Board name" form.
@@ -72,7 +75,7 @@ defmodule Relay.Boards do
   @doc """
   The board behind a public URL: returns `{:ok, board}` **only when
   `public_enabled` is true**, `:error` otherwise (disabled or unknown slug). Stages
-  are preloaded in position order. Non-scoped — public visitors have no membership.
+  are preloaded in hierarchical order (`order_stages/1`). Non-scoped — public visitors have no membership.
   """
   def get_public_board(slug) when is_binary(slug) do
     case Repo.one(
@@ -81,7 +84,7 @@ defmodule Relay.Boards do
              preload: [stages: ^from(s in Stage, order_by: s.position)]
          ) do
       nil -> :error
-      %Board{} = board -> {:ok, board}
+      %Board{} = board -> {:ok, order_board_stages(board)}
     end
   end
 
@@ -105,7 +108,7 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Returns the user's board with `stages` preloaded in `position` order,
+  Returns the user's board with `stages` preloaded in hierarchical order (`order_stages/1`),
   creating the board (unique slug derived from the user) and seeding the
   default 8-stage pipeline, the three story-map releases
   (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
@@ -119,7 +122,9 @@ defmodule Relay.Boards do
         [] -> create_default_board!(user)
       end
 
-    Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+    board
+    |> Repo.preload(stages: from(s in Stage, order_by: s.position))
+    |> order_board_stages()
   end
 
   @doc "The user's non-archived boards (member of), oldest first (stable inserted_at/id order)."
@@ -134,29 +139,31 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Membership-scoped board lookup by slug, with stages preloaded in position
-  order. Returns an archived board too (still loadable, read-only). nil when
+  Membership-scoped board lookup by slug, with stages preloaded in hierarchical
+  order (`order_stages/1`). Returns an archived board too (still loadable, read-only). nil when
   the user is not a member of a board with that slug.
   """
   def get_board(%User{id: user_id}, slug) when is_binary(slug) do
-    Repo.one(
-      from b in Board,
-        join: m in Membership,
-        on: m.board_id == b.id,
-        where: m.user_id == ^user_id and b.slug == ^slug,
-        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    from(b in Board,
+      join: m in Membership,
+      on: m.board_id == b.id,
+      where: m.user_id == ^user_id and b.slug == ^slug,
+      preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
+    |> Repo.one()
+    |> order_board_stages()
   end
 
   @doc "Like get_board/2 but raises Ecto.NoResultsError (→ 404) when not found."
   def get_board!(%User{id: user_id}, slug) when is_binary(slug) do
-    Repo.one!(
-      from b in Board,
-        join: m in Membership,
-        on: m.board_id == b.id,
-        where: m.user_id == ^user_id and b.slug == ^slug,
-        preload: [stages: ^from(s in Stage, order_by: s.position)]
+    from(b in Board,
+      join: m in Membership,
+      on: m.board_id == b.id,
+      where: m.user_id == ^user_id and b.slug == ^slug,
+      preload: [stages: ^from(s in Stage, order_by: s.position)]
     )
+    |> Repo.one!()
+    |> order_board_stages()
   end
 
   @doc """
@@ -166,7 +173,7 @@ defmodule Relay.Boards do
   (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes, and the three disabled default flows — all in one transaction.
   External callers pass only a name (`%{name: ...}` / `%{"name" => ...}`).
-  Returns the board with stages preloaded.
+  Returns the board with stages preloaded in hierarchical order (`order_stages/1`).
   """
   def create_board(%User{} = user, attrs) do
     name = fetch_name(attrs)
@@ -185,7 +192,10 @@ defmodule Relay.Boards do
           seed_releases!(board)
           seed_lanes_and_flows!(board)
           insert_owner_membership!(board, user)
-          Repo.preload(board, stages: from(s in Stage, order_by: s.position))
+
+          board
+          |> Repo.preload(stages: from(s in Stage, order_by: s.position))
+          |> order_board_stages()
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -209,10 +219,34 @@ defmodule Relay.Boards do
     |> broadcast_board_updated(board.id)
   end
 
-  @doc "Returns the board's stages in position order."
+  @doc "Returns the board's stages in hierarchical order (`order_stages/1`)."
   def list_stages(%Board{id: board_id}) do
-    Repo.all(from s in Stage, where: s.board_id == ^board_id, order_by: s.position)
+    from(s in Stage, where: s.board_id == ^board_id, order_by: s.position)
+    |> Repo.all()
+    |> order_stages()
   end
+
+  @doc """
+  Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
+  `position`, each immediately followed by its substages in `Stage.sublane_rank/1` order
+  (Review before Done). Children whose parent is not in the list are appended at the end
+  by `position`, so nothing is dropped. Pure — no Repo access.
+  """
+  @spec order_stages([Stage.t()]) :: [Stage.t()]
+  def order_stages(stages) when is_list(stages) do
+    {mains, children} = Enum.split_with(stages, &is_nil(&1.parent_id))
+    mains = Enum.sort_by(mains, & &1.position)
+    main_ids = MapSet.new(mains, & &1.id)
+    {nested, orphans} = Enum.split_with(children, &MapSet.member?(main_ids, &1.parent_id))
+    by_parent = Enum.group_by(nested, & &1.parent_id)
+
+    Enum.flat_map(mains, fn main ->
+      [main | by_parent |> Map.get(main.id, []) |> Enum.sort_by(&{Stage.sublane_rank(&1.type), &1.position})]
+    end) ++ Enum.sort_by(orphans, & &1.position)
+  end
+
+  defp order_board_stages(nil), do: nil
+  defp order_board_stages(%Board{} = board), do: %{board | stages: order_stages(board.stages)}
 
   @doc "System-wide (non-scoped) board lookup by id, raising when missing. Used by Relay.Runs."
   def get_board_by_id!(id), do: Repo.get!(Board, id)
@@ -331,7 +365,7 @@ defmodule Relay.Boards do
   creating the child stage with `type:` review/done and `ai_enabled: false`.
   Idempotent.
   """
-  def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in [:review, :done] do
+  def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
       %Stage{} = existing ->
         {:ok, existing}
@@ -339,7 +373,7 @@ defmodule Relay.Boards do
       nil ->
         %Stage{board_id: parent.board_id, parent_id: parent.id}
         |> Stage.changeset(%{
-          name: "#{parent.name}:#{lane_word(lane)}",
+          name: sublane_name(parent.name, lane),
           position: next_position(parent.board_id),
           category: parent.category,
           type: lane,
@@ -355,7 +389,7 @@ defmodule Relay.Boards do
   (empty) child is removed, `{:ok, :not_enabled}` when there is nothing to
   remove, or `{:error, :not_empty}` when the lane still holds cards.
   """
-  def disable_lane(%Stage{} = parent, lane) when lane in [:review, :done] do
+  def disable_lane(%Stage{} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
       nil ->
         {:ok, :not_enabled}
@@ -372,24 +406,58 @@ defmodule Relay.Boards do
 
   @doc "The stage's `:review`/`:done` children, ordered Review then Done."
   def sublanes(%Stage{} = parent) do
-    Repo.all(
-      from s in Stage,
-        where: s.parent_id == ^parent.id,
-        order_by: fragment("array_position(ARRAY['review','done'], ?)", s.type)
-    )
+    from(s in Stage, where: s.parent_id == ^parent.id)
+    |> Repo.all()
+    |> Enum.sort_by(&Stage.sublane_rank(&1.type))
   end
 
   @doc """
   Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit, reject_to).
   `ai_enabled` is normalized by the changeset; a changed `reject_to_stage_id` must be a main stage
-  on the same board. Broadcasts `{:stages_changed, board_id}`.
+  on the same board.
+
+  Renaming a **main** stage cascades the new name to its Review/Done sub-lanes
+  (`"<new name>:Review"` / `"<new name>:Done"`, RE385) in the same transaction — a substage's
+  name is its API identifier, so it must never drift from its parent. Nothing else cascades,
+  and renaming a sub-lane directly touches no other stage. Any failure rolls the whole write
+  back and returns `{:error, changeset}`. Broadcasts `{:stages_changed, board_id}` once on success.
   """
   def update_stage(%Stage{} = stage, attrs) do
-    stage
-    |> Stage.changeset(attrs)
-    |> validate_reject_to_stage(stage)
-    |> Repo.update()
-    |> broadcast_stages_changed(stage.board_id)
+    changeset =
+      stage
+      |> Stage.changeset(attrs)
+      |> validate_reject_to_stage(stage)
+
+    new_name = Changeset.get_change(changeset, :name)
+
+    if is_nil(stage.parent_id) and is_binary(new_name) do
+      changeset
+      |> rename_with_sublanes(new_name)
+      |> broadcast_stages_changed(stage.board_id)
+    else
+      changeset
+      |> Repo.update()
+      |> broadcast_stages_changed(stage.board_id)
+    end
+  end
+
+  defp rename_with_sublanes(changeset, new_name) do
+    Repo.transaction(fn ->
+      case Repo.update(changeset) do
+        {:ok, updated} ->
+          updated |> sublanes() |> Enum.each(&rename_sublane!(&1, new_name))
+          updated
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp rename_sublane!(%Stage{} = sublane, parent_name) do
+    sublane
+    |> Stage.changeset(%{name: sublane_name(parent_name, sublane.type)})
+    |> Repo.update!()
   end
 
   @doc """
@@ -662,6 +730,10 @@ defmodule Relay.Boards do
         end
     end
   end
+
+  # The one place a sub-lane's composite name is built (RE385) — enable_lane/2 and the
+  # update_stage/2 rename cascade both go through it.
+  defp sublane_name(parent_name, lane), do: "#{parent_name}:#{lane_word(lane)}"
 
   defp lane_word(:review), do: "Review"
   defp lane_word(:done), do: "Done"
