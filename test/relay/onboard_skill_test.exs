@@ -84,12 +84,19 @@ defmodule Relay.OnboardSkillTest do
     assert doc =~ "Never offer to enable a flow that still has errors"
   end
 
-  test "Phase 3's plan actually authors .relay/runner.json when missing", %{doc: doc} do
-    [_, phase3_and_later] = String.split(doc, "## Phase 3", parts: 2)
-    [phase3, _] = String.split(phase3_and_later, "## Phase 4", parts: 2)
+  # RE383: `./relay update` generates a documented starter runner.json, so Phase 3 reviews it
+  # with the human and recreates a missing one with the command — it never hand-authors it.
+  test "Phase 3 reviews the generated .relay/runner.json instead of authoring it", %{doc: doc} do
+    phase3 = phase(doc, 3)
 
     assert phase3 =~ ".relay/runner.json"
-    assert phase3 =~ "author it for this repo"
+    refute phase3 =~ "author it for this repo"
+    assert phase3 =~ "run `./relay update` to create it"
+    assert phase3 =~ "**never hand-write it**"
+
+    for key <- ["`capacity`", "`base`", "`worktrees`"] do
+      assert phase3 =~ key
+    end
   end
 
   test "onboarding does not author relay.md — the scaffold serves it", %{doc: doc} do
