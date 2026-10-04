@@ -43,9 +43,14 @@ defmodule Relay.Events do
   Broadcasting is fire-and-forget: `broadcast/2` swallows PubSub errors
   and always returns `:ok`, so a broadcast failure can never fail the
   mutation that triggered it.
+
+  Delivery happens after the outermost transaction commits; it is dropped on rollback
+  (RE386). A broadcast made inside a `Relay.Repo` transaction is queued through
+  `Relay.Repo.after_commit/1`, so no subscriber ever reacts to — and re-reads — a write
+  that has not committed (or never will). Outside a transaction it is delivered at once.
   """
 
-  use Boundary, deps: [Relay.BoardWatch]
+  use Boundary, deps: [Relay.BoardWatch, Relay.Repo]
 
   @pubsub Relay.PubSub
   @firehose "events:firehose"
@@ -67,9 +72,14 @@ defmodule Relay.Events do
   Broadcasts `event` to every subscriber of `board_id`'s topic and bumps the
   board's version (RLY-12). Fire-and-forget: PubSub and version-bump errors are
   swallowed and `:ok` is always returned, so neither can fail the mutation that
-  triggered it.
+  triggered it. Inside a `Relay.Repo` transaction the delivery waits for the outermost
+  commit and is dropped on rollback (`Relay.Repo.after_commit/1`, RE386).
   """
   def broadcast(board_id, event) do
+    Relay.Repo.after_commit(fn -> deliver(board_id, event) end)
+  end
+
+  defp deliver(board_id, event) do
     _ = Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event)
     _ = Phoenix.PubSub.broadcast(@pubsub, @firehose, {board_id, event})
     _ = bump_version(board_id)

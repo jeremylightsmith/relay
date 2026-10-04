@@ -1,6 +1,7 @@
 defmodule RelayWeb.BoardLiveRealtimeTest do
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Relay.Activity
@@ -260,6 +261,131 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
     end
   end
 
+  describe "stale or out-of-order card events (RE386)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec | _rest] = board.stages
+      %{board: board, backlog: backlog, spec: spec}
+    end
+
+    test "a stale card_moved still leaves the card only in its target column",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Stale move"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Stale move")
+
+      send(view.pid, {:card_moved, %{card | stage_id: spec.id}, backlog.id})
+
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Stale move")
+      assert element_count(view, "#stage-col-1-cards .board-card") == 0
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a stale card_moved followed by card_upserted renders the card once",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Reported"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Reported")
+
+      send(view.pid, {:card_moved, %{card | stage_id: spec.id}, backlog.id})
+      _ = render(view)
+      move_without_broadcast(card, spec)
+      send(view.pid, {:card_upserted, Cards.get_card(board, card.id)})
+
+      assert element_count(view, ".board-card") == 1
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert element_count(view, "#stage-col-1-cards .board-card") == 0
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    # Scenario 2 with a sibling keeping Backlog open: an emptied Backlog collapses to a
+    # strip that hides its stream, which would mask a stale copy left in that stream.
+    test "a stale card_moved then card_upserted leaves no copy in an open source column",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, _stays} = Cards.create_card(backlog, %{title: "Stays"})
+      {:ok, card} = Cards.create_card(backlog, %{title: "Reported"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert element_count(view, "#stage-col-1-cards .board-card") == 2
+
+      send(view.pid, {:card_moved, %{card | stage_id: spec.id}, backlog.id})
+      _ = render(view)
+      move_without_broadcast(card, spec)
+      send(view.pid, {:card_upserted, Cards.get_card(board, card.id)})
+
+      assert element_count(view, ".board-card") == 2
+      assert element_count(view, "#stage-col-1-cards .board-card") == 1
+      refute has_element?(view, "#stage-col-1-cards .board-card", "Reported")
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-1 .stage-count", "1")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a bare cross-stage card_upserted removes the card from its old column",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Jumper"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Jumper")
+
+      move_without_broadcast(card, spec)
+      send(view.pid, {:card_upserted, Cards.get_card(board, card.id)})
+
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert element_count(view, "#stage-col-1-cards .board-card") == 0
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a cross-stage card_upserted deletes only the moved card",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, _stays} = Cards.create_card(backlog, %{title: "Stays"})
+      {:ok, goes} = Cards.create_card(backlog, %{title: "Goes"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert element_count(view, "#stage-col-1-cards .board-card") == 2
+
+      move_without_broadcast(goes, spec)
+      send(view.pid, {:card_upserted, Cards.get_card(board, goes.id)})
+
+      assert element_count(view, "#stage-col-1-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Stays")
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Goes")
+      assert has_element?(view, "#stage-col-1 .stage-count", "1")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a same-stage card_upserted sent twice stays a single card",
+         %{conn: conn, board: board, spec: spec} do
+      {:ok, card} = Cards.create_card(spec, %{title: "Already in Spec"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      send(view.pid, {:card_upserted, card})
+      send(view.pid, {:card_upserted, card})
+
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "a genuine move_card still renders the card once in its target",
+         %{conn: conn, board: board, backlog: backlog, spec: spec} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Real move"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Real move")
+
+      {:ok, _moved} = Cards.move_card(card, spec, 0)
+
+      assert element_count(view, "#stage-col-2-cards .board-card") == 1
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Real move")
+      assert element_count(view, "#stage-col-1-cards .board-card") == 0
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+  end
+
   describe "idempotent event application" do
     setup :register_and_log_in_user
 
@@ -509,6 +635,12 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
   defp api_conn(token) do
     put_req_header(build_conn(), "authorization", "Bearer " <> token)
+  end
+
+  # RE386 — move a card in the DB without broadcasting, so the subscribed view
+  # sees only the events a test hands it (a stale or out-of-order sequence).
+  defp move_without_broadcast(card, stage) do
+    Repo.update_all(from(c in Schemas.Card, where: c.id == ^card.id), set: [stage_id: stage.id])
   end
 
   defp element_count(view, selector) do
