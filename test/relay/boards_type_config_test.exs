@@ -25,15 +25,31 @@ defmodule Relay.BoardsTypeConfigTest do
     refute updated.ai_enabled
   end
 
-  test "changing a stage's type re-snaps its resident cards", %{board: board} do
-    code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
-    {:ok, card} = Cards.create_card(code, %{title: "WIP"})
-    {:ok, _} = Cards.set_status(card, %{status: :working})
+  describe "Cards.update_stage/2 (RE384)" do
+    setup %{board: board} do
+      code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
+      {:ok, card} = Cards.create_card(code, %{title: "WIP"})
+      {:ok, card} = Cards.set_status(card, %{status: :working})
+      %{code: code, card: card}
+    end
 
-    {:ok, queue} = Boards.update_stage(code, %{type: :queue})
-    :ok = Cards.snap_cards_in(queue)
+    test "changing a stage's type re-snaps its resident cards", %{code: code, card: card} do
+      assert {:ok, %Stage{type: :queue}} = Cards.update_stage(code, %{type: :queue})
+      assert Relay.Repo.reload!(card).status == :ready
+    end
 
-    assert Relay.Repo.reload!(card).status == :ready
+    test "a change that keeps the type leaves cards alone", %{board: board, code: code, card: card} do
+      :ok = Relay.Events.subscribe(board.id)
+      card_id = card.id
+
+      assert {:ok, %Stage{name: "Build"}} = Cards.update_stage(code, %{name: "Build"})
+      assert Relay.Repo.reload!(card).status == :working
+      refute_receive {:card_upserted, %{id: ^card_id}}
+    end
+
+    test "an invalid change returns the changeset", %{code: code} do
+      assert {:error, %Ecto.Changeset{}} = Cards.update_stage(code, %{name: ""})
+    end
   end
 
   test "previous_main_stage returns the nearest earlier main stage", %{board: board} do
