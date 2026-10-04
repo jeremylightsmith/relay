@@ -4451,10 +4451,10 @@ defmodule Relay.Runs do
     Repo.one(from st in SubTask, where: st.id == ^sub_task_id, select: st.title)
   end
 
+  # Delivered after the outermost Repo transaction commits, dropped on rollback (RE386).
   @doc false
   def broadcast_runs(board_id, event) do
-    _ = Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event)
-    :ok
+    Repo.after_commit(fn -> Phoenix.PubSub.broadcast(@pubsub, topic(board_id), event) end)
   end
 
   @doc false

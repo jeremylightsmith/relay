@@ -1,7 +1,10 @@
 defmodule Relay.EventsTest do
-  use ExUnit.Case, async: true
+  use Relay.DataCase, async: true
+
+  import ExUnit.CaptureLog
 
   alias Relay.Events
+  alias Relay.Repo
 
   test "subscribe/1 then broadcast/2 delivers the event to the subscriber" do
     board_id = System.unique_integer([:positive])
@@ -55,5 +58,158 @@ defmodule Relay.EventsTest do
     :ets.insert(:board_versions, {board_id, "not-an-integer"})
 
     assert :ok = Events.broadcast(board_id, {:stages_changed, board_id})
+  end
+
+  describe "after-commit delivery (RE386)" do
+    setup do
+      b = System.unique_integer([:positive])
+      :ok = Events.subscribe(b)
+      %{b: b}
+    end
+
+    test "a broadcast inside Repo.transaction/1 is held until the transaction commits", %{b: b} do
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 refute_received {:stages_changed, ^b}
+               end)
+
+      assert_received {:stages_changed, ^b}
+    end
+
+    test "the firehose copy is held until commit and delivered exactly once", %{b: b} do
+      :ok = Events.subscribe_firehose()
+
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 refute_received {^b, {:stages_changed, ^b}}
+               end)
+
+      assert_received {^b, {:stages_changed, ^b}}
+      refute_received {^b, {:stages_changed, ^b}}
+    end
+
+    test "the board version is bumped only after commit", %{b: b} do
+      Relay.BoardWatch.bump(b)
+      v = Relay.BoardWatch.version(b)
+
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 assert Relay.BoardWatch.version(b) == v
+               end)
+
+      assert Relay.BoardWatch.version(b) == v + 1
+    end
+
+    test "nested transactions flush once, in enqueue order, when the outermost commits", %{b: b} do
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 :ok = Events.broadcast(b, {:board_updated, 1})
+
+                 assert {:ok, _} =
+                          Repo.transaction(fn -> :ok = Events.broadcast(b, {:board_updated, 2}) end)
+
+                 refute_received {:board_updated, _}
+                 :ok = Events.broadcast(b, {:board_updated, 3})
+                 refute_received {:board_updated, _}
+               end)
+
+      assert_received {:board_updated, n1}
+      assert_received {:board_updated, n2}
+      assert_received {:board_updated, n3}
+      assert [n1, n2, n3] == [1, 2, 3]
+      refute_received {:board_updated, _}
+    end
+
+    test "Repo.rollback/1 drops the queued events", %{b: b} do
+      assert {:error, :nope} =
+               Repo.transaction(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 Repo.rollback(:nope)
+               end)
+
+      refute_receive {:stages_changed, _}, 100
+    end
+
+    test "a raise drops the queued events and resets the queue", %{b: b} do
+      assert_raise RuntimeError, "boom", fn ->
+        Repo.transaction(fn ->
+          :ok = Events.broadcast(b, {:stages_changed, b})
+          raise "boom"
+        end)
+      end
+
+      refute_receive {:stages_changed, _}, 100
+
+      :ok = Events.broadcast(b, {:stages_changed, b})
+      assert_received {:stages_changed, ^b}
+    end
+
+    test "an Ecto.Multi delivers on success and drops on a failed step", %{b: b} do
+      ok_multi =
+        Ecto.Multi.run(Ecto.Multi.new(), :x, fn _repo, _ ->
+          :ok = Events.broadcast(b, {:stages_changed, b})
+          {:ok, 1}
+        end)
+
+      assert {:ok, %{x: 1}} = Repo.transaction(ok_multi)
+      assert_received {:stages_changed, ^b}
+      refute_received {:stages_changed, ^b}
+
+      bad_multi =
+        Ecto.Multi.run(Ecto.Multi.new(), :x, fn _repo, _ ->
+          :ok = Events.broadcast(b, {:stages_changed, b})
+          {:error, :bad}
+        end)
+
+      assert {:error, :x, :bad, %{}} = Repo.transaction(bad_multi)
+      refute_receive {:stages_changed, _}, 100
+    end
+
+    test "Repo.transact/1 delivers on {:ok, _} and drops on {:error, _}", %{b: b} do
+      assert {:ok, :done} =
+               Repo.transact(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 refute_received {:stages_changed, ^b}
+                 {:ok, :done}
+               end)
+
+      assert_received {:stages_changed, ^b}
+
+      assert {:error, :no} =
+               Repo.transact(fn ->
+                 :ok = Events.broadcast(b, {:stages_changed, b})
+                 {:error, :no}
+               end)
+
+      refute_receive {:stages_changed, _}, 100
+    end
+
+    test "outside a transaction a broadcast is delivered immediately", %{b: b} do
+      :ok = Events.broadcast(b, {:stages_changed, b})
+      assert_received {:stages_changed, ^b}
+    end
+
+    test "a raising after-commit callback is logged and the rest still run", %{b: b} do
+      log =
+        capture_log(fn ->
+          assert {:ok, _} =
+                   Repo.transaction(fn ->
+                     :ok = Repo.after_commit(fn -> raise "cb boom" end)
+                     :ok = Events.broadcast(b, {:stages_changed, b})
+                   end)
+        end)
+
+      assert log =~ "cb boom"
+      assert_received {:stages_changed, ^b}
+    end
+
+    test "after_commit/1 outside a transaction runs the callback now" do
+      test_pid = self()
+      assert :ok = Repo.after_commit(fn -> send(test_pid, :ran) end)
+      assert_received :ran
+    end
   end
 end

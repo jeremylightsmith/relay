@@ -3,6 +3,7 @@ defmodule Relay.RunsTest do
 
   import ExUnit.CaptureLog
 
+  alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
   alias Schemas.Card
@@ -52,6 +53,30 @@ defmodule Relay.RunsTest do
       })
 
     card
+  end
+
+  # RE386: a spawned board subscriber that, on every card event, re-reads the card's committed
+  # stage — the read a LiveView does when it reacts — and reports it back to the test.
+  defp observe_committed_stage(test_pid) do
+    receive do
+      {:card_moved, c, _} -> report_seen(test_pid, :moved, c)
+      {:card_upserted, c} -> report_seen(test_pid, :upserted, c)
+      _ -> :ok
+    end
+
+    observe_committed_stage(test_pid)
+  end
+
+  defp report_seen(test_pid, tag, c) do
+    send(test_pid, {:seen, tag, Repo.get!(Card, c.id).stage_id})
+  end
+
+  defp collect_seen(acc) do
+    receive do
+      {:seen, _tag, stage_id} -> collect_seen([stage_id | acc])
+    after
+      200 -> Enum.reverse(acc)
+    end
   end
 
   # A fresh card with a run to cancel — each cancel test needs its own, because a cancelled
@@ -163,6 +188,68 @@ defmodule Relay.RunsTest do
   end
 
   describe "start_run/3" do
+    test "the run-start move is delivered after commit, so every subscriber reads the committed stage (RE386)",
+         %{board: board} do
+      :ok = Relay.Events.subscribe(board.id)
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      next_up_id = card.stage_id
+      works_in = flow.works_in_stage_id
+      test_pid = self()
+
+      subscriber =
+        spawn_link(fn ->
+          :ok = Relay.Events.subscribe(board.id)
+          send(test_pid, :subscribed)
+          observe_committed_stage(test_pid)
+        end)
+
+      Ecto.Adapters.SQL.Sandbox.allow(Repo, test_pid, subscriber)
+      assert_receive :subscribed
+
+      assert {:ok, %Run{}} = Runs.start_run(card, flow)
+
+      card_id = card.id
+      assert_receive {:card_moved, %Card{id: ^card_id, stage_id: ^works_in}, ^next_up_id}
+      refute_receive {:card_moved, %Card{id: ^card_id}, _}, 100
+      assert_received {:card_upserted, %Card{id: ^card_id, stage_id: ^works_in, status: :working}}
+
+      seen = collect_seen([])
+      assert seen != []
+      assert Enum.all?(seen, &(&1 == works_in)), "a subscriber read a stale stage: #{inspect(seen)}"
+    end
+
+    test "a run broadcast inside a transaction is delivered after commit (RE386)", %{board: board} do
+      card = insert(:card, stage: Enum.find(board.stages, &(&1.name == "Spec")))
+      insert(:run, card: card, status: :running, flow_key: "spec", current_node: "brainstorm")
+      card_id = card.id
+
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 :ok = Runs.broadcast_run_changed(board.id, card_id)
+                 refute_received {:run_changed, _}
+               end)
+
+      assert_received {:run_changed, ^card_id}
+    end
+
+    test "a run start that rolls back on an active run broadcasts no move (RE386)", %{board: board} do
+      :ok = Relay.Events.subscribe(board.id)
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      next_up_id = card.stage_id
+      card_id = card.id
+      # The card's own creation (part of the Given) is delivered; the When must add nothing.
+      assert_received {:card_upserted, %Card{id: ^card_id, status: :ready}}
+      insert(:run, card: card, status: :running, flow_key: "spec", current_node: "brainstorm")
+
+      assert {:error, :active_run_exists} = Runs.start_run(card, flow)
+
+      refute_receive {:card_moved, _, _}, 100
+      refute_receive {:card_upserted, _}, 100
+      assert Relay.Cards.get_card(board, card_id).stage_id == next_up_id
+    end
+
     test "a flow with no foreach node never marks its run tasks_from_plan (RE368)", %{board: board} do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
@@ -538,7 +625,7 @@ defmodule Relay.RunsTest do
       assert %Run{status: :done} = Runs.get_run!(run.id)
 
       refute Enum.any?(
-               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               Relay.Activity.list_timeline(Repo.get!(Card, card.id)),
                &match?(%Schemas.Activity{type: :action}, &1)
              )
     end
@@ -551,7 +638,7 @@ defmodule Relay.RunsTest do
       assert Runs.close_orphaned_runs() == 1
 
       assert Enum.any?(
-               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               Relay.Activity.list_timeline(Repo.get!(Card, card.id)),
                &match?(%Schemas.Activity{type: :action, text: "run cancelled — card already completed"}, &1)
              )
     end
@@ -569,7 +656,7 @@ defmodule Relay.RunsTest do
       assert Enum.all?(Runs.active_runs(board.id), &(&1.id != run.id))
 
       assert Enum.any?(
-               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               Relay.Activity.list_timeline(Repo.get!(Card, card.id)),
                &match?(%Schemas.Activity{type: :action, text: "run cancelled — card archived"}, &1)
              )
 
@@ -594,7 +681,7 @@ defmodule Relay.RunsTest do
       assert Runs.close_orphaned_runs() == 1
 
       assert Enum.any?(
-               Relay.Activity.list_timeline(Relay.Repo.get!(Card, card.id)),
+               Relay.Activity.list_timeline(Repo.get!(Card, card.id)),
                &match?(%Schemas.Activity{type: :action, text: "run cancelled — card archived"}, &1)
              )
     end
@@ -655,7 +742,7 @@ defmodule Relay.RunsTest do
 
       assert Runs.leaked?(run)
 
-      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [archived_at: nil])
+      {1, _} = Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [archived_at: nil])
 
       refute Runs.leaked?(run)
     end
@@ -729,7 +816,7 @@ defmodule Relay.RunsTest do
       # RLY-201: missing classes are stored explicitly as 0 — the row now holds the
       # canonical closed-set map, same as the ETS store.
       assert e2.capacity == %{"shared_clean" => 1, "exclusive" => 0}
-      assert Relay.Repo.aggregate(Schemas.Runner, :count) == 1
+      assert Repo.aggregate(Schemas.Runner, :count) == 1
     end
 
     test "upsert_runner/2 drops an unknown capacity class instead of storing it", %{board: board} do
@@ -836,7 +923,7 @@ defmodule Relay.RunsTest do
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
+      Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
       {:ok, holder} = Runs.upsert_runner(board, %{"name" => "holder", "capacity" => %{"exclusive" => 0}})
 
@@ -850,7 +937,7 @@ defmodule Relay.RunsTest do
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
       job = Runs.active_job(run)
 
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
+      Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
       {:ok, other} = Runs.upsert_runner(board, %{"name" => "other", "capacity" => %{"exclusive" => 3}})
 
@@ -992,13 +1079,13 @@ defmodule Relay.RunsTest do
       # Backdate past 2 × interval so the runner reads stale.
       stale_at = DateTime.add(DateTime.utc_now(), -1000, :second)
 
-      Relay.Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
+      Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
         set: [last_heartbeat: DateTime.truncate(stale_at, :second)]
       )
 
       :ok = Runs.reclaim_stale_runners()
 
-      requeued = Relay.Repo.get!(NodeJob, claimed.id)
+      requeued = Repo.get!(NodeJob, claimed.id)
       assert requeued.state == :queued
       assert requeued.runner_name == nil
 
@@ -1033,7 +1120,7 @@ defmodule Relay.RunsTest do
 
       {:ok, claimed} = Runs.claim_next_job(gone)
 
-      Relay.Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
+      Repo.update_all(from(e in Schemas.Runner, where: e.id == ^gone.id),
         set: [last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -1000, :second), :second)]
       )
 
@@ -1041,7 +1128,7 @@ defmodule Relay.RunsTest do
 
       assert Runs.get_run!(run.id).status == :parked
       assert Runs.get_run!(run.id).parked_reason == :runner_gone
-      assert Relay.Repo.get!(NodeJob, claimed.id).state == :revoked
+      assert Repo.get!(NodeJob, claimed.id).state == :revoked
     end
 
     test "park_for_reclaim/1 revokes a lingering active job even when the run isn't :running", %{board: board} do
@@ -1069,12 +1156,12 @@ defmodule Relay.RunsTest do
       # Simulate the run having moved on (e.g. cancelled via a concurrent
       # path) WITHOUT its job having been revoked first — the exact race the
       # fix guards against, so the job doesn't stay stuck :claimed forever.
-      Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :cancelled])
+      Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :cancelled])
       run = Runs.get_run!(run.id)
 
       :ok = Runs.park_for_reclaim(run)
 
-      assert Relay.Repo.get!(NodeJob, claimed.id).state == :revoked
+      assert Repo.get!(NodeJob, claimed.id).state == :revoked
       # A non-running run's own status is left alone — reclaim doesn't clobber it.
       assert Runs.get_run!(run.id).status == :cancelled
     end
@@ -1432,7 +1519,7 @@ defmodule Relay.RunsTest do
 
     defp backdate_claim(job, seconds) do
       at = DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.truncate(:second)
-      Relay.Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [claimed_at: at])
+      Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [claimed_at: at])
     end
 
     test "requeues a job the runner no longer reports running", %{board: board} do
@@ -1441,7 +1528,7 @@ defmodule Relay.RunsTest do
 
       :ok = Runs.requeue_orphaned_jobs(board, runner, [])
 
-      requeued = Relay.Repo.get!(NodeJob, job.id)
+      requeued = Repo.get!(NodeJob, job.id)
       assert requeued.state == :queued
       assert requeued.claimed_at == nil
     end
@@ -1452,7 +1539,7 @@ defmodule Relay.RunsTest do
 
       :ok = Runs.requeue_orphaned_jobs(board, runner, [job.id])
 
-      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+      assert Repo.get!(NodeJob, job.id).state == :claimed
     end
 
     test "leaves a job claimed inside the grace window — the just-claimed race", %{board: board} do
@@ -1462,7 +1549,7 @@ defmodule Relay.RunsTest do
 
       :ok = Runs.requeue_orphaned_jobs(board, runner, [])
 
-      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+      assert Repo.get!(NodeJob, job.id).state == :claimed
     end
 
     test "never touches another runner's job", %{board: board} do
@@ -1472,7 +1559,7 @@ defmodule Relay.RunsTest do
 
       :ok = Runs.requeue_orphaned_jobs(board, other, [])
 
-      assert Relay.Repo.get!(NodeJob, job.id).state == :claimed
+      assert Repo.get!(NodeJob, job.id).state == :claimed
     end
 
     test "an exclusive orphan stays PINNED to its runner; a shared_clean one is unpinned",
@@ -1483,7 +1570,7 @@ defmodule Relay.RunsTest do
       %{runner: runner, job: excl} = orphan_setup(board, :exclusive)
       backdate_claim(excl, 600)
       :ok = Runs.requeue_orphaned_jobs(board, runner, [])
-      assert %{state: :queued, runner_name: "e1"} = Relay.Repo.get!(NodeJob, excl.id)
+      assert %{state: :queued, runner_name: "e1"} = Repo.get!(NodeJob, excl.id)
     end
   end
 
@@ -1504,7 +1591,7 @@ defmodule Relay.RunsTest do
       flow = retry_flow(board)
       card = card_in(board, "Next up", "failed card")
       {:ok, run} = Runs.start_run(card, flow)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :failed])
+      {1, _} = Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: :failed])
       ref = Relay.Cards.ref(board, card)
 
       assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
@@ -1521,7 +1608,7 @@ defmodule Relay.RunsTest do
       assert Runs.releasable_held(board, [held(ref, "bound")]) == []
 
       {1, _} =
-        Relay.Repo.update_all(from(c in Card, where: c.id == ^card.id),
+        Repo.update_all(from(c in Card, where: c.id == ^card.id),
           set: [archived_at: DateTime.truncate(DateTime.utc_now(), :second)]
         )
 
@@ -1537,7 +1624,7 @@ defmodule Relay.RunsTest do
       for status <- Run.active_statuses() do
         card = card_in(board, "Next up", "active #{status}")
         {:ok, run} = Runs.start_run(card, flow)
-        {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: status])
+        {1, _} = Repo.update_all(from(r in Run, where: r.id == ^run.id), set: [status: status])
 
         assert Runs.releasable_held(board, [held(Relay.Cards.ref(board, card), "bound")]) == []
       end
@@ -1585,7 +1672,7 @@ defmodule Relay.RunsTest do
       card = card_in(board, "Next up", "cancel then retry")
       {:ok, cancelled} = Runs.start_run(card, flow)
       {:ok, _run} = Runs.cancel_run(cancelled)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.card_id == ^card.id), set: [status: :cancelled])
+      {1, _} = Repo.update_all(from(r in Run, where: r.card_id == ^card.id), set: [status: :cancelled])
       {:ok, _retry} = Runs.start_run(card, flow)
       ref = Relay.Cards.ref(board, card)
 
@@ -1602,8 +1689,8 @@ defmodule Relay.RunsTest do
       other_flow = retry_flow(other)
       mine = card_in(board, "Next up", "mine")
       theirs = card_in(other, "Next up", "theirs")
-      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^mine.id), set: [ref_number: 4242])
-      {1, _} = Relay.Repo.update_all(from(c in Card, where: c.id == ^theirs.id), set: [ref_number: 4242])
+      {1, _} = Repo.update_all(from(c in Card, where: c.id == ^mine.id), set: [ref_number: 4242])
+      {1, _} = Repo.update_all(from(c in Card, where: c.id == ^theirs.id), set: [ref_number: 4242])
       {:ok, their_run} = Runs.start_run(theirs, other_flow)
       {:ok, _run} = Runs.cancel_run(their_run)
       ref = "#{board.key}-4242"
@@ -1613,8 +1700,8 @@ defmodule Relay.RunsTest do
 
       # ...and once MY card's run ends, the ref names my card, with my run's status.
       my_flow = retry_flow(board)
-      {:ok, my_run} = Runs.start_run(Relay.Repo.reload!(mine), my_flow)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^my_run.id), set: [status: :failed])
+      {:ok, my_run} = Runs.start_run(Repo.reload!(mine), my_flow)
+      {1, _} = Repo.update_all(from(r in Run, where: r.id == ^my_run.id), set: [status: :failed])
 
       assert [%{ref: ^ref, status: :failed}] = Runs.releasable_held(board, [held(ref, "bound")])
     end
@@ -1623,7 +1710,7 @@ defmodule Relay.RunsTest do
       flow = retry_flow(board)
       card = card_in(board, "Next up", "two runs")
       {:ok, first} = Runs.start_run(card, flow)
-      {1, _} = Relay.Repo.update_all(from(r in Run, where: r.id == ^first.id), set: [status: :failed])
+      {1, _} = Repo.update_all(from(r in Run, where: r.id == ^first.id), set: [status: :failed])
       {:ok, second} = Runs.start_run(card, flow)
       {:ok, _run} = Runs.cancel_run(second)
       ref = Relay.Cards.ref(board, card)
@@ -1839,7 +1926,7 @@ defmodule Relay.RunsTest do
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
 
-      assert %DateTime{} = Relay.Repo.get!(Card, card.id).agent_heartbeat_at
+      assert %DateTime{} = Repo.get!(Card, card.id).agent_heartbeat_at
     end
 
     test "stamps only cards with an active reported job, never an idle one", %{board: board} do
@@ -1849,8 +1936,8 @@ defmodule Relay.RunsTest do
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
 
-      assert %DateTime{} = Relay.Repo.get!(Card, running.id).agent_heartbeat_at
-      assert Relay.Repo.get!(Card, idle.id).agent_heartbeat_at == nil
+      assert %DateTime{} = Repo.get!(Card, running.id).agent_heartbeat_at
+      assert Repo.get!(Card, idle.id).agent_heartbeat_at == nil
     end
 
     test "two claimed jobs both stamp; returns {2, nil}", %{board: board} do
@@ -1860,16 +1947,16 @@ defmodule Relay.RunsTest do
 
       assert {2, nil} = Runs.refresh_running_card_liveness(board, [job_a.id, job_b.id])
 
-      assert %DateTime{} = Relay.Repo.get!(Card, a.id).agent_heartbeat_at
-      assert %DateTime{} = Relay.Repo.get!(Card, b.id).agent_heartbeat_at
-      assert Relay.Repo.get!(Card, idle.id).agent_heartbeat_at == nil
+      assert %DateTime{} = Repo.get!(Card, a.id).agent_heartbeat_at
+      assert %DateTime{} = Repo.get!(Card, b.id).agent_heartbeat_at
+      assert Repo.get!(Card, idle.id).agent_heartbeat_at == nil
     end
 
     test "does not stamp a card whose job is terminal (not active)", %{board: board} do
       {card, job} = liveness_card(board, :done)
 
       assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])
-      assert Relay.Repo.get!(Card, card.id).agent_heartbeat_at == nil
+      assert Repo.get!(Card, card.id).agent_heartbeat_at == nil
     end
 
     test "never stamps another board's card (board scoping)", %{board: board} do
@@ -1877,7 +1964,7 @@ defmodule Relay.RunsTest do
       {card, job} = liveness_card(other, :claimed)
 
       assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])
-      assert Relay.Repo.get!(Card, card.id).agent_heartbeat_at == nil
+      assert Repo.get!(Card, card.id).agent_heartbeat_at == nil
     end
 
     test "ignores non-integer and unknown ids; [] is a no-op that never crashes", %{board: board} do
@@ -1899,7 +1986,7 @@ defmodule Relay.RunsTest do
       assert Relay.Cards.health(base) == :stale
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
-      refreshed = Relay.Repo.get!(Card, card.id)
+      refreshed = Repo.get!(Card, card.id)
 
       assert Relay.Cards.health(%{base | heartbeat_at: refreshed.agent_heartbeat_at}) == :live
     end
@@ -1910,7 +1997,7 @@ defmodule Relay.RunsTest do
       failure = %Schemas.Activity{type: :failure, inserted_at: DateTime.truncate(now, :second)}
 
       assert {1, nil} = Runs.refresh_running_card_liveness(board, [job.id])
-      refreshed = Relay.Repo.get!(Card, card.id)
+      refreshed = Repo.get!(Card, card.id)
 
       inputs = %{
         newest: failure,
@@ -1940,14 +2027,14 @@ defmodule Relay.RunsTest do
       job = insert(:node_job, node_execution: execution, state: :claimed, runner_name: "mac")
 
       # Write the legacy value past the enum, exactly as a pre-migration row holds it.
-      Relay.Repo.query!("UPDATE node_jobs SET state = 'running' WHERE id = $1", [job.id])
+      Repo.query!("UPDATE node_jobs SET state = 'running' WHERE id = $1", [job.id])
       # Ecto 3.14 raises ArgumentError (not Ecto.ChangeError) loading a value outside the enum.
-      assert_raise ArgumentError, fn -> Relay.Repo.get(NodeJob, job.id) end
+      assert_raise ArgumentError, fn -> Repo.get(NodeJob, job.id) end
 
       # The migration body, run against this row.
-      Relay.Repo.query!("UPDATE node_jobs SET state = 'claimed' WHERE state = 'running'")
+      Repo.query!("UPDATE node_jobs SET state = 'claimed' WHERE state = 'running'")
 
-      assert %NodeJob{state: :claimed} = Relay.Repo.get(NodeJob, job.id)
+      assert %NodeJob{state: :claimed} = Repo.get(NodeJob, job.id)
     end
   end
 end

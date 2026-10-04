@@ -85,9 +85,9 @@ tracked as a separate follow-up.
 
 | Topic | Broadcaster | Events | Subscribers |
 | --- | --- | --- | --- |
-| `board:<board_id>` | `Relay.Events` — contexts only, after successful mutations | `{:card_upserted, card}`, `{:card_moved, card, from_stage_id}`, `{:card_archived, card}`, `{:timeline_appended, card_id, entry}`, `{:card_log_appended, card_id, entries}`, `{:stages_changed, board_id}`, `{:story_map_changed, board_id}`, `{:board_updated, board}`, `{:vote_changed, card_id}` | every open `BoardLive` for that board (and, for `{:vote_changed, card_id}`, the public board — same fire-and-forget contract); every open `RelayWeb.ValueStreamLive` (RE347) recomputes on `{:card_moved, …}`, `{:card_archived, …}`, `{:stages_changed, …}` and an `:approved` / `:rejected` `{:timeline_appended, …}` |
+| `board:<board_id>` | `Relay.Events` — contexts only, after successful mutations, delivered after the outermost transaction commits (dropped on rollback) | `{:card_upserted, card}`, `{:card_moved, card, from_stage_id}`, `{:card_archived, card}`, `{:timeline_appended, card_id, entry}`, `{:card_log_appended, card_id, entries}`, `{:stages_changed, board_id}`, `{:story_map_changed, board_id}`, `{:board_updated, board}`, `{:vote_changed, card_id}` | every open `BoardLive` for that board (and, for `{:vote_changed, card_id}`, the public board — same fire-and-forget contract); every open `RelayWeb.ValueStreamLive` (RE347) recomputes on `{:card_moved, …}`, `{:card_archived, …}`, `{:stages_changed, …}` and an `:approved` / `:rejected` `{:timeline_appended, …}` |
 | `board:<board_id>:logs` | `Relay.AgentLog` | `{:agent_log, entry}` — live runner feed lines | the board's log sheet, only while open (no backfill by design) |
-| `board:<board_id>:runs` | `Relay.Runs` | `{:run_started, run}`, `{:node_started, run, execution}`, `{:node_finished, run, execution}`, `{:run_parked, run}`, `{:run_resumed, run}`, `{:run_finished, run}`, `{:run_changed, card_id}` | run UI (card 07/W8) and tests. Does NOT bump `BoardWatch`. The engine's fine-grained events above are internal; `{:run_changed, card_id}` (`Relay.Runs.broadcast_run_changed/2`, RLY-137) is the read side's coarse public contract — a subscriber refetches the card's runs/summary rather than patching state from a payload. `RelayWeb.ValueStreamFlowLive` (RE349) recomputes on `{:run_changed, card_id}`. |
+| `board:<board_id>:runs` | `Relay.Runs` — delivered after the outermost transaction commits (dropped on rollback) | `{:run_started, run}`, `{:node_started, run, execution}`, `{:node_finished, run, execution}`, `{:run_parked, run}`, `{:run_resumed, run}`, `{:run_finished, run}`, `{:run_changed, card_id}` | run UI (card 07/W8) and tests. Does NOT bump `BoardWatch`. The engine's fine-grained events above are internal; `{:run_changed, card_id}` (`Relay.Runs.broadcast_run_changed/2`, RLY-137) is the read side's coarse public contract — a subscriber refetches the card's runs/summary rather than patching state from a payload. `RelayWeb.ValueStreamFlowLive` (RE349) recomputes on `{:run_changed, card_id}`. |
 | `story_map_presence:<board_id>` | `Relay.Presence` (Phoenix.Presence's diff protocol) | `%Phoenix.Socket.Broadcast{event: "presence_diff"}` — joins/leaves of story-map viewers | every open `BoardLive` with `live_action == :story_map`. Does NOT bump `BoardWatch` |
 | `story_map_cursor:<board_id>` | `Relay.Presence` | `{:story_map_cursor, user_id, name, email, x, y}`, `{:story_map_cursor_gone, user_id}` | the same sockets; each relays to its own client with `push_event/3` (no template diff). Does NOT bump `BoardWatch` |
 | `story_map_view:<board_id>` | `Relay.StoryMap.merge_view/2` (which `put_view/3`, `toggle_view/2` and `toggle_view_member/4` all compose) | `{:story_map_view_changed, board_id, view}` — the board-wide shared map view settings changed | the same sockets, **including the writer** (there is no optimistic local assign). Does NOT bump `BoardWatch` |
@@ -96,9 +96,12 @@ tracked as a separate follow-up.
 | `api_log` | `RelayWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
 | `card:<card_id>:talk` | `Relay.Talk` (RE268 / ADR 0009) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
 
-Two invariants make the seam trustworthy: **only contexts broadcast** domain events (so
-LiveView and REST mutations share one path), and broadcasting is **fire-and-forget** (a
-PubSub failure can never fail the mutation). Every `Events.broadcast/2` also bumps the
+Three invariants make the seam trustworthy: **only contexts broadcast** domain events (so
+LiveView and REST mutations share one path), broadcasting is **fire-and-forget** (a
+PubSub failure can never fail the mutation), and events are **delivered after commit**: an
+event broadcast inside a transaction is queued and sent once the outermost `Relay.Repo`
+transaction commits, and discarded on rollback (`Relay.Repo.after_commit/1`, RE386). The
+same holds for `Relay.Runs`' `board:<board_id>:runs` events. Every `Events.broadcast/2` also bumps the
 board's `BoardWatch` version, which the CLI polls to avoid refetching unchanged boards.
 
 RE257's three topics are the deliberate exception to "only contexts broadcast domain events":
