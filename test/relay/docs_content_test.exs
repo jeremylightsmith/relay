@@ -47,6 +47,17 @@ defmodule Relay.DocsContentTest do
     assert domain =~ "Cards.search/3"
   end
 
+  test "the stage commands are documented in relay.md and the CLI page (RE384)" do
+    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    cli = read("cli.md")
+
+    for doc <- [relay_md, cli], cmd <- ["./relay stages", "./relay stage add"] do
+      assert doc =~ cmd
+    end
+
+    assert relay_md =~ "Restructuring a board"
+  end
+
   test "authentication.md still explains the API key + env vars" do
     html = read("authentication.md")
     assert html =~ "RELAY_API_KEY"

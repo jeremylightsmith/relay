@@ -17,6 +17,12 @@ exits non-zero.
 | `./relay update [--check]` | Install or refresh the six Relay-owned files from the board (`./relay`, the four `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. It also removes a leftover Relay-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `./relay board` | The board: stages with their cards |
 | `./relay card RLY-12` | One card: description, plan, branch, timeline |
+| `./relay stages` | The board's stages in board order — position, name, category, type, `ai:`, `wip:` and `substages:` per main stage, each substage indented beneath it. `--json` prints the list |
+| `./relay stage add "Triage" --after Spec` | **Add a main stage.** Exactly one of `--before STAGE` / `--after STAGE` (it adopts the anchor's category) or `--category C` (appended to that category's end). Optional `--type`, `--description`, `--ai`, `--wip N` |
+| `./relay stage set Code --wip 3` | **Change a main stage's settings**: `--name`, `--description`, `--type` (re-snaps its cards' statuses), `--ai`/`--no-ai`, `--wip N` or `none`, `--collapsed`/`--no-collapsed`, `--reject-to STAGE` or `none`. At least one option |
+| `./relay stage move Code --before Spec` | **Place a main stage** just before/after another; it adopts the anchor's category |
+| `./relay stage lane Code review on` | Turn a main stage's `review` or `done` substage `on` or `off` |
+| `./relay stage rm Triage` | **Remove a main stage** and its substages. Refused (409, nothing written) while the stage or a substage holds live or archived cards, an enabled flow uses it, it is the public intake stage, or it is the last stage. Stages are addressed by exact name or numeric id; an ambiguous name is refused with the ids |
 | `./relay search "words"` | **Find a card** by ref or title. A ref or bare number (`RLY-12`, `12`) is an exact hit ranked first; otherwise every whitespace-separated word must appear in the title, in any order. Done cards are included. `--archived` widens it to archived cards, `--limit N` caps it (default 20). No match prints a message and exits 0 |
 | `./relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
 | `./relay runs RLY-12` | The card's runs and node executions (failure detail in full) |

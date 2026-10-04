@@ -56,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 73
-RUNNER_FINGERPRINT = "d3e858a255bcd005f56077043f8ca28f14f47966248d478e82bb3eef0dd07536"
+RUNNER_VERSION = 74
+RUNNER_FINGERPRINT = "950c93a5b7479bd11317ea9bf3f26b1a67662fc497706d08d93cc3469535f96d"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -650,6 +650,28 @@ def add_tasks(ref, pairs):
         die("tasks add: at most one BODY may be '-' (stdin can be read only once)")
     tasks = [{"title": title, "body": read_arg(body)} for title, body in pairs]
     return api("POST", f"/api/cards/{ref}/tasks", {"tasks": tasks})["data"]
+
+
+def list_stages():
+    """Every stage of the board, hierarchical: each main stage followed by its substages."""
+    return api("GET", "/api/stages")["data"]
+
+
+def resolve_main_stage(token, stages):
+    """RE384 — a MAIN stage by numeric id or exact name. Substages never match: they are
+    reachable only through `relay stage lane`. Unlike resolve_stage_id, a duplicated name is
+    refused rather than silently taking the first."""
+    mains = [s for s in stages if s["parent_id"] is None]
+    if token.isdigit():
+        matches = [s for s in mains if s["id"] == int(token)]
+    else:
+        matches = [s for s in mains if s["name"] == token]
+    if not matches:
+        die(f'no main stage "{token}". stages: ' + ", ".join(s["name"] for s in mains))
+    if len(matches) > 1:
+        die(f'stage name "{token}" is ambiguous — ids: '
+            + ", ".join(str(s["id"]) for s in matches) + "; pass the id")
+    return matches[0]
 
 
 def show_task(ref, task_id):
@@ -1489,6 +1511,102 @@ def cmd_task_rm(args):
     emit(args, task, f"removed {task_ref_line(task)}")
 
 
+def _stage_row(s, stages):
+    if s["parent_id"] is not None:
+        return f"     {s['display_name']}  {s['type']}"
+    lanes = ",".join(sub["type"] for sub in stages if sub["parent_id"] == s["id"])
+    return (f"{s['position']:>3}  {s['name']:<20}  {s['category']:<11}  {s['type']:<8}  "
+            f"ai:{'yes' if s['ai_enabled'] else '-'}  wip:{s['wip_limit'] or '-'}  "
+            f"substages:{lanes or '-'}")
+
+
+def _stage_line(s):
+    return f"#{s['id']}  {s['display_name']}  ({s['category']}, {s['type']})"
+
+
+def _wip(value):
+    """--wip: `none` clears the limit (None); anything else must be a positive integer."""
+    if value == "none":
+        return None
+    if not value.isdigit() or int(value) < 1:
+        die("--wip takes a positive integer or none")
+    return int(value)
+
+
+def _anchor(args, stages):
+    """The --before/--after placement as an API body fragment ({} when neither was given)."""
+    for key in ("before", "after"):
+        token = getattr(args, key)
+        if token is not None:
+            return {key: resolve_main_stage(token, stages)["id"]}
+    return {}
+
+
+def cmd_stages(args):
+    stages = list_stages()
+    emit(args, stages, "\n".join(_stage_row(s, stages) for s in stages) or "(no stages)")
+
+
+def cmd_stage_add(args):
+    wip = _wip(args.wip) if args.wip is not None else None
+    stages = list_stages()
+    body = {"name": args.name}
+    body.update(_anchor(args, stages))
+    optional = (("category", args.category), ("type", args.type),
+                ("description", args.description), ("wip_limit", wip))
+    body.update({k: v for k, v in optional if v is not None})
+    if args.ai:
+        body["ai_enabled"] = True
+    stage = api("POST", "/api/stages", body)["data"]
+    emit(args, stage, _stage_line(stage))
+
+
+def cmd_stage_set(args):
+    given = {k: getattr(args, k) for k in
+             ("new_name", "description", "type", "ai", "wip", "collapsed", "reject_to")}
+    if all(v is None for v in given.values()):
+        die("stage set: nothing to change — pass at least one option")
+    body = {}
+    if args.wip is not None:
+        body["wip_limit"] = _wip(args.wip)
+    stages = list_stages()
+    stage = resolve_main_stage(args.stage, stages)
+    if args.reject_to is not None:
+        body["reject_to_stage_id"] = (None if args.reject_to == "none"
+                                      else resolve_main_stage(args.reject_to, stages)["id"])
+    plain = (("name", args.new_name), ("description", args.description), ("type", args.type),
+             ("ai_enabled", args.ai), ("collapsed_by_default", args.collapsed))
+    body.update({k: v for k, v in plain if v is not None})
+    updated = api("PATCH", f"/api/stages/{stage['id']}", body)["data"]
+    emit(args, updated, _stage_line(updated))
+
+
+def cmd_stage_move(args):
+    stages = list_stages()
+    stage = resolve_main_stage(args.stage, stages)
+    placed = api("POST", f"/api/stages/{stage['id']}/place", _anchor(args, stages))["data"]
+    emit(args, placed, _stage_line(placed))
+
+
+def cmd_stage_lane(args):
+    stage = resolve_main_stage(args.stage, list_stages())
+    path = f"/api/stages/{stage['id']}/substages/{args.lane}"
+    if args.state == "on":
+        sub = api("PUT", path)["data"]
+        emit(args, sub, f"{sub['display_name']} enabled")
+        return
+    result = api("DELETE", path)["data"]
+    human = (f"{stage['name']} · {args.lane.capitalize()} disabled" if result["disabled"]
+             else f"{stage['name']} has no {args.lane} substage")
+    emit(args, result, human)
+
+
+def cmd_stage_rm(args):
+    stage = resolve_main_stage(args.stage, list_stages())
+    removed = api("DELETE", f"/api/stages/{stage['id']}")["data"]
+    emit(args, removed, f"removed stage {removed['name']}")
+
+
 def cmd_comment(args):
     comment(args.ref, read_arg(args.text))
     print(f"{args.ref}: comment posted")
@@ -2051,6 +2169,12 @@ TALK_EVENT_KINDS = ("user", "tool", "out", "error")
 # other three. Unpacked from the tuple rather than re-typed, so the fixture assertion (which
 # compares ORDER too) is the single definition of both membership and position.
 _, TALK_KIND_TOOL, TALK_KIND_OUT, TALK_KIND_ERROR = TALK_EVENT_KINDS
+# Stage vocabulary (RE384) — argparse `choices` for `relay stage`. STAGE_LANES is
+# Schemas.Stage.sublane_types/0, STAGE_TYPES Schemas.Stage.types/0, STAGE_CATEGORIES
+# Schemas.Stage.categories/0.
+STAGE_LANES = ("review", "done")                                    # pinned: vocabulary.stage_lanes
+STAGE_TYPES = ("queue", "work", "planning", "review", "done")       # pinned: vocabulary.stage_types
+STAGE_CATEGORIES = ("unstarted", "planning", "in_progress", "complete")  # pinned: vocabulary.stage_categories
 
 
 # Bounded placement retry (RE268): a talk turn holding a retained tree makes `assign`
@@ -5581,6 +5705,8 @@ def cmd_update(args):
 
 COMMANDS = (
     ("Cards", "board", "show the board: its stages and their cards"),
+    ("Cards", "stages", "list the board's stages and their settings"),
+    ("Cards", "stage", "add, configure, move, toggle substages on, or remove a stage"),
     ("Cards", "card", "show one card"),
     ("Cards", "search", "find a card by ref or title"),
     ("Cards", "create", "create a card"),
@@ -5731,6 +5857,47 @@ def build_parser():
     # ---- Cards ----
     bd = add("board", cmd_board, json_flag=True)
     bd.add_argument("--include-done", action="store_true", help="include the Done stages' cards")
+    add("stages", cmd_stages, json_flag=True)
+    stage_arg = ("stage", "the main stage: its exact name or numeric id")
+    st = verbs(add("stage", None))
+
+    def placement(vp, required):
+        where = vp.add_mutually_exclusive_group(required=required)
+        where.add_argument("--before", metavar="STAGE", help="place it just before this main stage")
+        where.add_argument("--after", metavar="STAGE", help="place it just after this main stage")
+        return where
+
+    sa = verb(st, "add", cmd_stage_add,
+              "add a main stage: in a category (at its end) or beside an anchor stage",
+              ("name", "the new stage's name"))
+    placement(sa, True).add_argument("--category", choices=STAGE_CATEGORIES,
+                                     help="append it to the end of this category")
+    sa.add_argument("--type", choices=STAGE_TYPES, help="the stage type")
+    sa.add_argument("--description", help="the stage description")
+    sa.add_argument("--ai", action="store_true", help="let agents work it")
+    sa.add_argument("--wip", metavar="N", help="the WIP limit (a positive integer)")
+    ss = verb(st, "set", cmd_stage_set, "change a main stage's settings", stage_arg)
+    ss.add_argument("--name", dest="new_name", metavar="NAME", help="rename it")
+    ss.add_argument("--description", help="the stage description")
+    ss.add_argument("--type", choices=STAGE_TYPES,
+                    help="the stage type (re-snaps its cards' statuses)")
+    ss.add_argument("--ai", action=argparse.BooleanOptionalAction, default=None,
+                    help="let agents work it, or not")
+    ss.add_argument("--wip", metavar="N|none", help="the WIP limit, or none to clear it")
+    ss.add_argument("--collapsed", action=argparse.BooleanOptionalAction, default=None,
+                    help="collapse its column by default, or not")
+    ss.add_argument("--reject-to", metavar="STAGE|none",
+                    help="where a rejection sends a card, or none to clear it")
+    sm = verb(st, "move", cmd_stage_move,
+              "place a main stage beside another (it adopts the anchor's category)", stage_arg)
+    placement(sm, True)
+    sl = verb(st, "lane", cmd_stage_lane, "turn a main stage's review or done substage on or off",
+              stage_arg)
+    sl.add_argument("lane", choices=STAGE_LANES, help="the substage lane")
+    sl.add_argument("state", choices=("on", "off"), help="on adds it, off removes it")
+    verb(st, "rm", cmd_stage_rm,
+         "remove a main stage (refused while it holds cards or a flow or the intake uses it)",
+         stage_arg)
     add("card", cmd_card, "ref", json_flag=True)
     sr = add("search", cmd_search, "query", json_flag=True)
     sr.add_argument("--archived", action="store_true",
