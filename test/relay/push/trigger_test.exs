@@ -21,6 +21,19 @@ defmodule Relay.Push.TriggerTest do
     user
   end
 
+  describe "notification sound" do
+    # iOS silently falls back to the default sound when the named file is not
+    # in the app bundle, so pin the payload's sound to a file the Runner target
+    # actually copies into it.
+    test "names a sound file bundled into the iOS Runner target" do
+      sound = Push.sound()
+      pbxproj = File.read!("flutter/ios/Runner.xcodeproj/project.pbxproj")
+
+      assert File.exists?(Path.join("flutter/ios/Runner", sound))
+      assert pbxproj =~ "/* #{sound} in Resources */"
+    end
+  end
+
   describe "fires on the edge into a push-worthy status" do
     test "entering :needs_input delivers to each member's device" do
       %{board: board, card: card, users: [alice]} = board_with_members(1)
@@ -34,7 +47,7 @@ defmodule Relay.Push.TriggerTest do
       assert payload["aps"]["alert"]["body"] == "#{board.key}#{card.ref_number}: #{card.title}"
       assert payload["card_ref"] == "#{board.key}#{card.ref_number}"
       assert payload["board_slug"] == board.slug
-      assert payload["aps"]["sound"] == "default"
+      assert payload["aps"]["sound"] == "jobs_done.caf"
       assert payload["aps"]["badge"] == 1
     end
 
