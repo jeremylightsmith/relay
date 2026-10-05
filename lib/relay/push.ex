@@ -26,6 +26,13 @@ defmodule Relay.Push do
 
   require Logger
 
+  # The alert sound, by filename. It must ship in the iOS app bundle (the Runner
+  # target's Copy Bundle Resources); otherwise iOS plays the default sound.
+  @sound "jobs_done.caf"
+
+  @doc "The notification sound file every push names (bundled in the iOS app)."
+  def sound, do: @sound
+
   @doc """
   Registers `token` as a push device for `user`, upserting on the token: a
   device that re-registers (including after an account switch) re-points to
@@ -230,7 +237,7 @@ defmodule Relay.Push do
       "aps" => %{
         "alert" => %{"title" => title, "body" => "#{ref}: #{card.title}"},
         "badge" => badge,
-        "sound" => "default"
+        "sound" => @sound
       },
       "card_ref" => ref,
       "board_slug" => board.slug,
