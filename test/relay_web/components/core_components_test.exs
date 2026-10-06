@@ -4271,7 +4271,7 @@ defmodule RelayWeb.CoreComponentsTest do
       |> LazyHTML.from_fragment()
     end
 
-    test "with a current item: tiles link through item_href, drawn by kind, one is current, and Viewing/keys show" do
+    test "with a current item: tiles link through item_href, drawn by kind, one is current, and the section ends at the tiles" do
       doc = section_doc("m-b")
 
       for {%{key: key}, n} <- Enum.with_index(@section_items) do
@@ -4285,9 +4285,9 @@ defmodule RelayWeb.CoreComponentsTest do
       assert count(doc, ~s(a[aria-current="true"])) == 1
       assert count(doc, ~s(a#t-1-open[aria-current="true"])) == 1
 
-      viewing = doc |> LazyHTML.query("#s-viewing") |> LazyHTML.text() |> String.split() |> Enum.join(" ")
-      assert viewing == "Viewing B · 2 of 3"
-      assert doc |> LazyHTML.query("#s-keys") |> LazyHTML.text() =~ "back to card"
+      assert count(doc, "#s-viewing") == 0
+      assert count(doc, "#s-keys") == 0
+      assert count(doc, "#s kbd") == 0
       assert count(doc, "#s #t-tiles.flex.flex-wrap.gap-3") == 1
     end
 
@@ -4722,10 +4722,9 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert text(doc, "#mockup-viewer-sheet #mockup-viewer-mockups > span") == "Screenshots"
 
-      viewing =
-        doc |> LazyHTML.query("#mockup-viewer-mockups-viewing") |> LazyHTML.text() |> String.split() |> Enum.join(" ")
-
-      assert viewing == "Viewing Board · 1 of 2"
+      assert text(doc, "#mockup-viewer-header-caption") == "Board"
+      assert text(doc, "#mockup-viewer-header-count") == "1 of 2"
+      assert count(doc, "#mockup-viewer-mockups-viewing") == 0
       assert attr_of(doc, "#mockup-viewer-bar-prev", "aria-label") == ["Previous screenshot"]
     end
 

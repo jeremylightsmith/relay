@@ -65,7 +65,9 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
 
   defp refute_patched(%{proxy: {ref, topic, _}}), do: refute_received({^ref, {:patch, ^topic, _}})
 
-  defp viewing(view), do: view |> element("#mockup-viewer-mockups-viewing") |> render() |> text()
+  defp header_caption(view), do: view |> element("#mockup-viewer-header-caption") |> render() |> text()
+
+  defp header_count(view), do: view |> element("#mockup-viewer-header-count") |> render() |> text()
 
   defp text(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.text() |> String.split() |> Enum.join(" ")
 
@@ -85,7 +87,10 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
     tiles = view |> sheet() |> LazyHTML.from_fragment() |> LazyHTML.query("#mockup-viewer-mockup-tiles > *")
     assert Enum.count(tiles) == 2
 
-    assert viewing(view) == "Viewing Review drawer · 2 of 2"
+    assert header_caption(view) == "Review drawer"
+    assert header_count(view) == "2 of 2"
+    assert view |> element("#mockup-viewer-header-noun") |> render() |> text() == "Screenshot"
+    refute has_element?(view, "#mockup-viewer-sheet #mockup-viewer-mockups-viewing")
     refute sheet(view) =~ "Mockups"
     refute sheet(view) =~ "Mockup:"
     assert has_element?(view, ~s|#mockup-viewer-image[src="#{RelayWeb.attachment_path(s2.id)}"]|)
@@ -100,13 +105,14 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
 
     render_hook(view, "mockup_next", %{})
     refute_patched(view)
-    assert viewing(view) == "Viewing Review drawer · 2 of 2"
+    assert header_caption(view) == "Review drawer"
+    assert header_count(view) == "2 of 2"
     refute has_element?(view, "#mockup-viewer-frame")
 
     view = viewer(conn, board, 1)
     render_hook(view, "mockup_prev", %{})
     refute_patched(view)
-    assert viewing(view) =~ "1 of 2"
+    assert header_count(view) == "1 of 2"
   end
 
   test "3. Esc (mockup_back) returns to the drawer", %{conn: conn, board: board} do
@@ -125,7 +131,8 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
 
     refute_patched(view)
     assert has_element?(view, "#mockup-viewer")
-    assert viewing(view) == "Viewing Board · 1 of 2"
+    assert header_caption(view) == "Board"
+    assert header_count(view) == "1 of 2"
   end
 
   for n <- ~w(99 0 abc 2x) do

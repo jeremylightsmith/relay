@@ -1909,9 +1909,10 @@ defmodule RelayWeb.CoreComponents do
   tiles, one per `RelayWeb.CardMedia` item — a `mockup_preview/1` patching to
   `item_href.(item.key)`, or a `media_placeholder/1` for a `:placeholder` item. Shared by the card
   drawer (`current` nil: the `gap-2` row, nothing else) and the viewer's left sheet, where
-  `current` is the key on screen: its tile is ringed, the row opens up to `gap-3`, and two lines
-  follow — "Viewing <caption> · n of m" (`\#{id}-viewing`) and the ← → / Esc key hint
-  (`\#{id}-keys`). `show_label: false` drops the label row, for a caller that draws its own.
+  `current` is the key on screen: its tile is ringed and the row opens up to `gap-3`. The section
+  ends at the tile row — the caption, "n of m" and key hints live in the viewer's desktop
+  `mockup_viewer_header/1` (RE392). `show_label: false` drops the label row, for a caller that
+  draws its own.
 
   Ids: the row is `\#{tile_id}-tiles` and tile N is `\#{tile_id}-N` (its link `\#{tile_id}-N-open`).
   """
@@ -1926,14 +1927,6 @@ defmodule RelayWeb.CoreComponents do
   attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
 
   def card_mockups_section(assigns) do
-    index = assigns.current && Enum.find_index(assigns.items, &(&1.key == assigns.current))
-
-    assigns =
-      assign(assigns,
-        current_index: index,
-        current_caption: index && (Enum.at(assigns.items, index).caption || assigns.noun)
-      )
-
     ~H"""
     <section id={@id} class="space-y-2">
       <.section_label :if={@show_label}>{@label}</.section_label>
@@ -1960,19 +1953,6 @@ defmodule RelayWeb.CoreComponents do
           />
         <% end %>
       </div>
-      <p :if={@current_index} id={"#{@id}-viewing"} class="text-xs text-base-content/60">
-        Viewing <b class="font-semibold text-base-content/80">{@current_caption}</b>
-        · {@current_index + 1} of {length(@items)}
-      </p>
-      <p
-        :if={@current_index}
-        id={"#{@id}-keys"}
-        class="flex items-center gap-1 text-xs text-base-content/50"
-      >
-        <kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd>
-        switch · <kbd class="kbd kbd-xs">Esc</kbd>
-        back to card
-      </p>
     </section>
     """
   end

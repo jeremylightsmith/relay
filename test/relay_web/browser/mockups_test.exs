@@ -155,10 +155,13 @@ defmodule RelayWeb.Browser.MockupsTest do
     ctx.conn
     |> open_viewer(ctx.board, ctx.ref, id1)
     |> click("#mockup-viewer-mockup-1-open")
-    |> assert_has("#mockup-viewer-mockups-viewing", text: "2 of 3")
+    |> assert_has("#mockup-viewer-header-count", text: "2 of 3")
     |> press_on("body", "ArrowRight")
-    |> assert_has("#mockup-viewer-mockups-viewing", text: "Viewing Error · 3 of 3")
+    |> assert_has("#mockup-viewer-header-caption", text: "Error")
+    |> assert_has("#mockup-viewer-header-count", text: "3 of 3")
     |> assert_has(~s(#mockup-viewer-mockup-2-open[aria-current="true"]))
+    |> refute_has("#mockup-viewer-mockups-viewing")
+    |> refute_has("#mockup-viewer-mockups-keys")
   end
 
   # Scenario 6.
@@ -178,12 +181,12 @@ defmodule RelayWeb.Browser.MockupsTest do
     # A switch would have patched; give it the chance, then prove it never happened.
     Process.sleep(300)
     assert search(session) =~ "mockup=#{id0}"
-    session = assert_has(session, "#mockup-viewer-mockups-viewing", text: "1 of 3")
+    session = assert_has(session, "#mockup-viewer-header-count", text: "1 of 3")
 
     session =
       session
       |> click("#mockup-viewer-mockup-1-open")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "2 of 3")
+      |> assert_has("#mockup-viewer-header-count", text: "2 of 3")
 
     assert note_value(session) =~ ~r/^keep the filter/
 
@@ -216,11 +219,11 @@ defmodule RelayWeb.Browser.MockupsTest do
       ctx.conn
       |> open_drawer(ctx.board, ctx.ref)
       |> click("#card-drawer-mockup-0-open")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "1 of 3")
+      |> assert_has("#mockup-viewer-header-count", text: "1 of 3")
       |> press_on("body", "ArrowRight")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "2 of 3")
+      |> assert_has("#mockup-viewer-header-count", text: "2 of 3")
       |> press_on("body", "ArrowRight")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "3 of 3")
+      |> assert_has("#mockup-viewer-header-count", text: "3 of 3")
 
     js_eval(session, "(() => { history.back(); return true })()")
 

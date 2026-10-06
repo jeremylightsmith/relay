@@ -42,7 +42,7 @@ defmodule Storybook.Components.CoreComponents.CardMockupsSection do
         id: :viewer_sheet,
         description:
           "The mockup viewer's left sheet: the current tile is ringed and aria-current, the others " <>
-            "dimmed, then \"Viewing … · n of m\" and the ← → / Esc key hint.",
+            "dimmed; the section ends at the tiles.",
         attributes: %{
           id: "card-mockups-story-sheet",
           tile_id: "card-mockups-story-sheet-mockup",

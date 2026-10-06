@@ -67,7 +67,9 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
   # test process as this message, so its absence is "no patch happened".
   defp refute_patched(%{proxy: {ref, topic, _}}), do: refute_received({^ref, {:patch, ^topic, _}})
 
-  defp viewing(view), do: view |> element("#mockup-viewer-mockups-viewing") |> render() |> text()
+  defp header_caption(view), do: view |> element("#mockup-viewer-header-caption") |> render() |> text()
+
+  defp header_count(view), do: view |> element("#mockup-viewer-header-count") |> render() |> text()
 
   defp text(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.text() |> String.split() |> Enum.join(" ")
 
@@ -85,7 +87,10 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
            )
 
     assert has_element?(view, ~s|#mockup-viewer-mockup-0-open[aria-current="true"]|)
-    assert viewing(view) == "Viewing A — one list · 1 of 3"
+    assert header_caption(view) == "A — one list"
+    assert header_count(view) == "1 of 3"
+    refute has_element?(view, "#mockup-viewer-mockups-viewing")
+    refute has_element?(view, "#mockup-viewer-mockups-keys")
     refute render(view) =~ ~s(target="_blank")
   end
 
@@ -95,23 +100,25 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
     view |> element("#mockup-viewer-mockup-1-open") |> render_click()
     assert_patch(view, ~p"/board/#{board.slug}?card=MY1&mockup=#{m2.id}")
     assert has_element?(view, ~s|#mockup-viewer-mockup-1-open[aria-current="true"]|)
-    assert viewing(view) == "Viewing B — two panes · 2 of 3"
+    assert header_caption(view) == "B — two panes"
+    assert header_count(view) == "2 of 3"
 
     view |> element("#mockup-viewer-key-next") |> render_keydown(%{"key" => "ArrowRight"})
     assert_patch(view, ~p"/board/#{board.slug}?card=MY1&mockup=#{m3.id}")
-    assert viewing(view) == "Viewing C — empty · 3 of 3"
+    assert header_caption(view) == "C — empty"
+    assert header_count(view) == "3 of 3"
   end
 
   test "3. ← / → stop at the ends", %{conn: conn, board: board, m1: m1, m3: m3} do
     view = viewer(conn, board, m3)
     render_hook(view, "mockup_next", %{})
     refute_patched(view)
-    assert viewing(view) =~ "3 of 3"
+    assert header_count(view) == "3 of 3"
 
     view = viewer(conn, board, m1)
     render_hook(view, "mockup_prev", %{})
     refute_patched(view)
-    assert viewing(view) =~ "1 of 3"
+    assert header_count(view) == "1 of 3"
   end
 
   defp open_reject_with_note(view, note) do
@@ -350,7 +357,8 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
 
     assert has_element?(view, ~s|iframe#mockup-viewer-frame[src="#{RelayWeb.attachment_path(m1.id)}"]|)
     assert view |> element("#mockup-viewer-title") |> render() |> text() == "Mockups"
-    assert viewing(view) == "Viewing A — one list · 1 of 3"
+    assert header_caption(view) == "A — one list"
+    assert header_count(view) == "1 of 3"
   end
 
   test "19. an image mockup shows at natural size in a scrolling frame", %{conn: conn, board: board, card: card} do
