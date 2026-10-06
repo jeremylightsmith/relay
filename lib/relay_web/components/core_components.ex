@@ -2295,6 +2295,52 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
+  @doc """
+  The embedded mockup viewer's zoom control (RE393): − · Fit · + over the bottom-right of an HTML
+  mockup's frame, 44px targets. It is client-owned — no `phx-click`: `card_mockup_viewer/1`'s
+  `.MockupRenderWidth` hook handles the clicks, rewrites the label (`Fit`, `150%` … `400%`) and
+  toggles `disabled` (− at Fit, + at the top step). The server renders the Fit state, − disabled.
+  """
+  attr :id, :string, default: "mockup-viewer-zoom"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_zoom(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label="Zoom"
+      class={[
+        "flex items-center rounded-full border border-base-300 bg-base-100 shadow-sm",
+        @class
+      ]}
+    >
+      <button
+        type="button"
+        id={"#{@id}-out"}
+        aria-label="Zoom out"
+        disabled
+        class={zoom_button_class()}
+      >
+        <.icon name="hero-minus" class="size-5" />
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-reset"}
+        aria-label="Reset zoom to fit"
+        class="flex h-11 min-w-14 items-center justify-center font-mono text-(length:--m-meta) text-base-content"
+      >
+        Fit
+      </button>
+      <button type="button" id={"#{@id}-in"} aria-label="Zoom in" class={zoom_button_class()}>
+        <.icon name="hero-plus" class="size-5" />
+      </button>
+    </div>
+    """
+  end
+
+  defp zoom_button_class, do: "flex size-11 items-center justify-center text-primary disabled:text-base-content/25"
+
   defp pager_chevron_class(disabled?) do
     [
       "flex size-11 items-center justify-center",
@@ -2382,7 +2428,16 @@ defmodule RelayWeb.CoreComponents do
   def card_mockup_viewer(assigns) do
     index = Enum.find_index(assigns.items, &(&1.key == assigns.current_key)) || 0
     item = Enum.at(assigns.items, index) || %{key: assigns.current_key, src: nil, caption: nil, kind: :html}
-    assigns = assign(assigns, index: index + 1, item: item, caption: item.caption || assigns.noun)
+    caption = item.caption || assigns.noun
+
+    assigns =
+      assign(assigns,
+        index: index + 1,
+        item: item,
+        caption: caption,
+        zoomable: assigns.embed and item.kind == :html,
+        frame_title: "#{assigns.noun}: #{caption} (#{assigns.ref})"
+      )
 
     ~H"""
     <div
@@ -2410,6 +2465,8 @@ defmodule RelayWeb.CoreComponents do
       </div>
       <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
       </div>
+      <%!-- Tells the native shell the viewer is open, so it hands the webview every gesture. --%>
+      <div :if={@embed} id={"#{@id}-native"} phx-hook=".NativeMockupViewer" class="hidden"></div>
       <.mockup_viewer_bar
         :if={!@embed}
         id={"#{@id}-bar"}
@@ -2516,7 +2573,7 @@ defmodule RelayWeb.CoreComponents do
           id={"#{@id}-stage"}
           phx-hook=".MockupRenderWidth"
           data-width-toggle={@embed && "#{@id}-width"}
-          class="min-h-0 flex-1 drawer:p-4"
+          class="relative min-h-0 flex-1 drawer:p-4"
         >
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
@@ -2525,11 +2582,12 @@ defmodule RelayWeb.CoreComponents do
           `max-w-none` undoes preflight's `img { max-width: 100% }`. --%>
           <div
             id={"#{@id}-frame-box-#{@item.key}"}
-            data-render={@embed && @item.kind == :html && "phone"}
+            data-render={@zoomable && "phone"}
+            data-zoom={@zoomable && "1"}
             class={[
               "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
-              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden"),
-              "data-[render=desktop]:overflow-y-auto data-[render=desktop]:bg-base-200"
+              mockup_box_overflow(@item.kind, @zoomable),
+              "data-[render=desktop]:bg-base-200"
             ]}
           >
             <img
@@ -2539,15 +2597,32 @@ defmodule RelayWeb.CoreComponents do
               alt={@caption}
               class="block max-w-none"
             />
-            <iframe
-              :if={@item.kind != :image}
+            <%!-- Embedded, the sizer carries the zoomed frame's scaled width (a transform never
+            changes layout size), so the box scrolls sideways when zoomed past Fit. --%>
+            <div
+              :if={@zoomable}
+              id={"#{@id}-frame-sizer"}
+              data-zoom-sizer
+              class="relative h-full overflow-hidden"
+            >
+              <.mockup_viewer_iframe id={"#{@id}-frame"} src={@item.src} title={@frame_title} />
+            </div>
+            <.mockup_viewer_iframe
+              :if={@item.kind != :image and !@zoomable}
               id={"#{@id}-frame"}
               src={@item.src}
-              sandbox={RelayWeb.mockup_sandbox()}
-              title={"#{@noun}: #{@caption} (#{@ref})"}
-              class="block h-full w-full border-0"
-            >
-            </iframe>
+              title={@frame_title}
+            />
+          </div>
+          <%!-- Client-owned like the width toggle: `.MockupRenderWidth` rewrites the label and
+          the disabled flags, so a server patch must never redraw it. --%>
+          <div
+            :if={@zoomable}
+            id={"#{@id}-zoom-wrap"}
+            phx-update="ignore"
+            class="absolute right-3 bottom-3 z-10"
+          >
+            <.mockup_viewer_zoom id={"#{@id}-zoom"} />
           </div>
         </div>
         <.mockup_viewer_pager
@@ -2571,11 +2646,18 @@ defmodule RelayWeb.CoreComponents do
         // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
         const KEY = "relay:mockup-render"
         const DESKTOP_WIDTH = 1280
+        // Zoom multiplies the width mode's fit scale; index 0 is Fit. Not persisted: it resets
+        // to Fit on every item switch (a new frame box) and every width-mode switch.
+        const ZOOM_STEPS = [1, 1.5, 2, 3, 4]
+        const ZOOM_BUTTON = '[id$="-zoom-in"], [id$="-zoom-out"], [id$="-zoom-reset"]'
 
         export default {
           mounted() {
+            this.zoom = 0
             this.apply = () => this.render()
             this.onClick = (e) => {
+              const zoomButton = e.target.closest(ZOOM_BUTTON)
+              if (zoomButton && this.el.contains(zoomButton)) return this.zoomBy(zoomButton.id)
               const choice = e.target.closest("[data-render-choice]")
               const toggleId = this.el.dataset.widthToggle
               if (!choice || !toggleId || !choice.closest(`#${toggleId}`)) return
@@ -2583,6 +2665,8 @@ defmodule RelayWeb.CoreComponents do
               this.render()
             }
             document.addEventListener("click", this.onClick)
+            // childList/subtree only: the inline styles and data-zoom render() writes are
+            // attributes, so they never re-trigger it.
             this.mutations = new MutationObserver(this.apply)
             this.mutations.observe(this.el, { childList: true, subtree: true })
             this.resizes = new ResizeObserver(this.apply)
@@ -2598,6 +2682,12 @@ defmodule RelayWeb.CoreComponents do
           mode() {
             return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
           },
+          zoomBy(id) {
+            if (id.endsWith("-zoom-in")) this.zoom = Math.min(this.zoom + 1, ZOOM_STEPS.length - 1)
+            else if (id.endsWith("-zoom-out")) this.zoom = Math.max(this.zoom - 1, 0)
+            else this.zoom = 0
+            this.render()
+          },
           render() {
             const mode = this.mode()
             this.syncToggle(mode)
@@ -2605,16 +2695,40 @@ defmodule RelayWeb.CoreComponents do
             const frame = box && box.querySelector("iframe")
             if (!frame) return
             if (box.dataset.render !== mode) box.dataset.render = mode
-            if (mode === "desktop") {
-              const scale = box.clientWidth / DESKTOP_WIDTH
-              frame.style.width = `${DESKTOP_WIDTH}px`
-              frame.style.height = `${box.clientHeight / scale}px`
-              frame.style.transformOrigin = "top left"
-              frame.style.transform = `scale(${scale})`
-            } else {
+            if (box.id !== this.zoomBoxId || mode !== this.zoomMode) this.zoom = 0
+            this.zoomBoxId = box.id
+            this.zoomMode = mode
+            const z = ZOOM_STEPS[this.zoom]
+            this.syncZoom(box, z)
+            const sizer = box.querySelector("[data-zoom-sizer]")
+            if (mode === "phone" && z === 1) {
+              if (sizer) sizer.style.width = ""
               frame.style.width = frame.style.height = ""
               frame.style.transform = frame.style.transformOrigin = ""
+              return
             }
+            const fit = mode === "desktop" ? box.clientWidth / DESKTOP_WIDTH : 1
+            const layoutWidth = mode === "desktop" ? DESKTOP_WIDTH : box.clientWidth
+            const scale = fit * z
+            // Size the sizer first: once it overflows, a classic horizontal scrollbar takes
+            // height from the box, and the frame's layout height must account for it.
+            if (sizer) sizer.style.width = `${layoutWidth * scale}px`
+            frame.style.width = `${layoutWidth}px`
+            frame.style.height = `${box.clientHeight / scale}px`
+            frame.style.transformOrigin = "top left"
+            frame.style.transform = `scale(${scale})`
+          },
+          // The zoom control is phx-update="ignore": the hook owns its label and disabled flags.
+          // Text is only written when it changes — a text write is a childList mutation.
+          syncZoom(box, z) {
+            if (box.dataset.zoom !== undefined && box.dataset.zoom !== String(z)) box.dataset.zoom = String(z)
+            const control = this.el.querySelector('[role="group"][aria-label="Zoom"]')
+            if (!control) return
+            const label = z === 1 ? "Fit" : `${z * 100}%`
+            const reset = control.querySelector('[id$="-zoom-reset"]')
+            if (reset.textContent.trim() !== label) reset.textContent = label
+            control.querySelector('[id$="-zoom-out"]').disabled = z === ZOOM_STEPS[0]
+            control.querySelector('[id$="-zoom-in"]').disabled = z === ZOOM_STEPS[ZOOM_STEPS.length - 1]
           },
           // The toggle is phx-update="ignore": move the active look by swapping the server's
           // own active / inactive class lists between segments, so no class is re-typed here.
@@ -2647,6 +2761,9 @@ defmodule RelayWeb.CoreComponents do
               const dx = t.clientX - this.start.x
               const dy = t.clientY - this.start.y
               this.start = null
+              // Zoomed past Fit, a sideways drag pans the mockup; it never pages.
+              const box = this.el.querySelector("[data-zoom]")
+              if (box && box.dataset.zoom !== "1") return
               if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) {
                 this.pushEvent(dx < 0 ? "mockup_next" : "mockup_prev", {})
               }
@@ -2654,7 +2771,43 @@ defmodule RelayWeb.CoreComponents do
           }
         }
       </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeMockupViewer">
+        // RE393 — tell the native shell the viewer opened / closed, so it hands the webview every
+        // gesture (horizontal pan, pinch) while it is open. A plain browser has no bridge: no-op.
+        const HANDLER = "relayMockupViewer"
+
+        export default {
+          mounted() { this.signal(true) },
+          destroyed() { this.signal(false) },
+          signal(open) {
+            if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(HANDLER, open)
+          }
+        }
+      </script>
     </div>
+    """
+  end
+
+  # Embedded HTML scrolls sideways when zoomed (vertical scroll stays inside the iframe); an
+  # image scrolls both ways at natural size; the web viewer's frame clips, desktop mode scrolling.
+  defp mockup_box_overflow(_kind, true = _zoomable), do: "overflow-x-auto overflow-y-hidden"
+  defp mockup_box_overflow(:image, _zoomable), do: "overflow-auto"
+  defp mockup_box_overflow(_kind, _zoomable), do: "overflow-hidden data-[render=desktop]:overflow-y-auto"
+
+  attr :id, :string, required: true
+  attr :src, :string, required: true
+  attr :title, :string, required: true
+
+  defp mockup_viewer_iframe(assigns) do
+    ~H"""
+    <iframe
+      id={@id}
+      src={@src}
+      sandbox={RelayWeb.mockup_sandbox()}
+      title={@title}
+      class="block h-full w-full border-0"
+    >
+    </iframe>
     """
   end
 

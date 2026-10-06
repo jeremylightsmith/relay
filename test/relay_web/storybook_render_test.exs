@@ -168,4 +168,12 @@ defmodule RelayWeb.StorybookRenderTest do
     assert doc |> LazyHTML.query("button[id$='-next'][disabled]") |> Enum.count() >= 1
     assert doc |> LazyHTML.query("[id$='-count']") |> LazyHTML.text() =~ "2 of 3"
   end
+
+  test "GET /storybook/core_components/mockup_viewer_zoom shows − disabled, Fit and + (RE393)", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/mockup_viewer_zoom") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("button[id$='-out'][disabled]") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("button[id$='-in']") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("button[id$='-reset']") |> LazyHTML.text() =~ "Fit"
+  end
 end
