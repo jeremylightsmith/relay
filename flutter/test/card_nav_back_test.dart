@@ -76,4 +76,8 @@ void main() {
   test('the JS handler name pins the web nav bar contract', () {
     expect(CardScreen.navBackHandler, 'relayNavBack');
   });
+
+  test('the mockup viewer JS handler name pins the web hook contract', () {
+    expect(CardScreen.mockupViewerHandler, 'relayMockupViewer');
+  });
 }
