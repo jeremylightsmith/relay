@@ -4489,6 +4489,71 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "mockup_viewer_header/1 (RE392)" do
+    defp header_doc(attrs) do
+      (&CoreComponents.mockup_viewer_header/1)
+      |> render_component(Map.merge(%{caption: "B — two panes", index: 2, total: 3}, attrs))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp class_list(doc, selector), do: doc |> classes(selector) |> String.split()
+
+    test "a label: the noun, the caption, n of m and the key hint" do
+      doc = header_doc(%{})
+
+      assert count(doc, "header#mockup-viewer-header") == 1
+      assert text(doc, "#mockup-viewer-header-noun") == "Mockup"
+      assert text(doc, "#mockup-viewer-header-caption") == "B — two panes"
+      assert text(doc, "#mockup-viewer-header-count") == "2 of 3"
+
+      keys = doc |> text("#mockup-viewer-header-keys") |> String.split() |> Enum.join(" ")
+      assert keys == "← → switch · Esc back to card"
+      assert count(doc, "#mockup-viewer-header-keys kbd.kbd.kbd-xs") == 3
+    end
+
+    test "the noun swaps for screenshots" do
+      doc = header_doc(%{noun: "Screenshot", caption: "Board", index: 1, total: 2})
+
+      assert text(doc, "#mockup-viewer-header-noun") == "Screenshot"
+      assert text(doc, "#mockup-viewer-header-count") == "1 of 2"
+    end
+
+    test "matches the card mockup's classes and lays out as flex without a class" do
+      doc = header_doc(%{})
+
+      header = class_list(doc, "#mockup-viewer-header")
+
+      for c <- ~w(flex min-h-11 items-center border-b border-base-300 bg-base-100 px-4 py-2),
+          do: assert(c in header, "header lacks #{c}: #{inspect(header)}")
+
+      caption = class_list(doc, "#mockup-viewer-header-caption")
+      for c <- ~w(truncate text-sm font-semibold), do: assert(c in caption)
+
+      count_classes = class_list(doc, "#mockup-viewer-header-count")
+      for c <- ~w(shrink-0 font-mono text-xs text-base-content/55), do: assert(c in count_classes)
+
+      noun = class_list(doc, "#mockup-viewer-header-noun")
+      for c <- ~w(font-mono text-[10px] uppercase text-base-content/60 shrink-0), do: assert(c in noun)
+
+      assert "shrink-0" in class_list(doc, "#mockup-viewer-header-keys")
+    end
+
+    test "is never a switcher: no buttons, links or clicks" do
+      doc = header_doc(%{})
+
+      assert count(doc, "#mockup-viewer-header button") == 0
+      assert count(doc, "#mockup-viewer-header a") == 0
+      assert count(doc, "#mockup-viewer-header [phx-click]") == 0
+    end
+
+    test "every part's id derives from the id" do
+      doc = header_doc(%{id: "h2"})
+
+      for sel <- ~w(header#h2 #h2-noun #h2-caption #h2-count #h2-keys),
+          do: assert(count(doc, sel) == 1, "missing #{sel}")
+    end
+  end
+
   describe "card_mockup_viewer/1 (RE380)" do
     test "sheet, framed mockup, key guard and key bindings — and no banner" do
       first = "11111111-aaaa"
@@ -4564,6 +4629,57 @@ defmodule RelayWeb.CoreComponentsTest do
 
       assert count(doc, "#mockup-viewer-banner") == 0
     end
+
+    test "the desktop header is main's first child; the phone bar is unchanged (RE392)" do
+      first = "11111111-aaaa"
+
+      items =
+        CardMedia.mockup_items(
+          [
+            %{"url" => "/attachments/#{first}", "caption" => "Empty"},
+            %{"url" => "/attachments/22222222-bbbb", "caption" => "Loaded"}
+          ],
+          %{first => "text/html", "22222222-bbbb" => "text/html"}
+        )
+
+      assigns = %{items: items, first: first}
+
+      doc =
+        ~H"""
+        <CoreComponents.card_mockup_viewer
+          ref="RE9"
+          card={%{title: "Notif"}}
+          stage_name="Design · Review"
+          stage_owner={:human}
+          items={@items}
+          current_key={@first}
+          back_patch="/board/b?card=RE9"
+          item_href={&"/v/#{&1}"}
+        />
+        """
+        |> rendered_to_string()
+        |> LazyHTML.from_fragment()
+
+      assert count(doc, "#mockup-viewer-main > header#mockup-viewer-header:first-child") == 1
+
+      main_html = doc |> LazyHTML.query("#mockup-viewer-main") |> LazyHTML.to_html()
+
+      {header_at, _} = :binary.match(main_html, ~s(id="mockup-viewer-header"))
+      {frame_at, _} = :binary.match(main_html, ~s(id="mockup-viewer-frame-box-))
+      assert header_at < frame_at
+
+      header = doc |> classes("#mockup-viewer-header") |> String.split()
+      assert "hidden" in header
+      assert "drawer:flex" in header
+
+      assert text(doc, "#mockup-viewer-header-caption") == "Empty"
+      assert text(doc, "#mockup-viewer-header-count") == "1 of 2"
+      assert text(doc, "#mockup-viewer-header-noun") == "Mockup"
+
+      assert "drawer:hidden" in (doc |> classes("#mockup-viewer-bar") |> String.split())
+      assert text(doc, "#mockup-viewer-bar-caption") == "Empty"
+      assert text(doc, "#mockup-viewer-bar-count") == "1 / 2"
+    end
   end
 
   describe "card_mockup_viewer/1 screenshots (RE390)" do
@@ -4622,6 +4738,14 @@ defmodule RelayWeb.CoreComponentsTest do
       frame = LazyHTML.query(doc, ~s(#mockup-viewer-frame-box-2 iframe#mockup-viewer-frame[sandbox="allow-scripts"]))
       assert LazyHTML.attribute(frame, "title") == ["Screenshot: Screenshot (RE9)"]
       assert LazyHTML.attribute(frame, "src") == ["/attachments/h"]
+    end
+
+    test "the desktop header names the screenshot, falling back to the noun (RE392)" do
+      doc = screenshot_viewer_doc(2)
+
+      assert text(doc, "#mockup-viewer-header-noun") == "Screenshot"
+      assert text(doc, "#mockup-viewer-header-caption") == "Screenshot"
+      assert text(doc, "#mockup-viewer-header-count") == "2 of 2"
     end
   end
 end

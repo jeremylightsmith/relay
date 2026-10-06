@@ -4,7 +4,8 @@ defmodule RelayWeb.Browser.MockupsTest do
 
   The drawer shows them as small square tiles (a sandboxed live miniature each) side by side in
   one row. A tile opens BoardLive's mockup viewer **in the same tab** (`?card=<ref>&mockup=<id>`):
-  the card shrinks to a ~340px left sheet and the sandboxed frame sits directly under the top bar.
+  the card shrinks to a ~340px left sheet and the sandboxed frame sits under a header that names the
+  mockup (RE392), which sits directly under the top bar.
   ←/→ switch mockups (never while typing), a half-written reject note survives switching, Esc and
   one browser Back return to the drawer, and the RE370 `/attachments/:id/view` link redirects in.
 
@@ -32,13 +33,13 @@ defmodule RelayWeb.Browser.MockupsTest do
   })()
   """
 
-  # The viewer's left sheet, its frame and the app top bar.
+  # The viewer's left sheet, its header, its frame and the app top bar.
   @measure_viewer """
   (() => {
     const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect();
       return {top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width, h: r.height}; };
-    return {sheet: box('#mockup-viewer-sheet'), frame: box('#mockup-viewer-frame'),
-            topbar: box('#top-bar')};
+    return {sheet: box('#mockup-viewer-sheet'), header: box('#mockup-viewer-header'),
+            frame: box('#mockup-viewer-frame'), topbar: box('#top-bar')};
   })()
   """
 
@@ -119,7 +120,7 @@ defmodule RelayWeb.Browser.MockupsTest do
   end
 
   # Scenario 4.
-  test "a tile opens the viewer in the same tab: a 340px left sheet beside the frame, right under the top bar",
+  test "a tile opens the viewer in the same tab: a 340px left sheet beside the frame, the header right under the top bar",
        ctx do
     [id0 | _] = ctx.ids
 
@@ -129,6 +130,7 @@ defmodule RelayWeb.Browser.MockupsTest do
       |> click("#card-drawer-mockup-0-open")
       |> assert_has("#mockup-viewer")
       |> assert_has("#mockup-viewer-sheet")
+      |> assert_has("#mockup-viewer-header")
       |> assert_has(~s(iframe#mockup-viewer-frame[src="#{RelayWeb.attachment_path(id0)}"]))
 
     # THIS page (the one the test drives, not a new tab) is the one now showing the viewer.
@@ -140,8 +142,10 @@ defmodule RelayWeb.Browser.MockupsTest do
     assert m["sheet"]["right"] <= m["frame"]["left"] + 1, "sheet is not left of the frame: #{inspect(m)}"
     assert m["frame"]["top"] >= 53, "the frame is under the top bar: #{inspect(m)}"
 
-    assert m["frame"]["top"] - m["topbar"]["bottom"] <= 20,
-           "a bar sits between the top bar and the frame: #{inspect(m)}"
+    assert abs(m["header"]["top"] - m["topbar"]["bottom"]) <= 1,
+           "the header is not right under the top bar: #{inspect(m)}"
+
+    assert m["frame"]["top"] >= m["header"]["bottom"], "the frame is not under the header: #{inspect(m)}"
   end
 
   # Scenario 5.
