@@ -68,6 +68,16 @@ const BoardDnD = {
       card.scrollIntoView({block: "nearest"})
       card.focus()
     })
+
+    // RE389 — BoardLive pushes `scroll_card` when a card opens from a closed drawer (a click, a
+    // search result, a ?card= deep link). It only reveals the card: focus is NOT moved, because a
+    // click already focused the card and a search or deep link must never steal keyboard focus.
+    // A card this view isn't rendering is not found, and nothing happens.
+    this.handleEvent("scroll_card", ({ref}) => {
+      const card = this.el.querySelector(`${CARD_SELECTOR}[data-ref="${ref}"]`)
+      if (!card) return
+      card.scrollIntoView({block: "nearest"})
+    })
   },
 
   // 0-based insertion index among the zone's cards *excluding* the

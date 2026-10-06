@@ -165,6 +165,16 @@
 .board-card.dragging {
   opacity: 0.5;
 }
+/* RE389: the card the drawer is showing wears the browser's own focus ring
+   (the ‹/› look) for as long as the drawer is open, wherever focus is. Same
+   outline as :focus-visible, so open + focused draws one ring. No
+   outline-offset (the UA sets none); the WebKit colour keyword sits in its
+   own declaration so engines that drop it keep outline-style: auto. */
+.board-card[data-open],
+.story-map-card[data-open] {
+  outline-style: auto;
+  outline-color: -webkit-focus-ring-color;
+}
 .stage-drop.drag-over {
   outline: 2px dashed var(--color-primary);
   outline-offset: 2px;

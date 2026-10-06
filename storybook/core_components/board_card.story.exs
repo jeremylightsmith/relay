@@ -21,6 +21,11 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
         id: :unowned,
         attributes: %{id: "story-card-1", ref: "RLY-1", title: "Wire up Google sign-in"}
       },
+      # RE389 — the card the drawer is showing: data-open draws the focus-ring highlight.
+      %Variation{
+        id: :open,
+        attributes: %{id: "story-card-open", ref: "RLY-4", title: "The card the drawer is showing", open: true}
+      },
       %Variation{
         id: :human_active,
         attributes: %{

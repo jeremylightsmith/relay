@@ -18,6 +18,18 @@ defmodule Storybook.StoryMapComponents.StoryMapCard do
         }
       },
       %Variation{
+        id: :open,
+        description: "RE389 — the card the drawer is showing: data-open draws the focus-ring highlight",
+        attributes: %{
+          id: "story-map-card-open",
+          ref: "RLY-100",
+          title: "Add SSO for enterprise accounts",
+          badge: "BACKLOG",
+          hue: :neutral,
+          open: true
+        }
+      },
+      %Variation{
         id: :working_with_percentage,
         attributes: %{
           id: "story-map-card-2",

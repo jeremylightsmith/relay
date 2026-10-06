@@ -21,6 +21,10 @@ defmodule RelayWeb.FocusCardHookTest do
       assert src =~ ~S|const CARD_SELECTOR = ".board-card"|
       assert_focus_card_handler(src)
     end
+
+    test "handles scroll_card by scrolling the card into view without focusing it", %{src: src} do
+      assert_scroll_card_handler(src)
+    end
   end
 
   describe "StoryMapDnD" do
@@ -32,6 +36,10 @@ defmodule RelayWeb.FocusCardHookTest do
       assert src =~ ~S|const CARD_SELECTOR = ".story-map-card[data-ref]"|
       assert_focus_card_handler(src)
     end
+
+    test "handles scroll_card by scrolling the card into view without focusing it", %{src: src} do
+      assert_scroll_card_handler(src)
+    end
   end
 
   # The handler both hooks carry: look the card up by ref, do nothing when it isn't rendered
@@ -42,5 +50,21 @@ defmodule RelayWeb.FocusCardHookTest do
     assert src =~ "if (!card) return"
     assert src =~ ~S|card.scrollIntoView({block: "nearest"})|
     assert src =~ "card.focus()"
+  end
+
+  # RE389 — `scroll_card` (nil → A: a click, search result or deep link) reveals the card but must
+  # never move keyboard focus. The file legitimately calls card.focus() in focus_card, so the
+  # refute runs against the scroll_card handler's body alone.
+  defp assert_scroll_card_handler(src) do
+    opener = ~S|this.handleEvent("scroll_card", ({ref}) => {|
+    assert src =~ opener
+
+    [_before, after_opener] = String.split(src, opener, parts: 2)
+    [body | _rest] = String.split(after_opener, "\n    })", parts: 2)
+
+    assert body =~ ~S|this.el.querySelector(`${CARD_SELECTOR}[data-ref="${ref}"]`)|
+    assert body =~ "if (!card) return"
+    assert body =~ ~S|card.scrollIntoView({block: "nearest"})|
+    refute body =~ ".focus("
   end
 end

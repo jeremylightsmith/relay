@@ -1360,6 +1360,10 @@ defmodule RelayWeb.CoreComponents do
     default: 0,
     doc: "RE93 unmet blocker count — a quiet ghost lock chip in the meta row; 0 renders nothing"
 
+  attr :open, :boolean,
+    default: false,
+    doc: "RE389 the drawer is showing this card — renders a bare data-open (the focus-ring highlight)"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -1392,6 +1396,7 @@ defmodule RelayWeb.CoreComponents do
       data-health={@health}
       data-done={to_string(@done)}
       data-active-owner={@active_owner}
+      data-open={@open}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
@@ -5568,6 +5573,10 @@ defmodule RelayWeb.CoreComponents do
     default: %{},
     doc: "RE93 %{card_id => [unmet blocker id]} — the face chip's count comes from this"
 
+  attr :open_ref, :string,
+    default: nil,
+    doc: "RE389 the ref of the card the drawer is showing, from BoardLive's :open_ref assign; that card renders data-open"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -5828,6 +5837,7 @@ defmodule RelayWeb.CoreComponents do
                         rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                         vote_count={Map.get(@vote_counts, card.id, 0)}
                         blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                        open={open_card?(@open_ref, @board_key, card)}
                       />
                     </div>
                     <%!--
@@ -5943,6 +5953,7 @@ defmodule RelayWeb.CoreComponents do
                     rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                     vote_count={Map.get(@vote_counts, card.id, 0)}
                     blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                    open={open_card?(@open_ref, @board_key, card)}
                   />
                 </div>
               </div>
@@ -5952,6 +5963,11 @@ defmodule RelayWeb.CoreComponents do
     <% end %>
     """
   end
+
+  # RE389 — whether `card` is the one the drawer has open (BoardLive's :open_ref). Both
+  # board_card call sites (main lanes and sub-lanes) ask this, so they cannot drift.
+  defp open_card?(nil, _board_key, _card), do: false
+  defp open_card?(open_ref, board_key, card), do: Cards.format_ref(board_key, card.ref_number) == open_ref
 
   @doc """
   RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup

@@ -109,6 +109,21 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "board_card/1 open highlight (RE389)" do
+    test "open: true renders a bare data-open on the article" do
+      html = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RL3", title: "T", open: true)
+
+      assert [_article] =
+               html |> LazyHTML.from_fragment() |> LazyHTML.query("article.board-card[data-open]") |> Enum.to_list()
+    end
+
+    test "open omitted renders no data-open" do
+      html = render_component(&CoreComponents.board_card/1, id: "c1", ref: "RL3", title: "T")
+
+      refute html =~ "data-open"
+    end
+  end
+
   describe "board_card/1" do
     test "renders the title and ref" do
       html = render_component(&CoreComponents.board_card/1, id: "card-1", ref: "RLY-3", title: "Ship MMF 03")

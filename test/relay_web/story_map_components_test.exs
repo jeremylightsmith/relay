@@ -309,6 +309,38 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
   end
 
+  describe "RE389 — story_map_card/1 marks the drawer's open card" do
+    for zoom <- StoryMapComponents.zoom_levels() do
+      test "open: true renders data-open at #{zoom} zoom" do
+        html =
+          render_component(&StoryMapComponents.story_map_card/1,
+            id: "c",
+            ref: "RL1",
+            title: "T",
+            badge: "CODE",
+            open: true,
+            zoom: unquote(zoom)
+          )
+
+        assert [_article] =
+                 html |> LazyHTML.from_fragment() |> LazyHTML.query("article.story-map-card[data-open]") |> Enum.to_list()
+      end
+
+      test "omitting open renders no data-open at #{zoom} zoom" do
+        html =
+          render_component(&StoryMapComponents.story_map_card/1,
+            id: "c",
+            ref: "RL1",
+            title: "T",
+            badge: "CODE",
+            zoom: unquote(zoom)
+          )
+
+        refute html =~ "data-open"
+      end
+    end
+  end
+
   describe "story_map/1 — the grid chrome" do
     test "renders the sticky corner, the bands, the headers and the lane rail" do
       html = grid_html()

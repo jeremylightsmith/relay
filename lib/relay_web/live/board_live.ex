@@ -438,6 +438,7 @@ defmodule RelayWeb.BoardLive do
                   run_meta={@run_face_meta}
                   vote_counts={@vote_counts}
                   blocked_by={@blocked_by}
+                  open_ref={@open_ref}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -533,6 +534,7 @@ defmodule RelayWeb.BoardLive do
         focus={@story_map_focus}
         hide_complete={@story_map_hide_complete}
         filter_active={@story_map_filter_active}
+        open_ref={@open_ref}
       />
       <.card_drawer
         :if={@selected_card}
@@ -868,6 +870,7 @@ defmodule RelayWeb.BoardLive do
   attr :focus, :any, required: true, doc: "the focused activity id, or nil"
   attr :hide_complete, :boolean, required: true
   attr :filter_active, :boolean, required: true
+  attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
 
   defp story_map_viewport(assigns) do
     # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the
@@ -963,6 +966,7 @@ defmodule RelayWeb.BoardLive do
           stages={@board.stages}
           stalled_ids={@stalled_ids}
           open={@tray_open}
+          open_ref={@open_ref}
         />
         <div id="story-map-surface" class="relative min-w-0 flex-1 overflow-auto">
           <%!--
@@ -997,6 +1001,7 @@ defmodule RelayWeb.BoardLive do
             compose_form={@compose_form}
             zoom={@zoom}
             focus={@focus_activity}
+            open_ref={@open_ref}
           />
           <StoryMapComponents.story_map_empty
             :if={@activities == []}
@@ -1171,6 +1176,8 @@ defmodule RelayWeb.BoardLive do
       # selected card's editors were reopened from a draft (drives the "restored" note).
       |> assign(:field_drafts, %{})
       |> assign(:restored_drafts, MapSet.new())
+      # RE389 — the ref the board highlights as open (data-open); see open_ref/1.
+      |> assign(:open_ref, nil)
       |> assign(:dirty_run_cards, MapSet.new())
       |> assign(:run_flush_events, 0)
       |> assign(:run_flush_pending?, false)
@@ -1193,6 +1200,7 @@ defmodule RelayWeb.BoardLive do
   def handle_params(params, _uri, socket) do
     ref = card_ref(socket.assigns.live_action, params)
     previous_ref = selected_ref(socket)
+    previous_card = socket.assigns[:selected_card]
 
     if mockup_only_change?(socket, ref, previous_ref, params["mockup"]) do
       {:noreply, assign_viewer(socket, params["mockup"])}
@@ -1201,7 +1209,10 @@ defmodule RelayWeb.BoardLive do
 
       {:noreply,
        socket
+       |> assign(:open_ref, open_ref(socket))
+       |> reinsert_open_pair(previous_card, socket.assigns.selected_card)
        |> maybe_push_card_focus(previous_ref, selected_ref(socket))
+       |> maybe_push_card_scroll(previous_ref, selected_ref(socket))
        |> assign_viewer(params["mockup"])}
     end
   end
@@ -1280,28 +1291,89 @@ defmodule RelayWeb.BoardLive do
   defp selected_ref(%{assigns: %{selected_card: %Card{} = card, board: board}}), do: Cards.ref(board, card)
   defp selected_ref(_socket), do: nil
 
+  # RE389 — whether a board is rendered behind the drawer. Embed and card mode have no board in
+  # the DOM, so nothing there is highlighted, re-inserted, scrolled or focused. The one home of
+  # that exemption: open_ref/1, reinsert_open_pair/3, maybe_push_card_focus/3 and
+  # maybe_push_card_scroll/3 all ask it.
+  defp board_in_dom?(%{assigns: %{embed: true}}), do: false
+  defp board_in_dom?(%{assigns: %{live_action: :card}}), do: false
+  defp board_in_dom?(_socket), do: true
+
+  # RE389 — the ref the board renders as open (data-open): the drawer's card, or nil when no
+  # board is in the DOM (board_in_dom?/1).
+  defp open_ref(socket), do: if(board_in_dom?(socket), do: selected_ref(socket))
+
   # RE326 — board focus follows the drawer. Every open, switch and close is a URL change that
   # lands in handle_params/3 (chevron, ←/→, scrim, Esc/✕, archive, browser back/forward), so the
-  # rule lives here once, as a table of the selection before → after:
+  # rule lives here once, as a table of the selection before → after (RE389 adds the open
+  # highlight column — kanban stream items only re-render when re-inserted):
   #
-  #   embed / card mode  never, because there is no board in the DOM
-  #   nil → A            no push: a click already focused A, and a search result or deep link
-  #                      must not steal focus or scroll the board
-  #   A → A              no push
-  #   A → nil (close)    focus A, so Tab carries on from the last card viewed
-  #   A → B (switch)     focus B, which the hook scrolls into view (block: "nearest")
+  #                      focus / scroll                       open highlight (reinsert_open_pair/3)
+  #                      (maybe_push_card_focus/3,
+  #                       maybe_push_card_scroll/3)
+  #   embed / card mode  never: no board in the DOM (board_in_dom?/1, for both columns)
+  #   nil → A            push scroll_card: reveal the card,   re-insert A
+  #                      never focus it — a click already
+  #                      focused A, and a search result or
+  #                      deep link must not steal focus
+  #   A → A              no push                              nothing
+  #   A → nil (close)    focus A, so Tab carries on from      re-insert A
+  #                      the last card viewed
+  #   A → B (switch)     focus B, which the hook scrolls      re-insert A and B
+  #                      into view (block: "nearest")
   #
   # BoardDnD and StoryMapDnD both no-op when the ref isn't rendered (just archived, filtered out).
-  defp maybe_push_card_focus(%{assigns: %{embed: true}} = socket, _previous_ref, _ref), do: socket
-  defp maybe_push_card_focus(%{assigns: %{live_action: :card}} = socket, _previous_ref, _ref), do: socket
-  defp maybe_push_card_focus(socket, nil, _ref), do: socket
-  defp maybe_push_card_focus(socket, ref, ref), do: socket
-  defp maybe_push_card_focus(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
-  defp maybe_push_card_focus(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+  defp maybe_push_card_focus(socket, previous_ref, ref) do
+    if board_in_dom?(socket), do: push_focus_change(socket, previous_ref, ref), else: socket
+  end
+
+  defp push_focus_change(socket, nil, _ref), do: socket
+  defp push_focus_change(socket, ref, ref), do: socket
+  defp push_focus_change(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
+  defp push_focus_change(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+
+  # RE389 — the nil → A row of the table above: scroll the opened card into view, focus untouched.
+  defp maybe_push_card_scroll(socket, nil, ref) when is_binary(ref) do
+    if board_in_dom?(socket), do: push_card_scroll(socket, ref), else: socket
+  end
+
+  defp maybe_push_card_scroll(socket, _previous_ref, _ref), do: socket
+
+  # RE389 — re-insert the before and after cards so both re-render against the new @open_ref
+  # (assigned just before). Each is refetched, never the possibly stale @selected_card struct, and
+  # restreamed only when the board renders it: unarchived, in a loaded stage, and — through
+  # upsert_card_stream/3's terminal branch — inside the Done window.
+  defp reinsert_open_pair(socket, previous, card) do
+    if board_in_dom?(socket), do: reinsert_changed_pair(socket, previous, card), else: socket
+  end
+
+  defp reinsert_changed_pair(socket, %Card{id: id}, %Card{id: id}), do: socket
+
+  defp reinsert_changed_pair(socket, previous, card) do
+    [previous, card]
+    |> Enum.filter(&match?(%Card{}, &1))
+    |> Enum.reduce(socket, &reinsert_board_card(&2, &1.id))
+  end
+
+  defp reinsert_board_card(socket, card_id) do
+    case Cards.get_card(socket.assigns.board, card_id) do
+      %Card{} = card ->
+        if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id),
+          # %{}: upsert_card_stream/3 reads cards_by_stage only via the terminal window, which ignores it.
+          do: upsert_card_stream(socket, card, %{}),
+          else: socket
+
+      nil ->
+        socket
+    end
+  end
 
   # The one place the `focus_card` hook event is named: create_card and the drawer focus rule
   # above both push it.
   defp push_card_focus(socket, ref), do: push_event(socket, "focus_card", %{ref: ref})
+
+  # RE389 — the one place the scroll-only `scroll_card` hook event is named (maybe_push_card_scroll/3).
+  defp push_card_scroll(socket, ref), do: push_event(socket, "scroll_card", %{ref: ref})
 
   # RLY-68 — the async heavy-body fetch kicked off by
   # maybe_start_body_load/4. Compares the result's card id against the

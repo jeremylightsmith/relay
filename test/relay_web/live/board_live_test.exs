@@ -2758,6 +2758,197 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "RE389 — opening a card scrolls it into view without stealing focus" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "a deep link pushes scroll_card for its card and no focus_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "opening a card with the drawer closed pushes scroll_card and no focus_card",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY1"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "a switch (A → B) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "a close (A → nil) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "re-patching the open card (A → A) pushes no scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "embed mode never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1&card=MY1")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "card mode (/cards/:ref) never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+  end
+
+  describe "RE389 — the open card is highlighted on the board" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      first = insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board, first: first, second: second}
+    end
+
+    test "selecting a card from a closed drawer marks exactly that card open", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY2"})
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      assert open_card_count(view) == 1
+    end
+
+    test "a deep link marks the linked card open and no other", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY3"][data-open]))
+    end
+
+    test "the › chevron moves the highlight with the drawer", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      view |> element("#card-drawer-next") |> render_click()
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      view |> element("#card-drawer-next") |> render_click()
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY3")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY3"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      assert open_card_count(view) == 1
+    end
+
+    test "ArrowLeft moves the highlight to the previous card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+    end
+
+    test "Escape clears the highlight but keeps the card on the board", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+      assert_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, ".board-card[data-open]")
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"]))
+    end
+
+    test "patching ?card= away clears the highlight", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, ".board-card[data-open]")
+    end
+
+    test "a card_upserted for the open card keeps its highlight", %{conn: conn, board: board, second: second} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      {:ok, _card} = Cards.update_card(second, %{title: "Renamed"})
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"][data-open] .card-title), "Renamed")
+    end
+
+    test "archiving the open card elsewhere doesn't resurrect it on close", %{conn: conn, board: board, second: second} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      {:ok, _card} = Cards.archive_card(second)
+      _ = render(view)
+
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"]))
+    end
+
+    test "opening an archived card by URL doesn't put it on the board", %{conn: conn, board: board, first: first} do
+      {:ok, _card} = Cards.archive_card(first)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY1")
+      refute has_element?(view, ~s(.board-card[data-ref="MY1"]))
+    end
+
+    test "embed mode never marks a card open", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1&card=MY1")
+
+      refute has_element?(view, ".board-card[data-open]")
+    end
+
+    test "card mode never marks anything open, even across a patch", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      refute has_element?(view, "[data-open]")
+    end
+
+    defp open_card_count(view) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(".board-card[data-open]") |> Enum.count()
+    end
+  end
+
   defp expand_stage(view, stage) do
     view |> element("#stage-strip-#{stage.id}") |> render_click()
   end
