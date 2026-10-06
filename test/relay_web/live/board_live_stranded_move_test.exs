@@ -42,6 +42,17 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
     assert Repo.get!(Schemas.Card, ctx.card.id).stage_id == ctx.code.id
   end
 
+  # RE394 — the confirm shows a client-side Moving… pressed face; Keep it here goes inert with it.
+  test "the confirm carries a Moving… pressed face inside an action group", ctx do
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    drop(view, ctx.board, ctx.card, ctx.done)
+
+    assert has_element?(view, "#stranded-move-modal .action-group #stranded-move-cancel")
+    assert has_element?(view, "#stranded-move-modal .action-group #stranded-move-confirm.pending-action")
+    assert has_element?(view, "#stranded-move-confirm .pending-idle", "Cancel run & move")
+    assert has_element?(view, "#stranded-move-confirm .pending-face", "Moving…")
+  end
+
   test "declining leaves the card and run untouched", ctx do
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     drop(view, ctx.board, ctx.card, ctx.done)

@@ -1559,6 +1559,35 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ "hero-chevron-down size-[11px]"
     end
 
+    test "the Move-to rows carry a Moving… pressed face inside an action group (RE394)" do
+      attrs =
+        drawer_attrs(%{}, %{
+          stage_menu_open: true,
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      doc = LazyHTML.from_fragment(render_component(&CoreComponents.card_drawer/1, attrs))
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-stage-menu")
+      assert count(doc, "button#card-drawer-move-to-1") == 1
+      assert "pending-action" in btn_classes(doc, "#card-drawer-move-to-1")
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1") |> LazyHTML.attribute("phx-click") == ["move_card"]
+      assert text_of(doc, "#card-drawer-move-to-1 .pending-face") == "Moving…"
+
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1 .pending-face") |> LazyHTML.attribute("aria-hidden") == [
+               "true"
+             ]
+
+      assert "ml-auto" in btn_classes(doc, "#card-drawer-move-to-1 .pending-face")
+      assert count(doc, "#card-drawer-move-to-1 .pending-face .loading.loading-spinner.loading-xs") == 1
+
+      assert count(doc, "#card-drawer-move-to-2 .pending-face") == 0
+      assert text_of(doc, "#card-drawer-move-to-2") =~ "current"
+    end
+
     test "the stage popover matches the v5 artboard and marks the current stage inert" do
       attrs =
         drawer_attrs(%{}, %{
@@ -2835,6 +2864,49 @@ defmodule RelayWeb.CoreComponentsTest do
       render_component(&CoreComponents.needs_input_panel/1, Map.merge(base, extra))
     end
 
+    # RE394 — every server-bound action in the panel shows a client-side pressed face.
+    defp panel_doc(extra), do: extra |> panel() |> LazyHTML.from_fragment()
+    defp attr_at(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+
+    test "the escalation fallback's Send and Retry carry pressed faces inside an action group (RE394)" do
+      doc = panel_doc(%{park_kind: :escalation, node: "implement", answer_questions: nil})
+
+      assert "action-group" in btn_classes(doc, "#needs-input-panel")
+      assert attr_at(doc, "#needs-input-send", "type") == ["submit"]
+      assert text_of(doc, "#needs-input-send .pending-face") == "Sending…"
+      assert attr_at(doc, "#needs-input-retry", "type") == ["button"]
+      assert attr_at(doc, "#needs-input-retry", "phx-click") == ["retry_run"]
+      assert text_of(doc, "#needs-input-retry .pending-idle") == "Retry implement"
+      assert text_of(doc, "#needs-input-retry .pending-face") == "Retrying…"
+    end
+
+    test "the infrastructure Retry carries a Retrying… face (RE394)" do
+      doc = panel_doc(%{park_kind: :infrastructure, node: "implement"})
+
+      assert text_of(doc, "#needs-input-retry .pending-face") == "Retrying…"
+      assert attr_at(doc, "#needs-input-retry", "phx-click") == ["retry_run"]
+    end
+
+    test "the stepper's last-step Send carries a Sending… face; options do not (RE394)" do
+      doc =
+        panel_doc(%{
+          answer_questions: [%{"prompt" => "Pick", "options" => ["A"]}],
+          answer_step: 0,
+          answer_values: %{0 => "A"}
+        })
+
+      assert attr_at(doc, "#needs-input-send", "type") == ["button"]
+      assert attr_at(doc, "#needs-input-send", "phx-click") == ["answer_submit"]
+      assert text_of(doc, "#needs-input-send .pending-face") == "Sending…"
+      refute "pending-action" in btn_classes(doc, "#needs-input-option-0")
+    end
+
+    test "the advance control inside the panel carries a Continuing… face (RE394)" do
+      doc = panel_doc(%{advance_available?: true})
+
+      assert text_of(doc, "#needs-input-panel #run-advance .pending-face") == "Continuing…"
+    end
+
     test "an infrastructure park shows the cause and Retry — no answer box, no attempt count (RE308)" do
       detail = "agent could not run: Failed to authenticate: OAuth session expired and could not be refreshed"
 
@@ -3105,6 +3177,19 @@ defmodule RelayWeb.CoreComponentsTest do
     end
 
     # RLY-148 (supersedes Q6→C): the artboard's §02 Retry pill on the stopped strip.
+    test "the stopped strip's Retry chip shows a Retrying… pressed face (RE394)" do
+      doc = LazyHTML.from_fragment(strip(:stopped, log_text: "agent stopped"))
+
+      classes = btn_classes(doc, "#card-RLY-3-retry")
+      assert "card-retry-chip" in classes
+      assert "pending-action" in classes
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("type") == ["button"]
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("phx-click") == ["retry_card"]
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("phx-value-ref") == ["RLY-3"]
+      assert text_of(doc, "#card-RLY-3-retry .pending-idle") == "Retry"
+      assert text_of(doc, "#card-RLY-3-retry .pending-face") == "Retrying…"
+    end
+
     test "stopped shows the artboard's Retry chip on the strip" do
       html = strip(:stopped, log_text: "agent stopped")
 
@@ -4351,10 +4436,41 @@ defmodule RelayWeb.CoreComponentsTest do
 
     test "the drawer mode labels Approve with the gate's label; compact says just Approve" do
       doc = review_doc(%{compact: false})
-      assert text(doc, "#review-approve") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
       assert count(doc, "#review-request-changes") == 1
 
-      assert text(review_doc(%{compact: true}), "#review-approve") == "Approve"
+      assert text(review_doc(%{compact: true}), "#review-approve .pending-idle") == "Approve"
+    end
+
+    # RE394 — the gate's actions show a client-side pressed face; the group goes inert.
+    test "Approve carries the pressed face inside an action group; Request changes does not" do
+      doc = review_doc(%{compact: false})
+
+      assert "action-group" in btn_classes(doc, "#review-panel")
+      assert "pending-action" in btn_classes(doc, "#review-approve")
+      assert attr_of(doc, "#review-approve", "phx-click") == ["review_approve"]
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-face") == "Approving…"
+      assert count(doc, "#review-approve .pending-face .loading.loading-spinner.loading-xs") == 1
+      refute "pending-action" in btn_classes(doc, "#review-request-changes")
+    end
+
+    test "compact Approve says Approve idle and Approving… pressed" do
+      doc = review_doc(%{compact: true})
+
+      assert text(doc, "#review-approve .pending-idle") == "Approve"
+      assert text(doc, "#review-approve .pending-face") == "Approving…"
+    end
+
+    test "Reject → X submits with a Sending back… face; Cancel stays plain; the form sits in the group" do
+      doc = review_doc(%{reject_open: true})
+
+      assert attr_of(doc, "#review-send-back", "type") == ["submit"]
+      assert "pending-action" in btn_classes(doc, "#review-send-back")
+      assert text(doc, "#review-send-back .pending-idle") == "Reject → Code"
+      assert text(doc, "#review-send-back .pending-face") == "Sending back…"
+      refute "pending-action" in btn_classes(doc, "#review-cancel-reject")
+      assert count(doc, "#review-panel.action-group #review-reject-form") == 1
     end
 
     test "compact with the note open: short hint, 8-row note, quote button, stays-put line, phx-change" do

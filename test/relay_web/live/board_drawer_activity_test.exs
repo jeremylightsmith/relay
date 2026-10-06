@@ -143,6 +143,10 @@ defmodule RelayWeb.BoardDrawerActivityTest do
 
     assert has_element?(view, "#card-drawer-activity-health-chip[data-health='stopped']")
     assert has_element?(view, "#card-drawer-activity-retry")
+    # RE394 — the chip shows a client-side Retrying… pressed face, keeping its own class.
+    assert has_element?(view, ~s(#card-drawer-activity-retry.activity-retry-chip.pending-action[type="button"]))
+    assert has_element?(view, "#card-drawer-activity-retry .pending-idle", "Retry")
+    assert has_element?(view, "#card-drawer-activity-retry .pending-face", "Retrying…")
   end
 
   test "no chip renders for a card with no active agent", %{conn: conn, board: board, ref: ref} do

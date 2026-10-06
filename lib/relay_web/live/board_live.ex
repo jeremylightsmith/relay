@@ -832,7 +832,7 @@ defmodule RelayWeb.BoardLive do
             Moving it to <span class="font-medium">{@pending_move.target_stage_name}</span>
             will cancel that run and free its runner slot.
           </p>
-          <div class="modal-action">
+          <div class="modal-action action-group">
             <button
               type="button"
               id="stranded-move-cancel"
@@ -841,14 +841,15 @@ defmodule RelayWeb.BoardLive do
             >
               Keep it here
             </button>
-            <button
+            <.button
               type="button"
               id="stranded-move-confirm"
               phx-click="confirm_move"
               class="btn btn-error"
+              pending="Moving…"
             >
               Cancel run &amp; move
-            </button>
+            </.button>
           </div>
         </div>
         <label class="modal-backdrop" phx-click="cancel_move">Close</label>

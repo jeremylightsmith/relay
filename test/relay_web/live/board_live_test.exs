@@ -1648,7 +1648,15 @@ defmodule RelayWeb.BoardLiveTest do
         html
         |> LazyHTML.from_fragment()
         |> LazyHTML.query(~s{[id^="card-drawer-move-to-"]})
-        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim() |> String.replace_suffix("current", "") |> String.trim()))
+        # RE394 — a movable row also carries its hidden "Moving…" pressed face after the name.
+        |> Enum.map(
+          &(&1
+            |> LazyHTML.text()
+            |> String.trim()
+            |> String.replace_suffix("current", "")
+            |> String.replace_suffix("Moving…", "")
+            |> String.trim())
+        )
 
       assert names == [
                "Backlog",
