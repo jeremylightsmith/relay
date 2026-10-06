@@ -40,10 +40,10 @@ if config_env() != :test do
 
   config :ueberauth, Ueberauth.Strategy.Google.OAuth,
     client_id: System.get_env("GOOGLE_CLIENT_ID"),
-    # Sign in with Apple audiences (RE106). The default lives in config/config.exs;
-    # only an explicitly set APPLE_CLIENT_IDS (comma-separated) replaces it.
     client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
 
+  # Sign in with Apple audiences (RE106). The default lives in config/config.exs;
+  # only an explicitly set APPLE_CLIENT_IDS (comma-separated) replaces it.
   if apple_client_ids = System.get_env("APPLE_CLIENT_IDS") do
     config :relay,
            :apple_client_ids,
