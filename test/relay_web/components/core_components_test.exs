@@ -4851,6 +4851,76 @@ defmodule RelayWeb.CoreComponentsTest do
       assert nb_count(doc, "#rw-phone span.hero-device-phone-mobile") == 1
       assert nb_count(doc, "#rw-desktop span.hero-computer-desktop") == 1
       assert nb_text(doc, "#rw") == ""
+
+      [group] = nb_attr(doc, "#rw", "class")
+      assert "rounded-[9px]" in String.split(group)
+      [phone] = nb_attr(doc, "#rw-phone", "class")
+      [desktop] = nb_attr(doc, "#rw-desktop", "class")
+
+      for c <- ~w(h-[38px] w-[38px] rounded-[7px] bg-base-100 text-base-content shadow-xs),
+          do: assert(c in String.split(phone), c)
+
+      assert "text-base-content/55" in String.split(desktop)
+      refute "bg-base-100" in String.split(desktop)
+      assert nb_count(doc, "#rw-phone span.size-5") == 1
+    end
+  end
+
+  describe "mockup_viewer_pager/1 (RE393)" do
+    defp pager_doc(attrs) do
+      (&CoreComponents.mockup_viewer_pager/1)
+      |> render_component(Map.merge(%{id: "pg"}, attrs))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp pg_attr(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+    defp pg_count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
+    defp pg_text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+
+    test "1. the first of two: prev disabled, next live, two dots, 1 of 2" do
+      doc = pager_doc(%{index: 1, total: 2})
+
+      assert pg_count(doc, "button#pg-prev[type=button][disabled]") == 1
+      assert pg_attr(doc, "#pg-prev", "phx-click") == ["mockup_prev"]
+      assert pg_attr(doc, "#pg-prev", "aria-label") == ["Previous mockup"]
+      assert pg_count(doc, "button#pg-next[type=button]") == 1
+      assert pg_count(doc, "#pg-next[disabled]") == 0
+      assert pg_attr(doc, "#pg-next", "phx-click") == ["mockup_next"]
+      assert pg_attr(doc, "#pg-next", "aria-label") == ["Next mockup"]
+
+      assert [first, second] = doc |> LazyHTML.query("#pg-dots > *") |> LazyHTML.attribute("class")
+      assert "bg-base-content" in String.split(first)
+      assert "bg-base-content/25" in String.split(second)
+      refute "bg-base-content" in String.split(second)
+      assert pg_text(doc, "#pg-count") == "1 of 2"
+    end
+
+    test "2. the last of three names the noun and disables next" do
+      doc = pager_doc(%{index: 3, total: 3, noun: "Screenshot"})
+
+      assert pg_count(doc, "#pg-next[disabled]") == 1
+      assert pg_attr(doc, "#pg-next", "aria-label") == ["Next screenshot"]
+      assert pg_count(doc, "#pg-prev[disabled]") == 0
+      assert pg_attr(doc, "#pg-prev", "aria-label") == ["Previous screenshot"]
+      assert pg_text(doc, "#pg-count") == "3 of 3"
+    end
+
+    test "the card mockup's row, chevron, dot and count classes" do
+      doc = pager_doc(%{index: 1, total: 2})
+      cls = fn selector -> doc |> pg_attr(selector, "class") |> List.first("") |> String.split() end
+
+      for c <- ~w(flex h-[48px] items-center justify-between border-t border-base-300 bg-base-100 px-2),
+          do: assert(c in cls.("#pg"), c)
+
+      assert "size-11" in cls.("#pg-prev")
+      assert "text-base-content/25" in cls.("#pg-prev")
+      assert "text-primary" in cls.("#pg-next")
+      assert pg_count(doc, "#pg-prev span.hero-chevron-left.size-6") == 1
+      assert pg_count(doc, "#pg-next span.hero-chevron-right.size-6") == 1
+      assert "gap-2" in cls.("#pg-dots")
+      assert doc |> LazyHTML.query("#pg-dots > .size-\\[7px\\].rounded-full") |> Enum.count() == 2
+
+      for c <- ~w[ml-1.5 font-mono text-(length:--m-meta) text-base-content/60], do: assert(c in cls.("#pg-count"), c)
     end
   end
 

@@ -2070,7 +2070,11 @@ defmodule RelayWeb.CoreComponents do
       id={@id}
       role="group"
       aria-label={@aria_label}
-      class={["flex rounded-[10px] bg-base-200 p-[3px]", @class]}
+      class={[
+        "flex bg-base-200 p-[3px]",
+        if(@variant == :icon, do: "rounded-[9px]", else: "rounded-[10px]"),
+        @class
+      ]}
     >
       <button
         :for={option <- @option}
@@ -2078,13 +2082,7 @@ defmodule RelayWeb.CoreComponents do
         id={option.id}
         data-active={to_string(option[:active] == true)}
         aria-label={@variant == :icon && option[:label]}
-        class={[
-          "flex h-[32px] flex-1 items-center justify-center rounded-[8px] text-[14px]",
-          if(option[:active] == true,
-            do: "bg-base-100 font-semibold shadow-xs",
-            else: "font-medium text-base-content/70"
-          )
-        ]}
+        class={segment_class(@variant, option[:active] == true)}
         {segment_attrs(option)}
       >
         <.icon :if={@variant == :icon && option[:icon]} name={option.icon} class="size-5" />
@@ -2092,6 +2090,22 @@ defmodule RelayWeb.CoreComponents do
       </button>
     </div>
     """
+  end
+
+  # Icon segments are fixed 38px squares (the mockup viewer's render-width toggle); text
+  # segments share the track equally.
+  defp segment_class(:icon, active?) do
+    [
+      "flex h-[38px] w-[38px] items-center justify-center rounded-[7px]",
+      if(active?, do: "bg-base-100 text-base-content shadow-xs", else: "text-base-content/55")
+    ]
+  end
+
+  defp segment_class(:text, active?) do
+    [
+      "flex h-[32px] flex-1 items-center justify-center rounded-[8px] text-[14px]",
+      if(active?, do: "bg-base-100 font-semibold shadow-xs", else: "font-medium text-base-content/70")
+    ]
   end
 
   # The slot entry's pass-through attributes — everything but the declared keys.
@@ -2157,6 +2171,80 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The embedded mockup viewer's pager row (RE393 · card mockup "Mockup viewer — one nav bar,
+  phone/desktop toggle, pager above review bar"): a 48px row under the frame with 44px ‹ ›
+  chevrons (`mockup_prev` / `mockup_next`, disabled at either end, labels naming the `noun` as
+  `mockup_viewer_bar/1` does), one dot per item (the current one solid) and an "n of m" count.
+  `card_mockup_viewer/1` renders it in embed mode only, `drawer:hidden`.
+  """
+  attr :id, :string, default: "mockup-viewer-pager"
+  attr :index, :integer, required: true, doc: "1-based position of the item on screen"
+  attr :total, :integer, required: true
+  attr :noun, :string, default: "Mockup"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_pager(assigns) do
+    assigns = assign(assigns, :noun, String.downcase(assigns.noun))
+
+    ~H"""
+    <nav
+      id={@id}
+      aria-label={"#{String.capitalize(@noun)} pager"}
+      class={[
+        "flex h-[48px] shrink-0 items-center justify-between border-t border-base-300 bg-base-100 px-2",
+        @class
+      ]}
+    >
+      <button
+        type="button"
+        id={"#{@id}-prev"}
+        phx-click="mockup_prev"
+        aria-label={"Previous #{@noun}"}
+        disabled={@index == 1}
+        class={pager_chevron_class(@index == 1)}
+      >
+        <.icon name="hero-chevron-left" class="size-6" />
+      </button>
+      <span class="flex items-center gap-2">
+        <span id={"#{@id}-dots"} class="flex items-center gap-2" aria-hidden="true">
+          <span
+            :for={n <- 1..@total//1}
+            class={[
+              "size-[7px] rounded-full",
+              if(n == @index, do: "bg-base-content", else: "bg-base-content/25")
+            ]}
+          >
+          </span>
+        </span>
+        <span
+          id={"#{@id}-count"}
+          class="ml-1.5 font-mono text-(length:--m-meta) text-base-content/60"
+        >
+          {@index} of {@total}
+        </span>
+      </span>
+      <button
+        type="button"
+        id={"#{@id}-next"}
+        phx-click="mockup_next"
+        aria-label={"Next #{@noun}"}
+        disabled={@index == @total}
+        class={pager_chevron_class(@index == @total)}
+      >
+        <.icon name="hero-chevron-right" class="size-6" />
+      </button>
+    </nav>
+    """
+  end
+
+  defp pager_chevron_class(disabled?) do
+    [
+      "flex size-11 items-center justify-center",
+      if(disabled?, do: "text-base-content/25", else: "text-primary")
+    ]
+  end
+
+  @doc """
   The mockup viewer's header on desktop (RE392): the `noun` (MOCKUP / SCREENSHOT), the item's
   caption (truncated) and an "n of m" count, with the ←/→ · Esc key hint on the right. A label,
   never a switcher — it has no buttons, links or `phx-click`; tiles, the arrow keys and swipe
@@ -2205,6 +2293,13 @@ defmodule RelayWeb.CoreComponents do
   `mockup_viewer_header/1` sits over the mockup and names it (noun · caption · n of m, plus the
   key hint) — a label, not a switcher. Below the `drawer:` breakpoint the sheet and that header
   are hidden and `mockup_viewer_bar/1` is the one top bar.
+
+  Embedded (`embed`, RE393), the phone top bar is instead `mobile_nav_bar/1` (same
+  `\#{id}-bar` id: "‹ Card", the caption, and on HTML items the phone / desktop render-width
+  `segmented_control/1`), and `mockup_viewer_pager/1` sits under the frame. The colocated
+  `.MockupRenderWidth` hook on the stable `\#{id}-stage` owns the width: it keeps the choice in
+  sessionStorage and re-applies `data-render` on each freshly keyed frame box — desktop lays the
+  iframe out at 1280px and CSS-scales it to the box width.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
@@ -2258,6 +2353,7 @@ defmodule RelayWeb.CoreComponents do
       <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
       </div>
       <.mockup_viewer_bar
+        :if={!@embed}
         id={"#{@id}-bar"}
         caption={@caption}
         index={@index}
@@ -2266,6 +2362,41 @@ defmodule RelayWeb.CoreComponents do
         noun={@noun}
         class="drawer:hidden"
       />
+      <.mobile_nav_bar
+        :if={@embed}
+        id={"#{@id}-bar"}
+        title={@caption}
+        back_label="Card"
+        back_patch={@back_patch}
+        class="drawer:hidden"
+      >
+        <:actions :if={@item.kind == :html}>
+          <%!-- Client-owned once mounted: `.MockupRenderWidth` moves the active segment, so a
+          server patch must never redraw it. --%>
+          <div id={"#{@id}-width-wrap"} phx-update="ignore">
+            <.segmented_control
+              id={"#{@id}-width"}
+              aria_label="Render width"
+              variant={:icon}
+              class="mr-1"
+            >
+              <:option
+                id={"#{@id}-width-phone"}
+                label="Phone width"
+                icon="hero-device-phone-mobile"
+                active
+                data-render-choice="phone"
+              />
+              <:option
+                id={"#{@id}-width-desktop"}
+                label="Desktop, fit to width"
+                icon="hero-computer-desktop"
+                data-render-choice="desktop"
+              />
+            </.segmented_control>
+          </div>
+        </:actions>
+      </.mobile_nav_bar>
       <aside
         id={"#{@id}-sheet"}
         class="hidden w-[340px] shrink-0 flex-col bg-base-100 drawer:flex"
@@ -2323,7 +2454,12 @@ defmodule RelayWeb.CoreComponents do
           noun={@noun}
           class="hidden drawer:flex"
         />
-        <div class="min-h-0 flex-1 drawer:p-4">
+        <div
+          id={"#{@id}-stage"}
+          phx-hook=".MockupRenderWidth"
+          data-width-toggle={@embed && "#{@id}-width"}
+          class="min-h-0 flex-1 drawer:p-4"
+        >
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
           (browser Back would then step the frame, not leave the viewer), while a fresh
@@ -2331,9 +2467,11 @@ defmodule RelayWeb.CoreComponents do
           `max-w-none` undoes preflight's `img { max-width: 100% }`. --%>
           <div
             id={"#{@id}-frame-box-#{@item.key}"}
+            data-render={@embed && @item.kind == :html && "phone"}
             class={[
               "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
-              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden")
+              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden"),
+              "data-[render=desktop]:overflow-y-auto data-[render=desktop]:bg-base-200"
             ]}
           >
             <img
@@ -2354,7 +2492,90 @@ defmodule RelayWeb.CoreComponents do
             </iframe>
           </div>
         </div>
+        <.mockup_viewer_pager
+          :if={@embed}
+          id={"#{@id}-pager"}
+          index={@index}
+          total={length(@items)}
+          noun={@noun}
+          class="drawer:hidden"
+        />
       </main>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupRenderWidth">
+        // RE393 — the embedded viewer's phone / desktop render width. Phone (the server default)
+        // lets the iframe fill the frame box; desktop lays it out at a 1280px viewport and
+        // CSS-scales it to the box width (mockup_preview/1's technique), its layout height
+        // stretched so the scaled frame fills the box. The choice lives in sessionStorage, so it
+        // holds across paging and reopening for the rest of the session.
+        //
+        // The frame box is keyed by item and replaced on every switch (resetting data-render),
+        // so the hook sits on the stable stage and re-applies whenever its children change.
+        // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
+        const KEY = "relay:mockup-render"
+        const DESKTOP_WIDTH = 1280
+
+        export default {
+          mounted() {
+            this.apply = () => this.render()
+            this.onClick = (e) => {
+              const choice = e.target.closest("[data-render-choice]")
+              const toggleId = this.el.dataset.widthToggle
+              if (!choice || !toggleId || !choice.closest(`#${toggleId}`)) return
+              sessionStorage.setItem(KEY, choice.dataset.renderChoice)
+              this.render()
+            }
+            document.addEventListener("click", this.onClick)
+            this.mutations = new MutationObserver(this.apply)
+            this.mutations.observe(this.el, { childList: true, subtree: true })
+            this.resizes = new ResizeObserver(this.apply)
+            this.resizes.observe(this.el)
+            this.render()
+          },
+          updated() { this.render() },
+          destroyed() {
+            document.removeEventListener("click", this.onClick)
+            this.mutations.disconnect()
+            this.resizes.disconnect()
+          },
+          mode() {
+            return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
+          },
+          render() {
+            const mode = this.mode()
+            this.syncToggle(mode)
+            const box = this.el.querySelector("[data-render]")
+            const frame = box && box.querySelector("iframe")
+            if (!frame) return
+            if (box.dataset.render !== mode) box.dataset.render = mode
+            if (mode === "desktop") {
+              const scale = box.clientWidth / DESKTOP_WIDTH
+              frame.style.width = `${DESKTOP_WIDTH}px`
+              frame.style.height = `${box.clientHeight / scale}px`
+              frame.style.transformOrigin = "top left"
+              frame.style.transform = `scale(${scale})`
+            } else {
+              frame.style.width = frame.style.height = ""
+              frame.style.transform = frame.style.transformOrigin = ""
+            }
+          },
+          // The toggle is phx-update="ignore": move the active look by swapping the server's
+          // own active / inactive class lists between segments, so no class is re-typed here.
+          syncToggle(mode) {
+            const toggleId = this.el.dataset.widthToggle
+            const toggle = toggleId && document.getElementById(toggleId)
+            if (!toggle) return
+            const segments = [...toggle.querySelectorAll("[data-render-choice]")]
+            const active = segments.find((s) => s.dataset.active === "true")
+            const target = segments.find((s) => s.dataset.renderChoice === mode)
+            if (!active || !target || active === target) return
+            const activeClass = active.className
+            active.className = target.className
+            target.className = activeClass
+            active.dataset.active = "false"
+            target.dataset.active = "true"
+          }
+        }
+      </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupSwipe">
         export default {
           mounted() {
