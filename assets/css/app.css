@@ -934,6 +934,120 @@ textarea.commit-field-input { min-height: 64px; }
   pointer-events: none;
 }
 
+/* --- RE393 mobile type scale (embed only) ---
+   One shared iOS type scale for the embedded mobile surfaces (card mockups "Board tab —
+   web large-title header at iOS sizes", "Review card — web nav bar …", "Mockup viewer — …").
+   The variables are inert on their own; every rule that restyles an existing element is a
+   descendant of [data-embed] (Layouts.app/1 sets it on <main> when @embed), so desktop and
+   plain phone-width web never match. The variable block is mirrored verbatim into
+   storybook.css — keep the two byte-identical. */
+:root {
+  --m-large-title: 34px;
+  --m-large-title-weight: 700;
+  --m-nav-title: 17px;
+  --m-nav-title-weight: 600;
+  --m-title: 22px;
+  --m-title-weight: 700;
+  --m-headline: 17px;
+  --m-headline-sm: 16px;
+  --m-headline-weight: 600;
+  --m-body: 15px;
+  --m-meta: 13px;
+  --m-label: 12px;
+  --m-target: 44px;
+}
+
+/* Board tab — large-title row: px-4 pt-3 pb-1, items-end justify-between. The .board-pager-*
+   base rules stay untouched (plain phone web keeps its RLY-94 look); these override them. */
+[data-embed] .board-pager-header {
+  align-items: flex-end; justify-content: space-between;
+  padding: 12px 16px 4px;
+}
+[data-embed] .board-pager-switch { min-height: var(--m-target); }
+[data-embed] .board-pager-title {
+  font-size: var(--m-large-title); font-weight: var(--m-large-title-weight);
+  line-height: 41px; letter-spacing: -0.02em;
+}
+[data-embed] .board-pager-caret {
+  color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+/* The 44px primary circle "+" (btn btn-primary btn-circle size-11). */
+[data-embed] .board-pager-create {
+  width: var(--m-target); height: var(--m-target); min-height: var(--m-target);
+  border-radius: 9999px;
+}
+/* Chip strip: px-4 pt-2 pb-3, gap 6px; 36px pill chips with a 15/600 label. */
+[data-embed] .board-pager-chips { gap: 6px; padding: 8px 16px 12px; }
+[data-embed] .board-pager-chip {
+  height: 36px; padding: 0 14px; border-radius: 9999px;
+  font-size: var(--m-body); font-weight: 600;
+  color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+}
+[data-embed] .board-pager-chip[data-active] {
+  color: var(--color-base-content);
+  background: var(--color-base-200);
+  border-color: var(--color-base-300);
+}
+/* Keep RE377's collapsed (dashed) semantics over the embed restyle. */
+[data-embed] .board-pager-chip[data-collapsed="true"]:not([data-active]) {
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+[data-embed] .board-pager-chip-count {
+  font-size: var(--m-meta); font-family: var(--font-mono);
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+[data-embed] .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-count {
+  color: var(--color-secondary);
+}
+[data-embed] .board-pager-chip[data-active][data-ai="true"] .board-pager-chip-dot {
+  width: 8px; height: 8px; border-radius: 3px;
+}
+[data-embed] .board-pager-fade { width: 32px; bottom: 12px; }
+
+/* Stage row, group label and card face — !important beats their inline style= sizes. */
+[data-embed] .stage-name {
+  font-size: var(--m-headline) !important; font-weight: var(--m-headline-weight) !important;
+}
+[data-embed] .stage-count {
+  font-size: var(--m-meta) !important; font-family: var(--font-mono) !important;
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent) !important;
+}
+[data-embed] [id$="-show-as-list"] {
+  min-height: var(--m-target);
+  font-size: var(--m-body); font-weight: 500;
+  color: var(--color-primary);
+}
+[data-embed] .stage-lane-label {
+  font-size: var(--m-label) !important; font-weight: 600 !important;
+  font-family: var(--font-mono) !important;
+  text-transform: uppercase; letter-spacing: 0.08em !important;
+}
+[data-embed] .card-title {
+  font-size: var(--m-headline-sm) !important; font-weight: var(--m-headline-weight) !important;
+}
+[data-embed] .card-ref { font-size: var(--m-meta) !important; }
+[data-embed] .run-face [style*="font-family"] { font-size: var(--m-meta) !important; }
+[data-embed] #stopped-work-banner { font-size: var(--m-body); }
+
+/* Review card (card mockup "Review card — web nav bar replaces the native AppBar") — the drawer
+   body at the mobile scale: 12px mono caps section labels, 15px body and placeholders, and
+   44px "+ Add" targets in primary. The nav bar, chip, title and segmented tabs size themselves. */
+/* .inline-field-rest's own 600 is unlayered, so it beats the title's 22/700 weight utility. */
+[data-embed] #card-drawer-title .inline-field-rest { font-weight: var(--m-title-weight); }
+[data-embed] #card-drawer .section-label {
+  font-size: var(--m-label); font-weight: 600; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+[data-embed] #card-drawer-main .commit-field-rest,
+[data-embed] #card-drawer-main .commit-field-placeholder,
+[data-embed] #card-drawer-main .md { font-size: var(--m-body); }
+[data-embed] #card-drawer-main #add-public-desc,
+[data-embed] #card-drawer-main [id$="-unused-toggle"] {
+  min-height: var(--m-target);
+  font-size: var(--m-body); font-weight: 500;
+  color: var(--color-primary);
+}
+
 @media (width < 45rem) {
   /* One flat snap track: category wrappers pass through, band headers vanish. */
   #board-bands {

@@ -36,6 +36,7 @@ GoRouter _router({WidgetBuilder? body}) => GoRouter(
         cardRef: s.pathParameters['ref']!,
         boardSlug: s.uri.queryParameters['board'] ?? '',
         kind: s.uri.queryParameters['kind'],
+        backLabel: s.uri.queryParameters['back'],
         navContext: s.extra as CardNavContext?,
         bodyBuilder:
             body ?? (_) => const Text('card body', key: Key('stub_card_body')),
@@ -48,6 +49,7 @@ Future<GoRouter> _pump(
   WidgetTester tester, {
   required String at,
   bool withContext = true,
+  String? back,
   WidgetBuilder? body,
 }) async {
   final container = ProviderContainer(
@@ -71,8 +73,11 @@ Future<GoRouter> _pump(
   );
   final item = _items.firstWhere((i) => i.ref == at);
   final kindParam = item.kind == null ? '' : '&kind=${item.kind}';
+  final backParam = back == null
+      ? ''
+      : '&back=${Uri.encodeQueryComponent(back)}';
   router.push(
-    '/cards/$at?board=relay$kindParam',
+    '/cards/$at?board=relay$kindParam$backParam',
     extra: withContext ? _ctx(at) : null,
   );
   await tester.pumpAndSettle();
@@ -111,12 +116,29 @@ void main() {
     tester,
   ) async {
     await _pump(tester, at: 'RLY-2');
-    expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-2')), findsOneWidget);
 
     await tester.drag(_swipeArea, const Offset(-300, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-3')), findsOneWidget);
+  });
+
+  testWidgets('a swiped-to card keeps the back label it was opened with', (
+    tester,
+  ) async {
+    await _pump(tester, at: 'RLY-2', back: 'Board');
+    expect(
+      tester.widget<CardScreen>(find.byType(CardScreen)).backLabel,
+      'Board',
+    );
+
+    await tester.drag(_swipeArea, const Offset(-300, 0)); // → RLY-3
+    await tester.pumpAndSettle();
+
+    final screen = tester.widget<CardScreen>(find.byType(CardScreen));
+    expect(screen.cardRef, 'RLY-3');
+    expect(screen.backLabel, 'Board');
   });
 
   testWidgets('swipe right returns to the previous card', (tester) async {
@@ -125,7 +147,7 @@ void main() {
     await tester.drag(_swipeArea, const Offset(300, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-1')), findsOneWidget);
   });
 
   testWidgets('at the last card, swipe left is a no-op (no wrap, no crash)', (
@@ -136,7 +158,7 @@ void main() {
     await tester.drag(_swipeArea, const Offset(-300, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-3')), findsOneWidget);
   });
 
   testWidgets('a below-threshold drag does not navigate', (tester) async {
@@ -145,7 +167,7 @@ void main() {
     await tester.drag(_swipeArea, const Offset(-20, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-2')), findsOneWidget);
   });
 
   testWidgets("the landed card's kind drives the review bar", (tester) async {
@@ -156,7 +178,7 @@ void main() {
     await tester.drag(_swipeArea, const Offset(-300, 0)); // → RLY-3
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-3')), findsOneWidget);
     expect(find.byKey(const Key('card_approve')), findsNothing);
   });
 
@@ -168,7 +190,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.drag(_swipeArea, const Offset(-300, 0)); // → RLY-3
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
+      expect(find.byKey(const ValueKey('card_body_RLY-3')), findsOneWidget);
 
       router.pop(); // device back
       await tester.pumpAndSettle();
@@ -185,7 +207,7 @@ void main() {
     await tester.drag(_swipeArea, const Offset(-300, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-2')), findsOneWidget);
   });
 
   testWidgets('a vertical drag reaches the webview while the finger is down', (
@@ -206,7 +228,7 @@ void main() {
     expect(updates, greaterThan(0));
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'RLY-2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-2')), findsOneWidget);
   });
 
   testWidgets('a horizontal swipe still navigates over the webview', (
@@ -217,6 +239,6 @@ void main() {
     await tester.drag(_swipeArea, const Offset(-300, 0));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(AppBar, 'RLY-3'), findsOneWidget);
+    expect(find.byKey(const ValueKey('card_body_RLY-3')), findsOneWidget);
   });
 }

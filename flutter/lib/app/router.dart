@@ -94,6 +94,7 @@ GoRouter buildRouter({
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
           kind: state.uri.queryParameters['kind'],
+          backLabel: state.uri.queryParameters['back'],
           navContext: state.extra as CardNavContext?,
           bodyBuilder: cardBodyBuilder,
         ),

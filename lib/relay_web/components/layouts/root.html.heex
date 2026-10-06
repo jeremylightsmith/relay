@@ -2,7 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <%!-- RE393: embedded in the native shell the page draws under the notch and pads itself by
+          env(safe-area-inset-*), which is only non-zero with viewport-fit=cover. Plain mobile
+          Safari keeps the default so content never slides under the notch. --%>
+    <meta
+      name="viewport"
+      content={
+        if assigns[:embed],
+          do: "width=device-width, initial-scale=1, viewport-fit=cover",
+          else: "width=device-width, initial-scale=1"
+      }
+    />
     <meta name="csrf-token" content={get_csrf_token()} />
     <link rel="icon" type="image/png" href={~p"/images/logo_light_128.png"} />
     <.live_title default="Relay" suffix=" · Relay" phx-no-format>{assigns[:page_title]}</.live_title>

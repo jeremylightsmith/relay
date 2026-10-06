@@ -146,9 +146,37 @@ void main() {
       });
 
       testWidgets(
-        'both buttons carry the mockup radius, padding and label style',
+        'both buttons are 50px tall with 17/600 labels (RE393 iOS bar)',
         (tester) async {
           await pumpCard(tester, kind: 'in_review');
+
+          for (final key in const [Key('card_reject'), Key('card_approve')]) {
+            expect(tester.getSize(find.byKey(key)).height, 50);
+          }
+          final styles = <ButtonStyle>[
+            tester
+                .widget<FilledButton>(find.byKey(const Key('card_approve')))
+                .style!,
+            tester
+                .widget<OutlinedButton>(find.byKey(const Key('card_reject')))
+                .style!,
+          ];
+          for (final style in styles) {
+            expect(style.textStyle!.resolve({})!.fontSize, 17);
+            expect(style.textStyle!.resolve({})!.fontWeight, FontWeight.w600);
+          }
+        },
+      );
+
+      testWidgets(
+        'the buttons sit 10px apart, keep 10:14, and carry radius 12',
+        (tester) async {
+          await pumpCard(tester, kind: 'in_review');
+
+          final reject = tester.getRect(find.byKey(const Key('card_reject')));
+          final approve = tester.getRect(find.byKey(const Key('card_approve')));
+          expect(approve.left - reject.right, 10);
+          expect(approve.width / reject.width, closeTo(1.4, 0.01));
 
           final styles = <ButtonStyle>[
             tester
@@ -158,32 +186,63 @@ void main() {
                 .widget<OutlinedButton>(find.byKey(const Key('card_reject')))
                 .style!,
           ];
-
           for (final style in styles) {
             expect(
               style.shape!.resolve({}),
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             );
-            expect(
-              style.padding!.resolve({}),
-              const EdgeInsets.symmetric(vertical: 11),
-            );
-            expect(style.textStyle!.resolve({})!.fontSize, 12.5);
-            expect(style.textStyle!.resolve({})!.fontWeight, FontWeight.w600);
           }
         },
       );
+
+      testWidgets('the bar pads 16 horizontally and 10 on top', (tester) async {
+        await pumpCard(tester, kind: 'in_review');
+
+        final bar = tester.getRect(find.byType(CardReviewBar));
+        final reject = tester.getRect(find.byKey(const Key('card_reject')));
+        final approve = tester.getRect(find.byKey(const Key('card_approve')));
+        expect(reject.left - bar.left, 16);
+        expect(bar.right - approve.right, 16);
+        // The hairline is painted, not laid out — the padding starts at the top.
+        expect(reject.top - bar.top, 10);
+      });
     },
   );
 
-  test('cardUrl builds the chromeless standalone card link', () {
-    expect(
-      CardScreen.cardUrl(
-        cardRef: 'RLY-123',
-        boardSlug: 'my-board',
-        baseUrl: 'http://localhost:4003',
-      ),
-      'http://localhost:4003/cards/RLY-123?board=my-board&embed=1',
-    );
+  group('cardUrl', () {
+    test('builds the chromeless standalone card link', () {
+      expect(
+        CardScreen.cardUrl(
+          cardRef: 'RLY-123',
+          boardSlug: 'my-board',
+          baseUrl: 'http://localhost:4003',
+        ),
+        'http://localhost:4003/cards/RLY-123?board=my-board&embed=1',
+      );
+    });
+
+    test('carries the encoded back label for the web nav bar', () {
+      expect(
+        CardScreen.cardUrl(
+          cardRef: 'RLY-123',
+          boardSlug: 'my-board',
+          backLabel: 'Needs you',
+          baseUrl: 'http://localhost:4003',
+        ),
+        'http://localhost:4003/cards/RLY-123?board=my-board&embed=1&back=Needs+you',
+      );
+    });
+
+    test('an empty back label adds no back param', () {
+      expect(
+        CardScreen.cardUrl(
+          cardRef: 'RLY-123',
+          boardSlug: 'my-board',
+          backLabel: '',
+          baseUrl: 'http://localhost:4003',
+        ),
+        'http://localhost:4003/cards/RLY-123?board=my-board&embed=1',
+      );
+    });
   });
 }

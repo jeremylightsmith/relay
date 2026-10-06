@@ -186,7 +186,7 @@ void main() {
         boardSlug: 'relay',
       );
 
-      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
       expect(h.container.read(reviewQueueProvider).banner, 'Approved · RLY-A');
     },
   );
@@ -207,7 +207,7 @@ void main() {
         boardSlug: 'relay',
       );
 
-      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
       expect(
         feed.calls,
         0,
@@ -233,7 +233,7 @@ void main() {
       boardSlug: 'relay',
     );
 
-    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
     expect(
       h.container.read(reviewQueueProvider).banner,
       'Already handled · RLY-A',
@@ -255,7 +255,7 @@ void main() {
     );
 
     expect(feed.calls, 1);
-    expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-D?board=relay&kind=in_review&back=Needs+you');
     final state = h.container.read(reviewQueueProvider);
     expect(state.items.map((i) => i.ref), ['RLY-D', 'RLY-E']);
     expect(state.index, 0);
@@ -346,7 +346,7 @@ void main() {
         boardSlug: 'relay',
       );
 
-      expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
+      expect(dest, '/cards/RLY-D?board=relay&kind=in_review&back=Needs+you');
       expect(feed.calls, 3);
       final inbox = h.container.read(feedControllerProvider).value;
       expect(inbox!.rows.map((r) => r.ref), ['RLY-D', 'RLY-E']);
@@ -371,7 +371,10 @@ void main() {
       expect(second, isNull, reason: 'the second tap must not navigate either');
 
       api.completer.complete(const DecisionOk({}));
-      expect(await first, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(
+        await first,
+        '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you',
+      );
       expect(h.container.read(reviewQueueProvider).inFlight, isFalse);
     },
   );
@@ -459,7 +462,7 @@ void main() {
         note: 'Needs error handling',
       );
 
-      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
       expect(api.rejected, ['RLY-A']);
       expect(api.rejectedNotes, ['Needs error handling']);
       expect(api.rejectedBoards, ['relay']);
@@ -550,7 +553,7 @@ void main() {
         note: 'Please revise',
       );
 
-      expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
       expect(
         h.container.read(reviewQueueProvider).banner,
         'Already handled · RLY-A',
@@ -602,7 +605,10 @@ void main() {
       expect(second, isNull, reason: 'the second tap must not navigate either');
 
       api.completer.complete(const DecisionOk({}));
-      expect(await first, '/cards/RLY-B?board=relay&kind=in_review');
+      expect(
+        await first,
+        '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you',
+      );
       expect(h.container.read(reviewQueueProvider).inFlight, isFalse);
     },
   );
@@ -656,11 +662,11 @@ void main() {
   test('routeFor sends both kinds to the same card host (RLY-156)', () {
     expect(
       routeFor(QueueItem.fromRow(row('RLY-A', kind: 'needs_input'))),
-      '/cards/RLY-A?board=relay&kind=needs_input',
+      '/cards/RLY-A?board=relay&kind=needs_input&back=Needs+you',
     );
     expect(
       routeFor(QueueItem.fromRow(row('RLY-B'))),
-      '/cards/RLY-B?board=relay&kind=in_review',
+      '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you',
     );
   });
 
@@ -683,7 +689,7 @@ void main() {
         boardSlug: 'relay',
       );
 
-      expect(dest, '/cards/RLY-B?board=relay&kind=needs_input');
+      expect(dest, '/cards/RLY-B?board=relay&kind=needs_input&back=Needs+you');
     },
   );
 
@@ -758,7 +764,7 @@ void main() {
       boardSlug: 'relay',
     );
 
-    expect(dest, '/cards/RLY-D?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-D?board=relay&kind=in_review&back=Needs+you');
     expect(
       feed.calls,
       1,
@@ -796,7 +802,7 @@ void main() {
       boardSlug: 'relay',
     );
 
-    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
     // Optimistic: gone even though the reconcile hasn't answered yet.
     final inbox = h.container.read(feedControllerProvider).value!;
     expect(inbox.rows.map((r) => r.ref), ['RLY-B']);
@@ -824,7 +830,7 @@ void main() {
       cardRef: 'RLY-A',
       boardSlug: 'relay',
     );
-    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
 
     // The background reconcile fails (a transient blip) — mid-queue, so a
     // real screen (the next card) is already showing, not the inbox.
@@ -863,7 +869,7 @@ void main() {
       boardSlug: 'relay',
     );
 
-    expect(dest, '/cards/RLY-B?board=relay&kind=in_review');
+    expect(dest, '/cards/RLY-B?board=relay&kind=in_review&back=Needs+you');
     expect(
       h.container.read(feedControllerProvider).value!.rows.map((r) => r.ref),
       ['RLY-B'],
@@ -944,7 +950,7 @@ void main() {
         boardSlug: 'mkt',
       );
 
-      expect(dest, '/cards/MKT-2?board=mkt&kind=in_review');
+      expect(dest, '/cards/MKT-2?board=mkt&kind=in_review&back=Needs+you');
       expect(h.container.read(reviewQueueProvider).items.map((i) => i.ref), [
         'MKT-2',
         'MKT-3',

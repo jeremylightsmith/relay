@@ -51,6 +51,7 @@ GoRouter _router({WidgetBuilder? bodyBuilder}) => GoRouter(
         cardRef: s.pathParameters['ref']!,
         boardSlug: s.uri.queryParameters['board'] ?? '',
         kind: s.uri.queryParameters['kind'],
+        backLabel: s.uri.queryParameters['back'],
         bodyBuilder: bodyBuilder ?? (_) => const Text('card body'),
       ),
     ),
@@ -116,7 +117,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.approved, ['RLY-A']);
-      expect(find.widgetWithText(AppBar, 'RLY-B'), findsOneWidget);
+      expect(find.byKey(const ValueKey('card_body_RLY-B')), findsOneWidget);
       // D1: no CORE-06 confirmation screen — the signal is this snackbar.
       expect(find.text('Approved · RLY-A'), findsOneWidget);
     },
@@ -149,7 +150,7 @@ void main() {
 
       api.completer.complete(const DecisionOk({}));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'RLY-B'), findsOneWidget);
+      expect(find.byKey(const ValueKey('card_body_RLY-B')), findsOneWidget);
     },
   );
 
@@ -181,7 +182,7 @@ void main() {
       await tester.tap(find.byKey(const Key('card_approve')));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(AppBar, 'RLY-B'), findsOneWidget);
+      expect(find.byKey(const ValueKey('card_body_RLY-B')), findsOneWidget);
       expect(find.text('Already handled · RLY-A'), findsOneWidget);
       expect(
         find.text('This card is not in a review stage'),
@@ -206,7 +207,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(AppBar, 'RLY-A'),
+        find.byKey(const ValueKey('card_body_RLY-A')),
         findsOneWidget,
         reason: 'a failed decision must never advance',
       );
@@ -284,7 +285,7 @@ void main() {
       await tester.tap(find.byKey(const Key('card_approve')));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(AppBar, 'RLY-B'), findsOneWidget);
+      expect(find.byKey(const ValueKey('card_body_RLY-B')), findsOneWidget);
       expect(
         mounts,
         hasLength(2),

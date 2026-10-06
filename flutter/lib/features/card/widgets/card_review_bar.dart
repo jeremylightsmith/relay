@@ -23,6 +23,18 @@ class CardReviewBar extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
 
+  // RE393 iOS sizing: 50px buttons, 17/600 labels, radius 12, 10px apart. Only the
+  // height is fixed — the Expanded flexes set the widths.
+  static const _buttonSize = Size.fromHeight(50);
+  static const _gap = 10.0;
+  static final _buttonShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(12),
+  );
+  static const _labelStyle = TextStyle(
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+  );
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -38,8 +50,10 @@ class CardReviewBar extends StatelessWidget {
         top: false,
         // The mockup's own 20px bottom padding is the home indicator's clearance;
         // SafeArea supplies the device's real inset instead.
+        // RE393 "Review card — web nav bar replaces the native AppBar": the mockup's
+        // `px-4 pt-2.5`. SafeArea supplies the bottom.
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
           child: Row(
             children: [
               Expanded(
@@ -51,19 +65,15 @@ class CardReviewBar extends StatelessWidget {
                     backgroundColor: scheme.surface,
                     foregroundColor: RelayTheme.relayRejectLabel,
                     side: const BorderSide(color: RelayTheme.relayRejectBorder),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    fixedSize: _buttonSize,
+                    padding: EdgeInsets.zero,
+                    shape: _buttonShape,
+                    textStyle: _labelStyle,
                   ),
                   child: const Text('Reject'),
                 ),
               ),
-              const SizedBox(width: 8), // mockup gap:8px
+              const SizedBox(width: _gap),
               Expanded(
                 flex:
                     14, // mockup flex:1.4 — Approve reads as the primary action
@@ -73,14 +83,10 @@ class CardReviewBar extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: scheme.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    fixedSize: _buttonSize,
+                    padding: EdgeInsets.zero,
+                    shape: _buttonShape,
+                    textStyle: _labelStyle,
                   ),
                   child: const Text('Approve'),
                 ),

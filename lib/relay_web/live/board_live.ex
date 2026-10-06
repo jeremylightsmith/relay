@@ -325,7 +325,10 @@ defmodule RelayWeb.BoardLive do
                 data-board={@board.slug}
               >
                 <span class="board-pager-title">{@board.name}</span>
-                <span class="board-pager-caret" aria-hidden="true">▾</span>
+                <.icon
+                  name="hero-chevron-down"
+                  class="board-pager-caret size-6 text-base-content/45"
+                />
               </button>
               <.link
                 :if={not @embed}
@@ -344,12 +347,12 @@ defmodule RelayWeb.BoardLive do
                 :if={@embed}
                 type="button"
                 id="board-create-card"
-                class="board-pager-create"
+                class="board-pager-create btn btn-primary btn-circle size-11 min-h-11"
                 aria-label="New card"
                 data-board={@board.slug}
                 data-stages={Jason.encode!(for stage <- flat_stages(@stage_groups), do: stage.name)}
               >
-                +
+                <.icon name="hero-plus" class="size-6" />
               </button>
             </div>
             <div class="board-pager-chips">
@@ -546,6 +549,7 @@ defmodule RelayWeb.BoardLive do
         id="card-drawer"
         board_slug={@board.slug}
         embed={@embed}
+        back_label={@nav_back_label}
         card_nav_enabled={
           not @embed and @live_action not in [:card, :story_map] and not viewer_open?(assigns)
         }
@@ -1115,6 +1119,7 @@ defmodule RelayWeb.BoardLive do
       # RE380 — the mockup on screen in the same-tab viewer (`?mockup=<attachment id>`), or nil.
       # nil | %{section: :mockups | :screenshots, key: _} — see assign_viewer/2.
       |> assign(:viewer, nil)
+      |> assign(:nav_back_label, nil)
       # RE390 — the open card's `%{attachment_id => content_type}` (`Attachments.content_types/1`):
       # whether each mockup / screenshot tile is drawn as HTML or an image. Loaded with the card.
       |> assign(:attachment_types, %{})
@@ -1215,6 +1220,8 @@ defmodule RelayWeb.BoardLive do
     previous_card = socket.assigns[:selected_card]
 
     viewer = requested_viewer(params)
+    # RE393 — assigned on every params pass, viewer-only or not, so a patch can never strand it.
+    socket = assign(socket, :nav_back_label, nav_back_label(params))
 
     if viewer_only_change?(socket, ref, previous_ref, viewer) do
       {:noreply, assign_viewer(socket, viewer)}
@@ -1230,6 +1237,14 @@ defmodule RelayWeb.BoardLive do
        |> assign_viewer(viewer)}
     end
   end
+
+  # RE393 — the embed nav bar's back label: the native screen the card was pushed from (`back=Board`,
+  # `back=Needs+you`). Blank or absent is nil — mobile_nav_bar/1 owns the "Back" fallback.
+  defp nav_back_label(%{"back" => label}) when is_binary(label) do
+    if String.trim(label) == "", do: nil, else: label
+  end
+
+  defp nav_back_label(_params), do: nil
 
   # RE380 / RE390 — opening, switching or leaving the viewer on the SAME card only re-assigns the
   # viewer: assign_selected_card/2 would reset Talk, the streams and the editors, and its async
@@ -5162,8 +5177,8 @@ defmodule RelayWeb.BoardLive do
   defp viewer_path(%{live_action: :story_map, board: board}, ref, section, key),
     do: ~p"/board/#{board.slug}/story-map?#{[{:card, ref}, viewer_param(section, key)]}"
 
-  defp viewer_path(%{live_action: :card, board: board}, ref, section, key),
-    do: ~p"/cards/#{ref}?#{[{:board, board.slug}, viewer_param(section, key)]}"
+  defp viewer_path(%{live_action: :card, board: board} = assigns, ref, section, key),
+    do: ~p"/cards/#{ref}?#{[{:board, board.slug}, viewer_param(section, key) | card_back_param(assigns)]}"
 
   defp viewer_path(%{board: board}, ref, section, key),
     do: ~p"/board/#{board.slug}?#{[{:card, ref}, viewer_param(section, key)]}"
@@ -5192,8 +5207,15 @@ defmodule RelayWeb.BoardLive do
 
   # RE380 — where the viewer's Back / Esc / card crumb lands: the card's drawer on this host. In
   # card mode that is `/cards/:ref` with `board=` kept, since mount/3 resolves the ref with it.
-  defp viewer_back_path(%{live_action: :card, board: board}, ref), do: ~p"/cards/#{ref}?board=#{board.slug}"
+  defp viewer_back_path(%{live_action: :card, board: board} = assigns, ref),
+    do: ~p"/cards/#{ref}?#{[{:board, board.slug} | card_back_param(assigns)]}"
+
   defp viewer_back_path(assigns, ref), do: card_path(assigns, ref)
+
+  # RE393 — card mode carries the native back label through its own patches, only when the URL
+  # had one (never a synthesised `back=Back`).
+  defp card_back_param(%{nav_back_label: label}) when is_binary(label), do: [back: label]
+  defp card_back_param(_assigns), do: []
 
   # The header search's assigns, always set as a pair so query and rows can never disagree.
   # Archived cards are deliberately OUT of the UI search: they have their own dedicated

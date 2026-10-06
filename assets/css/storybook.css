@@ -713,3 +713,27 @@ textarea.commit-field-input { min-height: 64px; }
 .commit-pill-save { background: var(--color-primary); color: var(--color-primary-content); border: none; }
 .commit-pill-cancel { background: var(--color-base-100); color: color-mix(in oklab, var(--color-base-content) 65%, transparent); border: 1px solid var(--color-field-border); }
 .commit-pill-hint { font-family: var(--font-mono); font-size: 10px; color: color-mix(in oklab, var(--color-base-content) 55%, transparent); }
+
+/* --- Mirrored from app.css (keep in sync) --- */
+/* --- RE393 mobile type scale (embed only) ---
+   One shared iOS type scale for the embedded mobile surfaces (card mockups "Board tab —
+   web large-title header at iOS sizes", "Review card — web nav bar …", "Mockup viewer — …").
+   The variables are inert on their own; every rule that restyles an existing element is a
+   descendant of [data-embed] (Layouts.app/1 sets it on <main> when @embed), so desktop and
+   plain phone-width web never match. The variable block is mirrored verbatim into
+   storybook.css — keep the two byte-identical. */
+:root {
+  --m-large-title: 34px;
+  --m-large-title-weight: 700;
+  --m-nav-title: 17px;
+  --m-nav-title-weight: 600;
+  --m-title: 22px;
+  --m-title-weight: 700;
+  --m-headline: 17px;
+  --m-headline-sm: 16px;
+  --m-headline-weight: 600;
+  --m-body: 15px;
+  --m-meta: 13px;
+  --m-label: 12px;
+  --m-target: 44px;
+}

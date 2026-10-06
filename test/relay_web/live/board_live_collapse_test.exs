@@ -47,6 +47,8 @@ defmodule RelayWeb.BoardLiveCollapseTest do
 
       assert has_element?(view, "#stage-col-5-main-lane-header")
       refute has_element?(view, "#stage-col-5-main-strip")
+      # RE393: the lane label carries the stage-lane-label hook the embed scale restyles.
+      assert has_element?(view, "#stage-col-5-main-lane-header .stage-lane-label", "In progress")
 
       view |> element("#stage-col-5-main-lane-header") |> render_click()
       assert has_element?(view, "#stage-col-5-main-strip")

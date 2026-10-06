@@ -143,4 +143,29 @@ defmodule RelayWeb.StorybookRenderTest do
       assert html =~ ~s(data-node="#{key}"), "branching variation is missing node #{key}"
     end
   end
+
+  test "GET /storybook/core_components/mobile_nav_bar shows the bridge and patch backs (RE393)", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/mobile_nav_bar") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("button[id$='-back'][phx-hook$='NativeBack']") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("a[id$='-back'][data-phx-link='patch']") |> Enum.count() >= 1
+  end
+
+  test "GET /storybook/core_components/segmented_control shows text and icon variants (RE393)", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/segmented_control") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("[role=group] button[data-active=true]") |> Enum.count() >= 2
+
+    assert doc |> LazyHTML.query("[role=group][aria-label] button[aria-label] span.hero-computer-desktop") |> Enum.count() >=
+             1
+  end
+
+  test "GET /storybook/core_components/mockup_viewer_pager shows the first, middle and last pages (RE393)",
+       %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/mockup_viewer_pager") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("button[id$='-prev'][disabled]") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("button[id$='-next'][disabled]") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("[id$='-count']") |> LazyHTML.text() =~ "2 of 3"
+  end
 end

@@ -55,7 +55,7 @@ void main() {
           'board': 'demo',
           'kind': 'in_review',
         }),
-        '/cards/RLY-7?board=demo&kind=in_review',
+        '/cards/RLY-7?board=demo&kind=in_review&back=Board',
       );
     });
 
@@ -66,7 +66,7 @@ void main() {
           'board': 'demo',
           'kind': null,
         }),
-        '/cards/RLY-7?board=demo',
+        '/cards/RLY-7?board=demo&back=Board',
       );
     });
 

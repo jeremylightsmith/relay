@@ -121,6 +121,18 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
     assert header_count(view) == "1 of 3"
   end
 
+  # RE393 — the embed-only nav bar, width toggle and pager never reach the web board viewer.
+  test "6. the non-embed viewer keeps the one-bar header: no pager, no width toggle",
+       %{conn: conn, board: board, card: card, m1: m1, m2: m2} do
+    {:ok, _card} = Cards.set_mockups(card, entries([m1, m2]))
+
+    view = viewer(conn, board, m1)
+
+    assert view |> element("#mockup-viewer-bar-count") |> render() |> text() == "1 / 2"
+    refute has_element?(view, "#mockup-viewer-pager")
+    refute has_element?(view, "#mockup-viewer-width")
+  end
+
   defp open_reject_with_note(view, note) do
     view |> element("#review-request-changes") |> render_click()
     view |> element("#review-reject-form") |> render_change(%{"reject" => %{"note" => note}})

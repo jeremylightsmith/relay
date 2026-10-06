@@ -1786,7 +1786,7 @@ defmodule RelayWeb.CoreComponents do
     <span
       id={@id}
       class={[
-        "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+        "section-label font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
         @accent || "text-base-content/60",
         @class
       ]}
@@ -1958,6 +1958,160 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The iOS navigation bar a pushed embedded screen draws itself (RE393 · card mockup "Review card —
+  web nav bar replaces the native AppBar"): "‹ Label" back in primary on the left, a centered
+  17/600 truncating title, and an `:actions` slot on the right. The native shell draws no AppBar
+  over the webview, so the bar pads itself by `env(safe-area-inset-top)`; it is `sticky top-0`,
+  so render it first inside the scrolling panel.
+
+  Exactly one of `back_bridge` / `back_patch` drives the back control: `back_patch` is a
+  `<.link patch>`; `back_bridge` is a button whose `.NativeBack` hook asks the native shell to pop
+  (the hook names the handler), falling back to `history.back()` in a plain browser. A nil or blank
+  `back_label` reads "Back".
+  """
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :back_label, :string, default: nil, doc: "the screen this one was pushed from; nil/blank reads Back"
+  attr :back_bridge, :boolean, default: false, doc: "back asks the native shell to pop (the .NativeBack hook)"
+  attr :back_patch, :string, default: nil, doc: "back patches to this URL instead"
+  attr :class, :any, default: nil
+
+  slot :actions, doc: "right-hand controls (44px targets)"
+
+  def mobile_nav_bar(assigns) do
+    assigns = assign(assigns, :back_text, nav_back_text(assigns.back_label))
+
+    ~H"""
+    <header
+      id={@id}
+      class={[
+        "sticky top-0 z-20 border-b border-base-300 bg-base-100/95 px-1 backdrop-blur",
+        @class
+      ]}
+      style="padding-top: env(safe-area-inset-top);"
+    >
+      <div class="relative flex h-[44px] items-center">
+        <.link
+          :if={@back_patch}
+          id={"#{@id}-back"}
+          patch={@back_patch}
+          class={nav_back_class()}
+        >
+          <.icon name="hero-chevron-left" class="size-[22px]" />{@back_text}
+        </.link>
+        <button
+          :if={!@back_patch && @back_bridge}
+          type="button"
+          id={"#{@id}-back"}
+          phx-hook=".NativeBack"
+          class={nav_back_class()}
+        >
+          <.icon name="hero-chevron-left" class="size-[22px]" />{@back_text}
+        </button>
+        <span
+          id={"#{@id}-title"}
+          class="pointer-events-none absolute inset-x-24 truncate text-center text-(length:--m-nav-title) font-(--m-nav-title-weight)"
+        >
+          {@title}
+        </span>
+        <div id={"#{@id}-actions"} class="ml-auto flex items-center">
+          {render_slot(@actions)}
+        </div>
+      </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeBack">
+        export default {
+          mounted() {
+            this.el.addEventListener("click", () => {
+              if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler("relayNavBack")
+              } else {
+                history.back()
+              }
+            })
+          }
+        }
+      </script>
+    </header>
+    """
+  end
+
+  defp nav_back_text(label) when is_binary(label) do
+    if String.trim(label) == "", do: "Back", else: label
+  end
+
+  defp nav_back_text(_label), do: "Back"
+
+  defp nav_back_class,
+    do: "flex h-[44px] min-w-[44px] items-center gap-0.5 pr-2 text-(length:--m-nav-title) font-normal text-primary"
+
+  @doc """
+  An iOS segmented control (RE393): a rounded `bg-base-200` track of equal-width segments, the
+  active one lifted onto `bg-base-100`. One `:option` per segment; each renders a
+  `<button type="button">` carrying `data-active` and every extra attribute the entry passes
+  (`phx-click`, `phx-value-*`, `data-*`). The `:text` variant shows `label`; the `:icon` variant
+  shows the hero `icon` and uses `label` as the button's `aria-label`.
+  """
+  attr :id, :string, required: true
+  attr :aria_label, :string, default: nil, doc: "names the group (role=group)"
+  attr :variant, :atom, values: [:text, :icon], default: :text
+  attr :class, :any, default: nil
+
+  # The entry's keys are deliberately undeclared with `validate_attrs: false`: otherwise every
+  # pass-through attribute (`phx-click`, `phx-value-*`) is an "undefined attribute" warning, and
+  # precommit treats warnings as errors.
+  slot :option,
+    required: true,
+    validate_attrs: false,
+    doc: "one segment: `id` (required), `active`, `label`, `icon`, plus pass-through attributes"
+
+  def segmented_control(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label={@aria_label}
+      class={[
+        "flex bg-base-200 p-[3px]",
+        if(@variant == :icon, do: "rounded-[9px]", else: "rounded-[10px]"),
+        @class
+      ]}
+    >
+      <button
+        :for={option <- @option}
+        type="button"
+        id={option.id}
+        data-active={to_string(option[:active] == true)}
+        aria-label={@variant == :icon && option[:label]}
+        class={segment_class(@variant, option[:active] == true)}
+        {segment_attrs(option)}
+      >
+        <.icon :if={@variant == :icon && option[:icon]} name={option.icon} class="size-5" />
+        <span :if={@variant == :text}>{option[:label]}</span>
+      </button>
+    </div>
+    """
+  end
+
+  # Icon segments are fixed 38px squares (the mockup viewer's render-width toggle); text
+  # segments share the track equally.
+  defp segment_class(:icon, active?) do
+    [
+      "flex h-[38px] w-[38px] items-center justify-center rounded-[7px]",
+      if(active?, do: "bg-base-100 text-base-content shadow-xs", else: "text-base-content/55")
+    ]
+  end
+
+  defp segment_class(:text, active?) do
+    [
+      "flex h-[32px] flex-1 items-center justify-center rounded-[8px] text-[14px]",
+      if(active?, do: "bg-base-100 font-semibold shadow-xs", else: "font-medium text-base-content/70")
+    ]
+  end
+
+  # The slot entry's pass-through attributes — everything but the declared keys.
+  defp segment_attrs(option), do: Map.drop(option, [:__slot__, :inner_block, :id, :active, :label, :icon])
+
+  @doc """
   The mockup viewer's one-bar header on phones (RE380): ← back to the card, the mockup's caption
   over an "n / m" count, and ‹ › to step through the open section (`mockup_prev` /
   `mockup_next`, disabled at either end; their labels name the `noun`). `card_mockup_viewer/1` renders it first, `drawer:hidden`.
@@ -2017,6 +2171,80 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The embedded mockup viewer's pager row (RE393 · card mockup "Mockup viewer — one nav bar,
+  phone/desktop toggle, pager above review bar"): a 48px row under the frame with 44px ‹ ›
+  chevrons (`mockup_prev` / `mockup_next`, disabled at either end, labels naming the `noun` as
+  `mockup_viewer_bar/1` does), one dot per item (the current one solid) and an "n of m" count.
+  `card_mockup_viewer/1` renders it in embed mode only, `drawer:hidden`.
+  """
+  attr :id, :string, default: "mockup-viewer-pager"
+  attr :index, :integer, required: true, doc: "1-based position of the item on screen"
+  attr :total, :integer, required: true
+  attr :noun, :string, default: "Mockup"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_pager(assigns) do
+    assigns = assign(assigns, :noun, String.downcase(assigns.noun))
+
+    ~H"""
+    <nav
+      id={@id}
+      aria-label={"#{String.capitalize(@noun)} pager"}
+      class={[
+        "flex h-[48px] shrink-0 items-center justify-between border-t border-base-300 bg-base-100 px-2",
+        @class
+      ]}
+    >
+      <button
+        type="button"
+        id={"#{@id}-prev"}
+        phx-click="mockup_prev"
+        aria-label={"Previous #{@noun}"}
+        disabled={@index == 1}
+        class={pager_chevron_class(@index == 1)}
+      >
+        <.icon name="hero-chevron-left" class="size-6" />
+      </button>
+      <span class="flex items-center gap-2">
+        <span id={"#{@id}-dots"} class="flex items-center gap-2" aria-hidden="true">
+          <span
+            :for={n <- 1..@total//1}
+            class={[
+              "size-[7px] rounded-full",
+              if(n == @index, do: "bg-base-content", else: "bg-base-content/25")
+            ]}
+          >
+          </span>
+        </span>
+        <span
+          id={"#{@id}-count"}
+          class="ml-1.5 font-mono text-(length:--m-meta) text-base-content/60"
+        >
+          {@index} of {@total}
+        </span>
+      </span>
+      <button
+        type="button"
+        id={"#{@id}-next"}
+        phx-click="mockup_next"
+        aria-label={"Next #{@noun}"}
+        disabled={@index == @total}
+        class={pager_chevron_class(@index == @total)}
+      >
+        <.icon name="hero-chevron-right" class="size-6" />
+      </button>
+    </nav>
+    """
+  end
+
+  defp pager_chevron_class(disabled?) do
+    [
+      "flex size-11 items-center justify-center",
+      if(disabled?, do: "text-base-content/25", else: "text-primary")
+    ]
+  end
+
+  @doc """
   The mockup viewer's header on desktop (RE392): the `noun` (MOCKUP / SCREENSHOT), the item's
   caption (truncated) and an "n of m" count, with the ←/→ · Esc key hint on the right. A label,
   never a switcher — it has no buttons, links or `phx-click`; tiles, the arrow keys and swipe
@@ -2065,6 +2293,13 @@ defmodule RelayWeb.CoreComponents do
   `mockup_viewer_header/1` sits over the mockup and names it (noun · caption · n of m, plus the
   key hint) — a label, not a switcher. Below the `drawer:` breakpoint the sheet and that header
   are hidden and `mockup_viewer_bar/1` is the one top bar.
+
+  Embedded (`embed`, RE393), the phone top bar is instead `mobile_nav_bar/1` (same
+  `\#{id}-bar` id: "‹ Card", the caption, and on HTML items the phone / desktop render-width
+  `segmented_control/1`), and `mockup_viewer_pager/1` sits under the frame. The colocated
+  `.MockupRenderWidth` hook on the stable `\#{id}-stage` owns the width: it keeps the choice in
+  sessionStorage and re-applies `data-render` on each freshly keyed frame box — desktop lays the
+  iframe out at 1280px and CSS-scales it to the box width.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
@@ -2118,6 +2353,7 @@ defmodule RelayWeb.CoreComponents do
       <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
       </div>
       <.mockup_viewer_bar
+        :if={!@embed}
         id={"#{@id}-bar"}
         caption={@caption}
         index={@index}
@@ -2126,6 +2362,41 @@ defmodule RelayWeb.CoreComponents do
         noun={@noun}
         class="drawer:hidden"
       />
+      <.mobile_nav_bar
+        :if={@embed}
+        id={"#{@id}-bar"}
+        title={@caption}
+        back_label="Card"
+        back_patch={@back_patch}
+        class="drawer:hidden"
+      >
+        <:actions :if={@item.kind == :html}>
+          <%!-- Client-owned once mounted: `.MockupRenderWidth` moves the active segment, so a
+          server patch must never redraw it. --%>
+          <div id={"#{@id}-width-wrap"} phx-update="ignore">
+            <.segmented_control
+              id={"#{@id}-width"}
+              aria_label="Render width"
+              variant={:icon}
+              class="mr-1"
+            >
+              <:option
+                id={"#{@id}-width-phone"}
+                label="Phone width"
+                icon="hero-device-phone-mobile"
+                active
+                data-render-choice="phone"
+              />
+              <:option
+                id={"#{@id}-width-desktop"}
+                label="Desktop, fit to width"
+                icon="hero-computer-desktop"
+                data-render-choice="desktop"
+              />
+            </.segmented_control>
+          </div>
+        </:actions>
+      </.mobile_nav_bar>
       <aside
         id={"#{@id}-sheet"}
         class="hidden w-[340px] shrink-0 flex-col bg-base-100 drawer:flex"
@@ -2183,7 +2454,12 @@ defmodule RelayWeb.CoreComponents do
           noun={@noun}
           class="hidden drawer:flex"
         />
-        <div class="min-h-0 flex-1 drawer:p-4">
+        <div
+          id={"#{@id}-stage"}
+          phx-hook=".MockupRenderWidth"
+          data-width-toggle={@embed && "#{@id}-width"}
+          class="min-h-0 flex-1 drawer:p-4"
+        >
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
           (browser Back would then step the frame, not leave the viewer), while a fresh
@@ -2191,9 +2467,11 @@ defmodule RelayWeb.CoreComponents do
           `max-w-none` undoes preflight's `img { max-width: 100% }`. --%>
           <div
             id={"#{@id}-frame-box-#{@item.key}"}
+            data-render={@embed && @item.kind == :html && "phone"}
             class={[
               "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
-              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden")
+              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden"),
+              "data-[render=desktop]:overflow-y-auto data-[render=desktop]:bg-base-200"
             ]}
           >
             <img
@@ -2214,7 +2492,90 @@ defmodule RelayWeb.CoreComponents do
             </iframe>
           </div>
         </div>
+        <.mockup_viewer_pager
+          :if={@embed}
+          id={"#{@id}-pager"}
+          index={@index}
+          total={length(@items)}
+          noun={@noun}
+          class="drawer:hidden"
+        />
       </main>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupRenderWidth">
+        // RE393 — the embedded viewer's phone / desktop render width. Phone (the server default)
+        // lets the iframe fill the frame box; desktop lays it out at a 1280px viewport and
+        // CSS-scales it to the box width (mockup_preview/1's technique), its layout height
+        // stretched so the scaled frame fills the box. The choice lives in sessionStorage, so it
+        // holds across paging and reopening for the rest of the session.
+        //
+        // The frame box is keyed by item and replaced on every switch (resetting data-render),
+        // so the hook sits on the stable stage and re-applies whenever its children change.
+        // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
+        const KEY = "relay:mockup-render"
+        const DESKTOP_WIDTH = 1280
+
+        export default {
+          mounted() {
+            this.apply = () => this.render()
+            this.onClick = (e) => {
+              const choice = e.target.closest("[data-render-choice]")
+              const toggleId = this.el.dataset.widthToggle
+              if (!choice || !toggleId || !choice.closest(`#${toggleId}`)) return
+              sessionStorage.setItem(KEY, choice.dataset.renderChoice)
+              this.render()
+            }
+            document.addEventListener("click", this.onClick)
+            this.mutations = new MutationObserver(this.apply)
+            this.mutations.observe(this.el, { childList: true, subtree: true })
+            this.resizes = new ResizeObserver(this.apply)
+            this.resizes.observe(this.el)
+            this.render()
+          },
+          updated() { this.render() },
+          destroyed() {
+            document.removeEventListener("click", this.onClick)
+            this.mutations.disconnect()
+            this.resizes.disconnect()
+          },
+          mode() {
+            return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
+          },
+          render() {
+            const mode = this.mode()
+            this.syncToggle(mode)
+            const box = this.el.querySelector("[data-render]")
+            const frame = box && box.querySelector("iframe")
+            if (!frame) return
+            if (box.dataset.render !== mode) box.dataset.render = mode
+            if (mode === "desktop") {
+              const scale = box.clientWidth / DESKTOP_WIDTH
+              frame.style.width = `${DESKTOP_WIDTH}px`
+              frame.style.height = `${box.clientHeight / scale}px`
+              frame.style.transformOrigin = "top left"
+              frame.style.transform = `scale(${scale})`
+            } else {
+              frame.style.width = frame.style.height = ""
+              frame.style.transform = frame.style.transformOrigin = ""
+            }
+          },
+          // The toggle is phx-update="ignore": move the active look by swapping the server's
+          // own active / inactive class lists between segments, so no class is re-typed here.
+          syncToggle(mode) {
+            const toggleId = this.el.dataset.widthToggle
+            const toggle = toggleId && document.getElementById(toggleId)
+            if (!toggle) return
+            const segments = [...toggle.querySelectorAll("[data-render-choice]")]
+            const active = segments.find((s) => s.dataset.active === "true")
+            const target = segments.find((s) => s.dataset.renderChoice === mode)
+            if (!active || !target || active === target) return
+            const activeClass = active.className
+            active.className = target.className
+            target.className = activeClass
+            active.dataset.active = "false"
+            target.dataset.active = "true"
+          }
+        }
+      </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupSwipe">
         export default {
           mounted() {
@@ -3148,6 +3509,12 @@ defmodule RelayWeb.CoreComponents do
         "is display:none, binds no window keys and renders no gate panel — the viewer's sheet " <>
         "renders that, and both carry fixed DOM ids"
 
+  attr :back_label, :string,
+    default: nil,
+    doc:
+      "RE393 embed only: the nav bar's back label — the screen the card was pushed from " <>
+        "(the `back` URL param); nil reads Back"
+
   def card_drawer(assigns) do
     assigns =
       assigns
@@ -3203,6 +3570,31 @@ defmodule RelayWeb.CoreComponents do
           data-guard-keys={@card_nav_enabled && "ArrowLeft,ArrowRight"}
           class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
         >
+          <%!--
+            RE393 — embedded, the page owns its top bar (the native shell draws no AppBar over the
+            webview): "‹ Board" pops the native stack, the ref is the centered title, and the Talk
+            button and ⋯ move up here — each still renders exactly once on the page.
+          --%>
+          <.mobile_nav_bar
+            :if={@embed}
+            id="card-drawer-nav-bar"
+            back_bridge
+            back_label={@back_label}
+            title={@ref}
+          >
+            <:actions>
+              <div class="hidden min-h-11 flex-none items-center drawer:flex">
+                <.drawer_talk_button active={@drawer_tab == :talk} />
+              </div>
+              <.drawer_overflow
+                :if={!@archived}
+                embed
+                ref={@ref}
+                open={@overflow_open}
+                active_run?={@active_run?}
+              />
+            </:actions>
+          </.mobile_nav_bar>
           <header class="flex items-start gap-3 border-b border-base-300 p-5">
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <div class="flex items-center gap-2">
@@ -3223,18 +3615,21 @@ defmodule RelayWeb.CoreComponents do
                     aria-haspopup="listbox"
                     aria-expanded={to_string(@stage_menu_open)}
                     class={[
-                      "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium",
+                      stage_chip_class(@embed, :menu),
                       if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
                     ]}
                   >
                     {@stage_name}
-                    <.icon name="hero-chevron-down" class="size-[11px]" />
+                    <.icon
+                      name="hero-chevron-down"
+                      class={if(@embed, do: "size-[14px]", else: "size-[11px]")}
+                    />
                   </button>
                   <span
                     :if={@archived or length(@stages) <= 1}
                     id="card-drawer-stage-chip"
                     class={[
-                      "drawer-stage-chip badge badge-sm h-5 whitespace-nowrap rounded-[4px] border-none px-[9px] py-0 text-[12px] font-medium",
+                      stage_chip_class(@embed, :plain),
                       if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
                     ]}
                   >
@@ -3243,7 +3638,7 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :if={@stage_menu_open and !@archived}
                     id="card-drawer-stage-menu"
-                    class="absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"}
                     style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
                   >
                     <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
@@ -3301,7 +3696,9 @@ defmodule RelayWeb.CoreComponents do
                     </div>
                   </div>
                 </div>
-                <span class="drawer-card-ref font-mono text-xs text-base-content/65">{@ref}</span>
+                <span :if={!@embed} class="drawer-card-ref font-mono text-xs text-base-content/65">
+                  {@ref}
+                </span>
                 <span
                   :if={@done}
                   id="drawer-done-pill"
@@ -3320,13 +3717,13 @@ defmodule RelayWeb.CoreComponents do
                 edit_event="edit_title"
                 save_event="save_card_title"
                 cancel_event="cancel_title"
-                read_class="break-words px-1 text-lg font-semibold leading-[1.3]"
-                input_class="text-lg font-semibold leading-[1.3]"
+                read_class={["break-words px-1", drawer_title_type(@embed)]}
+                input_class={drawer_title_type(@embed)}
               />
               <h2
                 :if={@archived}
                 id={"#{@id}-title-archived"}
-                class="whitespace-pre-wrap break-words px-1 text-lg font-semibold leading-[1.3]"
+                class={["whitespace-pre-wrap break-words px-1", drawer_title_type(@embed)]}
               >
                 {@card.title}
               </h2>
@@ -3369,59 +3766,19 @@ defmodule RelayWeb.CoreComponents do
               identical active/inactive conditional. The `h-11` wrapper is what centres the
               artboard's 28px control against the 44px chevrons beside it (RE281).
             --%>
-            <div class="hidden h-11 flex-none items-center drawer:flex">
-              <button
-                type="button"
-                id="card-drawer-talk-button"
-                phx-click="drawer_tab"
-                phx-value-tab="talk"
-                data-active={to_string(@drawer_tab == :talk)}
-                class={talk_button_class(@drawer_tab == :talk)}
-              >
-                <.icon name="hero-command-line" class="size-[14px]" /> Talk
-                <span class="rounded-[3px] border border-base-300 px-[3px] font-mono text-[9.5px] font-semibold leading-[13px] text-base-content/45">
-                  t
-                </span>
-              </button>
+            <div :if={!@embed} class="hidden h-11 flex-none items-center drawer:flex">
+              <.drawer_talk_button active={@drawer_tab == :talk} />
             </div>
             <%!--
-              RE281 — card-level actions. Renders in `embed` too: @embed suppresses dismissal
-              affordances (scrim, ✕), and Archive is not one — parity with today, where the
-              rail's Archive already renders in embed. The h-11 wrapper centres the artboard's
-              28×28 square against the 44px prev/next chevrons beside it.
+              RE281 — card-level actions. Embedded (RE393) the same ⋯ renders in the nav bar
+              instead, so `#card-drawer-overflow` is on the page exactly once.
             --%>
-            <div :if={!@archived} class="relative flex h-11 flex-none items-center">
-              <button
-                type="button"
-                id="card-drawer-overflow"
-                phx-click="toggle_overflow_menu"
-                aria-haspopup="menu"
-                aria-expanded={to_string(@overflow_open)}
-                aria-label="Card actions"
-                class="flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
-              >
-                <.icon name="hero-ellipsis-horizontal" class="size-[17px]" />
-              </button>
-              <div
-                :if={@overflow_open}
-                id="card-drawer-overflow-menu"
-                role="menu"
-                class="absolute right-0 top-[33px] z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"
-                style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
-              >
-                <button
-                  type="button"
-                  id="archive-card-button"
-                  role="menuitem"
-                  phx-click="archive_card"
-                  phx-value-ref={@ref}
-                  data-confirm={archive_confirm(@active_run?)}
-                  class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
-                >
-                  Archive
-                </button>
-              </div>
-            </div>
+            <.drawer_overflow
+              :if={!@archived and !@embed}
+              ref={@ref}
+              open={@overflow_open}
+              active_run?={@active_run?}
+            />
             <.link
               :if={!@embed}
               id={"#{@id}-close"}
@@ -3456,8 +3813,29 @@ defmodule RelayWeb.CoreComponents do
             phx-key={!@hidden && "t"}
             phx-hook="TypingKeyGuard"
             data-guard-keys="t"
-            style="display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
+            class={@embed && "px-4 pb-3"}
+            style={
+              !@embed &&
+                "display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
+            }
           >
+            <%!-- RE393 — embedded, the tabs are an iOS segmented control; Talk (desktop-only) has
+                 no segment. The segment ids and events are the underline tabs' own. --%>
+            <.segmented_control
+              :if={@embed}
+              id="card-drawer-tab-segments"
+              aria_label="Card sections"
+            >
+              <:option
+                :for={{tab, label} <- [{:detail, "Detail"}, {:run, "Run"}, {:activity, "Activity"}]}
+                :if={tab != :run or @show_run_tab?}
+                id={"card-drawer-tab-#{tab}"}
+                label={label}
+                active={@drawer_tab == tab}
+                phx-click="drawer_tab"
+                phx-value-tab={tab}
+              />
+            </.segmented_control>
             <button
               :for={
                 {tab, label, show} <- [
@@ -3467,7 +3845,7 @@ defmodule RelayWeb.CoreComponents do
                   {:activity, "Activity", true}
                 ]
               }
-              :if={show}
+              :if={show and !@embed}
               type="button"
               id={"card-drawer-tab-#{tab}"}
               phx-click="drawer_tab"
@@ -5075,7 +5453,7 @@ defmodule RelayWeb.CoreComponents do
         class="text-[13px] leading-normal"
         style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
       >
-        {review_hint(@review_gate)}
+        {review_hint(@review_gate, @embed)}
       </p>
       <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
         <button
@@ -5412,6 +5790,104 @@ defmodule RelayWeb.CoreComponents do
   # overflow button spells in classes, plus the active/inactive flip. `border-base-content/60`
   # and `bg-base-content/5` composite over the opaque `bg-base-100` behind them, which is what
   # the artboard's `color-mix(… , var(--color-base-100))` draws.
+  # RE393 — the stage chip's box: embedded it is the mockup's 32px, 15/600 rounded-lg chip; on the
+  # web it keeps the v5 artboard's 20px, 12/500 tag (the Move-to button leaves room for its
+  # chevron). The owner tint is the caller's.
+  defp stage_chip_class(true, kind),
+    do: [
+      "drawer-stage-chip badge badge-sm h-8 whitespace-nowrap rounded-lg border-none px-3 py-0 text-(length:--m-body) font-semibold",
+      kind == :menu && "gap-[5px]"
+    ]
+
+  defp stage_chip_class(false, :menu),
+    do:
+      "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium"
+
+  defp stage_chip_class(false, :plain),
+    do:
+      "drawer-stage-chip badge badge-sm h-5 whitespace-nowrap rounded-[4px] border-none px-[9px] py-0 text-[12px] font-medium"
+
+  # RE393 — the drawer title's type: the mobile scale's 22/700 title embedded, 18/600 on the web.
+  defp drawer_title_type(true), do: "text-(length:--m-title) font-(--m-title-weight) leading-[28px] tracking-[-0.01em]"
+
+  defp drawer_title_type(false), do: "text-lg font-semibold leading-[1.3]"
+
+  # RE268 — the header's Talk button (`t`). One component so the web header and the embed nav bar
+  # (RE393) render the same control; the caller owns the wrapper that hides it below the drawer
+  # breakpoint.
+  attr :active, :boolean, required: true
+
+  defp drawer_talk_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id="card-drawer-talk-button"
+      phx-click="drawer_tab"
+      phx-value-tab="talk"
+      data-active={to_string(@active)}
+      class={talk_button_class(@active)}
+    >
+      <.icon name="hero-command-line" class="size-[14px]" /> Talk
+      <span class="rounded-[3px] border border-base-300 px-[3px] font-mono text-[9.5px] font-semibold leading-[13px] text-base-content/45">
+        t
+      </span>
+    </button>
+    """
+  end
+
+  # RE281 — card-level actions (⋯ → Archive). Renders in `embed` too: @embed suppresses dismissal
+  # affordances (scrim, ✕), and Archive is not one. On the web the h-11 wrapper centres the
+  # artboard's 28×28 square against the 44px prev/next chevrons; embedded (RE393) it is the nav
+  # bar's 44px iOS icon button.
+  attr :ref, :string, required: true
+  attr :open, :boolean, required: true
+  attr :active_run?, :boolean, required: true
+  attr :embed, :boolean, default: false
+
+  defp drawer_overflow(assigns) do
+    ~H"""
+    <div class="relative flex h-11 flex-none items-center">
+      <button
+        type="button"
+        id="card-drawer-overflow"
+        phx-click="toggle_overflow_menu"
+        aria-haspopup="menu"
+        aria-expanded={to_string(@open)}
+        aria-label="Card actions"
+        class={
+          if(@embed,
+            do: "flex size-11 items-center justify-center text-primary",
+            else:
+              "flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+          )
+        }
+      >
+        <.icon :if={@embed} name="hero-ellipsis-horizontal-circle" class="size-[26px]" />
+        <.icon :if={!@embed} name="hero-ellipsis-horizontal" class="size-[17px]" />
+      </button>
+      <div
+        :if={@open}
+        id="card-drawer-overflow-menu"
+        role="menu"
+        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"}
+        style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+      >
+        <button
+          type="button"
+          id="archive-card-button"
+          role="menuitem"
+          phx-click="archive_card"
+          phx-value-ref={@ref}
+          data-confirm={archive_confirm(@active_run?)}
+          class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+        >
+          Archive
+        </button>
+      </div>
+    </div>
+    """
+  end
+
   defp talk_button_class(active?) do
     [
       "flex h-7 items-center gap-[7px] rounded-[7px] border px-[11px] text-xs font-semibold text-base-content/85",
@@ -5531,10 +6007,12 @@ defmodule RelayWeb.CoreComponents do
 
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
   # offers the approve/send-back pair; an ungated one has no drawer decision
-  # button (RLY-37) — move it forward by drag or Move to… when ready.
-  defp review_hint(nil), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
+  # button (RLY-37) — move it forward by drag or Move to… when ready. Embedded
+  # (RE393), a gated stage's pair is the native review bar under the page.
+  defp review_hint(nil, _embed), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
+  defp review_hint(_gate, true), do: "Relay AI finished this. Approve or reject below."
 
-  defp review_hint(_gate), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
+  defp review_hint(_gate, _embed), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
 
   # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
   # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
@@ -5848,7 +6326,10 @@ defmodule RelayWeb.CoreComponents do
                   aria-label="Collapse In progress lane"
                   style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
                 >
-                  <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                  <span
+                    class="stage-lane-label"
+                    style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}
+                  >
                     In progress
                   </span>
                   <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
