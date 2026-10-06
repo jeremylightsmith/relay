@@ -403,6 +403,39 @@ defmodule Relay.Cards do
     end
   end
 
+  @doc """
+  The ref of the next card awaiting review in the decided card's lane, in
+  `stage_column/2` order — what the review drawer advances to after an Approve or
+  Request changes (RE388). `nil` when no other card in the lane awaits review.
+
+  `before_ids` is the lane's card ids in `stage_column/2` order, captured BEFORE the
+  decision. The scan starts just below `decided_card_id` and wraps to the top (from the
+  start when the decided card is absent), never returning the decided card itself. A
+  candidate must still be in the lane's post-decision `stage_column/2` and satisfy
+  `Schemas.Card.awaiting_review?/1`; cards that arrived after the decision are ignored.
+  Reads `stage_column/2` once, so order can never drift from the rendered order.
+  Requires `board.stages` preloaded.
+  """
+  @spec next_awaiting_review(Board.t(), integer(), [integer()], integer()) :: String.t() | nil
+  def next_awaiting_review(%Board{} = board, stage_id, before_ids, decided_card_id) do
+    lane = Map.new(stage_column(board, stage_id), &{&1.id, &1})
+
+    {above, below} =
+      case Enum.find_index(before_ids, &(&1 == decided_card_id)) do
+        nil -> {before_ids, []}
+        idx -> Enum.split(before_ids, idx + 1)
+      end
+
+    (below ++ above)
+    |> Enum.reject(&(&1 == decided_card_id))
+    |> Enum.map(&Map.get(lane, &1))
+    |> Enum.find(&(&1 && Card.awaiting_review?(&1)))
+    |> case do
+      %Card{} = next -> ref(board, next)
+      nil -> nil
+    end
+  end
+
   defp neighbors_around(column, board, card_id) do
     case Enum.find_index(column, &(&1.id == card_id)) do
       nil -> %{prev: nil, next: nil}

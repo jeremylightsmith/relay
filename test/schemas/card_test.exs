@@ -160,6 +160,16 @@ defmodule Schemas.CardTest do
     end
   end
 
+  describe "awaiting_review?/1" do
+    test "true for an in_review card" do
+      assert Card.awaiting_review?(%Card{status: :in_review})
+    end
+
+    test "false for a ready card" do
+      refute Card.awaiting_review?(%Card{status: :ready})
+    end
+  end
+
   describe "mockup_entries/1" do
     test "keeps only /attachments/<id> entries, in order, with a binary caption or nil" do
       mockups = [

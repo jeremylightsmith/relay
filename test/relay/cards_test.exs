@@ -1452,6 +1452,119 @@ defmodule Relay.CardsTest do
     end
   end
 
+  describe "next_awaiting_review/4" do
+    setup do
+      user = insert(:user)
+      board = Relay.Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      %{board: board, review: review, code: code}
+    end
+
+    defp in_review(stage, n, status \\ :in_review) do
+      insert(:card, stage: stage, title: "Card #{n}", position: n, ref_number: n, status: status)
+    end
+
+    test "approving the top card returns the card below it", %{board: board, review: review} do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY2"
+    end
+
+    test "approving the bottom card wraps to the top", %{board: board, review: review} do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(c)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, c.id) == "MY1"
+    end
+
+    test "skips a card in the lane that is not awaiting review", %{board: board, review: review} do
+      a = in_review(review, 1)
+      b = in_review(review, 2, :working)
+      c = in_review(review, 3)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY3"
+    end
+
+    test "skips a card that has left the lane since the ids were captured", %{
+      board: board,
+      review: review,
+      code: code
+    } do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.move_card(b, code, 0)
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY3"
+    end
+
+    test "ignores a card that arrived in the lane after the decision", %{board: board, review: review, code: code} do
+      [a, b] = for n <- 1..2, do: in_review(review, n)
+      ids = [a.id, b.id]
+
+      _d = in_review(review, 4)
+      {:ok, _} = Cards.approve(a)
+      {:ok, _} = Cards.move_card(b, code, 0)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == nil
+    end
+
+    test "the only card in the lane leaves nothing to advance to", %{board: board, review: review} do
+      a = in_review(review, 1)
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, [a.id], a.id) == nil
+    end
+
+    test "an empty lane returns nil", %{board: board, review: review} do
+      assert Cards.next_awaiting_review(board, review.id, [], 999_999) == nil
+    end
+  end
+
+  describe "next_awaiting_review/4 on a terminal review stage" do
+    setup do
+      board = insert(:board, key: "RLY")
+
+      code =
+        insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 1)
+
+      done =
+        insert(:stage, board: board, name: "Done", type: :review, ai_enabled: false, category: :complete, position: 2)
+
+      %{board: Relay.Repo.preload(board, :stages), code: code, done: done}
+    end
+
+    test "never returns the decided card, though approval completes it in place", %{board: board, done: done} do
+      x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
+
+      {:ok, approved} = Cards.approve(x)
+      assert approved.stage_id == done.id
+      assert approved.status == :ready
+
+      assert Cards.next_awaiting_review(board, done.id, [x.id], x.id) == nil
+    end
+
+    test "advances to the next card still awaiting review in the terminal lane", %{board: board, done: done} do
+      x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
+      y = insert(:card, stage: done, title: "Y", position: 2, ref_number: 2, status: :in_review)
+
+      {:ok, _} = Cards.approve(x)
+
+      assert Cards.next_awaiting_review(board, done.id, [x.id, y.id], x.id) == Cards.ref(board, y)
+    end
+  end
+
   describe "stage_column/2" do
     setup do
       user = insert(:user)
