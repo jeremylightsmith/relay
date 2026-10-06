@@ -168,4 +168,33 @@ defmodule RelayWeb.BoardLiveDoneLimitTest do
       assert first == "Fresh finish"
     end
   end
+
+  describe "RE389 — the open-card highlight respects the Done window" do
+    test "opening a card outside the window by URL doesn't surface it, nor does closing",
+         %{conn: conn, board: board, done: done} do
+      [oldest | _rest] = seed_done_cards(done, 12)
+      cards_selector = "#stage-col-#{done.position}-cards .board-card"
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, oldest)}")
+
+      assert card_count(view, cards_selector) == 8
+      refute "Done 1" in card_titles(view, "#{cards_selector} .card-title")
+      refute has_element?(view, ".board-card[data-open]")
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      assert card_count(view, cards_selector) == 8
+    end
+
+    test "opening a card inside the window by URL highlights exactly that card",
+         %{conn: conn, board: board, done: done} do
+      newest = done |> seed_done_cards(12) |> List.last()
+      cards_selector = "#stage-col-#{done.position}-cards .board-card"
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, newest)}")
+
+      assert card_titles(view, ".board-card[data-open] .card-title") == ["Done 12"]
+      assert card_count(view, cards_selector) == 8
+    end
+  end
 end

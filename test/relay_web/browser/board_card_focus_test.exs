@@ -129,6 +129,45 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> assert_focused(ref)
   end
 
+  # RE389 — the drawer's card wears the focus-ring highlight from the moment it opens, wherever
+  # keyboard focus is. A mouse click doesn't match :focus-visible, so the ring comes only from
+  # the [data-open] rule.
+  test "a clicked card is marked open and wears the focus ring", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> assert_has(open_card(first))
+    |> assert_outline_style(first, "auto")
+  end
+
+  test "the open card keeps its ring while focus is inside the drawer", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> focus_in_drawer()
+    |> assert_has(open_card(first))
+    |> assert_outline_style(first, "auto")
+  end
+
+  test "Escape clears the open highlight", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> focus_in_drawer()
+    |> press_in_drawer("Escape")
+    |> refute_has("#card-drawer-panel")
+    |> refute_has(".board-card[data-open]")
+  end
+
   # Creates `count` cards in `stage` and returns their refs in the order the board renders the
   # column. `Cards.stage_column/2` is the same read `stage_neighbors/2` (and so ←/→) walks.
   defp column(board, stage, count) do
@@ -151,6 +190,36 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
 
   defp assert_drawer_shows(session, ref) do
     assert_has(session, "#card-drawer .drawer-card-ref", text: ref, exact: true)
+  end
+
+  defp open_card(ref), do: ~s(.board-card[data-ref="#{ref}"][data-open])
+
+  defp focus_in_drawer(session) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.focus(frame_id, selector: "#card-drawer-tab-detail", timeout: 2_000)
+
+      {:ok, inside?} =
+        Frame.evaluate(frame_id,
+          expression: ~s{(() => !!document.activeElement.closest("#card-drawer"))()},
+          timeout: 2_000
+        )
+
+      assert inside?, "precondition: focus must be inside #card-drawer"
+    end)
+  end
+
+  defp assert_outline_style(session, ref, style) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      selector = Jason.encode!(board_card(ref))
+
+      {:ok, actual} =
+        Frame.evaluate(frame_id,
+          expression: "(() => getComputedStyle(document.querySelector(#{selector})).outlineStyle)()",
+          timeout: 2_000
+        )
+
+      assert actual == style, "expected #{ref}'s outlineStyle to be #{style}, got #{inspect(actual)}"
+    end)
   end
 
   defp press_in_drawer(session, key) do

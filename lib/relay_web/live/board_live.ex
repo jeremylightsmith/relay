@@ -438,6 +438,7 @@ defmodule RelayWeb.BoardLive do
                   run_meta={@run_face_meta}
                   vote_counts={@vote_counts}
                   blocked_by={@blocked_by}
+                  open_ref={@open_ref}
                   cards={Map.fetch!(@streams, stream_name(stage.id))}
                   composing={@composing_stage_id == stage.id}
                   compose_form={@compose_form}
@@ -1171,6 +1172,8 @@ defmodule RelayWeb.BoardLive do
       # selected card's editors were reopened from a draft (drives the "restored" note).
       |> assign(:field_drafts, %{})
       |> assign(:restored_drafts, MapSet.new())
+      # RE389 — the ref the board highlights as open (data-open); see open_ref/1.
+      |> assign(:open_ref, nil)
       |> assign(:dirty_run_cards, MapSet.new())
       |> assign(:run_flush_events, 0)
       |> assign(:run_flush_pending?, false)
@@ -1193,6 +1196,7 @@ defmodule RelayWeb.BoardLive do
   def handle_params(params, _uri, socket) do
     ref = card_ref(socket.assigns.live_action, params)
     previous_ref = selected_ref(socket)
+    previous_card = socket.assigns[:selected_card]
 
     if mockup_only_change?(socket, ref, previous_ref, params["mockup"]) do
       {:noreply, assign_viewer(socket, params["mockup"])}
@@ -1201,6 +1205,8 @@ defmodule RelayWeb.BoardLive do
 
       {:noreply,
        socket
+       |> assign(:open_ref, open_ref(socket))
+       |> reinsert_open_pair(previous_card, socket.assigns.selected_card)
        |> maybe_push_card_focus(previous_ref, selected_ref(socket))
        |> assign_viewer(params["mockup"])}
     end
@@ -1280,16 +1286,27 @@ defmodule RelayWeb.BoardLive do
   defp selected_ref(%{assigns: %{selected_card: %Card{} = card, board: board}}), do: Cards.ref(board, card)
   defp selected_ref(_socket), do: nil
 
+  # RE389 — the ref the board renders as open (data-open): the drawer's card, except in embed and
+  # card mode, where there is no board in the DOM. The one home of that exemption.
+  defp open_ref(%{assigns: %{embed: true}}), do: nil
+  defp open_ref(%{assigns: %{live_action: :card}}), do: nil
+  defp open_ref(socket), do: selected_ref(socket)
+
   # RE326 — board focus follows the drawer. Every open, switch and close is a URL change that
   # lands in handle_params/3 (chevron, ←/→, scrim, Esc/✕, archive, browser back/forward), so the
-  # rule lives here once, as a table of the selection before → after:
+  # rule lives here once, as a table of the selection before → after (RE389 adds the open
+  # highlight column — kanban stream items only re-render when re-inserted):
   #
-  #   embed / card mode  never, because there is no board in the DOM
-  #   nil → A            no push: a click already focused A, and a search result or deep link
-  #                      must not steal focus or scroll the board
-  #   A → A              no push
-  #   A → nil (close)    focus A, so Tab carries on from the last card viewed
-  #   A → B (switch)     focus B, which the hook scrolls into view (block: "nearest")
+  #                      focus (maybe_push_card_focus/3)      open highlight (reinsert_open_pair/3)
+  #   embed / card mode  never: no board in the DOM           never: no board in the DOM
+  #   nil → A            no push: a click already focused A,  re-insert A
+  #                      and a search result or deep link
+  #                      must not steal focus or scroll
+  #   A → A              no push                              nothing
+  #   A → nil (close)    focus A, so Tab carries on from      re-insert A
+  #                      the last card viewed
+  #   A → B (switch)     focus B, which the hook scrolls      re-insert A and B
+  #                      into view (block: "nearest")
   #
   # BoardDnD and StoryMapDnD both no-op when the ref isn't rendered (just archived, filtered out).
   defp maybe_push_card_focus(%{assigns: %{embed: true}} = socket, _previous_ref, _ref), do: socket
@@ -1298,6 +1315,33 @@ defmodule RelayWeb.BoardLive do
   defp maybe_push_card_focus(socket, ref, ref), do: socket
   defp maybe_push_card_focus(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
   defp maybe_push_card_focus(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+
+  # RE389 — re-insert the before and after cards so both re-render against the new @open_ref
+  # (assigned just before). Each is refetched, never the possibly stale @selected_card struct, and
+  # restreamed only when the board renders it: unarchived, in a loaded stage, and — through
+  # upsert_card_stream/3's terminal branch — inside the Done window.
+  defp reinsert_open_pair(%{assigns: %{embed: true}} = socket, _previous, _card), do: socket
+  defp reinsert_open_pair(%{assigns: %{live_action: :card}} = socket, _previous, _card), do: socket
+  defp reinsert_open_pair(socket, %Card{id: id}, %Card{id: id}), do: socket
+
+  defp reinsert_open_pair(socket, previous, card) do
+    [previous, card]
+    |> Enum.filter(&match?(%Card{}, &1))
+    |> Enum.reduce(socket, &reinsert_board_card(&2, &1.id))
+  end
+
+  defp reinsert_board_card(socket, card_id) do
+    case Cards.get_card(socket.assigns.board, card_id) do
+      %Card{} = card ->
+        if is_nil(card.archived_at) and find_stage_by_id(socket, card.stage_id),
+          # %{}: upsert_card_stream/3 reads cards_by_stage only via the terminal window, which ignores it.
+          do: upsert_card_stream(socket, card, %{}),
+          else: socket
+
+      nil ->
+        socket
+    end
+  end
 
   # The one place the `focus_card` hook event is named: create_card and the drawer focus rule
   # above both push it.
