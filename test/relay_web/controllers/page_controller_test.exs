@@ -161,21 +161,35 @@ defmodule RelayWeb.PageControllerTest do
             "READY FOR YOUR REVIEW",
             "Approve",
             "Request changes",
-            "Redesign the pricing page",
+            "Redesign the recipe page",
             "Design · Review",
             "RE142",
             "Viewing",
-            "A — three tiers, annual toggle",
+            "A — photo header, two columns",
             "1 of 2",
             "1 / 2",
-            "Simple pricing that grows with you",
-            "Annual · save 20%",
-            "POPULAR"
+            "Forkful",
+            "Weeknight lemon pasta",
+            "25 min · Serves 4 · Easy",
+            "Ingredients",
+            "Method",
+            "200g spaghetti",
+            "Toss with pasta, parmesan and basil."
           ] do
         assert text =~ snippet, "expected #design to contain #{inspect(snippet)}"
       end
+    end
 
-      assert text =~ "SSO & audit log"
+    test "the showcase sample is not a pricing page", %{conn: conn} do
+      text = conn |> design_section() |> LazyHTML.text()
+      lowered = String.downcase(text)
+
+      for word <- ["pricing", "tier", "annual", "acme", "popular", "enterprise"] do
+        refute lowered =~ word, "expected #design not to mention #{inspect(word)}"
+      end
+
+      refute text =~ "$"
+      refute text =~ "/mo"
     end
 
     test "the replica is inert: no bindings, buttons, iframes or descendant ids", %{conn: conn} do
@@ -186,6 +200,8 @@ defmodule RelayWeb.PageControllerTest do
       refute section_html =~ "phx-"
       refute section_html =~ "<button"
       refute section_html =~ "<iframe"
+      refute section_html =~ "<img"
+      refute section_html =~ "<input"
       assert doc |> LazyHTML.query("#design [id]") |> Enum.count() == 0
     end
 
@@ -205,11 +221,11 @@ defmodule RelayWeb.PageControllerTest do
 
       current = LazyHTML.query(section, ~s([class*="ring-2 ring-primary ring-offset-2"]))
       assert Enum.count(current) == 1
-      assert LazyHTML.attribute(current, "title") == ["A — three tiers, annual toggle"]
+      assert LazyHTML.attribute(current, "title") == ["A — photo header, two columns"]
 
       dimmed = LazyHTML.query(section, "span.opacity-80")
       assert Enum.count(dimmed) == 1
-      assert LazyHTML.attribute(dimmed, "title") == ["B — one plan, usage slider"]
+      assert LazyHTML.attribute(dimmed, "title") == ["B — one step at a time"]
 
       [approve_style] =
         section
@@ -234,6 +250,7 @@ defmodule RelayWeb.PageControllerTest do
 
       bar = LazyHTML.query(pane, ~s(div[class*="md:hidden"]))
       assert Enum.count(bar) == 1
+      assert LazyHTML.text(bar) =~ "A — photo header, two columns"
       assert LazyHTML.text(bar) =~ "1 / 2"
 
       frame = LazyHTML.query(section, ~s(div[class*="max-h-[300px]"]))
