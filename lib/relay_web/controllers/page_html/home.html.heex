@@ -316,7 +316,7 @@
               </span>
               <span class="font-mono text-xs text-base-content/65">RE142</span>
             </div>
-            <h3 class="text-base font-semibold leading-[1.3]">Redesign the pricing page</h3>
+            <h3 class="text-base font-semibold leading-[1.3]">Redesign the recipe page</h3>
           </div>
           <div class="flex flex-1 flex-col gap-5 p-4">
             <%!-- card_review_panel, compact --%>
@@ -374,35 +374,35 @@
               <div class="flex flex-wrap gap-3 p-0.5">
                 <span
                   class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 ring-2 ring-primary ring-offset-2 ring-offset-base-100"
-                  title="A — three tiers, annual toggle"
+                  title="A — photo header, two columns"
                 >
                   <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
                   </span>
-                  <span class="absolute left-1/2 top-[13px] h-1.5 w-9 -translate-x-1/2 rounded-full bg-base-content/15">
+                  <span class="absolute inset-x-2 top-[14px] h-4 rounded-sm bg-base-content/10">
                   </span>
-                  <span class="absolute inset-x-2 bottom-2 top-7 flex gap-1">
-                    <span class="flex-1 rounded-sm border border-base-300"></span>
+                  <span class="absolute inset-x-2 bottom-2 top-8 flex gap-1">
+                    <span class="w-1/3 rounded-sm border border-base-300"></span>
                     <span class="flex-1 rounded-sm border border-primary bg-primary/10"></span>
-                    <span class="flex-1 rounded-sm border border-base-300"></span>
                   </span>
                 </span>
                 <span
                   class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 opacity-80"
-                  title="B — one plan, usage slider"
+                  title="B — one step at a time"
                 >
                   <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
                   </span>
-                  <span class="absolute inset-x-4 bottom-2 top-6 rounded-sm border border-base-300">
+                  <span class="absolute inset-x-3 bottom-4 top-6 rounded-sm border border-base-300">
                   </span>
-                  <span class="absolute inset-x-6 top-[42px] h-1 rounded-full bg-base-content/15">
-                  </span>
-                  <span class="absolute left-[30px] top-[39px] size-2.5 rounded-full bg-primary">
+                  <span class="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
+                    <span class="size-1.5 rounded-full bg-primary"></span>
+                    <span class="size-1.5 rounded-full bg-base-content/20"></span>
+                    <span class="size-1.5 rounded-full bg-base-content/20"></span>
                   </span>
                 </span>
               </div>
               <p class="text-xs text-base-content/60">
                 Viewing
-                <b class="font-semibold text-base-content/80">A — three tiers, annual toggle</b>
+                <b class="font-semibold text-base-content/80">A — photo header, two columns</b>
                 · 1 of 2
               </p>
               <p class="hidden items-center gap-1 text-xs text-base-content/50 md:flex">
@@ -420,7 +420,7 @@
           <div class="flex items-center gap-1 border-b border-base-300 bg-base-100 px-1.5 py-1.5 md:hidden">
             <span class="btn btn-ghost btn-sm btn-square text-base">←</span>
             <div class="flex min-w-0 flex-1 flex-col px-1 leading-tight">
-              <span class="truncate text-sm font-semibold">A — three tiers, annual toggle</span>
+              <span class="truncate text-sm font-semibold">A — photo header, two columns</span>
               <span class="font-mono text-[11px] text-base-content/55">1 / 2</span>
             </div>
             <span class="btn btn-ghost btn-sm btn-square btn-disabled text-2xl leading-none">
@@ -430,74 +430,69 @@
           </div>
           <div class="p-3 md:p-4">
             <div class="max-h-[300px] overflow-hidden rounded-lg border border-base-300 bg-base-100 shadow-sm md:max-h-none">
-              <%!-- the AI's mockup: a pricing page --%>
+              <%!-- the AI's mockup: a recipe page --%>
               <div class="flex items-center gap-2 border-b border-base-300 px-4 py-2.5">
                 <span class="size-3.5 rounded bg-base-content/80"></span>
-                <span class="text-[12px] font-semibold">Acme</span>
+                <span class="text-[12px] font-semibold">Forkful</span>
                 <span class="flex-1"></span>
-                <span class="hidden text-[11px] text-base-content/55 sm:inline">Product</span>
-                <span class="hidden text-[11px] text-base-content/55 sm:inline">Pricing</span>
+                <span class="hidden text-[11px] text-base-content/55 sm:inline">Recipes</span>
+                <span class="hidden text-[11px] text-base-content/55 sm:inline">Saved</span>
                 <span class="rounded-md bg-base-content px-2 py-1 text-[10.5px] font-semibold text-base-100">
-                  Start free
+                  Sign in
                 </span>
               </div>
-              <div class="px-5 pb-6 pt-6 text-center sm:px-8">
-                <div class="mb-1.5 text-[20px] font-semibold tracking-[-0.02em] sm:text-[24px]">
-                  Simple pricing that grows with you
+              <div class="flex h-24 items-center justify-center bg-base-content/10 text-2xl text-base-content/40 sm:h-32">
+                <span aria-hidden="true">◐</span>
+              </div>
+              <div class="px-5 pb-6 pt-5 sm:px-8">
+                <div class="mb-1 text-[20px] font-semibold tracking-[-0.02em] sm:text-[24px]">
+                  Weeknight lemon pasta
                 </div>
-                <div class="mb-4 text-[12px] text-base-content/60">
-                  Every plan includes unlimited boards and a 14-day trial.
-                </div>
-                <div class="mx-auto mb-5 inline-flex rounded-full border border-base-300 bg-base-200 p-0.5 text-[11px] font-semibold">
-                  <span class="rounded-full px-3 py-1 text-base-content/60">Monthly</span>
-                  <span class="rounded-full bg-base-100 px-3 py-1 shadow-sm">
-                    Annual · save 20%
-                  </span>
-                </div>
-                <div class="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
-                  <div class="rounded-lg border border-base-300 p-3.5">
-                    <div class="text-[12px] font-semibold">Starter</div>
-                    <div class="my-1.5">
-                      <span class="text-[22px] font-semibold">$0</span><span class="text-[11px] text-base-content/55"> /mo</span>
-                    </div>
-                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
-                      <li>✓ 3 boards</li>
-                      <li>✓ 1 AI lane</li>
+                <div class="mb-4 text-[12px] text-base-content/60">25 min · Serves 4 · Easy</div>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_3fr]">
+                  <div>
+                    <div class="mb-1.5 text-[12px] font-semibold">Ingredients</div>
+                    <ul class="space-y-1 text-[11px] text-base-content/65">
+                      <li
+                        :for={
+                          item <- [
+                            "200g spaghetti",
+                            "2 lemons, zested",
+                            "3 cloves garlic",
+                            "40g parmesan",
+                            "Handful of basil"
+                          ]
+                        }
+                        class="flex items-center gap-1.5"
+                      >
+                        <span class="size-2.5 shrink-0 rounded-sm border border-base-300"></span>
+                        {item}
+                      </li>
                     </ul>
-                    <div class="rounded-md border border-base-300 py-1.5 text-center text-[11px] font-semibold">
-                      Get started
-                    </div>
                   </div>
-                  <div class="rounded-lg border-2 border-base-content p-3.5">
-                    <div class="flex items-center justify-between">
-                      <span class="text-[12px] font-semibold">Team</span>
-                      <span class="rounded bg-base-content px-1.5 py-0.5 text-[9px] font-semibold text-base-100">
-                        POPULAR
-                      </span>
-                    </div>
-                    <div class="my-1.5">
-                      <span class="text-[22px] font-semibold">$12</span><span class="text-[11px] text-base-content/55"> /seat/mo</span>
-                    </div>
-                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
-                      <li>✓ Unlimited boards</li>
-                      <li>✓ 5 AI lanes</li>
-                    </ul>
-                    <div class="rounded-md bg-base-content py-1.5 text-center text-[11px] font-semibold text-base-100">
-                      Start trial
-                    </div>
-                  </div>
-                  <div class="rounded-lg border border-base-300 p-3.5">
-                    <div class="text-[12px] font-semibold">Enterprise</div>
-                    <div class="my-1.5">
-                      <span class="text-[22px] font-semibold">Custom</span>
-                    </div>
-                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
-                      <li>✓ SSO &amp; audit log</li>
-                      <li>✓ Unlimited AI lanes</li>
-                    </ul>
-                    <div class="rounded-md border border-base-300 py-1.5 text-center text-[11px] font-semibold">
-                      Talk to us
-                    </div>
+                  <div>
+                    <div class="mb-1.5 text-[12px] font-semibold">Method</div>
+                    <ol class="space-y-1.5 text-[11px] text-base-content/65">
+                      <li
+                        :for={
+                          {step, n} <-
+                            Enum.with_index(
+                              [
+                                "Boil the pasta in well-salted water.",
+                                "Warm garlic in olive oil; add zest and juice.",
+                                "Toss with pasta, parmesan and basil."
+                              ],
+                              1
+                            )
+                        }
+                        class="flex items-start gap-1.5"
+                      >
+                        <span class="rounded bg-base-content px-1.5 py-0.5 text-[9px] font-semibold text-base-100">
+                          {n}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    </ol>
                   </div>
                 </div>
               </div>
