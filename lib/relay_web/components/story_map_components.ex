@@ -1338,7 +1338,7 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   attr :face, :map, required: true
-  attr :open, :boolean, default: false
+  attr :open, :boolean, default: false, doc: "RE389 — the drawer is showing this card (renders data-open)"
 
   defp tray_card(assigns) do
     ~H"""

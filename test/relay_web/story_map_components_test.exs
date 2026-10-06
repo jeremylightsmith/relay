@@ -310,7 +310,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
   end
 
   describe "RE389 — story_map_card/1 marks the drawer's open card" do
-    for zoom <- [:map, :compact, :full] do
+    for zoom <- StoryMapComponents.zoom_levels() do
       test "open: true renders data-open at #{zoom} zoom" do
         html =
           render_component(&StoryMapComponents.story_map_card/1,
