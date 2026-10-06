@@ -1694,9 +1694,10 @@ defmodule Relay.Cards do
   end
 
   @doc """
-  One summary row per board the user belongs to (RE376), in `Boards.list_boards/1`
-  order: `%{board, slug, name, key, updated_at, card_count, stage_count, ai_active?,
-  needs_you_count, needs_you_two_type}`.
+  One summary row per board the user belongs to (RE376), in display order —
+  `Boards.list_boards_for_display/1`: starred first, then A–Z (RE395) —
+  `%{board, slug, name, key, updated_at, card_count, stage_count, ai_active?,
+  needs_you_count, needs_you_two_type, starred?}`. `starred?` is the user's personal star.
 
   The ONE definition of these facts: the web boards home (`RelayWeb.BoardsLive`) and the
   native board switcher (`GET /api/all/boards`) both render these rows, so their counts
@@ -1706,7 +1707,7 @@ defmodule Relay.Cards do
   mobile surfaces show (ADR 0005) — both include `agent_stalled` (RLY-148).
   """
   def list_board_summaries(%User{} = user) do
-    for board <- Boards.list_boards(user) do
+    for %{board: board, starred?: starred?} <- Boards.list_boards_for_display(user) do
       rollup = needs_you_rollup(board)
       cards = list_cards(board)
       stages = Boards.list_stages(board)
@@ -1721,7 +1722,8 @@ defmodule Relay.Cards do
         stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
         ai_active?: Enum.any?(cards, &(&1.status == :working and active_owner_type(&1) == :ai)),
         needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
-        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled
+        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled,
+        starred?: starred?
       }
     end
   end

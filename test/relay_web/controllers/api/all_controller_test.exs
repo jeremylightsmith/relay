@@ -127,11 +127,29 @@ defmodule RelayWeb.Api.AllControllerTest do
                "needs_you_count" => 1,
                "stage_count" => 1,
                "card_count" => 2,
-               "ai_active" => true
+               "ai_active" => true,
+               "starred" => false
              }
 
       assert b["needs_you_count"] == 0
       assert b["ai_active"] == false
+    end
+
+    test "lists boards starred-first A–Z with a starred flag", %{conn: conn, user: user} do
+      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: "zeta")
+      alpha = insert(:board, name: "Alpha", key: "AAA", slug: "alpha")
+      mango = insert(:board, name: "mango", key: "MMM", slug: "mango")
+      for b <- [zeta, alpha, mango], do: insert(:membership, board: b, user: user)
+      {:ok, true} = Relay.Boards.set_starred(user, zeta.slug, true)
+
+      data =
+        conn
+        |> get(~p"/api/all/boards")
+        |> json_response(200)
+        |> Map.fetch!("data")
+
+      assert Enum.map(data, & &1["slug"]) == [zeta.slug, alpha.slug, mango.slug]
+      assert Enum.map(data, & &1["starred"]) == [true, false, false]
     end
 
     test "needs_you_count is the two-type count (ADR 0005), never the web's three-type sum",

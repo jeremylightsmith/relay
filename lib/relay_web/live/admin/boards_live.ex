@@ -2,7 +2,7 @@ defmodule RelayWeb.Admin.BoardsLive do
   @moduledoc """
   Read-only table of every board at `/admin/boards` (RE353): name, key, owner email, member
   count, card count, created date, and an "Archived" badge — archived boards included,
-  newest first. A board's name links to `/board/:slug` only when the current superadmin is
+  A–Z by name (no stars: this isn't a personal list). A board's name links to `/board/:slug` only when the current superadmin is
   already a member; board access rules are unchanged (no bypass). Static snapshot at mount
   (no PubSub). Gated by the `:admin` live_session.
   """
@@ -33,7 +33,7 @@ defmodule RelayWeb.Admin.BoardsLive do
         </.link>
         <h1 class="mt-2 text-2xl font-semibold">Boards</h1>
         <p class="mt-1 text-sm text-base-content/65">
-          Every board, archived included, newest first. Names link only to boards you're a member of.
+          Every board, archived included, A–Z by name. Names link only to boards you're a member of.
         </p>
 
         <div class="mt-6 overflow-x-auto rounded-box border border-base-200">
