@@ -33,6 +33,22 @@ defmodule Relay.Push do
   @doc "The notification sound file every push names (bundled in the iOS app)."
   def sound, do: @sound
 
+  @doc "The web-playable copy of the same horn, served by `Plug.Static` (RE399)."
+  def web_sound_path, do: "/sounds/jobs_done.mp3"
+
+  @pubsub Relay.PubSub
+
+  @doc """
+  The per-user browser-notification topic (RE399): every push-worthy event is broadcast
+  here as `{:browser_notification, message/2}` to each recipient, device token or not.
+  The only place the topic string is spelled.
+  """
+  def user_topic(user_id) when is_integer(user_id), do: "user:#{user_id}:notify"
+
+  @doc "Subscribes the calling process to `user`'s browser-notification topic."
+  def subscribe_user(%User{id: user_id}), do: subscribe_user(user_id)
+  def subscribe_user(user_id) when is_integer(user_id), do: Phoenix.PubSub.subscribe(@pubsub, user_topic(user_id))
+
   @doc """
   Registers `token` as a push device for `user`, upserting on the token: a
   device that re-registers (including after an account switch) re-points to
@@ -190,18 +206,51 @@ defmodule Relay.Push do
       :ok
   end
 
+  # One message per event (one `id`, shared by every recipient and both channels): the
+  # browser broadcast goes to every recipient; APNs only to those with device tokens.
   defp notify(%Card{} = card, actor, config) do
     board = Repo.get!(Board, card.board_id)
+    message = message(card, board)
 
-    for user <- recipients(board, actor), tokens = device_tokens(user), tokens != [] do
-      payload = payload(card, board, needs_you_count(user))
-
-      for token <- tokens do
-        config.adapter.deliver(token, payload)
-      end
+    for user <- recipients(board, actor) do
+      Phoenix.PubSub.broadcast(@pubsub, user_topic(user.id), {:browser_notification, message})
+      deliver_apns(user, message, config)
     end
 
     :ok
+  end
+
+  defp deliver_apns(%User{} = user, message, config) do
+    case device_tokens(user) do
+      [] ->
+        :ok
+
+      tokens ->
+        payload = payload(message, needs_you_count(user))
+        Enum.each(tokens, &config.adapter.deliver(&1, payload))
+    end
+  end
+
+  @doc """
+  The notification for `card` (status `:needs_input` / `:in_review`) on `board` — the one
+  copy both channels carry: the browser broadcast verbatim, and APNs via `payload/2`.
+  `id` is unique per call, so build it once per event and share it across recipients
+  (the client's multi-tab de-dup key).
+  """
+  def message(%Card{} = card, %Board{} = board) do
+    {title, kind} = copy(card.status)
+    ref = ref(board, card)
+
+    %{
+      id: "#{ref}:#{kind}:#{System.unique_integer([:positive])}",
+      kind: kind,
+      title: title,
+      body: "#{ref}: #{card.title}",
+      card_ref: ref,
+      board_slug: board.slug,
+      board_name: board.name,
+      card_title: card.title
+    }
   end
 
   # Every resolved human member of the board, minus the acting user. Ownership is
@@ -229,19 +278,16 @@ defmodule Relay.Push do
 
   # The APNs payload (RLY-81 spec §5). `card_ref` + `board_slug` are the deep-link
   # keys the app routes on: the web opens a card at /board/:slug?card=:ref.
-  defp payload(%Card{} = card, %Board{} = board, badge) do
-    {title, kind} = copy(card.status)
-    ref = ref(board, card)
-
+  defp payload(message, badge) do
     %{
       "aps" => %{
-        "alert" => %{"title" => title, "body" => "#{ref}: #{card.title}"},
+        "alert" => %{"title" => message.title, "body" => message.body},
         "badge" => badge,
         "sound" => @sound
       },
-      "card_ref" => ref,
-      "board_slug" => board.slug,
-      "kind" => kind
+      "card_ref" => message.card_ref,
+      "board_slug" => message.board_slug,
+      "kind" => message.kind
     }
   end
 

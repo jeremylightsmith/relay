@@ -266,4 +266,143 @@ defmodule Relay.Push.TriggerTest do
       refute_received {:push_delivered, _, _}
     end
   end
+
+  describe "browser notifications (RE399)" do
+    defp subscribe_all(users), do: Enum.each(users, &(:ok = Push.subscribe_user(&1)))
+
+    test "every member gets the message on their own topic, token or not (needs_input)" do
+      %{board: board, card: card, users: [alice, bob] = users} = board_with_members(2)
+      subscribe_all(users)
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, :agent)
+
+      ref = "#{board.key}#{card.ref_number}"
+
+      for _ <- [alice, bob] do
+        assert_received {:browser_notification, msg}
+        assert msg.kind == "needs_input"
+        assert msg.title == "Question from the AI"
+        assert msg.body == "#{ref}: #{card.title}"
+        assert msg.card_ref == ref
+        assert msg.board_slug == board.slug
+        assert msg.board_name == board.name
+        assert msg.card_title == card.title
+      end
+
+      refute_received {:browser_notification, _}
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "entering :in_review uses the review copy" do
+      %{card: card, users: users} = board_with_members(2)
+      subscribe_all(users)
+
+      {:ok, _} = Cards.set_status(card, %{status: :in_review}, :agent)
+
+      assert_received {:browser_notification, msg}
+      assert msg.kind == "in_review"
+      assert msg.title == "Ready for your review"
+    end
+
+    test "a member with a device token gets both channels with identical copy" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      subscribe_all([alice])
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, :agent)
+
+      assert_received {:push_delivered, "tok-alice", payload}
+      assert_received {:browser_notification, msg}
+      assert payload["aps"]["alert"]["title"] == msg.title
+      assert payload["aps"]["alert"]["body"] == msg.body
+    end
+
+    test "one event shares one id across recipients; the next event gets a new id" do
+      %{card: card, users: users} = board_with_members(2)
+      subscribe_all(users)
+
+      {:ok, card} = Cards.set_status(card, %{status: :needs_input}, :agent)
+      assert_received {:browser_notification, %{id: id1}}
+      assert_received {:browser_notification, %{id: id2}}
+      assert is_binary(id1)
+      assert id1 == id2
+
+      {:ok, card} = Cards.set_status(card, %{status: :working}, :agent)
+      {:ok, _} = Cards.set_status(card, %{status: :in_review}, :agent)
+      assert_received {:browser_notification, %{id: id3}}
+      assert id3 != id1
+    end
+
+    test "the acting user is skipped" do
+      %{card: card, users: [alice, _bob]} = board_with_members(2)
+      subscribe_all([alice])
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, {:user, alice.id})
+
+      refute_received {:browser_notification, _}
+    end
+
+    test "a member other than the actor is still notified" do
+      %{card: card, users: [alice, bob]} = board_with_members(2)
+      subscribe_all([bob])
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, {:user, alice.id})
+
+      assert_received {:browser_notification, %{kind: "needs_input"}}
+    end
+
+    test "no message for a non-push status or a same-status re-set" do
+      %{card: card, users: users} = board_with_members(1)
+      subscribe_all(users)
+
+      {:ok, card} = Cards.set_status(card, %{status: :ready}, :agent)
+      refute_received {:browser_notification, _}
+
+      {:ok, card} = Cards.set_status(card, %{status: :needs_input}, :agent)
+      assert_received {:browser_notification, _}
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, :agent)
+      refute_received {:browser_notification, _}
+    end
+
+    test "nothing is broadcast from a transaction that rolls back" do
+      %{card: card, users: users} = board_with_members(1)
+      subscribe_all(users)
+
+      assert {:error, :nope} =
+               Repo.transaction(fn ->
+                 assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent)
+                 Repo.rollback(:nope)
+               end)
+
+      refute_received {:browser_notification, _}
+    end
+
+    test "unresolved invite rows are skipped without crashing" do
+      %{board: board, card: card, users: [alice]} = board_with_members(1)
+      insert(:membership, board: board, user: nil, email: "invited@example.com")
+      subscribe_all([alice])
+
+      {:ok, _} = Cards.set_status(card, %{status: :needs_input}, :agent)
+
+      assert_received {:browser_notification, %{kind: "needs_input"}}
+      refute_received {:browser_notification, _}
+    end
+
+    test "user_topic/1 spells the per-user topic" do
+      assert Push.user_topic(42) == "user:42:notify"
+    end
+
+    test "subscribe_user/1 accepts a user struct" do
+      assert :ok = Push.subscribe_user(%Schemas.User{id: 42})
+      Phoenix.PubSub.broadcast(Relay.PubSub, Push.user_topic(42), :ping)
+      assert_received :ping
+    end
+
+    test "subscribe_user/1 accepts an integer id" do
+      assert :ok = Push.subscribe_user(43)
+      Phoenix.PubSub.broadcast(Relay.PubSub, Push.user_topic(43), :ping)
+      assert_received :ping
+    end
+  end
 end
