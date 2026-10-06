@@ -13,6 +13,8 @@ defmodule RelayWeb.BrowserNotify do
   (the native shell has APNs): `/cards/:ref` forces `embed: true` inside `BoardLive.mount`,
   after this hook ran, so the embed check happens again at delivery time.
   """
+  use RelayWeb, :verified_routes
+
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, push_event: 3, push_navigate: 2]
 
   alias Relay.Push
@@ -44,8 +46,12 @@ defmodule RelayWeb.BrowserNotify do
   defp handle_info(_other, socket), do: {:cont, socket}
 
   defp handle_event("browser_notify:open", %{"board_slug" => slug, "card_ref" => ref}, socket) do
-    {:halt, push_navigate(socket, to: "/board/#{slug}?card=#{ref}")}
+    {:halt, push_navigate(socket, to: ~p"/board/#{slug}?#{[card: ref]}")}
   end
+
+  # A malformed open event is ours to swallow — falling through would crash a LiveView that
+  # has no handle_event clause for it.
+  defp handle_event("browser_notify:open", _params, socket), do: {:halt, socket}
 
   defp handle_event(_event, _params, socket), do: {:cont, socket}
 

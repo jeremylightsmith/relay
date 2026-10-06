@@ -194,7 +194,7 @@ defmodule RelayWeb.Layouts do
         hidden
       >
       </div>
-      <template :for={kind <- [:needs_input, :in_review]} id={"browser-notify-toast-#{kind}"}>
+      <template :for={kind <- Relay.Push.notification_statuses()} id={"browser-notify-toast-#{kind}"}>
         <.notification_toast kind={kind} card_ref="" title="" card_title="" board_name="" />
       </template>
       <div

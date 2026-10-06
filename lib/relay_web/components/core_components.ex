@@ -683,8 +683,11 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
-  defp notification_kind(kind) when kind in [:needs_input, "needs_input"], do: :needs_input
-  defp notification_kind(kind) when kind in [:in_review, "in_review"], do: :in_review
+  # Accepts the atom or its string form (the JS hook's payload); only push-worthy statuses map.
+  defp notification_kind(kind) do
+    Enum.find(Relay.Push.notification_statuses(), &(to_string(&1) == to_string(kind))) ||
+      raise ArgumentError, "not a notification kind: #{inspect(kind)}"
+  end
 
   defp notification_accent(:needs_input), do: "border-l-warning"
   defp notification_accent(:in_review), do: "border-l-primary"

@@ -303,7 +303,7 @@ defmodule RelayWeb.LayoutsTest do
       hook =
         LazyHTML.query(
           d,
-          ~s(#browser-notify[phx-hook="BrowserNotify"][data-sound="/sounds/jobs_done.mp3"][data-board-slug="my-board"])
+          ~s(#browser-notify[phx-hook="BrowserNotify"][data-sound="#{Relay.Push.web_sound_path()}"][data-board-slug="my-board"])
         )
 
       assert Enum.count(hook) == 1
@@ -318,7 +318,6 @@ defmodule RelayWeb.LayoutsTest do
       hook = LazyHTML.query(d, "#browser-notify")
       assert Enum.count(hook) == 1
       assert LazyHTML.attribute(hook, "data-board-slug") == []
-      refute render_app(%{inner_block: inner_block_slot()}) =~ "data-board-slug"
     end
 
     test "embed renders none of the notification surface" do

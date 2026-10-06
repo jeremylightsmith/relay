@@ -36,6 +36,15 @@ defmodule Relay.Push do
   @doc "The web-playable copy of the same horn, served by `Plug.Static` (RE399)."
   def web_sound_path, do: "/sounds/jobs_done.mp3"
 
+  @notification_statuses [:needs_input, :in_review]
+
+  @doc """
+  The push-worthy card statuses: entering one of these notifies the board's humans (APNs and
+  the browser), and they are what `needs_you_count/1` counts. The one place this set lives —
+  the web layer's toast templates iterate over it.
+  """
+  def notification_statuses, do: @notification_statuses
+
   @pubsub Relay.PubSub
 
   @doc """
@@ -123,7 +132,7 @@ defmodule Relay.Push do
         join: b in Board,
         on: b.id == c.board_id,
         where: m.user_id == ^user_id,
-        where: c.status in [:needs_input, :in_review],
+        where: c.status in @notification_statuses,
         where: is_nil(c.archived_at),
         where: is_nil(b.archived_at)
       ),
@@ -147,8 +156,8 @@ defmodule Relay.Push do
   `from_status` is part of the contract but unused: the *edge* guard (only fire
   when `card.status` actually changed) lives at the call site
   (`Relay.Cards.set_status/3`), which is the only place that sees it. Which
-  statuses are push-worthy is decided here, by this clause's guard — the one
-  and only place that list lives, so `Cards` never has to know it.
+  statuses are push-worthy is decided here, by this clause's guard over
+  `notification_statuses/0` — the one place that list lives, so `Cards` never has to know it.
 
   **Never dispatches from inside an open transaction** (`dispatch/1`): an
   uncommitted write is invisible to a `Task` on another DB connection (the
@@ -164,7 +173,7 @@ defmodule Relay.Push do
   def card_status_changed(card, from_status, actor, opts \\ [])
 
   def card_status_changed(%Card{status: status} = card, _from_status, actor, opts)
-      when status in [:needs_input, :in_review] do
+      when status in @notification_statuses do
     config = Keyword.get_lazy(opts, :config, &config/0)
     dispatch(config, fn -> notify(card, actor, config) end)
     :ok

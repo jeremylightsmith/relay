@@ -113,6 +113,19 @@ defmodule RelayWeb.BrowserNotifyTest do
       assert_redirect(view, "/board/#{other_board.slug}?card=#{ref_c}")
     end
 
+    test "a browser_notify:open missing its keys is swallowed, not crashing the LiveView", %{
+      conn: conn,
+      board: board
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view
+      |> element("#browser-notify")
+      |> render_hook("browser_notify:open", %{"board_slug" => board.slug})
+
+      assert render(view) =~ "browser-notify"
+    end
+
     test "other messages still reach the LiveView (the hook continues for them)", %{
       conn: conn,
       board: board
