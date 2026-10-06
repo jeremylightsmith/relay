@@ -58,4 +58,22 @@ defmodule RelayWeb.StorybookStoriesTest do
     [_, new_variations] = String.split(src, "id: :pending,", parts: 2)
     refute new_variations =~ ~r/\b(?:bg|text|border)-(?:emerald|slate|gray|zinc|red|green|blue|amber|violet|white|black)/
   end
+
+  test "notification_settings and notification_toast stories cover their states and are indexed (RE399)" do
+    settings = read("notification_settings.story.exs")
+
+    for id <- ~w(:default :granted :denied :unsupported) do
+      assert settings =~ "id: #{id}", "notification_settings story is missing variation #{id}"
+    end
+
+    toast = read("notification_toast.story.exs")
+
+    for id <- ~w(:needs_input :in_review :other_board) do
+      assert toast =~ "id: #{id}", "notification_toast story is missing variation #{id}"
+    end
+
+    index = read("_core_components.index.exs")
+    assert index =~ ~s|def entry("notification_settings")|
+    assert index =~ ~s|def entry("notification_toast")|
+  end
 end

@@ -5403,4 +5403,109 @@ defmodule RelayWeb.CoreComponentsTest do
       assert doc |> LazyHTML.query("div#g1 > button") |> LazyHTML.text() == "A"
     end
   end
+
+  describe "notification_toast/1 (RE399)" do
+    defp toast(attrs) do
+      (&CoreComponents.notification_toast/1) |> render_component(attrs) |> LazyHTML.from_fragment()
+    end
+
+    defp classes(node), do: node |> LazyHTML.attribute("class") |> hd() |> String.split()
+
+    test "a needs_input toast carries the warning accent, the badge and every text slot" do
+      doc =
+        toast(
+          kind: :needs_input,
+          card_ref: "RE391",
+          title: "Question from the AI",
+          card_title: "update landing page"
+        )
+
+      root = LazyHTML.query(doc, "div.browser-notify-toast")
+      assert Enum.count(root) == 1
+      assert LazyHTML.attribute(root, "role") == ["alert"]
+      assert LazyHTML.attribute(root, "data-kind") == ["needs_input"]
+
+      for class <- ~w(border-l-4 border-l-warning bg-base-100 rounded-box) do
+        assert class in classes(root), "expected #{class} on the toast root"
+      end
+
+      badge = LazyHTML.query(doc, ".status-badge.badge-warning")
+      assert Enum.count(badge) == 1
+      assert LazyHTML.text(badge) =~ "NEEDS INPUT"
+
+      assert doc |> LazyHTML.query(~s([data-field="card_ref"])) |> LazyHTML.text() == "RE391"
+      assert doc |> LazyHTML.query(~s([data-field="title"])) |> LazyHTML.text() == "Question from the AI"
+      assert doc |> LazyHTML.query(~s([data-field="card_title"])) |> LazyHTML.text() == "update landing page"
+      assert doc |> LazyHTML.query(~s([data-action="open"])) |> LazyHTML.text() =~ "Open card"
+      assert doc |> LazyHTML.query(~s([data-action="close"][aria-label="close"])) |> Enum.count() == 1
+      assert doc |> LazyHTML.query(~s([data-field="board_name"])) |> Enum.count() == 0
+    end
+
+    test "an in_review toast on another board carries the primary accent, the eye and the board name" do
+      doc =
+        toast(
+          kind: :in_review,
+          card_ref: "MK42",
+          title: "Ready for your review",
+          card_title: "Pricing table copy pass",
+          board_name: "Marketing site"
+        )
+
+      root = LazyHTML.query(doc, "div.browser-notify-toast")
+      assert "border-l-primary" in classes(root)
+      refute "border-l-warning" in classes(root)
+      assert doc |> LazyHTML.query(".hero-eye") |> Enum.count() == 1
+
+      badge = LazyHTML.query(doc, ".status-badge.badge-primary")
+      assert LazyHTML.text(badge) =~ "in review"
+
+      assert doc |> LazyHTML.query(~s([data-field="board_name"])) |> LazyHTML.text() =~ "· Marketing site"
+    end
+
+    test "accepts the kind as a string, as the JS payload carries it" do
+      doc = toast(kind: "in_review", card_ref: "", title: "", card_title: "")
+      assert doc |> LazyHTML.query("div.browser-notify-toast") |> LazyHTML.attribute("data-kind") == ["in_review"]
+    end
+  end
+
+  describe "notification_settings/1 (RE399)" do
+    defp settings(state) do
+      (&CoreComponents.notification_settings/1) |> render_component(state: state) |> LazyHTML.from_fragment()
+    end
+
+    for state <- [:denied, :unsupported] do
+      test "a forced #{state} state renders only the blocked row, with the re-allow hint and Sound" do
+        doc = settings(unquote(state))
+
+        assert doc |> LazyHTML.query("li[data-notify-state]") |> Enum.count() == 1
+        blocked = LazyHTML.query(doc, ~s(li[data-notify-state="blocked"].menu-disabled))
+        assert Enum.count(blocked) == 1
+        text = LazyHTML.text(blocked)
+        assert text =~ "Blocked in browser settings"
+        assert text =~ "To allow: click"
+        assert text =~ "then reload."
+        assert blocked |> LazyHTML.query(".hero-lock-closed-micro") |> Enum.count() == 1
+        assert doc |> LazyHTML.query("li#notify-sound-row input#notify-sound-toggle") |> Enum.count() == 1
+      end
+    end
+
+    test "a forced granted state renders only the granted row reading On" do
+      doc = settings(:granted)
+
+      assert doc |> LazyHTML.query("li[data-notify-state]") |> Enum.count() == 1
+      granted = LazyHTML.query(doc, ~s(li[data-notify-state="granted"]))
+      assert LazyHTML.text(granted) =~ "On"
+      assert granted |> LazyHTML.query(".text-success") |> Enum.count() >= 1
+    end
+
+    test "a forced default state renders only the default row with the Enable button" do
+      doc = settings(:default)
+
+      assert doc |> LazyHTML.query("li[data-notify-state]") |> Enum.count() == 1
+
+      assert doc
+             |> LazyHTML.query(~s(li[data-notify-state="default"] button#notify-enable.btn.btn-primary.btn-xs))
+             |> LazyHTML.text() =~ "Enable"
+    end
+  end
 end

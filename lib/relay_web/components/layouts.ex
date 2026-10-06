@@ -64,6 +64,12 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "when true, suppress the web top-bar chrome (surface hosted in the native shell)"
 
+  attr :board_slug, :string,
+    default: nil,
+    doc:
+      "the board in view (only `BoardLive` passes it) — the browser-notification hook (RE399) " <>
+        "uses it to drop the toast's board name for cards on this board"
+
   # No default (RE397): an absent key lets `RelayWeb.Feedback.url/1` fall back to config;
   # a `default: nil` would always win and hide the item in prod.
   attr :feedback_url, :string,
@@ -134,6 +140,7 @@ defmodule RelayWeb.Layouts do
               <.icon name="hero-shield-check" class="size-4" /> Admin
             </.link>
           </li>
+          <.notification_settings />
           <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Theme</li>
           <li>
             <div class="pointer-events-auto px-1 py-1 hover:bg-transparent">
@@ -175,6 +182,28 @@ defmodule RelayWeb.Layouts do
     </main>
 
     <.flash_group flash={@flash} />
+
+    <%!-- RE399: browser notifications. RelayWeb.BrowserNotify pushes "relay:notify" to this hook;
+    the JS clones a kind's <template> toast into #browser-notify-toasts. Never in the native shell. --%>
+    <%= if @current_scope && !@embed do %>
+      <div
+        id="browser-notify"
+        phx-hook="BrowserNotify"
+        data-sound={Relay.Push.web_sound_path()}
+        data-board-slug={@board_slug}
+        hidden
+      >
+      </div>
+      <template :for={kind <- [:needs_input, :in_review]} id={"browser-notify-toast-#{kind}"}>
+        <.notification_toast kind={kind} card_ref="" title="" card_title="" board_name="" />
+      </template>
+      <div
+        id="browser-notify-toasts"
+        phx-update="ignore"
+        class="toast toast-top toast-end z-50 flex flex-col gap-2 max-sm:left-0 max-sm:right-0 max-sm:top-[53px] max-sm:w-full"
+      >
+      </div>
+    <% end %>
     """
   end
 

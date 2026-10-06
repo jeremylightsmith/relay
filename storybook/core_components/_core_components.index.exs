@@ -34,6 +34,8 @@ defmodule Storybook.CoreComponents do
   def entry("mockup_viewer_pager"), do: [icon: {:fa, "ellipsis", :thin}]
   def entry("mockup_viewer_zoom"), do: [icon: {:fa, "magnifying-glass-plus", :thin}]
   def entry("modal_scrim"), do: [icon: {:fa, "layer-group", :thin}]
+  def entry("notification_settings"), do: [icon: {:fa, "bell", :thin}]
+  def entry("notification_toast"), do: [icon: {:fa, "message-exclamation", :thin}]
   def entry("owner_avatars"), do: [icon: {:fa, "user-group", :thin}]
   def entry("owner_pill"), do: [icon: {:fa, "tag", :thin}]
   def entry("page_heading"), do: [icon: {:fa, "heading", :thin}]

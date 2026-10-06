@@ -257,4 +257,82 @@ defmodule RelayWeb.LayoutsTest do
       refute html =~ "suggest-idea-link"
     end
   end
+
+  describe "browser notifications (RE399)" do
+    defp doc(html), do: LazyHTML.from_fragment(html)
+
+    test "the account menu shows the Notifications section, in order, right above Theme" do
+      html = render_app(%{inner_block: inner_block_slot()})
+      menu = html |> doc() |> LazyHTML.query("#account-menu")
+
+      assert menu |> LazyHTML.query(~s(li[data-notify-state="default"] button#notify-enable)) |> LazyHTML.text() =~
+               "Enable"
+
+      assert menu |> LazyHTML.query(~s(li[data-notify-state="granted"])) |> Enum.count() == 1
+
+      blocked = LazyHTML.query(menu, ~s(li[data-notify-state="blocked"].menu-disabled))
+      assert LazyHTML.text(blocked) =~ "Blocked in browser settings"
+
+      toggle = LazyHTML.query(menu, "input#notify-sound-toggle.toggle.toggle-xs.toggle-primary[checked]")
+      assert Enum.count(toggle) == 1
+
+      positions =
+        Enum.map(
+          [
+            ~s(uppercase tracking-wider">Notifications),
+            ~s(data-notify-state="default"),
+            ~s(id="notify-enable"),
+            ~s(data-notify-state="granted"),
+            ~s(data-notify-state="blocked"),
+            ~s(id="notify-sound-toggle"),
+            ~s(uppercase tracking-wider">Theme)
+          ],
+          fn needle ->
+            assert {pos, _} = :binary.match(html, needle), "missing #{needle}"
+            pos
+          end
+        )
+
+      assert positions == Enum.sort(positions)
+    end
+
+    test "renders the hook element, both toast templates and the toast container" do
+      html = render_app(%{board_slug: "my-board", inner_block: inner_block_slot()})
+      d = doc(html)
+
+      hook =
+        LazyHTML.query(
+          d,
+          ~s(#browser-notify[phx-hook="BrowserNotify"][data-sound="/sounds/jobs_done.mp3"][data-board-slug="my-board"])
+        )
+
+      assert Enum.count(hook) == 1
+      assert d |> LazyHTML.query("template#browser-notify-toast-needs_input") |> Enum.count() == 1
+      assert d |> LazyHTML.query("template#browser-notify-toast-in_review") |> Enum.count() == 1
+      assert d |> LazyHTML.query(~s(#browser-notify-toasts[phx-update="ignore"])) |> Enum.count() == 1
+    end
+
+    test "without a board_slug the hook element carries no data-board-slug" do
+      d = doc(render_app(%{inner_block: inner_block_slot()}))
+
+      hook = LazyHTML.query(d, "#browser-notify")
+      assert Enum.count(hook) == 1
+      assert LazyHTML.attribute(hook, "data-board-slug") == []
+      refute render_app(%{inner_block: inner_block_slot()}) =~ "data-board-slug"
+    end
+
+    test "embed renders none of the notification surface" do
+      html = render_app(%{embed: true, inner_block: inner_block_slot()})
+
+      refute html =~ ~s(id="browser-notify")
+      refute html =~ ~s(id="browser-notify-toasts")
+      refute html =~ ~s(id="notify-enable")
+    end
+
+    test "a signed-out render has no hook element" do
+      html = render_app(%{current_scope: nil, inner_block: inner_block_slot()})
+
+      refute html =~ ~s(id="browser-notify")
+    end
+  end
 end

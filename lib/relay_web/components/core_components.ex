@@ -611,6 +611,176 @@ defmodule RelayWeb.CoreComponents do
   defp status_badge_label(:failed, _progress), do: "FAILED"
 
   @doc """
+  The in-page browser-notification toast (RE399): one push-worthy event, accented by the card
+  status it announces (amber rule for `needs_input`, blue for `in_review`, the same tokens as
+  `status_badge/1`). `board_name` renders as "· <name>" and is omitted when nil — the
+  `BrowserNotify` JS hook drops it when the card is on the board in view.
+
+  `Layouts.app` renders one per kind inside a `<template>` with blank text slots; the JS hook
+  clones it and fills the `[data-field]` slots, so every class stays here, in tokens.
+  `[data-action="open"]` / `[data-action="close"]` are the hook's click targets.
+  """
+  attr :kind, :any, required: true, doc: ":needs_input | :in_review (or the same as strings)"
+  attr :card_ref, :string, required: true
+  attr :title, :string, required: true
+  attr :card_title, :string, required: true
+  attr :board_name, :string, default: nil
+  attr :id, :string, default: nil
+
+  def notification_toast(assigns) do
+    assigns = assign(assigns, :kind, notification_kind(assigns.kind))
+
+    ~H"""
+    <div
+      id={@id}
+      role="alert"
+      data-kind={@kind}
+      class={[
+        "browser-notify-toast w-full sm:w-96 sm:max-w-96 rounded-box border border-base-300 border-l-4 bg-base-100 p-3 shadow-lg",
+        notification_accent(@kind)
+      ]}
+    >
+      <div class="flex items-start gap-3">
+        <.icon
+          :if={@kind == :needs_input}
+          name="hero-chat-bubble-left-ellipsis"
+          class="size-5 shrink-0 text-warning"
+        />
+        <.icon :if={@kind == :in_review} name="hero-eye" class="size-5 shrink-0 text-primary" />
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <.status_badge status={@kind} class="badge-xs font-mono" />
+            <%!-- `phx-no-format` keeps the slot text flush: the formatter's line break would put
+            whitespace into the text the JS hook reads and replaces. --%>
+            <span
+              phx-no-format
+              data-field="card_ref"
+              class="font-mono text-[11px] text-base-content/65"
+            >{@card_ref}</span>
+            <span
+              :if={@board_name}
+              phx-no-format
+              data-field="board_name"
+              class="truncate text-[11px] text-base-content/50"
+            >· {@board_name}</span>
+          </div>
+          <p data-field="title" class="mt-1 text-sm font-semibold">{@title}</p>
+          <p data-field="card_title" class="truncate text-sm text-base-content/80">{@card_title}</p>
+          <div class="mt-2">
+            <button type="button" data-action="open" class="btn btn-sm btn-primary">Open card</button>
+          </div>
+        </div>
+        <button
+          type="button"
+          data-action="close"
+          class="group self-start cursor-pointer"
+          aria-label={gettext("close")}
+        >
+          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp notification_kind(kind) when kind in [:needs_input, "needs_input"], do: :needs_input
+  defp notification_kind(kind) when kind in [:in_review, "in_review"], do: :in_review
+
+  defp notification_accent(:needs_input), do: "border-l-warning"
+  defp notification_accent(:in_review), do: "border-l-primary"
+
+  @doc """
+  The "Notifications" section of the avatar menu (RE399): a fragment of `<li>`s for the
+  `#account-menu` `<ul>`, one row per browser permission state plus the Sound switch.
+
+  The permission lives in the browser, so the server cannot know it. With `state: :auto` (the
+  layout's default) all three state rows render hidden and are revealed by an arbitrary variant
+  keyed off `<html data-notify-permission="default|granted|denied|unsupported">`, which the
+  `BrowserNotify` JS hook sets — the same technique as `Layouts.theme_toggle/1`, keyed off an
+  attribute LiveView never re-renders. `blocked` covers both `denied` and `unsupported`.
+
+  A forced state (Storybook, tests) renders only that state's row, visible.
+
+  The Sound row is `phx-update="ignore"`: the JS hook owns the checkbox's `checked` (stored per
+  browser), and a LiveView patch must never reset it.
+  """
+  attr :state, :atom, values: [:auto, :default, :granted, :denied, :unsupported], default: :auto
+
+  def notification_settings(assigns) do
+    assigns = assign(assigns, :rows, notification_rows(assigns.state))
+
+    ~H"""
+    <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Notifications</li>
+    <li
+      :if={:default in @rows}
+      data-notify-state="default"
+      class={notification_row_class(@state, :default)}
+    >
+      <div class="flex items-center gap-2 hover:bg-transparent">
+        <.icon name="hero-bell" class="size-4" />
+        <span class="flex-1">Desktop alerts</span>
+        <button type="button" id="notify-enable" class="btn btn-primary btn-xs">Enable</button>
+      </div>
+    </li>
+    <li
+      :if={:granted in @rows}
+      data-notify-state="granted"
+      class={notification_row_class(@state, :granted)}
+    >
+      <div class="flex items-center gap-2 hover:bg-transparent">
+        <.icon name="hero-bell-alert" class="size-4 text-success" />
+        <span class="flex-1">Desktop alerts</span>
+        <span class="inline-flex items-center gap-1 text-xs font-medium text-success">
+          <.icon name="hero-check-micro" class="size-3.5" />On
+        </span>
+      </div>
+    </li>
+    <li
+      :if={:blocked in @rows}
+      data-notify-state="blocked"
+      class={["menu-disabled", notification_row_class(@state, :blocked)]}
+    >
+      <div class="flex flex-col items-start gap-1 hover:bg-transparent">
+        <span class="flex w-full items-center gap-2">
+          <.icon name="hero-bell-slash" class="size-4" />
+          <span class="flex-1">Blocked in browser settings</span>
+        </span>
+        <span class="pl-6 text-[11px] leading-snug text-base-content/65">
+          To allow: click <.icon name="hero-lock-closed-micro" class="size-3 align-[-1px]" />
+          in the address bar → Notifications → Allow, then reload.
+        </span>
+      </div>
+    </li>
+    <li id="notify-sound-row" phx-update="ignore">
+      <label class="flex items-center gap-2">
+        <.icon name="hero-speaker-wave" class="size-4" />
+        <span class="flex-1">Sound</span>
+        <input
+          type="checkbox"
+          id="notify-sound-toggle"
+          class="toggle toggle-xs toggle-primary"
+          checked
+        />
+      </label>
+    </li>
+    """
+  end
+
+  defp notification_rows(:auto), do: [:default, :granted, :blocked]
+  defp notification_rows(:default), do: [:default]
+  defp notification_rows(:granted), do: [:granted]
+  defp notification_rows(state) when state in [:denied, :unsupported], do: [:blocked]
+
+  # Tailwind only sees literal class strings, so each reveal variant is spelled out in full.
+  defp notification_row_class(:auto, :default), do: "hidden [[data-notify-permission=default]_&]:flex"
+  defp notification_row_class(:auto, :granted), do: "hidden [[data-notify-permission=granted]_&]:flex"
+
+  defp notification_row_class(:auto, :blocked),
+    do: "hidden [[data-notify-permission=denied]_&]:flex [[data-notify-permission=unsupported]_&]:flex"
+
+  defp notification_row_class(_forced, _row), do: nil
+
+  @doc """
   The RLY-69 public-support badge. `variant: :pill` is the public board's interactive
   vote pill (violet-filled when `voted`, outlined otherwise); `variant: :count` is the
   internal card face's muted `↑ N` label. Presentational only — the caller wires

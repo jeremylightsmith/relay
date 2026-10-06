@@ -86,7 +86,12 @@ defmodule RelayWeb.Router do
         if(Application.compile_env(:relay, :sql_sandbox),
           do: [RelayWeb.LiveAcceptance],
           else: []
-        ) ++ [{RelayWeb.Auth, :require_authenticated}, {RelayWeb.Auth, :mount_embed}] do
+        ) ++
+          [
+            {RelayWeb.Auth, :require_authenticated},
+            {RelayWeb.Auth, :mount_embed},
+            RelayWeb.BrowserNotify
+          ] do
       live "/boards", BoardsLive
       # RE370 legacy mockup link (RelayWeb.attachment_view_path/1): a membership-scoped redirect to
       # BoardLive's same-tab mockup viewer, /board/:slug?card=<ref>&mockup=<id> (RE380).
@@ -140,7 +145,7 @@ defmodule RelayWeb.Router do
         if(Application.compile_env(:relay, :sql_sandbox),
           do: [RelayWeb.LiveAcceptance],
           else: []
-        ) ++ [{RelayWeb.Auth, :require_superadmin}] do
+        ) ++ [{RelayWeb.Auth, :require_superadmin}, RelayWeb.BrowserNotify] do
       live "/", IndexLive
       live "/boards", BoardsLive
       live "/users", UsersLive
