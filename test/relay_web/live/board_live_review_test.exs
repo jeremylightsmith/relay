@@ -313,4 +313,106 @@ defmodule RelayWeb.BoardLiveReviewTest do
     refute has_element?(view, "#review-panel")
     assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
   end
+
+  describe "advance to the next card awaiting review (RE388)" do
+    setup %{board: board} do
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      spec_review = Enum.find(board.stages, &(&1.parent_id == spec.id and &1.type == :review))
+      spec_done = Enum.find(board.stages, &(&1.parent_id == spec.id and &1.type == :done))
+      %{spec_review: spec_review, spec_done: spec_done}
+    end
+
+    defp open_card(conn, board, ref) do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+      render_async(view)
+      view
+    end
+
+    test "1. Approve advances to the card below with a confirmation flash",
+         %{conn: conn, board: board, spec_review: spec_review, spec_done: spec_done} do
+      # create_card inserts at the top, so create bottom-up for A above B above C
+      in_review_card(spec_review, "Charlie")
+      b = in_review_card(spec_review, "Bravo")
+      a = in_review_card(spec_review, "Alpha")
+      a_ref = Cards.ref(board, a)
+      b_ref = Cards.ref(board, b)
+
+      view = open_card(conn, board, a_ref)
+      view |> element("#review-approve") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=#{b_ref}")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer", "Bravo")
+      assert has_element?(view, "#flash-info", "Approved #{a_ref} → Spec · Done")
+      assert has_element?(view, "#sublane-#{spec_done.id}-cards .board-card", "Alpha")
+      assert Cards.get_card_by_ref(board, a_ref).stage_id == spec_done.id
+    end
+
+    test "2. Request changes advances too, with the next card's review panel closed",
+         %{conn: conn, board: board, spec_review: spec_review} do
+      c = in_review_card(spec_review, "Charlie")
+      b = in_review_card(spec_review, "Bravo")
+      b_ref = Cards.ref(board, b)
+      c_ref = Cards.ref(board, c)
+
+      view = open_card(conn, board, b_ref)
+      view |> element("#review-request-changes") |> render_click()
+
+      view
+      |> form("#review-reject-form", reject: %{note: "Needs a sharper goal"})
+      |> render_submit()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=#{c_ref}")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer", "Charlie")
+      assert has_element?(view, "#flash-info", "Sent #{b_ref} back to Spec")
+      refute has_element?(view, "#review-reject-panel")
+      refute has_element?(view, "#review-request-note")
+      assert has_element?(view, "#review-approve")
+    end
+
+    test "3. deciding the bottom card wraps to the top of the lane",
+         %{conn: conn, board: board, review: review} do
+      y = in_review_card(review, "Yankee")
+      x = in_review_card(review, "X-ray")
+      y_ref = Cards.ref(board, y)
+      x_ref = Cards.ref(board, x)
+
+      view = open_card(conn, board, y_ref)
+      view |> element("#review-approve") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=#{x_ref}")
+      render_async(view)
+
+      assert has_element?(view, "#flash-info", "Approved #{y_ref} → Deploy")
+    end
+
+    test "4. a card in the lane that is not awaiting review is skipped",
+         %{conn: conn, board: board, review: review} do
+      r = in_review_card(review, "Romeo")
+      q = in_review_card(review, "Quebec")
+      p = in_review_card(review, "Papa")
+      {:ok, _q} = Cards.set_status(q, %{status: :working})
+
+      view = open_card(conn, board, Cards.ref(board, p))
+      view |> element("#review-approve") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=#{Cards.ref(board, r)}")
+    end
+
+    test "5. never crosses lanes — the last card in its lane closes the drawer silently",
+         %{conn: conn, board: board, review: review, spec_review: spec_review} do
+      in_review_card(spec_review, "Other lane")
+      card = in_review_card(review, "Only one")
+
+      view = open_card(conn, board, Cards.ref(board, card))
+      view |> element("#review-approve") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+      refute has_element?(view, "#flash-info")
+    end
+  end
 end

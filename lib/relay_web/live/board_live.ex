@@ -2671,8 +2671,10 @@ defmodule RelayWeb.BoardLive do
   # re-streams the source and target columns synchronously; MMF 18 echoes
   # keep every other session in sync.
   def handle_event("review_approve", _params, %{assigns: %{selected_card: %Card{status: :in_review} = card}} = socket) do
+    lane = lane_ids(socket, card)
+
     case Cards.approve(card, current_actor(socket)) do
-      {:ok, updated} -> {:noreply, after_review_decision(socket, card, updated)}
+      {:ok, updated} -> {:noreply, after_review_decision(socket, :approved, card, updated, lane)}
       {:error, _reason} -> {:noreply, socket}
     end
   end
@@ -2705,8 +2707,10 @@ defmodule RelayWeb.BoardLive do
          reject_error: "Add a note — the AI needs to know what to change."
        )}
     else
+      lane = lane_ids(socket, card)
+
       case Cards.reject(card, note, current_actor(socket)) do
-        {:ok, updated} -> {:noreply, after_review_decision(socket, card, updated)}
+        {:ok, updated} -> {:noreply, after_review_decision(socket, :rejected, card, updated, lane)}
         {:error, _reason} -> {:noreply, socket}
       end
     end
@@ -3761,21 +3765,60 @@ defmodule RelayWeb.BoardLive do
     |> refresh_card(updated)
   end
 
-  # RLY-115 — a primary review decision (Approve / Request changes) dispatches the
-  # card, so the drawer's job is done: keep the column re-stream + counts
-  # (apply_move/3) but skip the drawer refresh, and patch back to the board URL —
-  # the patch's handle_params clears selected_card, which closes the drawer.
-  # Archive's precedent, minus the flash: the card's new column placement is the
-  # confirmation. Card mode (/cards/:ref) keeps refresh-in-place — the native
-  # shell owns dismissal (RLY-87) and there is no board behind the drawer.
-  defp after_review_decision(%{assigns: %{live_action: :card}} = socket, %Card{} = before, %Card{} = updated) do
+  # RE388 (revisits RLY-115 for board mode) — a primary review decision (Approve / Request
+  # changes) dispatches the card, so the drawer moves on to the next card in the SAME lane (the
+  # exact stage row the card sat in — a substage like Spec:Review, never its parent) that is still
+  # awaiting review: the one below the decided card, wrapping to the top. The lane order is the
+  # pre-decision Cards.stage_column/2 order the handler captured, because the decided card has
+  # usually left the lane by now. Advancing flashes where the decided card went and patches via
+  # card_path/2 (select_card's path), whose handle_params resets the review panel and closes the
+  # mockup viewer. No other card awaiting review → close the drawer silently, as RLY-115 did.
+  # apply_move/3 always runs first: the acting session's column re-stream depends on it.
+  # Card mode (/cards/:ref) keeps refresh-in-place — the native shell owns dismissal (RLY-87)
+  # and there is no board behind the drawer.
+  defp after_review_decision(
+         %{assigns: %{live_action: :card}} = socket,
+         _decision,
+         %Card{} = before,
+         %Card{} = updated,
+         _lane_ids
+       ) do
     refresh_after_review(socket, before, updated)
   end
 
-  defp after_review_decision(socket, %Card{} = before, %Card{} = updated) do
-    socket
-    |> apply_move(before.stage_id, updated)
-    |> close_drawer_after_action()
+  defp after_review_decision(socket, decision, %Card{} = before, %Card{} = updated, lane_ids) do
+    socket = apply_move(socket, before.stage_id, updated)
+
+    case Cards.next_awaiting_review(socket.assigns.board, before.stage_id, lane_ids, before.id) do
+      nil ->
+        close_drawer_after_action(socket)
+
+      next_ref ->
+        socket
+        |> put_flash(:info, review_decision_flash(socket, decision, before, updated))
+        |> push_patch(to: card_path(socket.assigns, next_ref))
+    end
+  end
+
+  # The lane's card ids in column order — captured BEFORE the decision moves the card out of it.
+  defp lane_ids(socket, %Card{stage_id: stage_id}) do
+    socket.assigns.board |> Cards.stage_column(stage_id) |> Enum.map(& &1.id)
+  end
+
+  # Names where the decided card actually landed. An Approve that stayed put completed in place at
+  # the terminal stage, which approve_label/1 words as "Done".
+  defp review_decision_flash(socket, decision, %Card{} = before, %Card{} = updated) do
+    ref = Cards.ref(socket.assigns.board, before)
+
+    destination =
+      if decision == :approved and updated.stage_id == before.stage_id,
+        do: "Done",
+        else: Boards.stage_display_name(find_stage_by_id(socket, updated.stage_id))
+
+    case decision do
+      :approved -> "Approved #{ref} → #{destination}"
+      :rejected -> "Sent #{ref} back to #{destination}"
+    end
   end
 
   defp close_drawer_after_action(socket) do

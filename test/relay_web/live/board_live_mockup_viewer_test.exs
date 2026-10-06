@@ -248,6 +248,22 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
     assert reloaded.status == :working
   end
 
+  test "12b. Approve from the sheet advances to the next card awaiting review (RE388)",
+       %{conn: conn, board: board, review: review, m1: m1} do
+    # created after MY1, so it lands at the TOP of Review — MY1 is now the bottom card
+    in_review_card(review, "Second")
+    view = viewer(conn, board, m1)
+
+    view |> element("#review-approve") |> render_click()
+
+    assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+    render_async(view)
+
+    refute has_element?(view, "#mockup-viewer")
+    assert has_element?(view, "#card-drawer", "Second")
+    assert has_element?(view, "#flash-info", "Approved MY1 → Deploy")
+  end
+
   test "13. Reject from the sheet sends the card back with the note", %{conn: conn, board: board, plan: plan, m1: m1} do
     view = viewer(conn, board, m1)
     view |> element("#review-request-changes") |> render_click()

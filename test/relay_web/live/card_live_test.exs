@@ -17,6 +17,10 @@ defmodule RelayWeb.CardLiveTest do
     %{board: board, card: card, ref: Cards.ref(board, card)}
   end
 
+  # LiveViewTest has `refute_redirected/1` but no patch counterpart; a push_patch lands in the
+  # test process as this message, so its absence is "no patch happened".
+  defp refute_patched(%{proxy: {ref, topic, _}}), do: refute_received({^ref, {:patch, ^topic, _}})
+
   describe "/cards/:ref" do
     test "renders the card body with no board and no web chrome", %{conn: conn, board: board, ref: ref} do
       {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
@@ -80,6 +84,24 @@ defmodule RelayWeb.CardLiveTest do
       refute has_element?(view, "#review-panel")
       assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
       assert Cards.get_card_by_ref(board, ref).status == :working
+    end
+
+    test "approving in card mode never advances to the next card awaiting review (RE388)",
+         %{conn: conn, board: board, ref: ref} do
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      {:ok, other} = Cards.create_card(review, %{title: "Other"})
+      {:ok, _other} = Cards.set_status(other, %{status: :in_review})
+
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      render_async(view)
+
+      render_click(view, "review_approve", %{})
+
+      refute_patched(view)
+      assert has_element?(view, "#card-drawer .drawer-stage-chip", "Deploy")
+      assert has_element?(view, "#card-drawer", "Review me")
+      refute has_element?(view, "#card-drawer", "Other")
+      refute has_element?(view, "#flash-info")
     end
 
     test "answering stays on the card and updates in place (RLY-115)",
