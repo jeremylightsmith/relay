@@ -87,6 +87,8 @@ defmodule RelayWeb.Browser.EmbedMockupViewerTest do
       box: box.id,
       render: box.dataset.render,
       boxWidth: box.getBoundingClientRect().width,
+      viewportWidth: window.innerWidth,
+      layoutWidth: document.documentElement.clientWidth,
       frameWidth: frame.getBoundingClientRect().width,
       offsetWidth: frame.offsetWidth,
       transform: getComputedStyle(frame).transform,
@@ -141,7 +143,13 @@ defmodule RelayWeb.Browser.EmbedMockupViewerTest do
     s = frame_state(conn)
     assert s["render"] == "phone", inspect(s)
     assert s["frameWidth"] == s["boxWidth"], inspect(s)
-    assert_in_delta s["boxWidth"], 390, 1
+    # The frame fills the layout viewport. That is 390px wherever scrollbars overlay (iOS, macOS),
+    # but the open card drawer's daisyUI scroll lock sets `scrollbar-gutter: stable` on <html>,
+    # which reserves a classic 15px gutter on Linux Chromium (CI) — so measure the layout width
+    # rather than hard-coding 390.
+    assert s["viewportWidth"] == 390, inspect(s)
+    assert_in_delta s["boxWidth"], s["layoutWidth"], 1
+    assert s["layoutWidth"] >= 390 - 15, inspect(s)
   end
 
   # The open card drawer checks `.drawer-toggle`, which makes daisyUI set
