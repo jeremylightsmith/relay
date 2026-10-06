@@ -7,7 +7,10 @@ defmodule Relay.Runs.RunnerReaper do
   (`close_orphaned_runs/0`: closes any run still active while its card sits in a terminal stage,
   RLY-233, or is archived, RE335), and unresumable-run ageing (`abandon_unresumable_runs/0`: fails a parked run whose
   resume the scheduler has refused continuously for `unresumable_after_s/0`, so a dead end
-  becomes a visible failure a human can `retry` instead of a silent forever-wait, RE297). It
+  becomes a visible failure a human can `retry` instead of a silent forever-wait, RE297), and
+  scheduler presence (`SchedulerSupervisor.reconcile/0`: adopts any board that has no scheduler
+  — created, unarchived or restored since boot — so its cards dispatch instead of sitting
+  `ready` with nothing to tick them, RE387). It
   holds no state beyond its timer — the policies are pure/DB functions; this is only their
   heartbeat, and its first tick (≤ one interval after boot) doubles as the startup catch-up.
   """
@@ -35,6 +38,9 @@ defmodule Relay.Runs.RunnerReaper do
     Relay.Runs.reclaim_stale_runners()
     Relay.Runs.close_orphaned_runs()
     Relay.Runs.abandon_unresumable_runs()
+    # Last on purpose: the three run-lifecycle policies above predate this one, and a raise here
+    # must not cost them their sweep.
+    Relay.Runs.SchedulerSupervisor.reconcile()
     Process.send_after(self(), :sweep, state.interval)
     {:noreply, state}
   end

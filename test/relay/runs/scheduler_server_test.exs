@@ -38,7 +38,9 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
     @impl true
     def start_run(card_id, flow_key, runner_id) do
-      send(Agent.get(name(), & &1.test), {:start_run, card_id, flow_key, runner_id})
+      state = Agent.get(name(), & &1)
+      if Map.get(state, :raise_on_start), do: raise("engine exploded")
+      send(state.test, {:start_run, card_id, flow_key, runner_id})
       :ok
     end
 
@@ -56,14 +58,14 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
   # Start the FakeEngine's collaborator Agent (named per-test), seeded with the test pid and
   # the canned active runs. Must run before the server so boot reconcile sees these runs.
-  defp start_engine(runs) do
+  defp start_engine(runs, opts \\ []) do
     test = self()
     name = :"fake_engine_#{System.unique_integer([:positive])}"
     FakeEngine.put_name(name)
 
     start_supervised!(%{
       id: FakeEngine,
-      start: {Agent, :start_link, [fn -> %{test: test, runs: runs} end, [name: name]]}
+      start: {Agent, :start_link, [fn -> Map.merge(%{test: test, runs: runs}, Map.new(opts)) end, [name: name]]}
     })
 
     :ok
@@ -131,6 +133,22 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
     refute_receive {:start_run, _, _, _}, 50
     assert Repo.get!(Card, card.id).status == :queued
+  end
+
+  # RE387: a reconcile that raises used to crash the board's scheduler; its boot reconcile raised
+  # again on every restart, so one bad board blew the shared SchedulerSupervisor's restart
+  # intensity and took EVERY board's scheduler down with it. The failure must stay on its board.
+  test "a reconcile that raises is logged and the board's scheduler survives" do
+    %{board: board, exec_a: exec_a} = board_with_flow(:ready)
+    start_engine([], raise_on_start: true)
+    pid = start_server(board.id)
+    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Server.reconcile_now(pid) end)
+
+    assert Process.alive?(pid)
+    assert log =~ "engine exploded"
+    assert log =~ to_string(board.id)
   end
 
   test "capacity appearing drives a dispatch without waiting a tick (criterion 2)" do

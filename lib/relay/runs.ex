@@ -47,6 +47,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
   alias Relay.Runs.Scheduler.Snapshot
+  alias Relay.Runs.SchedulerSupervisor
   alias Relay.Runs.Transitions
   alias Schemas.Board
   alias Schemas.Card
@@ -2756,7 +2757,26 @@ defmodule Relay.Runs do
     |> layer_pin_freshness(board, now)
     |> layer_resume_refusal(run, now)
     |> override_verdict(run, last, job, board, now, capacity)
+    |> layer_scheduler_presence(board)
   end
+
+  # RE387: `:dispatchable` means "on the scheduler's next tick" — false when no scheduler is
+  # registered for the board, which is exactly the stall this verdict used to hide for hours.
+  defp layer_scheduler_presence(%{verdict: :dispatchable} = base, board) do
+    if SchedulerSupervisor.scheduler_running?(board.id) do
+      base
+    else
+      %{
+        base
+        | verdict: :no_scheduler,
+          detail:
+            "This card is ready to dispatch, but no scheduler is running for this board, so nothing " <>
+              "will tick it. The runner reaper re-adopts boards on its next sweep; restarting the app also does."
+      }
+    end
+  end
+
+  defp layer_scheduler_presence(base, _board), do: base
 
   # `resume_refused_since` is a run COLUMN, so the pure snapshot cannot carry it — layered here
   # exactly as current_node is (RE297). The age is what turns "refused" into "refused long

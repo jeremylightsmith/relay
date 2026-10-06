@@ -412,4 +412,30 @@ defmodule Relay.Runs.DiagnoseTest do
     assert %{evidence: evidence} = Runs.diagnose(board, card)
     assert Map.keys(evidence.capacity) == [a.id]
   end
+
+  describe "no_scheduler (RE387)" do
+    # The planner says "would dispatch on the next tick", but only a running scheduler ticks. With
+    # none registered for the board, that answer hid an hours-long stall on every board.
+    setup %{board: board, queue: queue, works: works} do
+      insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+      card = insert(:card, stage: queue, status: :ready)
+
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{"name" => "relay@blackrock", "interval" => 30, "version" => Runs.min_runner_version()})
+
+      :ok = Capacity.put(runner.id, %{"shared_clean" => 1, "exclusive" => 0})
+      {:ok, card: card}
+    end
+
+    test "a dispatchable card on a board with no scheduler says nothing will tick it", %{board: board, card: card} do
+      assert %{verdict: :no_scheduler, detail: detail} = Runs.diagnose(board, card)
+      assert detail =~ "no scheduler"
+    end
+
+    test "with the board's scheduler registered the card is dispatchable", %{board: board, card: card} do
+      {:ok, _} = Registry.register(Relay.Runs.SchedulerRegistry, board.id, nil)
+
+      assert %{verdict: :dispatchable} = Runs.diagnose(board, card)
+    end
+  end
 end

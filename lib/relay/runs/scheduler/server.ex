@@ -23,6 +23,8 @@ defmodule Relay.Runs.Scheduler.Server do
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Snapshot
 
+  require Logger
+
   @tick_ms 60_000
   @debounce_ms 50
 
@@ -88,7 +90,23 @@ defmodule Relay.Runs.Scheduler.Server do
     %{state | pending?: true}
   end
 
+  # A raise here must stay on this board (RE387). Uncaught, it crashed the server, whose boot
+  # reconcile raised again on every restart — blowing the shared SchedulerSupervisor's restart
+  # intensity and taking every board's scheduler down with it. Logged and retried on the next
+  # event or tick instead.
   defp reconcile(state) do
+    do_reconcile(state)
+  catch
+    kind, reason ->
+      Logger.error(
+        "scheduler reconcile failed for board #{state.board_id}: " <>
+          Exception.format(kind, reason, __STACKTRACE__)
+      )
+
+      state
+  end
+
+  defp do_reconcile(state) do
     {snapshot, cards_by_id} = build_snapshot(state)
     plan = Scheduler.plan(snapshot)
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))
