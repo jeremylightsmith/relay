@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
+import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
@@ -116,7 +118,7 @@ void main() {
       await tester.pumpAndSettle();
       now = now.add(const Duration(seconds: 16));
 
-      await tester.pageBack();
+      CardScreen.navBack(GoRouter.of(tester.element(find.byType(CardScreen))));
       await tester.pumpAndSettle();
 
       expect(repo.calls, 2);

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../api/api_client.dart';
 import '../auth/auth_controller.dart';
 import '../boards/current_board.dart';
+import '../card/card_screen.dart';
 import '../needs_you/feed_controller.dart';
 import '../needs_you/feed_repository.dart';
 import '../needs_you/models/feed_row.dart';
@@ -315,8 +316,11 @@ final reviewQueueProvider = NotifierProvider<ReviewQueue, ReviewQueueState>(
 /// (RLY-87), `board` and `kind` riding along so it picks its bottom bar — and so a
 /// needs_input card is answered through the web stepper inside the host's webview, the
 /// same surface the Board tab opens. The native answer screen it used to fork to is gone.
+///
+/// RE393: `back` names the list the card was opened from for the web nav bar.
 String routeFor(QueueItem item) =>
-    '/cards/${item.ref}?board=${item.boardSlug}&kind=${item.kind}';
+    '/cards/${item.ref}?board=${item.boardSlug}&kind=${item.kind}'
+    '&back=${Uri.encodeQueryComponent(CardScreen.backFromNeedsYou)}';
 
 /// Applies a destination from [ReviewQueue]. `/needs-you` goes back to the shell tab;
 /// a card *replaces* the one just decided, so clearing a long queue never grows the

@@ -126,8 +126,8 @@ void main() {
       await tester.tap(find.byKey(const Key('inbox_row_RLY-1')));
       await tester.pumpAndSettle();
 
-      // Pop back to the inbox via the card host's AppBar back button.
-      await tester.pageBack();
+      // Pop back to the inbox via the web nav bar's back (relayNavBack).
+      CardScreen.navBack(GoRouter.of(tester.element(find.byType(CardScreen))));
       await tester.pumpAndSettle();
 
       expect(repo.calls, 1, reason: 'fetched moments ago — the guard skips');

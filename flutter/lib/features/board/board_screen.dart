@@ -7,6 +7,7 @@ import '../../config.dart';
 import '../boards/board_switcher.dart';
 import '../boards/current_board.dart';
 import '../card/card_nav_context.dart';
+import '../card/card_screen.dart';
 import 'new_card_sheet.dart';
 
 /// The Board tab: the **embedded chromeless LiveView board** (RLY-94 · BOARD-01) for
@@ -50,8 +51,9 @@ class BoardScreen extends ConsumerWidget {
     if (ref == null || ref.isEmpty) return null;
     final board = payload['board'] as String? ?? '';
     final kind = payload['kind'] as String?;
-    final base = '/cards/$ref?board=$board';
-    return kind == null ? base : '$base&kind=$kind';
+    final kindParam = kind == null ? '' : '&kind=$kind';
+    return '/cards/$ref?board=$board$kindParam'
+        '&back=${Uri.encodeQueryComponent(CardScreen.backFromBoard)}';
   }
 
   /// The swipe navigation context for a `relayCardTap` payload (RLY-234): the tapped

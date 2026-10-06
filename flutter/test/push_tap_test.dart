@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
@@ -123,7 +124,13 @@ void main() {
       expect(find.byKey(const Key('board_switched_toast')), findsOneWidget);
       expect(find.text('Switched to Data pipeline'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('card_back')));
+      expect(
+        tester.widget<CardScreen>(find.byType(CardScreen)).backLabel,
+        isNull,
+        reason: 'a push is an orphan — the web shows plain "Back"',
+      );
+
+      CardScreen.navBack(GoRouter.of(tester.element(find.byType(CardScreen))));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('needs_you_header')), findsOneWidget);
