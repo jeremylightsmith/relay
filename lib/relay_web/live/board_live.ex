@@ -534,6 +534,7 @@ defmodule RelayWeb.BoardLive do
         focus={@story_map_focus}
         hide_complete={@story_map_hide_complete}
         filter_active={@story_map_filter_active}
+        open_ref={@open_ref}
       />
       <.card_drawer
         :if={@selected_card}
@@ -869,6 +870,7 @@ defmodule RelayWeb.BoardLive do
   attr :focus, :any, required: true, doc: "the focused activity id, or nil"
   attr :hide_complete, :boolean, required: true
   attr :filter_active, :boolean, required: true
+  attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
 
   defp story_map_viewport(assigns) do
     # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the
@@ -964,6 +966,7 @@ defmodule RelayWeb.BoardLive do
           stages={@board.stages}
           stalled_ids={@stalled_ids}
           open={@tray_open}
+          open_ref={@open_ref}
         />
         <div id="story-map-surface" class="relative min-w-0 flex-1 overflow-auto">
           <%!--
@@ -998,6 +1001,7 @@ defmodule RelayWeb.BoardLive do
             compose_form={@compose_form}
             zoom={@zoom}
             focus={@focus_activity}
+            open_ref={@open_ref}
           />
           <StoryMapComponents.story_map_empty
             :if={@activities == []}

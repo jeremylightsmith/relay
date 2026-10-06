@@ -228,6 +228,69 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
     end
   end
 
+  describe "RE389 — the open card's highlight" do
+    test "clicking a map card marks exactly that card open", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view, ".story-map-card[data-open]")
+
+      view |> element("##{card_dom_id(ctx.board, ctx.sso)}") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+      assert has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]))
+      assert open_count(view) == 1
+    end
+
+    test "a URL-driven switch moves the highlight to the new card", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      bulk_ref = Cards.ref(ctx.board, ctx.bulk)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+
+      render_patch(view, ~p"/board/#{ctx.board.slug}/story-map?card=#{bulk_ref}")
+
+      assert has_element?(view, ~s(.story-map-card[data-ref="#{bulk_ref}"][data-open]))
+      refute has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]))
+    end
+
+    test "closing the drawer removes the highlight", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+
+      assert has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]))
+
+      view |> element("#card-drawer-close") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view, ".story-map-card[data-open]")
+    end
+
+    test "an UNMAPPED card opened by deep link is highlighted in the tray", %{conn: conn} = ctx do
+      ref = Cards.ref(ctx.board, ctx.dashboards)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{ref}")
+
+      assert has_element?(view, "#story-map-tray-card-#{ref}[data-open]")
+      assert open_count(view) == 1
+    end
+
+    test "the highlight survives the open card being updated elsewhere", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+
+      {:ok, _card} = Cards.update_card(ctx.sso, %{title: "Renamed"})
+
+      assert has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]), "Renamed")
+    end
+
+    test "embed mode never highlights a card", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?embed=1&card=#{sso_ref}")
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, ".story-map-card[data-open]")
+    end
+  end
+
   describe "realtime" do
     test "a new activity appears without a reload", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
@@ -1526,6 +1589,10 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
 
   defp card_dom_id(board, card), do: "story-map-card-#{Cards.ref(board, card)}"
   defp tray_dom_id(board, card), do: "story-map-tray-card-#{Cards.ref(board, card)}"
+
+  defp open_count(view) do
+    view |> render() |> LazyHTML.from_document() |> LazyHTML.query(".story-map-card[data-open]") |> Enum.count()
+  end
 
   # RE257 — a second signed-in member of the same board, and their own connection. `insert/2`
   # and `build_conn/0` come from ConnCase's `import Relay.Factory` / `import Phoenix.ConnTest`.

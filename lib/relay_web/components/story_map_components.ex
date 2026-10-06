@@ -724,6 +724,8 @@ defmodule RelayWeb.StoryMapComponents do
     default: nil,
     doc: "the focused %Schemas.StoryActivity{} (RelayWeb.StoryMapGrid.resolve_focus/2), or nil"
 
+  attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
+
   def story_map(assigns) do
     ~H"""
     <div id="story-map-grid" style={grid_style(@grid, @draft)}>
@@ -934,6 +936,7 @@ defmodule RelayWeb.StoryMapComponents do
           compose_form={@compose_form}
           read_only={@read_only}
           zoom={@zoom}
+          open_ref={@open_ref}
         />
       <% end %>
     </div>
@@ -970,6 +973,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :compose_form, :any, default: nil, doc: "required when composing"
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :zoom, :atom, values: @zoom_levels, default: :full
+  attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
 
   def story_map_cell(assigns) do
     assigns =
@@ -984,9 +988,10 @@ defmodule RelayWeb.StoryMapComponents do
       style={cell_style(@column, @column_index, @lane_index, @zoom)}
     >
       <.story_map_card
-        :for={card <- @cards}
+        :for={face <- Enum.map(@cards, &card_face(&1, @board, @stages, @stalled_ids))}
         zoom={@zoom}
-        {card_face(card, @board, @stages, @stalled_ids)}
+        open={open?(face, @open_ref)}
+        {face}
       />
       <.form
         :if={@composing and not @read_only}
@@ -1074,6 +1079,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :owners, :list, default: []
   attr :active_owner, :atom, values: [:human, :ai, nil], default: nil
   attr :zoom, :atom, values: @zoom_levels, default: :full
+  attr :open, :boolean, default: false, doc: "RE389 — the drawer is showing this card (renders data-open)"
 
   def story_map_card(assigns) do
     ~H"""
@@ -1088,6 +1094,7 @@ defmodule RelayWeb.StoryMapComponents do
       data-hue={@hue}
       data-done={to_string(@done)}
       data-zoom={@zoom}
+      data-open={@open}
       phx-click="select_card"
       phx-value-ref={@ref}
     >
@@ -1123,6 +1130,7 @@ defmodule RelayWeb.StoryMapComponents do
   attr :stages, :list, required: true
   attr :stalled_ids, :any, required: true
   attr :open, :boolean, default: true
+  attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
 
   def unmapped_tray(assigns) do
     ~H"""
@@ -1152,8 +1160,9 @@ defmodule RelayWeb.StoryMapComponents do
         </div>
         <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 14px;">
           <.tray_card
-            :for={card <- @cards}
-            face={card_face(card, @board, @stages, @stalled_ids)}
+            :for={face <- Enum.map(@cards, &card_face(&1, @board, @stages, @stalled_ids))}
+            face={face}
+            open={open?(face, @open_ref)}
           />
         </div>
       </div>
@@ -1329,6 +1338,7 @@ defmodule RelayWeb.StoryMapComponents do
   end
 
   attr :face, :map, required: true
+  attr :open, :boolean, default: false
 
   defp tray_card(assigns) do
     ~H"""
@@ -1339,6 +1349,7 @@ defmodule RelayWeb.StoryMapComponents do
       tabindex="0"
       draggable="true"
       data-ref={@face.ref}
+      data-open={@open}
       phx-click="select_card"
       phx-value-ref={@face.ref}
       style={"flex:0 0 auto;background:var(--color-base-100);border:1px solid var(--color-field-border);border-left:3px solid #{card_accent(@face.hue, @face.done)};border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:7px;cursor:pointer;box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 7%, transparent);"}
@@ -1766,4 +1777,9 @@ defmodule RelayWeb.StoryMapComponents do
       "background:color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));" <>
       "border-radius:20px;padding:#{padding};"
   end
+
+  # RE389 — the one open/not-open comparison for the grid card and the tray card. A nil
+  # open ref (closed drawer, embed, card mode) matches nothing.
+  defp open?(_face, nil), do: false
+  defp open?(%{ref: ref}, open_ref), do: ref == open_ref
 end

@@ -138,16 +138,7 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
   end
 
   test "the story map drawer hands focus back to its card on close, with card nav still off", ctx do
-    {:ok, board} = Boards.create_board(ctx.user, %{name: "Focus map"})
-    {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
-    {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
-    [mvp | _later] = StoryMap.list_releases(board)
-
-    board = Boards.get_board!(ctx.user, board.slug)
-    [backlog | _rest] = board.stages
-    {:ok, card} = Cards.create_card(backlog, %{title: "Add SSO"})
-    {:ok, _placed} = StoryMap.assign_card(card, %{story_step_id: step.id, release_id: mvp.id})
-    ref = Cards.ref(board, card)
+    {board, ref} = story_map_board(ctx.user)
 
     ctx.conn
     |> visit_board("/board/#{board.slug}/story-map")
@@ -163,6 +154,21 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> assert_focused(ref)
   end
 
+  test "RE389 — the open story-map card is marked open and keeps its ring while focus is in the drawer",
+       ctx do
+    {board, ref} = story_map_board(ctx.user)
+    card = "#story-map-card-#{ref}"
+
+    ctx.conn
+    |> visit_board("/board/#{board.slug}/story-map")
+    |> assert_has("#story-map-grid")
+    |> click(card)
+    |> assert_drawer_shows(ref)
+    |> focus_in_drawer()
+    |> assert_has("#{card}[data-open]")
+    |> assert_outline_style(card, "auto")
+  end
+
   # RE389 — the drawer's card wears the focus-ring highlight from the moment it opens, wherever
   # keyboard focus is. A mouse click doesn't match :focus-visible, so the ring comes only from
   # the [data-open] rule.
@@ -174,7 +180,7 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> click(board_card(first))
     |> assert_drawer_shows(first)
     |> assert_has(open_card(first))
-    |> assert_outline_style(first, "auto")
+    |> assert_outline_style(board_card(first), "auto")
   end
 
   test "the open card keeps its ring while focus is inside the drawer", ctx do
@@ -186,7 +192,7 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> assert_drawer_shows(first)
     |> focus_in_drawer()
     |> assert_has(open_card(first))
-    |> assert_outline_style(first, "auto")
+    |> assert_outline_style(board_card(first), "auto")
   end
 
   test "Escape clears the open highlight", ctx do
@@ -208,6 +214,20 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     Enum.each(1..count, fn n -> {:ok, _card} = Cards.create_card(stage, %{title: "Focus #{n}"}) end)
 
     board |> Cards.stage_column(stage.id) |> Enum.map(&Cards.ref(board, &1))
+  end
+
+  # A story-map board with one card placed in a step × release cell. Returns {board, card ref}.
+  defp story_map_board(user) do
+    {:ok, board} = Boards.create_board(user, %{name: "Focus map"})
+    {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
+    {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
+    [mvp | _later] = StoryMap.list_releases(board)
+
+    board = Boards.get_board!(user, board.slug)
+    [backlog | _rest] = board.stages
+    {:ok, card} = Cards.create_card(backlog, %{title: "Add SSO"})
+    {:ok, _placed} = StoryMap.assign_card(card, %{story_step_id: step.id, release_id: mvp.id})
+    {board, Cards.ref(board, card)}
   end
 
   defp title_of(board, stage, ref) do
@@ -246,9 +266,9 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     end)
   end
 
-  defp assert_outline_style(session, ref, style) do
+  defp assert_outline_style(session, element, style) do
     unwrap(session, fn %{frame_id: frame_id} ->
-      selector = Jason.encode!(board_card(ref))
+      selector = Jason.encode!(element)
 
       {:ok, actual} =
         Frame.evaluate(frame_id,
@@ -256,7 +276,7 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
           timeout: 2_000
         )
 
-      assert actual == style, "expected #{ref}'s outlineStyle to be #{style}, got #{inspect(actual)}"
+      assert actual == style, "expected #{element}'s outlineStyle to be #{style}, got #{inspect(actual)}"
     end)
   end
 
