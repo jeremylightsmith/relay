@@ -185,23 +185,26 @@ defmodule RelayWeb.BoardLive do
       embed={@embed}
     >
       <:title>
-        <%!-- RE380 — viewer mode: `Boards / <board> / <card title> / Mockups`, and none of the
-        board's own title or actions (the board stays mounted under the overlay). --%>
-        <span :if={@viewer_mockup_id} id="mockup-viewer-title" class="truncate">Mockups</span>
+        <%!-- RE380 / RE390 — viewer mode: `Boards / <board> / <card title> / Mockups` (or
+        Screenshots), and none of the board's own title or actions (the board stays mounted under
+        the overlay). --%>
+        <span :if={viewer_open?(assigns)} id="mockup-viewer-title" class="truncate">
+          {viewer_label(@viewer.section)}
+        </span>
         <span
-          :if={!@viewer_mockup_id}
+          :if={!viewer_open?(assigns)}
           id="board-name"
           class="truncate shrink-[1000] max-w-[58vw] sm:max-w-[280px]"
         >
           {@board.name}
         </span>
         <.board_view_tabs
-          :if={!@viewer_mockup_id}
+          :if={!viewer_open?(assigns)}
           board_slug={@board.slug}
           active={if(@live_action == :story_map, do: :story_map, else: :board)}
         />
       </:title>
-      <:actions :if={!@viewer_mockup_id}>
+      <:actions :if={!viewer_open?(assigns)}>
         <.card_search
           query={@search_query}
           results={@search_results}
@@ -544,9 +547,9 @@ defmodule RelayWeb.BoardLive do
         board_slug={@board.slug}
         embed={@embed}
         card_nav_enabled={
-          not @embed and @live_action not in [:card, :story_map] and is_nil(@viewer_mockup_id)
+          not @embed and @live_action not in [:card, :story_map] and not viewer_open?(assigns)
         }
-        hidden={@viewer_mockup_id != nil}
+        hidden={viewer_open?(assigns)}
         prev_ref={@prev_ref}
         next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}
@@ -636,23 +639,23 @@ defmodule RelayWeb.BoardLive do
         restored_drafts={MapSet.to_list(@restored_drafts)}
       />
       <.card_mockup_viewer
-        :if={@selected_card && @viewer_mockup_id}
+        :if={viewer_open?(assigns)}
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage)}
-        items={CardMedia.mockup_items(@selected_card.mockups, @attachment_types)}
-        current_key={@viewer_mockup_id}
+        items={viewer_items(assigns, @viewer.section)}
+        current_key={@viewer.key}
         back_patch={viewer_back_path(assigns, Cards.ref(@board, @selected_card))}
-        item_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :mockups, &1)}
-        label="Mockups"
-        noun="Mockup"
+        item_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), @viewer.section, &1)}
+        label={viewer_label(@viewer.section)}
+        noun={viewer_noun(@viewer.section)}
         embed={@embed}
       >
         <:gate>
           <.card_gate_panel
             compact
-            quote_caption={viewer_caption(@selected_card, @viewer_mockup_id)}
+            quote_caption={viewer_caption(assigns)}
             card={@selected_card}
             archived={Card.archived?(@selected_card)}
             runs={@card_runs}
@@ -1110,8 +1113,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:story_map_draft, nil)
       |> assign(:story_map_draft_name, "")
       # RE380 — the mockup on screen in the same-tab viewer (`?mockup=<attachment id>`), or nil.
-      # Only ever one of the open card's mockups: see assign_viewer/2.
-      |> assign(:viewer_mockup_id, nil)
+      # nil | %{section: :mockups | :screenshots, key: _} — see assign_viewer/2.
+      |> assign(:viewer, nil)
       # RE390 — the open card's `%{attachment_id => content_type}` (`Attachments.content_types/1`):
       # whether each mockup / screenshot tile is drawn as HTML or an image. Loaded with the card.
       |> assign(:attachment_types, %{})
@@ -1211,8 +1214,10 @@ defmodule RelayWeb.BoardLive do
     previous_ref = selected_ref(socket)
     previous_card = socket.assigns[:selected_card]
 
-    if mockup_only_change?(socket, ref, previous_ref, params["mockup"]) do
-      {:noreply, assign_viewer(socket, params["mockup"])}
+    viewer = requested_viewer(params)
+
+    if viewer_only_change?(socket, ref, previous_ref, viewer) do
+      {:noreply, assign_viewer(socket, viewer)}
     else
       socket = socket |> maybe_clear_search(ref) |> assign_selected_card(ref)
 
@@ -1222,65 +1227,96 @@ defmodule RelayWeb.BoardLive do
        |> reinsert_open_pair(previous_card, socket.assigns.selected_card)
        |> maybe_push_card_focus(previous_ref, selected_ref(socket))
        |> maybe_push_card_scroll(previous_ref, selected_ref(socket))
-       |> assign_viewer(params["mockup"])}
+       |> assign_viewer(viewer)}
     end
   end
 
-  # RE380 — opening, switching or leaving the mockup viewer on the SAME card only re-assigns the
+  # RE380 / RE390 — opening, switching or leaving the viewer on the SAME card only re-assigns the
   # viewer: assign_selected_card/2 would reset Talk, the streams and the editors, and its async
   # body load re-runs assign_review/2, which empties a half-typed reject note. The ref compare is
   # case-insensitive (RE326: `?card=my1` and `?card=MY1` are the same card).
-  defp mockup_only_change?(_socket, _ref, nil, _mockup), do: false
-  defp mockup_only_change?(_socket, nil, _previous_ref, _mockup), do: false
+  defp viewer_only_change?(_socket, _ref, nil, _viewer), do: false
+  defp viewer_only_change?(_socket, nil, _previous_ref, _viewer), do: false
 
-  defp mockup_only_change?(socket, ref, previous_ref, mockup) do
+  defp viewer_only_change?(socket, ref, previous_ref, viewer) do
     String.upcase(ref) == String.upcase(previous_ref) and
-      (mockup != nil or socket.assigns.viewer_mockup_id != nil)
+      (viewer != nil or socket.assigns.viewer != nil)
   end
 
-  # RE380 — `?mockup=<id>` opens the viewer only when the id is one of the open card's mockups
-  # (`Schemas.Card.mockup_entries/1`, the one source). Anything else — an unknown id, another
-  # card's mockup, a non-mockup attachment — falls back to the card's drawer URL. The patch waits
-  # for the connected render: a dead render has no socket to patch, and the connected mount's
-  # handle_params/3 lands here again and patches then.
+  # RE390 — the viewer a URL asks for: `mockup=<attachment id>` or `screenshot=<n>` (a decimal
+  # integer ≥ 1, parsed exactly). `mockup` wins when both are present; a malformed `n` is
+  # `:invalid`, which falls straight back to the drawer.
+  defp requested_viewer(%{"mockup" => id}) when is_binary(id), do: %{section: :mockups, key: id}
+
+  defp requested_viewer(%{"screenshot" => n}) when is_binary(n) do
+    if n =~ ~r/\A[0-9]+\z/ and String.to_integer(n) >= 1,
+      do: %{section: :screenshots, key: String.to_integer(n)},
+      else: :invalid
+  end
+
+  defp requested_viewer(_params), do: nil
+
+  # RE380 — the viewer opens only on one of the open card's items in the requested section
+  # (`section_items/2`, from `RelayWeb.CardMedia`). Anything else — an unknown id, another card's
+  # mockup, a non-mockup attachment, an out-of-range screenshot — falls back to the card's drawer
+  # URL. The patch waits for the connected render: a dead render has no socket to patch, and the
+  # connected mount's handle_params/3 lands here again and patches then.
+  #
+  # RE390 — screenshots live in `ai_result`, which the light card lacks: while the body is still
+  # loading a screenshot request is kept as-is (`viewer_pending?/1`, the drawer's skeleton shows
+  # meanwhile), and the async body fill's drop_stale_viewer/1 validates it.
   #
   # The replace patch is sent to ourselves rather than pushed in place: a patch pushed from the
   # connected MOUNT's handle_params/3 rides on the join reply, which a reload honours but no
   # handle_info-driven code path (nor LiveViewTest's assert_patch) ever sees. One message later
   # it is an ordinary patch from every caller — mount, a same-card patch, a card_upserted, the
   # async body fill.
-  defp assign_viewer(socket, nil), do: assign(socket, :viewer_mockup_id, nil)
-
-  defp assign_viewer(socket, mockup_id) do
-    if viewer_mockup?(socket.assigns.selected_card, mockup_id) do
-      assign(socket, :viewer_mockup_id, mockup_id)
-    else
-      viewer_fallback(socket)
-    end
-  end
-
-  defp viewer_mockup?(%Card{mockups: mockups}, mockup_id),
-    do: Enum.any?(Card.mockup_entries(mockups), &(&1.id == mockup_id))
-
-  defp viewer_mockup?(_card, _mockup_id), do: false
+  defp assign_viewer(socket, nil), do: assign(socket, :viewer, nil)
+  defp assign_viewer(socket, :invalid), do: viewer_fallback(socket)
+  defp assign_viewer(socket, viewer), do: socket |> assign(:viewer, viewer) |> drop_stale_viewer()
 
   defp viewer_fallback(%{assigns: %{selected_card: %Card{} = card}} = socket) do
-    socket = assign(socket, :viewer_mockup_id, nil)
+    socket = assign(socket, :viewer, nil)
 
     if connected?(socket), do: send(self(), {:viewer_fallback, Cards.ref(socket.assigns.board, card)})
 
     socket
   end
 
-  defp viewer_fallback(socket), do: assign(socket, :viewer_mockup_id, nil)
+  defp viewer_fallback(socket), do: assign(socket, :viewer, nil)
 
-  # RE380 — the open card's mockup on screen went away (a `card_upserted` or the async body fill
-  # replaced `selected_card` with one whose mockups no longer include it): back to the drawer.
-  defp drop_stale_viewer(%{assigns: %{viewer_mockup_id: nil}} = socket), do: socket
+  # RE380 — the item on screen went away (a `card_upserted` or the async body fill replaced
+  # `selected_card` with one whose section no longer holds its key): back to the drawer.
+  defp drop_stale_viewer(%{assigns: %{viewer: nil}} = socket), do: socket
 
-  defp drop_stale_viewer(%{assigns: %{selected_card: card, viewer_mockup_id: id}} = socket) do
-    if viewer_mockup?(card, id), do: socket, else: viewer_fallback(socket)
+  defp drop_stale_viewer(socket) do
+    if viewer_open?(socket.assigns) or viewer_pending?(socket.assigns), do: socket, else: viewer_fallback(socket)
   end
+
+  defp viewer_pending?(%{viewer: %{section: :screenshots}, body_loading?: true}), do: true
+  defp viewer_pending?(_assigns), do: false
+
+  # RE390 — whether the viewer is showing: one is requested AND its key is among the open card's
+  # items in that section. Every "is the viewer up" check reads this.
+  defp viewer_open?(assigns), do: viewer_item(assigns) != nil
+
+  defp viewer_item(%{viewer: %{section: section, key: key}, selected_card: %Card{}} = assigns),
+    do: Enum.find(viewer_items(assigns, section), &(&1.key == key))
+
+  defp viewer_item(_assigns), do: nil
+
+  # RE390 — the viewer's section vocabulary, each spelled once.
+  defp viewer_items(%{selected_card: card, attachment_types: types}, :mockups),
+    do: CardMedia.mockup_items(card.mockups, types)
+
+  defp viewer_items(%{selected_card: card, attachment_types: types}, :screenshots),
+    do: CardMedia.screenshot_items(card.ai_result, types)
+
+  defp viewer_label(:mockups), do: "Mockups"
+  defp viewer_label(:screenshots), do: "Screenshots"
+
+  defp viewer_noun(:mockups), do: "Mockup"
+  defp viewer_noun(:screenshots), do: "Screenshot"
 
   # Card mode selects from the path (/cards/:ref); board mode from ?card=<ref>. In card mode
   # the selection is never nil'd — there is no board behind the drawer to close back to.
@@ -1553,19 +1589,19 @@ defmodule RelayWeb.BoardLive do
     {:noreply, navigate_neighbor(socket, socket.assigns.next_ref)}
   end
 
-  # RE380 — step through the open card's mockups. A nil neighbor (either end, or no viewer open)
+  # RE380 / RE390 — step through the open section's items. A nil neighbor (either end, or no viewer open)
   # is a no-op: the server owns the clamp, whatever the client's disabled ‹ › or swipe said.
   # Switching replaces the history entry, so one browser Back leaves the viewer.
   def handle_event("mockup_prev", _params, socket) do
-    {:noreply, navigate_mockup(socket, mockup_neighbor(socket.assigns, -1))}
+    {:noreply, navigate_viewer(socket, viewer_neighbor(socket.assigns, -1))}
   end
 
   def handle_event("mockup_next", _params, socket) do
-    {:noreply, navigate_mockup(socket, mockup_neighbor(socket.assigns, 1))}
+    {:noreply, navigate_viewer(socket, viewer_neighbor(socket.assigns, 1))}
   end
 
   # Esc in the viewer: back to the card's drawer, as a history push (unlike switching).
-  def handle_event("mockup_back", _params, %{assigns: %{viewer_mockup_id: id}} = socket) when is_binary(id) do
+  def handle_event("mockup_back", _params, %{assigns: %{viewer: %{}}} = socket) do
     ref = Cards.ref(socket.assigns.board, socket.assigns.selected_card)
     {:noreply, push_patch(socket, to: viewer_back_path(socket.assigns, ref))}
   end
@@ -2875,10 +2911,10 @@ defmodule RelayWeb.BoardLive do
   # session's own echo: streams upsert by DOM id and counts/stages are
   # recomputed from the DB, so double-apply is a no-op by construction.
   # RE380 — the deferred half of viewer_fallback/1. Dropped if the user has since left the card
-  # or opened a (valid) mockup: the fallback must never drag them back.
+  # or opened a (valid) viewer item: the fallback must never drag them back.
   @impl true
   def handle_info({:viewer_fallback, ref}, socket) do
-    if is_nil(socket.assigns.viewer_mockup_id) and selected_ref(socket) == ref do
+    if is_nil(socket.assigns.viewer) and selected_ref(socket) == ref do
       {:noreply, push_patch(socket, to: viewer_back_path(socket.assigns, ref), replace: true)}
     else
       {:noreply, socket}
@@ -4983,7 +5019,7 @@ defmodule RelayWeb.BoardLive do
         socket
         |> assign(
           selected_card: nil,
-          viewer_mockup_id: nil,
+          viewer: nil,
           attachment_types: %{},
           selected_stage: nil,
           prev_ref: nil,
@@ -5049,23 +5085,23 @@ defmodule RelayWeb.BoardLive do
     assign(socket, prev_ref: prev, next_ref: next)
   end
 
-  defp mockup_neighbor(%{viewer_mockup_id: nil}, _step), do: nil
+  defp viewer_neighbor(%{viewer: %{section: section, key: key}, selected_card: %Card{}} = assigns, step) do
+    keys = assigns |> viewer_items(section) |> Enum.map(& &1.key)
 
-  defp mockup_neighbor(%{viewer_mockup_id: id, selected_card: card}, step) do
-    ids = card.mockups |> Card.mockup_entries() |> Enum.map(& &1.id)
-
-    case Enum.find_index(ids, &(&1 == id)) do
+    case Enum.find_index(keys, &(&1 == key)) do
       nil -> nil
       index when index + step < 0 -> nil
-      index -> Enum.at(ids, index + step)
+      index -> Enum.at(keys, index + step)
     end
   end
 
-  defp navigate_mockup(socket, nil), do: socket
+  defp viewer_neighbor(_assigns, _step), do: nil
 
-  defp navigate_mockup(socket, id) do
-    ref = Cards.ref(socket.assigns.board, socket.assigns.selected_card)
-    push_patch(socket, to: viewer_path(socket.assigns, ref, :mockups, id), replace: true)
+  defp navigate_viewer(socket, nil), do: socket
+
+  defp navigate_viewer(socket, key) do
+    %{board: board, selected_card: card, viewer: %{section: section}} = socket.assigns
+    push_patch(socket, to: viewer_path(socket.assigns, Cards.ref(board, card), section, key), replace: true)
   end
 
   defp navigate_neighbor(socket, nil), do: socket
@@ -5137,14 +5173,21 @@ defmodule RelayWeb.BoardLive do
 
   # RE380 — the top bar's trail: the board's own, or in viewer mode `Boards / <board> / <card>`
   # whose card crumb patches back to the drawer.
-  defp top_bar_crumbs(%{viewer_mockup_id: id, board: board, selected_card: %Card{} = card} = assigns) when is_binary(id),
-    do: BoardCrumbs.card_mockups(board, card, viewer_back_path(assigns, Cards.ref(board, card)))
+  defp top_bar_crumbs(%{board: board} = assigns) do
+    if viewer_open?(assigns) do
+      card = assigns.selected_card
+      BoardCrumbs.card_mockups(board, card, viewer_back_path(assigns, Cards.ref(board, card)))
+    else
+      BoardCrumbs.board(board)
+    end
+  end
 
-  defp top_bar_crumbs(%{board: board}), do: BoardCrumbs.board(board)
-
-  # RE380 — the caption the sheet's "+ Quote" offers: the mockup on screen, "Mockup" if uncaptioned.
-  defp viewer_caption(%Card{mockups: mockups}, id) do
-    Enum.find_value(Card.mockup_entries(mockups), &(&1.id == id && &1.caption)) || "Mockup"
+  # RE380 / RE390 — the caption the sheet's "+ Quote" offers: the item on screen, else its noun.
+  defp viewer_caption(%{viewer: %{section: section}} = assigns) do
+    case viewer_item(assigns) do
+      %{caption: caption} when is_binary(caption) -> caption
+      _uncaptioned -> viewer_noun(section)
+    end
   end
 
   # RE380 — where the viewer's Back / Esc / card crumb lands: the card's drawer on this host. In

@@ -175,7 +175,7 @@ sharing behavior.
   attachment on the same card** (`Schemas.Attachment.mockup_types/0`, RE390; `422
   invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
-  distinct from `ai_result.screens` (run-result image screenshots).
+  distinct from `ai_result.screens` (run-result screenshots).
   The drawer renders mockups in a **Mockups** section above Description as a wrapping row of 80px
   square tiles (`CoreComponents.mockup_preview/1`, RE374): each tile is a live miniature (an inert
   `<iframe sandbox="allow-scripts">` rendered at 1280px and CSS-scaled down) with the caption as
@@ -188,6 +188,17 @@ sharing behavior.
   on phones it is full screen under one bar with no review controls. Switching (a tile, ←/→,
   ‹ ›, a swipe) replaces the history entry, so one browser Back, Esc or "← Back to card" returns
   to the drawer; an invalid or stale `mockup` id falls back to the drawer.
+  The same viewer opens the AI Result's **Screenshots** (RE390): the drawer shows them as the same
+  80px tiles, and a tile patches to `screenshot=<n>` (1-based among the openable screenshots; an
+  agent-local path is a placeholder tile, never a viewer item) on the same three hosts. BoardLive
+  holds one `viewer` assign, `nil | %{section: :mockups | :screenshots, key: _}`; the sheet shows
+  only the section that was opened and ←/→ stay within it. `mockup` wins when both params are
+  present; a malformed, out-of-range or stale `n` falls back to the drawer (a cold open waits for
+  the async body fill, since the light card has no `ai_result`). Tiles and the viewer pick **HTML
+  vs image** by content type (`Relay.Attachments.content_types/1` → `RelayWeb.CardMedia`): only a
+  same-card `/attachments/<id>` HTML attachment is framed; everything else is an image, shown in
+  the viewer at its natural size in an `overflow-auto` frame. Markdown images in descriptions,
+  specs and comments keep the RE322 `image_lightbox`.
   `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) is the
   legacy RE370 link: an authenticated, membership-scoped redirect to that viewer URL in the
   `:require_authenticated` live_session; it 404s for a non-member, an unknown id, or a non-HTML
