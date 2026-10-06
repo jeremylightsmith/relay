@@ -19,7 +19,7 @@ defmodule RelayWeb do
 
   use Boundary, deps: [Relay, Schemas], exports: [Endpoint, Telemetry, ApiLog]
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  def static_paths, do: ~w(assets fonts images sounds favicon.ico robots.txt)
 
   @doc """
   RE322 — where an uploaded attachment is served (`AttachmentController.show`). `CardJSON`
