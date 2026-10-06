@@ -1286,11 +1286,16 @@ defmodule RelayWeb.BoardLive do
   defp selected_ref(%{assigns: %{selected_card: %Card{} = card, board: board}}), do: Cards.ref(board, card)
   defp selected_ref(_socket), do: nil
 
-  # RE389 — the ref the board renders as open (data-open): the drawer's card, except in embed and
-  # card mode, where there is no board in the DOM. The one home of that exemption.
-  defp open_ref(%{assigns: %{embed: true}}), do: nil
-  defp open_ref(%{assigns: %{live_action: :card}}), do: nil
-  defp open_ref(socket), do: selected_ref(socket)
+  # RE389 — whether a board is rendered behind the drawer. Embed and card mode have no board in
+  # the DOM, so nothing there is highlighted, re-inserted or focused. The one home of that
+  # exemption: open_ref/1, reinsert_open_pair/3 and maybe_push_card_focus/3 all ask it.
+  defp board_in_dom?(%{assigns: %{embed: true}}), do: false
+  defp board_in_dom?(%{assigns: %{live_action: :card}}), do: false
+  defp board_in_dom?(_socket), do: true
+
+  # RE389 — the ref the board renders as open (data-open): the drawer's card, or nil when no
+  # board is in the DOM (board_in_dom?/1).
+  defp open_ref(socket), do: if(board_in_dom?(socket), do: selected_ref(socket))
 
   # RE326 — board focus follows the drawer. Every open, switch and close is a URL change that
   # lands in handle_params/3 (chevron, ←/→, scrim, Esc/✕, archive, browser back/forward), so the
@@ -1298,7 +1303,7 @@ defmodule RelayWeb.BoardLive do
   # highlight column — kanban stream items only re-render when re-inserted):
   #
   #                      focus (maybe_push_card_focus/3)      open highlight (reinsert_open_pair/3)
-  #   embed / card mode  never: no board in the DOM           never: no board in the DOM
+  #   embed / card mode  never: no board in the DOM (board_in_dom?/1, for both columns)
   #   nil → A            no push: a click already focused A,  re-insert A
   #                      and a search result or deep link
   #                      must not steal focus or scroll
@@ -1309,22 +1314,26 @@ defmodule RelayWeb.BoardLive do
   #                      into view (block: "nearest")
   #
   # BoardDnD and StoryMapDnD both no-op when the ref isn't rendered (just archived, filtered out).
-  defp maybe_push_card_focus(%{assigns: %{embed: true}} = socket, _previous_ref, _ref), do: socket
-  defp maybe_push_card_focus(%{assigns: %{live_action: :card}} = socket, _previous_ref, _ref), do: socket
-  defp maybe_push_card_focus(socket, nil, _ref), do: socket
-  defp maybe_push_card_focus(socket, ref, ref), do: socket
-  defp maybe_push_card_focus(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
-  defp maybe_push_card_focus(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+  defp maybe_push_card_focus(socket, previous_ref, ref) do
+    if board_in_dom?(socket), do: push_focus_change(socket, previous_ref, ref), else: socket
+  end
+
+  defp push_focus_change(socket, nil, _ref), do: socket
+  defp push_focus_change(socket, ref, ref), do: socket
+  defp push_focus_change(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
+  defp push_focus_change(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
 
   # RE389 — re-insert the before and after cards so both re-render against the new @open_ref
   # (assigned just before). Each is refetched, never the possibly stale @selected_card struct, and
   # restreamed only when the board renders it: unarchived, in a loaded stage, and — through
   # upsert_card_stream/3's terminal branch — inside the Done window.
-  defp reinsert_open_pair(%{assigns: %{embed: true}} = socket, _previous, _card), do: socket
-  defp reinsert_open_pair(%{assigns: %{live_action: :card}} = socket, _previous, _card), do: socket
-  defp reinsert_open_pair(socket, %Card{id: id}, %Card{id: id}), do: socket
-
   defp reinsert_open_pair(socket, previous, card) do
+    if board_in_dom?(socket), do: reinsert_changed_pair(socket, previous, card), else: socket
+  end
+
+  defp reinsert_changed_pair(socket, %Card{id: id}, %Card{id: id}), do: socket
+
+  defp reinsert_changed_pair(socket, previous, card) do
     [previous, card]
     |> Enum.filter(&match?(%Card{}, &1))
     |> Enum.reduce(socket, &reinsert_board_card(&2, &1.id))

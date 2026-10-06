@@ -5837,10 +5837,7 @@ defmodule RelayWeb.CoreComponents do
                         rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                         vote_count={Map.get(@vote_counts, card.id, 0)}
                         blocked_count={length(Map.get(@blocked_by, card.id, []))}
-                        open={
-                          @open_ref != nil and
-                            Cards.format_ref(@board_key, card.ref_number) == @open_ref
-                        }
+                        open={open_card?(@open_ref, @board_key, card)}
                       />
                     </div>
                     <%!--
@@ -5956,9 +5953,7 @@ defmodule RelayWeb.CoreComponents do
                     rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                     vote_count={Map.get(@vote_counts, card.id, 0)}
                     blocked_count={length(Map.get(@blocked_by, card.id, []))}
-                    open={
-                      @open_ref != nil and Cards.format_ref(@board_key, card.ref_number) == @open_ref
-                    }
+                    open={open_card?(@open_ref, @board_key, card)}
                   />
                 </div>
               </div>
@@ -5968,6 +5963,11 @@ defmodule RelayWeb.CoreComponents do
     <% end %>
     """
   end
+
+  # RE389 — whether `card` is the one the drawer has open (BoardLive's :open_ref). Both
+  # board_card call sites (main lanes and sub-lanes) ask this, so they cannot drift.
+  defp open_card?(nil, _board_key, _card), do: false
+  defp open_card?(open_ref, board_key, card), do: Cards.format_ref(board_key, card.ref_number) == open_ref
 
   @doc """
   RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup
