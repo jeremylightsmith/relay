@@ -21,7 +21,8 @@ defmodule Relay.Runs.Capacity do
   test's advertised capacity can never be read or wiped by another. The
   `{:runner_capacity_changed, runner_id}` broadcast on `topic/0` stays global: a spurious
   wake-up makes a scheduler re-reconcile against its own (correctly scoped) snapshot, which is
-  idempotent. Every `put/2`/`clear/1` broadcasts it so schedulers reconcile immediately
+  idempotent — but not free: every board's scheduler wakes, so `put/2`/`clear/1` broadcast only
+  when the stored slots actually change, letting schedulers reconcile immediately
   (acceptance criterion 2's "without waiting a full tick"). The runner heartbeat feeds this
   store; with no runner connected it is empty and the scheduler is dormant.
 
@@ -63,15 +64,27 @@ defmodule Relay.Runs.Capacity do
   Callers must not pre-atomize (RLY-201).
   """
   def put(runner_id, slots) when is_map(slots) do
-    :ets.insert(table(), {runner_id, normalize(slots)})
-    broadcast(runner_id)
+    entry = {runner_id, normalize(slots)}
+
+    # Broadcast only on a real change: every runner beat re-advertises the same configured
+    # total, and the topic is global, so an unconditional broadcast woke EVERY board's
+    # scheduler on every beat of every runner — a synchronized reconcile burst that drained
+    # the Repo pool in prod. The scheduler's ~60s tick remains the backstop.
+    if :ets.lookup(table(), runner_id) != [entry] do
+      :ets.insert(table(), entry)
+      broadcast(runner_id)
+    end
+
     :ok
   end
 
   @doc "Removes a gone runner and broadcasts the change."
   def clear(runner_id) do
-    :ets.delete(table(), runner_id)
-    broadcast(runner_id)
+    if :ets.member(table(), runner_id) do
+      :ets.delete(table(), runner_id)
+      broadcast(runner_id)
+    end
+
     :ok
   end
 
