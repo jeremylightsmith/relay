@@ -213,10 +213,12 @@ whole list; `[]` or `null` clears it:
 ```
 
 Each entry takes only `url` (required) and `caption` (optional string). The `url` must be the
-`/attachments/<id>` path of an **HTML attachment on this same card** — upload it first with
-`POST /api/cards/:ref/attachments` (`content_type: "text/html"`). Anything else is refused with
+`/attachments/<id>` path of an **HTML or image attachment on this same card** — upload it
+first with `POST /api/cards/:ref/attachments` (`content_type` `text/html`, `image/png`,
+`image/jpeg`, `image/webp` or `image/gif`; `./relay mockups` takes `.html .png .jpg .jpeg .webp
+.gif` files). Anything else is refused with
 `422 invalid_mockups` naming the entry's index; nothing is written. `GET /api/cards/:ref`
-returns the list as `mockups` (`[]` when none). Mockups are served under a sandbox CSP:
+returns the list as `mockups` (`[]` when none). HTML mockups are served under a sandbox CSP:
 inline JS/CSS and `data:` assets, plus **Google Fonts** as the only network exception —
 stylesheets from `https://fonts.googleapis.com` and font files from `https://fonts.gstatic.com`.
 Every other request (remote scripts and images, fetch/XHR/WebSocket/EventSource, frames, form
@@ -235,7 +237,8 @@ that `url` is what a screenshot's `screens[].url` should be.
 ### GET /api/attachments/:id
 
 Download an attachment's raw bytes with the board API key — how `./relay mockups REF --pull`
-reads a card's HTML mockups back. `:id` is the last segment of the `/attachments/<id>` url the
+reads a card's mockups back (it names each file by the returned `Content-Type`, so a PNG
+mockup lands as `NN-<slug>.png`). `:id` is the last segment of the `/attachments/<id>` url the
 upload returned (and that a card's `mockups[].url` / `screens[].url` carry). Returns `200` with
 the stored bytes byte-for-byte and the stored `Content-Type` (HTML keeps its sandbox
 `Content-Security-Policy` and `X-Content-Type-Options: nosniff`), plus

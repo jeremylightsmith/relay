@@ -1,8 +1,8 @@
 defmodule Relay.CardsMockupsTest do
   @moduledoc """
-  RE370 — a card's `mockups`: a REPLACE-only list of HTML attachments on the same card, each with
+  RE370 — a card's `mockups`: a REPLACE-only list of HTML (or, RE390, image) attachments on the same card, each with
   an optional caption. Validated on write so the drawer and the viewer only ever frame this
-  card's own sandboxed HTML.
+  card's own attachments.
   """
   use Relay.DataCase, async: true
 
@@ -48,6 +48,13 @@ defmodule Relay.CardsMockupsTest do
     assert %Attachment{} = Attachments.get_attachment(old_id)
   end
 
+  test "an image attachment on this card is a mockup (RE390)", %{card: card} do
+    url = upload(card, "shot.png", "image/png")
+
+    assert {:ok, %Card{mockups: mockups}} = Cards.set_mockups(card, [%{"url" => url, "caption" => "Empty state"}])
+    assert mockups == [%{"url" => url, "caption" => "Empty state"}]
+  end
+
   test "an empty list clears to nil", %{card: card} do
     {:ok, card} = Cards.set_mockups(card, [%{"url" => upload(card, "a.html")}])
     assert {:ok, %Card{mockups: nil}} = Cards.set_mockups(card, [])
@@ -68,15 +75,18 @@ defmodule Relay.CardsMockupsTest do
 
       assert {:error, {:invalid_mockups, message}} = Cards.set_mockups(card, [%{"url" => url}])
       assert message =~ "mockups[0]"
-      assert message =~ "HTML attachment on this card"
+      assert message =~ "HTML or image attachment on this card"
       assert Repo.get!(Card, card.id).mockups == nil
     end
 
-    test "a non-HTML attachment on this card", %{card: card} do
-      url = upload(card, "shot.png", "image/png")
+    test "an image attachment on ANOTHER card (RE390)", %{card: card, stage: stage} do
+      other = insert(:card, stage: stage)
+      url = upload(other, "theirs.png", "image/png")
 
       assert {:error, {:invalid_mockups, message}} = Cards.set_mockups(card, [%{"url" => url}])
-      assert message =~ "HTML attachment on this card"
+      assert message =~ "mockups[0]"
+      assert message =~ "HTML or image attachment on this card"
+      assert Repo.get!(Card, card.id).mockups == nil
     end
 
     test "a url that is not an attachment path", %{card: card} do

@@ -66,7 +66,7 @@ defmodule Schemas.Card do
     field :ai_result, :map
     # RE370 — HTML mockups: [%{"url" => "/attachments/<id>", "caption" => String | nil}], nil when
     # none. Never cast by changeset/2 — written only through Relay.Cards.set_mockups/2, which
-    # validates every url is an HTML attachment on this card and REPLACES the whole list.
+    # validates every url is an HTML or image attachment on this card and REPLACES the whole list.
     field :mockups, {:array, :map}
     field :public_description, :string
 

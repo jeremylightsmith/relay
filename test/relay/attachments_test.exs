@@ -153,4 +153,25 @@ defmodule Relay.AttachmentsTest do
       assert Attachments.get_attachment_for_board(board, "not-a-uuid") == nil
     end
   end
+
+  describe "content_types/1 (RE390)" do
+    test "maps every attachment on the card to its content type, and only that card's" do
+      card = insert(:card)
+      other = insert(:card)
+
+      {:ok, png} = Attachments.create_attachment(card, %{filename: "shot.png", content_type: "image/png", bytes: @png})
+
+      {:ok, html} =
+        Attachments.create_attachment(card, %{filename: "a.html", content_type: "text/html", bytes: "<p>a</p>"})
+
+      {:ok, _theirs} =
+        Attachments.create_attachment(other, %{filename: "b.png", content_type: "image/png", bytes: @png})
+
+      assert Attachments.content_types(card) == %{png.id => "image/png", html.id => "text/html"}
+    end
+
+    test "a card with no attachments is an empty map" do
+      assert Attachments.content_types(insert(:card)) == %{}
+    end
+  end
 end

@@ -56,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 74
-RUNNER_FINGERPRINT = "950c93a5b7479bd11317ea9bf3f26b1a67662fc497706d08d93cc3469535f96d"
+RUNNER_VERSION = 75
+RUNNER_FINGERPRINT = "91659d2e3c18f42305563d0294f5e5baf53b4b05e38a1aac5b99d44f4bb92168"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -146,8 +146,9 @@ def _retryable(method, err, idempotent=False):
 
 def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True,
              idempotent=False, *, decode):
-    """The request/retry core api() and api_bytes() share: bearer auth, the RE336 timeout, the
-    `_retryable` retries and die-on-error. A successful body is handed to `decode`; the soft_404
+    """The request/retry core api(), api_bytes() and api_download() share: bearer auth, the RE336
+    timeout, the `_retryable` retries and die-on-error. A successful response is handed to
+    `decode` (which reads its body, and headers if it needs them); the soft_404
     (None) and soft_conflict (the 409 body) verdicts are returned as they always were."""
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
@@ -164,7 +165,7 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
     for attempt in range(1, API_MAX_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, **open_kwargs) as resp:
-                return decode(resp.read())
+                return decode(resp)
         except socket.timeout as e:
             if caller_timeout:
                 raise   # long-poll read timeout — the claim caller treats it as 'no work'
@@ -215,14 +216,21 @@ def _json_or_empty(raw):
 
 def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True, idempotent=False):
     return _request(method, path, body, soft_404=soft_404, soft_conflict=soft_conflict,
-                    timeout=timeout, auth=auth, idempotent=idempotent, decode=_json_or_empty)
+                    timeout=timeout, auth=auth, idempotent=idempotent,
+                    decode=lambda resp: _json_or_empty(resp.read()))
 
 
 def api_bytes(path):
     """GET `path` with the board key and return the body as raw bytes (RE373) — api() without
     the JSON decode, for downloads. Same core, so the same auth, timeout, GET retries and
     die-on-error."""
-    return _request("GET", path, decode=lambda raw: raw)
+    return _request("GET", path, decode=lambda resp: resp.read())
+
+
+def api_download(path):
+    """api_bytes() plus the response's Content-Type (RE390): `(bytes, content_type)`, the type
+    `None` when the server sent none. `relay mockups --pull` names each file by it."""
+    return _request("GET", path, decode=lambda resp: (resp.read(), resp.headers.get("Content-Type")))
 
 
 def _ref_from_tag(tag):
@@ -725,16 +733,38 @@ def comment(ref, text):
     return api("POST", f"/api/cards/{ref}/comments", {"body": text})
 
 
-def attach(ref, path):
+def attach(ref, path, content_type=None):
+    """Upload `path` to `ref`. The content type is guessed from the extension unless the caller
+    names it (`relay mockups` passes its MOCKUP_TYPES value)."""
     with open(path, "rb") as f:
         data = f.read()
-    content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    content_type = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
     body = {
         "filename": os.path.basename(path),
         "content_type": content_type,
         "data_base64": base64.b64encode(data).decode(),
     }
     return api("POST", f"/api/cards/{ref}/attachments", body)["data"]
+
+
+# RE390: what a mockup file may be — extension (lowercased) → content type. The ONE runner-side
+# table: `relay mockups` validates uploads and types them by it, and `--pull` names a download by
+# it. Its value set is pinned by runner_contract.json's `mockups.content_types`
+# (Schemas.Attachment.mockup_types/0 on the server).
+MOCKUP_TYPES = {".html": "text/html", ".png": "image/png", ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def mockup_type(path):
+    """The MOCKUP_TYPES content type for `path`'s extension, or None when it isn't a mockup."""
+    return MOCKUP_TYPES.get(os.path.splitext(path)[1].lower())
+
+
+def mockup_ext(content_type):
+    """The extension a downloaded mockup is saved with: the first MOCKUP_TYPES extension for its
+    content type (parameters such as `; charset=…` ignored), `.html` when unknown or missing."""
+    base = (content_type or "").split(";", 1)[0].strip().lower()
+    return next((ext for ext, t in MOCKUP_TYPES.items() if t == base), ".html")
 
 
 def mockups_body(entries):
@@ -761,12 +791,12 @@ def mockup_download_path(url):
     return ATTACHMENT_DOWNLOAD_PREFIX + attachment_id(url)
 
 
-def mockup_filename(index, caption):
-    """`NN-<slug>.html` for the 1-based `index`th mockup. The number keeps the card's order and
+def mockup_filename(index, caption, ext=".html"):
+    """`NN-<slug><ext>` for the 1-based `index`th mockup. The number keeps the card's order and
     keeps names unique when captions repeat; the slug is the caption lowercased with every run of
     non-alphanumerics collapsed to `-`, or `mockup` when nothing is left."""
     slug = re.sub(r"[^a-z0-9]+", "-", (caption or "").lower()).strip("-") or "mockup"
-    return f"{index:02d}-{slug}.html"
+    return f"{index:02d}-{slug}{ext}"
 
 
 def default_pull_dir(ref):
@@ -775,8 +805,8 @@ def default_pull_dir(ref):
 
 
 def pull_mockups(ref, dest):
-    """Download every mockup on `ref` into `dest`, byte-for-byte, overwriting; returns
-    [{caption, url, path}]. A card with none returns [] without creating `dest`. A failed
+    """Download every mockup on `ref` into `dest`, byte-for-byte, overwriting, each named with the
+    extension of its served content type (RE390, `mockup_ext`); returns [{caption, url, path}]. A card with none returns [] without creating `dest`. A failed
     download dies naming the attachment id; files already written stay."""
     mockups = get_card(ref).get("mockups") or []
     if not mockups:
@@ -785,10 +815,10 @@ def pull_mockups(ref, dest):
     pulled = []
     for i, m in enumerate(mockups, 1):
         try:
-            data = api_bytes(mockup_download_path(m["url"]))
+            data, content_type = api_download(mockup_download_path(m["url"]))
         except Died as e:
             die(f"mockup {attachment_id(m['url'])} failed to download ({e.msg})")
-        path = os.path.join(dest, mockup_filename(i, m.get("caption")))
+        path = os.path.join(dest, mockup_filename(i, m.get("caption"), mockup_ext(content_type)))
         with open(path, "wb") as f:
             f.write(data)
         pulled.append({"caption": m.get("caption"), "url": m["url"], "path": path})
@@ -1648,8 +1678,8 @@ def cmd_mockups_pull(args):
 def cmd_mockups(args):
     """relay mockups REF FILE… [--caption T…] | --clear | --pull [DIR] (RE370, RE373).
 
-    Uploads each file through the attachments endpoint (`attach`, so the content type comes from
-    the extension — .html → text/html; the server refuses anything else), then REPLACES the
+    Uploads each file through the attachments endpoint, typed by its extension through
+    MOCKUP_TYPES (RE390: .html or an image — anything else dies up front), then REPLACES the
     card's mockups with ONE PATCH. Captions pair with files in order; a file without one is
     captioned with its filename. Every argument error dies before the first request, so a bad
     call never leaves half-uploaded files behind."""
@@ -1664,12 +1694,16 @@ def cmd_mockups(args):
     if args.clear and files:
         die("--clear takes no files — it empties the card's mockups")
     if not args.clear and not files:
-        die("name at least one .html file, or pass --clear")
+        die("name at least one mockup file (.html or an image), or pass --clear")
+    not_mockups = [path for path in files if mockup_type(path) is None]
+    if not_mockups:
+        die(f"not a mockup file: {', '.join(not_mockups)} — a mockup is one of "
+            f"{', '.join(MOCKUP_TYPES)}")
     if len(captions) > len(files):
         die(f"{len(captions)} --caption for {len(files)} file(s) — captions pair with files in order")
     entries = []
     for i, path in enumerate(files):
-        url = attach(args.ref, path)["url"]
+        url = attach(args.ref, path, content_type=mockup_type(path))["url"]
         entries.append((url, captions[i] if i < len(captions) else os.path.basename(path)))
     mockups = set_mockups(args.ref, entries).get("mockups") or []
     emit(args, mockups, format_mockups(args.ref, mockups))
@@ -5731,7 +5765,7 @@ COMMANDS = (
     ("Cards", "depends", "replace a card's blockers (none clears them)"),
     ("Cards", "comment", "comment on a card"),
     ("Cards", "attach", "upload a file to a card and print its markdown"),
-    ("Cards", "mockups", "attach HTML mockups to a card, replacing its list (--clear empties it, --pull downloads them)"),
+    ("Cards", "mockups", "attach HTML or image mockups to a card, replacing its list (--clear empties it, --pull downloads them)"),
     ("Cards", "needs-input", "park a card on questions for a human"),
     ("Cards", "own", "take the baton on a card"),
     ("Cards", "release", "let go of a card's baton"),
@@ -5946,7 +5980,7 @@ def build_parser():
     at = add("attach", cmd_attach, "ref", ("file", "the file to upload"), json_flag=True)
     at.add_argument("--caption", help="alt text for the printed markdown image")
     mk = add("mockups", cmd_mockups, "ref", json_flag=True)
-    mk.add_argument("files", nargs="*", help="self-contained .html files, uploaded in order")
+    mk.add_argument("files", nargs="*", help="self-contained .html files or images (.png .jpg .jpeg .webp .gif), uploaded in order")
     mk.add_argument("--caption", action="append",
                     help="a caption, paired with the files in order (repeat; default: the filename)")
     mk.add_argument("--clear", action="store_true", help="empty the card's mockups instead")

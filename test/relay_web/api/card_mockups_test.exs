@@ -1,8 +1,8 @@
 defmodule RelayWeb.Api.CardMockupsTest do
   @moduledoc """
   RE370 — `relay mockups` PATCHes `{"mockups": [...]}` here after uploading each file through
-  `POST /api/cards/:ref/attachments`. Replace semantics; a url that is not an HTML attachment on
-  this card is `422 invalid_mockups` naming the entry, and nothing is written.
+  `POST /api/cards/:ref/attachments`. Replace semantics; a url that is not an HTML or image
+  attachment on this card is `422 invalid_mockups` naming the entry, and nothing is written.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -72,11 +72,14 @@ defmodule RelayWeb.Api.CardMockupsTest do
     assert conn |> get(~p"/api/cards/#{ref}") |> json_response(200) |> get_in(["data", "mockups"]) == []
   end
 
-  test "a non-HTML attachment is 422", %{conn: conn, ref: ref} do
+  test "an image attachment on this card is a mockup (RE390)", %{conn: conn, ref: ref} do
     png = upload(conn, ref, "shot.png", "image/png")
 
-    assert conn |> patch_mockups(ref, [%{"url" => png}]) |> json_response(422) |> get_in(["error", "code"]) ==
-             "invalid_mockups"
+    assert conn
+           |> patch_mockups(ref, [%{"url" => png, "caption" => "Empty state"}])
+           |> json_response(200)
+           |> get_in(["data", "mockups"]) ==
+             [%{"url" => png, "caption" => "Empty state"}]
   end
 
   test "a non-list mockups is 400", %{conn: conn, ref: ref} do

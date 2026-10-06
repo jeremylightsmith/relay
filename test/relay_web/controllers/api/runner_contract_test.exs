@@ -224,6 +224,8 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "version" => 9,
       "mockups" => %{
         "download_path" => Schemas.Attachment.api_path("<attachment-id>"),
+        # RE390 — what a mockup may be; `./relay`'s MOCKUP_TYPES values must equal it.
+        "content_types" => Enum.sort(Schemas.Attachment.mockup_types()),
         "request" => mockup_placeholders(mockups_request),
         "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"])
       },

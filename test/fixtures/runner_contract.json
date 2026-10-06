@@ -130,6 +130,13 @@
         "url": "/attachments/<attachment-id>"
       }
     ],
+    "content_types": [
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "text/html"
+    ],
     "download_path": "/api/attachments/<attachment-id>",
     "request": {
       "mockups": [

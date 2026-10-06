@@ -1125,7 +1125,8 @@ defmodule Relay.Cards do
 
   Every entry is validated before anything is written: only `mockup_keys/0`, a string caption,
   and a url that is an `/attachments/<id>` path (`Schemas.Attachment.id_from_path/1`) of an
-  **HTML attachment on this card**. The first offending entry is refused as
+  **HTML or image attachment on this card** (`Schemas.Attachment.mockup_types/0`, RE390). The
+  first offending entry is refused as
   `{:error, {:invalid_mockups, message}}`, the message naming its index — the caller is an
   agent that just wrote the list. On success returns `{:ok, card}` (owners preloaded) and
   broadcasts `{:card_upserted, card}` so an open drawer updates live.
@@ -1142,15 +1143,15 @@ defmodule Relay.Cards do
 
   defp validate_mockups(%Card{} = card, mockups) do
     with {:ok, entries} <- mockup_entries(mockups) do
-      html_ids = card_html_attachment_ids(card, Enum.map(entries, & &1.id))
+      mockup_ids = card_mockup_attachment_ids(card, Enum.map(entries, & &1.id))
 
-      case Enum.find(entries, &(&1.id not in html_ids)) do
+      case Enum.find(entries, &(&1.id not in mockup_ids)) do
         nil ->
           {:ok, Enum.map(entries, &%{"url" => &1.url, "caption" => &1.caption})}
 
         %{index: index} ->
           invalid_mockups(
-            ~s(mockups[#{index}]: "url" must be an HTML attachment on this card — upload it with `relay mockups` and use the /attachments/… path it prints)
+            ~s(mockups[#{index}]: "url" must be an HTML or image attachment on this card — upload it with `relay mockups` and use the /attachments/… path it prints)
           )
       end
     end
@@ -1201,7 +1202,7 @@ defmodule Relay.Cards do
     else
       _ ->
         invalid_mockups(
-          ~s(mockups[#{index}]: "url" must be an /attachments/<id> path — upload the HTML with `relay mockups`)
+          ~s(mockups[#{index}]: "url" must be an /attachments/<id> path — upload the file with `relay mockups`)
         )
     end
   end
@@ -1213,14 +1214,15 @@ defmodule Relay.Cards do
 
   defp mockup_caption(_caption, index), do: invalid_mockups(~s(mockups[#{index}]: "caption" must be a string))
 
-  # The ids among `ids` that are HTML attachments on `card` — one query for the whole list.
-  defp card_html_attachment_ids(_card, []), do: []
+  # The ids among `ids` that are mockup-type (HTML or image) attachments on `card` — one query
+  # for the whole list.
+  defp card_mockup_attachment_ids(_card, []), do: []
 
-  defp card_html_attachment_ids(%Card{id: card_id}, ids) do
-    html_type = Attachment.html_type()
+  defp card_mockup_attachment_ids(%Card{id: card_id}, ids) do
+    mockup_types = Attachment.mockup_types()
 
     Attachment
-    |> where([a], a.card_id == ^card_id and a.id in ^ids and a.content_type == ^html_type)
+    |> where([a], a.card_id == ^card_id and a.id in ^ids and a.content_type in ^mockup_types)
     |> select([a], a.id)
     |> Repo.all()
   end

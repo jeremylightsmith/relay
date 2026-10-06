@@ -7,9 +7,11 @@ defmodule Schemas.Attachment do
   programmatically, never cast from input; only `filename` and `content_type` originate from
   the caller.
 
-  This module is the ONE definition of two facts every layer needs: the HTML content type
-  (`html_type/0`, `html?/1` — the controller's sandboxed serving branch and `Relay.Cards`'
-  mockup validation both ask here) and where an attachment is served (`path/1`,
+  This module is the ONE definition of the facts every layer needs: the HTML content type
+  (`html_type/0`, `html?/1` — the controller's sandboxed serving branch asks here), the image
+  types (`image_types/0`), the mockup types (`mockup_types/0`, RE390 — what `Relay.Cards`'
+  mockup validation accepts: HTML or an image; `./relay` mirrors it under
+  `runner_contract.json`'s `mockups.content_types`), and where an attachment is served (`path/1`,
   `id_from_path/1`, `path?/1` — domain-side so `Relay.Cards` can parse a mockup url without
   calling the web layer; `RelayWeb.attachment_path/1` delegates here) — plus where a board API
   key downloads it (`api_path/1`, RE373).
@@ -21,7 +23,8 @@ defmodule Schemas.Attachment do
 
   @image_types ~w(image/png image/jpeg image/webp image/gif)
   @html_type "text/html"
-  @allowed_types @image_types ++ [@html_type]
+  @mockup_types @image_types ++ [@html_type]
+  @allowed_types @mockup_types
   @max_bytes 5_242_880
   @path_prefix "/attachments/"
   @api_path_prefix "/api/attachments/"
@@ -54,6 +57,14 @@ defmodule Schemas.Attachment do
     )
     |> foreign_key_constraint(:card_id)
   end
+
+  @doc "The image content types an attachment may have (RE390)."
+  @spec image_types() :: [String.t()]
+  def image_types, do: @image_types
+
+  @doc "The content types a card mockup may be (RE390): an image or self-contained HTML."
+  @spec mockup_types() :: [String.t()]
+  def mockup_types, do: @mockup_types
 
   @doc "The HTML content type (RE370) — the one spelling of it."
   def html_type, do: @html_type

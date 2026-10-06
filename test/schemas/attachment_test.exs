@@ -13,6 +13,13 @@ defmodule Schemas.AttachmentTest do
     end
   end
 
+  describe "image_types/0 and mockup_types/0 (RE390)" do
+    test "image_types/0 is the image content types and mockup_types/0 adds HTML" do
+      assert Attachment.image_types() == ["image/png", "image/jpeg", "image/webp", "image/gif"]
+      assert Attachment.mockup_types() == ["image/png", "image/jpeg", "image/webp", "image/gif", "text/html"]
+    end
+  end
+
   describe "path/1, id_from_path/1, path?/1 — the domain-side definition of the attachment url" do
     test "path/1 builds the served path and id_from_path/1 inverts it" do
       id = Ecto.UUID.generate()

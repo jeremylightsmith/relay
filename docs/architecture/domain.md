@@ -171,8 +171,9 @@ sharing behavior.
   the raw error.
   A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
   `%{"url", "caption"}` entries, written only through `Relay.Cards.set_mockups/2`: a full
-  REPLACE, validated so every url is an `/attachments/<id>` path of an **HTML attachment on the
-  same card** (`422 invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
+  REPLACE, validated so every url is an `/attachments/<id>` path of an **HTML or image
+  attachment on the same card** (`Schemas.Attachment.mockup_types/0`, RE390; `422
+  invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
   distinct from `ai_result.screens` (run-result image screenshots).
   The drawer renders mockups in a **Mockups** section above Description as a wrapping row of 80px
@@ -265,7 +266,11 @@ sharing behavior.
 - **Attachments** — file uploads onto cards (images, and since RE370 self-contained HTML
   mockups; 5 MB cap), served same-origin by `AttachmentController` at `/attachments/:id`
   (`Schemas.Attachment.path/1` is the one definition of that path — domain-side so
-  `Relay.Cards` can parse it).
+  `Relay.Cards` can parse it). `Schemas.Attachment` also owns `image_types/0` and
+  `mockup_types/0` (RE390 — what a mockup may be; `./relay`'s `MOCKUP_TYPES` is pinned to it by
+  `runner_contract.json`'s `mockups.content_types`). `Relay.Attachments.content_types/1` maps
+  every attachment on a card to its content type in one query — the web layer's only way to
+  learn content types (to render an image mockup differently from an HTML one).
   A REST API key reads the same bytes at the bearer-authed `GET /api/attachments/:id`
   (`RelayWeb.Api.AttachmentController`, RE373; path `Schemas.Attachment.api_path/1`), scoped by
   `Relay.Attachments.get_attachment_for_board/2` to the key's board — 404 for anything off-board —
