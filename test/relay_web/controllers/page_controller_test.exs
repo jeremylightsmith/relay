@@ -133,6 +133,149 @@ defmodule RelayWeb.PageControllerTest do
     end
   end
 
+  describe "GET / design showcase" do
+    defp landing_html(conn), do: conn |> get(~p"/") |> html_response(200)
+
+    defp design_section(conn), do: conn |> landing_html() |> LazyHTML.from_document() |> LazyHTML.query("#design")
+
+    defp class_list(node) do
+      node |> LazyHTML.attribute("class") |> Enum.flat_map(&String.split/1)
+    end
+
+    test "renders the #design section with its eyebrow and headline", %{conn: conn} do
+      html = landing_html(conn)
+
+      assert html =~ ~s(id="design")
+      assert html =~ "DESIGN, BUILT IN"
+      assert html =~ "See it before anyone builds it."
+
+      eyebrow = html |> LazyHTML.from_document() |> LazyHTML.query("#design > div:first-child")
+      assert eyebrow |> LazyHTML.text() |> String.trim() == "DESIGN, BUILT IN"
+      assert "text-success" in class_list(eyebrow)
+    end
+
+    test "the viewer replica shows the approval moment copy", %{conn: conn} do
+      text = conn |> design_section() |> LazyHTML.text()
+
+      for snippet <- [
+            "READY FOR YOUR REVIEW",
+            "Approve",
+            "Request changes",
+            "Redesign the pricing page",
+            "Design · Review",
+            "RE142",
+            "Viewing",
+            "A — three tiers, annual toggle",
+            "1 of 2",
+            "1 / 2",
+            "Simple pricing that grows with you",
+            "Annual · save 20%",
+            "POPULAR"
+          ] do
+        assert text =~ snippet, "expected #design to contain #{inspect(snippet)}"
+      end
+
+      assert text =~ "SSO & audit log"
+    end
+
+    test "the replica is inert: no bindings, buttons, iframes or descendant ids", %{conn: conn} do
+      doc = conn |> landing_html() |> LazyHTML.from_document()
+      section_html = doc |> LazyHTML.query("#design") |> LazyHTML.to_html()
+
+      assert section_html =~ "DESIGN, BUILT IN"
+      refute section_html =~ "phx-"
+      refute section_html =~ "<button"
+      refute section_html =~ "<iframe"
+      assert doc |> LazyHTML.query("#design [id]") |> Enum.count() == 0
+    end
+
+    test "sits after When it's unsure and before The flow", %{conn: conn} do
+      html = landing_html(conn)
+
+      {unsure, _} = :binary.match(html, "A question, not a wrong guess")
+      {design, _} = :binary.match(html, ~s(id="design"))
+      {flow, _} = :binary.match(html, ~s(id="flow"))
+
+      assert unsure < design
+      assert design < flow
+    end
+
+    test "tile A is current, tile B dimmed, and Approve is emphasised", %{conn: conn} do
+      section = design_section(conn)
+
+      current = LazyHTML.query(section, ~s([class*="ring-2 ring-primary ring-offset-2"]))
+      assert Enum.count(current) == 1
+      assert LazyHTML.attribute(current, "title") == ["A — three tiers, annual toggle"]
+
+      dimmed = LazyHTML.query(section, "span.opacity-80")
+      assert Enum.count(dimmed) == 1
+      assert LazyHTML.attribute(dimmed, "title") == ["B — one plan, usage slider"]
+
+      [approve_style] =
+        section
+        |> LazyHTML.query("span.btn")
+        |> Enum.filter(&(&1 |> LazyHTML.text() |> String.trim() == "Approve"))
+        |> Enum.flat_map(&LazyHTML.attribute(&1, "style"))
+
+      assert approve_style =~ "box-shadow:0 0 0 4px color-mix(in oklab, var(--color-success) 22%, transparent)"
+    end
+
+    test "lays out frame-first on phones and sheet-first on desktop", %{conn: conn} do
+      section = design_section(conn)
+
+      aside = LazyHTML.query(section, "aside")
+      assert Enum.count(aside) == 1
+      assert "order-2" in class_list(aside)
+      assert "md:order-1" in class_list(aside)
+
+      pane = LazyHTML.query(section, ~s(div[class*="md:order-2"]))
+      assert Enum.count(pane) == 1
+      assert "order-1" in class_list(pane)
+
+      bar = LazyHTML.query(pane, ~s(div[class*="md:hidden"]))
+      assert Enum.count(bar) == 1
+      assert LazyHTML.text(bar) =~ "1 / 2"
+
+      frame = LazyHTML.query(section, ~s(div[class*="max-h-[300px]"]))
+      assert Enum.count(frame) == 1
+      assert "md:max-h-none" in class_list(frame)
+
+      assert section |> LazyHTML.query("main, header") |> Enum.count() == 0
+    end
+
+    test "the flow strip includes an AI Design stage and fits eight cards", %{conn: conn} do
+      html = landing_html(conn)
+      cards = html |> LazyHTML.from_document() |> LazyHTML.query(~s(section#flow div[class*="border-t-[3px]"]))
+
+      names =
+        Enum.map(cards, fn card ->
+          card |> LazyHTML.query("div.text-sm") |> LazyHTML.text() |> String.trim()
+        end)
+
+      assert names == ["Backlog", "Design", "Spec", "Plan", "Code", "Review", "Deploy", "Complete"]
+
+      design = Enum.at(cards, 1)
+      assert "border-t-secondary" in class_list(design)
+      owner = LazyHTML.query(design, "div.font-mono")
+      assert owner |> LazyHTML.text() |> String.trim() == "AI"
+      assert "text-secondary" in class_list(owner)
+
+      assert Enum.all?(cards, &("min-w-[112px]" in class_list(&1)))
+      refute html =~ "min-w-[120px]"
+    end
+
+    test "the nav gets no #design anchor", %{conn: conn} do
+      hrefs =
+        conn
+        |> landing_html()
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("header nav a[href^='#']")
+        |> LazyHTML.attribute("href")
+
+      assert hrefs == ["#top", "#how", "#flow", "#stages"]
+    end
+  end
+
   describe "GET / when logged in" do
     setup :register_and_log_in_user
 
