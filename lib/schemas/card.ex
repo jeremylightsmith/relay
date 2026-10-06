@@ -38,6 +38,8 @@ defmodule Schemas.Card do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "cards" do
     field :title, :string
     field :description, :string
@@ -204,6 +206,13 @@ defmodule Schemas.Card do
   component, whose `card` attr is any card-shaped map and whose archived state is its own attr.
   """
   def awaiting_answer?(status, archived) when is_boolean(archived), do: status == :needs_input and not archived
+
+  @doc """
+  True when the card is awaiting a human review decision: `:in_review` (RE388). The ONE definition
+  of "awaiting review" — `Relay.Cards.next_awaiting_review/4` gates the review drawer's advance on it.
+  """
+  @spec awaiting_review?(t()) :: boolean()
+  def awaiting_review?(%__MODULE__{status: status}), do: status == :in_review
 
   @doc "The closed set of card statuses — the one definition; the docs generate from it (RE239)."
   def statuses, do: Ecto.Enum.values(__MODULE__, :status)

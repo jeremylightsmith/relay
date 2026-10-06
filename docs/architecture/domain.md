@@ -143,8 +143,10 @@ sharing behavior.
   transport in [runner.md](runner.md); the failure grid in [failures.md](failures.md). Why:
   [ADR 0006](../adr/0006-workflow-orchestration.md), [ADR 0007](../adr/0007-card-lifecycle-and-failure-states.md); per-function detail in the `Relay.Runs` `@moduledoc`.
 - **Cards** — the card lifecycle: create/edit/move/archive, status (`working`,
-  `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject,
-  needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
+  `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject
+  (after a decision, `next_awaiting_review/4` names the next card in the lane awaiting review —
+  `Schemas.Card.awaiting_review?/1` — in `stage_column/2` order, wrapping, for the review drawer
+  to advance to, RE388), needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
   run ends terminally — a separate path from `needs_input`'s genuine question.
   **Tasks** (RE355) are addressable `sub_tasks` rows with a nullable markdown `body`:
   `list_tasks/1`, `get_task/2`, `add_tasks/2`, `update_task/3` and `delete_task/2` write one row
