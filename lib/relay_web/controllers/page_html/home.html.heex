@@ -3,7 +3,7 @@
 <div class="w-full overflow-x-clip">
   <%!-- NAV --%>
   <header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
-    <nav class="mx-auto flex h-[62px] max-w-[1120px] items-center gap-7 px-4 sm:px-8">
+    <nav class="mx-auto flex h-[62px] max-w-[1120px] items-center gap-4 px-4 sm:gap-7 sm:px-8">
       <a href="#top" class="flex items-center gap-2.5">
         <span class="relative flex size-[25px] items-center justify-center rounded-lg bg-primary">
           <span class="size-[9px] rounded-full bg-primary-content"></span>
@@ -18,6 +18,15 @@
         <a href="#stages" class="hover:text-primary">Stages</a>
       </div>
       <span class="flex-1"></span>
+      <a
+        id="nav-github"
+        href={github_url()}
+        aria-label="Relay on GitHub"
+        class="flex items-center gap-1.5 text-[13.5px] text-base-content/70 hover:text-primary"
+      >
+        <.github_mark class="size-[18px]" />
+        <span class="hidden lg:inline">GitHub</span>
+      </a>
       <Layouts.theme_toggle />
       <a
         href={~p"/auth/google"}
@@ -275,6 +284,230 @@
     </div>
   </section>
 
+  <%!-- DESIGN, BUILT IN — a static, inert replica of the mockup viewer (card_mockup_viewer/1)
+       at the approval moment. Transcribed, not called: the real components bring a fixed
+       overlay, phx-* bindings, an iframe and fixed ids. No ids, buttons or bindings in here. --%>
+  <section id="design" class="mx-auto max-w-[1120px] px-4 pb-16 pt-6 sm:px-8">
+    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-success">
+      DESIGN, BUILT IN
+    </div>
+    <h2 class="mb-3.5 max-w-[640px] text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
+      See it before anyone builds it.
+    </h2>
+    <p class="mb-10 max-w-[600px] text-base leading-relaxed text-base-content/70">
+      Cards can start in a Design stage. The AI drafts real mockups right onto the card, and you
+      flip through the options and pick one. Approve sends it on to spec. Request changes sends
+      it back with your note, and the next round starts from what you said.
+    </p>
+
+    <div class="overflow-hidden rounded-[18px] border border-base-300 bg-base-200 text-left shadow-2xl">
+      <div class="flex flex-col md:flex-row">
+        <%!-- Left sheet --%>
+        <aside class="order-2 flex w-full shrink-0 flex-col border-t border-base-300 bg-base-100 md:order-1 md:w-[320px] md:border-t-0">
+          <div class="hidden border-b border-base-300 px-3 py-2.5 md:block">
+            <span class="btn btn-ghost btn-sm gap-1.5 px-2">
+              <span aria-hidden="true">←</span>Back to card
+            </span>
+          </div>
+          <div class="flex flex-col gap-1.5 border-b border-base-300 px-4 py-3">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-sm badge-primary h-5 rounded-[4px] border-none text-[12px]">
+                Design · Review
+              </span>
+              <span class="font-mono text-xs text-base-content/65">RE142</span>
+            </div>
+            <h3 class="text-base font-semibold leading-[1.3]">Redesign the pricing page</h3>
+          </div>
+          <div class="flex flex-1 flex-col gap-5 p-4">
+            <%!-- card_review_panel, compact --%>
+            <section
+              class="flex flex-col gap-3 rounded-[10px] p-3.5"
+              style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
+            >
+              <span
+                class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+                style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
+              >
+                READY FOR YOUR REVIEW
+              </span>
+              <p
+                class="text-[13px] leading-normal"
+                style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
+              >
+                Relay AI finished this. Approve to move it forward, or send it back with a note.
+              </p>
+              <div class="flex gap-2">
+                <span class="relative flex-1">
+                  <span
+                    class="btn btn-sm w-full rounded-lg border-none font-semibold text-success-content"
+                    style="background:var(--color-success);box-shadow:0 0 0 4px color-mix(in oklab, var(--color-success) 22%, transparent);"
+                  >
+                    Approve
+                  </span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    class="pointer-events-none absolute -bottom-4 right-6 size-6 text-base-content drop-shadow"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 3l14 8-6.5 1.5L9 19z"
+                      fill="currentColor"
+                      stroke="var(--color-base-100)"
+                      stroke-width="1.5"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span
+                  class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
+                  style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
+                >
+                  Request changes
+                </span>
+              </div>
+            </section>
+            <%!-- card_mockups_section with a current mockup --%>
+            <section class="space-y-2">
+              <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
+                Mockups
+              </span>
+              <div class="flex flex-wrap gap-3 p-0.5">
+                <span
+                  class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 ring-2 ring-primary ring-offset-2 ring-offset-base-100"
+                  title="A — three tiers, annual toggle"
+                >
+                  <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
+                  </span>
+                  <span class="absolute left-1/2 top-[13px] h-1.5 w-9 -translate-x-1/2 rounded-full bg-base-content/15">
+                  </span>
+                  <span class="absolute inset-x-2 bottom-2 top-7 flex gap-1">
+                    <span class="flex-1 rounded-sm border border-base-300"></span>
+                    <span class="flex-1 rounded-sm border border-primary bg-primary/10"></span>
+                    <span class="flex-1 rounded-sm border border-base-300"></span>
+                  </span>
+                </span>
+                <span
+                  class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 opacity-80"
+                  title="B — one plan, usage slider"
+                >
+                  <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
+                  </span>
+                  <span class="absolute inset-x-4 bottom-2 top-6 rounded-sm border border-base-300">
+                  </span>
+                  <span class="absolute inset-x-6 top-[42px] h-1 rounded-full bg-base-content/15">
+                  </span>
+                  <span class="absolute left-[30px] top-[39px] size-2.5 rounded-full bg-primary">
+                  </span>
+                </span>
+              </div>
+              <p class="text-xs text-base-content/60">
+                Viewing
+                <b class="font-semibold text-base-content/80">A — three tiers, annual toggle</b>
+                · 1 of 2
+              </p>
+              <p class="hidden items-center gap-1 text-xs text-base-content/50 md:flex">
+                <kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd>
+                switch · <kbd class="kbd kbd-xs">Esc</kbd>
+                back to card
+              </p>
+            </section>
+          </div>
+        </aside>
+
+        <%!-- Framed mockup (a div, not <main>: the landing page has no main landmark) --%>
+        <div class="order-1 flex min-w-0 flex-1 flex-col md:order-2 md:border-l md:border-base-300">
+          <%!-- phone bar (mockup_viewer_bar), mobile only --%>
+          <div class="flex items-center gap-1 border-b border-base-300 bg-base-100 px-1.5 py-1.5 md:hidden">
+            <span class="btn btn-ghost btn-sm btn-square text-base">←</span>
+            <div class="flex min-w-0 flex-1 flex-col px-1 leading-tight">
+              <span class="truncate text-sm font-semibold">A — three tiers, annual toggle</span>
+              <span class="font-mono text-[11px] text-base-content/55">1 / 2</span>
+            </div>
+            <span class="btn btn-ghost btn-sm btn-square btn-disabled text-2xl leading-none">
+              ‹
+            </span>
+            <span class="btn btn-ghost btn-sm btn-square text-2xl leading-none">›</span>
+          </div>
+          <div class="p-3 md:p-4">
+            <div class="max-h-[300px] overflow-hidden rounded-lg border border-base-300 bg-base-100 shadow-sm md:max-h-none">
+              <%!-- the AI's mockup: a pricing page --%>
+              <div class="flex items-center gap-2 border-b border-base-300 px-4 py-2.5">
+                <span class="size-3.5 rounded bg-base-content/80"></span>
+                <span class="text-[12px] font-semibold">Acme</span>
+                <span class="flex-1"></span>
+                <span class="hidden text-[11px] text-base-content/55 sm:inline">Product</span>
+                <span class="hidden text-[11px] text-base-content/55 sm:inline">Pricing</span>
+                <span class="rounded-md bg-base-content px-2 py-1 text-[10.5px] font-semibold text-base-100">
+                  Start free
+                </span>
+              </div>
+              <div class="px-5 pb-6 pt-6 text-center sm:px-8">
+                <div class="mb-1.5 text-[20px] font-semibold tracking-[-0.02em] sm:text-[24px]">
+                  Simple pricing that grows with you
+                </div>
+                <div class="mb-4 text-[12px] text-base-content/60">
+                  Every plan includes unlimited boards and a 14-day trial.
+                </div>
+                <div class="mx-auto mb-5 inline-flex rounded-full border border-base-300 bg-base-200 p-0.5 text-[11px] font-semibold">
+                  <span class="rounded-full px-3 py-1 text-base-content/60">Monthly</span>
+                  <span class="rounded-full bg-base-100 px-3 py-1 shadow-sm">
+                    Annual · save 20%
+                  </span>
+                </div>
+                <div class="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
+                  <div class="rounded-lg border border-base-300 p-3.5">
+                    <div class="text-[12px] font-semibold">Starter</div>
+                    <div class="my-1.5">
+                      <span class="text-[22px] font-semibold">$0</span><span class="text-[11px] text-base-content/55"> /mo</span>
+                    </div>
+                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
+                      <li>✓ 3 boards</li>
+                      <li>✓ 1 AI lane</li>
+                    </ul>
+                    <div class="rounded-md border border-base-300 py-1.5 text-center text-[11px] font-semibold">
+                      Get started
+                    </div>
+                  </div>
+                  <div class="rounded-lg border-2 border-base-content p-3.5">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[12px] font-semibold">Team</span>
+                      <span class="rounded bg-base-content px-1.5 py-0.5 text-[9px] font-semibold text-base-100">
+                        POPULAR
+                      </span>
+                    </div>
+                    <div class="my-1.5">
+                      <span class="text-[22px] font-semibold">$12</span><span class="text-[11px] text-base-content/55"> /seat/mo</span>
+                    </div>
+                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
+                      <li>✓ Unlimited boards</li>
+                      <li>✓ 5 AI lanes</li>
+                    </ul>
+                    <div class="rounded-md bg-base-content py-1.5 text-center text-[11px] font-semibold text-base-100">
+                      Start trial
+                    </div>
+                  </div>
+                  <div class="rounded-lg border border-base-300 p-3.5">
+                    <div class="text-[12px] font-semibold">Enterprise</div>
+                    <div class="my-1.5">
+                      <span class="text-[22px] font-semibold">Custom</span>
+                    </div>
+                    <ul class="mb-3 space-y-1 text-[11px] text-base-content/65">
+                      <li>✓ SSO &amp; audit log</li>
+                      <li>✓ Unlimited AI lanes</li>
+                    </ul>
+                    <div class="rounded-md border border-base-300 py-1.5 text-center text-[11px] font-semibold">
+                      Talk to us
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <%!-- THE FLOW --%>
   <section id="flow" class="border-y border-base-300 bg-base-200">
     <div class="mx-auto max-w-[1120px] px-4 py-16 sm:px-8">
@@ -290,6 +523,7 @@
       <div class="flex items-stretch gap-2.5 overflow-x-auto pb-1.5">
         <%= for {name, owner, border_cls, label_cls} <- [
           {"Backlog", "HUMAN", "border-t-primary", "text-base-content/70"},
+          {"Design", "AI", "border-t-secondary", "text-secondary"},
           {"Spec", "HUMAN", "border-t-primary", "text-base-content/70"},
           {"Plan", "AI", "border-t-secondary", "text-secondary"},
           {"Code", "AI", "border-t-secondary", "text-secondary"},
@@ -298,7 +532,7 @@
           {"Complete", "DONE", "border-t-success", "text-success"}
         ] do %>
           <div class={[
-            "min-w-[120px] flex-1 rounded-[11px] border border-base-300 border-t-[3px] bg-base-100 p-3.5",
+            "min-w-[112px] flex-1 rounded-[11px] border border-base-300 border-t-[3px] bg-base-100 p-3.5",
             border_cls
           ]}>
             <div class={["mb-1.5 font-mono text-[10px]", label_cls]}>{owner}</div>
@@ -375,6 +609,15 @@
         Start with the default workflow, then bend it to fit. It takes about a minute.
       </p>
       <a href={~p"/auth/google"} class="btn btn-primary">Open the board →</a>
+      <p class="mx-auto mt-6 max-w-[600px] text-[13px] leading-relaxed text-neutral-content/60">
+        Relay is open source under the MIT license. Rather run it yourself?
+        <a
+          href={github_url() <> "#readme"}
+          class="link text-neutral-content/85 hover:text-neutral-content"
+        >
+          Self-host from the README →
+        </a>
+      </p>
     </div>
   </section>
 
@@ -386,11 +629,16 @@
       </span>
       <span class="text-sm font-semibold tracking-[-0.01em]">Relay</span>
       <span class="flex-1"></span>
-      <span class="font-mono text-xs text-base-content/65">humans + AI, one board · © 2026</span>
+      <span class="font-mono text-xs text-base-content/65">
+        humans + AI, one board · open source (MIT) · © 2026
+      </span>
       <nav class="flex items-center gap-4 text-xs text-base-content/65">
         <.link navigate={~p"/terms"} class="link link-hover">Terms</.link>
         <.link navigate={~p"/privacy"} class="link link-hover">Privacy</.link>
         <.link navigate={~p"/docs"} class="link link-hover">Docs</.link>
+        <a href={github_url()} class="link link-hover inline-flex items-center gap-1">
+          <.github_mark class="size-3.5" /> GitHub
+        </a>
       </nav>
     </div>
   </footer>
