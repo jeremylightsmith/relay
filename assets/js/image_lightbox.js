@@ -14,14 +14,16 @@
 //
 // RE322 — the same holds for the carousel: its set is computed from the live DOM when the
 // viewer opens and dropped when it closes. Nothing is recorded per image, so a patch that
-// re-renders a comment or the screenshots strip can never leave the viewer with stale state.
-const SELECTOR = ".md img, .docs img, #ai-result-screens img"
+// re-renders a comment can never leave the viewer with stale state.
+//
+// RE390 — markdown images only. The AI Result screenshots are 80px tiles that open the same-tab
+// mockup viewer (`?screenshot=<n>`), so they are not in the selector or a group.
+const SELECTOR = ".md img, .docs img"
 
-// D1 — the set is the clicked image's own group. The AI Result screenshots strip is one group;
-// every other markdown block (a description, a spec, one timeline comment, a docs page) is its
-// own. `closest` finds the nearest, so a screenshot never steps into a comment's images and a
-// comment image never steps into the screenshots.
-const GROUP = "#ai-result-screens, .md, .docs"
+// D1 — the set is the clicked image's own group: every markdown block (a description, a spec,
+// one timeline comment, a docs page) is its own. `closest` finds the nearest, so a comment image
+// never steps into the description's images.
+const GROUP = ".md, .docs"
 
 // D4 — ←/k previous, →/j next (vim/Gmail). Matched against the lowercased key, the same
 // case-folding LiveView applies to `phx-key` and TypingKeyGuard mirrors (RE306).

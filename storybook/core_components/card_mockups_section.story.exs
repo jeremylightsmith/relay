@@ -5,14 +5,24 @@ defmodule Storybook.Components.CoreComponents.CardMockupsSection do
   def function, do: &RelayWeb.CoreComponents.card_mockups_section/1
   def render_source, do: :function
 
-  # A real mockup is an /attachments/<id> HTML page; the tiles load whatever `src` the section
-  # derives from each id, so these ids just need to be distinct.
+  # `RelayWeb.CardMedia` items. A real HTML mockup is an /attachments/<id> page; any same-origin
+  # path shows the miniature here.
   defp mockups do
+    for {key, caption} <- [
+          {"story-empty", "A — empty state"},
+          {"story-panes", "B — two panes"},
+          {"story-error", "C — error"},
+          {"story-uncaptioned", nil}
+        ] do
+      %{key: key, src: "/images/logo_light_128.png", caption: caption, kind: :html}
+    end
+  end
+
+  defp screenshots do
     [
-      %{id: "story-empty", caption: "A — empty state"},
-      %{id: "story-panes", caption: "B — two panes"},
-      %{id: "story-error", caption: "C — error"},
-      %{id: "story-uncaptioned", caption: nil}
+      %{key: 1, src: "/images/logo_light_128.png", caption: "Board", kind: :image},
+      %{key: nil, src: nil, caption: "12-review.png", kind: :placeholder},
+      %{key: 2, src: "/images/logo_dark_128.png", caption: nil, kind: :image}
     ]
   end
 
@@ -24,8 +34,8 @@ defmodule Storybook.Components.CoreComponents.CardMockupsSection do
         attributes: %{
           id: "card-mockups-story-drawer",
           tile_id: "card-mockups-story-drawer-mockup",
-          mockups: mockups(),
-          mockup_href: &"/storybook/core_components/card_mockups_section?m=#{&1}"
+          items: mockups(),
+          item_href: &"/storybook/core_components/card_mockups_section?m=#{&1}"
         }
       },
       %Variation{
@@ -36,10 +46,25 @@ defmodule Storybook.Components.CoreComponents.CardMockupsSection do
         attributes: %{
           id: "card-mockups-story-sheet",
           tile_id: "card-mockups-story-sheet-mockup",
-          mockups: mockups(),
-          mockup_href: &"/storybook/core_components/card_mockups_section?m=#{&1}",
+          items: mockups(),
+          item_href: &"/storybook/core_components/card_mockups_section?m=#{&1}",
           current: "story-panes",
           replace: true
+        }
+      },
+      %Variation{
+        id: :screenshots,
+        description:
+          "RE390 — the drawer's AI Result Screenshots through the same section: image tiles cropped " <>
+            "to the top, and a dashed placeholder for a path the browser can't fetch. The drawer " <>
+            "draws its own \"Screenshots\" label, so show_label is false there.",
+        attributes: %{
+          id: "card-mockups-story-screenshots",
+          tile_id: "card-mockups-story-screenshot",
+          items: screenshots(),
+          item_href: &"/storybook/core_components/card_mockups_section?screenshot=#{&1}",
+          label: "Screenshots",
+          noun: "Screenshot"
         }
       }
     ]

@@ -33,6 +33,7 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
   alias Relay.Cards
+  alias RelayWeb.CardMedia
   alias RelayWeb.RunComponents
   alias RelayWeb.TalkComponents
   alias RelayWeb.TimeAgo
@@ -1792,7 +1793,8 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  One HTML mockup as a small square tile (RE370, RE374, RE380): a live miniature of the mockup
+  One mockup or screenshot as a small square tile (RE370, RE374, RE380, RE390). An HTML item
+  (`kind: :html`) is a live miniature of the mockup
   that is itself a same-tab `patch` link to the mockup viewer (`view_href` — on the board, the
   card's own drawer URL plus `mockup=<id>`), so the board stays mounted underneath. The miniature
   is the same sandboxed iframe, rendered at a 1280×1280 desktop viewport and CSS-scaled down to
@@ -1802,9 +1804,12 @@ defmodule RelayWeb.CoreComponents do
   scripts run, but it can never reach Relay's origin, and its only network access is Google Fonts
   (`AttachmentController.html_csp/0`).
 
+  An image item (`kind: :image`, RE390) is an `<img>` (`\#{id}-image`) filling the square,
+  cropped to the top (`object-cover object-top`). No tile carries an HTML/PNG type mark.
+
   The caption doesn't fit in 80px. It becomes the tile's `title` (hover tooltip) and `aria-label`,
-  plus a `sr-only` `\#{id}-caption`. It falls back to "Mockup". Never link to `src` directly: Relay
-  never shows a mockup as a bare top-level page.
+  plus a `sr-only` `\#{id}-caption`. It falls back to `noun` ("Mockup" / "Screenshot"). Never link
+  to `src` directly: Relay never shows a mockup as a bare top-level page.
 
   `current` is the viewer's sheet: `true` rings the tile and marks it `aria-current`, `false`
   dims it, and `nil` (the drawer) does neither. `replace` makes the patch replace the history
@@ -1820,14 +1825,16 @@ defmodule RelayWeb.CoreComponents do
       />
   """
   attr :id, :string, required: true
-  attr :src, :string, required: true, doc: "the attachment path the miniature iframe loads"
+  attr :src, :string, required: true, doc: "the url the miniature iframe or image loads"
+  attr :kind, :atom, values: [:html, :image], default: :html, doc: "how the item is drawn (`RelayWeb.CardMedia.kind/2`)"
+  attr :noun, :string, default: "Mockup", doc: "names the item: the caption fallback and the aria-label's verb object"
   attr :view_href, :string, required: true, doc: "the same-tab viewer URL the tile patches to"
   attr :caption, :string, default: nil
   attr :current, :boolean, default: nil, doc: "true = the mockup on screen, false = another one, nil = no viewer"
   attr :replace, :boolean, default: false, doc: "replace the history entry instead of pushing one"
 
   def mockup_preview(assigns) do
-    assigns = assign(assigns, :label, assigns.caption || "Mockup")
+    assigns = assign(assigns, :label, assigns.caption || assigns.noun)
 
     ~H"""
     <.link
@@ -1835,7 +1842,7 @@ defmodule RelayWeb.CoreComponents do
       patch={@view_href}
       replace={@replace}
       title={@label}
-      aria-label={"Open mockup: #{@label}"}
+      aria-label={"Open #{String.downcase(@noun)}: #{@label}"}
       aria-current={@current && "true"}
       class={[
         "relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 transition hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
@@ -1844,7 +1851,17 @@ defmodule RelayWeb.CoreComponents do
       ]}
     >
       <span id={"#{@id}-caption"} class="sr-only">{@label}</span>
+      <img
+        :if={@kind == :image}
+        id={"#{@id}-image"}
+        src={@src}
+        alt=""
+        loading="lazy"
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-0 block size-full object-cover object-top"
+      />
       <iframe
+        :if={@kind == :html}
         id={"#{@id}-frame"}
         src={@src}
         sandbox={RelayWeb.mockup_sandbox()}
@@ -1860,50 +1877,88 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  A card's Mockups section (RE380): the "Mockups" label and a wrapping row of `mockup_preview/1`
-  tiles, each patching to `mockup_href.(attachment_id)`. Shared by the card drawer (`current`
-  nil: the `gap-2` row, nothing else) and the mockup viewer's left sheet, where `current` is the
-  attachment on screen: its tile is ringed, the row opens up to `gap-3`, and two lines follow —
-  "Viewing <caption> · n of m" (`\#{id}-viewing`) and the ← → / Esc key hint (`\#{id}-keys`).
+  A screenshot the browser can't fetch (RE390) — an agent-local path like
+  `tmp/smoke/12-review.png` — as a dashed 80px tile captioned with its file name. Not a link:
+  there is nothing to open. `card_mockups_section/1` renders it for a `:placeholder` item.
+  """
+  attr :id, :string, required: true
+  attr :caption, :string, required: true
+
+  def media_placeholder(assigns) do
+    ~H"""
+    <span
+      id={@id}
+      title={@caption}
+      class="relative flex size-20 shrink-0 items-end overflow-hidden rounded-md border border-dashed border-base-300 bg-base-200 p-1.5"
+    >
+      <span class="text-[10px] leading-tight text-base-content/55 break-all">{@caption}</span>
+    </span>
+    """
+  end
+
+  @doc false
+  # `card_drawer/1`'s `screenshot_href` default (an attr default must be a remote capture).
+  def screenshot_query(n), do: "?screenshot=#{n}"
+
+  @doc """
+  A card's Mockups or Screenshots section (RE380, RE390): the section label and a wrapping row of
+  tiles, one per `RelayWeb.CardMedia` item — a `mockup_preview/1` patching to
+  `item_href.(item.key)`, or a `media_placeholder/1` for a `:placeholder` item. Shared by the card
+  drawer (`current` nil: the `gap-2` row, nothing else) and the viewer's left sheet, where
+  `current` is the key on screen: its tile is ringed, the row opens up to `gap-3`, and two lines
+  follow — "Viewing <caption> · n of m" (`\#{id}-viewing`) and the ← → / Esc key hint
+  (`\#{id}-keys`). `show_label: false` drops the label row, for a caller that draws its own.
 
   Ids: the row is `\#{tile_id}-tiles` and tile N is `\#{tile_id}-N` (its link `\#{tile_id}-N-open`).
   """
   attr :id, :string, required: true, doc: "the section id"
   attr :tile_id, :string, required: true, doc: "the tile id prefix"
-  attr :mockups, :list, required: true, doc: "[%{id, caption}] — `Schemas.Card.mockup_entries/1`"
-  attr :mockup_href, :any, required: true, doc: "attachment id -> the URL its tile patches to"
-  attr :current, :string, default: nil, doc: "the attachment id on screen in the viewer, or nil"
+  attr :items, :list, required: true, doc: "`RelayWeb.CardMedia` items (placeholders allowed)"
+  attr :item_href, :any, required: true, doc: "item key -> the URL its tile patches to"
+  attr :current, :any, default: nil, doc: "the item key on screen in the viewer, or nil"
+  attr :label, :string, default: "Mockups"
+  attr :noun, :string, default: "Mockup"
+  attr :show_label, :boolean, default: true
   attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
 
   def card_mockups_section(assigns) do
-    index = assigns.current && Enum.find_index(assigns.mockups, &(&1.id == assigns.current))
+    index = assigns.current && Enum.find_index(assigns.items, &(&1.key == assigns.current))
 
     assigns =
       assign(assigns,
         current_index: index,
-        current_caption: index && (Enum.at(assigns.mockups, index).caption || "Mockup")
+        current_caption: index && (Enum.at(assigns.items, index).caption || assigns.noun)
       )
 
     ~H"""
     <section id={@id} class="space-y-2">
-      <.section_label>Mockups</.section_label>
+      <.section_label :if={@show_label}>{@label}</.section_label>
       <div
         id={"#{@tile_id}-tiles"}
         class={if(@current, do: "flex flex-wrap gap-3 p-0.5", else: "flex flex-wrap gap-2")}
       >
-        <.mockup_preview
-          :for={{mockup, index} <- Enum.with_index(@mockups)}
-          id={"#{@tile_id}-#{index}"}
-          src={RelayWeb.attachment_path(mockup.id)}
-          view_href={@mockup_href.(mockup.id)}
-          caption={mockup.caption}
-          current={@current && mockup.id == @current}
-          replace={@replace}
-        />
+        <%= for {item, index} <- Enum.with_index(@items) do %>
+          <.media_placeholder
+            :if={item.kind == :placeholder}
+            id={"#{@tile_id}-#{index}"}
+            caption={item.caption}
+          />
+          <.mockup_preview
+            :if={item.kind != :placeholder}
+            id={"#{@tile_id}-#{index}"}
+            src={item.src}
+            kind={item.kind}
+            noun={@noun}
+            view_href={@item_href.(item.key)}
+            caption={item.caption}
+            current={@current && item.key == @current}
+            replace={@replace}
+          />
+        <% end %>
       </div>
       <p :if={@current_index} id={"#{@id}-viewing"} class="text-xs text-base-content/60">
         Viewing <b class="font-semibold text-base-content/80">{@current_caption}</b>
-        · {@current_index + 1} of {length(@mockups)}
+        · {@current_index + 1} of {length(@items)}
       </p>
       <p
         :if={@current_index}
@@ -1920,17 +1975,20 @@ defmodule RelayWeb.CoreComponents do
 
   @doc """
   The mockup viewer's one-bar header on phones (RE380): ← back to the card, the mockup's caption
-  over an "n / m" count, and ‹ › to step through the card's mockups (`mockup_prev` /
-  `mockup_next`, disabled at either end). `card_mockup_viewer/1` renders it first, `drawer:hidden`.
+  over an "n / m" count, and ‹ › to step through the open section (`mockup_prev` /
+  `mockup_next`, disabled at either end; their labels name the `noun`). `card_mockup_viewer/1` renders it first, `drawer:hidden`.
   """
   attr :id, :string, default: "mockup-viewer-bar"
   attr :caption, :string, required: true
   attr :index, :integer, required: true, doc: "1-based position of the mockup on screen"
   attr :total, :integer, required: true
   attr :back_patch, :string, required: true, doc: "the card's drawer URL"
+  attr :noun, :string, default: "Mockup"
   attr :class, :any, default: nil
 
   def mockup_viewer_bar(assigns) do
+    assigns = assign(assigns, :noun, String.downcase(assigns.noun))
+
     ~H"""
     <header
       id={@id}
@@ -1954,7 +2012,7 @@ defmodule RelayWeb.CoreComponents do
         type="button"
         id={"#{@id}-prev"}
         phx-click="mockup_prev"
-        aria-label="Previous mockup"
+        aria-label={"Previous #{@noun}"}
         disabled={@index == 1}
         class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
       >
@@ -1964,7 +2022,7 @@ defmodule RelayWeb.CoreComponents do
         type="button"
         id={"#{@id}-next"}
         phx-click="mockup_next"
-        aria-label="Next mockup"
+        aria-label={"Next #{@noun}"}
         disabled={@index == @total}
         class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
       >
@@ -1975,10 +2033,12 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  The same-tab mockup viewer (RE380): the card's mockup fills the right of the screen, framed in
-  the sandboxed iframe (`RelayWeb.mockup_sandbox/0`), and the card shrinks to a 340px left sheet —
-  ← Back to card, the stage chip, ref and title, the `:gate` slot (the caller's
-  `card_gate_panel/1`), then the Mockups section with the current tile ringed. There is no bar
+  The same-tab viewer (RE380, RE390): the item on screen (`current_key` among `items`, the
+  `RelayWeb.CardMedia` shape) fills the right of the screen — an HTML item framed in the sandboxed
+  iframe (`RelayWeb.mockup_sandbox/0`), an image shown at its natural size in an `overflow-auto`
+  frame (never scaled to fit) — and the card shrinks to a 340px left sheet — ← Back to card, the
+  stage chip, ref and title, the `:gate` slot (the caller's `card_gate_panel/1`), then the open
+  section (`label` "Mockups" / "Screenshots") with the current tile ringed. There is no bar
   over the mockup on desktop; the app's breadcrumb names the card. Below the `drawer:` breakpoint
   the sheet is hidden and `mockup_viewer_bar/1` is the one top bar.
 
@@ -1992,18 +2052,20 @@ defmodule RelayWeb.CoreComponents do
   attr :card, :any, required: true, doc: "needs `title`"
   attr :stage_name, :string, required: true
   attr :stage_owner, :atom, values: [:human, :ai], required: true
-  attr :mockups, :list, required: true, doc: "[%{id, caption}] — `Schemas.Card.mockup_entries/1`"
-  attr :current_id, :string, required: true, doc: "the attachment id on screen"
+  attr :items, :list, required: true, doc: "the open section's `RelayWeb.CardMedia` items (no placeholders)"
+  attr :current_key, :any, required: true, doc: "the key of the item on screen"
   attr :back_patch, :string, required: true, doc: "the card's drawer URL"
-  attr :mockup_href, :any, required: true, doc: "attachment id -> that mockup's viewer URL"
+  attr :item_href, :any, required: true, doc: "item key -> that item's viewer URL"
+  attr :label, :string, default: "Mockups", doc: "the sheet's section label"
+  attr :noun, :string, default: "Mockup", doc: "names one item: caption fallback, frame title, arrow labels"
   attr :embed, :boolean, default: false, doc: "native host: no web top bar to sit under"
 
   slot :gate, doc: "the card's gate panel (review or question), rendered at the top of the sheet"
 
   def card_mockup_viewer(assigns) do
-    index = Enum.find_index(assigns.mockups, &(&1.id == assigns.current_id)) || 0
-    caption = (Enum.at(assigns.mockups, index) || %{caption: nil}).caption || "Mockup"
-    assigns = assign(assigns, index: index + 1, caption: caption)
+    index = Enum.find_index(assigns.items, &(&1.key == assigns.current_key)) || 0
+    item = Enum.at(assigns.items, index) || %{key: assigns.current_key, src: nil, caption: nil, kind: :html}
+    assigns = assign(assigns, index: index + 1, item: item, caption: item.caption || assigns.noun)
 
     ~H"""
     <div
@@ -2035,8 +2097,9 @@ defmodule RelayWeb.CoreComponents do
         id={"#{@id}-bar"}
         caption={@caption}
         index={@index}
-        total={length(@mockups)}
+        total={length(@items)}
         back_patch={@back_patch}
+        noun={@noun}
         class="drawer:hidden"
       />
       <aside
@@ -2074,9 +2137,11 @@ defmodule RelayWeb.CoreComponents do
           <.card_mockups_section
             id={"#{@id}-mockups"}
             tile_id={"#{@id}-mockup"}
-            mockups={@mockups}
-            mockup_href={@mockup_href}
-            current={@current_id}
+            items={@items}
+            item_href={@item_href}
+            label={@label}
+            noun={@noun}
+            current={@current_key}
             replace
           />
         </div>
@@ -2084,22 +2149,34 @@ defmodule RelayWeb.CoreComponents do
       <main
         id={"#{@id}-main"}
         phx-hook=".MockupSwipe"
-        class="flex min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
+        class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
       >
         <div class="min-h-0 flex-1 drawer:p-4">
-          <%!-- Keyed by the mockup on screen, so switching REPLACES the iframe instead of
+          <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
           (browser Back would then step the frame, not leave the viewer), while a fresh
-          iframe's first load adds none. --%>
+          iframe's first load adds none. An image scrolls both ways at its natural size:
+          `max-w-none` undoes preflight's `img { max-width: 100% }`. --%>
           <div
-            id={"#{@id}-frame-box-#{@current_id}"}
-            class="h-full overflow-hidden bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm"
+            id={"#{@id}-frame-box-#{@item.key}"}
+            class={[
+              "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
+              if(@item.kind == :image, do: "overflow-auto", else: "overflow-hidden")
+            ]}
           >
+            <img
+              :if={@item.kind == :image}
+              id={"#{@id}-image"}
+              src={@item.src}
+              alt={@caption}
+              class="block max-w-none"
+            />
             <iframe
+              :if={@item.kind != :image}
               id={"#{@id}-frame"}
-              src={RelayWeb.attachment_path(@current_id)}
+              src={@item.src}
               sandbox={RelayWeb.mockup_sandbox()}
-              title={"Mockup: #{@caption} (#{@ref})"}
+              title={"#{@noun}: #{@caption} (#{@ref})"}
               class="block h-full w-full border-0"
             >
             </iframe>
@@ -3020,6 +3097,18 @@ defmodule RelayWeb.CoreComponents do
       "RE380: attachment id -> the URL a Mockups tile patches to. BoardLive always passes its " <>
         "viewer-URL closure; the default exists for Storybook and component tests"
 
+  attr :screenshot_href, :any,
+    default: &RelayWeb.CoreComponents.screenshot_query/1,
+    doc:
+      "RE390: screenshot position (1-based) -> the URL an AI Result Screenshots tile patches to. " <>
+        "BoardLive always passes its viewer-URL closure"
+
+  attr :attachment_types, :map,
+    default: %{},
+    doc:
+      "RE390: the card's `%{attachment_id => content_type}` (`Relay.Attachments.content_types/1`) — " <>
+        "decides whether a mockup or screenshot tile is HTML or an image"
+
   attr :hidden, :boolean,
     default: false,
     doc:
@@ -3035,7 +3124,8 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:working_progress, Cards.sub_task_pct(assigns.card))
       |> assign_blocked_state()
       # Map.get because the drawer's `card` is any card-shaped map (Storybook passes plain maps).
-      |> assign(:mockup_entries, Card.mockup_entries(Map.get(assigns.card, :mockups)))
+      |> assign(:mockup_items, CardMedia.mockup_items(Map.get(assigns.card, :mockups), assigns.attachment_types))
+      |> assign(:screen_items, CardMedia.screens(Map.get(assigns.card, :ai_result), assigns.attachment_types))
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
@@ -3513,30 +3603,17 @@ defmodule RelayWeb.CoreComponents do
                       class="flex flex-col gap-1.5"
                     >
                       <.section_label>Screenshots</.section_label>
-                      <div id="ai-result-screens" class="flex flex-wrap gap-2">
-                        <figure
-                          :for={screen <- ai_screens(@card.ai_result["screens"])}
-                          class="w-32 space-y-1"
-                        >
-                          <img
-                            :if={screen.url}
-                            src={screen.url}
-                            alt={screen.caption || "Screenshot"}
-                            data-caption={screen.caption || ""}
-                            class="w-full cursor-zoom-in rounded border border-base-300"
-                          />
-                          <div
-                            :if={!screen.url}
-                            class="aspect-video w-full rounded bg-gradient-to-br from-primary/30 to-secondary/30"
-                          />
-                          <figcaption
-                            :if={screen.caption}
-                            class="text-[11px] leading-tight text-base-content/65"
-                          >
-                            {screen.caption}
-                          </figcaption>
-                        </figure>
-                      </div>
+                      <%!-- RE390 — the same 80px tiles as Mockups, patching to the
+                      same-tab viewer (`?screenshot=<n>`); an unfetchable path is a placeholder. --%>
+                      <.card_mockups_section
+                        id="ai-result-screens"
+                        tile_id="ai-result-screen"
+                        items={@screen_items}
+                        item_href={@screenshot_href}
+                        label="Screenshots"
+                        noun="Screenshot"
+                        show_label={false}
+                      />
                     </div>
                     <%!-- `block` keeps the link-style button on its own line; a button element
                     is inline-block by default and would otherwise ride up beside the summary. --%>
@@ -3552,14 +3629,14 @@ defmodule RelayWeb.CoreComponents do
                     </button>
                   </div>
                 </section>
-                <%!-- RE370 / RE374 / RE380 — the card's HTML mockups as small square tiles in a
-                wrapping row; each tile patches to the same-tab mockup viewer (`mockup_href`). --%>
+                <%!-- RE370 / RE374 / RE380 / RE390 — the card's mockups (HTML or image) as small
+                square tiles in a wrapping row; each patches to the same-tab viewer (`mockup_href`). --%>
                 <.card_mockups_section
-                  :if={!@body_loading and @mockup_entries != []}
+                  :if={!@body_loading and @mockup_items != []}
                   id={"#{@id}-mockups"}
                   tile_id={"#{@id}-mockup"}
-                  mockups={@mockup_entries}
-                  mockup_href={@mockup_href}
+                  items={@mockup_items}
+                  item_href={@mockup_href}
                 />
                 <section id={"#{@id}-description"} class="space-y-2">
                   <.section_label>Description</.section_label>
@@ -6610,46 +6687,13 @@ defmodule RelayWeb.CoreComponents do
 
   # `ai_result` is a free-form JSON blob an agent writes over the API, so the drawer can never
   # assume a caller honoured the documented shape — and a raise here kills the LiveView on every
-  # mount, which the browser sees as an endless reconnect loop (TH8 on `changes`, TH95 on
-  # `screens`, where the smoke node wrote bare screenshot paths instead of maps). Every read of
-  # the blob goes through one of these, so no shape can break the render.
+  # mount (TH8, TH95). Every read of the blob goes through a shape-tolerant reader; the list
+  # coercion and the screenshot readers live in `RelayWeb.CardMedia` (RE390), so the changes
+  # list and the screens tiles share one coercion.
   defp ai_text(value) when is_binary(value), do: value
   defp ai_text(_value), do: nil
 
-  defp ai_list(value) when is_list(value), do: value
-  defp ai_list(value) when value in [nil, ""], do: []
-  defp ai_list(value), do: [value]
-
-  defp ai_screens(value), do: value |> ai_list() |> Enum.map(&ai_screen/1)
-
-  defp ai_screen(%{} = screen), do: screen_figure(ai_text(screen["url"]), ai_text(screen["caption"]))
-  defp ai_screen(screen) when is_binary(screen), do: screen_figure(screen, nil)
-  defp ai_screen(other), do: %{url: nil, caption: inspect(other)}
-
-  # A screenshot path on the agent's machine (`tmp/smoke/12-review.png`) is not something this
-  # browser can fetch, so it captions the placeholder tile instead of rendering as a broken image.
-  defp screen_figure(url, caption) do
-    if fetchable_image?(url),
-      do: %{url: url, caption: caption},
-      else: %{url: nil, caption: caption || (url && Path.basename(url))}
-  end
-
-  defp fetchable_image?("http://" <> _rest), do: true
-  defp fetchable_image?("https://" <> _rest), do: true
-  defp fetchable_image?("//" <> _rest), do: true
-  defp fetchable_image?("data:image/" <> _rest), do: true
-
-  # A root-relative src only resolves if this app serves that path: a static prefix, or an uploaded
-  # attachment (RE322 — `relay attach` hands agents `/attachments/<id>`, a router route rather than a
-  # static path, so checking static_paths alone drew every uploaded screenshot as the placeholder).
-  # An agent's local screenshot path ("/Users/…/tmp/smoke/12-review.png") is neither, and must not
-  # become a broken <img>.
-  defp fetchable_image?("/" <> path = url) do
-    [prefix | _rest] = String.split(path, "/", parts: 2)
-    prefix in RelayWeb.static_paths() or RelayWeb.attachment_path?(url)
-  end
-
-  defp fetchable_image?(_url), do: false
+  defp ai_list(value), do: CardMedia.ai_list(value)
 
   # RE316 — whether one of `ai_result`'s list keys ("changes", "screens") has anything to show.
   # Coerced through `ai_list/1` so Show more and the group `:if`s agree with what renders.

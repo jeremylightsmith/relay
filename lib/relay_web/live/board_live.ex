@@ -105,6 +105,7 @@ defmodule RelayWeb.BoardLive do
 
   alias Relay.Activity
   alias Relay.AgentLog
+  alias Relay.Attachments
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
@@ -116,6 +117,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Talk
   alias Relay.Votes
   alias RelayWeb.BoardCrumbs
+  alias RelayWeb.CardMedia
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.RunComponents
   alias RelayWeb.StoryMapComponents
@@ -549,7 +551,9 @@ defmodule RelayWeb.BoardLive do
         next_ref={@next_ref}
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
-        mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), &1)}
+        attachment_types={@attachment_types}
+        mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :mockups, &1)}
+        screenshot_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :screenshots, &1)}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage)}
         stages={move_targets(@board, @selected_card)}
@@ -637,10 +641,12 @@ defmodule RelayWeb.BoardLive do
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage)}
-        mockups={Card.mockup_entries(@selected_card.mockups)}
-        current_id={@viewer_mockup_id}
+        items={CardMedia.mockup_items(@selected_card.mockups, @attachment_types)}
+        current_key={@viewer_mockup_id}
         back_patch={viewer_back_path(assigns, Cards.ref(@board, @selected_card))}
-        mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), &1)}
+        item_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :mockups, &1)}
+        label="Mockups"
+        noun="Mockup"
         embed={@embed}
       >
         <:gate>
@@ -1106,6 +1112,9 @@ defmodule RelayWeb.BoardLive do
       # RE380 — the mockup on screen in the same-tab viewer (`?mockup=<attachment id>`), or nil.
       # Only ever one of the open card's mockups: see assign_viewer/2.
       |> assign(:viewer_mockup_id, nil)
+      # RE390 — the open card's `%{attachment_id => content_type}` (`Attachments.content_types/1`):
+      # whether each mockup / screenshot tile is drawn as HTML or an image. Loaded with the card.
+      |> assign(:attachment_types, %{})
       # RE261 — the ONE open inline rename: nil | {:activity, id} | {:step, id} | {:release,
       # id}, at most one anywhere on the page. Untouched by refresh_story_map/1 for exactly the
       # reason the draft pair is: another tab's edit must never eat what you are typing.
@@ -3747,6 +3756,7 @@ defmodule RelayWeb.BoardLive do
 
     socket
     |> assign(:selected_card, card)
+    |> assign(:attachment_types, Attachments.content_types(card))
     |> assign(:body_loading?, false)
     |> assign_question(card, activity)
     |> assign(:answer_step, 0)
@@ -4916,6 +4926,9 @@ defmodule RelayWeb.BoardLive do
         socket =
           socket
           |> assign(:selected_card, card)
+          # RE390 — synchronously with the light card, not in the async body load: the light
+          # card already carries `mockups`, and a cold `?mockup=` open renders before the body.
+          |> assign(:attachment_types, Attachments.content_types(card))
           |> assign(:selected_stage, find_stage_by_id(socket, card.stage_id))
           |> assign_stage_neighbors(card)
           |> assign(:title_form, to_form(%{"title" => card.title}, as: :card))
@@ -4971,6 +4984,7 @@ defmodule RelayWeb.BoardLive do
         |> assign(
           selected_card: nil,
           viewer_mockup_id: nil,
+          attachment_types: %{},
           selected_stage: nil,
           prev_ref: nil,
           next_ref: nil,
@@ -5051,7 +5065,7 @@ defmodule RelayWeb.BoardLive do
 
   defp navigate_mockup(socket, id) do
     ref = Cards.ref(socket.assigns.board, socket.assigns.selected_card)
-    push_patch(socket, to: viewer_path(socket.assigns, ref, id), replace: true)
+    push_patch(socket, to: viewer_path(socket.assigns, ref, :mockups, id), replace: true)
   end
 
   defp navigate_neighbor(socket, nil), do: socket
@@ -5105,15 +5119,21 @@ defmodule RelayWeb.BoardLive do
 
   defp card_path(%{board: board}, ref), do: ~p"/board/#{board.slug}?card=#{ref}"
 
-  # RE380 — the same-tab mockup viewer is the card's own drawer URL plus `mockup=<attachment id>`,
-  # on whichever host this socket is (board, story map, or the native `/cards/:ref` page). A
-  # Mockups tile patches here; a patch to another LiveView's route would not be a same-view patch.
-  defp viewer_path(%{live_action: :story_map, board: board}, ref, id),
-    do: ~p"/board/#{board.slug}/story-map?card=#{ref}&mockup=#{id}"
+  # RE380 / RE390 — the same-tab viewer is the card's own drawer URL plus `mockup=<attachment id>`
+  # or `screenshot=<n>` (1-based among the openable screenshots), on whichever host this socket is
+  # (board, story map, or the native `/cards/:ref` page). A tile patches here; a patch to another
+  # LiveView's route would not be a same-view patch.
+  defp viewer_path(%{live_action: :story_map, board: board}, ref, section, key),
+    do: ~p"/board/#{board.slug}/story-map?#{[{:card, ref}, viewer_param(section, key)]}"
 
-  defp viewer_path(%{live_action: :card, board: board}, ref, id), do: ~p"/cards/#{ref}?board=#{board.slug}&mockup=#{id}"
+  defp viewer_path(%{live_action: :card, board: board}, ref, section, key),
+    do: ~p"/cards/#{ref}?#{[{:board, board.slug}, viewer_param(section, key)]}"
 
-  defp viewer_path(%{board: board}, ref, id), do: ~p"/board/#{board.slug}?card=#{ref}&mockup=#{id}"
+  defp viewer_path(%{board: board}, ref, section, key),
+    do: ~p"/board/#{board.slug}?#{[{:card, ref}, viewer_param(section, key)]}"
+
+  defp viewer_param(:mockups, id), do: {:mockup, id}
+  defp viewer_param(:screenshots, n), do: {:screenshot, n}
 
   # RE380 — the top bar's trail: the board's own, or in viewer mode `Boards / <board> / <card>`
   # whose card crumb patches back to the drawer.

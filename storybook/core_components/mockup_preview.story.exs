@@ -53,6 +53,20 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
           current: false
         }
       },
+      %Variation{
+        id: :image,
+        description:
+          "RE390 — an image item (a PNG mockup or an AI Result screenshot): the <img> fills the " <>
+            "80px square, cropped to the top (object-cover object-top). No type mark.",
+        attributes: %{
+          id: "mockup-preview-story-image",
+          src: "/images/logo_light_128.png",
+          view_href: "/storybook/core_components/mockup_preview",
+          kind: :image,
+          noun: "Screenshot",
+          caption: "Board"
+        }
+      },
       %VariationGroup{
         id: :wrapping_row,
         description:

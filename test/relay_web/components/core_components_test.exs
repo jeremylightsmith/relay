@@ -4,6 +4,7 @@ defmodule RelayWeb.CoreComponentsTest do
   import Phoenix.Component
   import Phoenix.LiveViewTest
 
+  alias RelayWeb.CardMedia
   alias RelayWeb.CoreComponents
 
   describe "owner_pill/1" do
@@ -3676,31 +3677,86 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
       doc = LazyHTML.from_fragment(html)
 
-      assert doc |> LazyHTML.query("#ai-result-screens figure") |> Enum.count() == 4
+      assert doc |> LazyHTML.query("#ai-result-screen-tiles > span.border-dashed") |> Enum.count() == 4
+      assert doc |> LazyHTML.query("#ai-result-screens a") |> Enum.count() == 0
       assert doc |> LazyHTML.query("#ai-result-screens img") |> Enum.count() == 0
       assert html =~ "12-review.png"
       assert html =~ "a.png"
     end
 
-    # RE322 D3 — the carousel captions a screenshot with its figcaption; the <img> mirrors it so the
-    # JS never walks the figure. Blank (not absent) when there is no caption: the img's `alt` falls
-    # back to a generic "Screenshot", which must not become the viewer's caption.
-    test "a screenshot img carries its caption as data-caption, blank when it has none" do
+    # RE390 — screenshots are the same 80px tiles as mockups, patching to the same-tab viewer
+    # (`?screenshot=<n>`); they no longer join the RE322 lightbox.
+    test "screens render as 80px tiles patching to screenshot_href; unfetchable paths are dashed placeholders" do
       ai_result = %{
         "summary" => "s",
-        "screens" => [%{"url" => "https://example.com/a.png", "caption" => "The drawer"}, "https://example.com/b.png"]
+        "screens" => [%{"url" => "/images/logo_light_128.png", "caption" => "home"}, "tmp/smoke/12-review.png"]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(expanded_drawer_assigns(ai_result), :screenshot_href, &"/board/b?card=RE1&screenshot=#{&1}")
+        )
+
       doc = LazyHTML.from_fragment(html)
 
-      assert doc
-             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/a.png"][data-caption="The drawer"]))
-             |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#ai-result-screens-group > span") |> LazyHTML.text() |> String.trim() ==
+               "Screenshots"
 
-      assert doc
-             |> LazyHTML.query(~s(#ai-result-screens img[src="https://example.com/b.png"][data-caption=""]))
-             |> Enum.count() == 1
+      link = LazyHTML.query(doc, "a#ai-result-screen-0-open")
+      assert LazyHTML.attribute(link, "href") == ["/board/b?card=RE1&screenshot=1"]
+      assert LazyHTML.attribute(link, "data-phx-link") == ["patch"]
+      assert LazyHTML.attribute(link, "title") == ["home"]
+      [class] = LazyHTML.attribute(link, "class")
+      assert class =~ "size-20"
+      assert link |> LazyHTML.query("img.object-top") |> Enum.count() == 1
+
+      placeholder = LazyHTML.query(doc, "span#ai-result-screen-1")
+      assert LazyHTML.attribute(placeholder, "title") == ["12-review.png"]
+      assert doc |> LazyHTML.query("a#ai-result-screen-1-open") |> Enum.count() == 0
+
+      assert doc |> LazyHTML.query("#ai-result-screens-group figure") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#ai-result-screens-group figcaption") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#ai-result-screens-group .cursor-zoom-in") |> Enum.count() == 0
+    end
+
+    test "a screen whose attachment is HTML renders as a live miniature iframe, not an img" do
+      ai_result = %{"summary" => "s", "screens" => ["/attachments/h1"]}
+
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          Map.put(expanded_drawer_assigns(ai_result), :attachment_types, %{"h1" => "text/html"})
+        )
+
+      tile = html |> LazyHTML.from_fragment() |> LazyHTML.query("a#ai-result-screen-0-open")
+      assert tile |> LazyHTML.query("iframe") |> LazyHTML.attribute("sandbox") == ["allow-scripts"]
+      assert tile |> LazyHTML.query("img") |> Enum.count() == 0
+    end
+  end
+
+  describe "card_drawer/1 Mockups by content type (RE390)" do
+    defp mockup_drawer_tile(types) do
+      card = Map.put(%{drawer_assigns(nil).card | ai_result: nil}, :mockups, [%{"url" => "/attachments/a1"}])
+
+      (&CoreComponents.card_drawer/1)
+      |> render_component(Map.put(%{drawer_assigns(nil) | card: card, id: "card-drawer"}, :attachment_types, types))
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-mockup-0-open")
+    end
+
+    test "an image mockup tile holds an img cropped to the top, and no iframe" do
+      tile = mockup_drawer_tile(%{"a1" => "image/png"})
+
+      assert tile |> LazyHTML.query("img.object-top") |> Enum.count() == 1
+      assert tile |> LazyHTML.query("iframe") |> Enum.count() == 0
+    end
+
+    test "an HTML mockup tile keeps its live miniature iframe" do
+      tile = mockup_drawer_tile(%{"a1" => "text/html"})
+
+      assert tile |> LazyHTML.query("iframe") |> Enum.count() == 1
+      assert tile |> LazyHTML.query("img") |> Enum.count() == 0
     end
   end
 
@@ -3806,9 +3862,9 @@ defmodule RelayWeb.CoreComponentsTest do
       assert ai_text(html, "#ai-result-changes") =~ "changed A"
 
       assert ai_text(html, "#ai-result #ai-result-screens-group > span") == "Screenshots"
-      assert ai_count(html, "#ai-result-screens-group > span + div#ai-result-screens") == 1
-      assert ai_text(html, "#ai-result-screens figcaption") == "home"
-      assert ai_count(html, "#ai-result-screens img.cursor-zoom-in") == 1
+      assert ai_count(html, "#ai-result-screens-group > span + section#ai-result-screens") == 1
+      assert ai_count(html, ~s(#ai-result-screens a#ai-result-screen-0-open[title="home"])) == 1
+      assert ai_count(html, "#ai-result-screens .cursor-zoom-in") == 0
 
       assert ai_count(html, "#ai-result #ai-result-summary") == 1
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show less"
@@ -4155,29 +4211,76 @@ defmodule RelayWeb.CoreComponentsTest do
     test "replace: true makes the patch replace the history entry" do
       assert tile_attr(tile_doc(%{replace: true}), "data-phx-link-state") == ["replace"]
     end
+
+    test "kind: :image renders an img cropped to the top instead of the iframe" do
+      doc = tile_doc(%{kind: :image})
+
+      img = LazyHTML.query(doc, "a#t-open img#t-image")
+      assert LazyHTML.attribute(img, "src") == ["/attachments/x"]
+      [class] = LazyHTML.attribute(img, "class")
+      assert class =~ "object-cover object-top"
+      assert doc |> LazyHTML.query("iframe") |> Enum.count() == 0
+    end
+
+    test "the default kind keeps the iframe miniature and no img" do
+      doc = tile_doc(%{})
+
+      assert doc |> LazyHTML.query("a#t-open iframe#t-frame") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("img") |> Enum.count() == 0
+    end
+
+    test "noun names the tile when there is no caption" do
+      doc = tile_doc(%{noun: "Screenshot", caption: nil})
+
+      assert tile_attr(doc, "aria-label") == ["Open screenshot: Screenshot"]
+      assert tile_attr(doc, "title") == ["Screenshot"]
+    end
   end
 
-  describe "card_mockups_section/1 (RE380)" do
-    @section_mockups [%{id: "m-a", caption: "A"}, %{id: "m-b", caption: "B"}, %{id: "m-c", caption: nil}]
+  describe "media_placeholder/1 (RE390)" do
+    test "a dashed 80px span titled and captioned, never a link" do
+      doc =
+        (&CoreComponents.media_placeholder/1)
+        |> render_component(id: "p", caption: "12-review.png")
+        |> LazyHTML.from_fragment()
 
-    defp section_doc(current) do
+      span = LazyHTML.query(doc, ~s(span#p[title="12-review.png"]))
+      [class] = LazyHTML.attribute(span, "class")
+      assert "size-20" in String.split(class)
+      assert "border-dashed" in String.split(class)
+      assert span |> LazyHTML.text() |> String.trim() == "12-review.png"
+      assert doc |> LazyHTML.query("a") |> Enum.count() == 0
+    end
+  end
+
+  describe "card_mockups_section/1 (RE380, RE390)" do
+    @section_items [
+      %{key: "m-a", src: "/attachments/m-a", caption: "A", kind: :html},
+      %{key: "m-b", src: "/attachments/m-b", caption: "B", kind: :image},
+      %{key: "m-c", src: "/attachments/m-c", caption: nil, kind: :html}
+    ]
+
+    defp section_doc(current, extra \\ []) do
       (&CoreComponents.card_mockups_section/1)
       |> render_component(
-        id: "s",
-        tile_id: "t",
-        mockups: @section_mockups,
-        current: current,
-        mockup_href: &"/v/#{&1}"
+        Keyword.merge(
+          [id: "s", tile_id: "t", items: @section_items, current: current, item_href: &"/v/#{&1}"],
+          extra
+        )
       )
       |> LazyHTML.from_fragment()
     end
 
-    test "with a current mockup: tiles link through mockup_href, one is current, and Viewing/keys show" do
+    test "with a current item: tiles link through item_href, drawn by kind, one is current, and Viewing/keys show" do
       doc = section_doc("m-b")
 
-      for {%{id: id}, n} <- Enum.with_index(@section_mockups) do
-        assert doc |> LazyHTML.query("a#t-#{n}-open") |> LazyHTML.attribute("href") == ["/v/#{id}"]
+      for {%{key: key}, n} <- Enum.with_index(@section_items) do
+        assert doc |> LazyHTML.query("a#t-#{n}-open") |> LazyHTML.attribute("href") == ["/v/#{key}"]
       end
+
+      assert count(doc, "a#t-0-open iframe") == 1
+      assert count(doc, "a#t-1-open img") == 1
+      assert count(doc, "a#t-1-open iframe") == 0
 
       assert count(doc, ~s(a[aria-current="true"])) == 1
       assert count(doc, ~s(a#t-1-open[aria-current="true"])) == 1
@@ -4188,13 +4291,31 @@ defmodule RelayWeb.CoreComponentsTest do
       assert count(doc, "#s #t-tiles.flex.flex-wrap.gap-3") == 1
     end
 
-    test "with no current mockup (the drawer): no Viewing line, no key hint, the gap-2 row" do
+    test "with no current item (the drawer): no Viewing line, no key hint, the gap-2 row" do
       doc = section_doc(nil)
 
       assert count(doc, "#s-viewing") == 0
       assert count(doc, "#s-keys") == 0
       assert count(doc, "#t-tiles.flex.flex-wrap.gap-2") == 1
       assert count(doc, ~s(a[aria-current])) == 0
+      assert doc |> LazyHTML.query("#s > span") |> LazyHTML.text() |> String.trim() == "Mockups"
+    end
+
+    test "show_label: false drops the label row; a placeholder renders in place as a non-link span" do
+      items = [
+        %{key: 1, src: "/images/a.png", caption: "A", kind: :image},
+        %{key: nil, src: nil, caption: "b.png", kind: :placeholder},
+        %{key: 2, src: "/images/c.png", caption: "C", kind: :image}
+      ]
+
+      doc = section_doc(nil, items: items, label: "Screenshots", noun: "Screenshot", show_label: false)
+
+      refute LazyHTML.text(doc) =~ "Screenshots"
+      assert count(doc, "#t-tiles > :nth-child(1)#t-0-open") == 1
+      assert count(doc, ~s(#t-tiles > span#t-1[title="b.png"])) == 1
+      assert count(doc, "#t-tiles > :nth-child(3)#t-2-open") == 1
+      assert count(doc, "a#t-1-open") == 0
+      assert doc |> LazyHTML.query("a#t-2-open") |> LazyHTML.attribute("href") == ["/v/2"]
     end
   end
 
@@ -4361,14 +4482,27 @@ defmodule RelayWeb.CoreComponentsTest do
       assert count(bar_doc(3), "#mockup-viewer-bar-next[disabled]") == 1
       assert count(bar_doc(1), "#mockup-viewer-bar-prev[disabled]") == 1
     end
+
+    test "the arrows name the mockup by default" do
+      assert attr_of(bar_doc(2), "#mockup-viewer-bar-prev", "aria-label") == ["Previous mockup"]
+      assert attr_of(bar_doc(2), "#mockup-viewer-bar-next", "aria-label") == ["Next mockup"]
+    end
   end
 
   describe "card_mockup_viewer/1 (RE380)" do
     test "sheet, framed mockup, key guard and key bindings — and no banner" do
       first = "11111111-aaaa"
-      mockups = [%{id: first, caption: "Empty"}, %{id: "22222222-bbbb", caption: "Loaded"}]
 
-      assigns = %{mockups: mockups, first: first}
+      items =
+        CardMedia.mockup_items(
+          [
+            %{"url" => "/attachments/#{first}", "caption" => "Empty"},
+            %{"url" => "/attachments/22222222-bbbb", "caption" => "Loaded"}
+          ],
+          %{first => "text/html", "22222222-bbbb" => "text/html"}
+        )
+
+      assigns = %{items: items, first: first}
 
       html =
         rendered_to_string(~H"""
@@ -4377,10 +4511,10 @@ defmodule RelayWeb.CoreComponentsTest do
           card={%{title: "Notif"}}
           stage_name="Design · Review"
           stage_owner={:human}
-          mockups={@mockups}
-          current_id={@first}
+          items={@items}
+          current_key={@first}
           back_patch="/board/b?card=RE9"
-          mockup_href={&"/v/#{&1}"}
+          item_href={&"/v/#{&1}"}
         >
           <:gate>
             <p id="gate-probe">g</p>
@@ -4419,6 +4553,7 @@ defmodule RelayWeb.CoreComponentsTest do
       frame = LazyHTML.query(doc, "iframe#mockup-viewer-frame")
       assert LazyHTML.attribute(frame, "sandbox") == [RelayWeb.mockup_sandbox()]
       assert LazyHTML.attribute(frame, "src") == [RelayWeb.attachment_path(first)]
+      assert LazyHTML.attribute(frame, "title") == ["Mockup: Empty (RE9)"]
 
       assert attr_of(doc, "#mockup-viewer", "phx-hook") == ["ArrowKeyGuard"]
       assert attr_of(doc, "#mockup-viewer", "data-guard-keys") == ["ArrowLeft,ArrowRight,Escape"]
@@ -4428,6 +4563,65 @@ defmodule RelayWeb.CoreComponentsTest do
       assert count(doc, ~s(#mockup-viewer-key-back[phx-key="Escape"][phx-window-keydown="mockup_back"])) == 1
 
       assert count(doc, "#mockup-viewer-banner") == 0
+    end
+  end
+
+  describe "card_mockup_viewer/1 screenshots (RE390)" do
+    @viewer_items [
+      %{key: 1, src: "/images/a.png", caption: "Board", kind: :image},
+      %{key: 2, src: "/attachments/h", caption: nil, kind: :html}
+    ]
+
+    defp screenshot_viewer_doc(current_key) do
+      assigns = %{items: @viewer_items, current_key: current_key}
+
+      ~H"""
+      <CoreComponents.card_mockup_viewer
+        ref="RE9"
+        card={%{title: "Notif"}}
+        stage_name="Code"
+        stage_owner={:ai}
+        items={@items}
+        current_key={@current_key}
+        back_patch="/board/b?card=RE9"
+        item_href={&"/v/#{&1}"}
+        label="Screenshots"
+        noun="Screenshot"
+      />
+      """
+      |> rendered_to_string()
+      |> LazyHTML.from_fragment()
+    end
+
+    test "an image item is shown at natural size in a scrolling frame, under the Screenshots label" do
+      doc = screenshot_viewer_doc(1)
+
+      [box_class] = attr_of(doc, "#mockup-viewer-frame-box-1", "class")
+      assert "overflow-auto" in String.split(box_class)
+
+      img = LazyHTML.query(doc, ~s(#mockup-viewer-frame-box-1 img#mockup-viewer-image[src="/images/a.png"]))
+      [img_class] = LazyHTML.attribute(img, "class")
+      assert "max-w-none" in String.split(img_class)
+      assert count(doc, "iframe#mockup-viewer-frame") == 0
+
+      assert text(doc, "#mockup-viewer-sheet #mockup-viewer-mockups > span") == "Screenshots"
+
+      viewing =
+        doc |> LazyHTML.query("#mockup-viewer-mockups-viewing") |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+
+      assert viewing == "Viewing Board · 1 of 2"
+      assert attr_of(doc, "#mockup-viewer-bar-prev", "aria-label") == ["Previous screenshot"]
+    end
+
+    test "an HTML item is framed in the sandboxed iframe, titled with the noun" do
+      doc = screenshot_viewer_doc(2)
+
+      [box_class] = attr_of(doc, "#mockup-viewer-frame-box-2", "class")
+      assert "overflow-hidden" in String.split(box_class)
+
+      frame = LazyHTML.query(doc, ~s(#mockup-viewer-frame-box-2 iframe#mockup-viewer-frame[sandbox="allow-scripts"]))
+      assert LazyHTML.attribute(frame, "title") == ["Screenshot: Screenshot (RE9)"]
+      assert LazyHTML.attribute(frame, "src") == ["/attachments/h"]
     end
   end
 end
