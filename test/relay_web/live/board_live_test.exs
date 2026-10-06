@@ -154,6 +154,16 @@ defmodule RelayWeb.BoardLiveTest do
       assert document |> LazyHTML.query("#board .stage-strip") |> Enum.count() == 8
       assert document |> LazyHTML.query("#board .stage-empty") |> Enum.count() == 0
     end
+
+    # RE395: starring lives on /boards only — never on the board page or its top bar.
+    test "the board page has no star button", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "[id^=board-star-]")
+      refute html =~ "hero-star"
+      refute render(view) =~ "hero-star"
+    end
   end
 
   describe "cards" do
