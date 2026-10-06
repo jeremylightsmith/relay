@@ -2758,6 +2758,80 @@ defmodule RelayWeb.BoardLiveTest do
     end
   end
 
+  describe "RE389 — opening a card scrolls it into view without stealing focus" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "a deep link pushes scroll_card for its card and no focus_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "opening a card with the drawer closed pushes scroll_card and no focus_card",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY1"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "a switch (A → B) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "a close (A → nil) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "re-patching the open card (A → A) pushes no scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "embed mode never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1&card=MY1")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "card mode (/cards/:ref) never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+  end
+
   describe "RE389 — the open card is highlighted on the board" do
     setup :register_and_log_in_user
 

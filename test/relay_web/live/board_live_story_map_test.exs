@@ -215,6 +215,17 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       assert_patched(view, "/board/#{ctx.board.slug}/story-map?card=#{Cards.ref(ctx.board, ctx.sso)}")
       refute_push_event(view, "focus_card", %{})
     end
+
+    test "RE389 — opening a card from the map scrolls it into view without focusing it", %{conn: conn} = ctx do
+      ref = Cards.ref(ctx.board, ctx.sso)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("##{card_dom_id(ctx.board, ctx.sso)}") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map?card=#{ref}")
+      assert_push_event(view, "scroll_card", %{ref: ^ref})
+      refute_push_event(view, "focus_card", %{})
+    end
   end
 
   describe "realtime" do

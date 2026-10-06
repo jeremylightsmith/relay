@@ -2,7 +2,8 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
   @moduledoc """
   Real-browser (Playwright) tests for RE326. Switching the drawer's card with ←/→ or the ‹ ›
   chevrons moves keyboard focus to that card on the board and scrolls it into view. Closing the
-  drawer leaves focus on the last card viewed.
+  drawer leaves focus on the last card viewed. RE389: opening a card from a search result or a
+  `?card=` deep link scrolls it into view (`scroll_card`) without moving focus.
 
   `RelayWeb.BoardLiveTest` pins the server half (`BoardLive.handle_params/3` pushing
   `focus_card`). `Phoenix.LiveViewTest` never runs the `BoardDnD` / `StoryMapDnD` hooks that act on
@@ -80,27 +81,60 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     |> assert_focused(second)
   end
 
-  test "a deep link steals no focus and scrolls nothing; a switch scrolls the board to follow", ctx do
+  # RE389 — opening a card (nil → A) pushes the scroll-only `scroll_card`: the card is revealed,
+  # but keyboard focus stays where it was.
+  test "a deep link scrolls its card into view without focusing it", ctx do
     refs = column(ctx.board, ctx.code, 20)
-    [opened, target] = Enum.take(refs, -2)
+    opened = Enum.at(refs, -2)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> unwrap(fn %{frame_id: frame_id} ->
+      # Precondition: the column must overflow the viewport, or "scrolls into view" proves nothing.
+      # If this fails, the column needs more cards, not a looser assertion.
+      refute card_in_viewport?(frame_id, opened),
+             "precondition: #{opened} must start below the fold — add cards to the column"
+    end)
+    |> visit("/board/#{ctx.board.slug}?card=#{opened}")
+    |> assert_has("body .phx-connected")
+    |> assert_drawer_shows(opened)
+    |> assert_has(open_card(opened))
+    |> assert_in_viewport(opened)
+    |> refute_focused(opened)
+  end
+
+  test "a switch from a deep-linked card scrolls the board to follow and focuses the new card", ctx do
+    refs = column(ctx.board, ctx.code, 20)
+    [opened, last] = Enum.take(refs, -2)
 
     ctx.conn
     |> visit_board("/board/#{ctx.board.slug}?card=#{opened}")
     |> assert_drawer_shows(opened)
-    |> unwrap(fn %{frame_id: frame_id} ->
-      # Precondition: the column must overflow the viewport, or "scrolls to follow" proves nothing.
-      # If this fails, the column needs more cards, not a looser assertion.
-      refute card_in_viewport?(frame_id, target),
-             "precondition: #{target} must start below the fold — add cards to the column"
-
-      # A deep link neither focused the opened card nor scrolled the board to it.
-      refute card_in_viewport?(frame_id, opened), "the deep link scrolled the board to #{opened}"
-      refute focused_ref(frame_id) == opened, "the deep link moved focus to #{opened}"
-    end)
     |> click("#card-drawer-next")
-    |> assert_drawer_shows(target)
-    |> assert_focused(target)
-    |> assert_in_viewport(target)
+    |> assert_drawer_shows(last)
+    |> assert_focused(last)
+    |> assert_in_viewport(last)
+  end
+
+  test "picking an off-screen card from the board search scrolls it into view without focusing it", ctx do
+    refs = column(ctx.board, ctx.code, 20)
+    # The column renders newest first, so the second-to-last card ("Focus 2") is below the fold.
+    found = Enum.at(refs, -2)
+    title = title_of(ctx.board, ctx.code, found)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> unwrap(fn %{frame_id: frame_id} ->
+      refute card_in_viewport?(frame_id, found),
+             "precondition: #{found} must start below the fold — add cards to the column"
+
+      {:ok, _} = Frame.type(frame_id, selector: "#board-search-input", text: title, timeout: 2_000)
+    end)
+    |> click("#board-search-result-#{found}")
+    |> assert_drawer_shows(found)
+    |> assert_has(open_card(found))
+    |> assert_in_viewport(found)
+    |> refute_focused(found)
   end
 
   test "the story map drawer hands focus back to its card on close, with card nav still off", ctx do
@@ -174,6 +208,10 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
     Enum.each(1..count, fn n -> {:ok, _card} = Cards.create_card(stage, %{title: "Focus #{n}"}) end)
 
     board |> Cards.stage_column(stage.id) |> Enum.map(&Cards.ref(board, &1))
+  end
+
+  defp title_of(board, stage, ref) do
+    board |> Cards.stage_column(stage.id) |> Enum.find(&(Cards.ref(board, &1) == ref)) |> Map.fetch!(:title)
   end
 
   defp visit_board(conn, path) do
@@ -251,7 +289,13 @@ defmodule RelayWeb.Browser.BoardCardFocusTest do
       _ =
         Frame.wait_for_function(frame_id, expression: in_viewport_expression(ref), timeout: 5_000)
 
-      assert card_in_viewport?(frame_id, ref), "#{ref} was focused but never scrolled into view"
+      assert card_in_viewport?(frame_id, ref), "#{ref} was never scrolled into view"
+    end)
+  end
+
+  defp refute_focused(session, ref) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      refute focused_ref(frame_id) == ref, "opening #{ref} moved keyboard focus to it"
     end)
   end
 

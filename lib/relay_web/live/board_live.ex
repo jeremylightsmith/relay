@@ -1208,6 +1208,7 @@ defmodule RelayWeb.BoardLive do
        |> assign(:open_ref, open_ref(socket))
        |> reinsert_open_pair(previous_card, socket.assigns.selected_card)
        |> maybe_push_card_focus(previous_ref, selected_ref(socket))
+       |> maybe_push_card_scroll(previous_ref, selected_ref(socket))
        |> assign_viewer(params["mockup"])}
     end
   end
@@ -1287,8 +1288,9 @@ defmodule RelayWeb.BoardLive do
   defp selected_ref(_socket), do: nil
 
   # RE389 — whether a board is rendered behind the drawer. Embed and card mode have no board in
-  # the DOM, so nothing there is highlighted, re-inserted or focused. The one home of that
-  # exemption: open_ref/1, reinsert_open_pair/3 and maybe_push_card_focus/3 all ask it.
+  # the DOM, so nothing there is highlighted, re-inserted, scrolled or focused. The one home of
+  # that exemption: open_ref/1, reinsert_open_pair/3, maybe_push_card_focus/3 and
+  # maybe_push_card_scroll/3 all ask it.
   defp board_in_dom?(%{assigns: %{embed: true}}), do: false
   defp board_in_dom?(%{assigns: %{live_action: :card}}), do: false
   defp board_in_dom?(_socket), do: true
@@ -1302,11 +1304,14 @@ defmodule RelayWeb.BoardLive do
   # rule lives here once, as a table of the selection before → after (RE389 adds the open
   # highlight column — kanban stream items only re-render when re-inserted):
   #
-  #                      focus (maybe_push_card_focus/3)      open highlight (reinsert_open_pair/3)
+  #                      focus / scroll                       open highlight (reinsert_open_pair/3)
+  #                      (maybe_push_card_focus/3,
+  #                       maybe_push_card_scroll/3)
   #   embed / card mode  never: no board in the DOM (board_in_dom?/1, for both columns)
-  #   nil → A            no push: a click already focused A,  re-insert A
-  #                      and a search result or deep link
-  #                      must not steal focus or scroll
+  #   nil → A            push scroll_card: reveal the card,   re-insert A
+  #                      never focus it — a click already
+  #                      focused A, and a search result or
+  #                      deep link must not steal focus
   #   A → A              no push                              nothing
   #   A → nil (close)    focus A, so Tab carries on from      re-insert A
   #                      the last card viewed
@@ -1322,6 +1327,13 @@ defmodule RelayWeb.BoardLive do
   defp push_focus_change(socket, ref, ref), do: socket
   defp push_focus_change(socket, previous_ref, nil), do: push_card_focus(socket, previous_ref)
   defp push_focus_change(socket, _previous_ref, ref), do: push_card_focus(socket, ref)
+
+  # RE389 — the nil → A row of the table above: scroll the opened card into view, focus untouched.
+  defp maybe_push_card_scroll(socket, nil, ref) when is_binary(ref) do
+    if board_in_dom?(socket), do: push_card_scroll(socket, ref), else: socket
+  end
+
+  defp maybe_push_card_scroll(socket, _previous_ref, _ref), do: socket
 
   # RE389 — re-insert the before and after cards so both re-render against the new @open_ref
   # (assigned just before). Each is refetched, never the possibly stale @selected_card struct, and
@@ -1355,6 +1367,9 @@ defmodule RelayWeb.BoardLive do
   # The one place the `focus_card` hook event is named: create_card and the drawer focus rule
   # above both push it.
   defp push_card_focus(socket, ref), do: push_event(socket, "focus_card", %{ref: ref})
+
+  # RE389 — the one place the scroll-only `scroll_card` hook event is named (maybe_push_card_scroll/3).
+  defp push_card_scroll(socket, ref), do: push_event(socket, "scroll_card", %{ref: ref})
 
   # RLY-68 — the async heavy-body fetch kicked off by
   # maybe_start_body_load/4. Compares the result's card id against the
