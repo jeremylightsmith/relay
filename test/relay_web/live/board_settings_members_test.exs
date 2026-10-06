@@ -20,6 +20,44 @@ defmodule RelayWeb.BoardSettingsMembersTest do
     assert has_element?(view, "#invite-member-form")
   end
 
+  # RE394 — settings actions show the shared client-side pressed face inside their group.
+  test "Send invite presses to Sending… inside the invite form's action group", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#invite-member-form.action-group #send-invite.pending-action[type=submit]")
+    assert view |> element("#send-invite .pending-idle") |> render() =~ "Send invite"
+    assert view |> element("#send-invite .pending-face") |> render() =~ "Sending…"
+    # an inline-styled button gets no daisyUI classes from <.button>
+    refute has_element?(view, "#send-invite.btn")
+  end
+
+  test "the new-key form's Create presses to Creating…; Cancel stays idle", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
+    view |> element("#generate-key") |> render_click()
+
+    assert has_element?(view, "#new-key-form.action-group")
+    assert has_element?(view, "#create-key-submit.pending-action[type=submit]")
+    assert view |> element("#create-key-submit .pending-idle") |> render() =~ "Create"
+    assert view |> element("#create-key-submit .pending-face") |> render() =~ "Creating…"
+    assert has_element?(view, "#cancel-new-key")
+    refute has_element?(view, "#cancel-new-key.pending-action")
+  end
+
+  test "a key row's Regenerate and Revoke press to Regenerating… / Revoking…", %{conn: conn, user: user} do
+    board = board_for(user)
+    {:ok, %{api_key: key}} = Relay.ApiKeys.create_key(board, user)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=keys")
+
+    row = "#api-key-row-#{key.id}"
+    assert has_element?(view, "#{row}.action-group #regenerate-key-#{key.id}.pending-action")
+    assert has_element?(view, "#{row}.action-group #revoke-key-#{key.id}.pending-action")
+    assert view |> element("#regenerate-key-#{key.id} .pending-face") |> render() =~ "Regenerating…"
+    assert view |> element("#revoke-key-#{key.id} .pending-face") |> render() =~ "Revoking…"
+    assert has_element?(view, "#regenerate-key-#{key.id}[data-confirm]")
+  end
+
   test "the invite email input uses the field-surface token, not the base-200 canvas token", %{
     conn: conn,
     user: user

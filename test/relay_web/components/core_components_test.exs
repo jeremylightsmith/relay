@@ -1537,6 +1537,68 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="archive-card-button")
     end
 
+    # RE394 — the drawer's one-off server actions show the shared pressed face in their group.
+    defp drawer_doc(card_overrides, extra) do
+      (&CoreComponents.card_drawer/1)
+      |> render_component(drawer_attrs(card_overrides, extra))
+      |> LazyHTML.from_fragment()
+    end
+
+    test "Archive in the ⋯ menu presses to Archiving…; the menu is the action group (RE394)" do
+      doc = drawer_doc(%{}, %{overflow_open: true})
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-overflow-menu")
+      assert "pending-action" in btn_classes(doc, "#archive-card-button")
+      assert attr_of(doc, "#archive-card-button", "role") == ["menuitem"]
+      assert attr_of(doc, "#archive-card-button", "phx-click") == ["archive_card"]
+      assert text_of(doc, "#archive-card-button .pending-idle") == "Archive"
+      assert text_of(doc, "#archive-card-button .pending-face") == "Archiving…"
+    end
+
+    test "an archived card's Restore presses to Restoring… (RE394)" do
+      doc = drawer_doc(%{}, %{archived: true})
+
+      assert "action-group" in btn_classes(doc, "#card-archived-banner")
+      assert text_of(doc, "#restore-card-button .pending-idle") == "Restore"
+      assert text_of(doc, "#restore-card-button .pending-face") == "Restoring…"
+    end
+
+    test "Add note presses to Adding…; the comment form is the action group (RE394)" do
+      doc = drawer_doc(%{}, %{})
+      submit = "#card-drawer-comment-form button[type=submit]"
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-comment-form")
+      assert "pending-action" in btn_classes(doc, submit)
+      assert text_of(doc, "#{submit} .pending-idle") == "Add note"
+      assert text_of(doc, "#{submit} .pending-face") == "Adding…"
+    end
+
+    test "Take over presses to Taking over… beside the owner's ✕ (RE394)" do
+      doc = drawer_doc(%{owners: [%{actor_type: :agent, user_id: nil}]}, %{active_owner: :ai})
+
+      assert "action-group" in btn_classes(doc, ".rail-owner")
+      assert text_of(doc, "#card-drawer-take-over .pending-idle") == "Take over"
+      assert text_of(doc, "#card-drawer-take-over .pending-face") == "Taking over…"
+      refute "pending-action" in btn_classes(doc, "#card-drawer-remove-owner-agent")
+    end
+
+    test "the public description's Save presses to Saving…; Cancel stays idle (RE394)" do
+      doc =
+        drawer_doc(%{}, %{
+          vote_count: 0,
+          public_description: nil,
+          editing_public_desc: true,
+          public_desc_form: to_form(%{"public_description" => ""})
+        })
+
+      assert "action-group" in btn_classes(doc, "#public-desc-form")
+      save = "#public-desc-form button[type=submit]"
+      assert btn_classes(doc, save) == ~w(btn btn-primary btn-xs pending-action)
+      assert text_of(doc, "#{save} .pending-idle") == "Save"
+      assert text_of(doc, "#{save} .pending-face") == "Saving…"
+      refute "pending-action" in btn_classes(doc, "#public-desc-form button[phx-click=cancel_public_desc]")
+    end
+
     test "the header stage chip is a nowrap trigger with the v5 artboard's geometry and its owner tint" do
       attrs =
         drawer_attrs(%{}, %{
@@ -2204,6 +2266,24 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="if-title-cancel")
       assert html =~ "Enter · Esc"
     end
+
+    test "editing: the pill's ✓ is a pending action inside an action group (RE394)" do
+      doc =
+        (&CoreComponents.inline_field/1)
+        |> render_component(
+          id: "card-drawer-title",
+          editing: true,
+          field: :title,
+          form: Phoenix.Component.to_form(%{"title" => "Draft"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+        |> LazyHTML.from_fragment()
+
+      assert "pending-action" in btn_classes(doc, "#card-drawer-title-save")
+      assert "action-group" in btn_classes(doc, "#card-drawer-title-pill")
+    end
   end
 
   describe "boxed_field/1" do
@@ -2318,6 +2398,53 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  # RE394 — the commit pill's ✓ shows a spinner-only pressed face; its hint swaps to Saving….
+  describe "boxed_field/1 commit pill pressed face (RE394)" do
+    defp pill_doc(extra \\ []) do
+      (&CoreComponents.boxed_field/1)
+      |> render_component(
+        Keyword.merge(
+          [
+            id: "board-name",
+            commit: :self,
+            value: "Relay",
+            field: :name,
+            form: Phoenix.Component.to_form(%{"name" => "Relay"}, as: :board),
+            save_event: "save_board_name",
+            cancel_event: "cancel_board_name"
+          ],
+          extra
+        )
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "the pill is a hidden action group; ✓ is a spinner-only pending submit; hint swaps to Saving…" do
+      doc = pill_doc()
+
+      assert btn_classes(doc, "#board-name-pill") == ~w(commit-pill action-group hidden)
+      assert attr_of(doc, "#board-name-save", "type") == ["submit"]
+      assert attr_of(doc, "#board-name-save", "aria-label") == ["Save"]
+      assert btn_classes(doc, "#board-name-save") == ~w(commit-pill-save pending-action)
+      assert count(doc, "#board-name-save .pending-stack .pending-idle span.hero-check") == 1
+      assert count(doc, "#board-name-save .pending-face .loading.loading-spinner.loading-xs") == 1
+      assert text_of(doc, "#board-name-save .pending-face") == ""
+      assert attr_of(doc, "#board-name-save .pending-face", "aria-hidden") == ["true"]
+      refute "pending-action" in btn_classes(doc, "#board-name-cancel")
+
+      assert "pending-status" in btn_classes(doc, "#board-name-pill .commit-pill-hint")
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-idle") == "Enter · Esc"
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-face") == "Saving…"
+    end
+
+    test "a multiline field's hint idles on ⌘↵ · Esc and presses to Saving…" do
+      doc = pill_doc(multiline: true)
+
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-idle") == "⌘↵ · Esc"
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-face") == "Saving…"
+    end
+  end
+
   describe "boxed_field/1 editing commit affordance (RLY-58)" do
     defp edit_attrs do
       [
@@ -2354,6 +2481,21 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(data-cancel-id="bf-cancel")
       assert html =~ ~s(data-commit="cmd-enter")
       refute html =~ "data-dirty-pill"
+    end
+
+    test "Save is a Saving… pending submit; the actions row is the action group (RE394)" do
+      doc =
+        (&CoreComponents.boxed_field/1)
+        |> render_component(Keyword.put(edit_attrs(), :id, "card-drawer-description"))
+        |> LazyHTML.from_fragment()
+
+      assert "action-group" in btn_classes(doc, ".commit-field-actions")
+      save = "#card-drawer-description-save"
+      assert doc |> LazyHTML.query(save) |> LazyHTML.attribute("type") == ["submit"]
+      assert btn_classes(doc, save) == ~w(btn btn-sm btn-primary pending-action)
+      assert text_of(doc, "#{save} .pending-idle") == "Save"
+      assert text_of(doc, "#{save} .pending-face") == "Saving…"
+      refute "pending-action" in btn_classes(doc, "#card-drawer-description-cancel")
     end
   end
 

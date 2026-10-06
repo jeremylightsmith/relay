@@ -40,6 +40,14 @@ defmodule RelayWeb.PendingActionCssTest do
     end
   end
 
+  test "a left-aligned pending row keeps its faces anchored left, not centred in the stack" do
+    for path <- [@app_css, @storybook_css] do
+      assert block(path) =~
+               ~r/\.pending-action\.text-left \.pending-stack\s*\{[^}]*justify-items: start/s,
+             path
+    end
+  end
+
   test "the RE394 block is byte-identical in app.css and storybook.css" do
     assert block(@app_css) == block(@storybook_css)
   end

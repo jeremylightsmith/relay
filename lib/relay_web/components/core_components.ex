@@ -3943,20 +3943,21 @@ defmodule RelayWeb.CoreComponents do
               <section
                 :if={@archived}
                 id="card-archived-banner"
-                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
+                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm action-group"
                 style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
               >
                 <.icon name="hero-archive-box" class="size-4" />
                 <span class="flex-1">This card is archived.</span>
-                <button
+                <.button
                   type="button"
                   id="restore-card-button"
                   phx-click="restore_card"
                   phx-value-ref={@ref}
                   class="btn btn-sm"
+                  pending="Restoring…"
                 >
                   Restore
-                </button>
+                </.button>
               </section>
               <div id="card-drawer-tab-panel-detail" class={[@drawer_tab != :detail && "hidden"]}>
                 <section
@@ -4362,6 +4363,7 @@ defmodule RelayWeb.CoreComponents do
                       :if={!@archived}
                       for={@comment_form}
                       id={"#{@id}-comment-form"}
+                      class="action-group"
                       phx-change="validate_comment"
                       phx-submit="post_comment"
                     >
@@ -4374,12 +4376,13 @@ defmodule RelayWeb.CoreComponents do
                           placeholder="What you did, what you found, what’s left…"
                           class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
                         >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
-                        <button
+                        <.button
                           type="submit"
                           class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
+                          pending="Adding…"
                         >
                           Add note
-                        </button>
+                        </.button>
                       </div>
                       <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
                     </.form>
@@ -4678,7 +4681,7 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :for={owner <- @card.owners}
                     class={[
-                      "rail-owner flex items-center gap-2 rounded-md px-1.5 py-1",
+                      "rail-owner action-group flex items-center gap-2 rounded-md px-1.5 py-1",
                       active_owner?(owner, @active_owner) &&
                         if(owner.actor_type == :agent,
                           do: "rail-owner-active ring-2 ring-secondary/60",
@@ -4689,15 +4692,16 @@ defmodule RelayWeb.CoreComponents do
                     data-active={to_string(active_owner?(owner, @active_owner))}
                   >
                     <span class="text-sm">{owner_name(owner)}</span>
-                    <button
+                    <.button
                       :if={!@archived and owner.actor_type == :agent}
                       type="button"
                       id={"#{@id}-take-over"}
                       class="rail-take-over btn btn-primary btn-xs"
                       phx-click="take_over"
+                      pending="Taking over…"
                     >
                       Take over
-                    </button>
+                    </.button>
                     <button
                       :if={!@archived}
                       type="button"
@@ -4869,6 +4873,7 @@ defmodule RelayWeb.CoreComponents do
                   :if={@editing_public_desc}
                   for={@public_desc_form}
                   id="public-desc-form"
+                  class="action-group"
                   phx-submit="save_public_desc"
                   phx-change="draft_field"
                 >
@@ -4879,9 +4884,9 @@ defmodule RelayWeb.CoreComponents do
                     class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
                   >{Phoenix.HTML.Form.normalize_value("textarea", @public_desc_form[:public_description].value)}</textarea>
                   <div class="mt-2 flex flex-wrap items-center gap-[7px]">
-                    <button type="submit" class="btn btn-primary btn-xs">
+                    <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
                       Save
-                    </button>
+                    </.button>
                     <button
                       type="button"
                       phx-click="cancel_public_desc"
@@ -5946,10 +5951,10 @@ defmodule RelayWeb.CoreComponents do
         :if={@open}
         id="card-drawer-overflow-menu"
         role="menu"
-        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"}
+        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
         style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
       >
-        <button
+        <.button
           type="button"
           id="archive-card-button"
           role="menuitem"
@@ -5957,9 +5962,10 @@ defmodule RelayWeb.CoreComponents do
           phx-value-ref={@ref}
           data-confirm={archive_confirm(@active_run?)}
           class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+          pending="Archiving…"
         >
           Archive
-        </button>
+        </.button>
       </div>
     </div>
     """
@@ -6831,9 +6837,21 @@ defmodule RelayWeb.CoreComponents do
 
   defp commit_pill(assigns) do
     ~H"""
-    <div id={"#{@id}-pill"} class={["commit-pill", @hidden && "hidden"]}>
-      <button type="submit" id={"#{@id}-save"} class="commit-pill-save" aria-label="Save">
-        <.icon name="hero-check" class="size-3.5" />
+    <%!-- RE394 — the ✓ is a fixed 26×24 square, so its pressed face is the spinner alone (not
+    `<.button pending>`, which would widen it); the hint carries the Saving… text instead. --%>
+    <div id={"#{@id}-pill"} class={["commit-pill action-group", @hidden && "hidden"]}>
+      <button
+        type="submit"
+        id={"#{@id}-save"}
+        class="commit-pill-save pending-action"
+        aria-label="Save"
+      >
+        <span class="pending-stack">
+          <span class="pending-idle"><.icon name="hero-check" class="size-3.5" /></span>
+          <span class="pending-face" aria-hidden="true">
+            <span class="loading loading-spinner loading-xs"></span>
+          </span>
+        </span>
       </button>
       <button
         type="button"
@@ -6844,7 +6862,12 @@ defmodule RelayWeb.CoreComponents do
       >
         <.icon name="hero-x-mark" class="size-3.5" />
       </button>
-      <span class="commit-pill-hint">{@hint}</span>
+      <span class="commit-pill-hint pending-status">
+        <span class="pending-stack">
+          <span class="pending-idle">{@hint}</span>
+          <span class="pending-face" aria-hidden="true">Saving…</span>
+        </span>
+      </span>
     </div>
     """
   end
@@ -7074,8 +7097,10 @@ defmodule RelayWeb.CoreComponents do
           data-autofocus="true"
           data-cancel-id={"#{@id}-cancel"}
         />
-        <div class="commit-field-actions">
-          <button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary">Save</button>
+        <div class="commit-field-actions action-group">
+          <.button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary" pending="Saving…">
+            Save
+          </.button>
           <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
             Cancel
           </button>

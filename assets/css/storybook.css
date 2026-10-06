@@ -157,6 +157,10 @@
   justify-content: center;
   gap: inherit;
 }
+/* A left-aligned row (menu items) keeps both faces anchored left instead of centred. */
+.pending-action.text-left .pending-stack {
+  justify-items: start;
+}
 .pending-face { visibility: hidden; }
 .pending-action.phx-click-loading .pending-face,
 .pending-action[type="submit"].phx-submit-loading .pending-face {

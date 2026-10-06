@@ -193,6 +193,17 @@ defmodule RelayWeb.BoardLiveRestartStalledTest do
     refute render(view) =~ ~s(phx-click="restart_stalled")
   end
 
+  test "a row's Restart presses to Restarting… with its row as the action group (RE394)", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-row-#{a.card.id}.action-group #stalled-restart-#{a.card.id}.pending-action")
+    assert view |> element("#stalled-restart-#{a.card.id} .pending-idle") |> render() =~ "Restart"
+    assert view |> element("#stalled-restart-#{a.card.id} .pending-face") |> render() =~ "Restarting…"
+  end
+
   test "a row's Restart revives only that card and drops it from the list", ctx do
     a = park(ctx.board, ctx.flow, "Escalated A", :failed)
     b = park(ctx.board, ctx.flow, "Escalated B", :failed)

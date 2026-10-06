@@ -367,15 +367,17 @@ defmodule RelayWeb.BoardSettingsLive do
                   <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);flex:1;">
                     Archiving hides this board for everyone. You can restore it later.
                   </span>
-                  <button
+                  <.button
                     type="button"
                     id="archive-board-button"
                     phx-click="archive_board"
                     data-confirm="Archive this board?"
+                    class=""
                     style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;"
+                    pending="Archiving…"
                   >
                     Archive board
-                  </button>
+                  </.button>
                 </div>
               </div>
             </section>
@@ -769,6 +771,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 :let={f}
                 for={@invite_form}
                 id="invite-member-form"
+                class="action-group"
                 as={:invite}
                 phx-submit="invite_member"
                 style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px;display:flex;align-items:center;gap:10px;margin-bottom:26px;flex-wrap:wrap;"
@@ -782,13 +785,15 @@ defmodule RelayWeb.BoardSettingsLive do
                   autocomplete="off"
                   style="flex:1;min-width:180px;border:1px solid var(--color-field-border);border-radius:8px;padding:9px 11px;font-size:13.5px;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);background:var(--color-field-bg);outline:none;"
                 />
-                <button
+                <.button
                   type="submit"
                   id="send-invite"
+                  class=""
                   style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;"
+                  pending="Sending…"
                 >
                   Send invite
-                </button>
+                </.button>
               </.form>
 
               <div
@@ -917,7 +922,11 @@ defmodule RelayWeb.BoardSettingsLive do
                   id={"api-key-#{key.id}"}
                   style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;"
                 >
-                  <div style="display:flex;align-items:center;gap:10px;">
+                  <div
+                    id={"api-key-row-#{key.id}"}
+                    class="action-group"
+                    style="display:flex;align-items:center;gap:10px;"
+                  >
                     <div id={"api-key-name-#{key.id}"} style="flex:1;min-width:0;">
                       <.boxed_field
                         :if={!@read_only?}
@@ -937,26 +946,30 @@ defmodule RelayWeb.BoardSettingsLive do
                         {key.name}
                       </span>
                     </div>
-                    <button
+                    <.button
                       id={"regenerate-key-#{key.id}"}
                       type="button"
                       phx-click="regenerate_key"
                       phx-value-id={key.id}
                       data-confirm="Regenerate the key? The current key stops working immediately."
+                      class=""
                       style="background:transparent;border:1px solid var(--color-base-300);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
+                      pending="Regenerating…"
                     >
                       Regenerate
-                    </button>
-                    <button
+                    </.button>
+                    <.button
                       id={"revoke-key-#{key.id}"}
                       type="button"
                       phx-click="revoke_key"
                       phx-value-id={key.id}
                       data-confirm="Revoke the key? Tools using it will lose access."
+                      class=""
                       style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:7px;padding:6px 11px;font-size:12px;font-weight:600;flex:0 0 auto;"
+                      pending="Revoking…"
                     >
                       Revoke
-                    </button>
+                    </.button>
                   </div>
 
                   <div :if={@revealed && @revealed.key_id == key.id} id="api-key-reveal">
@@ -1021,6 +1034,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 :if={@new_key_form}
                 for={@new_key_form}
                 id="new-key-form"
+                class="action-group"
                 phx-submit="create_key"
                 style="margin-top:14px;display:flex;align-items:flex-start;gap:8px;max-width:520px;"
               >
@@ -1034,9 +1048,14 @@ defmodule RelayWeb.BoardSettingsLive do
                     phx-mounted={JS.focus()}
                   />
                 </div>
-                <button type="submit" id="create-key-submit" class="btn btn-sm btn-primary">
+                <.button
+                  type="submit"
+                  id="create-key-submit"
+                  class="btn btn-sm btn-primary"
+                  pending="Creating…"
+                >
                   Create
-                </button>
+                </.button>
                 <button
                   type="button"
                   id="cancel-new-key"

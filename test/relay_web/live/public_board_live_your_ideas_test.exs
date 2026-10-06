@@ -35,6 +35,23 @@ defmodule RelayWeb.PublicBoardLiveYourIdeasTest do
     refute has_element?(view, "#public-card-#{theirs.id} .your-idea-badge")
   end
 
+  test "the inline description editor's Save presses to Saving…; Cancel stays idle (RE394)",
+       %{conn: conn, board: board} do
+    me = insert(:user)
+    {:ok, mine} = Cards.post_public_idea(board, me, %{"title" => "Mine, no desc"})
+
+    conn = log_in_user(conn, me)
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+    view |> element("#add-desc-#{mine.id}") |> render_click()
+
+    save = "#desc-form-#{mine.id} .action-group button[type=submit].pending-action"
+    assert has_element?(view, save)
+    assert view |> element("#{save} .pending-idle") |> render() =~ "Save"
+    assert view |> element("#{save} .pending-face") |> render() =~ "Saving…"
+    assert has_element?(view, "#desc-form-#{mine.id} .action-group button[phx-click=cancel_add_desc]")
+    refute has_element?(view, "#desc-form-#{mine.id} button[phx-click=cancel_add_desc].pending-action")
+  end
+
   test "inline add-public-description appears only on your own description-less card and saves in place",
        %{conn: conn, board: board} do
     me = insert(:user)
