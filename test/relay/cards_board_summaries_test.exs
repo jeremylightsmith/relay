@@ -61,12 +61,24 @@ defmodule Relay.CardsBoardSummariesTest do
     assert [%{ai_active?: false, needs_you_two_type: 0}] = Cards.list_board_summaries(user)
   end
 
-  test "boards the user is not a member of are excluded, member boards keep list order",
+  test "boards the user is not a member of are excluded, member boards keep display order",
        %{user: user} do
     member_board(user, "AAA", "alpha")
     member_board(user, "BBB", "beta")
     member_board(insert(:user), "ZZZ", "zeta")
 
     assert Enum.map(Cards.list_board_summaries(user), & &1.slug) == ["alpha", "beta"]
+  end
+
+  test "rows come starred-first A–Z and carry starred?", %{user: user} do
+    zeta = insert(:board, name: "zeta", key: "ZZZ")
+
+    for b <- [zeta, insert(:board, name: "Alpha"), insert(:board, name: "mango")],
+        do: insert(:membership, board: b, user: user)
+
+    {:ok, true} = Relay.Boards.set_starred(user, zeta.slug, true)
+
+    assert Enum.map(Cards.list_board_summaries(user), &{&1.name, &1.starred?}) ==
+             [{"zeta", true}, {"Alpha", false}, {"mango", false}]
   end
 end

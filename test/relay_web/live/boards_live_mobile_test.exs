@@ -120,6 +120,24 @@ defmodule RelayWeb.BoardsLiveMobileTest do
       {:ok, embed, _html} = live(conn, ~p"/boards?embed=1")
       assert has_element?(embed, "#board-needs-you-mobile-#{board.slug}", "3 NEEDS YOU")
     end
+
+    # RE395: the star is always visible on the phone/embedded layout — the last child of the
+    # name row, after the phone-only NEEDS YOU badge.
+    test "embedded /boards shows the star after the NEEDS YOU badge, ungated", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/boards?embed=1")
+
+      assert has_element?(view, "#board-star-#{board.slug}")
+
+      star = view |> element("#board-star-#{board.slug}") |> render()
+      refute star =~ "hidden"
+      refute star =~ "drawer:"
+      refute star =~ "group-hover"
+
+      tile = view |> element("#board-card-#{board.slug}") |> render()
+      {needs_you, _} = :binary.match(tile, "board-needs-you-mobile-#{board.slug}")
+      {star_at, _} = :binary.match(tile, "board-star-#{board.slug}")
+      assert needs_you < star_at
+    end
   end
 
   describe "what phone width hides" do

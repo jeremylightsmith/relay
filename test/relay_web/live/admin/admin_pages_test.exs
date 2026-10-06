@@ -48,7 +48,7 @@ defmodule RelayWeb.Admin.AdminPagesTest do
   describe "/admin/boards as the superadmin" do
     setup :log_in_superadmin
 
-    test "lists every board newest first with its columns and an Archived badge", %{conn: conn} do
+    test "lists every board A–Z by name with its columns and an Archived badge", %{conn: conn} do
       owner = insert(:user, email: "owner@example.com")
 
       theirs =
@@ -84,7 +84,8 @@ defmodule RelayWeb.Admin.AdminPagesTest do
       assert has_element?(view, "#admin-board-#{archived.id}", "Old Stuff")
       assert has_element?(view, "#admin-board-#{archived.id} .badge", "Archived")
 
-      assert position(html, "admin-board-#{theirs.id}") < position(html, "admin-board-#{archived.id}")
+      assert position(html, "admin-board-#{archived.id}") < position(html, "admin-board-#{theirs.id}")
+      refute has_element?(view, "[id^=board-star-]")
       assert has_element?(view, ~s(#admin-back[href="/admin"]))
     end
 

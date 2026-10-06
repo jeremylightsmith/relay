@@ -6,31 +6,31 @@ defmodule Relay.BoardsAdminTest do
   defp admin_rows(ids), do: Enum.filter(Boards.list_all_boards_for_admin(), &(&1.id in ids))
 
   describe "list_all_boards_for_admin/0" do
-    test "lists every board, archived and non-member boards included, newest first" do
-      older = insert(:board, name: "Older", inserted_at: ~U[2020-01-01 00:00:00Z])
+    test "lists every board, archived and non-member boards included, A–Z by name" do
+      zeta = insert(:board, name: "zeta", inserted_at: ~U[2020-01-01 00:00:00Z])
 
-      archived =
+      alpha =
         insert(:board,
-          name: "Archived",
+          name: "Alpha",
           archived_at: ~U[2020-03-01 00:00:00Z],
           inserted_at: ~U[2020-02-01 00:00:00Z]
         )
 
-      newest = insert(:board, name: "Newest", inserted_at: ~U[2020-03-01 00:00:00Z])
+      mango = insert(:board, name: "mango", inserted_at: ~U[2020-03-01 00:00:00Z])
 
-      assert [n, a, o] = admin_rows([older.id, archived.id, newest.id])
-      assert {n.id, a.id, o.id} == {newest.id, archived.id, older.id}
+      assert [a, m, z] = admin_rows([zeta.id, alpha.id, mango.id])
+      assert {a.id, m.id, z.id} == {alpha.id, mango.id, zeta.id}
       assert a.archived_at == ~U[2020-03-01 00:00:00Z]
-      assert n.archived_at == nil
-      assert o.inserted_at == ~U[2020-01-01 00:00:00Z]
+      assert m.archived_at == nil
+      assert z.inserted_at == ~U[2020-01-01 00:00:00Z]
     end
 
-    test "breaks inserted_at ties by id desc" do
-      first = insert(:board, inserted_at: ~U[2020-01-01 00:00:00Z])
-      second = insert(:board, inserted_at: ~U[2020-01-01 00:00:00Z])
+    test "breaks name ties by id ascending" do
+      first = insert(:board, name: "Same")
+      second = insert(:board, name: "Same")
 
       assert [%{id: a}, %{id: b}] = admin_rows([first.id, second.id])
-      assert {a, b} == {second.id, first.id}
+      assert {a, b} == {first.id, second.id}
     end
 
     test "reports the owner email, resolved member count and non-archived card count" do

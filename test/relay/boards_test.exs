@@ -5,6 +5,7 @@ defmodule Relay.BoardsTest do
   alias Relay.Flows
   alias Relay.Repo
   alias Schemas.Board
+  alias Schemas.Membership
   alias Schemas.Stage
 
   @default_hierarchical_names [
@@ -311,6 +312,125 @@ defmodule Relay.BoardsTest do
       insert(:membership, board: board, user: guest, email: guest.email)
 
       assert board.id in Enum.map(Boards.list_boards(guest), & &1.id)
+    end
+
+    test "keeps creation order and the default board when a later board is starred" do
+      user = insert(:user)
+      {:ok, zeta} = Boards.create_board(user, %{name: "zeta"})
+      {:ok, alpha} = Boards.create_board(user, %{name: "Alpha"})
+      assert {:ok, true} = Boards.set_starred(user, alpha.slug, true)
+
+      assert Enum.map(Boards.list_boards(user), & &1.id) == [zeta.id, alpha.id]
+      assert Boards.get_or_create_default_board(user).id == zeta.id
+    end
+  end
+
+  # RE395: personal stars + starred-first A–Z display order.
+  defp member_board(user, name, attrs \\ []) do
+    board = insert(:board, Keyword.merge([name: name], attrs))
+    insert(:membership, board: board, user: user)
+    board
+  end
+
+  defp display_names(user), do: Enum.map(Boards.list_boards_for_display(user), & &1.board.name)
+
+  defp membership(user, board), do: Repo.get_by!(Membership, user_id: user.id, board_id: board.id)
+
+  describe "list_boards_for_display/1" do
+    test "orders unstarred boards A–Z case-insensitively" do
+      user = insert(:user)
+      for name <- ["zeta", "Alpha", "mango"], do: member_board(user, name)
+
+      rows = Boards.list_boards_for_display(user)
+      assert Enum.map(rows, & &1.board.name) == ["Alpha", "mango", "zeta"]
+      assert Enum.all?(rows, &(&1.starred? == false))
+    end
+
+    test "puts a starred board first" do
+      user = insert(:user)
+      [zeta | _] = for name <- ["zeta", "Alpha", "mango"], do: member_board(user, name)
+      assert {:ok, true} = Boards.set_starred(user, zeta.slug, true)
+
+      rows = Boards.list_boards_for_display(user)
+      assert Enum.map(rows, & &1.board.name) == ["zeta", "Alpha", "mango"]
+      assert Enum.map(rows, & &1.starred?) == [true, false, false]
+    end
+
+    test "sorts starred boards A–Z, then unstarred boards A–Z" do
+      user = insert(:user)
+      beta = member_board(user, "Beta")
+      alpha = member_board(user, "alpha")
+      member_board(user, "Delta")
+      member_board(user, "charlie")
+      {:ok, true} = Boards.set_starred(user, beta.slug, true)
+      {:ok, true} = Boards.set_starred(user, alpha.slug, true)
+
+      assert display_names(user) == ["alpha", "Beta", "charlie", "Delta"]
+    end
+
+    test "breaks name ties by id ascending" do
+      user = insert(:user)
+      first = member_board(user, "Same")
+      second = member_board(user, "Same")
+
+      assert Enum.map(Boards.list_boards_for_display(user), & &1.board.id) == [first.id, second.id]
+    end
+
+    test "omits archived boards" do
+      user = insert(:user)
+      archived = member_board(user, "Old", archived_at: ~U[2020-01-01 00:00:00Z])
+
+      refute archived.id in Enum.map(Boards.list_boards_for_display(user), & &1.board.id)
+    end
+
+    test "another member's star does not change your order" do
+      a = insert(:user)
+      b = insert(:user)
+      mango = insert(:board, name: "mango")
+      zeta = insert(:board, name: "zeta")
+      for board <- [mango, zeta], user <- [a, b], do: insert(:membership, board: board, user: user)
+      {:ok, true} = Boards.set_starred(a, zeta.slug, true)
+
+      rows = Boards.list_boards_for_display(b)
+      assert Enum.map(rows, & &1.board.name) == ["mango", "zeta"]
+      assert Enum.map(rows, & &1.starred?) == [false, false]
+    end
+  end
+
+  describe "set_starred/3" do
+    test "sets (not toggles) the caller's star and returns the value set" do
+      user = insert(:user)
+      board = member_board(user, "Zeta", slug: "zeta-board")
+
+      assert Boards.set_starred(user, "zeta-board", true) == {:ok, true}
+      assert Boards.set_starred(user, "zeta-board", true) == {:ok, true}
+      assert membership(user, board).starred == true
+
+      assert Boards.set_starred(user, "zeta-board", false) == {:ok, false}
+      assert membership(user, board).starred == false
+    end
+
+    test "is :not_found on a board the user is not a member of, or an unknown slug" do
+      owner = insert(:user)
+      theirs = member_board(owner, "Theirs", slug: "theirs")
+      user = insert(:user)
+
+      assert Boards.set_starred(user, "theirs", true) == {:error, :not_found}
+      assert membership(owner, theirs).starred == false
+      assert Boards.set_starred(user, "no-such-board", true) == {:error, :not_found}
+    end
+
+    test "is allowed on an archived board" do
+      user = insert(:user)
+      board = member_board(user, "Old", archived_at: ~U[2020-01-01 00:00:00Z])
+
+      assert Boards.set_starred(user, board.slug, true) == {:ok, true}
+    end
+
+    test "Membership.changeset/2 never casts :starred" do
+      changeset = Membership.changeset(%Membership{}, %{email: "x@example.com", starred: true})
+
+      refute Map.has_key?(changeset.changes, :starred)
     end
   end
 

@@ -10,6 +10,10 @@ defmodule Schemas.Membership do
   email already belongs to a registered user. `email` is the normalized
   (downcased/trimmed) invite address. `board_id`/`user_id` are set
   programmatically, never cast from input.
+
+  `starred` is the member's personal board star (RE395): it sorts the board first in
+  `Relay.Boards.list_boards_for_display/1`. Never cast — written only by
+  `Relay.Boards.set_starred/3`.
   """
 
   use Ecto.Schema
@@ -18,6 +22,7 @@ defmodule Schemas.Membership do
 
   schema "board_members" do
     field :email, :string
+    field :starred, :boolean, default: false
 
     belongs_to :board, Schemas.Board
     belongs_to :user, Schemas.User

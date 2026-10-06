@@ -3,7 +3,9 @@ defmodule RelayWeb.BoardsLive do
   The "Your boards" home (`/boards`): a grid of the user's active boards
   plus a "New board" tile — the switcher entry point (MMF 19). Each card
   navigates to `/board/<slug>`; the board you arrived from (`?from=<slug>`)
-  gets a CURRENT badge. "New board" seeds a board and drops you into its
+  gets a CURRENT badge. Tiles come starred-first, then A–Z (RE395); each
+  tile's star button (`toggle_star`) sets the user's personal star and
+  reorders the grid in place without navigating. "New board" seeds a board and drops you into its
   settings to name it. Loads fresh on navigate (no realtime — out of scope).
   """
 
@@ -69,11 +71,14 @@ defmodule RelayWeb.BoardsLive do
           class="flex flex-col gap-2.5 p-3 drawer:grid drawer:gap-4 drawer:p-0"
           style="grid-template-columns:repeat(auto-fill,minmax(324px,1fr));"
         >
-          <.link
+          <%!-- RE395: the tile is a `relative` container, not an <a>, so the star button can be a
+                SIBLING of the link (interactive content inside <a> is invalid and would navigate).
+                The link wraps the name text and stretches over the whole tile with an
+                `after:absolute after:inset-0` overlay; the star sits above it (`relative z-20`). --%>
+          <div
             :for={b <- @boards}
             id={"board-card-#{b.slug}"}
-            navigate={~p"/board/#{b.slug}"}
-            class="flex flex-col overflow-hidden rounded-[12px] border border-base-300 bg-base-100 no-underline transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[var(--color-field-border)]"
+            class="relative flex flex-col overflow-hidden rounded-[12px] border border-base-300 bg-base-100 transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[var(--color-field-border)]"
           >
             <div class="hidden drawer:block" style={"height:3px;background:#{accent(b.slug)};"}></div>
             <div class="flex flex-col gap-2 p-3 drawer:gap-2.5 drawer:p-4">
@@ -87,9 +92,12 @@ defmodule RelayWeb.BoardsLive do
                         CoreComponents.identity_color/1's avatar text). --%>
                   <span class="hidden size-[7px] rounded-full bg-neutral-content drawer:block"></span>
                 </span>
-                <span class="text-[14px] font-semibold tracking-[-0.015em] text-base-content drawer:text-[15.5px] drawer:tracking-tight">
+                <.link
+                  navigate={~p"/board/#{b.slug}"}
+                  class="text-[14px] font-semibold tracking-[-0.015em] text-base-content no-underline after:absolute after:inset-0 after:z-10 drawer:text-[15.5px] drawer:tracking-tight"
+                >
                   {b.name}
-                </span>
+                </.link>
                 <span class="flex-1"></span>
                 <span
                   :if={b.slug == @from}
@@ -110,6 +118,25 @@ defmodule RelayWeb.BoardsLive do
                 >
                   {badge_count(b, @embed)} NEEDS YOU
                 </span>
+                <button
+                  type="button"
+                  id={"board-star-#{b.slug}"}
+                  phx-click="toggle_star"
+                  phx-value-slug={b.slug}
+                  aria-pressed={to_string(b.starred?)}
+                  aria-label={star_label(b.starred?)}
+                  title={star_label(b.starred?)}
+                  class={[
+                    "btn btn-ghost btn-square btn-sm -my-1.5 -mr-1.5 relative z-20",
+                    if(b.starred?,
+                      do: "text-base-content",
+                      else: "text-base-content/40 hover:text-base-content"
+                    )
+                  ]}
+                >
+                  <.icon :if={b.starred?} name="hero-star-solid" class="size-[18px]" />
+                  <.icon :if={!b.starred?} name="hero-star" class="size-[18px]" />
+                </button>
               </div>
               <span
                 id={"board-meta-mobile-#{b.slug}"}
@@ -137,7 +164,7 @@ defmodule RelayWeb.BoardsLive do
                 </span>
               </div>
             </div>
-          </.link>
+          </div>
 
           <button
             id="new-board-button"
@@ -180,6 +207,20 @@ defmodule RelayWeb.BoardsLive do
     {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/settings")}
   end
 
+  # RE395: sets the negation of the tile's current star (set_starred/3 sets, it doesn't
+  # toggle). A slug no longer in @boards, or a membership lost under the view
+  # ({:error, :not_found}), just reloads — silently. The order comes from the summaries.
+  def handle_event("toggle_star", %{"slug" => slug}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Enum.find(socket.assigns.boards, &(&1.slug == slug)) do
+      nil -> :ok
+      board -> Boards.set_starred(user, slug, !board.starred?)
+    end
+
+    {:noreply, assign(socket, :boards, load_boards(user))}
+  end
+
   # RE376: the summary facts come from the one domain definition the native switcher
   # (GET /api/all/boards) also reads; only the member stack is web-specific.
   defp load_boards(user) do
@@ -202,6 +243,9 @@ defmodule RelayWeb.BoardsLive do
     activity = if b.ai_active?, do: "AI active", else: "idle"
     "#{b.stage_count} stages · #{b.card_count} cards · #{activity}"
   end
+
+  defp star_label(true = _starred?), do: "Unstar board"
+  defp star_label(false = _starred?), do: "Star board"
 
   defp board_meta_summary(b), do: "#{b.slug} · #{b.card_count} cards"
 

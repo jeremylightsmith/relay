@@ -139,6 +139,52 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  The user's non-archived boards (same membership/archived filter as `list_boards/1`) in
+  **display order** (RE395): starred boards first, then case-insensitive by name, board id as
+  the tiebreak. Each row is `%{board: board, starred?: boolean}`. The web boards home and
+  `GET /api/all/boards` read it (via `Relay.Cards.list_board_summaries/1`); `list_boards/1`
+  keeps creation order because the default board depends on it.
+  """
+  @spec list_boards_for_display(User.t()) :: [%{board: Board.t(), starred?: boolean()}]
+  def list_boards_for_display(%User{id: user_id}) do
+    from(b in Board,
+      as: :board,
+      join: m in Membership,
+      on: m.board_id == b.id,
+      where: m.user_id == ^user_id and is_nil(b.archived_at),
+      order_by: [desc: m.starred],
+      select: %{board: b, starred?: m.starred}
+    )
+    |> order_by_name()
+    |> Repo.all()
+  end
+
+  @doc """
+  Sets (does not toggle) the user's personal star on the board with `slug` and returns the
+  value set (RE395). Only the caller's own membership row changes. Archived boards are allowed.
+  `{:error, :not_found}` when the user has no resolved membership on a board with that slug.
+  """
+  @spec set_starred(User.t(), String.t(), boolean()) :: {:ok, boolean()} | {:error, :not_found}
+  def set_starred(%User{id: user_id}, slug, starred) when is_binary(slug) and is_boolean(starred) do
+    query =
+      from m in Membership,
+        join: b in Board,
+        on: b.id == m.board_id,
+        where: m.user_id == ^user_id and b.slug == ^slug
+
+    case Repo.update_all(query, set: [starred: starred]) do
+      {0, _} -> {:error, :not_found}
+      {_, _} -> {:ok, starred}
+    end
+  end
+
+  # The ONE name order (RE395): case-insensitive name, id as the stable tiebreak. Appends to a
+  # query whose board binding is named `:board`, after any order it already has (stars first).
+  defp order_by_name(query) do
+    order_by(query, [board: b], asc: fragment("lower(?)", b.name), asc: b.id)
+  end
+
+  @doc """
   Membership-scoped board lookup by slug, with stages preloaded in hierarchical
   order (`order_stages/1`). Returns an archived board too (still loadable, read-only). nil when
   the user is not a member of a board with that slug.
@@ -258,7 +304,7 @@ defmodule Relay.Boards do
 
   @doc """
   Every board — archived included, regardless of membership — for the superadmin
-  `/admin/boards` table (RE353), newest first (`inserted_at desc, id desc`). Unscoped on
+  `/admin/boards` table (RE353), A–Z by name (case-insensitive, id tiebreak — RE395). Unscoped on
   purpose: the gate is the `/admin` route (`RelayWeb.Auth.require_superadmin`), not this
   context. One query: `member_count` counts resolved memberships (`user_id` set — pending
   email invites excluded) and `card_count` counts non-archived cards, both via aggregate
@@ -277,26 +323,27 @@ defmodule Relay.Boards do
         group_by: c.board_id,
         select: %{board_id: c.board_id, n: count(c.id)}
 
-    Repo.all(
-      from b in Board,
-        left_join: o in assoc(b, :owner),
-        left_join: mc in subquery(member_counts),
-        on: mc.board_id == b.id,
-        left_join: cc in subquery(card_counts),
-        on: cc.board_id == b.id,
-        order_by: [desc: b.inserted_at, desc: b.id],
-        select: %{
-          id: b.id,
-          name: b.name,
-          slug: b.slug,
-          key: b.key,
-          archived_at: b.archived_at,
-          inserted_at: b.inserted_at,
-          owner_email: o.email,
-          member_count: coalesce(mc.n, 0),
-          card_count: coalesce(cc.n, 0)
-        }
+    from(b in Board,
+      as: :board,
+      left_join: o in assoc(b, :owner),
+      left_join: mc in subquery(member_counts),
+      on: mc.board_id == b.id,
+      left_join: cc in subquery(card_counts),
+      on: cc.board_id == b.id,
+      select: %{
+        id: b.id,
+        name: b.name,
+        slug: b.slug,
+        key: b.key,
+        archived_at: b.archived_at,
+        inserted_at: b.inserted_at,
+        owner_email: o.email,
+        member_count: coalesce(mc.n, 0),
+        card_count: coalesce(cc.n, 0)
+      }
     )
+    |> order_by_name()
+    |> Repo.all()
   end
 
   @doc """
