@@ -7,6 +7,9 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
   module (`render_keydown/3` pushes straight at the server), so only real clicks and keystrokes
   show that → steps the carousel *instead of* switching the card, and that Esc closes the viewer
   *instead of* the drawer. Same reasoning as `RelayWeb.Browser.TypingKeyGuardTest`.
+
+  RE390 — AI Result screenshots left the lightbox for the same-tab viewer, so the three-image
+  group is the card's description: one markdown block, one group.
   """
   use PhoenixTest.Playwright.Case, async: false
 
@@ -18,11 +21,7 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
 
   @moduletag :playwright
 
-  @screens [
-    %{"url" => "/images/logo_light_128.png", "caption" => "One"},
-    %{"url" => "/images/logo_dark_128.png", "caption" => "Two"},
-    %{"url" => "/images/logo_transparent_128.png", "caption" => "Three"}
-  ]
+  @description "![One](/images/logo_light_128.png) ![Two](/images/logo_dark_128.png) ![Three](/images/logo_transparent_128.png)"
 
   setup do
     user = Accounts.ensure_dev_user!()
@@ -41,14 +40,14 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
         match?(%{prev: prev, next: next} when is_binary(prev) and is_binary(next), Cards.stage_neighbors(board, card))
       end)
 
-    {:ok, card} = Cards.update_ai_result(card, %{"summary" => "Shipped", "screens" => @screens})
-    # D1 — one image in a comment: its own group, separate from the screenshots.
+    {:ok, card} = Cards.update_card(card, %{description: @description})
+    # D1 — one image in a comment: its own group, separate from the description's.
     {:ok, _comment} = Activity.add_comment(card, %{actor: :agent, body: "![solo](/images/logo_dark_512.png)"})
 
     %{board: board, card: card}
   end
 
-  defp open_screenshots(conn, board, card) do
+  defp open_card(conn, board, card) do
     conn
     |> visit("/dev/login")
     |> assert_has("body .phx-connected")
@@ -59,8 +58,7 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
     |> assert_has("#card-drawer-title", text: card.title)
     |> assert_has("#card-drawer-prev:not([disabled])")
     |> assert_has("#card-drawer-next:not([disabled])")
-    |> click("#ai-result-show-more")
-    |> assert_has("#ai-result-screens img")
+    |> assert_has("#card-drawer-description .md img[alt='Three']")
   end
 
   # The key goes to the page with focus inside the open dialog, exactly as a human's does; the
@@ -77,11 +75,11 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
     |> assert_has("#image-lightbox-counter", text: counter)
   end
 
-  test "a screenshot opens the carousel, which steps and wraps by button, arrow and j/k without touching the card behind it",
+  test "a description image opens the carousel, which steps and wraps by button, arrow and j/k without touching the card behind it",
        ctx do
     ctx.conn
-    |> open_screenshots(ctx.board, ctx.card)
-    |> click("#ai-result-screens figure:nth-child(2) img")
+    |> open_card(ctx.board, ctx.card)
+    |> click("#card-drawer-description .md img[alt='Two']")
     |> assert_has("#image-lightbox[open]")
     |> assert_showing("Two", "2 / 3")
     |> assert_has("#image-lightbox-prev:not([hidden])")
@@ -113,7 +111,7 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
 
   test "a lone comment image is its own group: no nav, no counter, and the keys do nothing", ctx do
     ctx.conn
-    |> open_screenshots(ctx.board, ctx.card)
+    |> open_card(ctx.board, ctx.card)
     |> assert_has("#card-drawer-conversation .md img[alt='solo']")
     |> click("#card-drawer-conversation .md img[alt='solo']")
     |> assert_has("#image-lightbox[open]")
@@ -136,8 +134,8 @@ defmodule RelayWeb.Browser.ImageCarouselTest do
     end)
     |> press("Escape")
     |> refute_has("#image-lightbox[open]")
-    # …and the screenshots count only themselves, never the comment's image.
-    |> click("#ai-result-screens figure:nth-child(1) img")
+    # …and the description's images count only themselves, never the comment's image.
+    |> click("#card-drawer-description .md img[alt='One']")
     |> assert_showing("One", "1 / 3")
     |> press("Escape")
     |> refute_has("#image-lightbox[open]")

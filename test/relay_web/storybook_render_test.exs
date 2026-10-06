@@ -47,6 +47,19 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ ~s(aria-current="true")
   end
 
+  test "GET the RE390 image tile, Screenshots section and media placeholder stories", %{conn: conn} do
+    placeholder = conn |> get("/storybook/core_components/media_placeholder") |> html_response(200)
+    assert placeholder |> LazyHTML.from_document() |> LazyHTML.query("span.border-dashed.size-20") |> Enum.count() >= 1
+
+    for page <- ~w(mockup_preview card_mockups_section) do
+      doc = conn |> get("/storybook/core_components/#{page}") |> html_response(200) |> LazyHTML.from_document()
+      assert doc |> LazyHTML.query("a img.object-top") |> Enum.count() >= 1, "#{page}: no image tile"
+    end
+
+    section = conn |> get("/storybook/core_components/card_mockups_section") |> html_response(200)
+    assert section |> LazyHTML.from_document() |> LazyHTML.query("span.border-dashed") |> Enum.count() >= 1
+  end
+
   test "GET /storybook/core_components/stage_column shows the RE377 compact pager page and Show as list",
        %{conn: conn} do
     html = conn |> get("/storybook/core_components/stage_column") |> html_response(200)

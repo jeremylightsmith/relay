@@ -25,6 +25,7 @@ defmodule Storybook.CoreComponents do
   def entry("image_lightbox"), do: [icon: {:fa, "magnifying-glass-plus", :thin}]
   def entry("input"), do: [icon: {:fa, "input-text", :thin}]
   def entry("list"), do: [icon: {:fa, "list", :thin}]
+  def entry("media_placeholder"), do: [icon: {:fa, "image-slash", :thin}]
   def entry("member_stack"), do: [icon: {:fa, "people-group", :thin}]
   def entry("meta_label"), do: [icon: {:fa, "tag", :thin}]
   def entry("mockup_preview"), do: [icon: {:fa, "window-maximize", :thin}]

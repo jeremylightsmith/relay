@@ -3,6 +3,7 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
 
   import Phoenix.LiveViewTest
 
+  alias Relay.Attachments
   alias Relay.Boards
   alias Relay.Cards
 
@@ -47,15 +48,20 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
     end
   end
 
-  describe "AI Result screens strip" do
-    test "thumbnails carry the zoom-in affordance",
+  # RE390 — AI Result screenshots left the lightbox: they are 80px tiles patching to the
+  # same-tab viewer (`?screenshot=<n>`), drawn by the attachment's content type.
+  describe "AI Result screenshot tiles" do
+    test "an uploaded image screenshot is a tile patching to ?screenshot=1, with no zoom-in affordance",
          %{conn: conn, board: board, code: code} do
       {:ok, card} = Cards.create_card(code, %{title: "Shipped it"})
+
+      {:ok, attachment} =
+        Attachments.create_attachment(card, %{filename: "board.png", content_type: "image/png", bytes: "png"})
 
       {:ok, _card} =
         Cards.update_ai_result(card, %{
           "summary" => "Done",
-          "screens" => [%{"url" => "/images/logo_light_128.png", "caption" => "Board"}]
+          "screens" => [%{"url" => "/attachments/#{attachment.id}", "caption" => "Board"}]
         })
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
@@ -64,25 +70,12 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
       # RE316 — screenshots live behind the AI Result box's Show more.
       view |> element("#ai-result-show-more") |> render_click()
 
-      assert has_element?(view, "#ai-result-screens img.cursor-zoom-in")
-    end
+      assert has_element?(
+               view,
+               ~s(a#ai-result-screen-0-open[href="/board/#{board.slug}?card=MY1&screenshot=1"] img[src="/attachments/#{attachment.id}"])
+             )
 
-    test "a screenshot uploaded with relay attach renders as the image, not the placeholder (RE322)",
-         %{conn: conn, board: board, code: code} do
-      {:ok, card} = Cards.create_card(code, %{title: "Attached it"})
-      uuid = Ecto.UUID.generate()
-
-      {:ok, _card} =
-        Cards.update_ai_result(card, %{
-          "summary" => "Done",
-          "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Board"}]
-        })
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
-      render_async(view)
-      view |> element("#ai-result-show-more") |> render_click()
-
-      assert has_element?(view, ~s(#ai-result-screens img[src="/attachments/#{uuid}"][data-caption="Board"]))
+      refute has_element?(view, "#ai-result-screens .cursor-zoom-in")
     end
   end
 end

@@ -42,8 +42,13 @@ defmodule RelayWeb.ImageLightboxJsTest do
   end
 
   test "D1 — the set is the clicked image's own group", %{src: src} do
-    assert src =~ ~s[const GROUP = "#ai-result-screens, .md, .docs"]
-    assert src =~ ~s[const SELECTOR = ".md img, .docs img, #ai-result-screens img"]
+    assert src =~ ~s[const GROUP = ".md, .docs"]
+    assert src =~ ~s[const SELECTOR = ".md img, .docs img"]
+  end
+
+  # RE390 — AI Result screenshots open in the same-tab viewer, not the lightbox.
+  test "the AI Result screenshots are no longer a lightbox group", %{src: src} do
+    refute src =~ "ai-result-screens"
   end
 
   test "D2 — stepping wraps at both ends", %{src: src} do

@@ -86,7 +86,7 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     assert has_element?(view, "#ai-result #ai-result-changes-group > span", "Changes")
     assert has_element?(view, "#ai-result #ai-result-changes", "changed A")
     assert has_element?(view, "#ai-result #ai-result-screens-group > span", "Screenshots")
-    assert has_element?(view, "#ai-result #ai-result-screens figcaption", "home")
+    assert has_element?(view, ~s(#ai-result #ai-result-screens a#ai-result-screen-0-open[title="home"]))
     assert has_element?(view, "#ai-result-show-more", "Show less")
 
     view |> element("#ai-result-show-more") |> render_click()

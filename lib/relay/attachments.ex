@@ -10,6 +10,8 @@ defmodule Relay.Attachments do
 
   use Boundary, deps: [Relay.Boards, Relay.Repo, Schemas]
 
+  import Ecto.Query
+
   alias Relay.Boards
   alias Relay.Repo
   alias Schemas.Attachment
@@ -42,6 +44,19 @@ defmodule Relay.Attachments do
     else
       {:error, %{changeset | action: :insert}}
     end
+  end
+
+  @doc """
+  RE390 — every attachment on `card` as `attachment id => content_type`, in one query. The web
+  layer's only way to learn content types (to tell an image mockup from an HTML one).
+  """
+  @spec content_types(Card.t()) :: %{String.t() => String.t()}
+  def content_types(%Card{id: card_id}) do
+    Attachment
+    |> where([a], a.card_id == ^card_id)
+    |> select([a], {a.id, a.content_type})
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc "The metadata row for `id`, or `nil` (also `nil` for an id that isn't a valid UUID)."

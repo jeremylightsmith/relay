@@ -341,4 +341,31 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
     render_async(view)
     refute has_element?(view, "#review-reject-panel")
   end
+
+  test "18. a URL with both mockup= and screenshot= opens the mockup", %{conn: conn, board: board, card: card, m1: m1} do
+    shot = upload(card, "shot.html")
+    {:ok, _card} = Cards.update_ai_result(card, %{"screens" => [%{"url" => RelayWeb.attachment_path(shot.id)}]})
+
+    view = open(conn, ~p"/board/#{board.slug}?card=MY1&mockup=#{m1.id}&screenshot=1")
+
+    assert has_element?(view, ~s|iframe#mockup-viewer-frame[src="#{RelayWeb.attachment_path(m1.id)}"]|)
+    assert view |> element("#mockup-viewer-title") |> render() |> text() == "Mockups"
+    assert viewing(view) == "Viewing A — one list · 1 of 3"
+  end
+
+  test "19. an image mockup shows at natural size in a scrolling frame", %{conn: conn, board: board, card: card} do
+    {:ok, png} =
+      Attachments.create_attachment(card, %{filename: "shot.png", content_type: "image/png", bytes: "png bytes"})
+
+    {:ok, _card} = Cards.set_mockups(card, [%{"url" => RelayWeb.attachment_path(png.id), "caption" => "Shot"}])
+
+    view = open(conn, ~p"/board/#{board.slug}?card=MY1&mockup=#{png.id}")
+
+    assert has_element?(
+             view,
+             ~s|#mockup-viewer-frame-box-#{png.id}.overflow-auto #mockup-viewer-image[src="#{RelayWeb.attachment_path(png.id)}"]|
+           )
+
+    assert has_element?(view, "#card-drawer-mockup-0-open img.object-top")
+  end
 end
