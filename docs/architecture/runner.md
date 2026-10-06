@@ -78,8 +78,9 @@ looks like the leftward flow is being starved. Pinned by
 `test/relay/runs/scheduler_test.exs` and exercised live over the REST API by
 `test/relay_web/api/plan_flow_e2e_test.exs` / `test/relay/runs/code_flow_e2e_test.exs`.
 
-The capacity **store** (`Relay.Runs.Capacity`, ETS) is global by runner id across every board
-and never evicted, but the scheduler **snapshot** is board-scoped: `Scheduler.Server.build_snapshot/2`
+The capacity **store** (`Relay.Runs.Capacity`, ETS) is keyed by runner id; each entry carries
+the runner's board id and is evicted by the reaper's reclaim sweep once the runner goes stale
+(RE402). The scheduler **snapshot** is board-scoped: `Scheduler.Server.build_snapshot/2`
 keeps a capacity entry only for a runner of *this* board that `Relay.Runs.counting_runner?/1`
 accepts (not `:gone`) — an allow-list, so another board's runner or an orphaned ETS entry
 contributes nothing to dispatch or to `relay why`'s `capacity` evidence (RE338). Every snapshot

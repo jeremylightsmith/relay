@@ -2271,7 +2271,8 @@ defmodule Relay.Runs do
   The reclaim sweep (criterion 2): for every stale runner, return its in-flight
   `shared_clean` jobs to `queued` (dropping `runner_name`, so W8 re-offers them)
   and park its `exclusive` runs (`parked_reason: :runner_gone` — affinity is
-  absolute; the run waits for its machine). Idempotent; `now` is injectable for
+  absolute; the run waits for its machine), and evicts its `Relay.Runs.Capacity` entry so its
+  board stops looking live (RE402). Idempotent; `now` is injectable for
   the reaper's clock and tests.
   """
   def reclaim_stale_runners(now \\ nil) do
@@ -2280,7 +2281,10 @@ defmodule Relay.Runs do
     Runner
     |> Repo.all()
     |> Enum.filter(&runner_stale?(&1, now))
-    |> Enum.each(&reclaim_runner/1)
+    |> Enum.each(fn runner ->
+      reclaim_runner(runner)
+      Capacity.clear(runner.id)
+    end)
 
     :ok
   end

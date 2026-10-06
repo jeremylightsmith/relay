@@ -83,7 +83,7 @@ defmodule Relay.Runs.CodeFlowE2ETest do
   defp announce(conn, board) do
     assert Exec.claim(conn, @runner_name, @capacity) == nil
     runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: @runner_name)
-    :ok = Capacity.put(runner.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(runner.id, runner.board_id, %{shared_clean: 0, exclusive: 1})
     runner
   end
 

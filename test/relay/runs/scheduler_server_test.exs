@@ -142,7 +142,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     %{board: board, exec_a: exec_a} = board_with_flow(:ready)
     start_engine([], raise_on_start: true)
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
 
     log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Server.reconcile_now(pid) end)
 
@@ -156,7 +156,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     start_engine([])
     _pid = start_server(board.id)
 
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
 
     assert_receive {:start_run, card_id, "spec", ^exec_a}, 500
     assert card_id == card.id
@@ -179,7 +179,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
     :ok = Server.reconcile_now(pid)
 
     assert_receive {:resume_run, 99, ^exec_a}, 500
@@ -203,7 +203,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
     :ok = Server.reconcile_now(pid)
 
     refute_receive {:resume_run, _, _}, 50
@@ -220,7 +220,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
     :ok = Server.reconcile_now(pid)
 
     refute_receive {:start_run, _, _, _}, 50
@@ -235,7 +235,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
     :ok = Server.reconcile_now(pid)
 
     assert_receive {:start_run, card_id, "spec", ^exec_a}, 500
@@ -261,7 +261,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 0, exclusive: 1})
     :ok = Server.reconcile_now(pid)
 
     refute_receive {:start_run, _, _, _}, 50
@@ -289,8 +289,8 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 0, exclusive: 1})
-    :ok = Capacity.put(exec_b, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_b, board.id, %{shared_clean: 0, exclusive: 1})
     :ok = Server.reconcile_now(pid)
 
     # exec_b is spent by the pinned running run; exec_a is free → the ready card dispatches there.
@@ -320,7 +320,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
 
     pid = start_server(board.id)
     # Only exec_a advertises capacity; the pinned runner (exec_b) is absent from the map.
-    :ok = Capacity.put(exec_a, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 0, exclusive: 1})
     :ok = Server.reconcile_now(pid)
 
     # The pinned run debits exec_a via the :any fallback, so no exclusive slot remains for the
@@ -336,7 +336,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
     ])
 
     pid = start_server(board.id)
-    :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 0})
+    :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
     :ok = Server.reconcile_now(pid)
 
     assert_receive {:start_run, card_id, "spec", ^exec_a}, 500
@@ -364,9 +364,9 @@ defmodule Relay.Runs.Scheduler.ServerTest do
       # A negative id can never be a Runner row: an ETS entry nothing on any board owns.
       orphan = -System.unique_integer([:positive])
 
-      :ok = Capacity.put(exec_a, %{shared_clean: 1, exclusive: 1})
-      :ok = Capacity.put(foreign.id, %{shared_clean: 3, exclusive: 2})
-      :ok = Capacity.put(orphan, %{shared_clean: 3, exclusive: 2})
+      :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 1})
+      :ok = Capacity.put(foreign.id, foreign.board_id, %{shared_clean: 3, exclusive: 2})
+      :ok = Capacity.put(orphan, board.id, %{shared_clean: 3, exclusive: 2})
 
       {snapshot, _cards} = Server.build_snapshot(board.id, NoopEngine)
 
@@ -382,8 +382,14 @@ defmodule Relay.Runs.Scheduler.ServerTest do
       foreign = insert(:runner, board: insert(:board))
       orphan = -System.unique_integer([:positive])
 
-      for id <- [fresh, stale.id, gone.id, foreign.id, orphan] do
-        :ok = Capacity.put(id, %{shared_clean: 1, exclusive: 1})
+      for {id, board_id} <- [
+            {fresh, board.id},
+            {stale.id, board.id},
+            {gone.id, board.id},
+            {foreign.id, foreign.board_id},
+            {orphan, board.id}
+          ] do
+        :ok = Capacity.put(id, board_id, %{shared_clean: 1, exclusive: 1})
       end
 
       {snapshot, _cards} = Server.build_snapshot(board.id, NoopEngine)
@@ -416,8 +422,8 @@ defmodule Relay.Runs.Scheduler.ServerTest do
       ])
 
       pid = start_server(board.id)
-      :ok = Capacity.put(exec_a, %{shared_clean: 0, exclusive: 1})
-      :ok = Capacity.put(foreign.id, %{shared_clean: 0, exclusive: 2})
+      :ok = Capacity.put(exec_a, board.id, %{shared_clean: 0, exclusive: 1})
+      :ok = Capacity.put(foreign.id, foreign.board_id, %{shared_clean: 0, exclusive: 2})
       :ok = Server.reconcile_now(pid)
 
       refute_receive {:start_run, _card_id, _flow, _runner}, 300

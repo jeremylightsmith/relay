@@ -399,12 +399,12 @@ defmodule Relay.Runs.DiagnoseTest do
     {:ok, a} =
       Runs.upsert_runner(board, %{"name" => "relay@blackrock", "interval" => 30, "version" => version})
 
-    :ok = Capacity.put(a.id, %{"shared_clean" => 3, "exclusive" => 0})
+    :ok = Capacity.put(a.id, a.board_id, %{"shared_clean" => 3, "exclusive" => 0})
 
     {:ok, b} =
       Runs.upsert_runner(other, %{"name" => "throughway@blackrock", "interval" => 30, "version" => version})
 
-    :ok = Capacity.put(b.id, %{"shared_clean" => 3, "exclusive" => 2})
+    :ok = Capacity.put(b.id, b.board_id, %{"shared_clean" => 3, "exclusive" => 2})
 
     {snapshot, _cards} = Server.build_snapshot(board.id, Server.configured_engine())
     assert Map.keys(snapshot.capacity) == [a.id]
@@ -423,7 +423,7 @@ defmodule Relay.Runs.DiagnoseTest do
       {:ok, runner} =
         Runs.upsert_runner(board, %{"name" => "relay@blackrock", "interval" => 30, "version" => Runs.min_runner_version()})
 
-      :ok = Capacity.put(runner.id, %{"shared_clean" => 1, "exclusive" => 0})
+      :ok = Capacity.put(runner.id, runner.board_id, %{"shared_clean" => 1, "exclusive" => 0})
       {:ok, card: card}
     end
 

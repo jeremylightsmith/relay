@@ -80,7 +80,7 @@ defmodule RelayWeb.Api.PlanFlowE2ETest do
     capacity = %{"shared_clean" => slots.shared_clean, "exclusive" => slots.exclusive}
     assert claim(conn, capacity) == nil
     runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: @runner_name)
-    :ok = Capacity.put(runner.id, slots)
+    :ok = Capacity.put(runner.id, runner.board_id, slots)
     runner
   end
 
