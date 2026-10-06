@@ -238,4 +238,50 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'starring from the sheet keeps it open and re-renders in server order (RE396)',
+    (tester) async {
+      final repo =
+          FakeBoardsRepository(
+              boards: [
+                makeBoard('mkt', name: 'Marketing site'),
+                makeBoard('dat', name: 'Data pipeline'),
+              ],
+            )
+            ..onStar = (r) => r.boards = [
+              makeBoard('dat', name: 'Data pipeline', starred: true),
+              makeBoard('mkt', name: 'Marketing site'),
+            ];
+      await pumpApp(tester, boardSlug: 'mkt', boards: repo);
+
+      await tester.tap(find.byKey(const Key('board_switcher_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('board_row_star_dat')));
+      await tester.pumpAndSettle();
+
+      expect(repo.starCalls, [('dat', true)]);
+      expect(find.byKey(const Key('board_switcher_title')), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+        'Marketing site',
+      );
+      expect(find.byKey(const Key('board_row_current_mkt')), findsOneWidget);
+      expect(
+        tester
+            .widget<Icon>(
+              find.descendant(
+                of: find.byKey(const Key('board_row_star_dat')),
+                matching: find.byType(Icon),
+              ),
+            )
+            .icon,
+        Icons.star,
+      );
+      expect(
+        tester.getTopLeft(find.byKey(const Key('board_row_dat'))).dy,
+        lessThan(tester.getTopLeft(find.byKey(const Key('board_row_mkt'))).dy),
+      );
+    },
+  );
 }

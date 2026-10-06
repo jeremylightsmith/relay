@@ -9,6 +9,9 @@ defmodule RelayWeb.Api.BoardListJSON do
 
   def boards(%{summaries: summaries}), do: %{data: Enum.map(summaries, &row/1)}
 
+  @doc "The switcher's star reply (RE396, `POST /api/all/boards/:slug/star`): the value set."
+  def star(%{slug: slug, starred: starred}), do: %{data: %{slug: slug, starred: starred}}
+
   defp row(summary) do
     %{
       name: summary.name,

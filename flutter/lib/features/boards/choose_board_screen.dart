@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -80,6 +82,11 @@ class ChooseBoardScreen extends ConsumerWidget {
                         itemBuilder: (context, i) => BoardRow(
                           board: list[i],
                           showMeta: true,
+                          onToggleStar: () => unawaited(
+                            ref
+                                .read(boardsProvider.notifier)
+                                .toggleStar(list[i].slug),
+                          ),
                           onTap: () async {
                             await ref
                                 .read(currentBoardProvider.notifier)

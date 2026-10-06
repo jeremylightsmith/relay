@@ -4,11 +4,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/board_summary.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/choose_board_screen.dart';
+import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/boards/widgets/board_row.dart';
 
 import 'support/fake_boards.dart';
+
+Future<void> pumpRow(
+  WidgetTester tester,
+  BoardSummary board, {
+  bool current = false,
+  VoidCallback? onTap,
+  VoidCallback? onToggleStar,
+}) => tester.pumpWidget(
+  MaterialApp(
+    theme: RelayTheme.light,
+    home: Scaffold(
+      body: BoardRow(
+        board: board,
+        current: current,
+        onTap: onTap ?? () {},
+        onToggleStar: onToggleStar ?? () {},
+      ),
+    ),
+  ),
+);
+
+Icon starIcon(WidgetTester tester, String slug) => tester.widget<Icon>(
+  find.descendant(
+    of: find.byKey(Key('board_row_star_$slug')),
+    matching: find.byType(Icon),
+  ),
+);
 
 Future<void> pumpChoose(WidgetTester tester, FakeBoardsRepository repo) async {
   await tester.pumpWidget(
@@ -72,7 +101,8 @@ void main() {
     expect(subtitle.style?.fontSize, 15);
     expect(subtitle.style?.color, scheme.onSurfaceVariant);
 
-    // Row: rounded-xl border-base-300 p-3 → radius 12, outlineVariant, padding 12.
+    // Row: rounded-xl border-base-300 py-1 pl-3 pr-1 (RE396) → radius 12,
+    // outlineVariant, padding 12/4/4/4.
     final surface = tester.widget<Material>(
       find.byKey(const Key('board_row_surface_support-triage')),
     );
@@ -87,7 +117,7 @@ void main() {
           )
           .first,
     );
-    expect(padding.padding, const EdgeInsets.all(12));
+    expect(padding.padding, const EdgeInsets.fromLTRB(12, 4, 4, 4));
 
     // Name: font-semibold text-[14px].
     final name = tester.widget<Text>(find.text('Marketing site'));
@@ -149,6 +179,7 @@ void main() {
             board: makeBoard('alpha', name: 'Alpha', needsYou: 1),
             current: true,
             onTap: () {},
+            onToggleStar: () {},
           ),
         ),
       ),
@@ -164,5 +195,115 @@ void main() {
     final shape = material.shape! as RoundedRectangleBorder;
     expect(shape.side.color, RelayTheme.light.colorScheme.primary);
     expect(shape.borderRadius, BorderRadius.circular(12));
+  });
+
+  // Card mockup "B — native Switch board sheet: same order, star at far right
+  // of each row" (RE396).
+  group('BoardRow star', () {
+    testWidgets('starred: solid star in onSurface, size 20, "Unstar board"', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', starred: true));
+
+      final icon = starIcon(tester, 'alpha');
+      expect(icon.icon, Icons.star);
+      expect(icon.color, RelayTheme.light.colorScheme.onSurface);
+      expect(icon.size, 20);
+      expect(find.bySemanticsLabel('Unstar board'), findsOneWidget);
+    });
+
+    testWidgets('unstarred: outline star in onSurface/40, "Star board"', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha'));
+
+      final scheme = RelayTheme.light.colorScheme;
+      final icon = starIcon(tester, 'alpha');
+      expect(icon.icon, Icons.star_border);
+      expect(icon.color, scheme.onSurface.withValues(alpha: 0.4));
+      expect(icon.size, 20);
+      expect(find.bySemanticsLabel('Star board'), findsOneWidget);
+      // Neutral — never brand-colored, never amber.
+      expect(icon.color, isNot(scheme.primary));
+      expect(icon.color, isNot(scheme.secondary));
+      expect(icon.color, isNot(RelayTheme.relayNeedsInputText));
+    });
+
+    testWidgets('tapping the star toggles it without switching boards', (
+      tester,
+    ) async {
+      var taps = 0;
+      var stars = 0;
+      await pumpRow(
+        tester,
+        makeBoard('alpha'),
+        onTap: () => taps++,
+        onToggleStar: () => stars++,
+      );
+
+      await tester.tap(find.byKey(const Key('board_row_star_alpha')));
+      await tester.pumpAndSettle();
+      expect(stars, 1);
+      expect(taps, 0);
+
+      await tester.tap(find.text('alpha'));
+      await tester.pumpAndSettle();
+      expect(taps, 1);
+      expect(stars, 1);
+    });
+
+    testWidgets('order: badge, ✓, then the star at the far right', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', needsYou: 2), current: true);
+
+      final star = tester.getRect(
+        find.byKey(const Key('board_row_star_alpha')),
+      );
+      final check = tester.getRect(
+        find.byKey(const Key('board_row_current_alpha')),
+      );
+      final badge = tester.getRect(
+        find.byKey(const Key('board_row_needs_you_alpha')),
+      );
+      final surface = tester.getRect(
+        find.byKey(const Key('board_row_surface_alpha')),
+      );
+      expect(star.left, greaterThanOrEqualTo(check.right));
+      expect(check.left, greaterThanOrEqualTo(badge.right));
+      expect((surface.right - star.right).abs(), lessThanOrEqualTo(4));
+    });
+
+    testWidgets('the star is at least a 44×44 tap target', (tester) async {
+      await pumpRow(tester, makeBoard('alpha'));
+
+      final size = tester.getSize(
+        find.byKey(const Key('board_row_star_alpha')),
+      );
+      expect(size.width, greaterThanOrEqualTo(44));
+      expect(size.height, greaterThanOrEqualTo(44));
+    });
+  });
+
+  testWidgets('Choose a board: the star stars without choosing (RE396)', (
+    tester,
+  ) async {
+    final repo = FakeBoardsRepository(
+      boards: [makeBoard('alpha'), makeBoard('beta')],
+    );
+    await pumpChoose(tester, repo);
+
+    expect(find.byKey(const Key('board_row_star_alpha')), findsOneWidget);
+    expect(find.byKey(const Key('board_row_star_beta')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('board_row_star_beta')));
+    await tester.pumpAndSettle();
+
+    expect(repo.starCalls, [('beta', true)]);
+    expect(find.byKey(const Key('choose_board_title')), findsOneWidget);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ChooseBoardScreen)),
+    );
+    expect(container.read(currentBoardProvider).slug, isNot('beta'));
   });
 }

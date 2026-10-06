@@ -9,6 +9,7 @@ class BoardSummary {
     required this.stageCount,
     required this.cardCount,
     required this.aiActive,
+    this.starred = false,
   });
 
   final String name;
@@ -21,6 +22,10 @@ class BoardSummary {
   final int cardCount;
   final bool aiActive;
 
+  /// The signed-in user's personal star (RE395). The server already sorts
+  /// starred boards first; the client renders the list as given.
+  final bool starred;
+
   factory BoardSummary.fromJson(Map<String, dynamic> json) => BoardSummary(
     name: json['name'] as String? ?? '',
     slug: json['slug'] as String? ?? '',
@@ -29,6 +34,7 @@ class BoardSummary {
     stageCount: json['stage_count'] as int? ?? 0,
     cardCount: json['card_count'] as int? ?? 0,
     aiActive: json['ai_active'] as bool? ?? false,
+    starred: json['starred'] as bool? ?? false,
   );
 
   /// BOARDS-00's meta line — the same text the web boards list draws.
