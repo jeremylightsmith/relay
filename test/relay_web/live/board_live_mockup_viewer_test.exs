@@ -131,6 +131,9 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
     assert view |> element("#mockup-viewer-bar-count") |> render() |> text() == "1 / 2"
     refute has_element?(view, "#mockup-viewer-pager")
     refute has_element?(view, "#mockup-viewer-width")
+    refute has_element?(view, "#mockup-viewer-zoom")
+    refute has_element?(view, "#mockup-viewer-frame-sizer")
+    refute has_element?(view, "#mockup-viewer-native")
   end
 
   defp open_reject_with_note(view, note) do

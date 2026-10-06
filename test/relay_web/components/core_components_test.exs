@@ -5182,6 +5182,94 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "mockup_viewer_zoom/1 (RE393)" do
+    defp zoom_doc(attrs) do
+      (&CoreComponents.mockup_viewer_zoom/1)
+      |> render_component(attrs)
+      |> LazyHTML.from_fragment()
+    end
+
+    test "11. a Zoom group: − disabled, Fit, + live, 44px icon targets, no phx-click" do
+      doc = zoom_doc(%{id: "z"})
+
+      assert pg_count(doc, ~s(div#z[role=group][aria-label=Zoom])) == 1
+      assert pg_count(doc, ~s(#z button#z-out[type=button][disabled][aria-label="Zoom out"])) == 1
+      assert pg_count(doc, ~s(#z button#z-reset[type=button][aria-label="Reset zoom to fit"])) == 1
+      assert pg_text(doc, "#z-reset") == "Fit"
+      assert pg_count(doc, ~s(#z button#z-in[type=button][aria-label="Zoom in"])) == 1
+      assert pg_count(doc, "#z-in[disabled]") == 0
+
+      cls = fn selector -> doc |> pg_attr(selector, "class") |> List.first("") |> String.split() end
+      assert "size-11" in cls.("#z-out")
+      assert "size-11" in cls.("#z-in")
+      assert "h-11" in cls.("#z-reset")
+      assert "min-w-14" in cls.("#z-reset")
+      assert pg_count(doc, "#z-out span.hero-minus") == 1
+      assert pg_count(doc, "#z-in span.hero-plus") == 1
+
+      assert pg_count(doc, "[phx-click]") == 0
+    end
+  end
+
+  describe "card_mockup_viewer/1 embedded zoom (RE393)" do
+    defp embed_viewer_doc(items, current_key) do
+      assigns = %{items: items, current_key: current_key}
+
+      ~H"""
+      <CoreComponents.card_mockup_viewer
+        ref="RE9"
+        card={%{title: "Notif"}}
+        stage_name="Review"
+        stage_owner={:human}
+        items={@items}
+        current_key={@current_key}
+        back_patch="/cards/RE9?board=b&embed=1"
+        item_href={&"/v/#{&1}"}
+        embed
+      />
+      """
+      |> rendered_to_string()
+      |> LazyHTML.from_fragment()
+    end
+
+    @zoom_items [
+      %{key: 1, src: "/images/a.png", caption: "Board", kind: :image},
+      %{key: 2, src: "/attachments/h", caption: "Empty", kind: :html}
+    ]
+
+    test "12. an HTML item gets the zoom wrap, data-zoom, a sizer around the frame and the native hook" do
+      doc = embed_viewer_doc(@zoom_items, 2)
+
+      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
+
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-zoom") == ["1"]
+      box = doc |> pg_attr("#mockup-viewer-frame-box-2", "class") |> List.first("") |> String.split()
+      assert "overflow-x-auto" in box
+      assert "overflow-y-hidden" in box
+      refute "overflow-hidden" in box
+
+      assert pg_count(
+               doc,
+               "#mockup-viewer-frame-box-2 > #mockup-viewer-frame-sizer[data-zoom-sizer] > iframe#mockup-viewer-frame"
+             ) ==
+               1
+
+      assert [hook] = pg_attr(doc, "#mockup-viewer-native", "phx-hook")
+      assert String.ends_with?(hook, "NativeMockupViewer")
+    end
+
+    test "13. an image item gets no zoom, sizer or data-zoom, but keeps the native hook" do
+      doc = embed_viewer_doc(@zoom_items, 1)
+
+      assert pg_count(doc, "#mockup-viewer-zoom-wrap") == 0
+      assert pg_count(doc, "#mockup-viewer-frame-sizer") == 0
+      assert pg_count(doc, "[data-zoom]") == 0
+      box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
+      assert "overflow-auto" in box
+      assert pg_count(doc, "#mockup-viewer-native") == 1
+    end
+  end
+
   describe "card_review_panel/1 embed copy (RE393)" do
     @embed_gate %{approve_label: "Approve", reject_target_name: "Spec", can_reject: true}
 

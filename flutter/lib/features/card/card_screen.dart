@@ -75,6 +75,29 @@ class CardScreen extends ConsumerStatefulWidget {
     }
   }
 
+  /// The JS handler the embedded mockup viewer calls (RE393) with `true` when it
+  /// opens and `false` when it closes — the only Dart copy of the name; the web
+  /// side lives in the `.NativeMockupViewer` hook.
+  static const mockupViewerHandler = 'relayMockupViewer';
+
+  /// Decodes the [mockupViewerHandler] args: open only for a leading literal
+  /// `true`, so a malformed call can never strand the card with its swipe off.
+  static bool mockupViewerOpenFromArgs(List<dynamic> args) =>
+      args.isNotEmpty && args.first == true;
+
+  /// Records whether the embedded mockup viewer is open on the enclosing card
+  /// screen. The [mockupViewerHandler] callback lands here — a static, testable
+  /// entry point (the real webview can't build under `flutter test`). A no-op
+  /// outside a [CardScreen]. The callback's context is the screen's own (an
+  /// ancestor lookup starts *above* it), so that element is checked first.
+  static void setMockupViewerOpen(BuildContext context, bool open) {
+    final own = context is StatefulElement ? context.state : null;
+    final state = own is _CardScreenState
+        ? own
+        : context.findAncestorStateOfType<_CardScreenState>();
+    state?._setMockupViewerOpen(open);
+  }
+
   /// Overrides the webview body. `flutter test` runs on the host, where
   /// flutter_inappwebview has no platform implementation and throws on build —
   /// so tests inject a stub here. Same structural-seam idea as buildRouter's
@@ -105,11 +128,20 @@ class CardScreen extends ConsumerStatefulWidget {
   /// touch once one of these wins, so without a vertical recognizer the swipe
   /// GestureDetector's horizontal recognizer was the sole contender: a vertical drag
   /// stayed unresolved until pointer-up and the card body would (mostly) not scroll.
-  /// Vertical claims vertical drags; horizontal ones still reach the swipe handler.
-  static final Set<Factory<OneSequenceGestureRecognizer>>
-  webviewGestureRecognizers = {
-    Factory<VerticalDragGestureRecognizer>(VerticalDragGestureRecognizer.new),
-  };
+  ///
+  /// - Viewer closed: Vertical claims vertical drags; horizontal ones still reach
+  ///   the swipe handler.
+  /// - Viewer open (RE393): Eager hands the WKWebView every touch, so a mockup can
+  ///   pan sideways and pinch-zoom natively; the card swipe stands down meanwhile.
+  static Set<Factory<OneSequenceGestureRecognizer>>
+  webviewGestureRecognizersFor({required bool mockupViewerOpen}) =>
+      mockupViewerOpen
+      ? {Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new)}
+      : {
+          Factory<VerticalDragGestureRecognizer>(
+            VerticalDragGestureRecognizer.new,
+          ),
+        };
 
   @override
   ConsumerState<CardScreen> createState() => _CardScreenState();
@@ -123,6 +155,16 @@ class _CardScreenState extends ConsumerState<CardScreen> {
   /// Logical pixels a horizontal drag must pass to commit to a neighbor; below it the
   /// drag is ignored, so an incidental sideways nudge never navigates.
   static const double _swipeCommitThreshold = 60;
+
+  /// Whether the embedded mockup viewer is open (RE393), set through
+  /// [CardScreen.setMockupViewerOpen]. While true the webview takes every gesture
+  /// and the card swipe is off.
+  bool _mockupViewerOpen = false;
+
+  void _setMockupViewerOpen(bool open) {
+    if (open == _mockupViewerOpen) return;
+    setState(() => _mockupViewerOpen = open);
+  }
 
   @override
   void initState() {
@@ -161,6 +203,8 @@ class _CardScreenState extends ConsumerState<CardScreen> {
     super.didUpdateWidget(oldWidget);
     if (widget.cardRef != oldWidget.cardRef ||
         widget.boardSlug != oldWidget.boardSlug) {
+      // The new card's page has no viewer open yet (RE393).
+      _mockupViewerOpen = false;
       _seedIfNeeded();
       _scheduleBanner();
     }
@@ -266,19 +310,28 @@ class _CardScreenState extends ConsumerState<CardScreen> {
         child: GestureDetector(
           key: const Key('card_swipe_area'),
           // Horizontal only: the webview owns vertical scroll via its
-          // [CardScreen.webviewGestureRecognizers], so the arena gives vertical drags to
-          // the page and only a horizontal drag reaches these callbacks (RLY-234 —
-          // mirrors the web hook's |dx|>|dy| rule).
-          onHorizontalDragStart: (_) => _dragDx = 0,
-          onHorizontalDragUpdate: (d) => _dragDx += d.delta.dx,
-          onHorizontalDragEnd: (_) => _commitSwipe(),
+          // [CardScreen.webviewGestureRecognizersFor], so the arena gives vertical
+          // drags to the page and only a horizontal drag reaches these callbacks
+          // (RLY-234 — mirrors the web hook's |dx|>|dy| rule). While the mockup
+          // viewer is open the callbacks are null, so no horizontal recognizer
+          // enters the arena and the mockup gets the sideways pan (RE393).
+          onHorizontalDragStart: _mockupViewerOpen ? null : (_) => _dragDx = 0,
+          onHorizontalDragUpdate: _mockupViewerOpen
+              ? null
+              : (d) => _dragDx += d.delta.dx,
+          onHorizontalDragEnd: _mockupViewerOpen ? null : (_) => _commitSwipe(),
           child: KeyedSubtree(
             key: ValueKey('card_body_${widget.cardRef}'),
             child:
                 widget.bodyBuilder?.call(context) ??
                 InAppWebView(
                   key: const Key('card_webview'),
-                  gestureRecognizers: CardScreen.webviewGestureRecognizers,
+                  // Never key the webview on the flag: a remount reloads the page
+                  // and drops the viewer. The platform view picks up the new set
+                  // on rebuild.
+                  gestureRecognizers: CardScreen.webviewGestureRecognizersFor(
+                    mockupViewerOpen: _mockupViewerOpen,
+                  ),
                   initialUrlRequest: URLRequest(
                     url: WebUri(
                       CardScreen.cardUrl(
@@ -290,12 +343,25 @@ class _CardScreenState extends ConsumerState<CardScreen> {
                       ),
                     ),
                   ),
+                  // A full page load means the viewer's destroyed() never ran.
+                  onLoadStart: (_, _) => _setMockupViewerOpen(false),
                   onWebViewCreated: (controller) {
                     controller.addJavaScriptHandler(
                       handlerName: CardScreen.navBackHandler,
                       callback: (_) {
                         if (context.mounted) {
                           CardScreen.navBack(GoRouter.of(context));
+                        }
+                      },
+                    );
+                    controller.addJavaScriptHandler(
+                      handlerName: CardScreen.mockupViewerHandler,
+                      callback: (args) {
+                        if (context.mounted) {
+                          CardScreen.setMockupViewerOpen(
+                            context,
+                            CardScreen.mockupViewerOpenFromArgs(args),
+                          );
                         }
                       },
                     );

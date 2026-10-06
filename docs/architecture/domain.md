@@ -199,6 +199,10 @@ sharing behavior.
   on phones it is full screen under one bar with no review controls. Switching (a tile, ←/→,
   ‹ ›, a swipe) replaces the history entry, so one browser Back, Esc or "← Back to card" returns
   to the drawer; an invalid or stale `mockup` id falls back to the drawer.
+  Embedded (the native host, RE393), an HTML mockup zooms from Fit to 400% (− · Fit · + over the
+  frame) and its frame scrolls sideways once zoomed, in both phone and desktop render widths; the
+  viewer signals `relayMockupViewer` (`true` on open, `false` on close) to the native shell so it
+  hands the webview every gesture while the viewer is open.
   The same viewer opens the AI Result's **Screenshots** (RE390): the drawer shows them as the same
   80px tiles, and a tile patches to `screenshot=<n>` (1-based among the openable screenshots; an
   agent-local path is a placeholder tile, never a viewer item) on the same three hosts. BoardLive
