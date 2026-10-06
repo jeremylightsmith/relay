@@ -31,6 +31,9 @@ end
 # prod from `fly secrets set`. Test uses static dummies from
 # config/test.exs, which this must not override with nils.
 if config_env() != :test do
+  # "Suggest an idea" URL (RE397); unset/blank hides it. Read only via RelayWeb.Feedback.
+  config :relay, feedback_url: System.get_env("RELAY_FEEDBACK_URL")
+
   config :relay,
     google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
     google_ios_client_id: System.get_env("GOOGLE_IOS_CLIENT_ID")

@@ -122,6 +122,32 @@ void main() {
     expect(store.value, 'apple-cookie');
   });
 
+  test('a successful Apple sign-in carries the feedback URL (RE397)', () async {
+    final adapter = StubAdapter(
+      body: {
+        'success': true,
+        'user': {'id': 1, 'name': 'Alice Apple', 'email': 'alice@example.com'},
+        'token': 'relayu_x',
+        'feedback_url': 'https://example.com/ideas',
+      },
+      headers: {
+        'set-cookie': ['_relay_key=apple-cookie; Path=/'],
+      },
+    );
+    final container = containerWith(
+      store: InMemorySessionStore(),
+      adapter: adapter,
+      apple: FakeAppleRequest(),
+    );
+
+    await (await ready(container)).signInWithApple();
+
+    expect(
+      container.read(authProvider).feedbackUrl,
+      'https://example.com/ideas',
+    );
+  });
+
   test('a cancelled Apple sheet signs out silently, with no request', () async {
     final adapter = StubAdapter();
     final container = containerWith(

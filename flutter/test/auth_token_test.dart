@@ -81,4 +81,41 @@ void main() {
     expect(state.signedIn, isTrue);
     expect(container.read(authTokenProvider), isNull);
   });
+
+  test(
+    'a restored session carries the feedback URL from /me (RE397)',
+    () async {
+      final adapter = StubAdapter(
+        body: {
+          'success': true,
+          'user': _user,
+          'token': 'relayu_abc_def',
+          'feedback_url': 'https://relayboard.fly.dev/board/relay/public',
+        },
+      );
+      final container = containerWith(adapter, persisted: 'cookie-value');
+
+      final state = await restore(container);
+
+      expect(
+        state.feedbackUrl,
+        'https://relayboard.fly.dev/board/relay/public',
+      );
+    },
+  );
+
+  test(
+    'an old server with no feedback_url key restores with it null',
+    () async {
+      final adapter = StubAdapter(
+        body: {'success': true, 'user': _user, 'token': 'relayu_abc_def'},
+      );
+      final container = containerWith(adapter, persisted: 'cookie-value');
+
+      final state = await restore(container);
+
+      expect(state.signedIn, isTrue);
+      expect(state.feedbackUrl, isNull);
+    },
+  );
 }

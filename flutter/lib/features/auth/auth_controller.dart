@@ -46,6 +46,7 @@ class AuthState {
     this.error,
     this.token,
     this.method,
+    this.feedbackUrl,
   });
 
   final AuthStatus status;
@@ -63,6 +64,13 @@ class AuthState {
   /// a `signedOut` state carrying [error] — so the screen spins the right button
   /// and "Try again" retries the right provider. Null otherwise.
   final SignInMethod? method;
+
+  /// Where "Suggest an idea" in Settings sends people (RE397) — the server's
+  /// `feedback_url`, null when the operator left `RELAY_FEEDBACK_URL` unset (or
+  /// the server predates it), which hides the row. Like [token] it is **not**
+  /// persisted: the server sends it on every sign-in and every /me, so a
+  /// restored launch gets it from /me.
+  final String? feedbackUrl;
 
   bool get signedIn => status == AuthStatus.signedIn;
   bool get signingIn => status == AuthStatus.signingIn;
@@ -117,6 +125,7 @@ class AuthController extends Notifier<AuthState> {
           status: AuthStatus.signedIn,
           user: Map<String, dynamic>.from(resp.data['user'] as Map),
           token: resp.data['token'] as String?,
+          feedbackUrl: resp.data['feedback_url'] as String?,
         );
         return;
       }
@@ -226,6 +235,7 @@ class AuthController extends Notifier<AuthState> {
       status: AuthStatus.signedIn,
       user: Map<String, dynamic>.from(resp.data['user'] as Map),
       token: resp.data['token'] as String?,
+      feedbackUrl: resp.data['feedback_url'] as String?,
     );
   }
 
