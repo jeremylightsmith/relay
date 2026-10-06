@@ -78,6 +78,17 @@ defmodule RelayWeb.BoardsLiveTest do
       refute has_element?(view, "#top-bar-new-board.bg-primary")
     end
 
+    test "both New board buttons press to Creating… (RE394)", %{conn: conn, user: user} do
+      _default = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      for id <- ~w(top-bar-new-board new-board-button) do
+        assert has_element?(view, "##{id}.pending-action[phx-click=new_board]")
+        assert view |> element("##{id} .pending-idle") |> render() =~ "New board"
+        assert view |> element("##{id} .pending-face") |> render() =~ "Creating…"
+      end
+    end
+
     test "a board tile shows its needs-you count", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       review = Enum.find(board.stages, &(&1.type == :review))

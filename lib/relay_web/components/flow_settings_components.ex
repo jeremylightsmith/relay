@@ -131,6 +131,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       <.form
         for={@form}
         id="new-flow-form"
+        class="action-group"
         phx-submit="flow_create"
         phx-change="flow_create_validate"
       >
@@ -173,13 +174,15 @@ defmodule RelayWeb.FlowSettingsComponents do
           options={[{"Shared clean", "shared_clean"}, {"Exclusive", "exclusive"}]}
         />
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button
+          <.button
             type="submit"
             id="new-flow-create"
+            class=""
             style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            pending="Creating…"
           >
             Create flow
-          </button>
+          </.button>
           <button
             type="button"
             id="new-flow-cancel"
@@ -353,7 +356,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                   >
                     ⋯
                   </summary>
-                  <ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-100 p-1 shadow">
+                  <ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-100 p-1 shadow action-group">
                     <li>
                       <.link
                         navigate={~p"/board/#{@slug}/flows/#{row.flow.key}"}
@@ -363,14 +366,17 @@ defmodule RelayWeb.FlowSettingsComponents do
                       </.link>
                     </li>
                     <li>
-                      <button
+                      <%!-- RE394 — `text-left` keeps the stacked faces anchored left in the menu row. --%>
+                      <.button
                         type="button"
                         id={"flow-#{row.flow.id}-duplicate"}
                         phx-click="flow_duplicate"
                         phx-value-flow-id={row.flow.id}
+                        class="text-left"
+                        pending="Duplicating…"
                       >
                         ⧉ Duplicate
-                      </button>
+                      </.button>
                     </li>
                     <li :if={row.resettable?}>
                       <button
@@ -432,16 +438,18 @@ defmodule RelayWeb.FlowSettingsComponents do
           {confirm_body(@flow)}
         </p>
         <.preflight_list :if={@preflight} flow={@flow} preflight={@preflight} />
-        <div style="display:flex;gap:8px;">
-          <button
+        <div class="action-group" style="display:flex;gap:8px;">
+          <.button
             type="button"
             id={"flow-#{@flow.id}-confirm-cta"}
             phx-click="flow_confirm_toggle"
             phx-value-flow-id={@flow.id}
+            class=""
             style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            pending={confirm_pending(@flow)}
           >
             {confirm_cta(@flow)}
-          </button>
+          </.button>
           <button
             type="button"
             id={"flow-#{@flow.id}-confirm-cancel"}
@@ -633,6 +641,10 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp confirm_cta(%Flow{enabled: false} = flow), do: "Turn on #{flow_name(flow)}"
   defp confirm_cta(%Flow{} = flow), do: "Turn off #{flow_name(flow)}"
 
+  # RE394 — the CTA's pressed-face label, keyed on the same `enabled` as `confirm_cta/1`.
+  defp confirm_pending(%Flow{enabled: false}), do: "Turning on…"
+  defp confirm_pending(%Flow{}), do: "Turning off…"
+
   # The confirm is unreachable when the pulls-from trigger is nil (the toggle
   # is disabled), but stay total for arbitrary data.
   defp pulls_name(%Flow{pulls_from_stage: %{name: name}}), do: name
@@ -736,16 +748,18 @@ defmodule RelayWeb.FlowSettingsComponents do
           Replace this flow's definition with the shipped default? Your customizations are
           overwritten. The flow's triggers and on/off state are untouched.
         </p>
-        <div style="display:flex;gap:8px;">
-          <button
+        <div class="action-group" style="display:flex;gap:8px;">
+          <.button
             type="button"
             id={"flow-#{@flow.id}-reset-cta"}
             phx-click="flow_confirm_reset"
             phx-value-flow-id={@flow.id}
+            class=""
             style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            pending="Resetting…"
           >
             Reset {flow_name(@flow)}
-          </button>
+          </.button>
           <button
             type="button"
             id={"flow-#{@flow.id}-reset-cancel"}
@@ -790,16 +804,18 @@ defmodule RelayWeb.FlowSettingsComponents do
           {@mid_run} cards are mid-run on this flow. Deleting it orphans them — their next
           hand-off fails with <span style="font-family:ui-monospace,monospace;">no_flow</span>.
         </p>
-        <div style="display:flex;gap:8px;">
-          <button
+        <div class="action-group" style="display:flex;gap:8px;">
+          <.button
             type="button"
             id={"flow-#{@flow.id}-delete-cta"}
             phx-click="flow_confirm_delete"
             phx-value-flow-id={@flow.id}
+            class=""
             style="background:var(--color-error);color:var(--color-error-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            pending="Deleting…"
           >
             Delete {flow_name(@flow)}
-          </button>
+          </.button>
           <button
             type="button"
             id={"flow-#{@flow.id}-delete-cancel"}

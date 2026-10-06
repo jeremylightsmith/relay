@@ -107,10 +107,25 @@ defmodule RelayWeb.CoreComponents do
       <.button>Send!</.button>
       <.button phx-click="go" variant="primary">Send!</.button>
       <.button navigate={~p"/"}>Home</.button>
+      <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+
+  ## Pending (RE394)
+
+  `pending` gives a `<button>` a client-side pressed face: the button gains `pending-action` and
+  stacks its idle content and a spinner + `pending` label in one grid cell (`pending-stack` →
+  `pending-idle` / `pending-face`). The unlayered "RE394 pending actions" rules in `app.css` swap
+  the faces while LiveView's own `phx-click-loading` / `phx-submit-loading` class is on the
+  button, so it reacts in the click's frame and the width never changes. Ignored on links.
+  Don't combine it with `phx-disable-with`, which replaces the button's text and wipes the faces.
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
   attr :class, :any
   attr :variant, :string, values: ~w(primary)
+
+  attr :pending, :string,
+    default: nil,
+    doc: "verb-ing label shown with a spinner while the server handles this button's click/submit"
+
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
@@ -121,19 +136,60 @@ defmodule RelayWeb.CoreComponents do
         ["btn", Map.fetch!(variants, assigns[:variant])]
       end)
 
-    if rest[:href] || rest[:navigate] || rest[:patch] do
-      ~H"""
-      <.link class={@class} {@rest}>
-        {render_slot(@inner_block)}
-      </.link>
-      """
-    else
-      ~H"""
-      <button class={@class} {@rest}>
-        {render_slot(@inner_block)}
-      </button>
-      """
+    cond do
+      rest[:href] || rest[:navigate] || rest[:patch] ->
+        ~H"""
+        <.link class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </.link>
+        """
+
+      assigns.pending ->
+        ~H"""
+        <button class={[@class, "pending-action"]} {@rest}>
+          <span class="pending-stack">
+            <span class="pending-idle">{render_slot(@inner_block)}</span>
+            <span class="pending-face" aria-hidden="true">
+              <span class="loading loading-spinner loading-xs"></span>
+              {@pending}
+            </span>
+          </span>
+        </button>
+        """
+
+      true ->
+        ~H"""
+        <button class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </button>
+        """
     end
+  end
+
+  @doc """
+  Marks one cluster of action controls (RE394). While any `pending-action` inside it is pressed
+  (see `button/1`'s `pending`), the group's other buttons, links, inputs and menu rows go inert —
+  dimmed, no pointer events — so e.g. Approve and Reject can't race. A caller may instead put the
+  literal class `action-group` on an existing wrapper; the effect is the same.
+
+  ## Examples
+
+      <.action_group class="flex gap-2">
+        <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+        <.button phx-click="open_reject">Request changes</.button>
+      </.action_group>
+  """
+  attr :id, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def action_group(assigns) do
+    ~H"""
+    <div id={@id} class={["action-group", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </div>
+    """
   end
 
   @doc """
@@ -1449,16 +1505,18 @@ defmodule RelayWeb.CoreComponents do
         >
           {relative_time(@log_at)}
         </span>
-        <button
+        <.button
           :if={@health == :stopped}
           id={"card-#{@ref}-retry"}
+          type="button"
           class="card-retry-chip"
           phx-click="retry_card"
           phx-value-ref={@ref}
           style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+          pending="Retrying…"
         >
           Retry
-        </button>
+        </.button>
       </div>
       <div
         :if={@status == :needs_input and is_nil(@run)}
@@ -3638,7 +3696,7 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :if={@stage_menu_open and !@archived}
                     id="card-drawer-stage-menu"
-                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"}
+                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
                     style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
                   >
                     <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
@@ -3687,10 +3745,18 @@ defmodule RelayWeb.CoreComponents do
                           phx-click="move_card"
                           phx-value-ref={@ref}
                           phx-value-stage_id={stage.id}
-                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50"
+                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50 pending-action"
                         >
                           <span class="size-[6px] flex-none rounded-[2px] bg-base-300"></span>
                           {stage.name}
+                          <%!-- RE394 — the pressed row's face, in the trailing slot the current
+                          row's "current" tag uses; hidden until LiveView marks the row loading. --%>
+                          <span
+                            class="pending-face ml-auto flex flex-none items-center gap-1 font-mono text-[10px] text-base-content/65"
+                            aria-hidden="true"
+                          >
+                            <span class="loading loading-spinner loading-xs"></span> Moving…
+                          </span>
                         </button>
                       <% end %>
                     </div>
@@ -3877,20 +3943,21 @@ defmodule RelayWeb.CoreComponents do
               <section
                 :if={@archived}
                 id="card-archived-banner"
-                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm"
+                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm action-group"
                 style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
               >
                 <.icon name="hero-archive-box" class="size-4" />
                 <span class="flex-1">This card is archived.</span>
-                <button
+                <.button
                   type="button"
                   id="restore-card-button"
                   phx-click="restore_card"
                   phx-value-ref={@ref}
                   class="btn btn-sm"
+                  pending="Restoring…"
                 >
                   Restore
-                </button>
+                </.button>
               </section>
               <div id="card-drawer-tab-panel-detail" class={[@drawer_tab != :detail && "hidden"]}>
                 <section
@@ -4296,6 +4363,7 @@ defmodule RelayWeb.CoreComponents do
                       :if={!@archived}
                       for={@comment_form}
                       id={"#{@id}-comment-form"}
+                      class="action-group"
                       phx-change="validate_comment"
                       phx-submit="post_comment"
                     >
@@ -4308,12 +4376,13 @@ defmodule RelayWeb.CoreComponents do
                           placeholder="What you did, what you found, what’s left…"
                           class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
                         >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
-                        <button
+                        <.button
                           type="submit"
                           class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
+                          pending="Adding…"
                         >
                           Add note
-                        </button>
+                        </.button>
                       </div>
                       <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
                     </.form>
@@ -4466,16 +4535,18 @@ defmodule RelayWeb.CoreComponents do
                         do: RunComponents.rate_limited_label(@rate_limited),
                         else: health_chip_label(@health)}
                     </span>
-                    <button
+                    <.button
                       :if={@health == :stopped and !@archived}
                       id={"#{@id}-activity-retry"}
+                      type="button"
                       class="activity-retry-chip"
                       phx-click="retry_card"
                       phx-value-ref={@ref}
                       style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                      pending="Retrying…"
                     >
                       Retry
-                    </button>
+                    </.button>
                   </div>
                   <div
                     :if={@body_loading}
@@ -4610,7 +4681,7 @@ defmodule RelayWeb.CoreComponents do
                   <div
                     :for={owner <- @card.owners}
                     class={[
-                      "rail-owner flex items-center gap-2 rounded-md px-1.5 py-1",
+                      "rail-owner action-group flex items-center gap-2 rounded-md px-1.5 py-1",
                       active_owner?(owner, @active_owner) &&
                         if(owner.actor_type == :agent,
                           do: "rail-owner-active ring-2 ring-secondary/60",
@@ -4621,15 +4692,16 @@ defmodule RelayWeb.CoreComponents do
                     data-active={to_string(active_owner?(owner, @active_owner))}
                   >
                     <span class="text-sm">{owner_name(owner)}</span>
-                    <button
+                    <.button
                       :if={!@archived and owner.actor_type == :agent}
                       type="button"
                       id={"#{@id}-take-over"}
                       class="rail-take-over btn btn-primary btn-xs"
                       phx-click="take_over"
+                      pending="Taking over…"
                     >
                       Take over
-                    </button>
+                    </.button>
                     <button
                       :if={!@archived}
                       type="button"
@@ -4801,6 +4873,7 @@ defmodule RelayWeb.CoreComponents do
                   :if={@editing_public_desc}
                   for={@public_desc_form}
                   id="public-desc-form"
+                  class="action-group"
                   phx-submit="save_public_desc"
                   phx-change="draft_field"
                 >
@@ -4811,9 +4884,9 @@ defmodule RelayWeb.CoreComponents do
                     class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
                   >{Phoenix.HTML.Form.normalize_value("textarea", @public_desc_form[:public_description].value)}</textarea>
                   <div class="mt-2 flex flex-wrap items-center gap-[7px]">
-                    <button type="submit" class="btn btn-primary btn-xs">
+                    <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
                       Save
-                    </button>
+                    </.button>
                     <button
                       type="button"
                       phx-click="cancel_public_desc"
@@ -5139,7 +5212,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <section
       id="needs-input-panel"
-      class="flex flex-col gap-4 rounded-[10px] p-5"
+      class="flex flex-col gap-4 rounded-[10px] p-5 action-group"
       style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
     >
       <%!-- RE279: no wait readout here — the blocked strip above the tabs is the one place the wait
@@ -5192,15 +5265,16 @@ defmodule RelayWeb.CoreComponents do
           style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
         ><%= @failure_detail || @question %></pre>
         <div class="flex items-center gap-2">
-          <button
+          <.button
             id="needs-input-retry"
             type="button"
             phx-click="retry_run"
             class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
             style="background:var(--color-warning);"
+            pending="Retrying…"
           >
             Retry {@node}
-          </button>
+          </.button>
         </div>
       </div>
       <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
@@ -5313,7 +5387,7 @@ defmodule RelayWeb.CoreComponents do
           >
             Next →
           </button>
-          <button
+          <.button
             :if={@answer_step == length(@answer_questions) - 1}
             id="needs-input-send"
             type="button"
@@ -5321,9 +5395,10 @@ defmodule RelayWeb.CoreComponents do
             disabled={not Map.has_key?(@answer_values, @answer_step)}
             class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
             style="background:var(--color-warning);"
+            pending="Sending…"
           >
             Send to AI →
-          </button>
+          </.button>
         </div>
       </div>
       <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
@@ -5362,26 +5437,31 @@ defmodule RelayWeb.CoreComponents do
             />
           </div>
           <div class="flex items-center gap-2">
-            <button
+            <.button
               id="needs-input-send"
               type="submit"
               class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
               style="background:var(--color-warning);"
+              pending="Sending…"
             >
               Send to AI →
-            </button>
+            </.button>
             <%!-- Retry differs from answering and stays useful: it re-enters with NO session and
             +1 retry-budget bonus, where an answer resumes the session with the note as findings. --%>
-            <button
+            <%!-- RE394 — stays type="button": a no-submitter requestSubmit() (⌘↵) puts
+            phx-submit-loading on every button in the form, and only a [type="submit"] reads as
+            pressed on submit, so Retry keeps its idle label while Send shows Sending…. --%>
+            <.button
               :if={@park_kind == :escalation}
               id="needs-input-retry"
               type="button"
               phx-click="retry_run"
               class="btn btn-sm rounded-[7px] font-semibold"
               style="background:transparent;border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+              pending="Retrying…"
             >
               Retry {@node}
-            </button>
+            </.button>
           </div>
         </.form>
       </div>
@@ -5440,7 +5520,7 @@ defmodule RelayWeb.CoreComponents do
     ~H"""
     <section
       id={@id}
-      class="flex flex-col gap-3 rounded-[10px] p-3.5"
+      class="flex flex-col gap-3 rounded-[10px] p-3.5 action-group"
       style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
     >
       <span
@@ -5456,15 +5536,16 @@ defmodule RelayWeb.CoreComponents do
         {review_hint(@review_gate, @embed)}
       </p>
       <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
-        <button
+        <.button
           id="review-approve"
           type="button"
           phx-click="review_approve"
           class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-success-content"
           style="background:var(--color-success);"
+          pending="Approving…"
         >
           {if @compact, do: "Approve", else: @review_gate.approve_label}
-        </button>
+        </.button>
         <button
           :if={@review_gate.can_reject}
           id="review-request-changes"
@@ -5549,14 +5630,15 @@ defmodule RelayWeb.CoreComponents do
             {@reject_error}
           </p>
           <div class="flex items-center gap-2">
-            <button
+            <.button
               id="review-send-back"
               type="submit"
               class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
               style="background:var(--color-warning);"
+              pending="Sending back…"
             >
               Reject → {@review_gate.reject_target_name}
-            </button>
+            </.button>
             <button
               id="review-cancel-reject"
               type="button"
@@ -5869,10 +5951,10 @@ defmodule RelayWeb.CoreComponents do
         :if={@open}
         id="card-drawer-overflow-menu"
         role="menu"
-        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"}
+        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
         style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
       >
-        <button
+        <.button
           type="button"
           id="archive-card-button"
           role="menuitem"
@@ -5880,9 +5962,10 @@ defmodule RelayWeb.CoreComponents do
           phx-value-ref={@ref}
           data-confirm={archive_confirm(@active_run?)}
           class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+          pending="Archiving…"
         >
           Archive
-        </button>
+        </.button>
       </div>
     </div>
     """
@@ -6754,9 +6837,21 @@ defmodule RelayWeb.CoreComponents do
 
   defp commit_pill(assigns) do
     ~H"""
-    <div id={"#{@id}-pill"} class={["commit-pill", @hidden && "hidden"]}>
-      <button type="submit" id={"#{@id}-save"} class="commit-pill-save" aria-label="Save">
-        <.icon name="hero-check" class="size-3.5" />
+    <%!-- RE394 — the ✓ is a fixed 26×24 square, so its pressed face is the spinner alone (not
+    `<.button pending>`, which would widen it); the hint carries the Saving… text instead. --%>
+    <div id={"#{@id}-pill"} class={["commit-pill action-group", @hidden && "hidden"]}>
+      <button
+        type="submit"
+        id={"#{@id}-save"}
+        class="commit-pill-save pending-action"
+        aria-label="Save"
+      >
+        <span class="pending-stack">
+          <span class="pending-idle"><.icon name="hero-check" class="size-3.5" /></span>
+          <span class="pending-face" aria-hidden="true">
+            <span class="loading loading-spinner loading-xs"></span>
+          </span>
+        </span>
       </button>
       <button
         type="button"
@@ -6767,7 +6862,12 @@ defmodule RelayWeb.CoreComponents do
       >
         <.icon name="hero-x-mark" class="size-3.5" />
       </button>
-      <span class="commit-pill-hint">{@hint}</span>
+      <span class="commit-pill-hint pending-status">
+        <span class="pending-stack">
+          <span class="pending-idle">{@hint}</span>
+          <span class="pending-face" aria-hidden="true">Saving…</span>
+        </span>
+      </span>
     </div>
     """
   end
@@ -6997,8 +7097,10 @@ defmodule RelayWeb.CoreComponents do
           data-autofocus="true"
           data-cancel-id={"#{@id}-cancel"}
         />
-        <div class="commit-field-actions">
-          <button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary">Save</button>
+        <div class="commit-field-actions action-group">
+          <.button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary" pending="Saving…">
+            Save
+          </.button>
           <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
             Cancel
           </button>

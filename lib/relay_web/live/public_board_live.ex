@@ -183,8 +183,10 @@ defmodule RelayWeb.PublicBoardLive do
                       placeholder="Describe this idea for the public — one or two lines."
                       class="textarea textarea-bordered w-full min-h-[62px] text-xs"
                     ></textarea>
-                    <div class="mt-2 flex gap-2">
-                      <button type="submit" class="btn btn-primary btn-xs">Save</button>
+                    <div class="mt-2 flex gap-2 action-group">
+                      <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
+                        Save
+                      </.button>
                       <button
                         type="button"
                         class="btn btn-ghost btn-xs"
@@ -369,7 +371,9 @@ defmodule RelayWeb.PublicBoardLive do
               class="textarea textarea-bordered w-full min-h-[86px]"
             />
 
-            <button type="submit" class="btn btn-primary mt-4 w-full">{@composer_cta}</button>
+            <.button type="submit" class="btn btn-primary mt-4 w-full" pending="Sending…">
+              {@composer_cta}
+            </.button>
 
             <div
               :if={is_nil(@current_user)}

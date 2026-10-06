@@ -279,19 +279,20 @@ defmodule RelayWeb.BoardLive do
           <div
             :if={@read_only?}
             id="read-only-banner"
-            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
+            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5 action-group"
             style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
           >
             <.icon name="hero-archive-box" class="size-4" />
             <span class="flex-1">This board is archived and read-only.</span>
-            <button
+            <.button
               type="button"
               id="restore-board-button"
               phx-click="restore_board"
               class="btn btn-sm"
+              pending="Restoring…"
             >
               Restore
-            </button>
+            </.button>
           </div>
           <RunComponents.stopped_work_banner
             :if={@stopped_work}
@@ -703,7 +704,7 @@ defmodule RelayWeb.BoardLive do
             <li
               :for={card <- @archived_cards}
               id={"archived-row-#{card.id}"}
-              class="flex items-center gap-3 py-2.5"
+              class="flex items-center gap-3 py-2.5 action-group"
             >
               <button
                 type="button"
@@ -725,15 +726,16 @@ defmodule RelayWeb.BoardLive do
                   )}
                 </div>
               </button>
-              <button
+              <.button
                 type="button"
                 id={"archived-restore-#{card.id}"}
                 phx-click="restore_card"
                 phx-value-ref={Cards.ref(@board, card)}
                 class="btn btn-sm"
+                pending="Restoring…"
               >
                 Restore
-              </button>
+              </.button>
             </li>
             <li :if={@archived_cards == []} class="py-3 text-sm text-base-content/55">
               No archived cards.
@@ -769,7 +771,7 @@ defmodule RelayWeb.BoardLive do
             <li
               :for={%{card: card, run: run, reason: reason} <- @stalled_cards}
               id={"stalled-row-#{card.id}"}
-              class="flex items-center gap-3 py-2.5"
+              class="flex items-center gap-3 py-2.5 action-group"
             >
               <button
                 type="button"
@@ -799,15 +801,16 @@ defmodule RelayWeb.BoardLive do
                   {run.failure_detail}
                 </div>
               </button>
-              <button
+              <.button
                 type="button"
                 id={"stalled-restart-#{card.id}"}
                 phx-click="restart_one"
                 phx-value-ref={Cards.ref(@board, card)}
                 class="btn btn-sm btn-warning"
+                pending="Restarting…"
               >
                 Restart
-              </button>
+              </.button>
             </li>
             <li :if={@stalled_cards == []} class="py-3 text-sm text-base-content/55">
               No stalled cards.
@@ -832,7 +835,7 @@ defmodule RelayWeb.BoardLive do
             Moving it to <span class="font-medium">{@pending_move.target_stage_name}</span>
             will cancel that run and free its runner slot.
           </p>
-          <div class="modal-action">
+          <div class="modal-action action-group">
             <button
               type="button"
               id="stranded-move-cancel"
@@ -841,14 +844,15 @@ defmodule RelayWeb.BoardLive do
             >
               Keep it here
             </button>
-            <button
+            <.button
               type="button"
               id="stranded-move-confirm"
               phx-click="confirm_move"
               class="btn btn-error"
+              pending="Moving…"
             >
               Cancel run &amp; move
-            </button>
+            </.button>
           </div>
         </div>
         <label class="modal-backdrop" phx-click="cancel_move">Close</label>

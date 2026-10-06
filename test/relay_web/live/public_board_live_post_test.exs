@@ -32,6 +32,16 @@ defmodule RelayWeb.PublicBoardLivePostTest do
     refute has_element?(view, "#public-idea-composer")
   end
 
+  test "the composer's submit presses to Sending… (RE394)", %{conn: conn, board: board} do
+    conn = log_in_user(conn, insert(:user))
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
+    view |> element("#open-composer") |> render_click()
+
+    submit = "#public-idea-composer button[type=submit].pending-action"
+    assert has_element?(view, submit)
+    assert view |> element("#{submit} .pending-face") |> render() =~ "Sending…"
+  end
+
   test "signed-in: submitting the composer posts an idea that lands with ↑ 1 and a YOUR IDEA badge",
        %{conn: conn, board: board} do
     user = insert(:user)

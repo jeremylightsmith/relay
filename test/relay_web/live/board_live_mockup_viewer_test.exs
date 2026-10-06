@@ -255,7 +255,7 @@ defmodule RelayWeb.BoardLiveMockupViewerTest do
        %{conn: conn, board: board, deploy: deploy, m1: m1} do
     view = viewer(conn, board, m1)
 
-    assert view |> element("#review-approve") |> render() |> text() == "Approve"
+    assert view |> element("#review-approve .pending-idle") |> render() |> text() == "Approve"
     view |> element("#review-approve") |> render_click()
 
     assert_patch(view, ~p"/board/#{board.slug}")

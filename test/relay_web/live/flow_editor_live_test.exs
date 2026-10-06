@@ -163,6 +163,45 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert Flows.get_flow!(board, "code").pulls_from_stage_id == code.pulls_from_stage_id
   end
 
+  # RE394 — the editor's persisting actions show the shared client-side pressed face.
+  defp pending_text(view, selector), do: view |> element(selector) |> render() |> face_text()
+
+  defp face_text(html) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query(".pending-face") |> LazyHTML.text() |> String.trim()
+  end
+
+  test "the unsaved bar's Save presses to Saving… inside its action group (RE394)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    render_hook(view, "edit_node_field", %{"key" => "implement", "field" => "run", "value" => "CHANGED"})
+
+    assert has_element?(view, "#flow-editor-unsaved-bar .action-group #flow-editor-save.pending-action")
+    assert has_element?(view, "#flow-editor-unsaved-bar .action-group #flow-editor-discard")
+    refute has_element?(view, "#flow-editor-discard.pending-action")
+    refute has_element?(view, "#flow-editor-save.btn")
+    assert view |> element("#flow-editor-save .pending-idle") |> render() =~ "Save as v2"
+    assert pending_text(view, "#flow-editor-save") == "Saving…"
+
+    view |> element("#flow-editor-save") |> render_click()
+
+    assert has_element?(view, "#flow-save-modal .action-group #flow-save-confirm.pending-action")
+    assert pending_text(view, "#flow-save-confirm") == "Saving…"
+    refute has_element?(view, "#flow-save-modal button[phx-click=close_modal].pending-action")
+  end
+
+  test "the reset modal's confirm presses to Resetting… (RE394)", %{conn: conn, board: board} do
+    {:ok, _} =
+      Flows.save_definition(Flows.get_flow!(board, "code"), %{
+        nodes: bump_implement_run(Flows.get_flow!(board, "code"))
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element("#flow-diff-reset") |> render_click()
+
+    assert has_element?(view, "#flow-reset-modal .action-group #flow-reset-confirm.pending-action")
+    assert pending_text(view, "#flow-reset-confirm") == "Resetting…"
+    refute has_element?(view, "#flow-reset-modal button[phx-click=close_modal].pending-action")
+  end
+
   test "editing then Save opens the confirm modal; confirm bumps to v2", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
 

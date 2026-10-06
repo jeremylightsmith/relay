@@ -1537,6 +1537,68 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ ~s(id="archive-card-button")
     end
 
+    # RE394 — the drawer's one-off server actions show the shared pressed face in their group.
+    defp drawer_doc(card_overrides, extra) do
+      (&CoreComponents.card_drawer/1)
+      |> render_component(drawer_attrs(card_overrides, extra))
+      |> LazyHTML.from_fragment()
+    end
+
+    test "Archive in the ⋯ menu presses to Archiving…; the menu is the action group (RE394)" do
+      doc = drawer_doc(%{}, %{overflow_open: true})
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-overflow-menu")
+      assert "pending-action" in btn_classes(doc, "#archive-card-button")
+      assert attr_of(doc, "#archive-card-button", "role") == ["menuitem"]
+      assert attr_of(doc, "#archive-card-button", "phx-click") == ["archive_card"]
+      assert text_of(doc, "#archive-card-button .pending-idle") == "Archive"
+      assert text_of(doc, "#archive-card-button .pending-face") == "Archiving…"
+    end
+
+    test "an archived card's Restore presses to Restoring… (RE394)" do
+      doc = drawer_doc(%{}, %{archived: true})
+
+      assert "action-group" in btn_classes(doc, "#card-archived-banner")
+      assert text_of(doc, "#restore-card-button .pending-idle") == "Restore"
+      assert text_of(doc, "#restore-card-button .pending-face") == "Restoring…"
+    end
+
+    test "Add note presses to Adding…; the comment form is the action group (RE394)" do
+      doc = drawer_doc(%{}, %{})
+      submit = "#card-drawer-comment-form button[type=submit]"
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-comment-form")
+      assert "pending-action" in btn_classes(doc, submit)
+      assert text_of(doc, "#{submit} .pending-idle") == "Add note"
+      assert text_of(doc, "#{submit} .pending-face") == "Adding…"
+    end
+
+    test "Take over presses to Taking over… beside the owner's ✕ (RE394)" do
+      doc = drawer_doc(%{owners: [%{actor_type: :agent, user_id: nil}]}, %{active_owner: :ai})
+
+      assert "action-group" in btn_classes(doc, ".rail-owner")
+      assert text_of(doc, "#card-drawer-take-over .pending-idle") == "Take over"
+      assert text_of(doc, "#card-drawer-take-over .pending-face") == "Taking over…"
+      refute "pending-action" in btn_classes(doc, "#card-drawer-remove-owner-agent")
+    end
+
+    test "the public description's Save presses to Saving…; Cancel stays idle (RE394)" do
+      doc =
+        drawer_doc(%{}, %{
+          vote_count: 0,
+          public_description: nil,
+          editing_public_desc: true,
+          public_desc_form: to_form(%{"public_description" => ""})
+        })
+
+      assert "action-group" in btn_classes(doc, "#public-desc-form")
+      save = "#public-desc-form button[type=submit]"
+      assert btn_classes(doc, save) == ~w(btn btn-primary btn-xs pending-action)
+      assert text_of(doc, "#{save} .pending-idle") == "Save"
+      assert text_of(doc, "#{save} .pending-face") == "Saving…"
+      refute "pending-action" in btn_classes(doc, "#public-desc-form button[phx-click=cancel_public_desc]")
+    end
+
     test "the header stage chip is a nowrap trigger with the v5 artboard's geometry and its owner tint" do
       attrs =
         drawer_attrs(%{}, %{
@@ -1557,6 +1619,35 @@ defmodule RelayWeb.CoreComponentsTest do
                "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium badge-secondary"
 
       assert html =~ "hero-chevron-down size-[11px]"
+    end
+
+    test "the Move-to rows carry a Moving… pressed face inside an action group (RE394)" do
+      attrs =
+        drawer_attrs(%{}, %{
+          stage_menu_open: true,
+          stages: [
+            %{id: 1, name: "Plan", current?: false},
+            %{id: 2, name: "Code", current?: true}
+          ]
+        })
+
+      doc = LazyHTML.from_fragment(render_component(&CoreComponents.card_drawer/1, attrs))
+
+      assert "action-group" in btn_classes(doc, "#card-drawer-stage-menu")
+      assert count(doc, "button#card-drawer-move-to-1") == 1
+      assert "pending-action" in btn_classes(doc, "#card-drawer-move-to-1")
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1") |> LazyHTML.attribute("phx-click") == ["move_card"]
+      assert text_of(doc, "#card-drawer-move-to-1 .pending-face") == "Moving…"
+
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1 .pending-face") |> LazyHTML.attribute("aria-hidden") == [
+               "true"
+             ]
+
+      assert "ml-auto" in btn_classes(doc, "#card-drawer-move-to-1 .pending-face")
+      assert count(doc, "#card-drawer-move-to-1 .pending-face .loading.loading-spinner.loading-xs") == 1
+
+      assert count(doc, "#card-drawer-move-to-2 .pending-face") == 0
+      assert text_of(doc, "#card-drawer-move-to-2") =~ "current"
     end
 
     test "the stage popover matches the v5 artboard and marks the current stage inert" do
@@ -2175,6 +2266,24 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(id="if-title-cancel")
       assert html =~ "Enter · Esc"
     end
+
+    test "editing: the pill's ✓ is a pending action inside an action group (RE394)" do
+      doc =
+        (&CoreComponents.inline_field/1)
+        |> render_component(
+          id: "card-drawer-title",
+          editing: true,
+          field: :title,
+          form: Phoenix.Component.to_form(%{"title" => "Draft"}, as: :card),
+          edit_event: "edit",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+        |> LazyHTML.from_fragment()
+
+      assert "pending-action" in btn_classes(doc, "#card-drawer-title-save")
+      assert "action-group" in btn_classes(doc, "#card-drawer-title-pill")
+    end
   end
 
   describe "boxed_field/1" do
@@ -2289,6 +2398,53 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  # RE394 — the commit pill's ✓ shows a spinner-only pressed face; its hint swaps to Saving….
+  describe "boxed_field/1 commit pill pressed face (RE394)" do
+    defp pill_doc(extra \\ []) do
+      (&CoreComponents.boxed_field/1)
+      |> render_component(
+        Keyword.merge(
+          [
+            id: "board-name",
+            commit: :self,
+            value: "Relay",
+            field: :name,
+            form: Phoenix.Component.to_form(%{"name" => "Relay"}, as: :board),
+            save_event: "save_board_name",
+            cancel_event: "cancel_board_name"
+          ],
+          extra
+        )
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "the pill is a hidden action group; ✓ is a spinner-only pending submit; hint swaps to Saving…" do
+      doc = pill_doc()
+
+      assert btn_classes(doc, "#board-name-pill") == ~w(commit-pill action-group hidden)
+      assert attr_of(doc, "#board-name-save", "type") == ["submit"]
+      assert attr_of(doc, "#board-name-save", "aria-label") == ["Save"]
+      assert btn_classes(doc, "#board-name-save") == ~w(commit-pill-save pending-action)
+      assert count(doc, "#board-name-save .pending-stack .pending-idle span.hero-check") == 1
+      assert count(doc, "#board-name-save .pending-face .loading.loading-spinner.loading-xs") == 1
+      assert text_of(doc, "#board-name-save .pending-face") == ""
+      assert attr_of(doc, "#board-name-save .pending-face", "aria-hidden") == ["true"]
+      refute "pending-action" in btn_classes(doc, "#board-name-cancel")
+
+      assert "pending-status" in btn_classes(doc, "#board-name-pill .commit-pill-hint")
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-idle") == "Enter · Esc"
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-face") == "Saving…"
+    end
+
+    test "a multiline field's hint idles on ⌘↵ · Esc and presses to Saving…" do
+      doc = pill_doc(multiline: true)
+
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-idle") == "⌘↵ · Esc"
+      assert text_of(doc, "#board-name-pill .commit-pill-hint .pending-face") == "Saving…"
+    end
+  end
+
   describe "boxed_field/1 editing commit affordance (RLY-58)" do
     defp edit_attrs do
       [
@@ -2325,6 +2481,21 @@ defmodule RelayWeb.CoreComponentsTest do
       assert html =~ ~s(data-cancel-id="bf-cancel")
       assert html =~ ~s(data-commit="cmd-enter")
       refute html =~ "data-dirty-pill"
+    end
+
+    test "Save is a Saving… pending submit; the actions row is the action group (RE394)" do
+      doc =
+        (&CoreComponents.boxed_field/1)
+        |> render_component(Keyword.put(edit_attrs(), :id, "card-drawer-description"))
+        |> LazyHTML.from_fragment()
+
+      assert "action-group" in btn_classes(doc, ".commit-field-actions")
+      save = "#card-drawer-description-save"
+      assert doc |> LazyHTML.query(save) |> LazyHTML.attribute("type") == ["submit"]
+      assert btn_classes(doc, save) == ~w(btn btn-sm btn-primary pending-action)
+      assert text_of(doc, "#{save} .pending-idle") == "Save"
+      assert text_of(doc, "#{save} .pending-face") == "Saving…"
+      refute "pending-action" in btn_classes(doc, "#card-drawer-description-cancel")
     end
   end
 
@@ -2835,6 +3006,49 @@ defmodule RelayWeb.CoreComponentsTest do
       render_component(&CoreComponents.needs_input_panel/1, Map.merge(base, extra))
     end
 
+    # RE394 — every server-bound action in the panel shows a client-side pressed face.
+    defp panel_doc(extra), do: extra |> panel() |> LazyHTML.from_fragment()
+    defp attr_at(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+
+    test "the escalation fallback's Send and Retry carry pressed faces inside an action group (RE394)" do
+      doc = panel_doc(%{park_kind: :escalation, node: "implement", answer_questions: nil})
+
+      assert "action-group" in btn_classes(doc, "#needs-input-panel")
+      assert attr_at(doc, "#needs-input-send", "type") == ["submit"]
+      assert text_of(doc, "#needs-input-send .pending-face") == "Sending…"
+      assert attr_at(doc, "#needs-input-retry", "type") == ["button"]
+      assert attr_at(doc, "#needs-input-retry", "phx-click") == ["retry_run"]
+      assert text_of(doc, "#needs-input-retry .pending-idle") == "Retry implement"
+      assert text_of(doc, "#needs-input-retry .pending-face") == "Retrying…"
+    end
+
+    test "the infrastructure Retry carries a Retrying… face (RE394)" do
+      doc = panel_doc(%{park_kind: :infrastructure, node: "implement"})
+
+      assert text_of(doc, "#needs-input-retry .pending-face") == "Retrying…"
+      assert attr_at(doc, "#needs-input-retry", "phx-click") == ["retry_run"]
+    end
+
+    test "the stepper's last-step Send carries a Sending… face; options do not (RE394)" do
+      doc =
+        panel_doc(%{
+          answer_questions: [%{"prompt" => "Pick", "options" => ["A"]}],
+          answer_step: 0,
+          answer_values: %{0 => "A"}
+        })
+
+      assert attr_at(doc, "#needs-input-send", "type") == ["button"]
+      assert attr_at(doc, "#needs-input-send", "phx-click") == ["answer_submit"]
+      assert text_of(doc, "#needs-input-send .pending-face") == "Sending…"
+      refute "pending-action" in btn_classes(doc, "#needs-input-option-0")
+    end
+
+    test "the advance control inside the panel carries a Continuing… face (RE394)" do
+      doc = panel_doc(%{advance_available?: true})
+
+      assert text_of(doc, "#needs-input-panel #run-advance .pending-face") == "Continuing…"
+    end
+
     test "an infrastructure park shows the cause and Retry — no answer box, no attempt count (RE308)" do
       detail = "agent could not run: Failed to authenticate: OAuth session expired and could not be refreshed"
 
@@ -3105,6 +3319,19 @@ defmodule RelayWeb.CoreComponentsTest do
     end
 
     # RLY-148 (supersedes Q6→C): the artboard's §02 Retry pill on the stopped strip.
+    test "the stopped strip's Retry chip shows a Retrying… pressed face (RE394)" do
+      doc = LazyHTML.from_fragment(strip(:stopped, log_text: "agent stopped"))
+
+      classes = btn_classes(doc, "#card-RLY-3-retry")
+      assert "card-retry-chip" in classes
+      assert "pending-action" in classes
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("type") == ["button"]
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("phx-click") == ["retry_card"]
+      assert doc |> LazyHTML.query("#card-RLY-3-retry") |> LazyHTML.attribute("phx-value-ref") == ["RLY-3"]
+      assert text_of(doc, "#card-RLY-3-retry .pending-idle") == "Retry"
+      assert text_of(doc, "#card-RLY-3-retry .pending-face") == "Retrying…"
+    end
+
     test "stopped shows the artboard's Retry chip on the strip" do
       html = strip(:stopped, log_text: "agent stopped")
 
@@ -4351,10 +4578,41 @@ defmodule RelayWeb.CoreComponentsTest do
 
     test "the drawer mode labels Approve with the gate's label; compact says just Approve" do
       doc = review_doc(%{compact: false})
-      assert text(doc, "#review-approve") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
       assert count(doc, "#review-request-changes") == 1
 
-      assert text(review_doc(%{compact: true}), "#review-approve") == "Approve"
+      assert text(review_doc(%{compact: true}), "#review-approve .pending-idle") == "Approve"
+    end
+
+    # RE394 — the gate's actions show a client-side pressed face; the group goes inert.
+    test "Approve carries the pressed face inside an action group; Request changes does not" do
+      doc = review_doc(%{compact: false})
+
+      assert "action-group" in btn_classes(doc, "#review-panel")
+      assert "pending-action" in btn_classes(doc, "#review-approve")
+      assert attr_of(doc, "#review-approve", "phx-click") == ["review_approve"]
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-face") == "Approving…"
+      assert count(doc, "#review-approve .pending-face .loading.loading-spinner.loading-xs") == 1
+      refute "pending-action" in btn_classes(doc, "#review-request-changes")
+    end
+
+    test "compact Approve says Approve idle and Approving… pressed" do
+      doc = review_doc(%{compact: true})
+
+      assert text(doc, "#review-approve .pending-idle") == "Approve"
+      assert text(doc, "#review-approve .pending-face") == "Approving…"
+    end
+
+    test "Reject → X submits with a Sending back… face; Cancel stays plain; the form sits in the group" do
+      doc = review_doc(%{reject_open: true})
+
+      assert attr_of(doc, "#review-send-back", "type") == ["submit"]
+      assert "pending-action" in btn_classes(doc, "#review-send-back")
+      assert text(doc, "#review-send-back .pending-idle") == "Reject → Code"
+      assert text(doc, "#review-send-back .pending-face") == "Sending back…"
+      refute "pending-action" in btn_classes(doc, "#review-cancel-reject")
+      assert count(doc, "#review-panel.action-group #review-reject-form") == 1
     end
 
     test "compact with the note open: short hint, 8-row note, quote button, stays-put line, phx-change" do
@@ -4951,6 +5209,110 @@ defmodule RelayWeb.CoreComponentsTest do
     test "embed with no gate keeps the drag / Move to copy" do
       assert hint_html(nil, true) =~
                "Relay AI finished this. Drag it or use Move to… when you&#39;re ready."
+    end
+  end
+
+  describe "button/1 pending (RE394)" do
+    defp button_doc(html), do: LazyHTML.from_fragment(html)
+
+    defp btn_classes(doc, selector) do
+      doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first() |> String.split()
+    end
+
+    defp text_of(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+
+    test "without pending the button renders exactly as before" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button phx-click="go">Send!</CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-primary btn-soft)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("phx-click") == ["go"]
+      assert text_of(doc, "button") == "Send!"
+      refute html =~ "pending-"
+      refute html =~ "<span"
+    end
+
+    test "pending appends pending-action to a caller class and stacks the idle and pressed faces" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button
+          class="btn btn-sm flex-1"
+          style="background:var(--color-success);"
+          phx-click="review_approve"
+          pending="Approving…"
+        >
+          Approve → Spec
+        </CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-sm flex-1 pending-action)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("style") == ["background:var(--color-success);"]
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("phx-click") == ["review_approve"]
+      assert doc |> LazyHTML.query("button > *") |> Enum.count() == 1
+      assert text_of(doc, "button > .pending-stack > .pending-idle") == "Approve → Spec"
+
+      face = LazyHTML.query(doc, "button > .pending-stack > .pending-face")
+      assert LazyHTML.attribute(face, "aria-hidden") == ["true"]
+      assert face |> LazyHTML.query("span.loading.loading-spinner.loading-xs") |> Enum.count() == 1
+      assert face |> LazyHTML.text() |> String.trim() == "Approving…"
+
+      assert doc |> LazyHTML.query("button > .pending-stack > :nth-child(1).pending-idle") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("button > .pending-stack > :nth-child(2).pending-face") |> Enum.count() == 1
+    end
+
+    test "pending on a primary submit keeps the variant classes and adds pending-action" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button variant="primary" type="submit" pending="Saving…">
+          Save
+        </CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-primary pending-action)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("type") == ["submit"]
+      assert text_of(doc, ".pending-face") == "Saving…"
+    end
+
+    test "pending is ignored on a link variant" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button navigate="/" pending="Going…">Home</CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert doc |> LazyHTML.query("a") |> LazyHTML.attribute("href") == ["/"]
+      assert text_of(doc, "a") == "Home"
+      refute html =~ "pending-"
+    end
+  end
+
+  describe "action_group/1 (RE394)" do
+    test "wraps its slot in a div marked action-group plus the caller's classes" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.action_group id="g1" class="flex gap-2">
+          <button>A</button>
+        </CoreComponents.action_group>
+        """)
+
+      doc = LazyHTML.from_fragment(html)
+      assert doc |> LazyHTML.query("div#g1") |> LazyHTML.attribute("class") == ["action-group flex gap-2"]
+      assert doc |> LazyHTML.query("div#g1 > button") |> LazyHTML.text() == "A"
     end
   end
 end

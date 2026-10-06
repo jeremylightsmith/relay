@@ -516,16 +516,18 @@ defmodule RelayWeb.FlowEditorLive do
           >
             <span :for={msg <- @errors}>{msg}</span>
           </div>
-          <div style="margin-left:auto;display:flex;gap:9px;">
-            <button
+          <div class="action-group" style="margin-left:auto;display:flex;gap:9px;">
+            <.button
               id="flow-editor-save"
               type="button"
               phx-click="save"
               disabled={@errors != [] or @read_only?}
+              class=""
               style={save_button_style(@errors == [] and !@read_only?)}
+              pending="Saving…"
             >
               Save as v{@flow.version + 1}
-            </button>
+            </.button>
             <button
               id="flow-editor-discard"
               type="button"
@@ -610,7 +612,10 @@ defmodule RelayWeb.FlowEditorLive do
               {Flows.mid_run_count(@flow)} cards are mid-run on v{@flow.version}. They finish on v{@flow.version} — this edit won't touch them.
             </div>
           </div>
-          <div style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
+          <div
+            class="action-group"
+            style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;"
+          >
             <button
               type="button"
               phx-click="close_modal"
@@ -618,14 +623,16 @@ defmodule RelayWeb.FlowEditorLive do
             >
               Cancel
             </button>
-            <button
+            <.button
               id="flow-save-confirm"
               type="button"
               phx-click="confirm_save"
+              class=""
               style="background:var(--color-secondary);color:var(--color-secondary-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+              pending="Saving…"
             >
               Save as v{@flow.version + 1}
-            </button>
+            </.button>
           </div>
         </div>
       </div>

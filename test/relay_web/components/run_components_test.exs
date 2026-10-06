@@ -237,6 +237,26 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "$0.41"
     end
 
+    # RE394 — the banner's Retry shows a client-side pressed face; the banner is its group.
+    for {variant, banner} <- [failed: ".run-banner-failed", circuit: ".run-banner-circuit"] do
+      test "#{variant} banner's Retry carries a Retrying… face inside an action group" do
+        doc =
+          (&RunComponents.run_state_banner/1)
+          |> render_component(
+            variant: unquote(variant),
+            card: nil,
+            detail: detail(%{status: :failed}, [ne("fixit", 1, :failed, %{detail: "boom"})])
+          )
+          |> LazyHTML.from_fragment()
+
+        assert "action-group" in classes_of(doc, unquote(banner))
+        assert doc |> LazyHTML.query("#run-retry") |> LazyHTML.attribute("phx-click") == ["retry_run"]
+        assert ~w(btn btn-sm btn-primary pending-action) -- classes_of(doc, "#run-retry") == []
+        assert text_at(doc, "#run-retry .pending-idle") == "Retry"
+        assert text_at(doc, "#run-retry .pending-face") == "Retrying…"
+      end
+    end
+
     test "failed variant falls back to a plain sentence when failure_detail is absent" do
       html =
         render_component(&RunComponents.run_state_banner/1,
@@ -510,6 +530,16 @@ defmodule RelayWeb.RunComponentsTest do
       refute render_component(&RunComponents.advance_button/1, available?: false) =~ "run-advance"
     end
 
+    test "#run-advance carries a Continuing… pressed face (RE394)" do
+      doc =
+        (&RunComponents.advance_button/1)
+        |> render_component(available?: true)
+        |> LazyHTML.from_fragment()
+
+      assert text_at(doc, "#run-advance .pending-face") == "Continuing…"
+      assert render_component(&RunComponents.advance_button/1, available?: false) =~ ~r/\A\s*\z/
+    end
+
     test "run_state_banner no longer has a :parked variant" do
       assert_raise FunctionClauseError, fn ->
         render_component(&RunComponents.run_state_banner/1, variant: :parked, detail: detail(%{status: :parked}, []))
@@ -581,4 +611,10 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "Claude refused (five_hour) · resumes 3:40 PM UTC"
     end
   end
+
+  defp classes_of(doc, selector) do
+    doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first() |> String.split()
+  end
+
+  defp text_at(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
 end

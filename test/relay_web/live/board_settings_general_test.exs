@@ -17,6 +17,27 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
       assert has_element?(view, "#board-name-form #board-name-input")
     end
 
+    test "the Board name ✓ is a pending action whose pill hint presses to Saving… (RE394)", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert has_element?(view, "#board-name-pill.action-group #board-name-save.pending-action[type=submit]")
+      assert view |> element("#board-name-pill .pending-status .pending-face") |> render() =~ "Saving…"
+    end
+
+    test "Archive board presses to Archiving… (RE394)", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert has_element?(view, "#archive-board-button.pending-action[data-confirm]")
+      refute has_element?(view, "#archive-board-button.btn")
+      assert view |> element("#archive-board-button .pending-idle") |> render() =~ "Archive board"
+      assert view |> element("#archive-board-button .pending-face") |> render() =~ "Archiving…"
+    end
+
     test "the Board name field is pre-filled with the current name", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
 

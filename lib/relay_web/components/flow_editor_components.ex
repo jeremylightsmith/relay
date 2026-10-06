@@ -616,7 +616,10 @@ defmodule RelayWeb.FlowEditorComponents do
             overwritten. The flow's triggers and on/off state are untouched.
           </p>
         </div>
-        <div style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;">
+        <div
+          class="action-group"
+          style="background:var(--color-base-200);border-top:1px solid var(--color-base-300);padding:14px 24px;display:flex;justify-content:flex-end;gap:9px;"
+        >
           <button
             type="button"
             phx-click="close_modal"
@@ -624,14 +627,16 @@ defmodule RelayWeb.FlowEditorComponents do
           >
             Cancel
           </button>
-          <button
+          <.button
             id="flow-reset-confirm"
             type="button"
             phx-click="confirm_reset"
+            class=""
             style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;"
+            pending="Resetting…"
           >
             Reset to default
-          </button>
+          </.button>
         </div>
       </div>
     </div>

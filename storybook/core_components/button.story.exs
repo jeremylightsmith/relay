@@ -26,6 +26,30 @@ defmodule Storybook.Components.CoreComponents.Button do
         slots: [
           "Click me!"
         ]
+      },
+      %Variation{
+        id: :pending,
+        description: "RE394 — pending: idle face; clicking shows the spinner + verb-ing label until the server replies",
+        attributes: %{
+          type: "button",
+          variant: "primary",
+          pending: "Approving…"
+        },
+        slots: [
+          "Approve → Spec"
+        ]
+      },
+      %Variation{
+        id: :pending_pressed,
+        description: "RE394 — the pressed face, forced with a static phx-click-loading class",
+        attributes: %{
+          type: "button",
+          class: "btn btn-primary phx-click-loading",
+          pending: "Approving…"
+        },
+        slots: [
+          "Approve → Spec"
+        ]
       }
     ]
   end

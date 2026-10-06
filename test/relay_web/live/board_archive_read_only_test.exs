@@ -168,6 +168,14 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
       refute has_element?(view, "[id^='story-map-add-']")
     end
 
+    test "Restore presses to Restoring… inside the read-only banner (RE394)", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#read-only-banner.action-group #restore-board-button.pending-action")
+      assert view |> element("#restore-board-button .pending-idle") |> render() =~ "Restore"
+      assert view |> element("#restore-board-button .pending-face") |> render() =~ "Restoring…"
+    end
+
     test "Restore re-activates the board and clears read-only",
          %{conn: conn, user: user, board: board} do
       stage = hd(board.stages)

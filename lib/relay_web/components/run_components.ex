@@ -22,6 +22,8 @@ defmodule RelayWeb.RunComponents do
   use Phoenix.Component
 
   alias Relay.Runs
+  # RE394 — a remote call for `button/1`'s pending face only; never `import` (see moduledoc).
+  alias RelayWeb.CoreComponents
   alias RelayWeb.RunStatus
   alias RelayWeb.TimeAgo
 
@@ -544,7 +546,7 @@ defmodule RelayWeb.RunComponents do
 
     ~H"""
     <div
-      class="run-banner run-banner-circuit"
+      class="run-banner run-banner-circuit action-group"
       style="border-left:3px solid var(--color-error);background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
     >
       <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));margin-bottom:6px;">
@@ -593,7 +595,7 @@ defmodule RelayWeb.RunComponents do
 
     ~H"""
     <div
-      class="run-banner run-banner-failed"
+      class="run-banner run-banner-failed action-group"
       style="border-left:3px solid var(--color-error);background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border-radius:8px;padding:14px 16px;"
     >
       <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));margin-bottom:6px;">
@@ -623,15 +625,16 @@ defmodule RelayWeb.RunComponents do
   # gates them), so the shared `run-retry` DOM id is never duplicated on a page.
   defp retry_button(assigns) do
     ~H"""
-    <button
+    <CoreComponents.button
       id="run-retry"
       type="button"
       class="btn btn-sm btn-primary"
       phx-click="retry_run"
       style="margin-top:10px;"
+      pending="Retrying…"
     >
       Retry
-    </button>
+    </CoreComponents.button>
     """
   end
 
@@ -652,16 +655,17 @@ defmodule RelayWeb.RunComponents do
 
   def advance_button(assigns) do
     ~H"""
-    <button
+    <CoreComponents.button
       :if={@available?}
       id="run-advance"
       type="button"
       class="btn btn-sm btn-ghost"
       phx-click="advance_run"
       style="margin-top:10px;margin-left:8px;"
+      pending="Continuing…"
     >
       Task already done — continue
-    </button>
+    </CoreComponents.button>
     """
   end
 

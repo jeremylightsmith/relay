@@ -25,14 +25,15 @@ defmodule RelayWeb.BoardsLive do
         <span id="boards-title">Your boards</span>
       </:title>
       <:actions>
-        <button
+        <.button
           type="button"
           id="top-bar-new-board"
           phx-click="new_board"
           class="btn btn-sm btn-primary font-semibold"
+          pending="Creating…"
         >
           <span class="text-[15px] leading-none">+</span> New board
-        </button>
+        </.button>
       </:actions>
       <div id="boards-home" class="mx-auto max-w-[1120px] drawer:px-7 drawer:py-9">
         <%!-- RLY-95 · BOARDS-00 — phone-width title bar: 22px/600/-0.03em "Boards" on
@@ -166,17 +167,21 @@ defmodule RelayWeb.BoardsLive do
             </div>
           </div>
 
-          <button
+          <.button
             id="new-board-button"
             type="button"
             phx-click="new_board"
             class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed border-base-content/20 bg-transparent text-base-content/65 drawer:flex"
+            pending="Creating…"
           >
-            <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
-              +
+            <%!-- RE394 — the pending face stacks its faces in a row; keep the tile's column here. --%>
+            <span class="flex flex-col items-center gap-2.5">
+              <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
+                +
+              </span>
+              <span class="text-[13px] font-semibold">New board</span>
             </span>
-            <span class="text-[13px] font-semibold">New board</span>
-          </button>
+          </.button>
         </div>
       </div>
     </Layouts.app>

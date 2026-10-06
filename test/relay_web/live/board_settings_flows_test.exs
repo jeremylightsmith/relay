@@ -227,6 +227,82 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     end
   end
 
+  # RE394 — every flow-settings action that persists shows the shared client-side pressed face,
+  # and its panel/menu is the action group whose other controls go inert.
+  describe "pressed faces (RE394)" do
+    defp face(view, selector), do: view |> element(selector) |> render() |> LazyHTML.from_fragment()
+    defp text_at(doc, sel), do: doc |> LazyHTML.query(sel) |> LazyHTML.text() |> String.trim()
+
+    test "a disabled flow's confirm CTA presses to Turning on…; Cancel stays idle", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+      view |> element("#flow-#{spec.id}-toggle") |> render_click()
+
+      cta = face(view, "#flow-#{spec.id}-confirm-cta")
+      assert text_at(cta, ".pending-idle") =~ ~r/^Turn on/
+      assert text_at(cta, ".pending-face") == "Turning on…"
+      assert has_element?(view, "#flow-#{spec.id}-confirm .action-group #flow-#{spec.id}-confirm-cta.pending-action")
+      refute has_element?(view, "#flow-#{spec.id}-confirm-cancel.pending-action")
+    end
+
+    test "an enabled flow's confirm CTA presses to Turning off…", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      {:ok, _} = Flows.enable_flow(spec)
+      view = open_flows(conn, board)
+      view |> element("#flow-#{spec.id}-toggle") |> render_click()
+
+      cta = face(view, "#flow-#{spec.id}-confirm-cta")
+      assert text_at(cta, ".pending-idle") =~ ~r/^Turn off/
+      assert text_at(cta, ".pending-face") == "Turning off…"
+    end
+
+    test "the reset CTA presses to Resetting…", %{conn: conn, board: board} do
+      plan = flow(board, "plan")
+
+      {:ok, plan} =
+        Flows.update_flow(plan, %{
+          nodes: [%{key: "write_plan", type: :agent, run: "custom run", max_retries: 3}],
+          edges: [%{from: "start", to: "write_plan"}, %{from: "write_plan", to: "done", on: :succeeded}]
+        })
+
+      view = open_flows(conn, board)
+      view |> element("#flow-#{plan.id}-reset") |> render_click()
+
+      assert text_at(face(view, "#flow-#{plan.id}-reset-cta"), ".pending-face") == "Resetting…"
+      assert has_element?(view, "#flow-#{plan.id}-reset-confirm .action-group #flow-#{plan.id}-reset-cancel")
+      refute has_element?(view, "#flow-#{plan.id}-reset-cancel.pending-action")
+    end
+
+    test "the delete CTA presses to Deleting…", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+      view |> element("#flow-#{spec.id}-delete") |> render_click()
+
+      assert text_at(face(view, "#flow-#{spec.id}-delete-cta"), ".pending-face") == "Deleting…"
+      assert has_element?(view, "#flow-#{spec.id}-delete-confirm .action-group #flow-#{spec.id}-delete-cancel")
+      refute has_element?(view, "#flow-#{spec.id}-delete-cancel.pending-action")
+    end
+
+    test "the new-flow form's Create flow presses to Creating…", %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+
+      create = face(view, "#new-flow-create")
+      assert text_at(create, ".pending-idle") == "Create flow"
+      assert text_at(create, ".pending-face") == "Creating…"
+      assert has_element?(view, "#new-flow-form.action-group #new-flow-create.pending-action[type=submit]")
+      refute has_element?(view, "#new-flow-cancel.pending-action")
+    end
+
+    test "the row menu's Duplicate presses to Duplicating… inside the menu group", %{conn: conn, board: board} do
+      spec = flow(board, "spec")
+      view = open_flows(conn, board)
+
+      assert has_element?(view, "#flow-#{spec.id}-menu ul.action-group #flow-#{spec.id}-duplicate.pending-action")
+      assert text_at(face(view, "#flow-#{spec.id}-duplicate"), ".pending-face") == "Duplicating…"
+      refute has_element?(view, "#flow-#{spec.id}-duplicate.btn")
+    end
+  end
+
   describe "enable/disable cutover confirm" do
     test "toggle opens the enable confirm; cancel persists nothing",
          %{conn: conn, board: board} do

@@ -1477,6 +1477,15 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#archived-list", "Stay on board")
     end
 
+    test "an archived row's Restore presses to Restoring… (RE394)", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-menu-item") |> render_click()
+
+      restore = "#archived-restore-#{archived_id(board)}"
+      assert has_element?(view, "#archived-list li.action-group #{restore}.pending-action")
+      assert view |> element("#{restore} .pending-face") |> render() =~ "Restoring…"
+    end
+
     test "Restore from the modal returns the card to the board and drops the count",
          %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -1648,7 +1657,15 @@ defmodule RelayWeb.BoardLiveTest do
         html
         |> LazyHTML.from_fragment()
         |> LazyHTML.query(~s{[id^="card-drawer-move-to-"]})
-        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim() |> String.replace_suffix("current", "") |> String.trim()))
+        # RE394 — a movable row also carries its hidden "Moving…" pressed face after the name.
+        |> Enum.map(
+          &(&1
+            |> LazyHTML.text()
+            |> String.trim()
+            |> String.replace_suffix("current", "")
+            |> String.replace_suffix("Moving…", "")
+            |> String.trim())
+        )
 
       assert names == [
                "Backlog",

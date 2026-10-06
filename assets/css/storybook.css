@@ -137,6 +137,68 @@
   background: color-mix(in oklab, var(--color-base-200) 72%, transparent);
 }
 
+/* RE394 — mirror of the pending-actions block in app.css (see that file for the rationale). */
+/* RE394 pending actions — begin */
+/* The client-side pressed face for <.button pending> and every other `pending-action`
+   (RelayWeb.CoreComponents.button/1, action_group/1). "Pressed" keys off the element's OWN
+   LiveView loading class — never an ancestor's: the phx-click-loading: variant's
+   `.phx-click-loading &` form would light up e.g. a Retry chip inside a clicked board card.
+   Unlayered on purpose, so these beat daisyUI's layered .btn rules (including its grey
+   :disabled look, which LiveView triggers by disabling a submitting form's buttons). */
+.pending-stack {
+  display: inline-grid;
+  place-items: center;
+  gap: inherit;
+}
+.pending-stack > * {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: inherit;
+}
+/* A left-aligned row (menu items) keeps both faces anchored left instead of centred. */
+.pending-action.text-left .pending-stack {
+  justify-items: start;
+}
+.pending-face { visibility: hidden; }
+.pending-action.phx-click-loading .pending-face,
+.pending-action[type="submit"].phx-submit-loading .pending-face {
+  visibility: visible;
+}
+.pending-action.phx-click-loading .pending-idle,
+.pending-action[type="submit"].phx-submit-loading .pending-idle {
+  visibility: hidden;
+}
+.pending-action.phx-click-loading,
+.pending-action[type="submit"].phx-submit-loading {
+  filter: brightness(.85);
+  box-shadow: inset 0 2px 4px color-mix(in oklab, var(--color-base-content) 25%, transparent);
+  pointer-events: none;
+}
+.btn.pending-action.phx-click-loading:disabled,
+.btn.pending-action[type="submit"].phx-submit-loading:disabled {
+  background-color: var(--btn-bg);
+}
+.btn-primary.pending-action.phx-click-loading:disabled,
+.btn-primary.pending-action[type="submit"].phx-submit-loading:disabled {
+  --btn-fg: var(--color-primary-content);
+}
+.action-group:has(.pending-action.phx-click-loading, .pending-action[type="submit"].phx-submit-loading)
+  :is(button, a, input, textarea, select, [role="button"], [role="menuitem"]):not(.pending-action.phx-click-loading, .pending-action[type="submit"].phx-submit-loading) {
+  opacity: .4;
+  pointer-events: none;
+}
+.action-group:has(.pending-action.phx-click-loading, .pending-action[type="submit"].phx-submit-loading)
+  .pending-status .pending-idle {
+  visibility: hidden;
+}
+.action-group:has(.pending-action.phx-click-loading, .pending-action[type="submit"].phx-submit-loading)
+  .pending-status .pending-face {
+  visibility: visible;
+}
+/* RE394 pending actions — end */
+
 /* RLY-59: PhoenixStorybook ships its own unlayered chrome CSS that defaults the
    sandbox to `serif` (the "weird font") and the chrome to a generic system sans.
    Force both onto Relay's Helvetica Neue so the storybook matches the app.
