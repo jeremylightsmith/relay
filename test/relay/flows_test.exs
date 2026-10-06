@@ -633,6 +633,54 @@ defmodule Relay.FlowsTest do
     end
   end
 
+  describe "list_enabled_flow_snapshots/1 (RE402)" do
+    test "projects only enabled flows, in key order, to the snapshot flow shape" do
+      board = insert(:board)
+      works = insert(:stage, board: board)
+      lands = insert(:stage, board: board)
+
+      on = fn key, enabled ->
+        insert(:flow,
+          board: board,
+          key: key,
+          enabled: enabled,
+          pulls_from_stage_id: insert(:stage, board: board).id,
+          works_in_stage_id: works.id,
+          lands_on_stage_id: lands.id
+        )
+      end
+
+      b = on.("b", true)
+      a = on.("a", true)
+      _off = on.("c", false)
+
+      snaps = Flows.list_enabled_flow_snapshots(board.id)
+
+      assert Enum.map(snaps, & &1.key) == ["a", "b"]
+      assert Enum.map(snaps, & &1.key) == board |> Flows.list_enabled_flows() |> Enum.map(& &1.key)
+
+      assert Enum.all?(
+               snaps,
+               &(&1 |> Map.keys() |> Enum.sort() == [:isolation, :key, :pulls_from_stage_id, :works_in_stage_id])
+             )
+
+      assert [
+               %{
+                 key: "a",
+                 pulls_from_stage_id: a.pulls_from_stage_id,
+                 works_in_stage_id: works.id,
+                 isolation: a.isolation
+               },
+               %{
+                 key: "b",
+                 pulls_from_stage_id: b.pulls_from_stage_id,
+                 works_in_stage_id: works.id,
+                 isolation: b.isolation
+               }
+             ] == snaps
+    end
+  end
+
   describe "trigger_fields/0 and enabled_flow_keys_using/1 (RE384)" do
     test "trigger_fields/0 lists the three trigger stage fields" do
       assert Flows.trigger_fields() == [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]

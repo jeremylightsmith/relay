@@ -6,9 +6,14 @@ defmodule Relay.Runs.Scheduler.Server do
   `Relay.Runs.Scheduler.Engine`, and applies the `ready ↔ queued` marking via
   `Relay.Cards` (the only card writes the scheduler owns — it never writes a `Run`'s
   **status** or moves cards into works-in). It also hands `plan/1`'s `refusals` to
-  `Relay.Runs.record_resume_refusals/3` (RE297), which stamps the refusal clock on the run
+  `Relay.Runs.record_resume_refusals/4` (RE297), which stamps the refusal clock on the run
   rows — a fact, not a status, and owned by `Relay.Runs` exactly as dispatch is owned by the
   engine and marking by `Relay.Cards`.
+
+  A reconcile is cheap by construction (RE402): the snapshot is five narrow reads (stages,
+  card projection, active runs, runners, enabled flows); `record_resume_refusals/4` decides
+  what to clear from the snapshot's runs instead of a SELECT; and marking loads a `%Card{}`
+  only for a card whose status actually changes. A steady-state reconcile is ≤ 5 queries.
 
   Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
   capacity-changed topic, debouncing a burst into one reconcile, with a slow
@@ -22,6 +27,7 @@ defmodule Relay.Runs.Scheduler.Server do
   alias Relay.Runs.Capacity
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Snapshot
+  alias Schemas.Board
 
   require Logger
 
@@ -110,8 +116,8 @@ defmodule Relay.Runs.Scheduler.Server do
     {snapshot, cards_by_id} = build_snapshot(state)
     plan = Scheduler.plan(snapshot)
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))
-    Relay.Runs.record_resume_refusals(state.board_id, plan.refusals)
-    apply_marking(plan, cards_by_id)
+    Relay.Runs.record_resume_refusals(state.board_id, plan.refusals, nil, snapshot.runs)
+    apply_marking(plan, state.board_id, cards_by_id)
     state
   end
 
@@ -119,31 +125,34 @@ defmodule Relay.Runs.Scheduler.Server do
 
   defp dispatch({:resume, run_id, runner_id}, engine), do: engine.resume_run(run_id, runner_id)
 
-  # --- snapshot assembly (returns the loaded card structs so apply_marking can write status) ---
+  # --- snapshot assembly ---
 
   @doc """
   Assembles the dispatch snapshot for `board_id` against `engine`, returning it alongside
-  the loaded card structs (which `apply_marking/2` writes status through).
+  `cards_by_id` — card id → that card's `Snapshot.card` map (what `apply_marking/3` reads the
+  current status from before it loads and writes a changed card).
+
+  Five narrow reads (RE402): `Boards.list_scheduler_stages/1`, `Cards.list_scheduler_cards/2`
+  (the projection, with `blocked_by` from the same predicate as `Cards.unmet_dependencies/2`),
+  `engine.active_runs/1`, `Runs.list_board_runners/1` and `Flows.list_enabled_flow_snapshots/1`.
 
   Public because `Relay.Runs.diagnose/3` (RLY-177) must diagnose against **byte-for-byte
   the snapshot this server plans from** — including the `reserve_active_runs/2` debit for
   in-flight runs. A second assembly path would be a second source of truth.
   """
   def build_snapshot(board_id, engine) do
-    board = Boards.get_board_by_id!(board_id)
-    cards = Cards.list_cards(board)
-    stages = Boards.list_stages(board)
-    # RE93 — the ONE "is this card blocked" read, done here where the stage list is already in
-    # hand, so the pure planner never re-derives "which stage is complete". Runs.diagnose/3
-    # reuses this same function, so plan and explain cannot disagree.
-    blocked_by = Cards.unmet_dependencies(board, stages)
+    stages = Boards.list_scheduler_stages(board_id)
+    # RE93 — the ONE "is this card blocked" read (`blocked_by` on each card), done here where the
+    # stage list is already in hand, so the pure planner never re-derives "which stage is
+    # complete". Runs.diagnose/3 reuses this same function, so plan and explain cannot disagree.
+    cards = Cards.list_scheduler_cards(board_id, Boards.top_level_done_stage_ids(stages))
     runs = engine.active_runs(board_id)
     runners = runner_snap(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(stages, &stage_snap/1),
-      cards: Enum.map(cards, &card_snap(&1, board, blocked_by)),
-      flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
+      cards: cards,
+      flows: Relay.Flows.list_enabled_flow_snapshots(board_id),
       runs: runs,
       capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> counting_capacity(runners),
       runners: runners
@@ -250,42 +259,29 @@ defmodule Relay.Runs.Scheduler.Server do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
   end
 
-  defp card_snap(card, board, blocked_by) do
-    %{
-      id: card.id,
-      ref: Cards.ref(board, card),
-      stage_id: card.stage_id,
-      status: card.status,
-      active_owner: Cards.active_owner_type(card),
-      position: card.position,
-      blocked_by: Map.get(blocked_by, card.id, [])
-    }
-  end
-
-  defp flow_snap(flow) do
-    %{
-      key: flow.key,
-      pulls_from_stage_id: flow.pulls_from_stage_id,
-      works_in_stage_id: flow.works_in_stage_id,
-      isolation: flow.isolation
-    }
-  end
-
   # --- the scheduler-owned ready <-> queued marking ---
 
-  defp apply_marking(plan, cards_by_id) do
-    Enum.each(plan.to_queue, &set_status(cards_by_id, &1, :queued))
-    Enum.each(plan.to_unqueue, &set_status(cards_by_id, &1, :ready))
+  defp apply_marking(plan, board_id, cards_by_id) do
+    Enum.each(plan.to_queue, &set_status(board_id, cards_by_id, &1, :queued))
+    Enum.each(plan.to_unqueue, &set_status(board_id, cards_by_id, &1, :ready))
     :ok
   end
 
   # :queued/:ready are valid in the pulls-from stage (queue/done), so a plain set_status is safe.
-  # Skip a no-op write (already at the target status) — set_status/3 re-broadcasts unconditionally,
-  # which would re-trigger this reconcile in a loop.
-  defp set_status(cards_by_id, card_id, status) do
+  # Skip a no-op write (already at the target status, per the snapshot) — Cards.set_status/2
+  # re-broadcasts unconditionally, which would re-trigger this reconcile in a loop. Only a card
+  # that really changes is loaded (RE402); one gone since the snapshot is skipped.
+  defp set_status(board_id, cards_by_id, card_id, status) do
     case Map.get(cards_by_id, card_id) do
       nil -> :ok
       %{status: ^status} -> :ok
+      _changed -> write_status(board_id, card_id, status)
+    end
+  end
+
+  defp write_status(board_id, card_id, status) do
+    case Cards.get_card(%Board{id: board_id}, card_id) do
+      nil -> :ok
       card -> Cards.set_status(card, %{status: status})
     end
   end

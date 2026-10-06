@@ -430,4 +430,60 @@ defmodule Relay.Runs.Scheduler.ServerTest do
       assert Repo.get!(Card, card.id).status == :queued
     end
   end
+
+  describe "narrow snapshot assembly (RE402)" do
+    # A second :ready pulls card, agent-owned and blocked by a card in the works stage.
+    defp busy_board do
+      ctx = board_with_flow(:ready)
+      blocker = insert(:card, stage: ctx.works, status: :working)
+      owned = insert(:card, stage: ctx.pulls, status: :ready)
+      insert(:card_owner, card: owned)
+      board = Repo.preload(ctx.board, [])
+      {:ok, _} = Relay.Cards.set_dependencies(board, owned, [Relay.Cards.ref(board, blocker)])
+      Map.merge(ctx, %{blocker: blocker, owned: owned})
+    end
+
+    test "a steady-state reconcile issues at most five Repo queries" do
+      %{board: board, exec_a: exec_a} = busy_board()
+      :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
+      start_engine([])
+      pid = start_server(board.id)
+      :ok = Server.reconcile_now(pid)
+
+      {:ok, count} = count_repo_queries(pid, fn -> Server.reconcile_now(pid) end)
+
+      assert count <= 5
+    end
+
+    test "build_snapshot/2 is exactly five queries and carries refusal_stamped on runs" do
+      %{board: board, blocker: blocker} = busy_board()
+      run = insert(:run, card: blocker, status: :running)
+
+      {{snapshot, _cards_by_id}, count} =
+        count_repo_queries(self(), fn -> Server.build_snapshot(board.id, Relay.Runs.Scheduler.RunsEngine) end)
+
+      assert count == 5
+      assert [%{id: run_id, refusal_stamped: false}] = snapshot.runs
+      assert run_id == run.id
+    end
+
+    test "cards_by_id holds the snapshot card maps" do
+      %{board: board, card: card} = board_with_flow(:ready)
+
+      {snapshot, cards_by_id} = Server.build_snapshot(board.id, NoopEngine)
+      snap_card = Enum.find(snapshot.cards, &(&1.id == card.id))
+
+      assert cards_by_id[card.id] == snap_card
+
+      assert snap_card |> Map.keys() |> Enum.sort() == [
+               :active_owner,
+               :blocked_by,
+               :id,
+               :position,
+               :ref,
+               :stage_id,
+               :status
+             ]
+    end
+  end
 end

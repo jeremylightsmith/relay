@@ -272,6 +272,23 @@ defmodule Relay.Boards do
     |> order_stages()
   end
 
+  # The stage columns the scheduler snapshot reads — `top_level_done_stage_ids/1` matches
+  # `parent_id` + `category`, `order_stages/1` reads `position` + `type`.
+  @scheduler_stage_fields [:id, :board_id, :position, :parent_id, :wip_limit, :category, :type]
+
+  @doc """
+  The board's stages as narrow `%Stage{}` structs (only #{inspect(@scheduler_stage_fields)}
+  loaded), in `list_stages/1` order — the lean read `Relay.Runs.Scheduler.Server.build_snapshot/2`
+  assembles its `stages` from (RE402). Structs, not maps, so `top_level_done_stage_ids/1` still
+  applies.
+  """
+  @spec list_scheduler_stages(integer()) :: [Stage.t()]
+  def list_scheduler_stages(board_id) do
+    from(s in Stage, where: s.board_id == ^board_id, select: struct(s, @scheduler_stage_fields))
+    |> Repo.all()
+    |> order_stages()
+  end
+
   @doc """
   Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
   `position`, each immediately followed by its substages in `Stage.sublane_rank/1` order

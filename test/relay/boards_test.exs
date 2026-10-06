@@ -525,6 +525,24 @@ defmodule Relay.BoardsTest do
     end
   end
 
+  describe "list_scheduler_stages/1 (RE402)" do
+    test "returns the board's stages as narrow %Stage{} structs in list_stages/1 order" do
+      board = insert(:board)
+      done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 3)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, category: :unstarted, position: 1)
+      {:ok, _review} = Boards.enable_lane(code, :review)
+
+      result = Boards.list_scheduler_stages(board.id)
+      full = Boards.list_stages(board)
+
+      assert Enum.map(result, & &1.id) == Enum.map(full, & &1.id)
+      assert Enum.all?(result, &match?(%Stage{}, &1))
+      assert Boards.top_level_done_stage_ids(result) == Boards.top_level_done_stage_ids(full)
+      assert Boards.top_level_done_stage_ids(result) == [done.id]
+    end
+  end
+
   describe "update_stage/2 reject_to_stage_id" do
     test "persists reject_to_stage_id" do
       board = insert(:board)

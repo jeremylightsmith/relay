@@ -80,7 +80,9 @@ looks like the leftward flow is being starved. Pinned by
 
 The capacity **store** (`Relay.Runs.Capacity`, ETS) is keyed by runner id; each entry carries
 the runner's board id and is evicted by the reaper's reclaim sweep once the runner goes stale
-(RE402). The scheduler **snapshot** is board-scoped: `Scheduler.Server.build_snapshot/2`
+(RE402). The scheduler **snapshot** is assembled from five narrow reads (stages, the
+`Cards.list_scheduler_cards/2` projection, active runs, runners, enabled flows — RE402) and is
+board-scoped: `Scheduler.Server.build_snapshot/2`
 keeps a capacity entry only for a runner of *this* board that `Relay.Runs.counting_runner?/1`
 accepts (not `:gone`) — an allow-list, so another board's runner or an orphaned ETS entry
 contributes nothing to dispatch or to `relay why`'s `capacity` evidence (RE338). Every snapshot

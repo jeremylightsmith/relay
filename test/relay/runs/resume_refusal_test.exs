@@ -91,6 +91,37 @@ defmodule Relay.Runs.ResumeRefusalTest do
 
       assert %Run{resume_refused_since: nil, resume_refused_reason: nil} = Runs.get_run!(run.id)
     end
+
+    # RE402 — given the snapshot's runs, the stamp set comes from `refusal_stamped`, not a SELECT.
+    test "with snapshot runs, a stamped run that is no longer refused is cleared", %{board: board, works: works} do
+      run = parked_run(works)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], at(-600))
+
+      :ok = Runs.record_resume_refusals(board.id, [], nil, [%{id: run.id, refusal_stamped: true}])
+
+      assert %Run{resume_refused_since: nil, resume_refused_reason: nil} = Runs.get_run!(run.id)
+    end
+
+    test "with snapshot runs and nothing stamped or refused, it issues no query", %{board: board, works: works} do
+      run = parked_run(works)
+      runs = [%{id: run.id, refusal_stamped: false}]
+
+      {result, count} = count_repo_queries(self(), fn -> Runs.record_resume_refusals(board.id, [], nil, runs) end)
+
+      assert result == :ok
+      assert count == 0
+    end
+
+    test "a snapshot run map with no refusal_stamped key is treated as unstamped", %{board: board, works: works} do
+      run = parked_run(works)
+      since = at(-600)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], since)
+      run_map = %{id: run.id, card_id: run.card_id, status: :parked}
+
+      assert :ok = Runs.record_resume_refusals(board.id, [], nil, [run_map])
+
+      assert %Run{resume_refused_since: ^since, resume_refused_reason: :no_free_slot} = Runs.get_run!(run.id)
+    end
   end
 
   describe "abandon_unresumable_runs/1" do
