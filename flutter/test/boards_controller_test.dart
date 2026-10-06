@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/boards/board_summary.dart';
 import 'package:relay_mobile/features/boards/boards_controller.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
@@ -140,6 +141,70 @@ void main() {
       await c.read(currentBoardProvider.notifier).ready;
 
       expect(c.read(currentBoardNameProvider), isNull);
+    });
+  });
+
+  group('toggleStar (RE396)', () {
+    List<String> slugs(ProviderContainer c) =>
+        c.read(boardsProvider).value!.map((b) => b.slug).toList();
+    List<bool> stars(ProviderContainer c) =>
+        c.read(boardsProvider).value!.map((b) => b.starred).toList();
+
+    test('stars an unstarred board, then renders the server order', () async {
+      final repo =
+          FakeBoardsRepository(boards: [makeBoard('alpha'), makeBoard('beta')])
+            ..onStar = (r) => r.boards = [
+              makeBoard('beta', starred: true),
+              makeBoard('alpha'),
+            ];
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleStar('beta');
+
+      expect(repo.starCalls, [('beta', true)]);
+      expect(repo.calls, 2);
+      expect(slugs(c), ['beta', 'alpha']);
+      expect(stars(c), [true, false]);
+    });
+
+    test('unstars a starred board', () async {
+      final repo = FakeBoardsRepository(
+        boards: [makeBoard('alpha', starred: true)],
+      );
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleStar('alpha');
+
+      expect(repo.starCalls, [('alpha', false)]);
+    });
+
+    test('a failed star still refreshes and leaves the server list', () async {
+      final repo = FakeBoardsRepository(boards: [makeBoard('alpha')])
+        ..starError = const ApiException('offline');
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleStar('alpha');
+
+      expect(repo.calls, 2);
+      expect(c.read(boardsProvider), isA<AsyncData<List<BoardSummary>>>());
+      expect(slugs(c), ['alpha']);
+      expect(stars(c), [false]);
+    });
+
+    test('a 404 star refreshes and drops the gone row', () async {
+      final repo = FakeBoardsRepository(
+        boards: [makeBoard('alpha'), makeBoard('beta')],
+      )..starError = const ApiException('Not found', statusCode: 404);
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+      repo.boards = [makeBoard('alpha')];
+
+      await c.read(boardsProvider.notifier).toggleStar('beta');
+
+      expect(slugs(c), ['alpha']);
     });
   });
 }

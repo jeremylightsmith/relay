@@ -47,6 +47,8 @@ void main() {
     expect(b.stageCount, 6);
     expect(b.cardCount, 11);
     expect(b.aiActive, isTrue);
+    // No `starred` key → not starred (RE396).
+    expect(b.starred, isFalse);
     // BOARDS-00's meta line, as card mockup "B — always in one board, switch from the title" draws it.
     expect(b.metaLabel, '6 stages · 11 cards · AI active');
   });
@@ -72,5 +74,52 @@ void main() {
     );
 
     expect(repoWith(adapter).fetchBoards(), throwsA(isA<ApiException>()));
+  });
+
+  test('parses starred, defaulting an absent key to false', () async {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'data': [
+          {'name': 'A', 'slug': 'a', 'starred': true},
+          {'name': 'Marketing site', 'slug': 'marketing-site', 'key': 'MKT'},
+        ],
+      }),
+    );
+
+    final boards = await repoWith(adapter).fetchBoards();
+
+    expect(boards.first.starred, isTrue);
+    expect(boards.last.starred, isFalse);
+  });
+
+  test('setStarred POSTs the value to the star endpoint (RE396)', () async {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'data': {'slug': 'alpha', 'starred': true},
+      }),
+    );
+
+    final result = await repoWith(adapter).setStarred('alpha', true);
+
+    final req = adapter.requests.single;
+    expect(req.method, 'POST');
+    expect(req.path, '/api/all/boards/alpha/star');
+    expect(req.data, {'starred': true});
+    expect(result, isTrue);
+  });
+
+  test('setStarred surfaces a non-200 as an ApiException with its status', () {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'error': {'code': 'not_found', 'message': 'Not found'},
+      }, status: 404),
+    );
+
+    expect(
+      repoWith(adapter).setStarred('gone', true),
+      throwsA(
+        isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404),
+      ),
+    );
   });
 }

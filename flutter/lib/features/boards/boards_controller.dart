@@ -43,6 +43,24 @@ class BoardsController extends AsyncNotifier<List<BoardSummary>> {
       // Already surfaced through the AsyncError state; nothing to add here.
     }
   }
+
+  /// Flip the user's star on [slug] (RE396), then refetch so the list renders in
+  /// the server's display order. The order is defined once on the server, so the
+  /// list is never re-sorted or patched here. A failed star is swallowed: the
+  /// refresh shows the list as the server reports it (e.g. a 404 drops the row).
+  Future<void> toggleStar(String slug) async {
+    final board = state.value?.where((b) => b.slug == slug).firstOrNull;
+    if (board != null) {
+      try {
+        await ref
+            .read(boardsRepositoryProvider)
+            .setStarred(slug, !board.starred);
+      } catch (_) {
+        // The refresh below is the recovery; nothing to surface.
+      }
+    }
+    await refresh();
+  }
 }
 
 final boardsProvider = AsyncNotifierProvider<BoardsController, List<BoardSummary>>(

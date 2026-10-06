@@ -74,6 +74,12 @@ class _BoardSwitcherSheetState extends ConsumerState<BoardSwitcherSheet> {
                   itemBuilder: (context, i) => BoardRow(
                     board: list[i],
                     current: list[i].slug == current,
+                    // Star in place: the sheet stays open on the same board.
+                    onToggleStar: () => unawaited(
+                      ref
+                          .read(boardsProvider.notifier)
+                          .toggleStar(list[i].slug),
+                    ),
                     onTap: () {
                       // Switch and close. No navigation, so you stay on this tab.
                       unawaited(

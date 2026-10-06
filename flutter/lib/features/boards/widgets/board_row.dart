@@ -7,17 +7,24 @@ import '../board_summary.dart';
 /// — the same row in both places, as card mockup "B — always in one board,
 /// switch from the title" draws it: name, an amber "N needs you" badge (absent
 /// at 0), a ✓ on the current board, and (Choose a board only) the meta line.
+///
+/// The top line ends with a 44px star tap target (RE396, card mockup "B — native
+/// Switch board sheet: same order, star at far right of each row"): a neutral
+/// filled star when starred, an outline star at 40% when not. Tapping it calls
+/// [onToggleStar] only; tapping anywhere else calls [onTap].
 class BoardRow extends StatelessWidget {
   const BoardRow({
     super.key,
     required this.board,
     required this.onTap,
+    required this.onToggleStar,
     this.current = false,
     this.showMeta = false,
   });
 
   final BoardSummary board;
   final VoidCallback onTap;
+  final VoidCallback onToggleStar;
   final bool current;
   final bool showMeta;
 
@@ -41,7 +48,7 @@ class BoardRow extends StatelessWidget {
         borderRadius: radius,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(12), // mockup p-3
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4), // py-1 pl-3 pr-1
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -49,14 +56,17 @@ class BoardRow extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      board.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8), // py-2
+                      child: Text(
+                        board.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
                       ),
                     ),
                   ),
@@ -74,11 +84,17 @@ class BoardRow extends StatelessWidget {
                         style: TextStyle(fontSize: 14, color: scheme.primary),
                       ),
                     ),
+                  _StarButton(
+                    key: Key('board_row_star_${board.slug}'),
+                    starred: board.starred,
+                    onPressed: onToggleStar,
+                  ),
                 ],
               ),
               if (showMeta)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  // The row's 4px bottom padding + 8 keeps the meta's gap at 12.
+                  padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
                   child: Text(
                     board.metaLabel,
                     key: Key('board_row_meta_${board.slug}'),
@@ -91,6 +107,42 @@ class BoardRow extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The mockup's `ml-1 size-11 rounded-lg` star: a 44×44 target, icon size 20,
+/// `hero-star-solid text-base-content` / `hero-star text-base-content/40`.
+class _StarButton extends StatelessWidget {
+  const _StarButton({
+    super.key,
+    required this.starred,
+    required this.onPressed,
+  });
+
+  final bool starred;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: IconButton(
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+        style: IconButton.styleFrom(
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: Icon(
+          starred ? Icons.star : Icons.star_border,
+          size: 20,
+          color: starred ? onSurface : onSurface.withValues(alpha: 0.4),
+          semanticLabel: starred ? 'Unstar board' : 'Star board',
         ),
       ),
     );
