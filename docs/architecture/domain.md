@@ -237,6 +237,12 @@ sharing behavior.
   `/api/all` user-token scope (`AllController.boards`, `RelayWeb.Api.BoardListJSON`), returning
   `{data: [{name, slug, key, needs_you_count, stage_count, card_count, ai_active, starred}]}`
   in display order, with `needs_you_count` = the two-type count and `starred` a boolean.
+  The switcher's star is **`POST /api/all/boards/:slug/star`** (RE396, `AllController.star`) —
+  body `{starred: <bool>}`, which sets (never toggles) the caller's own star through
+  `Boards.set_starred/3` and answers `{data: {slug, starred}}`; a repeat is a 200 no-op. A
+  non-member or unknown slug is a 404 `not_found`; a missing or non-boolean `starred` is a 422
+  `invalid_request` (validated before the membership lookup). The client never re-sorts — it
+  re-reads `GET /api/all/boards` for the server's order.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard
@@ -269,7 +275,7 @@ sharing behavior.
   menu's "Suggest an idea" link both use it (RE397). Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
-  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, and the board list).
+  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star).
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
