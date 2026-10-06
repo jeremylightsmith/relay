@@ -49,4 +49,13 @@ defmodule RelayWeb.StorybookStoriesTest do
     assert src =~ "&RelayWeb.CoreComponents.plan_tasks/1"
     assert read("_core_components.index.exs") =~ ~s|def entry("plan_tasks")|
   end
+
+  test "button story covers the RE394 pending and forced-pressed states" do
+    src = read("button.story.exs")
+    assert src =~ ~r/id: :pending,.*pending: "Approving…"/s
+    assert src =~ ~r/id: :pending_pressed,.*class: "[^"]*phx-click-loading[^"]*"/s
+
+    [_, new_variations] = String.split(src, "id: :pending,", parts: 2)
+    refute new_variations =~ ~r/\b(?:bg|text|border)-(?:emerald|slate|gray|zinc|red|green|blue|amber|violet|white|black)/
+  end
 end

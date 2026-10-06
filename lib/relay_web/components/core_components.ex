@@ -107,10 +107,25 @@ defmodule RelayWeb.CoreComponents do
       <.button>Send!</.button>
       <.button phx-click="go" variant="primary">Send!</.button>
       <.button navigate={~p"/"}>Home</.button>
+      <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+
+  ## Pending (RE394)
+
+  `pending` gives a `<button>` a client-side pressed face: the button gains `pending-action` and
+  stacks its idle content and a spinner + `pending` label in one grid cell (`pending-stack` →
+  `pending-idle` / `pending-face`). The unlayered "RE394 pending actions" rules in `app.css` swap
+  the faces while LiveView's own `phx-click-loading` / `phx-submit-loading` class is on the
+  button, so it reacts in the click's frame and the width never changes. Ignored on links.
+  Don't combine it with `phx-disable-with`, which replaces the button's text and wipes the faces.
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
   attr :class, :any
   attr :variant, :string, values: ~w(primary)
+
+  attr :pending, :string,
+    default: nil,
+    doc: "verb-ing label shown with a spinner while the server handles this button's click/submit"
+
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
@@ -121,19 +136,60 @@ defmodule RelayWeb.CoreComponents do
         ["btn", Map.fetch!(variants, assigns[:variant])]
       end)
 
-    if rest[:href] || rest[:navigate] || rest[:patch] do
-      ~H"""
-      <.link class={@class} {@rest}>
-        {render_slot(@inner_block)}
-      </.link>
-      """
-    else
-      ~H"""
-      <button class={@class} {@rest}>
-        {render_slot(@inner_block)}
-      </button>
-      """
+    cond do
+      rest[:href] || rest[:navigate] || rest[:patch] ->
+        ~H"""
+        <.link class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </.link>
+        """
+
+      assigns.pending ->
+        ~H"""
+        <button class={[@class, "pending-action"]} {@rest}>
+          <span class="pending-stack">
+            <span class="pending-idle">{render_slot(@inner_block)}</span>
+            <span class="pending-face" aria-hidden="true">
+              <span class="loading loading-spinner loading-xs"></span>
+              {@pending}
+            </span>
+          </span>
+        </button>
+        """
+
+      true ->
+        ~H"""
+        <button class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </button>
+        """
     end
+  end
+
+  @doc """
+  Marks one cluster of action controls (RE394). While any `pending-action` inside it is pressed
+  (see `button/1`'s `pending`), the group's other buttons, links, inputs and menu rows go inert —
+  dimmed, no pointer events — so e.g. Approve and Reject can't race. A caller may instead put the
+  literal class `action-group` on an existing wrapper; the effect is the same.
+
+  ## Examples
+
+      <.action_group class="flex gap-2">
+        <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+        <.button phx-click="open_reject">Request changes</.button>
+      </.action_group>
+  """
+  attr :id, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def action_group(assigns) do
+    ~H"""
+    <div id={@id} class={["action-group", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </div>
+    """
   end
 
   @doc """

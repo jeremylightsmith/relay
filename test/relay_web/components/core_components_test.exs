@@ -4953,4 +4953,108 @@ defmodule RelayWeb.CoreComponentsTest do
                "Relay AI finished this. Drag it or use Move to… when you&#39;re ready."
     end
   end
+
+  describe "button/1 pending (RE394)" do
+    defp button_doc(html), do: LazyHTML.from_fragment(html)
+
+    defp btn_classes(doc, selector) do
+      doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first() |> String.split()
+    end
+
+    defp text_of(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+
+    test "without pending the button renders exactly as before" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button phx-click="go">Send!</CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-primary btn-soft)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("phx-click") == ["go"]
+      assert text_of(doc, "button") == "Send!"
+      refute html =~ "pending-"
+      refute html =~ "<span"
+    end
+
+    test "pending appends pending-action to a caller class and stacks the idle and pressed faces" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button
+          class="btn btn-sm flex-1"
+          style="background:var(--color-success);"
+          phx-click="review_approve"
+          pending="Approving…"
+        >
+          Approve → Spec
+        </CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-sm flex-1 pending-action)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("style") == ["background:var(--color-success);"]
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("phx-click") == ["review_approve"]
+      assert doc |> LazyHTML.query("button > *") |> Enum.count() == 1
+      assert text_of(doc, "button > .pending-stack > .pending-idle") == "Approve → Spec"
+
+      face = LazyHTML.query(doc, "button > .pending-stack > .pending-face")
+      assert LazyHTML.attribute(face, "aria-hidden") == ["true"]
+      assert face |> LazyHTML.query("span.loading.loading-spinner.loading-xs") |> Enum.count() == 1
+      assert face |> LazyHTML.text() |> String.trim() == "Approving…"
+
+      assert doc |> LazyHTML.query("button > .pending-stack > :nth-child(1).pending-idle") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("button > .pending-stack > :nth-child(2).pending-face") |> Enum.count() == 1
+    end
+
+    test "pending on a primary submit keeps the variant classes and adds pending-action" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button variant="primary" type="submit" pending="Saving…">
+          Save
+        </CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert btn_classes(doc, "button") == ~w(btn btn-primary pending-action)
+      assert doc |> LazyHTML.query("button") |> LazyHTML.attribute("type") == ["submit"]
+      assert text_of(doc, ".pending-face") == "Saving…"
+    end
+
+    test "pending is ignored on a link variant" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.button navigate="/" pending="Going…">Home</CoreComponents.button>
+        """)
+
+      doc = button_doc(html)
+      assert doc |> LazyHTML.query("a") |> LazyHTML.attribute("href") == ["/"]
+      assert text_of(doc, "a") == "Home"
+      refute html =~ "pending-"
+    end
+  end
+
+  describe "action_group/1 (RE394)" do
+    test "wraps its slot in a div marked action-group plus the caller's classes" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.action_group id="g1" class="flex gap-2">
+          <button>A</button>
+        </CoreComponents.action_group>
+        """)
+
+      doc = LazyHTML.from_fragment(html)
+      assert doc |> LazyHTML.query("div#g1") |> LazyHTML.attribute("class") == ["action-group flex gap-2"]
+      assert doc |> LazyHTML.query("div#g1 > button") |> LazyHTML.text() == "A"
+    end
+  end
 end
