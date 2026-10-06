@@ -1691,6 +1691,17 @@ defmodule RelayWeb.CoreComponentsTest do
                ["Status", "Blocked by", "Blocks", "Owners", "Tags", "Updated", "Flow", "Links"]
     end
 
+    test "RE393: section_label carries the stable section-label class hook" do
+      html =
+        render_component(&CoreComponents.section_label/1, %{
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "Flow" end}]
+        })
+
+      assert [class] = html |> LazyHTML.from_fragment() |> LazyHTML.query("span") |> LazyHTML.attribute("class")
+      assert "section-label" in String.split(class)
+      assert class =~ "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]"
+    end
+
     test "RE282: every rail row label uses the section_label recipe" do
       attrs = drawer_attrs(%{branch: "re282-rail"}, %{run_flow: rail_flow()})
       html = render_component(&CoreComponents.card_drawer/1, attrs)

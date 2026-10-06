@@ -325,7 +325,10 @@ defmodule RelayWeb.BoardLive do
                 data-board={@board.slug}
               >
                 <span class="board-pager-title">{@board.name}</span>
-                <span class="board-pager-caret" aria-hidden="true">▾</span>
+                <.icon
+                  name="hero-chevron-down"
+                  class="board-pager-caret size-6 text-base-content/45"
+                />
               </button>
               <.link
                 :if={not @embed}
@@ -344,12 +347,12 @@ defmodule RelayWeb.BoardLive do
                 :if={@embed}
                 type="button"
                 id="board-create-card"
-                class="board-pager-create"
+                class="board-pager-create btn btn-primary btn-circle size-11 min-h-11"
                 aria-label="New card"
                 data-board={@board.slug}
                 data-stages={Jason.encode!(for stage <- flat_stages(@stage_groups), do: stage.name)}
               >
-                +
+                <.icon name="hero-plus" class="size-6" />
               </button>
             </div>
             <div class="board-pager-chips">

@@ -1786,7 +1786,7 @@ defmodule RelayWeb.CoreComponents do
     <span
       id={@id}
       class={[
-        "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+        "section-label font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
         @accent || "text-base-content/60",
         @class
       ]}
@@ -5848,7 +5848,10 @@ defmodule RelayWeb.CoreComponents do
                   aria-label="Collapse In progress lane"
                   style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
                 >
-                  <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}>
+                  <span
+                    class="stage-lane-label"
+                    style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}
+                  >
                     In progress
                   </span>
                   <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>

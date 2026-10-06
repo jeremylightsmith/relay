@@ -55,7 +55,8 @@ defmodule RelayWeb.BoardLivePagerBackTest do
 
     button = view |> element("#board-switch-board") |> render()
     assert button =~ "board-pager-title"
-    assert button =~ "▾"
+    # RE393: the ▾ text caret became a hero-chevron-down icon.
+    assert has_element?(view, "#board-switch-board .hero-chevron-down")
     # The "+" stays beside it (BOARD-01 in card mockup "B — always in one board, switch from the title").
     assert has_element?(view, "#board-pager-header #board-create-card")
   end

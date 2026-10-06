@@ -43,6 +43,21 @@ defmodule RelayWeb.LayoutsTest do
     assert html =~ ~s(href="/boards")
   end
 
+  # RE393: every embed-only mobile restyle is scoped under main[data-embed].
+  test "embedded, <main> carries data-embed" do
+    html = render_app(%{embed: true, inner_block: inner_block_slot()})
+
+    assert [_main] = html |> LazyHTML.from_fragment() |> LazyHTML.query("main[data-embed]") |> Enum.to_list()
+  end
+
+  test "not embedded, <main> carries no data-embed" do
+    html = render_app(%{embed: false, inner_block: inner_block_slot()})
+
+    main = html |> LazyHTML.from_fragment() |> LazyHTML.query("main")
+    assert Enum.count(main) == 1
+    assert LazyHTML.attribute(main, "data-embed") == []
+  end
+
   test "hides the wordmark text below md while keeping the logo icon" do
     html = render_app(%{inner_block: inner_block_slot()})
 
