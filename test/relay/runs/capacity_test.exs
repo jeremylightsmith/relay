@@ -46,15 +46,16 @@ defmodule Relay.Runs.CapacityTest do
   # Every runner heartbeat re-advertises its configured total, and every board's scheduler
   # subscribes to this global topic — so an unconditional broadcast woke EVERY board's
   # scheduler on every beat of every runner, exhausting the Repo pool in prod.
-  test "put/2 does not broadcast when the runner's slots are unchanged" do
+  test "put/3 does not broadcast when the runner's slots are unchanged" do
     eid = runner_id()
-    :ok = Capacity.put(eid, %{shared_clean: 1, exclusive: 0})
+    bid = board_id()
+    :ok = Capacity.put(eid, bid, %{shared_clean: 1, exclusive: 0})
     :ok = Capacity.subscribe()
 
-    :ok = Capacity.put(eid, %{"shared_clean" => 1, "exclusive" => 0})
+    :ok = Capacity.put(eid, bid, %{"shared_clean" => 1, "exclusive" => 0})
     refute_receive {:runner_capacity_changed, ^eid}
 
-    :ok = Capacity.put(eid, %{shared_clean: 2, exclusive: 0})
+    :ok = Capacity.put(eid, bid, %{shared_clean: 2, exclusive: 0})
     assert_receive {:runner_capacity_changed, ^eid}
   end
 
