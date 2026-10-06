@@ -957,6 +957,12 @@ textarea.commit-field-input { min-height: 64px; }
   --m-target: 44px;
 }
 
+/* Embedded, nothing scrolls the root and the native WebView owns the edges. daisyUI's
+   rootscrollgutter rule (`:root:has(.drawer-toggle:checked)` — the open card drawer) sets
+   `scrollbar-gutter: stable`, which on classic-scrollbar platforms reserves ~15px and shrinks
+   every `fixed inset-0` overlay (the mockup viewer: 375px wide in a 390px viewport). */
+:root:has([data-embed]) { scrollbar-gutter: auto; }
+
 /* Board tab — large-title row: px-4 pt-3 pb-1, items-end justify-between. The .board-pager-*
    base rules stay untouched (plain phone web keeps its RLY-94 look); these override them. */
 [data-embed] .board-pager-header {

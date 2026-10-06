@@ -144,6 +144,16 @@ defmodule RelayWeb.Browser.EmbedMockupViewerTest do
     assert_in_delta s["boxWidth"], 390, 1
   end
 
+  # The open card drawer checks `.drawer-toggle`, which makes daisyUI set
+  # `scrollbar-gutter: stable` on <html>. Where scrollbars are classic (Linux/Windows Chromium)
+  # that reserves ~15px, shrinking every `fixed inset-0` overlay to 375px. macOS overlay
+  # scrollbars reserve nothing, so only the computed style catches it on every platform.
+  test "7b. embedded, the page reserves no root scrollbar gutter", %{conn: conn} = ctx do
+    conn = visit_viewer(conn, ctx)
+
+    assert measure(conn, "getComputedStyle(document.documentElement).scrollbarGutter") == "auto"
+  end
+
   test "8. desktop lays the mockup out at 1280px scaled to the frame width", %{conn: conn} = ctx do
     conn = conn |> visit_viewer(ctx) |> click("#mockup-viewer-width-desktop")
     box = "mockup-viewer-frame-box-#{ctx.m1.id}"
