@@ -193,6 +193,99 @@ defmodule RelayWeb.CardLiveTest do
     end
   end
 
+  # RE393 — the embedded review card owns its top bar: a web nav bar replaces the native AppBar.
+  describe "/cards/:ref embed nav bar (RE393)" do
+    defp embed_view(conn, path) do
+      {:ok, view, _html} = live(conn, path)
+      render_async(view)
+      view
+    end
+
+    defp back_text(view) do
+      view
+      |> element("#card-drawer-nav-bar-back")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    test "one nav bar: the back label, the NativeBack hook, the ref title and the only ⋯",
+         %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board")
+
+      assert back_text(view) == "Board"
+      assert has_element?(view, ~s(button#card-drawer-nav-bar-back[phx-hook$="NativeBack"]))
+      assert has_element?(view, "#card-drawer-nav-bar-title", ref)
+
+      doc = view |> render() |> LazyHTML.from_fragment()
+      assert doc |> LazyHTML.query("#card-drawer-overflow") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#card-drawer-nav-bar #card-drawer-overflow") |> Enum.count() == 1
+      assert doc |> LazyHTML.query(".drawer-card-ref") |> Enum.count() == 0
+    end
+
+    test "the back label decodes from the URL and falls back to Back",
+         %{conn: conn, board: board, ref: ref} do
+      assert conn |> embed_view("/cards/#{ref}?board=#{board.slug}&embed=1&back=Needs+you") |> back_text() ==
+               "Needs you"
+
+      assert conn |> embed_view(~p"/cards/#{ref}?board=#{board.slug}&embed=1") |> back_text() == "Back"
+    end
+
+    test "the tab row is a segmented control with no Talk segment", %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")
+
+      assert has_element?(view, ~s(#card-drawer-tabs [role="group"] #card-drawer-tab-detail[data-active="true"]))
+      assert has_element?(view, ~s(#card-drawer-tabs [role="group"] #card-drawer-tab-activity[data-active="false"]))
+      refute has_element?(view, "#card-drawer-tab-talk")
+
+      view |> element("#card-drawer-tab-activity") |> render_click()
+      assert has_element?(view, ~s(#card-drawer-tab-activity[data-active="true"]))
+    end
+
+    test "the review hint points at the native bar; no web decision buttons",
+         %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")
+
+      assert has_element?(view, "#review-panel", "Approve or reject below.")
+      refute has_element?(view, "#review-approve")
+      refute has_element?(view, "#review-request-changes")
+    end
+
+    test "the back label survives opening a mockup and coming back",
+         %{conn: conn, board: board, card: card, ref: ref} do
+      {:ok, a} =
+        Relay.Attachments.create_attachment(card, %{
+          filename: "a.html",
+          content_type: Schemas.Attachment.html_type(),
+          bytes: "<p>a</p>"
+        })
+
+      {:ok, _card} = Cards.set_mockups(card, [%{"url" => RelayWeb.attachment_path(a.id), "caption" => "A"}])
+
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board")
+
+      view |> element("#card-drawer-mockup-0-open") |> render_click()
+      # ~p canonicalises the query (keys in order), so `back` leads.
+      assert_patch(view, "/cards/#{ref}?back=Board&board=#{board.slug}&mockup=#{a.id}")
+
+      view |> element("#mockup-viewer-bar-back") |> render_click()
+      assert_patch(view, "/cards/#{ref}?back=Board&board=#{board.slug}")
+      assert back_text(view) == "Board"
+    end
+
+    test "the dead render covers the notch and scopes the embed scale; the plain board does neither",
+         %{conn: conn, user: user, board: board, ref: ref} do
+      html = conn |> get(~p"/cards/#{ref}?board=#{board.slug}&embed=1") |> html_response(200)
+      assert html =~ "viewport-fit=cover"
+      assert html =~ "data-embed"
+
+      board_html = build_conn() |> log_in_user(user) |> get(~p"/board/#{board.slug}") |> html_response(200)
+      refute board_html =~ "viewport-fit=cover"
+      refute board_html =~ "data-embed"
+    end
+  end
+
   describe "/cards/:ref with duplicate board keys" do
     # Board keys are not unique. Derive the twin's key and ref_number from the card the
     # outer setup made, so the two boards genuinely produce the same ref string.

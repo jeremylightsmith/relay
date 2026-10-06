@@ -1009,6 +1009,20 @@ defmodule RelayWeb.BoardLiveTest do
       refute has_element?(view, "#card-drawer")
     end
 
+    # RE393 — the embed nav bar and segmented tabs never reach the desktop drawer.
+    test "the desktop drawer keeps its header, ref, Talk tab and underline tabs", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, card} = Cards.create_card(hd(board.stages), %{title: "Desktop drawer"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-nav-bar")
+      assert has_element?(view, "#card-drawer .drawer-card-ref")
+      assert has_element?(view, "#card-drawer-tab-talk")
+      refute has_element?(view, "#card-drawer-tabs .bg-base-200")
+      refute has_element?(view, ~s(#card-drawer-tabs [role="group"]))
+    end
+
     test "an unknown or malformed ref renders no drawer", %{conn: conn, user: user} do
       for ref <- ["MY999", "banana", "RLY-abc"] do
         board = Boards.get_or_create_default_board(user)
@@ -2753,7 +2767,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
 
-      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      assert has_element?(view, "#card-drawer-nav-bar-title", "MY2")
       refute_push_event(view, "focus_card", %{})
     end
   end
@@ -2940,7 +2954,7 @@ defmodule RelayWeb.BoardLiveTest do
 
       render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
 
-      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      assert has_element?(view, "#card-drawer-nav-bar-title", "MY2")
       refute has_element?(view, "[data-open]")
     end
 

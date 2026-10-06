@@ -28,6 +28,7 @@ defmodule Storybook.CoreComponents do
   def entry("media_placeholder"), do: [icon: {:fa, "image-slash", :thin}]
   def entry("member_stack"), do: [icon: {:fa, "people-group", :thin}]
   def entry("meta_label"), do: [icon: {:fa, "tag", :thin}]
+  def entry("mobile_nav_bar"), do: [icon: {:fa, "chevron-left", :thin}]
   def entry("mockup_preview"), do: [icon: {:fa, "window-maximize", :thin}]
   def entry("mockup_viewer_bar"), do: [icon: {:fa, "mobile-screen", :thin}]
   def entry("modal_scrim"), do: [icon: {:fa, "layer-group", :thin}]
@@ -36,6 +37,7 @@ defmodule Storybook.CoreComponents do
   def entry("page_heading"), do: [icon: {:fa, "heading", :thin}]
   def entry("plan_tasks"), do: [icon: {:fa, "list-check", :thin}]
   def entry("section_label"), do: [icon: {:fa, "heading", :thin}]
+  def entry("segmented_control"), do: [icon: {:fa, "toggle-on", :thin}]
   def entry("stage_column"), do: [icon: {:fa, "table-columns", :thin}]
   def entry("table"), do: [icon: {:fa, "table", :thin}]
 end

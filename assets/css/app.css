@@ -1029,6 +1029,25 @@ textarea.commit-field-input { min-height: 64px; }
 [data-embed] .run-face [style*="font-family"] { font-size: var(--m-meta) !important; }
 [data-embed] #stopped-work-banner { font-size: var(--m-body); }
 
+/* Review card (card mockup "Review card — web nav bar replaces the native AppBar") — the drawer
+   body at the mobile scale: 12px mono caps section labels, 15px body and placeholders, and
+   44px "+ Add" targets in primary. The nav bar, chip, title and segmented tabs size themselves. */
+/* .inline-field-rest's own 600 is unlayered, so it beats the title's 22/700 weight utility. */
+[data-embed] #card-drawer-title .inline-field-rest { font-weight: var(--m-title-weight); }
+[data-embed] #card-drawer .section-label {
+  font-size: var(--m-label); font-weight: 600; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+[data-embed] #card-drawer-main .commit-field-rest,
+[data-embed] #card-drawer-main .commit-field-placeholder,
+[data-embed] #card-drawer-main .md { font-size: var(--m-body); }
+[data-embed] #card-drawer-main #add-public-desc,
+[data-embed] #card-drawer-main [id$="-unused-toggle"] {
+  min-height: var(--m-target);
+  font-size: var(--m-body); font-weight: 500;
+  color: var(--color-primary);
+}
+
 @media (width < 45rem) {
   /* One flat snap track: category wrappers pass through, band headers vanish. */
   #board-bands {

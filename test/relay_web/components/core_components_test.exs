@@ -4758,4 +4758,129 @@ defmodule RelayWeb.CoreComponentsTest do
       assert text(doc, "#mockup-viewer-header-count") == "2 of 2"
     end
   end
+
+  describe "mobile_nav_bar/1 (RE393)" do
+    defp nav_doc(attrs) do
+      (&CoreComponents.mobile_nav_bar/1)
+      |> render_component(Map.merge(%{id: "nb"}, attrs))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp nb_text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+    defp nb_attr(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+    defp nb_count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
+
+    test "back_bridge renders a NativeBack button with the chevron and label; a truncating title" do
+      doc = nav_doc(%{title: "RL9001", back_label: "Board", back_bridge: true})
+
+      assert nb_count(doc, "header#nb") == 1
+      assert nb_count(doc, "button#nb-back[type=button]") == 1
+      assert [hook] = nb_attr(doc, "#nb-back", "phx-hook")
+      assert String.ends_with?(hook, "NativeBack")
+      assert nb_count(doc, "#nb-back span.hero-chevron-left") == 1
+      assert nb_text(doc, "#nb-back") == "Board"
+
+      assert nb_text(doc, "#nb-title") == "RL9001"
+      assert [title_class] = nb_attr(doc, "#nb-title", "class")
+      assert "truncate" in String.split(title_class)
+    end
+
+    test "back_patch renders a patch link with no hook" do
+      doc = nav_doc(%{title: "Fonts", back_label: "Card", back_patch: "/cards/RL1?board=b"})
+
+      assert nb_count(doc, "a#nb-back") == 1
+      assert nb_attr(doc, "#nb-back", "data-phx-link") == ["patch"]
+      assert nb_attr(doc, "#nb-back", "href") == ["/cards/RL1?board=b"]
+      assert nb_count(doc, "#nb-back[phx-hook]") == 0
+      assert nb_text(doc, "#nb-back") == "Card"
+    end
+
+    test "no back_label (or a nil/blank one) reads Back" do
+      assert nb_text(nav_doc(%{title: "T", back_bridge: true}), "#nb-back") == "Back"
+      assert nb_text(nav_doc(%{title: "T", back_bridge: true, back_label: nil}), "#nb-back") == "Back"
+      assert nb_text(nav_doc(%{title: "T", back_bridge: true, back_label: "  "}), "#nb-back") == "Back"
+    end
+  end
+
+  describe "segmented_control/1 (RE393)" do
+    test "text segments: pass-through attrs, data-active, the active one on base-100" do
+      assigns = %{}
+
+      doc =
+        ~H"""
+        <CoreComponents.segmented_control id="sc">
+          <:option id="s-a" label="Detail" active phx-click="drawer_tab" phx-value-tab="detail" />
+          <:option id="s-b" label="Run" active={false} phx-click="drawer_tab" phx-value-tab="run" />
+          <:option id="s-c" label="Activity" phx-click="drawer_tab" phx-value-tab="activity" />
+        </CoreComponents.segmented_control>
+        """
+        |> rendered_to_string()
+        |> LazyHTML.from_fragment()
+
+      assert nb_count(doc, "button#s-a[type=button]") == 1
+      assert nb_attr(doc, "#s-a", "data-active") == ["true"]
+      assert nb_attr(doc, "#s-a", "phx-click") == ["drawer_tab"]
+      assert nb_attr(doc, "#s-a", "phx-value-tab") == ["detail"]
+      assert nb_text(doc, "#s-a") == "Detail"
+      assert nb_attr(doc, "#s-b", "data-active") == ["false"]
+      assert nb_attr(doc, "#s-c", "data-active") == ["false"]
+
+      assert [active_class] = nb_attr(doc, "#s-a", "class")
+      assert "bg-base-100" in String.split(active_class)
+      assert [inactive_class] = nb_attr(doc, "#s-b", "class")
+      refute "bg-base-100" in String.split(inactive_class)
+    end
+
+    test "icon segments: a labelled group, aria-labelled buttons, icons and no visible text" do
+      assigns = %{}
+
+      doc =
+        ~H"""
+        <CoreComponents.segmented_control id="rw" variant={:icon} aria_label="Render width">
+          <:option id="rw-phone" icon="hero-device-phone-mobile" label="Phone width" active />
+          <:option id="rw-desktop" icon="hero-computer-desktop" label="Desktop, fit to width" />
+        </CoreComponents.segmented_control>
+        """
+        |> rendered_to_string()
+        |> LazyHTML.from_fragment()
+
+      assert nb_attr(doc, "#rw", "role") == ["group"]
+      assert nb_attr(doc, "#rw", "aria-label") == ["Render width"]
+      assert nb_attr(doc, "#rw-phone", "aria-label") == ["Phone width"]
+      assert nb_attr(doc, "#rw-desktop", "aria-label") == ["Desktop, fit to width"]
+      assert nb_count(doc, "#rw-phone span.hero-device-phone-mobile") == 1
+      assert nb_count(doc, "#rw-desktop span.hero-computer-desktop") == 1
+      assert nb_text(doc, "#rw") == ""
+    end
+  end
+
+  describe "card_review_panel/1 embed copy (RE393)" do
+    @embed_gate %{approve_label: "Approve", reject_target_name: "Spec", can_reject: true}
+
+    defp hint_html(gate, embed) do
+      render_component(&CoreComponents.card_review_panel/1,
+        review_gate: gate,
+        reject_open: false,
+        reject_form: to_form(%{"note" => ""}, as: :reject),
+        embed: embed
+      )
+    end
+
+    test "embed with a gate points at the native bar below" do
+      html = hint_html(@embed_gate, true)
+
+      assert html =~ "Relay AI finished this. Approve or reject below."
+      refute html =~ "Approve to move it forward"
+    end
+
+    test "non-embed with a gate keeps today's copy" do
+      assert hint_html(@embed_gate, false) =~
+               "Relay AI finished this. Approve to move it forward, or send it back with a note."
+    end
+
+    test "embed with no gate keeps the drag / Move to copy" do
+      assert hint_html(nil, true) =~
+               "Relay AI finished this. Drag it or use Move to… when you&#39;re ready."
+    end
+  end
 end
