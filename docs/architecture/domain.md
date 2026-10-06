@@ -263,7 +263,10 @@ sharing behavior.
   against Apple's JWKS (RS256 pinned, then `iss`/`aud`/`exp`, a SHA-256 nonce bound to the raw
   nonce the app sends, and a verified email). They back the two native endpoints
   `POST /api/auth/native/google` and `POST /api/auth/native/apple`, which share one sign-in tail
-  (same session cookie and `{success, user, token}` body). Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
+  (same session cookie and `{success, user, token, feedback_url}` body); `GET /api/auth/native/me`
+  returns the same shape. `feedback_url` is `RELAY_FEEDBACK_URL` (`null` when unset or blank), read
+  only via `RelayWeb.Feedback` — the native Settings "Suggest an idea" row and the web account
+  menu's "Suggest an idea" link both use it (RE397). Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
   nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, and the board list).

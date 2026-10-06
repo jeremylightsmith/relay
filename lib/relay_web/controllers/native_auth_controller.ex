@@ -13,6 +13,7 @@ defmodule RelayWeb.NativeAuthController do
   alias Relay.Accounts.AppleTokenValidator
   alias Relay.Accounts.GoogleTokenValidator
   alias RelayWeb.Auth
+  alias RelayWeb.Feedback
 
   def google(conn, %{"id_token" => id_token}) do
     sign_in(conn, GoogleTokenValidator.validate_token(id_token), [])
@@ -51,7 +52,7 @@ defmodule RelayWeb.NativeAuthController do
       conn
       |> Auth.put_user_session(user)
       |> put_status(:ok)
-      |> json(%{success: true, user: user_json(user), token: token})
+      |> json(success_json(conn, user, token))
     else
       {:error, %Ecto.Changeset{} = changeset} ->
         conn
@@ -98,7 +99,7 @@ defmodule RelayWeb.NativeAuthController do
       # signed in, and the embedded webview would bounce to sign-in.
       conn
       |> Auth.refresh_session()
-      |> json(%{success: true, user: user_json(user), token: token})
+      |> json(success_json(conn, user, token))
     else
       {:error, _} ->
         conn |> put_status(:internal_server_error) |> json(%{success: false, error: "Could not mint a token"})
@@ -122,6 +123,13 @@ defmodule RelayWeb.NativeAuthController do
     with {:ok, %{token: raw}} <- Accounts.create_user_api_token(user) do
       {:ok, raw}
     end
+  end
+
+  # The 200 body of sign-in and me/2, built once so the responses cannot drift.
+  # `feedback_url` (RE397) drives the native Settings "Suggest an idea" row; it sits
+  # beside `user`, not inside it, and is `null` when unset.
+  defp success_json(conn, user, token) do
+    %{success: true, user: user_json(user), token: token, feedback_url: Feedback.url(conn.assigns)}
   end
 
   # Shared by sign-in and me/2 so the responses cannot drift.

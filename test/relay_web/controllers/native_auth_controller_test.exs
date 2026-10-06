@@ -384,4 +384,77 @@ defmodule RelayWeb.NativeAuthControllerTest do
       refute get_session(conn, :session_refreshed_at)
     end
   end
+
+  describe "feedback_url on the success body (RE397)" do
+    @public_board "https://relayboard.fly.dev/board/relay/public"
+
+    test "GET /me carries an assigned feedback_url at the top level, not inside user", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> assign(:feedback_url, @public_board)
+        |> log_in_user(user)
+        |> get(~p"/api/auth/native/me")
+
+      body = json_response(conn, 200)
+      assert body["feedback_url"] == @public_board
+      refute Map.has_key?(body["user"], "feedback_url")
+    end
+
+    test "GET /me carries feedback_url as null when unset", %{conn: conn} do
+      user = insert(:user)
+
+      body = conn |> log_in_user(user) |> get(~p"/api/auth/native/me") |> json_response(200)
+
+      assert Map.has_key?(body, "feedback_url")
+      assert body["feedback_url"] == nil
+    end
+
+    test "POST /google carries an assigned feedback_url", %{conn: conn} do
+      stub_google(@tokeninfo)
+
+      body =
+        conn
+        |> assign(:feedback_url, @public_board)
+        |> post(~p"/api/auth/native/google", %{id_token: "tok"})
+        |> json_response(200)
+
+      assert body["feedback_url"] == @public_board
+    end
+
+    test "POST /google carries feedback_url as null when unset", %{conn: conn} do
+      stub_google(@tokeninfo)
+
+      body = conn |> post(~p"/api/auth/native/google", %{id_token: "tok"}) |> json_response(200)
+
+      assert Map.has_key?(body, "feedback_url")
+      assert body["feedback_url"] == nil
+    end
+
+    test "POST /apple carries an assigned feedback_url", %{conn: conn} do
+      key = signing_key()
+      stub_jwks(key, "test-kid")
+      token = apple_token(key, "test-kid", %{})
+
+      body =
+        conn
+        |> assign(:feedback_url, "https://example.com/ideas")
+        |> post(~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+        |> json_response(200)
+
+      assert body["feedback_url"] == "https://example.com/ideas"
+    end
+
+    test "a 401 body stays lean and carries no feedback_url", %{conn: conn} do
+      body =
+        conn
+        |> assign(:feedback_url, @public_board)
+        |> get(~p"/api/auth/native/me")
+        |> json_response(401)
+
+      assert body == %{"success" => false, "error" => "Not signed in"}
+      refute Map.has_key?(body, "feedback_url")
+    end
+  end
 end

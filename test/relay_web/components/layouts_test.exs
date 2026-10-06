@@ -186,4 +186,75 @@ defmodule RelayWeb.LayoutsTest do
       refute html =~ ~s(id="top-bar-crumb")
     end
   end
+
+  describe "Suggest an idea (RE397)" do
+    @public_board "https://relayboard.fly.dev/board/relay/public"
+
+    defp account_menu(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.query("#account-menu")
+
+    test "renders the link in the account menu, opening the URL in a new tab" do
+      html = render_app(%{feedback_url: @public_board, inner_block: inner_block_slot()})
+
+      link = html |> account_menu() |> LazyHTML.query("a#suggest-idea-link")
+      assert Enum.count(link) == 1
+      assert LazyHTML.attribute(link, "href") == [@public_board]
+      assert LazyHTML.attribute(link, "target") == ["_blank"]
+      assert LazyHTML.attribute(link, "rel") == ["noopener"]
+      assert LazyHTML.text(link) =~ "Suggest an idea"
+    end
+
+    test "sits between the theme toggle and sign out, with a bulb and a trailing external arrow" do
+      html = render_app(%{feedback_url: @public_board, inner_block: inner_block_slot()})
+
+      {theme, _} = :binary.match(html, ~s(data-phx-theme="dark"))
+      {suggest, _} = :binary.match(html, "suggest-idea-link")
+      {sign_out, _} = :binary.match(html, ~s(id="sign-out"))
+      assert theme < suggest and suggest < sign_out
+
+      link = html |> account_menu() |> LazyHTML.query("a#suggest-idea-link")
+
+      bulb = LazyHTML.query(link, ".hero-light-bulb")
+      assert Enum.count(bulb) == 1
+      assert bulb |> LazyHTML.attribute("class") |> hd() |> String.split() |> Enum.member?("size-4")
+
+      arrow = LazyHTML.query(link, ".hero-arrow-top-right-on-square")
+      assert Enum.count(arrow) == 1
+      arrow_classes = arrow |> LazyHTML.attribute("class") |> hd() |> String.split()
+
+      for class <- ["ml-auto", "size-3.5", "text-base-content/45"] do
+        assert class in arrow_classes, "expected #{class} on the arrow, got #{inspect(arrow_classes)}"
+      end
+    end
+
+    test "is wrapped by exactly two dividers, one directly before and one directly after its <li>" do
+      html = render_app(%{feedback_url: @public_board, inner_block: inner_block_slot()})
+
+      menu = account_menu(html)
+      assert menu |> LazyHTML.query(".divider") |> Enum.count() == 2
+
+      before = LazyHTML.query(menu, "li.divider + li:has(#suggest-idea-link)")
+      assert Enum.count(before) == 1
+
+      after_ = LazyHTML.query(menu, "li:has(#suggest-idea-link) + li.divider")
+      assert Enum.count(after_) == 1
+
+      divider_classes = menu |> LazyHTML.query(".divider") |> LazyHTML.attribute("class") |> hd() |> String.split()
+      for class <- ["divider", "my-1", "h-px"], do: assert(class in divider_classes)
+    end
+
+    test "a nil feedback_url renders no link, no label and no dividers" do
+      html = render_app(%{feedback_url: nil, inner_block: inner_block_slot()})
+
+      refute html =~ "suggest-idea-link"
+      refute html =~ "Suggest an idea"
+      assert html |> account_menu() |> LazyHTML.query(".divider") |> Enum.count() == 0
+      assert html =~ ~s(id="sign-out")
+    end
+
+    test "with no feedback_url assign it falls back to config, which test leaves unset" do
+      html = render_app(%{inner_block: inner_block_slot()})
+
+      refute html =~ "suggest-idea-link"
+    end
+  end
 end

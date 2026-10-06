@@ -64,12 +64,21 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "when true, suppress the web top-bar chrome (surface hosted in the native shell)"
 
+  # No default (RE397): an absent key lets `RelayWeb.Feedback.url/1` fall back to config;
+  # a `default: nil` would always win and hide the item in prod.
+  attr :feedback_url, :string,
+    doc:
+      "the \"Suggest an idea\" URL; omit it to use `RELAY_FEEDBACK_URL` " <>
+        "(`RelayWeb.Feedback`), nil hides the item"
+
   slot :title, doc: "the bar's title node (editable board name, or a plain span)"
   slot :actions, doc: "the view's contextual right-side controls"
   slot :menu_items, doc: "view-specific entries at the top of the avatar dropdown"
   slot :inner_block, required: true
 
   def app(assigns) do
+    assigns = assign(assigns, :feedback_url, RelayWeb.Feedback.url(assigns))
+
     ~H"""
     <header
       :if={!@embed}
@@ -131,6 +140,19 @@ defmodule RelayWeb.Layouts do
               <.theme_toggle />
             </div>
           </li>
+          <%= if @feedback_url do %>
+            <li class="divider my-1 h-px" aria-hidden="true"></li>
+            <li>
+              <a href={@feedback_url} target="_blank" rel="noopener" id="suggest-idea-link">
+                <.icon name="hero-light-bulb" class="size-4" /> Suggest an idea
+                <.icon
+                  name="hero-arrow-top-right-on-square"
+                  class="ml-auto size-3.5 text-base-content/45"
+                />
+              </a>
+            </li>
+            <li class="divider my-1 h-px" aria-hidden="true"></li>
+          <% end %>
           <li>
             <.link href={~p"/logout"} method="delete" id="sign-out">
               <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Sign out
