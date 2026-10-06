@@ -85,16 +85,19 @@ defmodule RelayWeb.Browser.ScreenshotViewerTest do
       session
       |> click("#ai-result-show-more")
       |> click("#ai-result-screen-0-open")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "1 of 2")
+      |> assert_has("#mockup-viewer-header-noun", text: "Screenshot")
+      |> assert_has("#mockup-viewer-header-count", text: "1 of 2")
       |> press_on("body", "ArrowRight")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "Viewing Small · 2 of 2")
+      |> assert_has("#mockup-viewer-header-caption", text: "Small")
+      |> assert_has("#mockup-viewer-header-count", text: "2 of 2")
 
     assert search(session) =~ "screenshot=2"
 
     session =
       session
       |> press_on("body", "ArrowRight")
-      |> assert_has("#mockup-viewer-mockups-viewing", text: "Viewing Small · 2 of 2")
+      |> assert_has("#mockup-viewer-header-caption", text: "Small")
+      |> assert_has("#mockup-viewer-header-count", text: "2 of 2")
 
     assert search(session) =~ "screenshot=2"
     refute search(session) =~ "mockup="

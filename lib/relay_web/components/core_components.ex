@@ -1777,16 +1777,20 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "a full text-color class (e.g. \"text-secondary\") used instead of the muted default"
 
+  attr :id, :string, default: nil
   attr :class, :any, default: nil
   slot :inner_block, required: true
 
   def section_label(assigns) do
     ~H"""
-    <span class={[
-      "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
-      @accent || "text-base-content/60",
-      @class
-    ]}>
+    <span
+      id={@id}
+      class={[
+        "font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+        @accent || "text-base-content/60",
+        @class
+      ]}
+    >
       {render_slot(@inner_block)}
     </span>
     """
@@ -1905,9 +1909,10 @@ defmodule RelayWeb.CoreComponents do
   tiles, one per `RelayWeb.CardMedia` item — a `mockup_preview/1` patching to
   `item_href.(item.key)`, or a `media_placeholder/1` for a `:placeholder` item. Shared by the card
   drawer (`current` nil: the `gap-2` row, nothing else) and the viewer's left sheet, where
-  `current` is the key on screen: its tile is ringed, the row opens up to `gap-3`, and two lines
-  follow — "Viewing <caption> · n of m" (`\#{id}-viewing`) and the ← → / Esc key hint
-  (`\#{id}-keys`). `show_label: false` drops the label row, for a caller that draws its own.
+  `current` is the key on screen: its tile is ringed and the row opens up to `gap-3`. The section
+  ends at the tile row — the caption, "n of m" and key hints live in the viewer's desktop
+  `mockup_viewer_header/1` (RE392). `show_label: false` drops the label row, for a caller that
+  draws its own.
 
   Ids: the row is `\#{tile_id}-tiles` and tile N is `\#{tile_id}-N` (its link `\#{tile_id}-N-open`).
   """
@@ -1922,14 +1927,6 @@ defmodule RelayWeb.CoreComponents do
   attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
 
   def card_mockups_section(assigns) do
-    index = assigns.current && Enum.find_index(assigns.items, &(&1.key == assigns.current))
-
-    assigns =
-      assign(assigns,
-        current_index: index,
-        current_caption: index && (Enum.at(assigns.items, index).caption || assigns.noun)
-      )
-
     ~H"""
     <section id={@id} class="space-y-2">
       <.section_label :if={@show_label}>{@label}</.section_label>
@@ -1956,19 +1953,6 @@ defmodule RelayWeb.CoreComponents do
           />
         <% end %>
       </div>
-      <p :if={@current_index} id={"#{@id}-viewing"} class="text-xs text-base-content/60">
-        Viewing <b class="font-semibold text-base-content/80">{@current_caption}</b>
-        · {@current_index + 1} of {length(@items)}
-      </p>
-      <p
-        :if={@current_index}
-        id={"#{@id}-keys"}
-        class="flex items-center gap-1 text-xs text-base-content/50"
-      >
-        <kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd>
-        switch · <kbd class="kbd kbd-xs">Esc</kbd>
-        back to card
-      </p>
     </section>
     """
   end
@@ -2033,14 +2017,54 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The mockup viewer's header on desktop (RE392): the `noun` (MOCKUP / SCREENSHOT), the item's
+  caption (truncated) and an "n of m" count, with the ←/→ · Esc key hint on the right. A label,
+  never a switcher — it has no buttons, links or `phx-click`; tiles, the arrow keys and swipe
+  switch. It has no display utility of its own: `class` supplies it (default `flex`), so
+  `card_mockup_viewer/1` renders it first in `<main>` with `hidden drawer:flex`.
+  """
+  attr :id, :string, default: "mockup-viewer-header"
+  attr :caption, :string, required: true
+  attr :index, :integer, required: true, doc: "1-based position of the item on screen"
+  attr :total, :integer, required: true
+  attr :noun, :string, default: "Mockup"
+  attr :class, :any, default: nil, doc: "display classes; `flex` when nil"
+
+  def mockup_viewer_header(assigns) do
+    ~H"""
+    <header
+      id={@id}
+      class={[
+        "min-h-11 items-center gap-3 border-b border-base-300 bg-base-100 px-4 py-2",
+        @class || "flex"
+      ]}
+    >
+      <div class="flex min-w-0 flex-1 items-baseline gap-2">
+        <.section_label id={"#{@id}-noun"} class="shrink-0">{@noun}</.section_label>
+        <span id={"#{@id}-caption"} class="truncate text-sm font-semibold">{@caption}</span>
+        <span id={"#{@id}-count"} class="shrink-0 font-mono text-xs text-base-content/55">
+          {@index} of {@total}
+        </span>
+      </div>
+      <%!-- The kbds sit on their own lines so the text reads "← → switch"; whitespace between flex items never renders. --%>
+      <p id={"#{@id}-keys"} class="flex shrink-0 items-center gap-1 text-xs text-base-content/50">
+        <kbd class="kbd kbd-xs">←</kbd>
+        <kbd class="kbd kbd-xs">→</kbd> switch · <kbd class="kbd kbd-xs">Esc</kbd> back to card
+      </p>
+    </header>
+    """
+  end
+
+  @doc """
   The same-tab viewer (RE380, RE390): the item on screen (`current_key` among `items`, the
   `RelayWeb.CardMedia` shape) fills the right of the screen — an HTML item framed in the sandboxed
   iframe (`RelayWeb.mockup_sandbox/0`), an image shown at its natural size in an `overflow-auto`
   frame (never scaled to fit) — and the card shrinks to a 340px left sheet — ← Back to card, the
   stage chip, ref and title, the `:gate` slot (the caller's `card_gate_panel/1`), then the open
-  section (`label` "Mockups" / "Screenshots") with the current tile ringed. There is no bar
-  over the mockup on desktop; the app's breadcrumb names the card. Below the `drawer:` breakpoint
-  the sheet is hidden and `mockup_viewer_bar/1` is the one top bar.
+  section (`label` "Mockups" / "Screenshots") with the current tile ringed. On desktop
+  `mockup_viewer_header/1` sits over the mockup and names it (noun · caption · n of m, plus the
+  key hint) — a label, not a switcher. Below the `drawer:` breakpoint the sheet and that header
+  are hidden and `mockup_viewer_bar/1` is the one top bar.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
@@ -2151,6 +2175,14 @@ defmodule RelayWeb.CoreComponents do
         phx-hook=".MockupSwipe"
         class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
       >
+        <.mockup_viewer_header
+          id={"#{@id}-header"}
+          caption={@caption}
+          index={@index}
+          total={length(@items)}
+          noun={@noun}
+          class="hidden drawer:flex"
+        />
         <div class="min-h-0 flex-1 drawer:p-4">
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
