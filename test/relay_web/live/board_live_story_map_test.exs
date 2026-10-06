@@ -253,6 +253,23 @@ defmodule RelayWeb.BoardLiveStoryMapTest do
       refute has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]))
     end
 
+    # Criterion 7 (amended): on the map the highlight follows a click on another card — the
+    # drawer has no ‹/› nav here (RE264), so a click is how the open card changes.
+    test "clicking another map card while one is open moves the highlight", %{conn: conn} = ctx do
+      sso_ref = Cards.ref(ctx.board, ctx.sso)
+      bulk_ref = Cards.ref(ctx.board, ctx.bulk)
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
+
+      refute has_element?(view, "#card-drawer-nav")
+
+      view |> element("##{card_dom_id(ctx.board, ctx.bulk)}") |> render_click()
+
+      assert_patched(view, "/board/#{ctx.board.slug}/story-map?card=#{bulk_ref}")
+      assert has_element?(view, ~s(.story-map-card[data-ref="#{bulk_ref}"][data-open]))
+      refute has_element?(view, ~s(.story-map-card[data-ref="#{sso_ref}"][data-open]))
+      assert open_count(view) == 1
+    end
+
     test "closing the drawer removes the highlight", %{conn: conn} = ctx do
       sso_ref = Cards.ref(ctx.board, ctx.sso)
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map?card=#{sso_ref}")
