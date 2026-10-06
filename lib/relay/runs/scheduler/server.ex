@@ -17,7 +17,15 @@ defmodule Relay.Runs.Scheduler.Server do
 
   Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
   capacity-changed topic, debouncing a burst into one reconcile, with a slow
-  (~60s) tick as backstop. `reconcile_now/1` forces a synchronous reconcile.
+  jittered (~60s) tick as backstop: the first tick lands uniformly in `[1, tick_ms]` and each
+  later one in `tick_ms × [0.8, 1.2]` (`tick_delay/2`), so boards don't tick in lockstep.
+  `reconcile_now/1` forces a synchronous reconcile.
+
+  **Quiescent dormant boards are skipped (RE402).** A tick, or a debounced burst made only of
+  capacity changes, issues zero queries when the board has no live capacity
+  (`Relay.Runs.Capacity.live?/1`) AND its last full reconcile saw no active runs (`settled?`).
+  Card events, `reconcile_now/1` and the boot reconcile always run in full; a board holding an
+  active (e.g. parked) run keeps reconciling every tick, so its RE297 refusal clock stays live.
   """
 
   use GenServer
@@ -33,6 +41,8 @@ defmodule Relay.Runs.Scheduler.Server do
 
   @tick_ms 60_000
   @debounce_ms 50
+  # The ONE jitter fraction: after the first tick, each delay is drawn from tick_ms × [1 ± this].
+  @tick_jitter 0.2
 
   def start_link(opts) do
     board_id = Keyword.fetch!(opts, :board_id)
@@ -56,13 +66,32 @@ defmodule Relay.Runs.Scheduler.Server do
       engine: Keyword.get(opts, :engine, default_engine()),
       tick_ms: Keyword.get(opts, :tick_ms, @tick_ms),
       debounce_ms: Keyword.get(opts, :debounce_ms, @debounce_ms),
-      pending?: false
+      pending: nil,
+      settled?: false,
+      tick_ref: nil
     }
 
     Relay.Events.subscribe(board_id)
     Capacity.subscribe()
-    Process.send_after(self(), :tick, state.tick_ms)
-    {:ok, state, {:continue, :boot_reconcile}}
+    {:ok, schedule_tick(state, :first), {:continue, :boot_reconcile}}
+  end
+
+  @doc """
+  The delay (ms) before a tick — pure, so the spread is testable. `:first` is uniform in
+  `[1, tick_ms]`, so boards started together don't tick in lockstep; `:next` is uniform in
+  `tick_ms × [1 − @tick_jitter, 1 + @tick_jitter]`, so they never drift back into it. Never < 1.
+  """
+  @spec tick_delay(pos_integer(), :first | :next) :: pos_integer()
+  def tick_delay(tick_ms, :first) when is_integer(tick_ms) and tick_ms > 0, do: :rand.uniform(tick_ms)
+
+  def tick_delay(tick_ms, :next) when is_integer(tick_ms) and tick_ms > 0 do
+    low = max(round(tick_ms * (1 - @tick_jitter)), 1)
+    high = max(round(tick_ms * (1 + @tick_jitter)), low)
+    low - 1 + :rand.uniform(high - low + 1)
+  end
+
+  defp schedule_tick(state, which) do
+    %{state | tick_ref: Process.send_after(self(), :tick, tick_delay(state.tick_ms, which))}
   end
 
   defp default_engine, do: Application.get_env(:relay, :runs_engine, Relay.Runs.Scheduler.NoopEngine)
@@ -75,25 +104,37 @@ defmodule Relay.Runs.Scheduler.Server do
 
   @impl true
   def handle_info(:tick, state) do
-    Process.send_after(self(), :tick, state.tick_ms)
-    {:noreply, reconcile(state)}
+    # Rescheduled even when the reconcile is skipped, or a dormant board would stop ticking.
+    state = schedule_tick(state, :next)
+    {:noreply, maybe_reconcile(state)}
   end
 
-  def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending?: false})}
+  def handle_info(:flush, %{pending: :capacity} = state), do: {:noreply, maybe_reconcile(%{state | pending: nil})}
+  def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending: nil})}
 
   # Any capacity change or card move/upsert on this board is a reason to reconcile.
-  def handle_info({:runner_capacity_changed, _runner_id}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:runner_capacity_changed, _runner_id}, state), do: {:noreply, mark_dirty(state, :capacity)}
+  def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state, :card)}
+  def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state, :card)}
+  def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state, :card)}
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Debounce a burst of events into one reconcile.
-  defp mark_dirty(%{pending?: true} = state), do: state
-
-  defp mark_dirty(state) do
+  # Debounce a burst of events into one reconcile (one pending :flush). The burst's reason is
+  # :card if any card event is in it — a later capacity event never downgrades it.
+  defp mark_dirty(%{pending: nil} = state, reason) do
     Process.send_after(self(), :flush, state.debounce_ms)
-    %{state | pending?: true}
+    %{state | pending: reason}
+  end
+
+  defp mark_dirty(state, :card), do: %{state | pending: :card}
+  defp mark_dirty(state, :capacity), do: state
+
+  # The skip rule (RE402) for a tick or a capacity-only flush: a board with no live capacity
+  # whose last full reconcile saw no active runs has nothing to dispatch, resume or refuse, so
+  # it is skipped before any Repo access — and `settled?` is left as it was. Card events,
+  # `reconcile_now/1` and boot never come through here.
+  defp maybe_reconcile(state) do
+    if state.settled? and not Capacity.live?(state.board_id), do: state, else: reconcile(state)
   end
 
   # A raise here must stay on this board (RE387). Uncaught, it crashed the server, whose boot
@@ -109,7 +150,7 @@ defmodule Relay.Runs.Scheduler.Server do
           Exception.format(kind, reason, __STACKTRACE__)
       )
 
-      state
+      %{state | settled?: false}
   end
 
   defp do_reconcile(state) do
@@ -118,7 +159,7 @@ defmodule Relay.Runs.Scheduler.Server do
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))
     Relay.Runs.record_resume_refusals(state.board_id, plan.refusals, nil, snapshot.runs)
     apply_marking(plan, state.board_id, cards_by_id)
-    state
+    %{state | settled?: snapshot.runs == []}
   end
 
   defp dispatch({:start, card_id, flow_key, runner_id}, engine), do: engine.start_run(card_id, flow_key, runner_id)

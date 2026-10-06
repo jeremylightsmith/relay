@@ -486,4 +486,171 @@ defmodule Relay.Runs.Scheduler.ServerTest do
              ]
     end
   end
+
+  describe "quiescent dormant boards and the jittered tick (RE402)" do
+    # A dormant board (no advertised capacity) whose last full reconcile saw no active runs.
+    defp settled_dormant_board do
+      ctx = board_with_flow(:ready)
+      start_engine([])
+      pid = start_server(ctx.board.id)
+      :ok = Server.reconcile_now(pid)
+      # The reconcile's own `:queued` write echoes back as a card event — drain it first.
+      assert %{settled?: true} = await_flushed(pid)
+      Map.put(ctx, :pid, pid)
+    end
+
+    # `:sys.get_state/1` is a message queued after the tick, so it returns once the tick ran.
+    defp tick_and_sync(pid) do
+      send(pid, :tick)
+      :sys.get_state(pid)
+    end
+
+    defp await_flushed(pid, tries \\ 100) do
+      case :sys.get_state(pid) do
+        %{pending: nil} = state ->
+          state
+
+        _pending when tries > 0 ->
+          Process.sleep(5)
+          await_flushed(pid, tries - 1)
+      end
+    end
+
+    defp await_status(card_id, status, tries \\ 100) do
+      case Repo.get!(Card, card_id).status do
+        ^status ->
+          status
+
+        other when tries == 0 ->
+          other
+
+        _other ->
+          Process.sleep(5)
+          await_status(card_id, status, tries - 1)
+      end
+    end
+
+    test "a tick on a settled dormant board issues zero Repo queries" do
+      %{pid: pid} = settled_dormant_board()
+
+      {_state, count} = count_repo_queries(pid, fn -> tick_and_sync(pid) end)
+
+      assert count == 0
+    end
+
+    test "a capacity wake-up on a settled dormant board issues zero Repo queries" do
+      %{pid: pid} = settled_dormant_board()
+
+      {_state, count} =
+        count_repo_queries(pid, fn ->
+          send(pid, {:runner_capacity_changed, -1})
+          await_flushed(pid)
+        end)
+
+      assert count == 0
+    end
+
+    test "a card event on a settled dormant board reconciles in full" do
+      %{pulls: pulls, lands: lands} = settled_dormant_board()
+      c2 = Repo.get!(Card, insert(:card, stage: lands, status: :ready).id)
+
+      {:ok, _moved} = Relay.Cards.move_card(c2, pulls, 0, :agent)
+
+      assert await_status(c2.id, :queued) == :queued
+    end
+
+    test "a tick on a live board reconciles in full" do
+      %{pid: pid, board: board, exec_a: exec_a} = settled_dormant_board()
+      :ok = Capacity.put(exec_a, board.id, %{shared_clean: 0, exclusive: 1})
+      await_flushed(pid)
+
+      {_state, count} = count_repo_queries(pid, fn -> tick_and_sync(pid) end)
+
+      assert count > 0
+    end
+
+    test "a tick on a board whose last reconcile saw active runs reconciles in full" do
+      %{board: board} = board_with_flow(:ready)
+
+      start_engine([
+        %{
+          id: 99,
+          card_id: -1,
+          status: :parked,
+          flow_key: "spec",
+          isolation: :shared_clean,
+          pinned_runner_id: nil,
+          parked_reason: :runner_gone
+        }
+      ])
+
+      pid = start_server(board.id)
+      :ok = Server.reconcile_now(pid)
+      assert :sys.get_state(pid).settled? == false
+
+      {_state, count} = count_repo_queries(pid, fn -> tick_and_sync(pid) end)
+
+      assert count > 0
+    end
+
+    test "reconcile_now/1 on a settled dormant board is never skipped" do
+      %{pid: pid} = settled_dormant_board()
+
+      {:ok, count} = count_repo_queries(pid, fn -> Server.reconcile_now(pid) end)
+
+      assert count > 0
+    end
+
+    test "a reconcile that raises leaves the board unsettled" do
+      %{board: board, exec_a: exec_a} = board_with_flow(:ready)
+      start_engine([], raise_on_start: true)
+      pid = start_server(board.id)
+      assert :sys.get_state(pid).settled? == true
+      :ok = Capacity.put(exec_a, board.id, %{shared_clean: 1, exclusive: 0})
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = Server.reconcile_now(pid) end)
+
+      assert Process.alive?(pid)
+      assert :sys.get_state(pid).settled? == false
+    end
+
+    test "tick_delay/2 draws the first tick from 1..tick_ms and later ticks from ±20%" do
+      firsts = for _ <- 1..1_000, do: Server.tick_delay(1_000, :first)
+      assert Enum.all?(firsts, &(is_integer(&1) and &1 in 1..1_000))
+      assert firsts |> Enum.uniq() |> length() >= 2
+
+      nexts = for _ <- 1..1_000, do: Server.tick_delay(1_000, :next)
+      assert Enum.all?(nexts, &(is_integer(&1) and &1 in 800..1_200))
+      assert nexts |> Enum.uniq() |> length() >= 2
+
+      assert Server.tick_delay(1, :first) == 1
+    end
+
+    test "boards started back-to-back do not tick in lockstep" do
+      start_engine([])
+
+      remaining =
+        for _ <- 1..5 do
+          board = insert(:board)
+
+          pid =
+            start_supervised!(
+              {Server,
+               [
+                 board_id: board.id,
+                 engine: FakeEngine,
+                 tick_ms: 3_600_000,
+                 callers: [self()],
+                 name: :"sched_jitter_#{board.id}"
+               ]},
+              id: {:sched_jitter, board.id}
+            )
+
+          Process.read_timer(:sys.get_state(pid).tick_ref)
+        end
+
+      assert Enum.all?(remaining, &(is_integer(&1) and &1 in 0..3_600_000))
+      assert Enum.max(remaining) - Enum.min(remaining) > 10_000
+    end
+  end
 end

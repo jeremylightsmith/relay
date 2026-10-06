@@ -4,6 +4,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
   import Ecto.Query
 
   alias Relay.Runs
+  alias Relay.Runs.Capacity
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.RunsEngine
   alias Relay.Runs.Scheduler.Server
@@ -343,6 +344,39 @@ defmodule Relay.Runs.ResumeRefusalTest do
 
       assert {:ok, revived} = Runs.retry_run(failed)
       assert revived.status == :running
+    end
+
+    # RE402: a dormant board (no live capacity) still reconciles on its tick while it holds an
+    # active run, so the refusal clock keeps being stamped and the reaper can still age it out.
+    test "a tick on a dormant board with a parked run still stamps the refusal", %{e2e_board: board} do
+      %{run: run, exec_a: exec_a} = park_pinned(board)
+      :ok = Capacity.put(exec_a.id, board.id, %{exclusive: 1})
+      :ok = Runs.reclaim_stale_runners()
+      refute Capacity.live?(board.id)
+
+      pid =
+        start_supervised!(
+          {Server,
+           [
+             board_id: board.id,
+             engine: RunsEngine,
+             tick_ms: 3_600_000,
+             callers: [self()],
+             name: :"sched_re402_#{board.id}"
+           ]}
+        )
+
+      _booted = :sys.get_state(pid)
+
+      Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id),
+        set: [resume_refused_since: nil, resume_refused_reason: nil]
+      )
+
+      send(pid, :tick)
+      _ticked = :sys.get_state(pid)
+
+      assert %Run{resume_refused_since: %DateTime{}, resume_refused_reason: :pinned_runner_absent} =
+               Runs.get_run!(run.id)
     end
   end
 end
