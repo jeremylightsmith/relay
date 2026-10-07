@@ -34,6 +34,22 @@ class BoardsRepository {
     );
   }
 
+  /// Sets (not toggles) the user's mute on [slug] — `POST /api/all/boards/:slug/mute`
+  /// (RE406). Returns the server's resulting value. Any non-200 answer throws an
+  /// [ApiException] carrying the status; a transport failure propagates as-is.
+  Future<bool> setMuted(String slug, bool muted) async {
+    final resp = await _client.postJson('/api/all/boards/$slug/mute', {
+      'muted': muted,
+    });
+    if (resp.statusCode == 200) {
+      return ((resp.data as Map)['data'] as Map)['muted'] as bool;
+    }
+    throw ApiException(
+      _messageFrom(resp.data) ?? 'Request failed (${resp.statusCode}).',
+      statusCode: resp.statusCode,
+    );
+  }
+
   String? _messageFrom(dynamic body) {
     if (body is Map && body['error'] is Map) {
       return (body['error'] as Map)['message'] as String?;

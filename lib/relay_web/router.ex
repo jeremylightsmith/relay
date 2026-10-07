@@ -183,7 +183,8 @@ defmodule RelayWeb.Router do
   # agent-only board-key /api scope below: different credential, different actor, and it must
   # not collide with the board API's payloads (RLY-67). RLY-126 extends this same scoped
   # exception (ADR 0001) with the native New-card sheet's create path, RE376 with the
-  # board switcher's list (GET /boards), and RE396 with the switcher's star (POST /boards/:slug/star).
+  # board switcher's list (GET /boards), RE396 with the switcher's star (POST /boards/:slug/star),
+  # and RE406 with the switcher's mute (POST /boards/:slug/mute).
   scope "/api/all", RelayWeb.Api do
     pipe_through [:api, :api_user_auth]
 
@@ -191,6 +192,7 @@ defmodule RelayWeb.Router do
     get "/feed", AllController, :feed
     get "/boards", AllController, :boards
     post "/boards/:slug/star", AllController, :star
+    post "/boards/:slug/mute", AllController, :mute
     get "/cards/:ref", AllController, :show
     post "/cards/:ref/approve", AllController, :approve
     post "/cards/:ref/reject", AllController, :reject

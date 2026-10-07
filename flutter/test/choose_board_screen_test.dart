@@ -18,6 +18,7 @@ Future<void> pumpRow(
   bool current = false,
   VoidCallback? onTap,
   VoidCallback? onToggleStar,
+  VoidCallback? onToggleMute,
 }) => tester.pumpWidget(
   MaterialApp(
     theme: RelayTheme.light,
@@ -27,6 +28,7 @@ Future<void> pumpRow(
         current: current,
         onTap: onTap ?? () {},
         onToggleStar: onToggleStar ?? () {},
+        onToggleMute: onToggleMute ?? () {},
       ),
     ),
   ),
@@ -35,6 +37,13 @@ Future<void> pumpRow(
 Icon starIcon(WidgetTester tester, String slug) => tester.widget<Icon>(
   find.descendant(
     of: find.byKey(Key('board_row_star_$slug')),
+    matching: find.byType(Icon),
+  ),
+);
+
+Icon muteIcon(WidgetTester tester, String slug) => tester.widget<Icon>(
+  find.descendant(
+    of: find.byKey(Key('board_row_mute_$slug')),
     matching: find.byType(Icon),
   ),
 );
@@ -180,6 +189,7 @@ void main() {
             current: true,
             onTap: () {},
             onToggleStar: () {},
+            onToggleMute: () {},
           ),
         ),
       ),
@@ -305,5 +315,128 @@ void main() {
       tester.element(find.byType(ChooseBoardScreen)),
     );
     expect(container.read(currentBoardProvider).slug, isNot('beta'));
+  });
+
+  // Card mockup "A — bell beside the star on the shared board row (Choose a
+  // board + Switch board sheet)" (RE406).
+  group('BoardRow bell (RE406)', () {
+    testWidgets(
+      'notifying: outline bell in onSurface/40, "Mute notifications"',
+      (tester) async {
+        await pumpRow(tester, makeBoard('alpha'));
+
+        final icon = muteIcon(tester, 'alpha');
+        expect(icon.icon, Icons.notifications_none);
+        expect(icon.size, 20);
+        expect(
+          icon.color,
+          RelayTheme.light.colorScheme.onSurface.withValues(alpha: 0.4),
+        );
+        expect(find.bySemanticsLabel('Mute notifications'), findsOneWidget);
+      },
+    );
+
+    testWidgets('muted: slashed bell in onSurface/40, "Unmute notifications"', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', muted: true));
+
+      final scheme = RelayTheme.light.colorScheme;
+      final icon = muteIcon(tester, 'alpha');
+      expect(icon.icon, Icons.notifications_off_outlined);
+      expect(icon.size, 20);
+      expect(icon.color, scheme.onSurface.withValues(alpha: 0.4));
+      expect(icon.color, isNot(scheme.primary));
+      expect(icon.color, isNot(scheme.secondary));
+      expect(find.bySemanticsLabel('Unmute notifications'), findsOneWidget);
+    });
+
+    testWidgets('order: ✓, then the bell, then the star at the far right', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', needsYou: 2), current: true);
+
+      final check = tester.getRect(
+        find.byKey(const Key('board_row_current_alpha')),
+      );
+      final bell = tester.getRect(
+        find.byKey(const Key('board_row_mute_alpha')),
+      );
+      final star = tester.getRect(
+        find.byKey(const Key('board_row_star_alpha')),
+      );
+      final surface = tester.getRect(
+        find.byKey(const Key('board_row_surface_alpha')),
+      );
+      expect(bell.left, greaterThanOrEqualTo(check.right));
+      expect(star.left, greaterThanOrEqualTo(bell.right));
+      expect((surface.right - star.right).abs(), lessThanOrEqualTo(4));
+    });
+
+    testWidgets('tapping the bell only toggles the mute', (tester) async {
+      var taps = 0;
+      var stars = 0;
+      var mutes = 0;
+      await pumpRow(
+        tester,
+        makeBoard('alpha'),
+        onTap: () => taps++,
+        onToggleStar: () => stars++,
+        onToggleMute: () => mutes++,
+      );
+
+      await tester.tap(find.byKey(const Key('board_row_mute_alpha')));
+      await tester.pumpAndSettle();
+
+      expect(mutes, 1);
+      expect(taps, 0);
+      expect(stars, 0);
+    });
+
+    testWidgets('the bell is at least a 44×44 tap target', (tester) async {
+      await pumpRow(tester, makeBoard('alpha'));
+
+      final size = tester.getSize(
+        find.byKey(const Key('board_row_mute_alpha')),
+      );
+      expect(size.width, greaterThanOrEqualTo(44));
+      expect(size.height, greaterThanOrEqualTo(44));
+    });
+
+    testWidgets('a muted row is not dimmed and keeps its needs-you badge', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', muted: true, needsYou: 1));
+
+      final material = tester.widget<Material>(
+        find.byKey(const Key('board_row_surface_alpha')),
+      );
+      expect(material.color, RelayTheme.light.colorScheme.surface);
+      expect(find.text('1 needs you'), findsOneWidget);
+    });
+  });
+
+  testWidgets('Choose a board: the bell mutes without choosing (RE406)', (
+    tester,
+  ) async {
+    final repo = FakeBoardsRepository(
+      boards: [makeBoard('alpha'), makeBoard('beta')],
+    );
+    await pumpChoose(tester, repo);
+
+    await tester.tap(find.byKey(const Key('board_row_mute_beta')));
+    await tester.pumpAndSettle();
+
+    expect(repo.muteCalls, [('beta', true)]);
+    expect(find.byKey(const Key('choose_board_title')), findsOneWidget);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ChooseBoardScreen)),
+    );
+    expect(container.read(currentBoardProvider).slug, isNot('beta'));
+    expect(
+      tester.getTopLeft(find.byKey(const Key('board_row_alpha'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(const Key('board_row_beta'))).dy),
+    );
+    expect(find.byType(SnackBar), findsNothing);
   });
 }

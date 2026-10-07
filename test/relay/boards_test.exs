@@ -434,6 +434,71 @@ defmodule Relay.BoardsTest do
     end
   end
 
+  # RE406: a per-member mute of the board's APNs pushes — a sibling of the personal star.
+  describe "set_muted/3" do
+    test "sets (not toggles) the caller's mute and returns the value set" do
+      user = insert(:user)
+      board = member_board(user, "Zeta", slug: "zeta-board")
+
+      assert Boards.set_muted(user, "zeta-board", true) == {:ok, true}
+      assert Boards.set_muted(user, "zeta-board", true) == {:ok, true}
+      assert membership(user, board).muted == true
+
+      assert Boards.set_muted(user, "zeta-board", false) == {:ok, false}
+      assert membership(user, board).muted == false
+    end
+
+    test "is :not_found on a board the user is not a member of, or an unknown slug" do
+      owner = insert(:user)
+      theirs = member_board(owner, "Theirs", slug: "theirs")
+      user = insert(:user)
+
+      assert Boards.set_muted(user, "theirs", true) == {:error, :not_found}
+      assert membership(owner, theirs).muted == false
+      assert Boards.set_muted(user, "no-such-board", true) == {:error, :not_found}
+    end
+
+    test "changes only the caller's own membership row" do
+      user = insert(:user)
+      other = insert(:user)
+      board = member_board(user, "Shared")
+      insert(:membership, board: board, user: other)
+
+      assert Boards.set_muted(user, board.slug, true) == {:ok, true}
+      assert membership(user, board).muted == true
+      assert membership(other, board).muted == false
+    end
+
+    test "muting does not move a row in the display order and is reported as muted?" do
+      user = insert(:user)
+      member_board(user, "beta")
+      alpha = member_board(user, "Alpha")
+      zeta = member_board(user, "zeta")
+      {:ok, true} = Boards.set_starred(user, zeta.slug, true)
+
+      assert {:ok, true} = Boards.set_muted(user, alpha.slug, true)
+
+      rows = Boards.list_boards_for_display(user)
+      assert Enum.map(rows, & &1.board.name) == ["zeta", "Alpha", "beta"]
+      assert Enum.map(rows, & &1.muted?) == [false, true, false]
+    end
+
+    test "a brand-new membership is reported as not muted" do
+      user = insert(:user)
+      for name <- ["one", "two"], do: member_board(user, name)
+
+      rows = Boards.list_boards_for_display(user)
+      assert length(rows) == 2
+      assert Enum.all?(rows, &(&1.muted? == false))
+    end
+
+    test "Membership.changeset/2 never casts :muted" do
+      changeset = Membership.changeset(%Membership{}, %{email: "x@example.com", muted: true})
+
+      refute Map.has_key?(changeset.changes, :muted)
+    end
+  end
+
   describe "get_board/2 and get_board!/2" do
     test "returns the owner's board by slug with stages preloaded" do
       user = insert(:user)

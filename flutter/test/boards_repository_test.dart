@@ -122,4 +122,51 @@ void main() {
       ),
     );
   });
+
+  test('parses muted, defaulting an absent key to false (RE406)', () async {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'data': [
+          {'name': 'A', 'slug': 'a', 'muted': true},
+          {'name': 'B', 'slug': 'b'},
+        ],
+      }),
+    );
+
+    final boards = await repoWith(adapter).fetchBoards();
+
+    expect(boards.first.muted, isTrue);
+    expect(boards.last.muted, isFalse);
+  });
+
+  test('setMuted POSTs the value to the mute endpoint (RE406)', () async {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'data': {'slug': 'alpha', 'muted': true},
+      }),
+    );
+
+    final result = await repoWith(adapter).setMuted('alpha', true);
+
+    final req = adapter.requests.single;
+    expect(req.method, 'POST');
+    expect(req.path, '/api/all/boards/alpha/mute');
+    expect(req.data, {'muted': true});
+    expect(result, isTrue);
+  });
+
+  test('setMuted surfaces a non-200 as an ApiException with its status', () {
+    final adapter = FakeAdapter(
+      (_) async => jsonBody({
+        'error': {'code': 'not_found', 'message': 'Not found'},
+      }, status: 404),
+    );
+
+    expect(
+      repoWith(adapter).setMuted('gone', true),
+      throwsA(
+        isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404),
+      ),
+    );
+  });
 }

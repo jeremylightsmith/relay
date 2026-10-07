@@ -14,6 +14,10 @@ defmodule Schemas.Membership do
   `starred` is the member's personal board star (RE395): it sorts the board first in
   `Relay.Boards.list_boards_for_display/1`. Never cast — written only by
   `Relay.Boards.set_starred/3`.
+
+  `muted` is the member's per-board mute (RE406): it stops APNs pushes for this member on this
+  board (browser notifications and badges are unaffected). Never cast — written only by
+  `Relay.Boards.set_muted/3`.
   """
 
   use Ecto.Schema
@@ -23,6 +27,7 @@ defmodule Schemas.Membership do
   schema "board_members" do
     field :email, :string
     field :starred, :boolean, default: false
+    field :muted, :boolean, default: false
 
     belongs_to :board, Schemas.Board
     belongs_to :user, Schemas.User

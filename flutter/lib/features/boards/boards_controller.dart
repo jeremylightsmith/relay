@@ -61,6 +61,21 @@ class BoardsController extends AsyncNotifier<List<BoardSummary>> {
     }
     await refresh();
   }
+
+  /// Flip the user's mute on [slug] (RE406), then refetch. Like [toggleStar], the
+  /// list is never re-sorted or patched here. A failed mute is swallowed: the
+  /// refresh is the recovery, showing the list as the server reports it.
+  Future<void> toggleMute(String slug) async {
+    final board = state.value?.where((b) => b.slug == slug).firstOrNull;
+    if (board != null) {
+      try {
+        await ref.read(boardsRepositoryProvider).setMuted(slug, !board.muted);
+      } catch (_) {
+        // The refresh below is the recovery; nothing to surface.
+      }
+    }
+    await refresh();
+  }
 }
 
 final boardsProvider = AsyncNotifierProvider<BoardsController, List<BoardSummary>>(

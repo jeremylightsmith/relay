@@ -207,4 +207,66 @@ void main() {
       expect(slugs(c), ['alpha']);
     });
   });
+
+  group('toggleMute (RE406)', () {
+    List<String> slugs(ProviderContainer c) =>
+        c.read(boardsProvider).value!.map((b) => b.slug).toList();
+    List<bool> mutes(ProviderContainer c) =>
+        c.read(boardsProvider).value!.map((b) => b.muted).toList();
+
+    test('mutes an unmuted board, then renders the server list', () async {
+      final repo =
+          FakeBoardsRepository(boards: [makeBoard('alpha'), makeBoard('beta')])
+            ..onMute = (r) =>
+                r.boards = [makeBoard('alpha'), makeBoard('beta', muted: true)];
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleMute('beta');
+
+      expect(repo.muteCalls, [('beta', true)]);
+      expect(repo.calls, 2);
+      expect(slugs(c), ['alpha', 'beta']);
+      expect(mutes(c), [false, true]);
+    });
+
+    test('unmutes a muted board', () async {
+      final repo = FakeBoardsRepository(
+        boards: [makeBoard('alpha', muted: true)],
+      );
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleMute('alpha');
+
+      expect(repo.muteCalls, [('alpha', false)]);
+    });
+
+    test('a failed mute still refreshes and leaves the server list', () async {
+      final repo = FakeBoardsRepository(boards: [makeBoard('alpha')])
+        ..muteError = const ApiException('offline');
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleMute('alpha');
+
+      expect(repo.calls, 2);
+      expect(c.read(boardsProvider), isA<AsyncData<List<BoardSummary>>>());
+      expect(slugs(c), ['alpha']);
+      expect(mutes(c), [false]);
+    });
+
+    test('a 404 mute refreshes and drops the gone row', () async {
+      final repo = FakeBoardsRepository(
+        boards: [makeBoard('alpha'), makeBoard('beta')],
+      )..muteError = const ApiException('Not found', statusCode: 404);
+      final c = containerWith(repo: repo, prefs: InMemoryBoardPrefs('alpha'));
+      await c.read(boardsProvider.future);
+      repo.boards = [makeBoard('alpha')];
+
+      await c.read(boardsProvider.notifier).toggleMute('beta');
+
+      expect(slugs(c), ['alpha']);
+    });
+  });
 }

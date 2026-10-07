@@ -41,12 +41,17 @@ sharing behavior.
   by `Membership.changeset/2`), so a star is one flag per user per board and goes with the
   membership. `set_starred/3` sets (not toggles) the caller's own row by slug — archived boards
   allowed, `{:error, :not_found}` without a resolved membership. `list_boards_for_display/1`
-  returns the user's non-archived boards as `%{board, starred?}` in **display order** —
+  returns the user's non-archived boards as `%{board, starred?, muted?}` in **display order** —
   starred first, then case-insensitive name, `id` tiebreak — defined once in a private
   `order_by_name/1` helper (the admin list reuses its name half). `list_boards/1` deliberately
   stays creation-ordered (`inserted_at, id`): the default board, `Cards.needs_you_feed/1`,
   `Cards.resolve_ref/3` and `AllController.resolve_board/2` depend on it, so starring never
   changes your default board.
+  The **per-board push mute** (RE406) lives beside it (`board_members.muted`, also never cast):
+  one flag per member per board, written only by `set_muted/3`, which mirrors `set_starred/3`
+  (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved
+  membership). A muted member gets no APNs push for that board; browser notifications, badges
+  and the needs-you counts are unaffected. Muting never moves a row in the display order.
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
   stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
@@ -240,19 +245,26 @@ sharing behavior.
   The per-board summary — top-level `stage_count`, non-archived `card_count`, `ai_active?`,
   and both needs-you counts (`needs_you_count`, the web's three-type sum, and
   `needs_you_two_type`, the mobile count, ADR 0005), plus the user's personal `starred?`
-  (RE395) — is `Relay.Cards.list_board_summaries/1` (RE376), the one definition both the web
+  (RE395) and per-board push `muted?` (RE406) — is `Relay.Cards.list_board_summaries/1` (RE376), the one definition both the web
   boards home (`RelayWeb.BoardsLive`) and the native board switcher read. Its rows come in
   `Boards.list_boards_for_display/1` order (starred first, then A–Z), so both surfaces agree
   on order and flag by construction. The switcher's list is **`GET /api/all/boards`** on the
   `/api/all` user-token scope (`AllController.boards`, `RelayWeb.Api.BoardListJSON`), returning
-  `{data: [{name, slug, key, needs_you_count, stage_count, card_count, ai_active, starred}]}`
-  in display order, with `needs_you_count` = the two-type count and `starred` a boolean.
+  `{data: [{name, slug, key, needs_you_count, stage_count, card_count, ai_active, starred, muted}]}`
+  in display order, with `needs_you_count` = the two-type count and `starred`/`muted` booleans.
   The switcher's star is **`POST /api/all/boards/:slug/star`** (RE396, `AllController.star`) —
   body `{starred: <bool>}`, which sets (never toggles) the caller's own star through
   `Boards.set_starred/3` and answers `{data: {slug, starred}}`; a repeat is a 200 no-op. A
   non-member or unknown slug is a 404 `not_found`; a missing or non-boolean `starred` is a 422
   `invalid_request` (validated before the membership lookup). The client never re-sorts — it
   re-reads `GET /api/all/boards` for the server's order.
+  The switcher's mute is **`POST /api/all/boards/:slug/mute`** (RE406, `AllController.mute`) —
+  body `{muted: <bool>}`, which sets (never toggles) the caller's own mute through
+  `Boards.set_muted/3` and answers `{data: {slug, muted}}`; a repeat is a 200 no-op. A
+  non-member or unknown slug is a 404 `not_found`; a missing or non-boolean `muted` is a 422
+  `invalid_request` (validated before the membership lookup). Muting never re-sorts the list.
+  Mute is native-only: the web boards home (`/boards`) has no mute control, though the mute is
+  still enforced server-side.
   Card **search** is `Relay.Cards.search/3` (RE198) — the one definition of what matches a query:
   the exact ref (`RLY-12`, `rly-12`, or a bare `12`) ranked first, then whitespace-token-AND,
   case-insensitive `ILIKE` matches on `title` in board order, with `%`/`_` escaped so a wildcard
@@ -334,7 +346,8 @@ sharing behavior.
   user-content origin is a documented follow-up. The sandbox token list is
   `RelayWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
-  change never waits on Apple (RLY-81).
+  change never waits on Apple (RLY-81). A member's `board_members.muted` (RE406) suppresses
+  APNs for that board only — the browser broadcast and the app-icon badge count are unaffected.
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
 - **ValueStream** (`Relay.ValueStream`, RE146) — the level-1 value-stream derivation behind the

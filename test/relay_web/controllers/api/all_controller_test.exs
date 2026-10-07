@@ -128,7 +128,8 @@ defmodule RelayWeb.Api.AllControllerTest do
                "stage_count" => 1,
                "card_count" => 2,
                "ai_active" => true,
-               "starred" => false
+               "starred" => false,
+               "muted" => false
              }
 
       assert b["needs_you_count"] == 0
@@ -265,6 +266,86 @@ defmodule RelayWeb.Api.AllControllerTest do
     test "401 without a bearer token" do
       assert build_conn()
              |> post(~p"/api/all/boards/alpha/star", %{"starred" => true})
+             |> json_response(401)
+    end
+  end
+
+  # RE406: the switcher's per-member mute of the board's APNs pushes.
+  describe "mute" do
+    defp boards_muted(conn) do
+      conn
+      |> get(~p"/api/all/boards")
+      |> json_response(200)
+      |> Map.fetch!("data")
+      |> Map.new(&{&1["slug"], &1["muted"]})
+    end
+
+    test "mutes a member board and answers the value set", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{"muted" => true}) |> json_response(200) ==
+               %{"data" => %{"slug" => alpha.slug, "muted" => true}}
+
+      assert boards_muted(conn)[alpha.slug] == true
+    end
+
+    test "a muted board keeps its place in GET /api/all/boards", %{conn: conn, user: user} do
+      alpha = insert(:board, name: "Alpha", key: "AAA", slug: unique_slug("alpha"))
+      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: unique_slug("zeta"))
+      for b <- [alpha, zeta], do: insert(:membership, board: b, user: user)
+
+      conn |> post(~p"/api/all/boards/#{zeta.slug}/mute", %{"muted" => true}) |> json_response(200)
+
+      data = conn |> get(~p"/api/all/boards") |> json_response(200) |> Map.fetch!("data")
+      assert Enum.map(data, & &1["slug"]) == [alpha.slug, zeta.slug]
+      assert Enum.map(data, & &1["muted"]) == [false, true]
+    end
+
+    test "unmuting sets false, idempotently", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+      {:ok, true} = Relay.Boards.set_muted(user, alpha.slug, true)
+
+      for _ <- 1..2 do
+        assert conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{"muted" => false}) |> json_response(200) ==
+                 %{"data" => %{"slug" => alpha.slug, "muted" => false}}
+      end
+
+      assert boards_muted(conn)[alpha.slug] == false
+    end
+
+    test "422 when muted is not a JSON boolean, and nothing changes", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+
+      body = conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{"muted" => "true"}) |> json_response(422)
+      assert body["error"]["code"] == "invalid_request"
+
+      assert boards_muted(conn)[alpha.slug] == false
+    end
+
+    test "422 when muted is missing", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{}) |> json_response(422) ==
+               %{"error" => %{"code" => "invalid_request", "message" => "muted must be a boolean"}}
+    end
+
+    test "404 on an unknown slug", %{conn: conn} do
+      assert conn |> post(~p"/api/all/boards/nope/mute", %{"muted" => true}) |> json_response(404)
+    end
+
+    test "404 on a board the user is not a member of, leaving others' mutes alone", %{conn: conn} do
+      other = insert(:user)
+      zeta = member_board(other, "ZZZ", unique_slug("zeta"))
+
+      body = conn |> post(~p"/api/all/boards/#{zeta.slug}/mute", %{"muted" => true}) |> json_response(404)
+      assert body["error"]["code"] == "not_found"
+
+      assert Relay.Repo.get_by!(Schemas.Membership, user_id: other.id, board_id: zeta.id).muted == false
+    end
+
+    test "401 without a bearer token" do
+      assert build_conn()
+             |> post(~p"/api/all/boards/alpha/mute", %{"muted" => true})
              |> json_response(401)
     end
   end

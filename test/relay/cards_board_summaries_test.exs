@@ -81,4 +81,15 @@ defmodule Relay.CardsBoardSummariesTest do
     assert Enum.map(Cards.list_board_summaries(user), &{&1.name, &1.starred?}) ==
              [{"zeta", true}, {"Alpha", false}, {"mango", false}]
   end
+
+  test "rows carry the caller's muted? (RE406), in display order", %{user: user} do
+    alpha = insert(:board, name: "Alpha", key: "AAA")
+    zeta = insert(:board, name: "zeta", key: "ZZZ")
+    for b <- [zeta, alpha], do: insert(:membership, board: b, user: user)
+
+    {:ok, true} = Relay.Boards.set_muted(user, zeta.slug, true)
+
+    assert Enum.map(Cards.list_board_summaries(user), &{&1.name, &1.muted?}) ==
+             [{"Alpha", false}, {"zeta", true}]
+  end
 end
