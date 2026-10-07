@@ -1,12 +1,15 @@
 name: Flutter Deploy
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'flutter/**'
-      - '.github/workflows/flutter-deploy.yml'
+  # push trigger - DISABLED by RE408: TestFlight / Play deploys now run on our own runners
+  # in the RE board's Deploy flow (bin/deploy_ios.sh, bin/deploy_android.sh). Manual
+  # workflow_dispatch runs still work. Re-enable by uncommenting the push block below.
+#   push:
+#     branches:
+#       - main
+#     paths:
+#       - 'flutter/**'
+#       - '.github/workflows/flutter-deploy.yml'
   workflow_dispatch:
 
 jobs:

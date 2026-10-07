@@ -272,3 +272,25 @@ canonical document (nodes, edges, trigger as stage **names**, isolation, version
 one bumps the version like an editor save. Include the pulled `version` to get compare-and-swap
 (a `409` means the flow moved under you — re-pull, re-apply, push again); omit it for
 last-write-wins. The same document shape is what `docs/designs/flows/*.json` ships.
+
+## Deploying
+
+On the RE board a card doesn't deploy from CI. The Code flow squashes the card's branch into one
+`<REF> <title>` commit, pushes it fast-forward to `main` (`bin/ship_to_main.sh`, no PR), and lands
+the card on **Code:Done**. The **Deploy** stage (WIP 1) then runs the `deploy` flow on a runner:
+`checkout` → `fly` → `ios` → `android` → Review. Fly always deploys. TestFlight and Play deploy only
+when the card's commit touched `flutter/`. Any failed step parks the card for a human. Both flows
+are checked in under `.relay/flows/` and pushed with `./relay flow-push <key> <file>`.
+
+Secrets come from 1Password. `.relay/deploy.env` is checked in and holds only `op://Relay
+Deploy/…` references; its header lists the vault items. To deploy by hand from the repo root
+(signed in with `op signin`, or with `OP_SERVICE_ACCOUNT_TOKEN` on a headless runner), run:
+
+```bash
+bin/op_deploy.sh bin/deploy_fly.sh
+# equivalently:
+op run --env-file=.relay/deploy.env -- bin/deploy_fly.sh
+```
+
+`bin/op_deploy.sh bin/deploy_ios.sh <REF>` and `bin/op_deploy.sh bin/deploy_android.sh <REF>` do
+the same for the stores.

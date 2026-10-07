@@ -58,6 +58,57 @@ it, so a card reaches Review only once its change is live; `post` runs last so i
 describes what shipped. The authoritative graph is
 [`docs/designs/flows/code.json`](../designs/flows/code.json).
 
+### The RE board: PR-less Code, then a Deploy stage (RE408)
+
+The graph above is the default library, which other boards still run. The RE board (this repo's
+own board) overrides two flows, checked in at
+[`.relay/flows/code.json`](../../.relay/flows/code.json) and
+[`.relay/flows/deploy.json`](../../.relay/flows/deploy.json) and pushed with
+`./relay flow-push <key> <file>`. Neither file has a `version`, so a push is last-write-wins.
+`test/relay/flows/re_board_flow_documents_test.exs` runs both through
+`Relay.Flows.upsert_from_document/3`, the same path `PUT /api/flows/:key` takes.
+
+```mermaid
+flowchart LR
+    rebrowser["… rebrowser"] -- succeeded --> merge["shell: bin/ship_to_main.sh<br/>(squash, fast-forward push)"]
+    merge -- failed --> resync["resync"]
+    merge -- succeeded --> post["agent: post checklist"]
+    post -- succeeded --> codedone[["Code:Done"]]
+    codedone --> checkout["shell: checkout -B {branch} origin/main"]
+    checkout -- succeeded --> fly["shell: deploy_fly.sh"]
+    fly -- succeeded --> ios["shell: deploy_ios.sh"]
+    ios -- succeeded --> android["shell: deploy_android.sh"]
+    android -- succeeded --> review[["Review"]]
+    checkout & fly & ios & android -- failed --> human{{"needs_input"}}
+```
+
+- **Code** (`Plan:Done → Code → Code:Done`) opens no PR. `merge` is `bin/ship_to_main.sh {ref}`:
+  it squashes `origin/main..HEAD` into one `<REF> <card title>` commit and pushes it to `main`
+  as a plain fast-forward, never with force. A rejected push fails into `resync` (max 2 loops).
+  The `deploy` / `github_fix` nodes are gone, and the card lands on `Code:Done`.
+- **Deploy** (`deploy` flow, `Code:Done → Deploy → Review`, `exclusive`, stage WIP 1) only deploys
+  what is already on `main`. Its four shell nodes (`max_retries: 1`, each parking on
+  `needs_input` when it fails, with no AI fixer) run on our own runners:
+  - `checkout`: `{relay} git-fetch && git checkout -B {branch} origin/main`.
+  - `fly`: `bin/deploy_fly.sh`. This deploy always runs, and it bakes `GIT_SHA` / `BUILT_AT` into the image.
+  - `ios`: `bin/deploy_ios.sh {ref}`, which goes to TestFlight.
+  - `android`: `bin/deploy_android.sh {ref}`, which goes to Google Play.
+
+  `ios` and `android` skip with exit 0 when the card's commit didn't touch `flutter/`
+  (`bin/card_touched_flutter.sh`), and Android also skips until its credentials exist (RLY-103).
+- **Secrets** come from 1Password. Each deploy node runs under `bin/op_deploy.sh`, which execs
+  `op run --env-file=.relay/deploy.env -- <cmd>`. `.relay/deploy.env` holds only `op://`
+  references.
+- **Why `checkout -B` and not `--detach`.** On an `exclusive` flow the runner re-attaches the
+  card's branch before every node, and it refuses a detached HEAD unless the command contains
+  `checkout -B`. Pointing the card's branch at `origin/main` keeps that guard happy and runs every
+  deploy on exactly what is on `main`. This is harmless, since the branch's work already shipped
+  as the squash.
+
+CI still runs the tests on pushes to `main` and on PRs. Its deploy jobs (`ci.yml`'s `deploy` and
+`flutter-deploy.yml`'s `push:` trigger) are commented out, not deleted, and
+`flutter-deploy.yml`'s `workflow_dispatch` still works for a manual store build.
+
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
 enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the
 node-job engine (`Relay.Runs`) — no per-stage config file, no board-runner poll loop.
@@ -182,7 +233,9 @@ never 403s):
   comes from `Relay.Runs.rate_limit_phrase/1` and `resume_time_label/1`. No new PubSub topic.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
-  `.github/workflows/ci.yml`'s `flyctl deploy --build-arg`). Unauthenticated, on the plain
+  `bin/deploy_fly.sh`'s `flyctl deploy --build-arg` in the RE board's Deploy flow; for a manual or
+  other-board deploy, the commented-out `deploy` job in `.github/workflows/ci.yml` passes the same
+  build args when it is restored). Unauthenticated, on the plain
   `:api` pipeline — it leaks nothing a deploy does not.
 - `GET /api/flows/:key/metrics` (`RelayWeb.Api.FlowMetricsController.metrics/2`) — the per-node
   rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `scope`

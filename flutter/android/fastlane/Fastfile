@@ -54,6 +54,22 @@ platform :android do
     UI.success("✅ Uploaded to Play Store Internal Testing! Add testers in the Play Console.")
   end
 
+  desc "Write the next internal-track version code to RELAY_BUILD_NUMBER_FILE (runner deploys)"
+  lane :next_build_number do
+    out = ENV["RELAY_BUILD_NUMBER_FILE"].to_s
+    UI.user_error!("❌ RELAY_BUILD_NUMBER_FILE environment variable is required (bin/deploy_android.sh sets it).") if out.empty?
+
+    json_key_file = ENV["PLAY_STORE_CONFIG_JSON_PATH"]
+    unless json_key_file && File.exist?(json_key_file)
+      UI.user_error!("❌ PLAY_STORE_CONFIG_JSON_PATH not set or file doesn't exist")
+    end
+
+    codes = google_play_track_version_codes(track: "internal", json_key: json_key_file)
+    next_code = (codes.max || 0) + 1
+    File.write(out, "#{next_code}\n")
+    UI.success("🔢 Next internal-track version code: #{next_code}")
+  end
+
   desc "Promote latest Internal build to Beta"
   lane :promote_to_beta do
     json_key_file = ENV["PLAY_STORE_CONFIG_JSON_PATH"]

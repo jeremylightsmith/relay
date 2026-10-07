@@ -1,0 +1,82 @@
+{
+  "edges": [
+    {
+      "from": "start",
+      "to": "checkout"
+    },
+    {
+      "from": "checkout",
+      "on": "succeeded",
+      "to": "fly"
+    },
+    {
+      "from": "fly",
+      "on": "succeeded",
+      "to": "ios"
+    },
+    {
+      "from": "ios",
+      "on": "succeeded",
+      "to": "android"
+    },
+    {
+      "from": "android",
+      "on": "succeeded",
+      "to": "done"
+    },
+    {
+      "from": "checkout",
+      "on": "failed",
+      "to": "needs_input"
+    },
+    {
+      "from": "fly",
+      "on": "failed",
+      "to": "needs_input"
+    },
+    {
+      "from": "ios",
+      "on": "failed",
+      "to": "needs_input"
+    },
+    {
+      "from": "android",
+      "on": "failed",
+      "to": "needs_input"
+    }
+  ],
+  "enabled": true,
+  "isolation": "exclusive",
+  "key": "deploy",
+  "nodes": [
+    {
+      "key": "checkout",
+      "max_retries": 1,
+      "run": "{relay} git-fetch && git checkout -B {branch} origin/main",
+      "type": "shell"
+    },
+    {
+      "key": "fly",
+      "max_retries": 1,
+      "run": "bin/op_deploy.sh bin/deploy_fly.sh",
+      "type": "shell"
+    },
+    {
+      "key": "ios",
+      "max_retries": 1,
+      "run": "bin/op_deploy.sh bin/deploy_ios.sh {ref}",
+      "type": "shell"
+    },
+    {
+      "key": "android",
+      "max_retries": 1,
+      "run": "bin/op_deploy.sh bin/deploy_android.sh {ref}",
+      "type": "shell"
+    }
+  ],
+  "trigger": {
+    "lands_on": "Review",
+    "pulls_from": "Code:Done",
+    "works_in": "Deploy"
+  }
+}

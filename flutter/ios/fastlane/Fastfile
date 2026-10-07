@@ -30,19 +30,27 @@ def beta_group
   group.empty? ? "Beta" : group
 end
 
+# Runner deploys (bin/deploy_ios.sh sets RELAY_DEPLOY=1) use match exactly as CI does:
+# read-only, never regenerating the distribution profile. A plain local run keeps forcing.
+# (`setup_ci` stays CI-only: on a runner Mac it would replace the default keychain.)
+def match_readonly?
+  is_ci || ENV["RELAY_DEPLOY"] == "1"
+end
+
 platform :ios do
   desc "Sync certificates and provisioning profiles using Match"
   lane :sync_certificates do
     UI.important("🔐 Syncing certificates and provisioning profiles...")
 
+    readonly = match_readonly?
     match(
       type: "appstore",
-      readonly: is_ci,
+      readonly: readonly,
       app_identifier: APP_IDENTIFIER,
       team_id: TEAM_ID,
-      force_for_new_devices: !is_ci,
+      force_for_new_devices: !readonly,
       verbose: true,
-      force: !is_ci
+      force: !readonly
     )
     UI.success("✅ Certificates and profiles synced from Match!")
   end
@@ -192,6 +200,25 @@ platform :ios do
       api_key: api_key
     )
     UI.success("✅ Build #{build_num} (#{app_version}) submitted to external beta (#{group})!")
+  end
+
+  desc "Write the next TestFlight build number to RELAY_BUILD_NUMBER_FILE (runner deploys)"
+  lane :next_build_number do
+    out = ENV["RELAY_BUILD_NUMBER_FILE"].to_s
+    UI.user_error!("❌ RELAY_BUILD_NUMBER_FILE environment variable is required (bin/deploy_ios.sh sets it).") if out.empty?
+
+    api_key = asc_api_key
+    if api_key.nil?
+      UI.user_error!("❌ An App Store Connect API key is required. Set FASTLANE_API_KEY_PATH, APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_ISSUER_ID.")
+    end
+
+    # latest_testflight_build_number answers for the latest app version by default. Builds CI
+    # uploaded were numbered by github.run_number, so latest + 1 stays above all of them; a new
+    # app version with no builds yet starts at 1, which TestFlight allows (build numbers are
+    # unique per version).
+    latest = latest_testflight_build_number(api_key: api_key, app_identifier: APP_IDENTIFIER, initial_build_number: 0)
+    File.write(out, "#{latest + 1}\n")
+    UI.success("🔢 Next TestFlight build number: #{latest + 1}")
   end
 
   desc "Build and upload to TestFlight"
