@@ -87,6 +87,11 @@ class ChooseBoardScreen extends ConsumerWidget {
                                 .read(boardsProvider.notifier)
                                 .toggleStar(list[i].slug),
                           ),
+                          onToggleMute: () => unawaited(
+                            ref
+                                .read(boardsProvider.notifier)
+                                .toggleMute(list[i].slug),
+                          ),
                           onTap: () async {
                             await ref
                                 .read(currentBoardProvider.notifier)

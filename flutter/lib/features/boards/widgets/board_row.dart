@@ -12,12 +12,18 @@ import '../board_summary.dart';
 /// Switch board sheet: same order, star at far right of each row"): a neutral
 /// filled star when starred, an outline star at 40% when not. Tapping it calls
 /// [onToggleStar] only; tapping anywhere else calls [onTap].
+///
+/// Immediately left of the star sits a 44px bell (RE406, card mockup "A — bell
+/// beside the star on the shared board row (Choose a board + Switch board
+/// sheet)"): an outline bell when notifying, a slashed bell when muted, both at
+/// 40% and never dimming the row. Tapping it calls [onToggleMute] only.
 class BoardRow extends StatelessWidget {
   const BoardRow({
     super.key,
     required this.board,
     required this.onTap,
     required this.onToggleStar,
+    required this.onToggleMute,
     this.current = false,
     this.showMeta = false,
   });
@@ -25,6 +31,7 @@ class BoardRow extends StatelessWidget {
   final BoardSummary board;
   final VoidCallback onTap;
   final VoidCallback onToggleStar;
+  final VoidCallback onToggleMute;
   final bool current;
   final bool showMeta;
 
@@ -84,6 +91,11 @@ class BoardRow extends StatelessWidget {
                         style: TextStyle(fontSize: 14, color: scheme.primary),
                       ),
                     ),
+                  _MuteButton(
+                    key: Key('board_row_mute_${board.slug}'),
+                    muted: board.muted,
+                    onPressed: onToggleMute,
+                  ),
                   _StarButton(
                     key: Key('board_row_star_${board.slug}'),
                     starred: board.starred,
@@ -143,6 +155,38 @@ class _StarButton extends StatelessWidget {
           size: 20,
           color: starred ? onSurface : onSurface.withValues(alpha: 0.4),
           semanticLabel: starred ? 'Unstar board' : 'Star board',
+        ),
+      ),
+    );
+  }
+}
+
+/// The mockup's `ml-1 size-11 rounded-lg` bell: a 44×44 target, icon size 20,
+/// `hero-bell` / `hero-bell-slash`, both `text-base-content/40`.
+class _MuteButton extends StatelessWidget {
+  const _MuteButton({super.key, required this.muted, required this.onPressed});
+
+  final bool muted;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: IconButton(
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+        style: IconButton.styleFrom(
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: Icon(
+          muted ? Icons.notifications_off_outlined : Icons.notifications_none,
+          size: 20,
+          color: onSurface.withValues(alpha: 0.4),
+          semanticLabel: muted ? 'Unmute notifications' : 'Mute notifications',
         ),
       ),
     );

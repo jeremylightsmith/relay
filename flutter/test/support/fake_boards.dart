@@ -19,6 +19,16 @@ class FakeBoardsRepository implements BoardsRepository {
   /// server's next [boards] list.
   void Function(FakeBoardsRepository)? onStar;
 
+  /// Every `setMuted` call, in order, as `(slug, muted)` (RE406).
+  final List<(String, bool)> muteCalls = [];
+
+  /// Thrown from `setMuted` (after the call is recorded) when non-null.
+  Object? muteError;
+
+  /// Runs after a recorded, non-failing `setMuted` — tests use it to set the
+  /// server's next [boards] list.
+  void Function(FakeBoardsRepository)? onMute;
+
   @override
   Future<List<BoardSummary>> fetchBoards() async {
     calls++;
@@ -33,6 +43,14 @@ class FakeBoardsRepository implements BoardsRepository {
     onStar?.call(this);
     return starred;
   }
+
+  @override
+  Future<bool> setMuted(String slug, bool muted) async {
+    muteCalls.add((slug, muted));
+    if (muteError != null) throw muteError!;
+    onMute?.call(this);
+    return muted;
+  }
 }
 
 BoardSummary makeBoard(
@@ -43,6 +61,7 @@ BoardSummary makeBoard(
   int cards = 9,
   bool aiActive = true,
   bool starred = false,
+  bool muted = false,
 }) => BoardSummary(
   name: name ?? slug,
   slug: slug,
@@ -52,4 +71,5 @@ BoardSummary makeBoard(
   cardCount: cards,
   aiActive: aiActive,
   starred: starred,
+  muted: muted,
 );

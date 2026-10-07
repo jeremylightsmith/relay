@@ -284,4 +284,44 @@ void main() {
       );
     },
   );
+
+  testWidgets('muting from the sheet keeps it open on the same board (RE406)', (
+    tester,
+  ) async {
+    final repo =
+        FakeBoardsRepository(
+            boards: [
+              makeBoard('mkt', name: 'Marketing site'),
+              makeBoard('dat', name: 'Data pipeline'),
+            ],
+          )
+          ..onMute = (r) => r.boards = [
+            makeBoard('mkt', name: 'Marketing site'),
+            makeBoard('dat', name: 'Data pipeline', muted: true),
+          ];
+    await pumpApp(tester, boardSlug: 'mkt', boards: repo);
+
+    await tester.tap(find.byKey(const Key('board_switcher_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('board_row_mute_dat')));
+    await tester.pumpAndSettle();
+
+    expect(repo.muteCalls, [('dat', true)]);
+    expect(find.byKey(const Key('board_row_current_mkt')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('board_switcher_name'))).data,
+      'Marketing site',
+    );
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(const Key('board_row_mute_dat')),
+              matching: find.byType(Icon),
+            ),
+          )
+          .icon,
+      Icons.notifications_off_outlined,
+    );
+  });
 }
