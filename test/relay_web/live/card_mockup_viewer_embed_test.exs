@@ -119,4 +119,31 @@ defmodule RelayWeb.CardMockupViewerEmbedTest do
     refute has_element?(view, "#mockup-viewer-width")
     assert has_element?(view, "#mockup-viewer-pager")
   end
+
+  test "RE405 4. an embedded screenshot gets the zoom control and an image-kind box at Fit",
+       %{conn: conn, board: board, card: card, ref: ref} do
+    shot = upload(card, "shot.png", "image/png")
+
+    {:ok, _card} =
+      Cards.update_ai_result(card, %{
+        "summary" => "Done",
+        "screens" => [%{"url" => RelayWeb.attachment_path(shot.id), "caption" => "Shot"}]
+      })
+
+    view = open(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board&screenshot=1")
+
+    assert has_element?(view, "#mockup-viewer-zoom")
+    assert has_element?(view, ~s(#mockup-viewer-frame-box-1[data-kind=image][data-zoom="1"]))
+    refute has_element?(view, "#mockup-viewer-width")
+  end
+
+  test "RE405 5. an embedded HTML mockup keeps the width toggle, zoom, phone render and sizer",
+       %{conn: conn, board: board, ref: ref, m1: m1} do
+    view = viewer(conn, board, ref, m1)
+
+    assert has_element?(view, "#mockup-viewer-width")
+    assert has_element?(view, "#mockup-viewer-zoom")
+    assert has_element?(view, "[data-kind=html][data-render=phone]")
+    assert has_element?(view, "#mockup-viewer-frame-sizer")
+  end
 end

@@ -2465,10 +2465,12 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
-  The embedded mockup viewer's zoom control (RE393): − · Fit · + over the bottom-right of an HTML
-  mockup's frame, 44px targets. It is client-owned — no `phx-click`: `card_mockup_viewer/1`'s
-  `.MockupRenderWidth` hook handles the clicks, rewrites the label (`Fit`, `150%` … `400%`) and
-  toggles `disabled` (− at Fit, + at the top step). The server renders the Fit state, − disabled.
+  The embedded mockup viewer's zoom control (RE393): − · Fit · + over the bottom-right of the
+  frame — an HTML mockup's or (RE405) a screenshot's — 44px targets. It is client-owned — no
+  `phx-click`: `card_mockup_viewer/1`'s `.MockupRenderWidth` hook handles the clicks, rewrites the
+  label (`Fit`, `150%` … `400%`, or any whole percentage in between after a pinch on a
+  screenshot, e.g. `173%`) and toggles `disabled` (− at Fit, + at 400%). + and − step to the next
+  zoom step above / below the current zoom. The server renders the Fit state, − disabled.
   """
   attr :id, :string, default: "mockup-viewer-zoom"
   attr :class, :any, default: nil
@@ -2559,8 +2561,8 @@ defmodule RelayWeb.CoreComponents do
   @doc """
   The same-tab viewer (RE380, RE390): the item on screen (`current_key` among `items`, the
   `RelayWeb.CardMedia` shape) fills the right of the screen — an HTML item framed in the sandboxed
-  iframe (`RelayWeb.mockup_sandbox/0`), an image shown at its natural size in an `overflow-auto`
-  frame (never scaled to fit) — and the card shrinks to a 340px left sheet — ← Back to card, the
+  iframe (`RelayWeb.mockup_sandbox/0`), an image in an `overflow-auto` frame (on the web at its
+  natural size, never scaled to fit) — the frame box carrying the item's kind as `data-kind` — and the card shrinks to a 340px left sheet — ← Back to card, the
   stage chip, ref and title, the `:gate` slot (the caller's `card_gate_panel/1`), then the open
   section (`label` "Mockups" / "Screenshots") with the current tile ringed. On desktop
   `mockup_viewer_header/1` sits over the mockup and names it (noun · caption · n of m, plus the
@@ -2572,12 +2574,14 @@ defmodule RelayWeb.CoreComponents do
   `segmented_control/1`), and `mockup_viewer_pager/1` sits under the frame. The colocated
   `.MockupRenderWidth` hook on the stable `\#{id}-stage` owns the width: it keeps the choice in
   sessionStorage and re-applies `data-render` on each freshly keyed frame box — desktop lays the
-  iframe out at 1280px and CSS-scales it to the box width.
+  iframe out at 1280px and CSS-scales it to the box width. Embedded, `mockup_viewer_zoom/1` zooms
+  the frame; an image item (RE405) fits the box width (never upscaled past its natural width),
+  zooms by width with the control or a two-finger pinch (1×–4×) and pans with one finger.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
-  `ArrowKeyGuard` while typing), and a horizontal swipe on the frame does the same through the
-  colocated `.MockupSwipe` hook.
+  `ArrowKeyGuard` while typing), and a horizontal swipe on an HTML item at Fit does the same through
+  the colocated `.MockupSwipe` hook — an image item never pages by swipe (a sideways drag pans it).
   """
   attr :id, :string, default: "mockup-viewer"
   attr :ref, :string, required: true
@@ -2604,7 +2608,7 @@ defmodule RelayWeb.CoreComponents do
         index: index + 1,
         item: item,
         caption: caption,
-        zoomable: assigns.embed and item.kind == :html,
+        zoomable: assigns.embed,
         frame_title: "#{assigns.noun}: #{caption} (#{assigns.ref})"
       )
 
@@ -2745,11 +2749,13 @@ defmodule RelayWeb.CoreComponents do
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
           (browser Back would then step the frame, not leave the viewer), while a fresh
-          iframe's first load adds none. An image scrolls both ways at its natural size:
-          `max-w-none` undoes preflight's `img { max-width: 100% }`. --%>
+          iframe's first load adds none. An image scrolls both ways — at its natural size on the
+          web, at the hook's fit × zoom width embedded: `max-w-none` undoes preflight's
+          `img { max-width: 100% }`. --%>
           <div
             id={"#{@id}-frame-box-#{@item.key}"}
-            data-render={@zoomable && "phone"}
+            data-kind={@item.kind}
+            data-render={@zoomable and @item.kind == :html and "phone"}
             data-zoom={@zoomable && "1"}
             class={[
               "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
@@ -2767,7 +2773,7 @@ defmodule RelayWeb.CoreComponents do
             <%!-- Embedded, the sizer carries the zoomed frame's scaled width (a transform never
             changes layout size), so the box scrolls sideways when zoomed past Fit. --%>
             <div
-              :if={@zoomable}
+              :if={@zoomable and @item.kind == :html}
               id={"#{@id}-frame-sizer"}
               data-zoom-sizer
               class="relative h-full overflow-hidden"
@@ -2813,14 +2819,19 @@ defmodule RelayWeb.CoreComponents do
         // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
         const KEY = "relay:mockup-render"
         const DESKTOP_WIDTH = 1280
-        // Zoom multiplies the width mode's fit scale; index 0 is Fit. Not persisted: it resets
-        // to Fit on every item switch (a new frame box) and every width-mode switch.
+        // Zoom multiplies the fit scale; ZOOM_STEPS[0] is Fit. Not persisted: it resets to Fit on
+        // every item switch (a new frame box) and every width-mode switch. The buttons step
+        // through ZOOM_STEPS; a pinch on a screenshot (RE405) lands anywhere between its ends.
         const ZOOM_STEPS = [1, 1.5, 2, 3, 4]
+        const ZOOM_MIN = ZOOM_STEPS[0]
+        const ZOOM_MAX = ZOOM_STEPS[ZOOM_STEPS.length - 1]
         const ZOOM_BUTTON = '[id$="-zoom-in"], [id$="-zoom-out"], [id$="-zoom-reset"]'
+        const clampZoom = (z) => Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX)
+        const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 
         export default {
           mounted() {
-            this.zoom = 0
+            this.zoom = ZOOM_MIN
             this.apply = () => this.render()
             this.onClick = (e) => {
               const zoomButton = e.target.closest(ZOOM_BUTTON)
@@ -2832,6 +2843,15 @@ defmodule RelayWeb.CoreComponents do
               this.render()
             }
             document.addEventListener("click", this.onClick)
+            // Pinch on an embedded screenshot. touchmove is non-passive so a two-finger move can
+            // stop the native gesture; a one-finger drag is left alone and scrolls the box.
+            this.onTouchStart = (e) => this.pinchStart(e)
+            this.onTouchMove = (e) => this.pinchMove(e)
+            this.onTouchEnd = (e) => { if (e.touches.length < 2) this.pinch = null }
+            this.el.addEventListener("touchstart", this.onTouchStart, { passive: true })
+            this.el.addEventListener("touchmove", this.onTouchMove, { passive: false })
+            this.el.addEventListener("touchend", this.onTouchEnd, { passive: true })
+            this.el.addEventListener("touchcancel", this.onTouchEnd, { passive: true })
             // childList/subtree only: the inline styles and data-zoom render() writes are
             // attributes, so they never re-trigger it.
             this.mutations = new MutationObserver(this.apply)
@@ -2843,32 +2863,46 @@ defmodule RelayWeb.CoreComponents do
           updated() { this.render() },
           destroyed() {
             document.removeEventListener("click", this.onClick)
+            this.el.removeEventListener("touchstart", this.onTouchStart)
+            this.el.removeEventListener("touchmove", this.onTouchMove)
+            this.el.removeEventListener("touchend", this.onTouchEnd)
+            this.el.removeEventListener("touchcancel", this.onTouchEnd)
             this.mutations.disconnect()
             this.resizes.disconnect()
           },
           mode() {
             return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
           },
+          // + goes to the next step above the current zoom, − to the next below — so a pinched
+          // 173% steps to 200% or 150%.
           zoomBy(id) {
-            if (id.endsWith("-zoom-in")) this.zoom = Math.min(this.zoom + 1, ZOOM_STEPS.length - 1)
-            else if (id.endsWith("-zoom-out")) this.zoom = Math.max(this.zoom - 1, 0)
-            else this.zoom = 0
+            if (id.endsWith("-zoom-in")) this.zoom = ZOOM_STEPS.find((z) => z > this.zoom) ?? ZOOM_MAX
+            else if (id.endsWith("-zoom-out")) this.zoom = [...ZOOM_STEPS].reverse().find((z) => z < this.zoom) ?? ZOOM_MIN
+            else this.zoom = ZOOM_MIN
             this.render()
+          },
+          // The zoomable screenshot box, or null (an HTML item, or the web viewer's natural size).
+          imageBox() {
+            const box = this.el.querySelector('[data-kind="image"][data-zoom]')
+            const img = box && box.querySelector("img")
+            return img ? { box, img } : null
           },
           render() {
             const mode = this.mode()
             this.syncToggle(mode)
+            const image = this.imageBox()
+            if (image) return this.renderImage(image)
             const box = this.el.querySelector("[data-render]")
             const frame = box && box.querySelector("iframe")
             if (!frame) return
             if (box.dataset.render !== mode) box.dataset.render = mode
-            if (box.id !== this.zoomBoxId || mode !== this.zoomMode) this.zoom = 0
+            if (box.id !== this.zoomBoxId || mode !== this.zoomMode) this.zoom = ZOOM_MIN
             this.zoomBoxId = box.id
             this.zoomMode = mode
-            const z = ZOOM_STEPS[this.zoom]
+            const z = this.zoom
             this.syncZoom(box, z)
             const sizer = box.querySelector("[data-zoom-sizer]")
-            if (mode === "phone" && z === 1) {
+            if (mode === "phone" && z === ZOOM_MIN) {
               if (sizer) sizer.style.width = ""
               frame.style.width = frame.style.height = ""
               frame.style.transform = frame.style.transformOrigin = ""
@@ -2885,17 +2919,55 @@ defmodule RelayWeb.CoreComponents do
             frame.style.transformOrigin = "top left"
             frame.style.transform = `scale(${scale})`
           },
+          // RE405 — a screenshot fits the box width (never upscaled past its natural width) and
+          // zooms by its layout width, not a transform, so the overflow-auto box pans both ways.
+          renderImage({ box, img }) {
+            if (box.id !== this.zoomBoxId) this.zoom = ZOOM_MIN
+            this.zoomBoxId = box.id
+            this.syncZoom(box, this.zoom)
+            // naturalWidth is 0 until the image loads, and the stage's ResizeObserver never sees
+            // the load — re-render once it lands. Same listener + options: added at most once.
+            if (!img.complete || !img.naturalWidth) return img.addEventListener("load", this.apply, { once: true })
+            const width = `${Math.min(img.naturalWidth, box.clientWidth) * this.zoom}px`
+            if (img.style.width !== width) img.style.width = width
+          },
+          pinchStart(e) {
+            const image = e.touches.length === 2 && this.imageBox()
+            this.pinch = image && { distance: distance(...e.touches), zoom: this.zoom }
+          },
+          // Scales by the change in finger distance, keeping the content point under the
+          // fingers' midpoint under it.
+          pinchMove(e) {
+            if (e.touches.length !== 2) return
+            const image = this.imageBox()
+            if (!image) return
+            e.preventDefault()
+            if (!this.pinch) return
+            const { box } = image
+            const [a, b] = e.touches
+            const rect = box.getBoundingClientRect()
+            const x = (a.clientX + b.clientX) / 2 - rect.left - box.clientLeft
+            const y = (a.clientY + b.clientY) / 2 - rect.top - box.clientTop
+            const before = this.zoom
+            const after = clampZoom(this.pinch.zoom * distance(a, b) / this.pinch.distance)
+            const contentX = (box.scrollLeft + x) / before
+            const contentY = (box.scrollTop + y) / before
+            this.zoom = after
+            this.renderImage(image)
+            box.scrollLeft = contentX * after - x
+            box.scrollTop = contentY * after - y
+          },
           // The zoom control is phx-update="ignore": the hook owns its label and disabled flags.
           // Text is only written when it changes — a text write is a childList mutation.
           syncZoom(box, z) {
             if (box.dataset.zoom !== undefined && box.dataset.zoom !== String(z)) box.dataset.zoom = String(z)
             const control = this.el.querySelector('[role="group"][aria-label="Zoom"]')
             if (!control) return
-            const label = z === 1 ? "Fit" : `${z * 100}%`
+            const label = z === ZOOM_MIN ? "Fit" : `${Math.round(z * 100)}%`
             const reset = control.querySelector('[id$="-zoom-reset"]')
             if (reset.textContent.trim() !== label) reset.textContent = label
-            control.querySelector('[id$="-zoom-out"]').disabled = z === ZOOM_STEPS[0]
-            control.querySelector('[id$="-zoom-in"]').disabled = z === ZOOM_STEPS[ZOOM_STEPS.length - 1]
+            control.querySelector('[id$="-zoom-out"]').disabled = z <= ZOOM_MIN
+            control.querySelector('[id$="-zoom-in"]').disabled = z >= ZOOM_MAX
           },
           // The toggle is phx-update="ignore": move the active look by swapping the server's
           // own active / inactive class lists between segments, so no class is re-typed here.
@@ -2919,15 +2991,22 @@ defmodule RelayWeb.CoreComponents do
         export default {
           mounted() {
             this.el.addEventListener("touchstart", (e) => {
+              // A gesture that ever had two fingers is a pinch, never a swipe.
+              if (e.touches.length > 1) this.multi = true
               const t = e.changedTouches[0]
               this.start = { x: t.clientX, y: t.clientY }
             }, { passive: true })
             this.el.addEventListener("touchend", (e) => {
-              if (!this.start) return
+              if (e.touches.length > 0) return
+              const multi = this.multi
+              this.multi = false
+              if (!this.start || multi) return (this.start = null)
               const t = e.changedTouches[0]
               const dx = t.clientX - this.start.x
               const dy = t.clientY - this.start.y
               this.start = null
+              // A screenshot never pages by swipe: a sideways drag pans it (RE405).
+              if (this.el.querySelector('[data-kind="image"]')) return
               // Zoomed past Fit, a sideways drag pans the mockup; it never pages.
               const box = this.el.querySelector("[data-zoom]")
               if (box && box.dataset.zoom !== "1") return
@@ -2942,10 +3021,11 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
-  # Embedded HTML scrolls sideways when zoomed (vertical scroll stays inside the iframe); an
-  # image scrolls both ways at natural size; the web viewer's frame clips, desktop mode scrolling.
-  defp mockup_box_overflow(_kind, true = _zoomable), do: "overflow-x-auto overflow-y-hidden"
+  # An image scrolls both ways (natural size on the web, fit-to-width and zoomable embedded);
+  # embedded HTML scrolls sideways when zoomed (vertical scroll stays inside the iframe); the web
+  # viewer's frame clips, desktop mode scrolling.
   defp mockup_box_overflow(:image, _zoomable), do: "overflow-auto"
+  defp mockup_box_overflow(_kind, true = _zoomable), do: "overflow-x-auto overflow-y-hidden"
   defp mockup_box_overflow(_kind, _zoomable), do: "overflow-hidden data-[render=desktop]:overflow-y-auto"
 
   attr :id, :string, required: true
