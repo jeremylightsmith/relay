@@ -2,8 +2,8 @@ defmodule RelayWeb.Api.AllController do
   @moduledoc """
   The native app's cross-board decision surface (RLY-80): the aggregated needs-you feed
   the inbox renders, the human's approve/reject/answer actions, (RLY-126) the native
-  New-card sheet's create path, (RE376) the board switcher's list, and (RE396) the
-  switcher's star. Authenticated by `RelayWeb.ApiUserAuth` (user bearer token),
+  New-card sheet's create path, (RE376) the board switcher's list, (RE396) the
+  switcher's star, and (RE406) the switcher's per-board push mute. Authenticated by `RelayWeb.ApiUserAuth` (user bearer token),
   acting as `{:user, id}` — never as the agent.
   """
 
@@ -59,6 +59,18 @@ defmodule RelayWeb.Api.AllController do
       conn
       |> put_view(json: BoardListJSON)
       |> render(:star, slug: slug, starred: starred)
+    end
+  end
+
+  # RE406 — the native switcher's mute: sets (never toggles) the caller's per-board APNs mute via
+  # Boards.set_muted/3. A narrow addition to this ADR-0001-scoped surface. The body is validated
+  # before the membership lookup.
+  def mute(conn, %{"slug" => slug} = params) do
+    with {:ok, muted} <- muted_param(params),
+         {:ok, muted} <- Boards.set_muted(conn.assigns.current_user, slug, muted) do
+      conn
+      |> put_view(json: BoardListJSON)
+      |> render(:mute, slug: slug, muted: muted)
     end
   end
 
@@ -146,6 +158,10 @@ defmodule RelayWeb.Api.AllController do
   # A JSON boolean only — a form-encoded "true" or a 1 is a 422, not a coerced star.
   defp starred_param(%{"starred" => starred}) when is_boolean(starred), do: {:ok, starred}
   defp starred_param(_params), do: {:error, {:invalid_request, "starred must be a boolean"}}
+
+  # Same rule as starred_param/1: a JSON boolean only.
+  defp muted_param(%{"muted" => muted}) when is_boolean(muted), do: {:ok, muted}
+  defp muted_param(_params), do: {:error, {:invalid_request, "muted must be a boolean"}}
 
   # The stepper's structured picks and the flat free-text fallback both compose down to the one
   # Q->A comment Cards.answer_input/3 already records — "structured" is the input shape, not a

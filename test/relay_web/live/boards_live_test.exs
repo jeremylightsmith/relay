@@ -218,6 +218,24 @@ defmodule RelayWeb.BoardsLiveTest do
       assert index_of(tile, "board-card-#{alpha.slug}-current") <
                index_of(tile, "board-star-#{alpha.slug}")
     end
+
+    # RE406: mute is native-only — the web tiles keep the star and get no bell/mute control,
+    # muted or not (the mute is enforced server-side).
+    test "no mute control on web, muted or not", %{conn: conn, user: user, alpha: alpha, zeta: zeta} do
+      {:ok, true} = Boards.set_muted(user, zeta.slug, true)
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      # The top bar's browser-notifications control (RE399) carries its own hero-bell, so the
+      # "no bell" check is scoped to the board tiles.
+      for board <- [alpha, zeta] do
+        assert has_element?(view, "#board-star-#{board.slug}")
+        refute view |> element("#board-card-#{board.slug}") |> render() =~ "hero-bell"
+      end
+
+      refute has_element?(view, ~s([id^="board-mute"]))
+      refute has_element?(view, ~s([phx-click="toggle_mute"]))
+    end
   end
 
   defp tile_order(html, ctx) do

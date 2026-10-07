@@ -141,11 +141,12 @@ defmodule Relay.Boards do
   @doc """
   The user's non-archived boards (same membership/archived filter as `list_boards/1`) in
   **display order** (RE395): starred boards first, then case-insensitive by name, board id as
-  the tiebreak. Each row is `%{board: board, starred?: boolean}`. The web boards home and
+  the tiebreak. Each row is `%{board: board, starred?: boolean, muted?: boolean}` — `muted?`
+  (RE406) never affects the order. The web boards home and
   `GET /api/all/boards` read it (via `Relay.Cards.list_board_summaries/1`); `list_boards/1`
   keeps creation order because the default board depends on it.
   """
-  @spec list_boards_for_display(User.t()) :: [%{board: Board.t(), starred?: boolean()}]
+  @spec list_boards_for_display(User.t()) :: [%{board: Board.t(), starred?: boolean(), muted?: boolean()}]
   def list_boards_for_display(%User{id: user_id}) do
     from(b in Board,
       as: :board,
@@ -153,7 +154,7 @@ defmodule Relay.Boards do
       on: m.board_id == b.id,
       where: m.user_id == ^user_id and is_nil(b.archived_at),
       order_by: [desc: m.starred],
-      select: %{board: b, starred?: m.starred}
+      select: %{board: b, starred?: m.starred, muted?: m.muted}
     )
     |> order_by_name()
     |> Repo.all()
@@ -175,6 +176,26 @@ defmodule Relay.Boards do
     case Repo.update_all(query, set: [starred: starred]) do
       {0, _} -> {:error, :not_found}
       {_, _} -> {:ok, starred}
+    end
+  end
+
+  @doc """
+  Sets (does not toggle) the user's per-board mute on the board with `slug` and returns the
+  value set (RE406). A muted member gets no APNs pushes for that board. Only the caller's own
+  membership row changes, and the display order is unaffected. `{:error, :not_found}` when the
+  user has no resolved membership on a board with that slug.
+  """
+  @spec set_muted(User.t(), String.t(), boolean()) :: {:ok, boolean()} | {:error, :not_found}
+  def set_muted(%User{id: user_id}, slug, muted) when is_binary(slug) and is_boolean(muted) do
+    query =
+      from m in Membership,
+        join: b in Board,
+        on: b.id == m.board_id,
+        where: m.user_id == ^user_id and b.slug == ^slug
+
+    case Repo.update_all(query, set: [muted: muted]) do
+      {0, _} -> {:error, :not_found}
+      {_, _} -> {:ok, muted}
     end
   end
 
