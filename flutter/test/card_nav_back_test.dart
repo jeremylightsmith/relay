@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:relay_mobile/features/card/card_nav_context.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/card/widgets/card_review_bar.dart';
 
@@ -77,7 +78,12 @@ void main() {
     expect(CardScreen.navBackHandler, 'relayNavBack');
   });
 
-  test('the mockup viewer JS handler name pins the web hook contract', () {
-    expect(CardScreen.mockupViewerHandler, 'relayMockupViewer');
+  test('the card nav JS handler name pins the web chevron contract', () {
+    expect(CardScreen.cardNavHandler, 'relayCardNav');
+  });
+
+  test('the card nav direction names are the wire tokens', () {
+    expect(CardNavDirection.prev.name, 'prev');
+    expect(CardNavDirection.next.name, 'next');
   });
 }

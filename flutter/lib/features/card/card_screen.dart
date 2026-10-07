@@ -5,6 +5,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/embedded_webview.dart';
 import '../../config.dart';
 import '../decisions/review_queue.dart';
 import 'card_nav_context.dart';
@@ -47,8 +48,9 @@ class CardScreen extends ConsumerStatefulWidget {
   /// renders no bar: the wrong bar on a card is worse than no bar.
   final String? kind;
 
-  /// The ordered cards surrounding this one (RLY-234), for horizontal swipe nav. Null
-  /// on a cold deep link / push (go_router `extra` is in-memory) → swipe is inert.
+  /// The ordered cards surrounding this one (RLY-234), for the web page's ‹ › buttons
+  /// (RE400). Null on a cold deep link / push (go_router `extra` is in-memory) → ‹ ›
+  /// are inert.
   final CardNavContext? navContext;
 
   /// The label of the screen this card was pushed from ([backFromBoard] or
@@ -75,27 +77,34 @@ class CardScreen extends ConsumerStatefulWidget {
     }
   }
 
-  /// The JS handler the embedded mockup viewer calls (RE393) with `true` when it
-  /// opens and `false` when it closes — the only Dart copy of the name; the web
-  /// side lives in the `.NativeMockupViewer` hook.
-  static const mockupViewerHandler = 'relayMockupViewer';
+  /// The JS handler the web drawer's ‹ › chevrons call (RE400) with `"prev"` or
+  /// `"next"` — the only Dart copy of the name; the web side lives in the drawer's
+  /// native-mode chevrons.
+  static const cardNavHandler = 'relayCardNav';
 
-  /// Decodes the [mockupViewerHandler] args: open only for a leading literal
-  /// `true`, so a malformed call can never strand the card with its swipe off.
-  static bool mockupViewerOpenFromArgs(List<dynamic> args) =>
-      args.isNotEmpty && args.first == true;
+  /// Decodes the [cardNavHandler] args: a direction only for a leading String that
+  /// is exactly a [CardNavDirection] name, so a malformed call never navigates.
+  static CardNavDirection? cardNavDirectionFromArgs(List<dynamic> args) {
+    if (args.isEmpty) return null;
+    final token = args.first;
+    if (token is! String) return null;
+    for (final direction in CardNavDirection.values) {
+      if (direction.name == token) return direction;
+    }
+    return null;
+  }
 
-  /// Records whether the embedded mockup viewer is open on the enclosing card
-  /// screen. The [mockupViewerHandler] callback lands here — a static, testable
-  /// entry point (the real webview can't build under `flutter test`). A no-op
-  /// outside a [CardScreen]. The callback's context is the screen's own (an
-  /// ancestor lookup starts *above* it), so that element is checked first.
-  static void setMockupViewerOpen(BuildContext context, bool open) {
+  /// Moves the enclosing card screen to its neighbor in [direction]. The
+  /// [cardNavHandler] callback lands here — a static, testable entry point (the
+  /// real webview can't build under `flutter test`). A no-op outside a
+  /// [CardScreen]. The callback's context is the screen's own (an ancestor lookup
+  /// starts *above* it), so that element is checked first.
+  static void navigate(BuildContext context, CardNavDirection direction) {
     final own = context is StatefulElement ? context.state : null;
     final state = own is _CardScreenState
         ? own
         : context.findAncestorStateOfType<_CardScreenState>();
-    state?._setMockupViewerOpen(open);
+    state?._navigate(direction);
   }
 
   /// Overrides the webview body. `flutter test` runs on the host, where
@@ -111,61 +120,37 @@ class CardScreen extends ConsumerStatefulWidget {
     required String cardRef,
     required String boardSlug,
     String? backLabel,
+    CardNavContext? navContext,
     String? baseUrl,
   }) {
     final base = baseUrl ?? AppConfig.baseUrl;
-    return '$base/cards/$cardRef?board=$boardSlug&embed=1${_backParam(backLabel)}';
+    return '$base/cards/$cardRef?board=$boardSlug&embed=1'
+        '${_backParam(backLabel)}${_navParam(navContext)}';
   }
 
   /// `&back=<encoded label>`, or nothing for a null/empty label — shared by the
-  /// webview URL and the swipe's replacement route so both encode it once.
+  /// webview URL and the ‹ › replacement route so both encode it once.
   static String _backParam(String? backLabel) =>
       backLabel == null || backLabel.isEmpty
       ? ''
       : '&back=${Uri.encodeQueryComponent(backLabel)}';
 
-  /// The webview's bid in Flutter's gesture arena. A platform view only receives a
-  /// touch once one of these wins, so without a vertical recognizer the swipe
-  /// GestureDetector's horizontal recognizer was the sole contender: a vertical drag
-  /// stayed unresolved until pointer-up and the card body would (mostly) not scroll.
-  ///
-  /// - Viewer closed: Vertical claims vertical drags; horizontal ones still reach
-  ///   the swipe handler.
-  /// - Viewer open (RE393): Eager hands the WKWebView every touch, so a mockup can
-  ///   pan sideways and pinch-zoom natively; the card swipe stands down meanwhile.
-  static Set<Factory<OneSequenceGestureRecognizer>>
-  webviewGestureRecognizersFor({required bool mockupViewerOpen}) =>
-      mockupViewerOpen
-      ? {Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new)}
-      : {
-          Factory<VerticalDragGestureRecognizer>(
-            VerticalDragGestureRecognizer.new,
-          ),
-        };
+  /// `&nav=prev`, `&nav=next` or `&nav=prev,next` — which ‹ › the web drawer
+  /// enables (RE400) — or nothing when there is no neighbor (or no context).
+  static String _navParam(CardNavContext? ctx) {
+    if (ctx == null) return '';
+    final tokens = [
+      for (final direction in CardNavDirection.values)
+        if (ctx.neighbor(direction) != null) direction.name,
+    ];
+    return tokens.isEmpty ? '' : '&nav=${tokens.join(',')}';
+  }
 
   @override
   ConsumerState<CardScreen> createState() => _CardScreenState();
 }
 
 class _CardScreenState extends ConsumerState<CardScreen> {
-  /// Accumulated horizontal drag distance for the in-progress swipe. Positive =
-  /// rightward (→ previous card), negative = leftward (→ next) — mirrors the web hook.
-  double _dragDx = 0;
-
-  /// Logical pixels a horizontal drag must pass to commit to a neighbor; below it the
-  /// drag is ignored, so an incidental sideways nudge never navigates.
-  static const double _swipeCommitThreshold = 60;
-
-  /// Whether the embedded mockup viewer is open (RE393), set through
-  /// [CardScreen.setMockupViewerOpen]. While true the webview takes every gesture
-  /// and the card swipe is off.
-  bool _mockupViewerOpen = false;
-
-  void _setMockupViewerOpen(bool open) {
-    if (open == _mockupViewerOpen) return;
-    setState(() => _mockupViewerOpen = open);
-  }
-
   @override
   void initState() {
     super.initState();
@@ -173,19 +158,16 @@ class _CardScreenState extends ConsumerState<CardScreen> {
     _scheduleBanner();
   }
 
-  /// Decide the just-finished horizontal drag. A committed rightward drag steps to the
-  /// previous card, leftward to the next. At a list boundary (neighbor null) or with no
-  /// nav context it is a no-op — no wrap, no crash. Commit *replaces* the route, carrying
-  /// the context re-centered on the neighbor, so Back still returns to the originating
-  /// list (Decision 3 — mirrors navigateQueue's pushReplacement).
-  void _commitSwipe() {
-    final dx = _dragDx;
-    _dragDx = 0;
-    if (dx.abs() < _swipeCommitThreshold) return;
-    final target = dx > 0 ? widget.navContext?.prev : widget.navContext?.next;
+  /// Step to the neighbor in [direction] (a web ‹ › tap). At a list boundary
+  /// (neighbor null) or with no nav context it is a no-op — no wrap, no crash. It
+  /// *replaces* the route, carrying the context re-centered on the neighbor, so Back
+  /// still returns to the originating list (Decision 3 — mirrors navigateQueue's
+  /// pushReplacement). Reads [widget] at call time: go_router reuses this State.
+  void _navigate(CardNavDirection direction) {
+    final target = widget.navContext?.neighbor(direction);
     if (target == null) return;
     final kindParam = target.kind == null ? '' : '&kind=${target.kind}';
-    // The swiped-to card keeps the label of the list it was opened from.
+    // The landed card keeps the label of the list it was opened from.
     final backParam = CardScreen._backParam(widget.backLabel);
     GoRouter.of(context).pushReplacement(
       '/cards/${target.ref}?board=${target.boardSlug}$kindParam$backParam',
@@ -203,8 +185,6 @@ class _CardScreenState extends ConsumerState<CardScreen> {
     super.didUpdateWidget(oldWidget);
     if (widget.cardRef != oldWidget.cardRef ||
         widget.boardSlug != oldWidget.boardSlug) {
-      // The new card's page has no viewer open yet (RE393).
-      _mockupViewerOpen = false;
       _seedIfNeeded();
       _scheduleBanner();
     }
@@ -307,67 +287,56 @@ class _CardScreenState extends ConsumerState<CardScreen> {
       // actually loads.
       body: SafeArea(
         top: false,
-        child: GestureDetector(
-          key: const Key('card_swipe_area'),
-          // Horizontal only: the webview owns vertical scroll via its
-          // [CardScreen.webviewGestureRecognizersFor], so the arena gives vertical
-          // drags to the page and only a horizontal drag reaches these callbacks
-          // (RLY-234 — mirrors the web hook's |dx|>|dy| rule). While the mockup
-          // viewer is open the callbacks are null, so no horizontal recognizer
-          // enters the arena and the mockup gets the sideways pan (RE393).
-          onHorizontalDragStart: _mockupViewerOpen ? null : (_) => _dragDx = 0,
-          onHorizontalDragUpdate: _mockupViewerOpen
-              ? null
-              : (d) => _dragDx += d.delta.dx,
-          onHorizontalDragEnd: _mockupViewerOpen ? null : (_) => _commitSwipe(),
-          child: KeyedSubtree(
-            key: ValueKey('card_body_${widget.cardRef}'),
-            child:
-                widget.bodyBuilder?.call(context) ??
-                InAppWebView(
-                  key: const Key('card_webview'),
-                  // Never key the webview on the flag: a remount reloads the page
-                  // and drops the viewer. The platform view picks up the new set
-                  // on rebuild.
-                  gestureRecognizers: CardScreen.webviewGestureRecognizersFor(
-                    mockupViewerOpen: _mockupViewerOpen,
+        child: KeyedSubtree(
+          key: ValueKey('card_body_${widget.cardRef}'),
+          child:
+              widget.bodyBuilder?.call(context) ??
+              InAppWebView(
+                key: const Key('card_webview'),
+                // RE400: no native swipe — the webview owns every gesture
+                // (vertical scroll and in-page horizontal scrollers alike), with
+                // no arena ambiguity; cards change through the web ‹ › chevrons.
+                gestureRecognizers: {
+                  Factory<OneSequenceGestureRecognizer>(
+                    EagerGestureRecognizer.new,
                   ),
-                  initialUrlRequest: URLRequest(
-                    url: WebUri(
-                      CardScreen.cardUrl(
-                        cardRef: widget.cardRef,
-                        boardSlug: widget.boardSlug,
-                        // Read from the widget, never cached: go_router reuses
-                        // this State across pushReplacement.
-                        backLabel: widget.backLabel,
-                      ),
+                },
+                initialSettings: embeddedWebViewSettings(),
+                initialUrlRequest: URLRequest(
+                  url: WebUri(
+                    CardScreen.cardUrl(
+                      cardRef: widget.cardRef,
+                      boardSlug: widget.boardSlug,
+                      // Read from the widget, never cached: go_router reuses
+                      // this State across pushReplacement.
+                      backLabel: widget.backLabel,
+                      navContext: widget.navContext,
                     ),
                   ),
-                  // A full page load means the viewer's destroyed() never ran.
-                  onLoadStart: (_, _) => _setMockupViewerOpen(false),
-                  onWebViewCreated: (controller) {
-                    controller.addJavaScriptHandler(
-                      handlerName: CardScreen.navBackHandler,
-                      callback: (_) {
-                        if (context.mounted) {
-                          CardScreen.navBack(GoRouter.of(context));
-                        }
-                      },
-                    );
-                    controller.addJavaScriptHandler(
-                      handlerName: CardScreen.mockupViewerHandler,
-                      callback: (args) {
-                        if (context.mounted) {
-                          CardScreen.setMockupViewerOpen(
-                            context,
-                            CardScreen.mockupViewerOpenFromArgs(args),
-                          );
-                        }
-                      },
-                    );
-                  },
                 ),
-          ),
+                onWebViewCreated: (controller) {
+                  controller.addJavaScriptHandler(
+                    handlerName: CardScreen.navBackHandler,
+                    callback: (_) {
+                      if (context.mounted) {
+                        CardScreen.navBack(GoRouter.of(context));
+                      }
+                    },
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: CardScreen.cardNavHandler,
+                    callback: (args) {
+                      if (!context.mounted) return;
+                      final direction = CardScreen.cardNavDirectionFromArgs(
+                        args,
+                      );
+                      if (direction != null) {
+                        CardScreen.navigate(context, direction);
+                      }
+                    },
+                  );
+                },
+              ),
         ),
       ),
       bottomNavigationBar: _bottomBar(),
