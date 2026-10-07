@@ -278,10 +278,15 @@ defmodule RelayWeb.CardLiveTest do
          %{conn: conn, user: user, board: board, ref: ref} do
       html = conn |> get(~p"/cards/#{ref}?board=#{board.slug}&embed=1") |> html_response(200)
       assert html =~ "viewport-fit=cover"
+      # RE400: the native shell pins the scale, so pinch-zoom can never leave a field zoomed.
+      assert html =~ "maximum-scale=1"
+      assert html =~ "user-scalable=no"
       assert html =~ "data-embed"
 
       board_html = build_conn() |> log_in_user(user) |> get(~p"/board/#{board.slug}") |> html_response(200)
       refute board_html =~ "viewport-fit=cover"
+      refute board_html =~ "maximum-scale=1"
+      refute board_html =~ "user-scalable=no"
       refute board_html =~ "data-embed"
     end
   end

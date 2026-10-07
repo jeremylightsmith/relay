@@ -43,11 +43,12 @@ defmodule RelayWeb.BoardLiveEmbedHeaderTest do
            ]
   end
 
-  test "embedded, the dead render opts the viewport into viewport-fit=cover",
+  test "embedded, the dead render opts the viewport into viewport-fit=cover and pins the scale (RE400)",
        %{conn: conn, board: board} do
     html = conn |> get(~p"/board/#{board.slug}?embed=1") |> html_response(200)
 
-    assert html =~ ~s(content="width=device-width, initial-scale=1, viewport-fit=cover")
+    assert html =~
+             ~s(content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover")
   end
 
   test "plain web: no data-embed on <main>, the ‹ back stays and there is no +",

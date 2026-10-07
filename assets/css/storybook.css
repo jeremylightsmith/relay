@@ -782,7 +782,9 @@ textarea.commit-field-input { min-height: 64px; }
    web large-title header at iOS sizes", "Review card — web nav bar …", "Mockup viewer — …").
    The variables are inert on their own; every rule that restyles an existing element is a
    descendant of [data-embed] (Layouts.app/1 sets it on <main> when @embed), so desktop and
-   plain phone-width web never match. The variable block is mirrored verbatim into
+   plain phone-width web never match. One exception: --m-field is also read outside
+   [data-embed], by the coarse-pointer field rule (RE400), so every touch device's fields are
+   16px and iOS never focus-zooms. The variable block is mirrored verbatim into
    storybook.css — keep the two byte-identical. */
 :root {
   --m-large-title: 34px;
@@ -795,6 +797,7 @@ textarea.commit-field-input { min-height: 64px; }
   --m-headline-sm: 16px;
   --m-headline-weight: 600;
   --m-body: 15px;
+  --m-field: 16px;
   --m-meta: 13px;
   --m-label: 12px;
   --m-target: 44px;
