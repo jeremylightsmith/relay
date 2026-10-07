@@ -402,27 +402,6 @@ defmodule RelayWeb.Browser.EmbedMockupViewerTest do
     assert zoom_state(conn)["box"] == "mockup-viewer-frame-box-#{ctx.m1.id}"
   end
 
-  test "Z9. the viewer tells the native shell it opened and closed", %{conn: conn} = ctx do
-    conn =
-      conn
-      |> visit("/dev/login")
-      |> assert_has("body .phx-connected")
-      |> visit("/cards/#{ctx.ref}?board=#{ctx.board.slug}&embed=1&back=Board")
-      |> await_connected()
-      |> await_attached("#card-drawer-mockup-0-open")
-
-    measure(
-      conn,
-      "(window.__calls = [], window.flutter_inappwebview = {callHandler: (...a) => window.__calls.push(a)}, true)"
-    )
-
-    conn = conn |> click("#card-drawer-mockup-0-open") |> assert_has("#mockup-viewer-pager-count", text: "1 of 2")
-    assert measure(conn, "window.__calls") == [["relayMockupViewer", true]]
-
-    conn = conn |> click("#mockup-viewer-bar-back") |> refute_has("#mockup-viewer")
-    assert measure(conn, "window.__calls") == [["relayMockupViewer", true], ["relayMockupViewer", false]]
-  end
-
   test "Z10. dark theme: the zoom control takes the dark base-100", %{conn: conn} = ctx do
     conn =
       conn

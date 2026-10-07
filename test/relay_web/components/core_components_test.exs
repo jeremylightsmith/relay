@@ -4796,6 +4796,42 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "card_drawer/1 native_nav (RE400)" do
+    defp nav_drawer_doc(native_nav) do
+      (&CoreComponents.card_drawer/1)
+      |> render_component(
+        drawer_attrs(%{status: :in_review}, %{
+          card_nav_enabled: true,
+          native_nav: native_nav,
+          prev_ref: "RLY-0",
+          next_ref: "RLY-2",
+          reject_form: to_form(%{"note" => ""}, as: :reject)
+        })
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "native mode: the flags decide disabled and no arrow keys are bound" do
+      doc = nav_drawer_doc(%{prev?: true, next?: false})
+
+      assert count(doc, "#card-drawer-next[disabled]") == 1
+      assert count(doc, "#card-drawer-prev:not([disabled])") == 1
+      assert count(doc, ~s([phx-window-keydown="prev_card"])) == 0
+      assert count(doc, ~s([phx-window-keydown="next_card"])) == 0
+      assert count(doc, "#card-drawer-panel[phx-hook]") == 0
+      assert [hook] = doc |> LazyHTML.query("#card-drawer-prev") |> LazyHTML.attribute("phx-hook")
+      assert String.ends_with?(hook, "NativeCardNav")
+    end
+
+    test "web mode (native_nav nil) keeps the server-driven chevrons" do
+      doc = nav_drawer_doc(nil)
+
+      assert count(doc, ~s(#card-drawer-prev[phx-click="prev_card"])) == 1
+      assert count(doc, ~s(#card-drawer-next[phx-click="next_card"])) == 1
+      assert count(doc, ~s([phx-hook$="NativeCardNav"])) == 0
+    end
+  end
+
   describe "mockup_viewer_bar/1 (RE380)" do
     defp bar_doc(index) do
       (&CoreComponents.mockup_viewer_bar/1)
@@ -5303,7 +5339,7 @@ defmodule RelayWeb.CoreComponentsTest do
       %{key: 2, src: "/attachments/h", caption: "Empty", kind: :html}
     ]
 
-    test "12. an HTML item gets the zoom wrap, data-zoom, a sizer around the frame and the native hook" do
+    test "12. an HTML item gets the zoom wrap, data-zoom, a sizer around the frame and no native hook" do
       doc = embed_viewer_doc(@zoom_items, 2)
 
       assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
@@ -5320,11 +5356,11 @@ defmodule RelayWeb.CoreComponentsTest do
              ) ==
                1
 
-      assert [hook] = pg_attr(doc, "#mockup-viewer-native", "phx-hook")
-      assert String.ends_with?(hook, "NativeMockupViewer")
+      # RE400 — the viewer no longer signals the native shell.
+      assert pg_count(doc, "#mockup-viewer-native") == 0
     end
 
-    test "13. an image item gets no zoom, sizer or data-zoom, but keeps the native hook" do
+    test "13. an image item gets no zoom, sizer, data-zoom or native hook" do
       doc = embed_viewer_doc(@zoom_items, 1)
 
       assert pg_count(doc, "#mockup-viewer-zoom-wrap") == 0
@@ -5332,7 +5368,7 @@ defmodule RelayWeb.CoreComponentsTest do
       assert pg_count(doc, "[data-zoom]") == 0
       box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
       assert "overflow-auto" in box
-      assert pg_count(doc, "#mockup-viewer-native") == 1
+      assert pg_count(doc, "#mockup-viewer-native") == 0
     end
   end
 

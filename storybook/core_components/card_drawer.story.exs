@@ -332,6 +332,37 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :embedded_native_nav,
+        description:
+          "RE400 — the native card host with `nav=next`: the ‹ › chevrons call the shell's relayCardNav bridge (no server patch, no arrow keys); ‹ is disabled, there being no previous card.",
+        attributes: %{
+          id: "story-drawer-embed-nav",
+          ref: "RLY-12",
+          board_slug: "storybook-board",
+          card: %{story_card() | status: :in_review, progress: nil},
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 2,
+          embed: true,
+          card_nav_enabled: true,
+          native_nav: %{prev?: false, next?: true},
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
+          review_gate: %{
+            approve_label: "Approve → Deploy",
+            reject_target_name: "Code",
+            can_reject: true
+          },
+          reject_form: Phoenix.Component.to_form(%{"note" => ""}, as: :reject),
+          conversation: story_conversation(),
+          note_count: length(story_conversation()),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :with_branch_and_plan,
         attributes: %{
           id: "story-drawer-6",
