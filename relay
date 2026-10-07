@@ -56,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 76
-RUNNER_FINGERPRINT = "810d1eca0837785b4125ad0b9b0e3444bed6bfd3d6c4a260cac4459a38189c01"
+RUNNER_VERSION = 77
+RUNNER_FINGERPRINT = "72ce2a59d2a81f12d22d5f8ca4f088926523b6b2ffd78d04f0714b94e88ab622"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -3863,7 +3863,10 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     without also forwarding to the ref-keyed board-log mirror (RE268).
     Returns (ok, captured_session_id, report) — `report` is the job's ClaudeRunReport (RE308).
     `on_proc` receives the live Popen."""
-    cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions",
+    # Auto mode, not --dangerously-skip-permissions: its classifier denies a risky action (an
+    # exfiltration, a deploy, a force-push) and -p carries on without it, where skipping
+    # permissions let every action through unchecked.
+    cmd = ["claude", "-p", prompt, "--permission-mode", "auto",
            "--verbose", "--output-format", "stream-json"]
     if session_id:
         cmd[2:2] = ["--resume", session_id]     # claude -p --resume <session> <prompt>

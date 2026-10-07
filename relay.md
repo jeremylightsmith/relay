@@ -294,3 +294,8 @@ op run --env-file=.relay/deploy.env -- bin/deploy_fly.sh
 
 `bin/op_deploy.sh bin/deploy_ios.sh <REF>` and `bin/op_deploy.sh bin/deploy_android.sh <REF>` do
 the same for the stores.
+
+Without a signed-in `op`, `bin/op_deploy.sh` runs the command on the environment it inherited
+instead — for a runner, the direnv shell it was started from, so secrets exported in
+`.envrc.local` reach the deploy. The env file's non-secret literals (`BETA_GROUP`,
+`TESTFLIGHT_EXTERNAL`) still apply unless already set; its `op://` references are ignored.

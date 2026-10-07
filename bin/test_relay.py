@@ -3694,6 +3694,18 @@ class StreamClaudeJobTest(unittest.TestCase):
         capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
         self.assertNotIn("--agent", seen["cmd"])
 
+    def test_runs_in_auto_mode_rather_than_skipping_permission_checks(self):
+        """An agent node runs under auto mode's classifier, which denies a risky action (an
+        exfiltration, a deploy, a force-push) and lets the run carry on, instead of
+        --dangerously-skip-permissions, which lets every action through unchecked."""
+        seen = {}
+        relay.subprocess.Popen = lambda cmd, *a, **k: (
+            seen.update(cmd=cmd) or _FakePopen([], code=0))
+        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        self.assertIn("--permission-mode", seen["cmd"])
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--permission-mode") + 1], "auto")
+        self.assertNotIn("--dangerously-skip-permissions", seen["cmd"])
+
     def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
         """claude -p caps a background workflow's wait at 10 minutes by default; a long agent
         node (implement, final_review) runs far longer, so without lifting the cap -p would

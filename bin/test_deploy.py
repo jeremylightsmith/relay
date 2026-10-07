@@ -349,14 +349,7 @@ FLY_FAIL = "deploy_fly: missing required variables: FLY_API_TOKEN"
 IOS_SKIP = "deploy_ios: no flutter/ changes for RE408 — skipping iOS"
 ANDROID_SKIP = "deploy_android: no flutter/ changes for RE408 — skipping Android"
 ANDROID_NO_CREDS = "deploy_android: Android credentials not configured — skipping Play deploy (RLY-103)"
-OP_MISSING = (
-    "op_deploy: 1Password CLI (op) is not installed — install it and sign in; "
-    "headless runners need OP_SERVICE_ACCOUNT_TOKEN"
-)
-OP_SIGNED_OUT = (
-    "op_deploy: op is not signed in — run `op signin`, or set OP_SERVICE_ACCOUNT_TOKEN on a "
-    "headless runner"
-)
+OP_UNAVAILABLE = "op_deploy: 1Password (op) not installed or not signed in — using the inherited environment"
 
 PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
 VALIDATION = [
@@ -717,15 +710,44 @@ class DeployAndroidTest(DeployCase):
 
 
 class OpDeployTest(DeployCase):
-    """op_deploy.sh is the only door to secrets: it explains a missing or signed-out `op`
-    instead of failing obscurely, then hands the command to `op run` with the repo's env file."""
+    """op_deploy.sh resolves secrets through `op run` with the repo's env file when 1Password is
+    installed and signed in. Without it, the command runs on the inherited environment (secrets
+    from e.g. .envrc.local), plus the env file's non-secret literals; never an `op://` string."""
 
-    def test_no_op_cli_fails_with_install_instructions(self):
-        result = self.run_deploy(
-            OP_DEPLOY, ["bin/deploy_fly.sh"], {"PATH": self.stubs + ":/usr/bin:/bin"}
-        )
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn(OP_MISSING, result.stderr)
+    ENV_FILE = (
+        "FLY_API_TOKEN=op://Relay Deploy/fly/credential\n"
+        "# COMMENTED=op://Relay Deploy/x/y\n"
+        "BETA_GROUP=Beta\n"
+        "TESTFLIGHT_EXTERNAL=true\n"
+    )
+    PROBE = 'echo "fly=${FLY_API_TOKEN-unset} group=${BETA_GROUP-unset} ext=${TESTFLIGHT_EXTERNAL-unset}"'
+
+    def setUp(self):
+        super().setUp()
+        commit(self.work, {".relay/deploy.env": self.ENV_FILE}, "deploy env")
+
+    def probe(self, env=None):
+        overrides = {"PATH": self.stubs + ":/usr/bin:/bin"}
+        overrides.update(env or {})
+        return self.run_deploy(OP_DEPLOY, ["sh", "-c", self.PROBE], overrides)
+
+    def test_without_op_runs_on_the_inherited_environment(self):
+        result = self.probe({"FLY_API_TOKEN": "inherited-token"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fly=inherited-token", result.stdout)
+        self.assertIn(OP_UNAVAILABLE, result.stderr)
+
+    def test_without_op_exports_the_env_files_literals(self):
+        result = self.probe()
+        self.assertIn("group=Beta ext=true", result.stdout)
+
+    def test_without_op_never_exports_an_op_reference(self):
+        result = self.probe()
+        self.assertIn("fly=unset", result.stdout)
+
+    def test_without_op_an_inherited_value_beats_the_files_literal(self):
+        result = self.probe({"TESTFLIGHT_EXTERNAL": "false"})
+        self.assertIn("ext=false", result.stdout)
 
     def op_stub(self, whoami_exit):
         stub_bin(
@@ -737,11 +759,11 @@ class OpDeployTest(DeployCase):
             "exit 0\n",
         )
 
-    def test_a_signed_out_op_fails_without_running(self):
+    def test_a_signed_out_op_falls_back_to_the_inherited_environment(self):
         self.op_stub(1)
-        result = self.run_deploy(OP_DEPLOY, ["bin/deploy_fly.sh"])
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn(OP_SIGNED_OUT, result.stderr)
+        result = self.probe({"FLY_API_TOKEN": "inherited-token"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fly=inherited-token", result.stdout)
         self.assertFalse(any(line.startswith("op run") for line in self.tool_lines()))
 
     def test_runs_the_command_under_op_run_with_the_repo_env_file(self):
