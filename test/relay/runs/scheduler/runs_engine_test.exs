@@ -102,6 +102,19 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
     assert got.pinned_runner_id == nil
     assert got.parked_reason == nil
     assert got.pinned_runner_name == nil
+    assert got.refusal_stamped == false
+  end
+
+  test "active_runs/1 reports a run carrying a resume-refusal stamp as refusal_stamped",
+       %{board: board, card: card, flow: flow} do
+    {:ok, run} = Runs.start_run(card, flow)
+    now = DateTime.truncate(DateTime.utc_now(), :second)
+
+    run
+    |> Ecto.Changeset.change(resume_refused_since: now, resume_refused_reason: :pinned_runner_absent)
+    |> Relay.Repo.update!()
+
+    assert [%{refusal_stamped: true}] = RunsEngine.active_runs(board.id)
   end
 
   test "active_runs/1 resolves pinned_runner_name to that board's runner id",

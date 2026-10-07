@@ -613,7 +613,9 @@ A `Card` may also be **blocked by** other cards on the same board (RE93). Each e
 on both FKs and unique on the pair. A blocker counts as **satisfied** when it sits in a
 top-level `:complete`-category stage — `Relay.Boards.top_level_done_stage_ids/1`, the same one
 definition the board's Done treatment and the API's index filter use; the blocker's *status* is
-irrelevant. `Relay.Cards.unmet_dependencies/2` is the single "is this card blocked" read, and
+irrelevant. `Relay.Cards.unmet_dependencies/2` is the single "is this card blocked" read — its
+predicate is one private query that `Relay.Cards.list_scheduler_cards/2` (the scheduler
+snapshot's one-query card projection, RE402) shares for each card's `blocked_by` — and
 `Relay.Runs.Policy.pullable?/1` is where it gates: a card with any unmet blocker is skipped by
 the scheduler's fresh pulls and by the board's "queued for X" face chip, together. It gates
 **fresh pulls only**, and two starts are named carve-outs on `pullable?/1`'s doc:

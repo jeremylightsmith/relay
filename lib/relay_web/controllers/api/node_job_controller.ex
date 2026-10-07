@@ -267,11 +267,11 @@ defmodule RelayWeb.Api.NodeJobController do
     |> json(%{error: %{code: @outdated_code, required: Runs.min_runner_version(), running: running, message: message}})
   end
 
-  # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/2
+  # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/3
   # normalizes (unknown classes dropped, bad values zeroed) — the controller must not
   # shape capacity itself, and must never atomize request keys.
   defp advertise_capacity(runner, capacity) when is_map(capacity) do
-    Capacity.put(runner.id, capacity)
+    Capacity.put(runner.id, runner.board_id, capacity)
   end
 
   defp advertise_capacity(_runner, _capacity), do: :ok

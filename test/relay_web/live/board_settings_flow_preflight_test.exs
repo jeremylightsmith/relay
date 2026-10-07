@@ -46,7 +46,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
         last_heartbeat: opts[:last_heartbeat] || DateTime.truncate(DateTime.utc_now(), :second)
       )
 
-    Capacity.put(runner.id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
+    Capacity.put(runner.id, runner.board_id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
     runner
   end
 

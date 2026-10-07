@@ -804,14 +804,91 @@ defmodule Relay.Cards do
   """
   @spec unmet_dependencies(Board.t(), [Stage.t()]) :: %{integer() => [integer()]}
   def unmet_dependencies(%Board{} = board, stages) when is_list(stages) do
-    done_ids = Boards.top_level_done_stage_ids(stages)
-
-    CardDependency
-    |> join(:inner, [d], b in Card, on: b.id == d.depends_on_card_id)
-    |> where([d, b], b.board_id == ^board.id and is_nil(b.archived_at) and b.stage_id not in ^done_ids)
+    board.id
+    |> unmet_dependencies_query(Boards.top_level_done_stage_ids(stages))
     |> select([d, b], {d.card_id, d.depends_on_card_id})
     |> Repo.all()
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  # The ONE unmet-blocker predicate (RE93): dependency edges whose blocker is a live card of
+  # the board outside every top-level Done stage. Read by `unmet_dependencies/2` and
+  # `list_scheduler_cards/2`, so "blocked" cannot mean two things.
+  defp unmet_dependencies_query(board_id, done_ids) do
+    CardDependency
+    |> join(:inner, [d], b in Card, on: b.id == d.depends_on_card_id)
+    |> where([d, b], b.board_id == ^board_id and is_nil(b.archived_at) and b.stage_id not in ^done_ids)
+  end
+
+  @doc """
+  The board's non-archived cards projected to `Relay.Runs.Scheduler.Snapshot.card/0` in ONE
+  query (RE402) — `%{id, ref, stage_id, status, active_owner, position, blocked_by}`, ordered
+  like `list_cards/1` (`stage_id, position, id`; the planner's tie-breaks rely on it).
+
+  `ref` joins the board's key in the same query; `active_owner` is `active_owner_type/1` over
+  the card's aggregated owner actor types; `blocked_by` is the card's unmet blocker ids, sorted
+  ascending, from the same predicate as `unmet_dependencies/2`, with `done_stage_ids` the
+  board's `Relay.Boards.top_level_done_stage_ids/1`.
+  """
+  @spec list_scheduler_cards(integer(), [integer()]) :: [Relay.Runs.Scheduler.Snapshot.card()]
+  def list_scheduler_cards(board_id, done_stage_ids) when is_list(done_stage_ids) do
+    owners =
+      from o in CardOwner,
+        join: oc in Card,
+        on: oc.id == o.card_id,
+        where: oc.board_id == ^board_id,
+        group_by: o.card_id,
+        select: %{card_id: o.card_id, actor_types: fragment("array_agg(DISTINCT ?)", o.actor_type)}
+
+    blockers =
+      from [d, _b] in unmet_dependencies_query(board_id, done_stage_ids),
+        group_by: d.card_id,
+        select: %{
+          card_id: d.card_id,
+          ids: fragment("array_agg(DISTINCT ? ORDER BY ?)", d.depends_on_card_id, d.depends_on_card_id)
+        }
+
+    from(c in Card,
+      join: bd in Board,
+      on: bd.id == c.board_id,
+      left_join: o in subquery(owners),
+      on: o.card_id == c.id,
+      left_join: bl in subquery(blockers),
+      on: bl.card_id == c.id,
+      where: c.board_id == ^board_id and is_nil(c.archived_at),
+      order_by: [asc: c.stage_id, asc: c.position, asc: c.id],
+      select: %{
+        id: c.id,
+        key: bd.key,
+        ref_number: c.ref_number,
+        stage_id: c.stage_id,
+        status: c.status,
+        position: c.position,
+        actor_types: o.actor_types,
+        blocked_by: bl.ids
+      }
+    )
+    |> Repo.all()
+    |> Enum.map(&scheduler_card/1)
+  end
+
+  defp scheduler_card(row) do
+    %{
+      id: row.id,
+      ref: format_ref(row.key, row.ref_number),
+      stage_id: row.stage_id,
+      status: row.status,
+      active_owner: active_owner_type(%{owners: Enum.map(row.actor_types || [], &%{actor_type: load_actor_type(&1)})}),
+      position: row.position,
+      blocked_by: row.blocked_by || []
+    }
+  end
+
+  # `array_agg` returns the enum's raw strings; load them through the schema's own field type
+  # rather than re-typing the actor set here.
+  defp load_actor_type(raw) do
+    {:ok, actor_type} = Ecto.Type.load(CardOwner.__schema__(:type, :actor_type), raw)
+    actor_type
   end
 
   @doc """

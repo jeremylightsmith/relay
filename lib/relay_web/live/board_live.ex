@@ -146,7 +146,7 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-204: coalesce a burst of run events per socket into ONE scoped refetch. A board that
   # gets N run events for a card in this window does one flush, not N whole-board refetches.
-  # Mirrors Relay.Runs.Scheduler.Server's Process.send_after + pending? debounce.
+  # Mirrors Relay.Runs.Scheduler.Server's Process.send_after + pending debounce.
   @run_flush_debounce_ms 150
 
   # RE257 — the per-socket floor on relayed cursor frames. The StoryMapCursors hook already

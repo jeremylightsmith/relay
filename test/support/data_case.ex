@@ -190,6 +190,44 @@ defmodule Relay.DataCase do
   end
 
   @doc """
+  Runs `fun` and returns `{result, count}`, where `count` is the number of Repo queries
+  (`[:relay, :repo, :query]` telemetry events) **issued by `pid`** while it ran.
+
+  Ecto emits repo telemetry in the process that issued the query, so filtering on `pid` keeps
+  this safe under `async: true` — pass `self()` to count the test's own queries, or a server's
+  pid to count what a `GenServer.call` made it do. The handler is detached afterwards.
+  """
+  def count_repo_queries(pid, fun) when is_pid(pid) and is_function(fun, 0) do
+    test = self()
+    tag = make_ref()
+    handler_id = {__MODULE__, :count_repo_queries, tag}
+
+    :telemetry.attach(
+      handler_id,
+      [:relay, :repo, :query],
+      fn _event, _measurements, _meta, _config ->
+        if self() == pid, do: send(test, {:repo_query, tag})
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, drain_repo_queries(tag, 0)}
+    after
+      :telemetry.detach(handler_id)
+    end
+  end
+
+  defp drain_repo_queries(tag, count) do
+    receive do
+      {:repo_query, ^tag} -> drain_repo_queries(tag, count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  @doc """
   A helper that transforms changeset errors into a map of messages.
 
       assert {:error, changeset} = Accounts.create_user(%{password: "short"})

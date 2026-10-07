@@ -2,8 +2,8 @@ defmodule Relay.Runs.Capacity do
   @moduledoc """
   The runner-capacity seam (ADR 0006 / RLY-133): a GenServer owning a public
   named ETS table of the **advertised** capacity each connected runner
-  carries per isolation class — `%{runner_id => %{shared_clean: n,
-  exclusive: n}}`. Like `Relay.BoardWatch`, beats and reads never hop
+  carries per isolation class, one row per runner tagged with the runner's
+  board — `{runner_id, board_id, %{shared_clean: n, exclusive: n}}`. Like `Relay.BoardWatch`, beats and reads never hop
   through the process, and state is lost on restart by design.
 
   **Contract: this is the runner's configured per-class slot count, not a
@@ -15,16 +15,19 @@ defmodule Relay.Runs.Capacity do
   runner having to re-advertise a decremented count (which would be racy
   across reconciles).
 
-  Global (not board-scoped) within an engine instance: capacity is keyed by runner and read by
-  every board's scheduler. The table name is resolved through `Relay.Runs.Instance` — the
+  Entries are keyed by runner and carry the runner's board id (RE402): `snapshot/0` drops the
+  board id and returns `%{runner_id => slots}` (each scheduler allow-lists its own runners), while
+  `live?/1` answers "does this board have any advertised slot?" from ETS alone. The table name is resolved through `Relay.Runs.Instance` — the
   application-wide `default_table/0` in production, a private table per test (ADR 0009), so one
   test's advertised capacity can never be read or wiped by another. The
   `{:runner_capacity_changed, runner_id}` broadcast on `topic/0` stays global: a spurious
   wake-up makes a scheduler re-reconcile against its own (correctly scoped) snapshot, which is
-  idempotent — but not free: every board's scheduler wakes, so `put/2`/`clear/1` broadcast only
-  when the stored slots actually change, letting schedulers reconcile immediately
-  (acceptance criterion 2's "without waiting a full tick"). The runner heartbeat feeds this
-  store; with no runner connected it is empty and the scheduler is dormant.
+  idempotent. It fires **only on a real change** — a `put/3` whose row differs from the stored one,
+  or a `clear/1` that removed an entry — so schedulers reconcile immediately on a change
+  (acceptance criterion 2's "without waiting a full tick") without being woken by every beat. The
+  runner heartbeat feeds this store; `Relay.Runs.reclaim_stale_runners/1` (the reaper's sweep)
+  evicts every stale runner's entry. With no runner connected it is empty and the scheduler is
+  dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
   concurrent per-card worktrees a runner holds, reinterpreted from the old fixed
@@ -56,20 +59,20 @@ defmodule Relay.Runs.Capacity do
   def subscribe, do: Phoenix.PubSub.subscribe(@pubsub, @topic)
 
   @doc """
-  Sets/replaces `runner_id`'s advertised (configured, not live-free) slots
-  and broadcasts the change. Fire-and-forget: `:ok`.
+  Sets/replaces `runner_id`'s advertised (configured, not live-free) slots on `board_id` — the
+  runner's board — and broadcasts **only when the stored entry actually changed**.
+  Fire-and-forget: `:ok`.
 
   Takes the **raw** client map — string- or atom-keyed — and shapes it with
   `normalize/1`: unknown classes dropped, bad values zeroed, missing classes 0.
   Callers must not pre-atomize (RLY-201).
   """
-  def put(runner_id, slots) when is_map(slots) do
-    entry = {runner_id, normalize(slots)}
+  def put(runner_id, board_id, slots) when is_map(slots) do
+    entry = {runner_id, board_id, normalize(slots)}
 
-    # Broadcast only on a real change: every runner beat re-advertises the same configured
-    # total, and the topic is global, so an unconditional broadcast woke EVERY board's
-    # scheduler on every beat of every runner — a synchronized reconcile burst that drained
-    # the Repo pool in prod. The scheduler's ~60s tick remains the backstop.
+    # Every heartbeat re-advertises the same configured total, and the topic is global — so an
+    # unconditional broadcast woke every board's scheduler on every beat of every runner. Compare
+    # the whole stored row (board id included: a runner moving boards is a change) first.
     if :ets.lookup(table(), runner_id) != [entry] do
       :ets.insert(table(), entry)
       broadcast(runner_id)
@@ -78,7 +81,7 @@ defmodule Relay.Runs.Capacity do
     :ok
   end
 
-  @doc "Removes a gone runner and broadcasts the change."
+  @doc "Removes a gone runner, broadcasting only when it actually had an entry."
   def clear(runner_id) do
     if :ets.member(table(), runner_id) do
       :ets.delete(table(), runner_id)
@@ -88,8 +91,21 @@ defmodule Relay.Runs.Capacity do
     :ok
   end
 
-  @doc "The full capacity map the scheduler reads into `Snapshot.capacity`."
-  def snapshot, do: table() |> :ets.tab2list() |> Map.new()
+  @doc """
+  True iff some runner advertising on `board_id` has a positive slot in any class. Reads ETS
+  only — never the Repo — so a scheduler can ask it every tick for free. No freshness check: a
+  dead runner keeps its board live until the reaper's sweep evicts it.
+  """
+  def live?(board_id) do
+    table()
+    |> :ets.match_object({:_, board_id, :_})
+    |> Enum.any?(fn {_runner_id, _board_id, slots} -> slots.shared_clean > 0 or slots.exclusive > 0 end)
+  end
+
+  @doc "The full capacity map the scheduler reads into `Snapshot.capacity` — `%{runner_id => slots}`."
+  def snapshot do
+    for {runner_id, _board_id, slots} <- :ets.tab2list(table()), into: %{}, do: {runner_id, slots}
+  end
 
   # The table this process's engine instance owns — `default_table/0` in production, where nothing
   # is registered, and a per-test table under `Relay.DataCase.start_capacity!/0` (ADR 0009). Reads

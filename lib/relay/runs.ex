@@ -106,7 +106,8 @@ defmodule Relay.Runs do
           isolation: f.isolation,
           parked_reason: r.parked_reason,
           pinned_runner_name: r.pinned_runner_name,
-          pinned_runner_id: e.id
+          pinned_runner_id: e.id,
+          refusal_stamped: not is_nil(r.resume_refused_since) or not is_nil(r.resume_refused_reason)
         }
       )
     )
@@ -2271,7 +2272,8 @@ defmodule Relay.Runs do
   The reclaim sweep (criterion 2): for every stale runner, return its in-flight
   `shared_clean` jobs to `queued` (dropping `runner_name`, so W8 re-offers them)
   and park its `exclusive` runs (`parked_reason: :runner_gone` — affinity is
-  absolute; the run waits for its machine). Idempotent; `now` is injectable for
+  absolute; the run waits for its machine), and evicts its `Relay.Runs.Capacity` entry so its
+  board stops looking live (RE402). Idempotent; `now` is injectable for
   the reaper's clock and tests.
   """
   def reclaim_stale_runners(now \\ nil) do
@@ -2280,7 +2282,10 @@ defmodule Relay.Runs do
     Runner
     |> Repo.all()
     |> Enum.filter(&runner_stale?(&1, now))
-    |> Enum.each(&reclaim_runner/1)
+    |> Enum.each(fn runner ->
+      reclaim_runner(runner)
+      Capacity.clear(runner.id)
+    end)
 
     :ok
   end
@@ -2469,9 +2474,16 @@ defmodule Relay.Runs do
     end)
   end
 
-  @doc "The board's raw `Runner` rows — the lean read `Scheduler.Server` builds its snapshot's `runners` map from."
+  # The runner columns `runner_snapshot_entry/2` and `working_run_ids/2` read (RE402).
+  @board_runner_fields [:id, :board_id, :name, :version, :last_heartbeat, :interval, :rate_limit]
+
+  @doc """
+  The board's `Runner` rows, narrowed to #{inspect(@board_runner_fields)} — the lean read
+  `Scheduler.Server` builds its snapshot's `runners` map from (and `working_run_ids/2` /
+  `roster_rate_limit/2` read). Any other field is left at its struct default.
+  """
   def list_board_runners(board_id) do
-    Repo.all(from e in Runner, where: e.board_id == ^board_id)
+    Repo.all(from e in Runner, where: e.board_id == ^board_id, select: struct(e, @board_runner_fields))
   end
 
   ## Resume refusals (RE297)
@@ -2490,11 +2502,16 @@ defmodule Relay.Runs do
 
   Steady state is a single SELECT that returns nothing: the values are already at their target,
   so a quiet board writes no rows per tick. `now` is injectable for tests.
+
+  `runs` (RE402) is the scheduler snapshot's active runs for the board. When given, the set to
+  clear is read from each run's `refusal_stamped` (absent counts as `false`) instead of a
+  SELECT, so a quiet tick issues **no** query; `nil` keeps the SELECT.
   """
-  def record_resume_refusals(board_id, refusals, now \\ nil) do
+  def record_resume_refusals(board_id, refusals, now \\ nil, runs \\ nil) do
     now = now || now()
     Enum.each(refusals, &stamp_refusal(&1, now))
-    clear_stale_refusals(board_id, Enum.map(refusals, & &1.run_id))
+    refused_ids = Enum.map(refusals, & &1.run_id)
+    clear_refusals(board_id, stamped_run_ids(board_id, runs) -- refused_ids)
     :ok
   end
 
@@ -2524,31 +2541,34 @@ defmodule Relay.Runs do
     :ok
   end
 
-  # Board-scoped, and only over runs that actually carry a stamp — so the common case (nothing
-  # is being refused) is one indexed SELECT returning zero rows and no UPDATE at all.
-  defp clear_stale_refusals(board_id, refused_ids) do
-    stamped =
-      Repo.all(
-        from r in Run,
-          join: c in Card,
-          on: c.id == r.card_id,
-          where: c.board_id == ^board_id,
-          where: r.status in ^Run.active_statuses(),
-          where: not is_nil(r.resume_refused_since) or not is_nil(r.resume_refused_reason),
-          select: r.id
-      )
+  # The board's active runs that carry a stamp. Given the snapshot's runs, read straight off
+  # their `refusal_stamped` (no query); otherwise one board-scoped, indexed SELECT — so the
+  # common case (nothing is being refused) writes nothing either way.
+  defp stamped_run_ids(_board_id, runs) when is_list(runs) do
+    for run <- runs, Map.get(run, :refusal_stamped, false), do: run.id
+  end
 
-    case stamped -- refused_ids do
-      [] ->
-        :ok
+  defp stamped_run_ids(board_id, nil) do
+    Repo.all(
+      from r in Run,
+        join: c in Card,
+        on: c.id == r.card_id,
+        where: c.board_id == ^board_id,
+        where: r.status in ^Run.active_statuses(),
+        where: not is_nil(r.resume_refused_since) or not is_nil(r.resume_refused_reason),
+        select: r.id
+    )
+  end
 
-      ids ->
-        Repo.update_all(from(r in Run, where: r.id in ^ids),
-          set: [resume_refused_since: nil, resume_refused_reason: nil]
-        )
+  defp clear_refusals(_board_id, []), do: :ok
 
-        :ok
-    end
+  defp clear_refusals(board_id, ids) do
+    Repo.update_all(
+      from(r in Run, join: c in Card, on: c.id == r.card_id, where: c.board_id == ^board_id and r.id in ^ids),
+      set: [resume_refused_since: nil, resume_refused_reason: nil]
+    )
+
+    :ok
   end
 
   # How long a run may be CONTINUOUSLY refused a resume before the scheduler gives up on it.
@@ -2585,7 +2605,7 @@ defmodule Relay.Runs do
           where: not is_nil(r.resume_refused_since) and r.resume_refused_since < ^cutoff,
           # A stamp with no classified reason has nothing to name in its failure detail, and
           # `Scheduler.resume_refusal_sentence/1` has no nil clause — sweeping it would raise
-          # inside `RunnerReaper`'s tick. `clear_stale_refusals/2` collects the row instead.
+          # inside `RunnerReaper`'s tick. `record_resume_refusals/4` clears the row instead.
           where: not is_nil(r.resume_refused_reason)
       )
 

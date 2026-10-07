@@ -68,12 +68,36 @@ defmodule Relay.Flows do
   end
 
   @doc "The board's **enabled** flows in stable `key` order (the scheduler's input)."
-  def list_enabled_flows(%Board{id: board_id}) do
-    Repo.all(
-      from f in Flow,
-        where: f.board_id == ^board_id and f.enabled == true,
-        order_by: f.key
-    )
+  def list_enabled_flows(%Board{id: board_id}), do: Repo.all(enabled_flows_query(board_id))
+
+  @doc """
+  The board's **enabled** flows projected to `Relay.Runs.Scheduler.Snapshot.flow/0` —
+  `%{key, pulls_from_stage_id, works_in_stage_id, isolation}` — in `key` order. The same
+  predicate as `list_enabled_flows/1`; the lean read the scheduler snapshot uses (RE402).
+  """
+  @spec list_enabled_flow_snapshots(integer()) :: [
+          %{
+            key: String.t(),
+            pulls_from_stage_id: integer(),
+            works_in_stage_id: integer(),
+            isolation: :shared_clean | :exclusive
+          }
+        ]
+  def list_enabled_flow_snapshots(board_id) do
+    board_id
+    |> enabled_flows_query()
+    |> select([f], %{
+      key: f.key,
+      pulls_from_stage_id: f.pulls_from_stage_id,
+      works_in_stage_id: f.works_in_stage_id,
+      isolation: f.isolation
+    })
+    |> Repo.all()
+  end
+
+  # The ONE "enabled flows of a board" predicate, shared by both readers above.
+  defp enabled_flows_query(board_id) do
+    from f in Flow, where: f.board_id == ^board_id and f.enabled == true, order_by: f.key
   end
 
   # The leading slash-command token of a node's `run`, e.g. "/write-plan {ref}" → "write-plan".

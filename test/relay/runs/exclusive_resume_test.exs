@@ -76,7 +76,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
     {:ok, exec_a} =
       Runs.upsert_runner(board, %{"name" => "exec-a", "interval" => 30, "capacity" => %{"exclusive" => 1}})
 
-    :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a.id, exec_a.board_id, %{shared_clean: 0, exclusive: 1})
 
     {snapshot, _cards} = Server.build_snapshot(board.id, RunsEngine)
     plan = Scheduler.plan(snapshot)
@@ -91,7 +91,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
     # last-advertised exclusive slot still lingers in the capacity table (nothing cleared it).
     # The planner must NOT resume onto a machine the reaper has already given up on, or the run
     # oscillates forever: resume → reap → resume (RLY-199).
-    :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a.id, exec_a.board_id, %{shared_clean: 0, exclusive: 1})
 
     {snapshot, _cards} = Server.build_snapshot(board.id, RunsEngine)
     plan = Scheduler.plan(snapshot)
@@ -104,7 +104,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
 
     # A DIFFERENT runner (exec-b) advertises exclusive capacity; exec-a stays absent.
     {:ok, exec_b} = Runs.upsert_runner(board, %{"name" => "exec-b", "capacity" => %{"exclusive" => 1}})
-    :ok = Capacity.put(exec_b.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_b.id, exec_b.board_id, %{shared_clean: 0, exclusive: 1})
 
     {snapshot, _cards} = Server.build_snapshot(board.id, RunsEngine)
     plan = Scheduler.plan(snapshot)
@@ -121,7 +121,7 @@ defmodule Relay.Runs.ExclusiveResumeTest do
     # lingers, so `explain/2` used to see a planned resume and report "dispatchable", never
     # naming exec-a. With the gone runner's capacity dropped, diagnose reaches run_verdict
     # and names the machine the run waits for (criterion 3).
-    :ok = Capacity.put(exec_a.id, %{shared_clean: 0, exclusive: 1})
+    :ok = Capacity.put(exec_a.id, exec_a.board_id, %{shared_clean: 0, exclusive: 1})
 
     card = Relay.Cards.get_card(board, run.card_id)
 

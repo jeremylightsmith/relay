@@ -6,13 +6,26 @@ defmodule Relay.Runs.Scheduler.Server do
   `Relay.Runs.Scheduler.Engine`, and applies the `ready ↔ queued` marking via
   `Relay.Cards` (the only card writes the scheduler owns — it never writes a `Run`'s
   **status** or moves cards into works-in). It also hands `plan/1`'s `refusals` to
-  `Relay.Runs.record_resume_refusals/3` (RE297), which stamps the refusal clock on the run
+  `Relay.Runs.record_resume_refusals/4` (RE297), which stamps the refusal clock on the run
   rows — a fact, not a status, and owned by `Relay.Runs` exactly as dispatch is owned by the
   engine and marking by `Relay.Cards`.
 
+  A reconcile is cheap by construction (RE402): the snapshot is five narrow reads (stages,
+  card projection, active runs, runners, enabled flows); `record_resume_refusals/4` decides
+  what to clear from the snapshot's runs instead of a SELECT; and marking loads a `%Card{}`
+  only for a card whose status actually changes. A steady-state reconcile is ≤ 5 queries.
+
   Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
   capacity-changed topic, debouncing a burst into one reconcile, with a slow
-  (~60s) tick as backstop. `reconcile_now/1` forces a synchronous reconcile.
+  jittered (~60s) tick as backstop: the first tick lands uniformly in `[1, tick_ms]` and each
+  later one in `tick_ms × [0.8, 1.2]` (`tick_delay/2`), so boards don't tick in lockstep.
+  `reconcile_now/1` forces a synchronous reconcile.
+
+  **Quiescent dormant boards are skipped (RE402).** A tick, or a debounced burst made only of
+  capacity changes, issues zero queries when the board has no live capacity
+  (`Relay.Runs.Capacity.live?/1`) AND its last full reconcile saw no active runs (`settled?`).
+  Card events, `reconcile_now/1` and the boot reconcile always run in full; a board holding an
+  active (e.g. parked) run keeps reconciling every tick, so its RE297 refusal clock stays live.
   """
 
   use GenServer
@@ -22,11 +35,14 @@ defmodule Relay.Runs.Scheduler.Server do
   alias Relay.Runs.Capacity
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Snapshot
+  alias Schemas.Board
 
   require Logger
 
   @tick_ms 60_000
   @debounce_ms 50
+  # The ONE jitter fraction: after the first tick, each delay is drawn from tick_ms × [1 ± this].
+  @tick_jitter 0.2
 
   def start_link(opts) do
     board_id = Keyword.fetch!(opts, :board_id)
@@ -50,13 +66,32 @@ defmodule Relay.Runs.Scheduler.Server do
       engine: Keyword.get(opts, :engine, default_engine()),
       tick_ms: Keyword.get(opts, :tick_ms, @tick_ms),
       debounce_ms: Keyword.get(opts, :debounce_ms, @debounce_ms),
-      pending?: false
+      pending: nil,
+      settled?: false,
+      tick_ref: nil
     }
 
     Relay.Events.subscribe(board_id)
     Capacity.subscribe()
-    Process.send_after(self(), :tick, state.tick_ms)
-    {:ok, state, {:continue, :boot_reconcile}}
+    {:ok, schedule_tick(state, :first), {:continue, :boot_reconcile}}
+  end
+
+  @doc """
+  The delay (ms) before a tick — pure, so the spread is testable. `:first` is uniform in
+  `[1, tick_ms]`, so boards started together don't tick in lockstep; `:next` is uniform in
+  `tick_ms × [1 − @tick_jitter, 1 + @tick_jitter]`, so they never drift back into it. Never < 1.
+  """
+  @spec tick_delay(pos_integer(), :first | :next) :: pos_integer()
+  def tick_delay(tick_ms, :first) when is_integer(tick_ms) and tick_ms > 0, do: :rand.uniform(tick_ms)
+
+  def tick_delay(tick_ms, :next) when is_integer(tick_ms) and tick_ms > 0 do
+    low = max(round(tick_ms * (1 - @tick_jitter)), 1)
+    high = max(round(tick_ms * (1 + @tick_jitter)), low)
+    low - 1 + :rand.uniform(high - low + 1)
+  end
+
+  defp schedule_tick(state, which) do
+    %{state | tick_ref: Process.send_after(self(), :tick, tick_delay(state.tick_ms, which))}
   end
 
   defp default_engine, do: Application.get_env(:relay, :runs_engine, Relay.Runs.Scheduler.NoopEngine)
@@ -69,25 +104,37 @@ defmodule Relay.Runs.Scheduler.Server do
 
   @impl true
   def handle_info(:tick, state) do
-    Process.send_after(self(), :tick, state.tick_ms)
-    {:noreply, reconcile(state)}
+    # Rescheduled even when the reconcile is skipped, or a dormant board would stop ticking.
+    state = schedule_tick(state, :next)
+    {:noreply, maybe_reconcile(state)}
   end
 
-  def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending?: false})}
+  def handle_info(:flush, %{pending: :capacity} = state), do: {:noreply, maybe_reconcile(%{state | pending: nil})}
+  def handle_info(:flush, state), do: {:noreply, reconcile(%{state | pending: nil})}
 
   # Any capacity change or card move/upsert on this board is a reason to reconcile.
-  def handle_info({:runner_capacity_changed, _runner_id}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state)}
-  def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state)}
+  def handle_info({:runner_capacity_changed, _runner_id}, state), do: {:noreply, mark_dirty(state, :capacity)}
+  def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state, :card)}
+  def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state, :card)}
+  def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state, :card)}
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Debounce a burst of events into one reconcile.
-  defp mark_dirty(%{pending?: true} = state), do: state
-
-  defp mark_dirty(state) do
+  # Debounce a burst of events into one reconcile (one pending :flush). The burst's reason is
+  # :card if any card event is in it — a later capacity event never downgrades it.
+  defp mark_dirty(%{pending: nil} = state, reason) do
     Process.send_after(self(), :flush, state.debounce_ms)
-    %{state | pending?: true}
+    %{state | pending: reason}
+  end
+
+  defp mark_dirty(state, :card), do: %{state | pending: :card}
+  defp mark_dirty(state, :capacity), do: state
+
+  # The skip rule (RE402) for a tick or a capacity-only flush: a board with no live capacity
+  # whose last full reconcile saw no active runs has nothing to dispatch, resume or refuse, so
+  # it is skipped before any Repo access — and `settled?` is left as it was. Card events,
+  # `reconcile_now/1` and boot never come through here.
+  defp maybe_reconcile(state) do
+    if state.settled? and not Capacity.live?(state.board_id), do: state, else: reconcile(state)
   end
 
   # A raise here must stay on this board (RE387). Uncaught, it crashed the server, whose boot
@@ -103,47 +150,50 @@ defmodule Relay.Runs.Scheduler.Server do
           Exception.format(kind, reason, __STACKTRACE__)
       )
 
-      state
+      %{state | settled?: false}
   end
 
   defp do_reconcile(state) do
     {snapshot, cards_by_id} = build_snapshot(state)
     plan = Scheduler.plan(snapshot)
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))
-    Relay.Runs.record_resume_refusals(state.board_id, plan.refusals)
-    apply_marking(plan, cards_by_id)
-    state
+    Relay.Runs.record_resume_refusals(state.board_id, plan.refusals, nil, snapshot.runs)
+    apply_marking(plan, state.board_id, cards_by_id)
+    %{state | settled?: snapshot.runs == []}
   end
 
   defp dispatch({:start, card_id, flow_key, runner_id}, engine), do: engine.start_run(card_id, flow_key, runner_id)
 
   defp dispatch({:resume, run_id, runner_id}, engine), do: engine.resume_run(run_id, runner_id)
 
-  # --- snapshot assembly (returns the loaded card structs so apply_marking can write status) ---
+  # --- snapshot assembly ---
 
   @doc """
   Assembles the dispatch snapshot for `board_id` against `engine`, returning it alongside
-  the loaded card structs (which `apply_marking/2` writes status through).
+  `cards_by_id` — card id → that card's `Snapshot.card` map (what `apply_marking/3` reads the
+  current status from before it loads and writes a changed card).
+
+  Five narrow reads (RE402): `Boards.list_scheduler_stages/1`, `Cards.list_scheduler_cards/2`
+  (the projection, with `blocked_by` from the same predicate as `Cards.unmet_dependencies/2`),
+  `engine.active_runs/1`, `Runs.list_board_runners/1` and `Flows.list_enabled_flow_snapshots/1`.
 
   Public because `Relay.Runs.diagnose/3` (RLY-177) must diagnose against **byte-for-byte
   the snapshot this server plans from** — including the `reserve_active_runs/2` debit for
   in-flight runs. A second assembly path would be a second source of truth.
   """
   def build_snapshot(board_id, engine) do
-    board = Boards.get_board_by_id!(board_id)
-    cards = Cards.list_cards(board)
-    stages = Boards.list_stages(board)
-    # RE93 — the ONE "is this card blocked" read, done here where the stage list is already in
-    # hand, so the pure planner never re-derives "which stage is complete". Runs.diagnose/3
-    # reuses this same function, so plan and explain cannot disagree.
-    blocked_by = Cards.unmet_dependencies(board, stages)
+    stages = Boards.list_scheduler_stages(board_id)
+    # RE93 — the ONE "is this card blocked" read (`blocked_by` on each card), done here where the
+    # stage list is already in hand, so the pure planner never re-derives "which stage is
+    # complete". Runs.diagnose/3 reuses this same function, so plan and explain cannot disagree.
+    cards = Cards.list_scheduler_cards(board_id, Boards.top_level_done_stage_ids(stages))
     runs = engine.active_runs(board_id)
     runners = runner_snap(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(stages, &stage_snap/1),
-      cards: Enum.map(cards, &card_snap(&1, board, blocked_by)),
-      flows: Enum.map(Relay.Flows.list_enabled_flows(board), &flow_snap/1),
+      cards: cards,
+      flows: Relay.Flows.list_enabled_flow_snapshots(board_id),
       runs: runs,
       capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> counting_capacity(runners),
       runners: runners
@@ -250,42 +300,29 @@ defmodule Relay.Runs.Scheduler.Server do
     %{id: stage.id, position: stage.position, parent_id: stage.parent_id, wip_limit: stage.wip_limit}
   end
 
-  defp card_snap(card, board, blocked_by) do
-    %{
-      id: card.id,
-      ref: Cards.ref(board, card),
-      stage_id: card.stage_id,
-      status: card.status,
-      active_owner: Cards.active_owner_type(card),
-      position: card.position,
-      blocked_by: Map.get(blocked_by, card.id, [])
-    }
-  end
-
-  defp flow_snap(flow) do
-    %{
-      key: flow.key,
-      pulls_from_stage_id: flow.pulls_from_stage_id,
-      works_in_stage_id: flow.works_in_stage_id,
-      isolation: flow.isolation
-    }
-  end
-
   # --- the scheduler-owned ready <-> queued marking ---
 
-  defp apply_marking(plan, cards_by_id) do
-    Enum.each(plan.to_queue, &set_status(cards_by_id, &1, :queued))
-    Enum.each(plan.to_unqueue, &set_status(cards_by_id, &1, :ready))
+  defp apply_marking(plan, board_id, cards_by_id) do
+    Enum.each(plan.to_queue, &set_status(board_id, cards_by_id, &1, :queued))
+    Enum.each(plan.to_unqueue, &set_status(board_id, cards_by_id, &1, :ready))
     :ok
   end
 
   # :queued/:ready are valid in the pulls-from stage (queue/done), so a plain set_status is safe.
-  # Skip a no-op write (already at the target status) — set_status/3 re-broadcasts unconditionally,
-  # which would re-trigger this reconcile in a loop.
-  defp set_status(cards_by_id, card_id, status) do
+  # Skip a no-op write (already at the target status, per the snapshot) — Cards.set_status/2
+  # re-broadcasts unconditionally, which would re-trigger this reconcile in a loop. Only a card
+  # that really changes is loaded (RE402); one gone since the snapshot is skipped.
+  defp set_status(board_id, cards_by_id, card_id, status) do
     case Map.get(cards_by_id, card_id) do
       nil -> :ok
       %{status: ^status} -> :ok
+      _changed -> write_status(board_id, card_id, status)
+    end
+  end
+
+  defp write_status(board_id, card_id, status) do
+    case Cards.get_card(%Board{id: board_id}, card_id) do
+      nil -> :ok
       card -> Cards.set_status(card, %{status: status})
     end
   end

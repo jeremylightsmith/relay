@@ -160,6 +160,80 @@ defmodule Relay.CardsDependenciesTest do
     end
   end
 
+  describe "list_scheduler_cards/2 (RE402)" do
+    # a (RE1, :ready, agent + user owner) blocked by b and c; b (RE2) owned by a user only.
+    setup ctx do
+      {:ok, a} = ctx.a |> Ecto.Changeset.change(status: :ready) |> Repo.update()
+      insert(:card_owner, card: a)
+      insert(:card_owner, card: a, user: insert(:user))
+      insert(:card_owner, card: ctx.b, user: insert(:user))
+      {:ok, _} = Cards.set_dependencies(ctx.board, a, ["RE2", "RE3"])
+      %{a: a}
+    end
+
+    defp done_ids(board), do: Relay.Boards.top_level_done_stage_ids(stages(board))
+
+    defp scheduler_cards(board), do: Map.new(Cards.list_scheduler_cards(board.id, done_ids(board)), &{&1.id, &1})
+
+    test "projects each card to the snapshot card map", ctx do
+      cards = scheduler_cards(ctx.board)
+
+      assert cards[ctx.a.id] == %{
+               id: ctx.a.id,
+               ref: "RE1",
+               stage_id: ctx.todo.id,
+               status: :ready,
+               active_owner: :ai,
+               position: ctx.a.position,
+               blocked_by: Enum.sort([ctx.b.id, ctx.c.id])
+             }
+
+      assert %{ref: "RE2", active_owner: :human, blocked_by: []} = cards[ctx.b.id]
+    end
+
+    test "is ordered stage, position, id like list_cards/1", ctx do
+      ids = Enum.map(Cards.list_scheduler_cards(ctx.board.id, done_ids(ctx.board)), & &1.id)
+      assert ids == Enum.map(Cards.list_cards(ctx.board), & &1.id)
+    end
+
+    test "an unowned card has no active owner", ctx do
+      assert scheduler_cards(ctx.board)[ctx.c.id].active_owner == nil
+    end
+
+    test "a blocker in a top-level :complete stage no longer blocks", ctx do
+      {:ok, _} = ctx.b |> Ecto.Changeset.change(stage_id: ctx.done.id) |> Repo.update()
+      {:ok, _} = ctx.c |> Ecto.Changeset.change(stage_id: ctx.done.id) |> Repo.update()
+      assert scheduler_cards(ctx.board)[ctx.a.id].blocked_by == []
+    end
+
+    test "an archived blocker never blocks", ctx do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {:ok, _} = ctx.b |> Ecto.Changeset.change(archived_at: now) |> Repo.update()
+      {:ok, _} = ctx.c |> Ecto.Changeset.change(archived_at: now) |> Repo.update()
+      assert scheduler_cards(ctx.board)[ctx.a.id].blocked_by == []
+    end
+
+    test "an archived card is absent", ctx do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {:ok, _} = ctx.c |> Ecto.Changeset.change(archived_at: now) |> Repo.update()
+      refute Map.has_key?(scheduler_cards(ctx.board), ctx.c.id)
+    end
+
+    test "agrees with unmet_dependencies/2 for every card (one predicate, two readers)", ctx do
+      unmet = Cards.unmet_dependencies(ctx.board, stages(ctx.board))
+
+      for card <- Cards.list_scheduler_cards(ctx.board.id, done_ids(ctx.board)) do
+        assert unmet |> Map.get(card.id, []) |> Enum.sort() == card.blocked_by
+      end
+    end
+
+    test "is one query", ctx do
+      done_ids = done_ids(ctx.board)
+      {_cards, count} = count_repo_queries(self(), fn -> Cards.list_scheduler_cards(ctx.board.id, done_ids) end)
+      assert count == 1
+    end
+  end
+
   describe "list_dependencies/2 and list_dependents/2" do
     test "both directions, ref-ordered, with the satisfied flag", ctx do
       {:ok, _} = Cards.set_dependencies(ctx.board, ctx.a, ["RE3", "RE2"])

@@ -35,7 +35,7 @@ defmodule Relay.RunsPreflightTest do
         at -> runner |> Ecto.Changeset.change(last_heartbeat: at) |> Relay.Repo.update!()
       end
 
-    Capacity.put(runner.id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
+    Capacity.put(runner.id, runner.board_id, opts[:capacity] || %{shared_clean: 1, exclusive: 1})
     runner
   end
 

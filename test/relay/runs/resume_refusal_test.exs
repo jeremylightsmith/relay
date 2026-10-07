@@ -4,6 +4,7 @@ defmodule Relay.Runs.ResumeRefusalTest do
   import Ecto.Query
 
   alias Relay.Runs
+  alias Relay.Runs.Capacity
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.RunsEngine
   alias Relay.Runs.Scheduler.Server
@@ -90,6 +91,37 @@ defmodule Relay.Runs.ResumeRefusalTest do
       {:ok, _resumed} = Runs.resume_run(Runs.get_run!(run.id))
 
       assert %Run{resume_refused_since: nil, resume_refused_reason: nil} = Runs.get_run!(run.id)
+    end
+
+    # RE402 — given the snapshot's runs, the stamp set comes from `refusal_stamped`, not a SELECT.
+    test "with snapshot runs, a stamped run that is no longer refused is cleared", %{board: board, works: works} do
+      run = parked_run(works)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], at(-600))
+
+      :ok = Runs.record_resume_refusals(board.id, [], nil, [%{id: run.id, refusal_stamped: true}])
+
+      assert %Run{resume_refused_since: nil, resume_refused_reason: nil} = Runs.get_run!(run.id)
+    end
+
+    test "with snapshot runs and nothing stamped or refused, it issues no query", %{board: board, works: works} do
+      run = parked_run(works)
+      runs = [%{id: run.id, refusal_stamped: false}]
+
+      {result, count} = count_repo_queries(self(), fn -> Runs.record_resume_refusals(board.id, [], nil, runs) end)
+
+      assert result == :ok
+      assert count == 0
+    end
+
+    test "a snapshot run map with no refusal_stamped key is treated as unstamped", %{board: board, works: works} do
+      run = parked_run(works)
+      since = at(-600)
+      :ok = Runs.record_resume_refusals(board.id, [refusal(run, :no_free_slot)], since)
+      run_map = %{id: run.id, card_id: run.card_id, status: :parked}
+
+      assert :ok = Runs.record_resume_refusals(board.id, [], nil, [run_map])
+
+      assert %Run{resume_refused_since: ^since, resume_refused_reason: :no_free_slot} = Runs.get_run!(run.id)
     end
   end
 
@@ -312,6 +344,39 @@ defmodule Relay.Runs.ResumeRefusalTest do
 
       assert {:ok, revived} = Runs.retry_run(failed)
       assert revived.status == :running
+    end
+
+    # RE402: a dormant board (no live capacity) still reconciles on its tick while it holds an
+    # active run, so the refusal clock keeps being stamped and the reaper can still age it out.
+    test "a tick on a dormant board with a parked run still stamps the refusal", %{e2e_board: board} do
+      %{run: run, exec_a: exec_a} = park_pinned(board)
+      :ok = Capacity.put(exec_a.id, board.id, %{exclusive: 1})
+      :ok = Runs.reclaim_stale_runners()
+      refute Capacity.live?(board.id)
+
+      pid =
+        start_supervised!(
+          {Server,
+           [
+             board_id: board.id,
+             engine: RunsEngine,
+             tick_ms: 3_600_000,
+             callers: [self()],
+             name: :"sched_re402_#{board.id}"
+           ]}
+        )
+
+      _booted = :sys.get_state(pid)
+
+      Relay.Repo.update_all(from(r in Run, where: r.id == ^run.id),
+        set: [resume_refused_since: nil, resume_refused_reason: nil]
+      )
+
+      send(pid, :tick)
+      _ticked = :sys.get_state(pid)
+
+      assert %Run{resume_refused_since: %DateTime{}, resume_refused_reason: :pinned_runner_absent} =
+               Runs.get_run!(run.id)
     end
   end
 end

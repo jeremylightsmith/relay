@@ -10,8 +10,11 @@ defmodule Relay.Runs.Scheduler.Snapshot do
     * `cards` — `[%{id, ref, stage_id, status, active_owner, position, blocked_by}]`.
       `active_owner` is `:ai | :human | nil` (from `Relay.Cards.active_owner_type/1`).
       `blocked_by` (RE93) is the card's list of UNMET blocker card ids, from
-      `Relay.Cards.unmet_dependencies/2` — the ids and not a count, so `explain/2` can name the
-      refs from this snapshot's own card list without a DB read. `[]` when nothing blocks it.
+      `Relay.Cards.list_scheduler_cards/2` (RE402 — the one-query card projection, sharing
+      `Relay.Cards.unmet_dependencies/2`'s predicate), sorted ascending — the ids and not a
+      count, so `explain/2` can name the refs from this snapshot's own card list without a DB
+      read. `[]` when nothing blocks it. `active_owner` is computed there by the same
+      `Relay.Cards.active_owner_type/1`.
     * `flows` — **enabled** flows only: `[%{key, pulls_from_stage_id,
       works_in_stage_id, isolation}]`; `isolation` is `:shared_clean | :exclusive`.
     * `runs` — **active** runs only (`status in Schemas.Run.active_statuses()`):
@@ -21,7 +24,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       parks are the run `Listener`'s territory (RLY-200).
       `pinned_runner_id` is the runner row id an `:exclusive` run is pinned to (nil
       when unpinned); `pinned_runner_name` is the same pin's human-readable name for the
-      `explain` path (RLY-199).
+      `explain` path (RLY-199). `refusal_stamped` (RE402) is `true` when the run row
+      carries a resume-refusal stamp (`resume_refused_since` or `resume_refused_reason`
+      set) — what `Relay.Runs.record_resume_refusals/4` clears without a SELECT. Optional:
+      a run map without it counts as unstamped.
     * `capacity` — `%{runner_id => %{shared_clean: n, exclusive: n}}`: the
       **free** slots each connected runner advertises per isolation class. A
       `:gone` runner's advertised capacity is dropped during assembly
@@ -58,6 +64,7 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           isolation: :shared_clean | :exclusive
         }
   @type run :: %{
+          optional(:refusal_stamped) => boolean(),
           id: term(),
           card_id: term(),
           status: :running | :parked,

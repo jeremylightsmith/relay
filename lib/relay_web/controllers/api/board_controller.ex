@@ -54,11 +54,11 @@ defmodule RelayWeb.Api.BoardController do
 
   defp maybe_advertise_runner(board, %{"capacity" => capacity, "name" => name} = params)
        when is_map(capacity) and is_binary(name) and name != "" do
-    # RLY-201: the raw client map goes straight to the domain. Runs.Capacity.put/2 and
+    # RLY-201: the raw client map goes straight to the domain. Runs.Capacity.put/3 and
     # Runs.upsert_runner/2 both normalize through Relay.Runs.Capacity.normalize/1, so
     # the ETS store and the runner row cannot disagree about a malformed payload.
     case Runs.upsert_runner(board, params) do
-      {:ok, runner} -> Runs.Capacity.put(runner.id, capacity)
+      {:ok, runner} -> Runs.Capacity.put(runner.id, runner.board_id, capacity)
       _error -> :ok
     end
   end
