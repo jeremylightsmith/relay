@@ -346,7 +346,8 @@ sharing behavior.
   user-content origin is a documented follow-up. The sandbox token list is
   `RelayWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
-  change never waits on Apple (RLY-81).
+  change never waits on Apple (RLY-81). A member's `board_members.muted` (RE406) suppresses
+  APNs for that board only — the browser broadcast and the app-icon badge count are unaffected.
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
 - **ValueStream** (`Relay.ValueStream`, RE146) — the level-1 value-stream derivation behind the

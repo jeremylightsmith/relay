@@ -4,7 +4,8 @@ defmodule Relay.Push do
 
   Owns registered devices (`Schemas.DeviceToken`), the recipient fan-out, the
   APNs payload, the app-icon badge count, and the delivery adapter seam
-  (`Relay.Push.Delivery`).
+  (`Relay.Push.Delivery`). A member who muted a board (RE406, `Membership.muted`)
+  gets no APNs push for it but still gets the browser broadcast and the badge count.
 
   **Depends on `Relay.Members`/`Relay.Repo`, never on `Relay.Cards`** — `Cards`
   calls `Push` from `set_status/3`, so a back-dependency would be a boundary
@@ -146,6 +147,10 @@ defmodule Relay.Push do
   actor, one push per registered device, each stamped with that recipient's own
   `needs_you_count/1` as the badge.
 
+  A member who muted the board (RE406, `Membership.muted`) still gets the browser
+  broadcast but no APNs push for it; their badge count is unaffected, so a muted
+  board's cards still count toward the badge carried by another board's push.
+
   **Fire-and-forget.** Always returns `:ok` immediately and never raises into the
   caller: the recipient query and the network call run under
   `Relay.Push.TaskSupervisor` (inline when `config :relay, Relay.Push, async: false`,
@@ -216,14 +221,15 @@ defmodule Relay.Push do
   end
 
   # One message per event (one `id`, shared by every recipient and both channels): the
-  # browser broadcast goes to every recipient; APNs only to those with device tokens.
+  # browser broadcast goes to every recipient; APNs only to those with device tokens
+  # who have not muted this board (RE406, `Membership.muted`).
   defp notify(%Card{} = card, actor, config) do
     board = Repo.get!(Board, card.board_id)
     message = message(card, board)
 
-    for user <- recipients(board, actor) do
+    for %Membership{user: user} = membership <- recipients(board, actor) do
       Phoenix.PubSub.broadcast(@pubsub, user_topic(user.id), {:browser_notification, message})
-      deliver_apns(user, message, config)
+      if !membership.muted, do: deliver_apns(user, message, config)
     end
 
     :ok
@@ -266,6 +272,12 @@ defmodule Relay.Push do
   # provenance (and is often the AI), so there is no per-card human assignee to
   # narrow to — the board's Members roster is the recipient set (ADR 0005, matching
   # F4's board-level "needs you"). `:agent` excludes nobody.
+  #
+  # Returns the **memberships** (with `:user` preloaded), one per user, so `notify/3`
+  # can read `muted` off the row. Muted members are deliberately kept: they still get
+  # the browser broadcast — only APNs is skipped (RE406). `board_members` has no unique
+  # `(board_id, user_id)` index, so de-dup on `user_id`; `Boards.set_muted/3` writes
+  # every row a user has on the board, so whichever row survives carries the same flag.
   defp recipients(%Board{} = board, actor) do
     actor_user_id =
       case actor do
@@ -275,10 +287,8 @@ defmodule Relay.Push do
 
     board
     |> Members.list_members()
-    |> Enum.reject(&Membership.invited?/1)
-    |> Enum.map(& &1.user)
-    |> Enum.reject(&(&1.id == actor_user_id))
-    |> Enum.uniq_by(& &1.id)
+    |> Enum.reject(&(Membership.invited?(&1) or &1.user_id == actor_user_id))
+    |> Enum.uniq_by(& &1.user_id)
   end
 
   defp device_tokens(%User{id: user_id}) do
