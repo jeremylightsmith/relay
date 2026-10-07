@@ -2186,8 +2186,10 @@ defmodule RelayWeb.CoreComponents do
   The iOS navigation bar a pushed embedded screen draws itself (RE393 · card mockup "Review card —
   web nav bar replaces the native AppBar"): "‹ Label" back in primary on the left, a centered
   17/600 truncating title, and an `:actions` slot on the right. The native shell draws no AppBar
-  over the webview, so the bar pads itself by `env(safe-area-inset-top)`; it is `sticky top-0`,
-  so render it first inside the scrolling panel.
+  over the webview; it supplies the top inset itself (CardScreen's `SafeArea`, RE405), so the
+  webview already starts below the status bar. The bar's `env(safe-area-inset-top)` padding is
+  only a fallback for a host without that `SafeArea` — inside the webview it resolves to 0. It is
+  `sticky top-0`, so render it first inside the scrolling panel.
 
   Exactly one of `back_bridge` / `back_patch` drives the back control: `back_patch` is a
   `<.link patch>`; `back_bridge` is a button whose `.NativeBack` hook asks the native shell to pop
