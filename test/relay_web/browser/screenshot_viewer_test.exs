@@ -83,7 +83,6 @@ defmodule RelayWeb.Browser.ScreenshotViewerTest do
 
     session =
       session
-      |> click("#ai-result-show-more")
       |> click("#ai-result-screen-0-open")
       |> assert_has("#mockup-viewer-header-noun", text: "Screenshot")
       |> assert_has("#mockup-viewer-header-count", text: "1 of 2")
@@ -134,13 +133,13 @@ defmodule RelayWeb.Browser.ScreenshotViewerTest do
     |> assert_has("#card-drawer-panel")
     # Keys pressed before THIS page's socket binds its window listeners are lost.
     |> assert_has("body .phx-connected")
-    |> assert_has("#ai-result-show-more")
+    # RE401 — the screenshot tiles lead the AI Result box with no Show more click.
+    |> assert_has("#ai-result-screen-0-open")
   end
 
   defp open_screenshot(conn, board, ref) do
     conn
     |> open_drawer(board, ref)
-    |> click("#ai-result-show-more")
     |> click("#ai-result-screen-0-open")
     |> assert_has("#mockup-viewer-image")
   end

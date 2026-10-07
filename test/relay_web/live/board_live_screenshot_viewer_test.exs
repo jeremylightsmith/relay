@@ -77,7 +77,8 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
        %{conn: conn, board: board, s2: s2} do
     view = open(conn, ~p"/board/#{board.slug}?card=MY1")
 
-    view |> element("#ai-result-show-more") |> render_click()
+    # RE401 — screens with no changes: the tiles are already on screen and there is no Show more.
+    refute has_element?(view, "#ai-result-show-more")
     view |> element("#ai-result-screen-2-open") |> render_click()
 
     assert_patch(view, ~p"/board/#{board.slug}?card=MY1&screenshot=2")
@@ -173,7 +174,6 @@ defmodule RelayWeb.BoardLiveScreenshotViewerTest do
       Cards.update_ai_result(card, %{"screens" => [%{"url" => RelayWeb.attachment_path(h.id), "caption" => "Capture"}]})
 
     view = open(conn, ~p"/board/#{board.slug}?card=MY1")
-    view |> element("#ai-result-show-more") |> render_click()
     view |> element("#ai-result-screen-0-open") |> render_click()
     assert_patch(view, ~p"/board/#{board.slug}?card=MY1&screenshot=1")
 
