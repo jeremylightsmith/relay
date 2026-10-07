@@ -5543,14 +5543,13 @@ defmodule RelayWeb.CoreComponentsTest do
       assert doc |> LazyHTML.query(~s([data-field="board_name"])) |> Enum.count() == 0
     end
 
-    test "an in_review toast on another board carries the primary accent, the eye and the board name" do
+    test "an in_review toast carries the primary accent and the eye" do
       doc =
         toast(
           kind: :in_review,
           card_ref: "MK42",
           title: "Ready for your review",
-          card_title: "Pricing table copy pass",
-          board_name: "Marketing site"
+          card_title: "Pricing table copy pass"
         )
 
       root = LazyHTML.query(doc, "div.browser-notify-toast")
@@ -5561,7 +5560,7 @@ defmodule RelayWeb.CoreComponentsTest do
       badge = LazyHTML.query(doc, ".status-badge.badge-primary")
       assert LazyHTML.text(badge) =~ "in review"
 
-      assert doc |> LazyHTML.query(~s([data-field="board_name"])) |> LazyHTML.text() =~ "· Marketing site"
+      assert doc |> LazyHTML.query(~s([data-field="board_name"])) |> Enum.count() == 0
     end
 
     test "accepts the kind as a string, as the JS payload carries it" do

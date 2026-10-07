@@ -184,7 +184,6 @@ defmodule RelayWeb.BoardLive do
       wide
       crumbs={top_bar_crumbs(assigns)}
       embed={@embed}
-      board_slug={@board.slug}
     >
       <:title>
         <%!-- RE380 / RE390 — viewer mode: `Boards / <board> / <card title> / Mockups` (or

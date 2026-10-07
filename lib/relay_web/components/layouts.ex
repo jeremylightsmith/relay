@@ -64,12 +64,6 @@ defmodule RelayWeb.Layouts do
     default: false,
     doc: "when true, suppress the web top-bar chrome (surface hosted in the native shell)"
 
-  attr :board_slug, :string,
-    default: nil,
-    doc:
-      "the board in view (only `BoardLive` passes it) — the browser-notification hook (RE399) " <>
-        "uses it to drop the toast's board name for cards on this board"
-
   # No default (RE397): an absent key lets `RelayWeb.Feedback.url/1` fall back to config;
   # a `default: nil` would always win and hide the item in prod.
   attr :feedback_url, :string,
@@ -190,12 +184,11 @@ defmodule RelayWeb.Layouts do
         id="browser-notify"
         phx-hook="BrowserNotify"
         data-sound={Relay.Push.web_sound_path()}
-        data-board-slug={@board_slug}
         hidden
       >
       </div>
       <template :for={kind <- Relay.Push.notification_statuses()} id={"browser-notify-toast-#{kind}"}>
-        <.notification_toast kind={kind} card_ref="" title="" card_title="" board_name="" />
+        <.notification_toast kind={kind} card_ref="" title="" card_title="" />
       </template>
       <div
         id="browser-notify-toasts"
