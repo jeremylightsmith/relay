@@ -204,8 +204,10 @@ sharing behavior.
   viewer signals `relayMockupViewer` (`true` on open, `false` on close) to the native shell so it
   hands the webview every gesture while the viewer is open.
   The same viewer opens the AI Result's **Screenshots** (RE390): the drawer shows them as the same
-  80px tiles, and a tile patches to `screenshot=<n>` (1-based among the openable screenshots; an
-  agent-local path is a placeholder tile, never a viewer item) on the same three hosts. BoardLive
+  80px tiles, which lead the violet AI Result box with a count and are always visible (RE401 —
+  Show more reveals only the Changes and is absent when there are none), and a tile patches to
+  `screenshot=<n>` (1-based among the openable screenshots; an agent-local path is a placeholder
+  tile, never a viewer item) on the same three hosts. BoardLive
   holds one `viewer` assign, `nil | %{section: :mockups | :screenshots, key: _}`; the sheet shows
   only the section that was opened and ←/→ stay within it. `mockup` wins when both params are
   present; a malformed, out-of-range or stale `n` falls back to the drawer (a cold open waits for

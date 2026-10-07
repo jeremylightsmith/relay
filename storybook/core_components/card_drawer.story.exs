@@ -399,7 +399,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       %Variation{
         id: :sub_tasks_and_result,
         description:
-          "RE316 — AI Result leads the body, collapsed by default: the full summary and Show more (changes + screenshots hidden).",
+          "RE316 / RE401 — AI Result leads the body, collapsed by default: Screenshots lead the box, then the full summary and Show more (changes hidden).",
         attributes: %{
           id: "story-drawer-9",
           ref: "RLY-18",
@@ -431,7 +431,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
       %Variation{
         id: :ai_result_expanded,
         description:
-          "RE316 — AI Result after Show more: labelled Changes and Screenshots inside the same violet box, with Show less.",
+          "RE316 / RE401 — AI Result after Show more: Screenshots, summary, then the labelled Changes, with Show less.",
         attributes: %{
           id: "story-drawer-ai-result-expanded",
           ref: "RLY-18",
@@ -450,6 +450,33 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           title_form: Phoenix.Component.to_form(%{"title" => "AI result & sub-tasks"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           expanded_ai_result: true,
+          conversation: story_conversation(),
+          note_count: length(story_conversation()),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
+        id: :ai_result_screens_only,
+        description:
+          "RE401 — AI Result with a summary and screenshots but no changes: the Screenshots lead the box and there is no Show more.",
+        attributes: %{
+          id: "story-drawer-ai-result-screens-only",
+          ref: "RLY-18",
+          board_slug: "storybook-board",
+          card: %{
+            story_card()
+            | status: :in_review,
+              progress: nil,
+              ai_result: Map.delete(story_ai_result(), "changes")
+          },
+          stage_name: "Review",
+          stage_owner: :human,
+          active_owner: :ai,
+          current_user_id: 1,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "AI result & sub-tasks"}, as: :card),
+          status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           conversation: story_conversation(),
           note_count: length(story_conversation()),
           activity: story_activity(),

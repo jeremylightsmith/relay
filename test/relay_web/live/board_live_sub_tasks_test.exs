@@ -78,21 +78,23 @@ defmodule RelayWeb.BoardLiveSubTasksTest do
     # RE327 — the deployment link is gone from the box for good.
     refute has_element?(view, "#ai-result-deploy")
     assert has_element?(view, "#ai-result-show-more", "Show more")
+    # RE401 — the screenshots lead the box with no click; only Changes sit behind Show more.
+    assert has_element?(view, ~s(#ai-result #ai-result-screens a#ai-result-screen-0-open[title="home"]))
+    assert has_element?(view, "#ai-result-screens-count", "1")
     refute has_element?(view, "#ai-result-changes")
-    refute has_element?(view, "#ai-result-screens")
 
     view |> element("#ai-result-show-more") |> render_click()
 
     assert has_element?(view, "#ai-result #ai-result-changes-group > span", "Changes")
     assert has_element?(view, "#ai-result #ai-result-changes", "changed A")
-    assert has_element?(view, "#ai-result #ai-result-screens-group > span", "Screenshots")
+    assert has_element?(view, "#ai-result #ai-result-screens-header > .section-label", "Screenshots")
     assert has_element?(view, ~s(#ai-result #ai-result-screens a#ai-result-screen-0-open[title="home"]))
     assert has_element?(view, "#ai-result-show-more", "Show less")
 
     view |> element("#ai-result-show-more") |> render_click()
 
     refute has_element?(view, "#ai-result-changes")
-    refute has_element?(view, "#ai-result-screens")
+    assert has_element?(view, "#ai-result-screens")
     assert has_element?(view, "#ai-result-summary", "Did the thing")
     assert has_element?(view, "#ai-result-show-more", "Show more")
   end

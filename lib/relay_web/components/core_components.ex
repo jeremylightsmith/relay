@@ -3572,7 +3572,7 @@ defmodule RelayWeb.CoreComponents do
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
   `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state), `"toggle_sub_task"` (phx-value id) / `"toggle_task_open"` (phx-value id) / `"toggle_task_full"` from the Plan section's task rows (RE356, see `plan_tasks/1`),
-  `"toggle_ai_result"` (flip the AI Result box between its summary and Show more detail),
+  `"toggle_ai_result"` (flip the AI Result box between its summary and the Changes list),
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
   `"add_owner"` / `"remove_owner"` (phx-value
@@ -3654,7 +3654,7 @@ defmodule RelayWeb.CoreComponents do
   attr :expanded_ai_result, :boolean,
     default: false,
     doc:
-      "RE316: whether the AI Result box is expanded (Show more) to reveal its Changes and Screenshots; collapsed shows just the summary"
+      "RE316 / RE401: whether the AI Result box is expanded (Show more) to reveal its Changes; collapsed shows the Screenshots and the summary"
 
   attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
@@ -4375,6 +4375,32 @@ defmodule RelayWeb.CoreComponents do
                     class="space-y-3 rounded-[10px] border p-3.5"
                     style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
                   >
+                    <%!-- RE401 — the screenshots lead the box and are always visible: a reviewer
+                    sees what the AI built before reading about it. The count is every tile drawn,
+                    placeholders included. --%>
+                    <div
+                      :if={ai_result_has?(@card.ai_result, "screens")}
+                      id="ai-result-screens-group"
+                      class="flex flex-col gap-1.5"
+                    >
+                      <div id="ai-result-screens-header" class="flex items-baseline justify-between">
+                        <.section_label>Screenshots</.section_label>
+                        <span id="ai-result-screens-count" class="text-[11px] text-base-content/55">
+                          {length(@screen_items)}
+                        </span>
+                      </div>
+                      <%!-- RE390 — the same 80px tiles as Mockups, patching to the
+                      same-tab viewer (`?screenshot=<n>`); an unfetchable path is a placeholder. --%>
+                      <.card_mockups_section
+                        id="ai-result-screens"
+                        tile_id="ai-result-screen"
+                        items={@screen_items}
+                        item_href={@screenshot_href}
+                        label="Screenshots"
+                        noun="Screenshot"
+                        show_label={false}
+                      />
+                    </div>
                     <div
                       :if={ai_text(@card.ai_result["summary"])}
                       id="ai-result-summary"
@@ -4382,8 +4408,8 @@ defmodule RelayWeb.CoreComponents do
                     >
                       {Relay.Markdown.to_html(ai_text(@card.ai_result["summary"]))}
                     </div>
-                    <%!-- RE316 — collapsed shows just the summary, in full;
-                    the changes and screenshots are the detail behind Show more. --%>
+                    <%!-- RE316 / RE401 — collapsed shows the screenshots and the summary, in full;
+                    the changes are the only detail behind Show more. --%>
                     <div
                       :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "changes")}
                       id="ai-result-changes-group"
@@ -4399,24 +4425,6 @@ defmodule RelayWeb.CoreComponents do
                           <span>{ai_change_text(change)}</span>
                         </li>
                       </ul>
-                    </div>
-                    <div
-                      :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "screens")}
-                      id="ai-result-screens-group"
-                      class="flex flex-col gap-1.5"
-                    >
-                      <.section_label>Screenshots</.section_label>
-                      <%!-- RE390 — the same 80px tiles as Mockups, patching to the
-                      same-tab viewer (`?screenshot=<n>`); an unfetchable path is a placeholder. --%>
-                      <.card_mockups_section
-                        id="ai-result-screens"
-                        tile_id="ai-result-screen"
-                        items={@screen_items}
-                        item_href={@screenshot_href}
-                        label="Screenshots"
-                        noun="Screenshot"
-                        show_label={false}
-                      />
                     </div>
                     <%!-- `block` keeps the link-style button on its own line; a button element
                     is inline-block by default and would otherwise ride up beside the summary. --%>
@@ -7649,8 +7657,9 @@ defmodule RelayWeb.CoreComponents do
       ai_result_has?(ai_result, "screens")
   end
 
-  # RE316 — the AI Result box offers Show more only when there is detail behind it.
-  defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes") or ai_result_has?(ai_result, "screens")
+  # RE316 / RE401 — the AI Result box offers Show more only when there are Changes behind it;
+  # the screenshots are always visible, so they never need revealing.
+  defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes")
 
   # `ai_result["changes"]` items may be plain strings (the documented shape) or structured maps
   # (%{"change"=>_, "file"=>_, "lines"=>_}) that some agents write. HEEx cannot interpolate a map

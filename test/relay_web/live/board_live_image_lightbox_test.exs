@@ -67,9 +67,6 @@ defmodule RelayWeb.BoardLiveImageLightboxTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      # RE316 — screenshots live behind the AI Result box's Show more.
-      view |> element("#ai-result-show-more") |> render_click()
-
       assert has_element?(
                view,
                ~s(a#ai-result-screen-0-open[href="/board/#{board.slug}?card=MY1&screenshot=1"] img[src="/attachments/#{attachment.id}"])

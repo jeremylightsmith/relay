@@ -3802,7 +3802,7 @@ defmodule RelayWeb.CoreComponentsTest do
       }
     end
 
-    # RE316: Changes and Screenshots sit behind Show more, so tests of their rendering expand.
+    # RE316 / RE401: only Changes sit behind Show more, so tests of their rendering expand.
     defp expanded_drawer_assigns(ai_result), do: Map.put(drawer_assigns(ai_result), :expanded_ai_result, true)
 
     test "renders structured (map) changes without crashing" do
@@ -3825,8 +3825,8 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
-  # RE316 collapses Changes and Screenshots behind Show more, so these regressions render the
-  # drawer expanded — the shapes they guard are only read once the detail is on screen.
+  # RE401 — Screenshots lead the AI Result box and are always visible, so these regressions
+  # render the drawer collapsed (the default); no Show more click is needed to see the tiles.
   describe "card_drawer/1 ai_result screens rendering" do
     # Regression (TH95 prod crash loop): the smoke node wrote `ai_result["screens"]` as a list of
     # bare screenshot *paths* instead of the documented `%{"url"=>_, "caption"=>_}` maps. The
@@ -3838,7 +3838,7 @@ defmodule RelayWeb.CoreComponentsTest do
         "screens" => ["/Users/jeremy/src/throughway/tmp/smoke/12-state3a-review.png"]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       assert html =~ ~s(id="ai-result-screens")
       # A local filesystem path is not fetchable by the browser, so it captions the placeholder
@@ -3850,7 +3850,7 @@ defmodule RelayWeb.CoreComponentsTest do
     test "a bare string that is a real URL still renders as the image" do
       ai_result = %{"summary" => "s", "screens" => ["https://example.com/shot.png"]}
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       assert html =~ ~s(src="https://example.com/shot.png")
     end
@@ -3861,7 +3861,7 @@ defmodule RelayWeb.CoreComponentsTest do
         "screens" => [%{"url" => "https://example.com/a.png", "caption" => "The drawer"}]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       assert html =~ ~s(src="https://example.com/a.png")
       assert html =~ "The drawer"
@@ -3870,7 +3870,7 @@ defmodule RelayWeb.CoreComponentsTest do
     test "a root-relative url this app serves still renders as the image" do
       ai_result = %{"summary" => "s", "screens" => [%{"url" => "/images/logo_light_128.png"}]}
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       assert html =~ ~s(src="/images/logo_light_128.png")
     end
@@ -3878,7 +3878,7 @@ defmodule RelayWeb.CoreComponentsTest do
     test "a map screen whose url is not a usable image src falls back to the placeholder" do
       ai_result = %{"summary" => "s", "screens" => [%{"url" => "tmp/smoke/a.png"}]}
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       refute html =~ ~s(src="tmp/smoke/a.png")
       assert html =~ "a.png"
@@ -3895,7 +3895,7 @@ defmodule RelayWeb.CoreComponentsTest do
         "screens" => [%{"url" => "/attachments/#{uuid}", "caption" => "Shot"}, "/attachments/#{uuid}"]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
 
       imgs = html |> LazyHTML.from_fragment() |> LazyHTML.query(~s(#ai-result-screens img[src="/attachments/#{uuid}"]))
       assert Enum.count(imgs) == 2
@@ -3912,7 +3912,7 @@ defmodule RelayWeb.CoreComponentsTest do
         ]
       }
 
-      html = render_component(&CoreComponents.card_drawer/1, expanded_drawer_assigns(ai_result))
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
       doc = LazyHTML.from_fragment(html)
 
       assert doc |> LazyHTML.query("#ai-result-screen-tiles > span.border-dashed") |> Enum.count() == 4
@@ -3933,12 +3933,12 @@ defmodule RelayWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          Map.put(expanded_drawer_assigns(ai_result), :screenshot_href, &"/board/b?card=RE1&screenshot=#{&1}")
+          Map.put(drawer_assigns(ai_result), :screenshot_href, &"/board/b?card=RE1&screenshot=#{&1}")
         )
 
       doc = LazyHTML.from_fragment(html)
 
-      assert doc |> LazyHTML.query("#ai-result-screens-group > span") |> LazyHTML.text() |> String.trim() ==
+      assert doc |> LazyHTML.query("#ai-result-screens-header > .section-label") |> LazyHTML.text() |> String.trim() ==
                "Screenshots"
 
       link = LazyHTML.query(doc, "a#ai-result-screen-0-open")
@@ -3964,7 +3964,7 @@ defmodule RelayWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          Map.put(expanded_drawer_assigns(ai_result), :attachment_types, %{"h1" => "text/html"})
+          Map.put(drawer_assigns(ai_result), :attachment_types, %{"h1" => "text/html"})
         )
 
       tile = html |> LazyHTML.from_fragment() |> LazyHTML.query("a#ai-result-screen-0-open")
@@ -4072,7 +4072,12 @@ defmodule RelayWeb.CoreComponentsTest do
 
     defp ai_count(html, selector), do: html |> ai_query(selector) |> Enum.count()
 
-    test "collapsed (default) shows the full summary and Show more, but not changes or screens" do
+    defp ai_offset(html, id) do
+      {offset, _} = :binary.match(html, ~s(id="#{id}"))
+      offset
+    end
+
+    test "collapsed (default) shows the screenshots, the full summary and Show more, but not changes" do
       long_summary = String.duplicate("Did the thing. ", 40)
       ai_result = Map.put(full_ai_result(), "summary", long_summary)
 
@@ -4082,49 +4087,110 @@ defmodule RelayWeb.CoreComponentsTest do
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show more"
       assert ai_count(html, "#ai-result-show-more.commit-field-showmore") == 1
       assert ai_count(html, "#ai-result-show-more[phx-click=toggle_ai_result]") == 1
+      assert ai_count(html, "#ai-result #ai-result-screens-group") == 1
+      assert ai_count(html, ~s(a#ai-result-screen-0-open[title="home"])) == 1
       assert ai_count(html, "#ai-result-changes") == 0
-      assert ai_count(html, "#ai-result-screens") == 0
       assert ai_count(html, "#ai-result-changes-group") == 0
-      assert ai_count(html, "#ai-result-screens-group") == 0
     end
 
-    test "expanded shows a Changes label above the checklist and a Screenshots label above the thumbnails, inside the box" do
+    test "collapsed, the screenshots group is the first child of the violet box, above the summary" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(full_ai_result()))
+
+      assert ai_offset(html, "ai-result-screens-group") < ai_offset(html, "ai-result-summary")
+      assert ai_count(html, "#ai-result > div > div:first-child#ai-result-screens-group") == 1
+    end
+
+    test "the screenshots header carries the label and a count of every tile, placeholders included" do
+      ai_result = %{
+        "summary" => "s",
+        "screens" => [
+          %{"url" => "/images/logo_light_128.png", "caption" => "a"},
+          %{"url" => "/images/logo_dark_128.png", "caption" => "b"},
+          "tmp/smoke/04-dark.png"
+        ]
+      }
+
+      html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+      doc = LazyHTML.from_fragment(html)
+
+      assert ai_text(html, "#ai-result-screens-header > .section-label") == "Screenshots"
+      assert ai_text(html, "#ai-result-screens-count") == "3"
+
+      [header_class] = doc |> LazyHTML.query("#ai-result-screens-header") |> LazyHTML.attribute("class")
+
+      assert MapSet.subset?(
+               MapSet.new(~w(flex items-baseline justify-between)),
+               MapSet.new(String.split(header_class))
+             )
+
+      [count_class] = doc |> LazyHTML.query("#ai-result-screens-count") |> LazyHTML.attribute("class")
+      assert "text-[11px]" in String.split(count_class)
+      assert "text-base-content/55" in String.split(count_class)
+
+      tiles = LazyHTML.query(doc, "#ai-result-screen-tiles > *")
+      assert Enum.map(tiles, &(&1 |> LazyHTML.tag() |> hd())) == ["a", "a", "span"]
+      assert ai_count(html, "#ai-result-screen-tiles > span.border-dashed:nth-child(3)") == 1
+      assert doc |> LazyHTML.query("span#ai-result-screen-2") |> LazyHTML.attribute("title") == ["04-dark.png"]
+    end
+
+    test "expanded shows the screenshots once, then the summary, then the labelled Changes and Show less" do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
           Map.put(drawer_assigns(full_ai_result()), :expanded_ai_result, true)
         )
 
+      assert ai_count(html, "#ai-result-screens-group") == 1
       assert ai_text(html, "#ai-result #ai-result-changes-group > span") == "Changes"
       assert ai_count(html, "#ai-result-changes-group > span + ul#ai-result-changes") == 1
       assert ai_text(html, "#ai-result-changes") =~ "changed A"
 
-      assert ai_text(html, "#ai-result #ai-result-screens-group > span") == "Screenshots"
-      assert ai_count(html, "#ai-result-screens-group > span + section#ai-result-screens") == 1
+      assert ai_text(html, "#ai-result #ai-result-screens-header > .section-label") == "Screenshots"
+      assert ai_count(html, "#ai-result-screens-header + section#ai-result-screens") == 1
       assert ai_count(html, ~s(#ai-result-screens a#ai-result-screen-0-open[title="home"])) == 1
       assert ai_count(html, "#ai-result-screens .cursor-zoom-in") == 0
 
-      assert ai_count(html, "#ai-result #ai-result-summary") == 1
+      assert ai_offset(html, "ai-result-screens-group") < ai_offset(html, "ai-result-summary")
+      assert ai_offset(html, "ai-result-summary") < ai_offset(html, "ai-result-changes-group")
+      assert ai_offset(html, "ai-result-changes-group") < ai_offset(html, "ai-result-show-more")
       assert ai_text(html, "#ai-result #ai-result-show-more") == "Show less"
     end
 
-    test "expanded renders only the labels whose lists are non-empty" do
-      html =
-        render_component(
-          &CoreComponents.card_drawer/1,
-          Map.put(
-            drawer_assigns(%{"summary" => "s", "changes" => ["changed A"], "screens" => []}),
-            :expanded_ai_result,
-            true
-          )
-        )
+    test "screens with no changes show the screenshots and summary but no Show more" do
+      screens = [%{"url" => "https://placehold.co/320x180", "caption" => "home"}]
 
-      assert ai_count(html, "#ai-result-changes-group") == 1
-      assert ai_count(html, "#ai-result-screens-group") == 0
-      refute html =~ "Screenshots"
+      for ai_result <- [
+            %{"summary" => "s", "screens" => screens},
+            %{"summary" => "s", "changes" => [], "screens" => screens}
+          ] do
+        html = render_component(&CoreComponents.card_drawer/1, drawer_assigns(ai_result))
+
+        assert ai_count(html, "#ai-result-screens-group") == 1
+        assert ai_text(html, "#ai-result-summary") == "s"
+        assert ai_count(html, "#ai-result-show-more") == 0
+      end
     end
 
-    test "there is no Show more when there are no changes or screens to reveal" do
+    test "renders only the groups whose lists are non-empty, collapsed or expanded" do
+      for expanded <- [false, true] do
+        html =
+          render_component(
+            &CoreComponents.card_drawer/1,
+            Map.put(
+              drawer_assigns(%{"summary" => "s", "changes" => ["changed A"], "screens" => []}),
+              :expanded_ai_result,
+              expanded
+            )
+          )
+
+        assert ai_count(html, "#ai-result-changes-group") == if(expanded, do: 1, else: 0)
+        assert ai_count(html, "#ai-result-screens-group") == 0
+        refute html =~ "Screenshots"
+        assert ai_text(html, "#ai-result-show-more") == if(expanded, do: "Show less", else: "Show more")
+      end
+    end
+
+    test "there is no Show more when there are no changes to reveal" do
       for ai_result <- [
             %{"summary" => "Just a summary"},
             %{"summary" => "Just a summary", "changes" => [], "screens" => []}
