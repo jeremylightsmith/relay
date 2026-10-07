@@ -4118,10 +4118,10 @@ defmodule RelayWeb.CoreComponentsTest do
 
       [header_class] = doc |> LazyHTML.query("#ai-result-screens-header") |> LazyHTML.attribute("class")
 
-      assert header_class
-             |> String.split()
-             |> MapSet.new()
-             |> MapSet.subset?(MapSet.new(~w(flex items-baseline justify-between)))
+      assert MapSet.subset?(
+               MapSet.new(~w(flex items-baseline justify-between)),
+               MapSet.new(String.split(header_class))
+             )
 
       [count_class] = doc |> LazyHTML.query("#ai-result-screens-count") |> LazyHTML.attribute("class")
       assert "text-[11px]" in String.split(count_class)
