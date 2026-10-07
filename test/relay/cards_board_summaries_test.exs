@@ -17,7 +17,7 @@ defmodule Relay.CardsBoardSummariesTest do
   end
 
   test "one row per member board, with the summary facts", %{user: user} do
-    alpha = member_board(user, "AAA", "alpha")
+    alpha = member_board(user, "AAA", unique_slug("alpha"))
     code = insert(:stage, board: alpha, name: "Code", type: :work, ai_enabled: true, position: 1)
     human = insert(:stage, board: alpha, name: "Polish", type: :work, ai_enabled: false, position: 2)
     review = insert(:stage, board: alpha, name: "Review", type: :review, position: 3)
@@ -41,7 +41,7 @@ defmodule Relay.CardsBoardSummariesTest do
     assert [row] = Cards.list_board_summaries(user)
 
     assert row.board.id == alpha.id
-    assert row.slug == "alpha"
+    assert row.slug == alpha.slug
     assert row.name == "Board AAA"
     assert row.key == "AAA"
     assert row.stage_count == 3
@@ -54,7 +54,7 @@ defmodule Relay.CardsBoardSummariesTest do
   end
 
   test "an idle board with no AI-owned working card is not ai_active?", %{user: user} do
-    beta = member_board(user, "BBB", "beta")
+    beta = member_board(user, "BBB", unique_slug("beta"))
     stage = insert(:stage, board: beta, name: "Code", type: :work, position: 1)
     insert(:card, stage: stage, status: :working)
 
@@ -63,11 +63,11 @@ defmodule Relay.CardsBoardSummariesTest do
 
   test "boards the user is not a member of are excluded, member boards keep display order",
        %{user: user} do
-    member_board(user, "AAA", "alpha")
-    member_board(user, "BBB", "beta")
-    member_board(insert(:user), "ZZZ", "zeta")
+    alpha = member_board(user, "AAA", unique_slug("alpha"))
+    beta = member_board(user, "BBB", unique_slug("beta"))
+    member_board(insert(:user), "ZZZ", unique_slug("zeta"))
 
-    assert Enum.map(Cards.list_board_summaries(user), & &1.slug) == ["alpha", "beta"]
+    assert Enum.map(Cards.list_board_summaries(user), & &1.slug) == [alpha.slug, beta.slug]
   end
 
   test "rows come starred-first A–Z and carry starred?", %{user: user} do

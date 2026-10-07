@@ -31,7 +31,8 @@ defmodule RelayWeb.ConnCase do
           start_engine!: 0,
           start_engine!: 1,
           restart_engine!: 0,
-          restart_engine!: 1
+          restart_engine!: 1,
+          unique_slug: 1
         ]
 
       import Relay.Factory

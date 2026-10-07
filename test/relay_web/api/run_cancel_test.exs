@@ -143,7 +143,7 @@ defmodule RelayWeb.Api.RunCancelTest do
 
   test "another board's run is 404, not someone else's run killed", ctx do
     other_user = insert(:user)
-    {:ok, other_board} = Relay.Boards.create_board(other_user, %{name: "Someone else"})
+    {:ok, other_board} = Relay.Boards.create_board(other_user, %{name: "Someone else", slug: unique_slug("someone-else")})
     other_card = insert(:card, board: other_board, stage: hd(other_board.stages))
     other_run = insert(:run, card: other_card, status: :running)
 

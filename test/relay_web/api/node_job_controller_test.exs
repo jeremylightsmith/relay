@@ -760,7 +760,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     end
 
     test "never reports another board's job as revoked", %{conn: conn} do
-      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board"})
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board", slug: unique_slug("other-board")})
       flow = four_outcome_flow(other)
       {_run, job} = start_queued_job(other, flow)
 

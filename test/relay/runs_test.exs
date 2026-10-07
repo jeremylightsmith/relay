@@ -892,7 +892,7 @@ defmodule Relay.RunsTest do
       {:ok, run_a} = Runs.start_run(card_in(board_a, "Next up"), flow_a)
       queued_a = Runs.active_job(run_a)
 
-      {:ok, board_b} = Relay.Boards.create_board(user, %{name: "Other Board"})
+      {:ok, board_b} = Relay.Boards.create_board(user, %{name: "Other Board", slug: unique_slug("other-board")})
       flow_b = enabled_spec_flow(board_b)
       {:ok, run_b} = Runs.start_run(card_in(board_b, "Next up"), flow_b)
       queued_b = Runs.active_job(run_b)
@@ -1960,7 +1960,7 @@ defmodule Relay.RunsTest do
     end
 
     test "never stamps another board's card (board scoping)", %{board: board} do
-      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other", slug: unique_slug("other")})
       {card, job} = liveness_card(other, :claimed)
 
       assert {0, nil} = Runs.refresh_running_card_liveness(board, [job.id])

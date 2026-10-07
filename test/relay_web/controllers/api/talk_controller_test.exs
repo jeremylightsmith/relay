@@ -113,7 +113,7 @@ defmodule RelayWeb.Api.TalkControllerTest do
 
   test "another board's key cannot reach this turn", ctx do
     other = insert(:user)
-    {:ok, other_board} = Relay.Boards.create_board(other, %{name: "Other", key: "OT"})
+    {:ok, other_board} = Relay.Boards.create_board(other, %{name: "Other", key: "OT", slug: unique_slug("other")})
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(other_board, other)
 
     conn =

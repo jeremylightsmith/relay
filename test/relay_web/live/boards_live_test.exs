@@ -31,7 +31,7 @@ defmodule RelayWeb.BoardsLiveTest do
     test "does not list another user's boards", %{conn: conn, user: user} do
       _mine = Boards.get_or_create_default_board(user)
       other = Relay.Factory.insert(:user)
-      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs"})
+      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs", slug: unique_slug("theirs")})
 
       {:ok, view, _html} = live(conn, ~p"/boards")
 
@@ -112,9 +112,9 @@ defmodule RelayWeb.BoardsLiveTest do
     setup :register_and_log_in_user
 
     setup %{user: user} do
-      {:ok, zeta} = Boards.create_board(user, %{name: "zeta"})
-      {:ok, alpha} = Boards.create_board(user, %{name: "Alpha"})
-      {:ok, mango} = Boards.create_board(user, %{name: "mango"})
+      {:ok, zeta} = Boards.create_board(user, %{name: "zeta", slug: unique_slug("zeta")})
+      {:ok, alpha} = Boards.create_board(user, %{name: "Alpha", slug: unique_slug("alpha")})
+      {:ok, mango} = Boards.create_board(user, %{name: "mango", slug: unique_slug("mango")})
       %{zeta: zeta, alpha: alpha, mango: mango}
     end
 

@@ -56,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 75
-RUNNER_FINGERPRINT = "91659d2e3c18f42305563d0294f5e5baf53b4b05e38a1aac5b99d44f4bb92168"
+RUNNER_VERSION = 76
+RUNNER_FINGERPRINT = "810d1eca0837785b4125ad0b9b0e3444bed6bfd3d6c4a260cac4459a38189c01"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -3176,13 +3176,33 @@ def _apply_node_env(child_env, partition, scratch, plan):
             child_env[name] = value
 
 
+# A failing gate's detail is the only thing the fix node gets, and a test runner prints each
+# failure mid-run, long before the tail (RE402: `mix precommit` buried an ExUnit deadlock under
+# its summary and bin/test_relay.py's output, so the fix agent was told "1 test failed" and not
+# which). Lines matching these start a highlight that is kept whatever scrolls after it. A
+# match is a failure header (ExUnit, unittest, pytest, go test, jest/vitest) or the seed line
+# that reproduces a randomised order.
+SHELL_HIGHLIGHT = re.compile(
+    r"^(\s+\d+\) (test|doctest|property) "
+    r"|(FAIL|ERROR): "
+    r"|(FAILED|ERROR) \S+::"
+    r"|\s*--- FAIL: "
+    r"|\s*● "
+    r"|Running ExUnit with seed: \d+"
+    r"|Using --randomly-seed=\d+)")
+SHELL_HIGHLIGHT_CONTEXT = 3   # lines kept after a header: ExUnit's location + the error line
+SHELL_HIGHLIGHT_MAX = 40      # total highlight lines kept, so a mass failure can't flood a card
+SHELL_TAIL = 12
+
+
 def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None):
     """Run a shell step with a live, tag-prefixed feed. Returns True on success.
 
     On failure the tail of the output is appended to `sink` so the card can carry the
     actual reason. Streaming it to the console alone was not enough: the console is
     not what a human reads later, so a stage that died on one line of git output
-    surfaced as a bare "stage did not complete".
+    surfaced as a bare "stage did not complete". Any SHELL_HIGHLIGHT blocks (failing test
+    headers, the seed) that scrolled above the tail come first, then "…", then the tail.
 
     `on_proc`, if given, receives the live Popen so a caller can terminate it (runner
     revoke). Every caller is a runner node-job, which passes `on_proc` (a
@@ -3205,18 +3225,35 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
                             start_new_session=on_proc is not None)
     if on_proc:
         on_proc(proc)
-    tail = collections.deque(maxlen=12)
+    tail = collections.deque(maxlen=SHELL_TAIL)
+    highlights = []          # (line number, text), in output order
+    context_left = 0
     try:
-        for line in proc.stdout:
-            print(f"    {tag}{line.rstrip()}", flush=True)
-            tail.append(line.rstrip())
+        for n, line in enumerate(proc.stdout):
+            line = line.rstrip()
+            print(f"    {tag}{line}", flush=True)
+            tail.append((n, line))
+            if SHELL_HIGHLIGHT.match(line):
+                context_left = SHELL_HIGHLIGHT_CONTEXT
+            elif not line.strip():
+                context_left = 0
+            elif context_left:
+                context_left -= 1
+            else:
+                continue
+            if len(highlights) < SHELL_HIGHLIGHT_MAX:
+                highlights.append((n, line))
         ok = proc.wait() == 0
     finally:
         # Close the subprocess pipe explicitly — leaving it to GC leaks the fd and, under the
         # test runner's warning filter, prints a ResourceWarning per call that buries the output.
         proc.stdout.close()
     if not ok and sink is not None:
-        sink.extend(tail)
+        first_tail = tail[0][0] if tail else 0
+        above = [text for n, text in highlights if n < first_tail]
+        if above:
+            sink.extend(above + ["…"])
+        sink.extend(text for _, text in tail)
     return ok
 
 

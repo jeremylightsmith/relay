@@ -228,6 +228,18 @@ defmodule Relay.DataCase do
   end
 
   @doc """
+  A board slug no other test can be using: `base` plus a unique suffix.
+
+  `boards.slug` is unique across the whole table, and an async test's rows sit in an
+  uncommitted sandbox transaction that other tests can't see. So two async test files that
+  insert the same literal slug make Postgres block one on the other, and when they insert two
+  shared slugs in opposite orders, Postgres aborts one with `deadlock_detected`. Use this
+  wherever a test would otherwise hardcode a slug or create a board from a literal name, and
+  assert against the returned `board.slug`.
+  """
+  def unique_slug(base), do: "#{base}-#{System.unique_integer([:positive])}"
+
+  @doc """
   A helper that transforms changeset errors into a map of messages.
 
       assert {:error, changeset} = Accounts.create_user(%{password: "short"})

@@ -9015,6 +9015,41 @@ class TestPartitionTest(unittest.TestCase):
             with open(out) as f:
                 self.assertEqual(f.read(), "2")
 
+    def test_failed_shell_step_keeps_test_failures_that_scrolled_above_the_tail(self):
+        # RE402: `mix precommit` prints ExUnit's failure block mid-run, then the summary, then
+        # bin/test_relay.py's output — so a 12-line tail named no test at all, and the fix
+        # agent could only guess at a flake. The sink must keep the failing test's header,
+        # location and error, plus the seed that reproduces the order.
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "out.txt")
+            with open(log, "w") as f:
+                f.write("Running ExUnit with seed: 276, max_cases: 36\n")
+                f.write("....\n")
+                f.write("  1) test starring unstars it (RelayWeb.BoardsLiveTest)\n")
+                f.write("     test/relay_web/live/boards_live_test.exs:165\n")
+                f.write("     ** (Postgrex.Error) ERROR 40P01 (deadlock_detected) deadlock detected\n")
+                f.write("\n")
+                f.write("".join(f"noise {i}\n" for i in range(40)))
+                f.write("Result: 4987/4988 passed\nFailed: 1 test\n")
+            sink = []
+            ok = relay._stream_shell(f"cat {log}; exit 1", cwd=d, sink=sink)
+            self.assertFalse(ok)
+            text = "\n".join(sink)
+            self.assertIn("Running ExUnit with seed: 276", text)
+            self.assertIn("1) test starring unstars it (RelayWeb.BoardsLiveTest)", text)
+            self.assertIn("test/relay_web/live/boards_live_test.exs:165", text)
+            self.assertIn("deadlock_detected", text)
+            self.assertIn("Failed: 1 test", text)  # the tail is still there
+            self.assertNotIn("noise 5\n", text + "\n")  # ...but the noise above it is not
+
+    def test_failed_shell_step_with_no_recognised_failure_keeps_just_the_tail(self):
+        with tempfile.TemporaryDirectory() as d:
+            sink = []
+            ok = relay._stream_shell("for i in $(seq 1 30); do echo line $i; done; exit 1",
+                                     cwd=d, sink=sink)
+            self.assertFalse(ok)
+            self.assertEqual(sink, [f"line {i}" for i in range(19, 31)])
+
     def test_shell_step_without_a_partition_is_unchanged(self):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")

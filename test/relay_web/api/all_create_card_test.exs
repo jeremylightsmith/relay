@@ -14,7 +14,7 @@ defmodule RelayWeb.Api.AllCreateCardTest do
 
   # A member board with a queue stage, an AI work stage with a Review sub-lane, and Done —
   # the shapes create must accept (top-level) and refuse (substage).
-  defp board_with_stages(user, key \\ "AAA", slug \\ "alpha") do
+  defp board_with_stages(user, key \\ "AAA", slug \\ unique_slug("alpha")) do
     board = insert(:board, key: key, slug: slug)
     insert(:membership, board: board, user: user)
     backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 0)
@@ -65,11 +65,11 @@ defmodule RelayWeb.Api.AllCreateCardTest do
 
   test "404 for a board the user is not a member of (no existence leak)", %{conn: conn, user: user} do
     {_board, _backlog, _review} = board_with_stages(user)
-    foreign = insert(:board, key: "BBB", slug: "beta")
+    foreign = insert(:board, key: "BBB", slug: unique_slug("beta"))
     insert(:stage, board: foreign, name: "Backlog", type: :queue, position: 0)
 
     assert conn
-           |> post(~p"/api/all/cards", %{board: "beta", stage: "Backlog", title: "x"})
+           |> post(~p"/api/all/cards", %{board: foreign.slug, stage: "Backlog", title: "x"})
            |> json_response(404)
            |> get_in(["error", "code"]) == "not_found"
   end

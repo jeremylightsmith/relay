@@ -22,7 +22,7 @@ defmodule RelayWeb.Api.AllControllerTest do
 
   describe "show" do
     test "returns the light card shape with pr_url", %{conn: conn, user: user} do
-      board = member_board(user, "AAA", "alpha")
+      board = member_board(user, "AAA", unique_slug("alpha"))
 
       card =
         insert(:card, stage: work_stage(board), pr_url: "https://github.com/acme/relay/pull/42")
@@ -45,7 +45,7 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "a card without a PR serves pr_url: null — the no-chip case", %{conn: conn, user: user} do
-      board = member_board(user, "AAA", "alpha")
+      board = member_board(user, "AAA", unique_slug("alpha"))
       card = insert(:card, stage: work_stage(board))
 
       body =
@@ -64,7 +64,7 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "a ref off the user's boards is 404, never leaking that it exists", %{conn: conn} do
-      other_board = member_board(insert(:user), "BBB", "beta")
+      other_board = member_board(insert(:user), "BBB", unique_slug("beta"))
       card = insert(:card, stage: work_stage(other_board))
 
       assert conn
@@ -74,8 +74,8 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "?board= disambiguates a ref two same-key boards share", %{conn: conn, user: user} do
-      alpha = member_board(user, "RLY", "alpha")
-      beta = member_board(user, "RLY", "beta")
+      alpha = member_board(user, "RLY", unique_slug("alpha"))
+      beta = member_board(user, "RLY", unique_slug("beta"))
       insert(:card, stage: work_stage(alpha), ref_number: 7)
 
       insert(:card,
@@ -91,7 +91,7 @@ defmodule RelayWeb.Api.AllControllerTest do
 
       body =
         conn
-        |> get(~p"/api/all/cards/RLY-7?board=beta")
+        |> get(~p"/api/all/cards/RLY-7?board=#{beta.slug}")
         |> json_response(200)
         |> Map.fetch!("data")
 
@@ -101,9 +101,9 @@ defmodule RelayWeb.Api.AllControllerTest do
 
   describe "boards" do
     test "lists exactly the user's boards with the switcher's fields", %{conn: conn, user: user} do
-      alpha = member_board(user, "AAA", "alpha")
-      _beta = member_board(user, "BBB", "beta")
-      _foreign = member_board(insert(:user), "ZZZ", "zeta")
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+      beta = member_board(user, "BBB", unique_slug("beta"))
+      _foreign = member_board(insert(:user), "ZZZ", unique_slug("zeta"))
 
       code = work_stage(alpha)
       insert(:card, stage: code, status: :needs_input)
@@ -116,13 +116,13 @@ defmodule RelayWeb.Api.AllControllerTest do
         |> json_response(200)
         |> Map.fetch!("data")
 
-      assert Enum.map(data, & &1["slug"]) == ["alpha", "beta"]
+      assert Enum.map(data, & &1["slug"]) == [alpha.slug, beta.slug]
 
       [a, b] = data
 
       assert a == %{
                "name" => alpha.name,
-               "slug" => "alpha",
+               "slug" => alpha.slug,
                "key" => "AAA",
                "needs_you_count" => 1,
                "stage_count" => 1,
@@ -136,9 +136,9 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "lists boards starred-first A–Z with a starred flag", %{conn: conn, user: user} do
-      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: "zeta")
-      alpha = insert(:board, name: "Alpha", key: "AAA", slug: "alpha")
-      mango = insert(:board, name: "mango", key: "MMM", slug: "mango")
+      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: unique_slug("zeta"))
+      alpha = insert(:board, name: "Alpha", key: "AAA", slug: unique_slug("alpha"))
+      mango = insert(:board, name: "mango", key: "MMM", slug: unique_slug("mango"))
       for b <- [zeta, alpha, mango], do: insert(:membership, board: b, user: user)
       {:ok, true} = Relay.Boards.set_starred(user, zeta.slug, true)
 
@@ -154,7 +154,7 @@ defmodule RelayWeb.Api.AllControllerTest do
 
     test "needs_you_count is the two-type count (ADR 0005), never the web's three-type sum",
          %{conn: conn, user: user} do
-      board = member_board(user, "AAA", "alpha")
+      board = member_board(user, "AAA", unique_slug("alpha"))
       code = work_stage(board)
       human = insert(:stage, board: board, name: "Polish", type: :work, ai_enabled: false, position: 2)
       review = insert(:stage, board: board, name: "Review", type: :review, position: 3)
@@ -191,52 +191,52 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "stars a member board and answers the value set", %{conn: conn, user: user} do
-      member_board(user, "AAA", "alpha")
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
 
-      assert conn |> post(~p"/api/all/boards/alpha/star", %{"starred" => true}) |> json_response(200) ==
-               %{"data" => %{"slug" => "alpha", "starred" => true}}
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/star", %{"starred" => true}) |> json_response(200) ==
+               %{"data" => %{"slug" => alpha.slug, "starred" => true}}
     end
 
     test "starring twice is an idempotent set, not a toggle", %{conn: conn, user: user} do
-      member_board(user, "AAA", "alpha")
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
 
       for _ <- 1..2 do
-        assert conn |> post(~p"/api/all/boards/alpha/star", %{"starred" => true}) |> json_response(200) ==
-                 %{"data" => %{"slug" => "alpha", "starred" => true}}
+        assert conn |> post(~p"/api/all/boards/#{alpha.slug}/star", %{"starred" => true}) |> json_response(200) ==
+                 %{"data" => %{"slug" => alpha.slug, "starred" => true}}
       end
 
-      assert boards_starred(conn)["alpha"] == true
+      assert boards_starred(conn)[alpha.slug] == true
     end
 
     test "a starred board moves first in GET /api/all/boards", %{conn: conn, user: user} do
-      alpha = insert(:board, name: "Alpha", key: "AAA", slug: "alpha")
-      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: "zeta")
+      alpha = insert(:board, name: "Alpha", key: "AAA", slug: unique_slug("alpha"))
+      zeta = insert(:board, name: "zeta", key: "ZZZ", slug: unique_slug("zeta"))
       for b <- [alpha, zeta], do: insert(:membership, board: b, user: user)
 
-      conn |> post(~p"/api/all/boards/zeta/star", %{"starred" => true}) |> json_response(200)
+      conn |> post(~p"/api/all/boards/#{zeta.slug}/star", %{"starred" => true}) |> json_response(200)
 
       data = conn |> get(~p"/api/all/boards") |> json_response(200) |> Map.fetch!("data")
-      assert Enum.map(data, & &1["slug"]) == ["zeta", "alpha"]
+      assert Enum.map(data, & &1["slug"]) == [zeta.slug, alpha.slug]
       assert Enum.map(data, & &1["starred"]) == [true, false]
     end
 
     test "unstarring sets false, idempotently", %{conn: conn, user: user} do
-      member_board(user, "AAA", "alpha")
-      {:ok, true} = Relay.Boards.set_starred(user, "alpha", true)
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+      {:ok, true} = Relay.Boards.set_starred(user, alpha.slug, true)
 
       for _ <- 1..2 do
-        assert conn |> post(~p"/api/all/boards/alpha/star", %{"starred" => false}) |> json_response(200) ==
-                 %{"data" => %{"slug" => "alpha", "starred" => false}}
+        assert conn |> post(~p"/api/all/boards/#{alpha.slug}/star", %{"starred" => false}) |> json_response(200) ==
+                 %{"data" => %{"slug" => alpha.slug, "starred" => false}}
       end
 
-      assert boards_starred(conn)["alpha"] == false
+      assert boards_starred(conn)[alpha.slug] == false
     end
 
     test "404 on a board the user is not a member of, leaving others' stars alone", %{conn: conn} do
       other = insert(:user)
-      zeta = member_board(other, "ZZZ", "zeta")
+      zeta = member_board(other, "ZZZ", unique_slug("zeta"))
 
-      body = conn |> post(~p"/api/all/boards/zeta/star", %{"starred" => true}) |> json_response(404)
+      body = conn |> post(~p"/api/all/boards/#{zeta.slug}/star", %{"starred" => true}) |> json_response(404)
       assert body["error"]["code"] == "not_found"
 
       assert Relay.Repo.get_by!(Schemas.Membership, user_id: other.id, board_id: zeta.id).starred == false
@@ -247,19 +247,19 @@ defmodule RelayWeb.Api.AllControllerTest do
     end
 
     test "422 when starred is missing", %{conn: conn, user: user} do
-      member_board(user, "AAA", "alpha")
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
 
-      assert conn |> post(~p"/api/all/boards/alpha/star", %{}) |> json_response(422) ==
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/star", %{}) |> json_response(422) ==
                %{"error" => %{"code" => "invalid_request", "message" => "starred must be a boolean"}}
     end
 
     test "422 when starred is not a JSON boolean, and nothing changes", %{conn: conn, user: user} do
-      member_board(user, "AAA", "alpha")
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
 
-      body = conn |> post(~p"/api/all/boards/alpha/star", %{"starred" => "true"}) |> json_response(422)
+      body = conn |> post(~p"/api/all/boards/#{alpha.slug}/star", %{"starred" => "true"}) |> json_response(422)
       assert body["error"]["code"] == "invalid_request"
 
-      assert boards_starred(conn)["alpha"] == false
+      assert boards_starred(conn)[alpha.slug] == false
     end
 
     test "401 without a bearer token" do

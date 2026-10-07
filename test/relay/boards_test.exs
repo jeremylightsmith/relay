@@ -289,8 +289,8 @@ defmodule Relay.BoardsTest do
   describe "list_boards/1" do
     test "returns the user's non-archived boards, oldest first" do
       user = insert(:user)
-      {:ok, a} = Boards.create_board(user, %{name: "Alpha"})
-      {:ok, b} = Boards.create_board(user, %{name: "Beta"})
+      {:ok, a} = Boards.create_board(user, %{name: "Alpha", slug: unique_slug("alpha")})
+      {:ok, b} = Boards.create_board(user, %{name: "Beta", slug: unique_slug("beta")})
       {:ok, archived} = Boards.create_board(user, %{name: "Gamma"})
       {:ok, _} = Boards.archive_board(archived)
 
@@ -300,7 +300,7 @@ defmodule Relay.BoardsTest do
     test "never returns another user's boards" do
       {:ok, _mine} = Boards.create_board(insert(:user), %{name: "Mine"})
       other = insert(:user)
-      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs"})
+      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs", slug: unique_slug("theirs")})
 
       refute theirs.id in Enum.map(Boards.list_boards(insert(:user)), & &1.id)
     end
@@ -316,8 +316,8 @@ defmodule Relay.BoardsTest do
 
     test "keeps creation order and the default board when a later board is starred" do
       user = insert(:user)
-      {:ok, zeta} = Boards.create_board(user, %{name: "zeta"})
-      {:ok, alpha} = Boards.create_board(user, %{name: "Alpha"})
+      {:ok, zeta} = Boards.create_board(user, %{name: "zeta", slug: unique_slug("zeta")})
+      {:ok, alpha} = Boards.create_board(user, %{name: "Alpha", slug: unique_slug("alpha")})
       assert {:ok, true} = Boards.set_starred(user, alpha.slug, true)
 
       assert Enum.map(Boards.list_boards(user), & &1.id) == [zeta.id, alpha.id]
@@ -495,10 +495,10 @@ defmodule Relay.BoardsTest do
 
     test "rejects a slug already taken by another board" do
       user = insert(:user)
-      {:ok, _a} = Boards.create_board(user, %{name: "Alpha"})
-      {:ok, b} = Boards.create_board(user, %{name: "Beta"})
+      {:ok, a} = Boards.create_board(user, %{name: "Alpha", slug: unique_slug("alpha")})
+      {:ok, b} = Boards.create_board(user, %{name: "Beta", slug: unique_slug("beta")})
 
-      assert {:error, changeset} = Boards.update_board(b, %{slug: "alpha"})
+      assert {:error, changeset} = Boards.update_board(b, %{slug: a.slug})
       refute changeset.valid?
     end
   end

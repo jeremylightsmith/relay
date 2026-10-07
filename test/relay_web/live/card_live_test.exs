@@ -133,7 +133,7 @@ defmodule RelayWeb.CardLiveTest do
     # other-user board with the default key would collide with this user's own RLY-1
     # and resolve to their card — the assertion would pass for the wrong reason.
     test "another user's card is a 404 — never leaking that it exists", %{conn: conn} do
-      other_board = insert(:board, key: "ZZZ", slug: "other-board")
+      other_board = insert(:board, key: "ZZZ", slug: unique_slug("other-board"))
       insert(:membership, board: other_board, user: insert(:user))
       other_stage = insert(:stage, board: other_board, name: "Review", type: :review)
       insert(:card, stage: other_stage, ref_number: 1, title: "Not yours")

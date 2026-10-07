@@ -125,7 +125,7 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     test "a taken slug shows an inline error and does not navigate",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
-      {:ok, other} = Boards.create_board(user, %{name: "Other"})
+      {:ok, other} = Boards.create_board(user, %{name: "Other", slug: unique_slug("other")})
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
 
