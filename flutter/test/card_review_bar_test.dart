@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/app/theme.dart';
+import 'package:relay_mobile/features/card/card_nav_context.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/card/widgets/card_review_bar.dart';
 
@@ -243,6 +244,52 @@ void main() {
         ),
         'http://localhost:4003/cards/RLY-123?board=my-board&embed=1',
       );
+    });
+
+    group('nav (RE400)', () {
+      const items = [
+        CardNavItem(ref: 'RLY-1', boardSlug: 'my-board'),
+        CardNavItem(ref: 'RLY-123', boardSlug: 'my-board'),
+        CardNavItem(ref: 'RLY-3', boardSlug: 'my-board'),
+      ];
+      CardNavContext ctx(String at, [List<CardNavItem> list = items]) =>
+          CardNavContext.seed(items: list, currentRef: at)!;
+      String url({CardNavContext? navContext, String? backLabel}) =>
+          CardScreen.cardUrl(
+            cardRef: 'RLY-123',
+            boardSlug: 'my-board',
+            backLabel: backLabel,
+            navContext: navContext,
+            baseUrl: 'http://localhost:4003',
+          );
+      const base = 'http://localhost:4003/cards/RLY-123?board=my-board&embed=1';
+
+      test('no context adds no nav param', () {
+        expect(url(), base);
+      });
+
+      test('the first card names only next', () {
+        expect(url(navContext: ctx('RLY-1')), '$base&nav=next');
+      });
+
+      test('a middle card names prev,next', () {
+        expect(url(navContext: ctx('RLY-123')), '$base&nav=prev,next');
+      });
+
+      test('the last card names only prev', () {
+        expect(url(navContext: ctx('RLY-3')), '$base&nav=prev');
+      });
+
+      test('a one-item context adds no nav param', () {
+        expect(url(navContext: ctx('RLY-123', [items[1]])), base);
+      });
+
+      test('nav follows the back label', () {
+        expect(
+          url(navContext: ctx('RLY-123'), backLabel: 'Needs you'),
+          '$base&back=Needs+you&nav=prev,next',
+        );
+      });
     });
   });
 }

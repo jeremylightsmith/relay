@@ -200,9 +200,13 @@ sharing behavior.
   ‹ ›, a swipe) replaces the history entry, so one browser Back, Esc or "← Back to card" returns
   to the drawer; an invalid or stale `mockup` id falls back to the drawer.
   Embedded (the native host, RE393), an HTML mockup zooms from Fit to 400% (− · Fit · + over the
-  frame) and its frame scrolls sideways once zoomed, in both phone and desktop render widths; the
-  viewer signals `relayMockupViewer` (`true` on open, `false` on close) to the native shell so it
-  hands the webview every gesture while the viewer is open.
+  frame) and its frame scrolls sideways once zoomed, in both phone and desktop render widths.
+  The native card host's `nav` param (RE400, `RelayWeb.NativeCardNav`) — comma-separated `prev` /
+  `next`, e.g. `/cards/:ref?board=<slug>&nav=prev,next` — names the neighbors the native shell has:
+  it drives the drawer's ‹ › chevrons in native mode, where each calls the shell's `relayCardNav`
+  bridge (`"prev"` / `"next"`) instead of patching, binds no arrow keys, and renders disabled for a
+  direction `nav` omits. No `nav` (or no known token), no chevrons; `nav` rides through the
+  viewer's patches like `back`, and `/board/:slug` ignores it.
   The same viewer opens the AI Result's **Screenshots** (RE390): the drawer shows them as the same
   80px tiles, which lead the violet AI Result box with a count and are always visible (RE401 —
   Show more reveals only the Changes and is absent when there are none), and a tile patches to

@@ -4,12 +4,15 @@
     <meta charset="utf-8" />
     <%!-- RE393: embedded in the native shell the page draws under the notch and pads itself by
           env(safe-area-inset-*), which is only non-zero with viewport-fit=cover. Plain mobile
-          Safari keeps the default so content never slides under the notch. --%>
+          Safari keeps the default so content never slides under the notch.
+          RE400: the native shell also pins the scale, so pinch-zoom can never leave a field
+          zoomed. Mobile Safari keeps pinch-zoom. --%>
     <meta
       name="viewport"
       content={
         if assigns[:embed],
-          do: "width=device-width, initial-scale=1, viewport-fit=cover",
+          do:
+            "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
           else: "width=device-width, initial-scale=1"
       }
     />

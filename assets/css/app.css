@@ -1000,7 +1000,9 @@ textarea.commit-field-input { min-height: 64px; }
    web large-title header at iOS sizes", "Review card — web nav bar …", "Mockup viewer — …").
    The variables are inert on their own; every rule that restyles an existing element is a
    descendant of [data-embed] (Layouts.app/1 sets it on <main> when @embed), so desktop and
-   plain phone-width web never match. The variable block is mirrored verbatim into
+   plain phone-width web never match. One exception: --m-field is also read outside
+   [data-embed], by the coarse-pointer field rule (RE400), so every touch device's fields are
+   16px and iOS never focus-zooms. The variable block is mirrored verbatim into
    storybook.css — keep the two byte-identical. */
 :root {
   --m-large-title: 34px;
@@ -1013,6 +1015,7 @@ textarea.commit-field-input { min-height: 64px; }
   --m-headline-sm: 16px;
   --m-headline-weight: 600;
   --m-body: 15px;
+  --m-field: 16px;
   --m-meta: 13px;
   --m-label: 12px;
   --m-target: 44px;
@@ -1023,6 +1026,17 @@ textarea.commit-field-input { min-height: 64px; }
    `scrollbar-gutter: stable`, which on classic-scrollbar platforms reserves ~15px and shrinks
    every `fixed inset-0` overlay (the mockup viewer: 375px wide in a 390px viewport). */
 :root:has([data-embed]) { scrollbar-gutter: auto; }
+
+/* RE400 — iOS zooms the page into any focused field under 16px. On a touch device every field
+   is at least --m-field. Unlayered on purpose, so it beats Tailwind's layered `text-[12.5px]` /
+   `textarea-sm` utilities; scoped to the coarse-pointer query so desktop sizes never change.
+   The drawer title editor is deliberately larger than 16px, so it keeps its own size: 18px
+   (`text-lg`) on the web, the mobile scale's 22px title embedded. */
+@media (hover: none) and (pointer: coarse) {
+  input, textarea, select { font-size: var(--m-field); }
+  #card-drawer-title-input { font-size: var(--text-lg); }
+  [data-embed] #card-drawer-title-input { font-size: var(--m-title); }
+}
 
 /* Board tab — large-title row: px-4 pt-3 pb-1, items-end justify-between. The .board-pager-*
    base rules stay untouched (plain phone web keeps its RLY-94 look); these override them. */

@@ -142,11 +142,50 @@ defmodule RelayWeb.CardLiveTest do
     end
 
     test "the native card host shows no web prev/next chevrons", %{conn: conn, board: board, ref: ref} do
-      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}")
+      for path <- [~p"/cards/#{ref}?board=#{board.slug}", ~p"/cards/#{ref}?board=#{board.slug}&nav=bogus"] do
+        {:ok, view, _html} = live(conn, path)
+        render_async(view)
+
+        refute has_element?(view, "#card-drawer-nav")
+        refute has_element?(view, "#card-drawer-prev")
+        refute has_element?(view, "#card-drawer-next")
+      end
+    end
+
+    # RE400 — `nav=` names the native neighbors; the chevrons call the `relayCardNav` bridge and
+    # never the server's prev_card / next_card.
+    test "nav=prev,next renders native-mode chevrons that call the bridge, never the server",
+         %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}&nav=prev,next")
       render_async(view)
 
-      refute has_element?(view, "#card-drawer-prev")
-      refute has_element?(view, "#card-drawer-next")
+      native = ~s([phx-hook$="NativeCardNav"][data-handler="relayCardNav"])
+
+      assert has_element?(view, "#card-drawer-nav")
+      assert has_element?(view, ~s|button#card-drawer-prev:not([disabled])#{native}[data-dir="prev"]|)
+      assert has_element?(view, ~s|button#card-drawer-next:not([disabled])#{native}[data-dir="next"]|)
+
+      for id <- ~w(#card-drawer-prev #card-drawer-next), attr <- ~w(phx-click phx-window-keydown phx-key) do
+        refute has_element?(view, "#{id}[#{attr}]")
+      end
+    end
+
+    test "nav=next disables the previous chevron", %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}&nav=next")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-prev[disabled]")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+    end
+
+    test "native mode binds no arrow keys and mounts no ArrowKeyGuard", %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}&nav=prev,next")
+      doc = view |> render_async() |> LazyHTML.from_document()
+
+      assert doc |> LazyHTML.query("#card-drawer-panel") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#card-drawer-panel[phx-hook]") |> Enum.count() == 0
+      assert doc |> LazyHTML.query(~s([phx-window-keydown="prev_card"])) |> Enum.count() == 0
+      assert doc |> LazyHTML.query(~s([phx-window-keydown="next_card"])) |> Enum.count() == 0
     end
 
     # RE380 — card mode hosts the same-tab mockup viewer too, keeping `board=` in every URL.
@@ -274,14 +313,39 @@ defmodule RelayWeb.CardLiveTest do
       assert back_text(view) == "Board"
     end
 
+    test "nav survives opening a mockup and coming back", %{conn: conn, board: board, card: card, ref: ref} do
+      {:ok, a} =
+        Relay.Attachments.create_attachment(card, %{
+          filename: "a.html",
+          content_type: Schemas.Attachment.html_type(),
+          bytes: "<p>a</p>"
+        })
+
+      {:ok, _card} = Cards.set_mockups(card, [%{"url" => RelayWeb.attachment_path(a.id), "caption" => "A"}])
+
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board&nav=prev,next")
+
+      view |> element("#card-drawer-mockup-0-open") |> render_click()
+      assert_patch(view, "/cards/#{ref}?back=Board&board=#{board.slug}&mockup=#{a.id}&nav=prev%2Cnext")
+
+      view |> element("#mockup-viewer-bar-back") |> render_click()
+      assert_patch(view, "/cards/#{ref}?back=Board&board=#{board.slug}&nav=prev%2Cnext")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+    end
+
     test "the dead render covers the notch and scopes the embed scale; the plain board does neither",
          %{conn: conn, user: user, board: board, ref: ref} do
       html = conn |> get(~p"/cards/#{ref}?board=#{board.slug}&embed=1") |> html_response(200)
       assert html =~ "viewport-fit=cover"
+      # RE400: the native shell pins the scale, so pinch-zoom can never leave a field zoomed.
+      assert html =~ "maximum-scale=1"
+      assert html =~ "user-scalable=no"
       assert html =~ "data-embed"
 
       board_html = build_conn() |> log_in_user(user) |> get(~p"/board/#{board.slug}") |> html_response(200)
       refute board_html =~ "viewport-fit=cover"
+      refute board_html =~ "maximum-scale=1"
+      refute board_html =~ "user-scalable=no"
       refute board_html =~ "data-embed"
     end
   end

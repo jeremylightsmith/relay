@@ -34,6 +34,7 @@ defmodule RelayWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   alias Relay.Cards
   alias RelayWeb.CardMedia
+  alias RelayWeb.NativeCardNav
   alias RelayWeb.RunComponents
   alias RelayWeb.TalkComponents
   alias RelayWeb.TimeAgo
@@ -2638,8 +2639,6 @@ defmodule RelayWeb.CoreComponents do
       </div>
       <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
       </div>
-      <%!-- Tells the native shell the viewer is open, so it hands the webview every gesture. --%>
-      <div :if={@embed} id={"#{@id}-native"} phx-hook=".NativeMockupViewer" class="hidden"></div>
       <.mockup_viewer_bar
         :if={!@embed}
         id={"#{@id}-bar"}
@@ -2941,19 +2940,6 @@ defmodule RelayWeb.CoreComponents do
                 this.pushEvent(dx < 0 ? "mockup_next" : "mockup_prev", {})
               }
             }, { passive: true })
-          }
-        }
-      </script>
-      <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeMockupViewer">
-        // RE393 — tell the native shell the viewer opened / closed, so it hands the webview every
-        // gesture (horizontal pan, pinch) while it is open. A plain browser has no bridge: no-op.
-        const HANDLER = "relayMockupViewer"
-
-        export default {
-          mounted() { this.signal(true) },
-          destroyed() { this.signal(false) },
-          signal(open) {
-            if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(HANDLER, open)
           }
         }
       </script>
@@ -3844,7 +3830,12 @@ defmodule RelayWeb.CoreComponents do
   attr :card_nav_enabled, :boolean,
     default: false,
     doc:
-      "RLY-234: web board drawer (non-embed, non-card) — mounts the ArrowKeyGuard hook and renders the prev/next chevron cluster + arrow-key bindings. Off on the native card host, where native gestures own card-to-card nav."
+      "RLY-234 / RE400: renders the prev/next chevron cluster. In web mode (`native_nav` nil — the web board drawer) it also mounts the ArrowKeyGuard hook and binds the arrow keys, and the chevrons patch via prev_card / next_card. In native mode (the native card host with `native_nav` set) the chevrons call the `relayCardNav` bridge and bind no keys."
+
+  attr :native_nav, :map,
+    default: nil,
+    doc:
+      "RE400: nil | %{prev?: boolean, next?: boolean} — non-nil puts the chevrons in native mode (RelayWeb.NativeCardNav): each calls the native shell's bridge instead of the server, disabled when its flag is false"
 
   attr :prev_ref, :string,
     default: nil,
@@ -3950,8 +3941,8 @@ defmodule RelayWeb.CoreComponents do
         </div>
         <aside
           id="card-drawer-panel"
-          phx-hook={@card_nav_enabled && "ArrowKeyGuard"}
-          data-guard-keys={@card_nav_enabled && "ArrowLeft,ArrowRight"}
+          phx-hook={web_card_nav?(assigns) && "ArrowKeyGuard"}
+          data-guard-keys={web_card_nav?(assigns) && "ArrowLeft,ArrowRight"}
           class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
         >
           <%!--
@@ -4120,7 +4111,7 @@ defmodule RelayWeb.CoreComponents do
                 {@card.title}
               </h2>
             </div>
-            <div :if={@card_nav_enabled} id="card-drawer-nav" class="flex items-center gap-1">
+            <div :if={web_card_nav?(assigns)} id="card-drawer-nav" class="flex items-center gap-1">
               <button
                 type="button"
                 id="card-drawer-prev"
@@ -4146,6 +4137,40 @@ defmodule RelayWeb.CoreComponents do
                 <.icon name="hero-chevron-right" class="size-5" />
               </button>
             </div>
+            <%!-- RE400 — native mode: the shell owns the card stack, so each chevron hands its
+            direction to the `relayCardNav` bridge and never touches the server. --%>
+            <div
+              :if={@card_nav_enabled and @native_nav != nil}
+              id="card-drawer-nav"
+              class="flex items-center gap-1"
+            >
+              <button
+                :for={chevron <- native_chevrons(@native_nav)}
+                type="button"
+                id={chevron.id}
+                phx-hook=".NativeCardNav"
+                data-handler={NativeCardNav.handler()}
+                data-dir={chevron.dir}
+                disabled={!chevron.enabled?}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label={chevron.label}
+              >
+                <.icon name={chevron.icon} class="size-5" />
+              </button>
+            </div>
+            <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeCardNav">
+              // RE400 — hand the direction to the native shell; the handler name and the direction
+              // come from the server (data-handler / data-dir). A plain browser has no bridge: no-op.
+              export default {
+                mounted() {
+                  this.el.addEventListener("click", () => {
+                    if (window.flutter_inappwebview) {
+                      window.flutter_inappwebview.callHandler(this.el.dataset.handler, this.el.dataset.dir)
+                    }
+                  })
+                }
+              }
+            </script>
             <%!--
               RE268 — the Talk entry point, always in the same place, in every card state
               (ADR 0009 §6 change 6: "Talk button in the header on every card, shortcut t"). Not
@@ -6224,6 +6249,20 @@ defmodule RelayWeb.CoreComponents do
       "drawer-stage-chip badge badge-sm h-5 whitespace-nowrap rounded-[4px] border-none px-[9px] py-0 text-[12px] font-medium"
 
   # RE393 — the drawer title's type: the mobile scale's 22/700 title embedded, 18/600 on the web.
+  # RE400 — the web drawer's server-driven ‹ › (phx-click + arrow keys + ArrowKeyGuard): never in
+  # native mode, where the shell owns card-to-card nav.
+  defp web_card_nav?(assigns), do: assigns.card_nav_enabled and is_nil(assigns.native_nav)
+
+  # RE400 — the native-mode chevrons, ‹ then ›, each carrying its `relayCardNav` direction token.
+  defp native_chevrons(native_nav) do
+    [prev, next] = NativeCardNav.directions()
+
+    [
+      %{dir: prev, id: "card-drawer-prev", enabled?: native_nav.prev?, icon: "hero-chevron-left", label: "Previous card"},
+      %{dir: next, id: "card-drawer-next", enabled?: native_nav.next?, icon: "hero-chevron-right", label: "Next card"}
+    ]
+  end
+
   defp drawer_title_type(true), do: "text-(length:--m-title) font-(--m-title-weight) leading-[28px] tracking-[-0.01em]"
 
   defp drawer_title_type(false), do: "text-lg font-semibold leading-[1.3]"

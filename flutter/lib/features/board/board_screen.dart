@@ -3,6 +3,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/embedded_webview.dart';
 import '../../config.dart';
 import '../boards/board_switcher.dart';
 import '../boards/current_board.dart';
@@ -56,10 +57,10 @@ class BoardScreen extends ConsumerWidget {
         '&back=${Uri.encodeQueryComponent(CardScreen.backFromBoard)}';
   }
 
-  /// The swipe navigation context for a `relayCardTap` payload (RLY-234): the tapped
+  /// The ‹ › navigation context for a `relayCardTap` payload (RLY-234): the tapped
   /// column's ordered `cards: [{ref, kind}]` (emitted by board_live's card-tap bridge),
   /// as a [CardNavContext] seeked to the tapped ref. Null when the payload carries no
-  /// column (a build/browser fallback with no `cards`) — swipe is then inert.
+  /// column (a build/browser fallback with no `cards`) — ‹ › are then inert.
   static CardNavContext? navContextForTap(Map<dynamic, dynamic> payload) {
     final ref = payload['ref'] as String?;
     if (ref == null || ref.isEmpty) return null;
@@ -99,6 +100,7 @@ class BoardScreen extends ConsumerWidget {
         // One key per board: initialUrlRequest only applies on mount, so a
         // switch has to remount to load the new board.
         key: ValueKey('board_webview_$slug'),
+        initialSettings: embeddedWebViewSettings(),
         initialUrlRequest: URLRequest(url: WebUri(boardUrl(slug: slug))),
         onWebViewCreated: (controller) {
           controller.addJavaScriptHandler(

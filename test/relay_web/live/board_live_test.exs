@@ -2652,6 +2652,9 @@ defmodule RelayWeb.BoardLiveTest do
 
       assert has_element?(view, "#card-drawer-prev:not([disabled])")
       assert has_element?(view, "#card-drawer-next:not([disabled])")
+      # RE400 — the web board's chevrons stay server-driven; native mode is the card host's only.
+      assert has_element?(view, ~s(#card-drawer-prev[phx-click="prev_card"]))
+      refute has_element?(view, ~s([phx-hook$="NativeCardNav"]))
     end
 
     test "clicking the next chevron advances to the next card in the column", %{conn: conn, board: board} do
