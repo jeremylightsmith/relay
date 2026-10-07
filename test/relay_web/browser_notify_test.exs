@@ -1,8 +1,10 @@
 defmodule RelayWeb.BrowserNotifyTest do
   @moduledoc """
   RE399 — `RelayWeb.BrowserNotify` relays each `{:browser_notification, message}` on the signed-in
-  user's `Relay.Push` topic to the client as `push_event "relay:notify"`, on every non-embedded
-  authenticated LiveView, and navigates on `"browser_notify:open"`.
+  user's `Relay.Push` topic to the client as `push_event "relay:notify"` — only from a non-embedded
+  LiveView showing the message's board (`/board/:slug` or any `/board/:slug/…` sub-page, RE404);
+  every other LiveView (another board, `/boards`, `/admin`) drops it and stays alive — and
+  navigates on `"browser_notify:open"`.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -51,7 +53,47 @@ defmodule RelayWeb.BrowserNotifyTest do
       assert_push_event(view, "relay:notify", ^msg)
     end
 
-    test "every page listens, not just the board — a real status change reaches /boards", %{
+    test "a board sub-page (/board/:slug/settings) receives its board's relay:notify", %{
+      conn: conn,
+      user: user,
+      board: board
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+      a_slug = board.slug
+      broadcast(user, message(board))
+
+      assert_push_event(view, "relay:notify", %{board_slug: ^a_slug})
+    end
+
+    test "the value stream (/board/:slug/value-stream) receives its board's relay:notify", %{
+      conn: conn,
+      user: user,
+      board: board
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/value-stream")
+
+      a_slug = board.slug
+      broadcast(user, message(board))
+
+      assert_push_event(view, "relay:notify", %{board_slug: ^a_slug})
+    end
+
+    test "another board in view drops the notification and stays alive", %{
+      conn: conn,
+      user: user,
+      board: board
+    } do
+      {:ok, other_board} = Boards.create_board(user, %{name: "Other board"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{other_board.slug}")
+
+      broadcast(user, message(board))
+
+      refute_push_event(view, "relay:notify", _)
+      assert render(view)
+    end
+
+    test "/boards (no board in view) drops a real status change's notification", %{
       conn: conn,
       board: board
     } do
@@ -63,7 +105,37 @@ defmodule RelayWeb.BrowserNotifyTest do
 
       {:ok, _card} = Cards.set_status(card, %{status: :in_review}, :agent)
 
+      refute_push_event(view, "relay:notify", _)
+      assert render(view)
+    end
+
+    test "the card's own board receives a real status change end-to-end through Relay.Push", %{
+      conn: conn,
+      board: board
+    } do
+      {:ok, card} = Cards.create_card(backlog(board), %{title: "Review me"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      {:ok, _card} = Cards.set_status(card, %{status: :in_review}, :agent)
+
       assert_push_event(view, "relay:notify", %{kind: "in_review", title: "Ready for your review"})
+    end
+
+    test "another board in view drops a real status change on a card elsewhere", %{
+      conn: conn,
+      user: user,
+      board: board
+    } do
+      {:ok, other_board} = Boards.create_board(user, %{name: "Other board"})
+      {:ok, card} = Cards.create_card(backlog(board), %{title: "Review me"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{other_board.slug}")
+
+      {:ok, _card} = Cards.set_status(card, %{status: :in_review}, :agent)
+
+      refute_push_event(view, "relay:notify", _)
+      assert render(view)
     end
 
     test "an embedded board (?embed=1) never receives relay:notify and stays alive", %{
@@ -144,7 +216,7 @@ defmodule RelayWeb.BrowserNotifyTest do
       %{conn: log_in_user(conn, admin), user: admin}
     end
 
-    test "a superadmin on /admin receives relay:notify (no :embed assign there)", %{
+    test "a superadmin on /admin receives no relay:notify and stays alive", %{
       conn: conn,
       user: user
     } do
@@ -152,7 +224,8 @@ defmodule RelayWeb.BrowserNotifyTest do
 
       broadcast(user, message(%{slug: "b", name: "B"}))
 
-      assert_push_event(view, "relay:notify", _)
+      refute_push_event(view, "relay:notify", _)
+      assert render(view)
     end
   end
 end

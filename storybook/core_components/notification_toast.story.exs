@@ -9,7 +9,7 @@ defmodule Storybook.Components.CoreComponents.NotificationToast do
     [
       %Variation{
         id: :needs_input,
-        description: "Needs input, on the board in view",
+        description: "Needs input",
         attributes: %{
           kind: :needs_input,
           card_ref: "RE391",
@@ -19,23 +19,12 @@ defmodule Storybook.Components.CoreComponents.NotificationToast do
       },
       %Variation{
         id: :in_review,
-        description: "Ready for review, on the board in view",
+        description: "Ready for review",
         attributes: %{
           kind: :in_review,
           card_ref: "RE388",
           title: "Ready for your review",
           card_title: "Star a board from the boards page"
-        }
-      },
-      %Variation{
-        id: :other_board,
-        description: "A card on another board names that board",
-        attributes: %{
-          kind: :in_review,
-          card_ref: "MK42",
-          title: "Ready for your review",
-          card_title: "Pricing table copy pass for the October launch",
-          board_name: "Marketing site"
         }
       }
     ]

@@ -614,8 +614,8 @@ defmodule RelayWeb.CoreComponents do
   @doc """
   The in-page browser-notification toast (RE399): one push-worthy event, accented by the card
   status it announces (amber rule for `needs_input`, blue for `in_review`, the same tokens as
-  `status_badge/1`). `board_name` renders as "· <name>" and is omitted when nil — the
-  `BrowserNotify` JS hook drops it when the card is on the board in view.
+  `status_badge/1`). It never names a board: the server only delivers notifications for the
+  board the tab is showing (RE404).
 
   `Layouts.app` renders one per kind inside a `<template>` with blank text slots; the JS hook
   clones it and fills the `[data-field]` slots, so every class stays here, in tokens.
@@ -625,7 +625,6 @@ defmodule RelayWeb.CoreComponents do
   attr :card_ref, :string, required: true
   attr :title, :string, required: true
   attr :card_title, :string, required: true
-  attr :board_name, :string, default: nil
   attr :id, :string, default: nil
 
   def notification_toast(assigns) do
@@ -658,12 +657,6 @@ defmodule RelayWeb.CoreComponents do
               data-field="card_ref"
               class="font-mono text-[11px] text-base-content/65"
             >{@card_ref}</span>
-            <span
-              :if={@board_name}
-              phx-no-format
-              data-field="board_name"
-              class="truncate text-[11px] text-base-content/50"
-            >· {@board_name}</span>
           </div>
           <p data-field="title" class="mt-1 text-sm font-semibold">{@title}</p>
           <p data-field="card_title" class="truncate text-sm text-base-content/80">{@card_title}</p>

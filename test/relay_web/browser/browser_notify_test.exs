@@ -3,7 +3,8 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
   Real-browser (Playwright) tests for RE399's `BrowserNotify` hook: the permission rows of the
   avatar menu, the focused-tab toast + horn, the background-tab OS notification + horn + "(n)"
   title + favicon dot, clearing on focus, the Sound switch, and "Open card" / notification click
-  landing on the card drawer across boards.
+  landing on the card drawer. Only the board in view is heard (RE404): a tab on board X reacts
+  to X's cards and stays quiet — no toast, horn, OS alert, count or dot — for board Y's.
 
   Everything the hook does is client-side, so a LiveView test cannot see it. The browser APIs it
   depends on are stubbed per test via `Frame.evaluate` (after load, before the event): focus
@@ -197,22 +198,22 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
     assert notifs(conn) == []
   end
 
-  test "toasts stack newest first, name a foreign board, and cap at three", ctx do
+  test "toasts stack newest first and cap at three", ctx do
     conn = ctx.conn |> open_board(ctx.x) |> stub(focus: true)
     change(ctx.cx, :needs_input)
     conn = assert_has(conn, "#browser-notify-toasts .browser-notify-toast", count: 1)
 
-    change(ctx.cy, :in_review)
+    change(ctx.cx2, :in_review)
 
     conn
     |> assert_has("#browser-notify-toasts .browser-notify-toast", count: 2)
     |> assert_has(
-      "#browser-notify-toasts > .browser-notify-toast:first-child[data-kind=in_review] [data-field=board_name]",
-      text: "· #{ctx.y.name}"
+      "#browser-notify-toasts > .browser-notify-toast:first-child[data-kind=in_review]",
+      text: ref(ctx.x, ctx.cx2)
     )
 
-    change(ctx.cx2, :in_review)
-    change(ctx.cy, :needs_input)
+    change(ctx.cx, :in_review)
+    change(ctx.cx2, :needs_input)
 
     conn
     |> wait!("(window.__horns || []).length === 4")
@@ -241,16 +242,26 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
     wait!(conn, ~s|document.querySelectorAll("#{toast}").length === 0|, 9_000)
   end
 
-  test "a toast's Open card lands on the card's drawer on its own board", ctx do
-    conn = ctx.conn |> open_board(ctx.x) |> stub(focus: true)
-    change(ctx.cy, :in_review)
+  test "a change on another board leaves the tab quiet (RE404)", ctx do
+    conn = ctx.conn |> open_board(ctx.x) |> stub(focus: true, permission: "granted")
+    change(ctx.cy, :needs_input)
 
-    ref_cy = ref(ctx.y, ctx.cy)
+    Process.sleep(500)
+
+    conn = refute_has(conn, "#browser-notify-toasts .browser-notify-toast")
+    assert horns(conn) == []
+    assert notifs(conn) == []
+    refute String.starts_with?(title(conn), "(")
+  end
+
+  test "a toast's Open card lands on the card's drawer", ctx do
+    conn = ctx.conn |> open_board(ctx.x) |> stub(focus: true)
+    change(ctx.cx, :in_review)
 
     conn
     |> click("#browser-notify-toasts .browser-notify-toast [data-action=open]")
-    |> assert_path("/board/#{ctx.y.slug}", query_params: %{card: ref_cy})
-    |> assert_has("#card-drawer-title", text: ctx.cy.title)
+    |> assert_path("/board/#{ctx.x.slug}", query_params: %{card: ref(ctx.x, ctx.cx)})
+    |> assert_has("#card-drawer-title", text: ctx.cx.title)
     |> refute_has("#browser-notify-toasts .browser-notify-toast")
   end
 
@@ -277,10 +288,22 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
     refute_has(conn, "#browser-notify-toasts .browser-notify-toast")
   end
 
-  test "clicking the OS notification opens the card; focusing the tab clears count and dot", ctx do
+  test "a background tab on another board gets no count, dot or OS alert", ctx do
     conn = ctx.conn |> open_board(ctx.x) |> stub(focus: false, permission: "granted")
     original_icon = icon_href(conn)
     change(ctx.cy, :in_review)
+
+    Process.sleep(500)
+
+    assert notifs(conn) == []
+    refute String.starts_with?(title(conn), "(")
+    assert icon_href(conn) == original_icon
+  end
+
+  test "clicking the OS notification opens the card; focusing the tab clears count and dot", ctx do
+    conn = ctx.conn |> open_board(ctx.x) |> stub(focus: false, permission: "granted")
+    original_icon = icon_href(conn)
+    change(ctx.cx2, :in_review)
 
     conn =
       conn
@@ -289,11 +312,11 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
       # Headless focus is not reliable either way, so window.focus() is a no-op here: whether the
       # click focused the window is not what this test asserts.
       |> js!("window.focus = () => {}; window.__notifs[0].instance.onclick(); true")
-      |> assert_path("/board/#{ctx.y.slug}", query_params: %{card: ref(ctx.y, ctx.cy)})
-      |> assert_has("#card-drawer-title", text: ctx.cy.title)
+      |> assert_path("/board/#{ctx.x.slug}", query_params: %{card: ref(ctx.x, ctx.cx2)})
+      |> assert_has("#card-drawer-title", text: ctx.cx2.title)
 
-    # Live navigation rewrote <title> to board Y's; the count survives it until the tab is focused.
-    conn = wait!(conn, ~s|document.title === "(1) #{ctx.y.name} · Relay"|)
+    # Opening the drawer patched the page; the count survives it until the tab is focused.
+    conn = wait!(conn, ~s|document.title === "(1) #{ctx.x.name} · Relay"|)
 
     conn =
       conn

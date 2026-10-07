@@ -1,7 +1,9 @@
 defmodule RelayWeb.BrowserNotify do
   @moduledoc """
-  `on_mount` hook (RE399) that relays the signed-in user's browser notifications to every open,
-  non-embedded LiveView of theirs.
+  `on_mount` hook (RE399) that relays the signed-in user's browser notifications to the open,
+  non-embedded LiveViews of theirs that are showing the notification's board (RE404): the board
+  itself or any `/board/:slug/…` sub-page whose `:board` assign has `slug == message.board_slug`.
+  Every other LiveView — another board, `/boards`, `/admin/*` — drops the message.
 
   `Relay.Push` decides what is push-worthy and broadcasts `{:browser_notification, message}` on
   the user's topic; this hook subscribes the LiveView process to it and forwards each message
@@ -35,11 +37,14 @@ defmodule RelayWeb.BrowserNotify do
     {:cont, socket}
   end
 
+  # Always `:halt` a notification — the LiveView has no handle_info clause for it. Embed and
+  # board are both read at delivery: `:board` is assigned by the LiveView's own mount (after
+  # this hook) and can be reassigned (a slug rename in settings).
   defp handle_info({:browser_notification, message}, socket) do
-    if embedded?(socket) do
-      {:halt, socket}
-    else
+    if not embedded?(socket) and board_in_view?(socket, message) do
       {:halt, push_event(socket, "relay:notify", message)}
+    else
+      {:halt, socket}
     end
   end
 
@@ -57,4 +62,9 @@ defmodule RelayWeb.BrowserNotify do
 
   # `[:embed]`, not `.embed`: the :admin live_session has no `:mount_embed`, so the key is absent.
   defp embedded?(socket), do: socket.assigns[:embed] == true
+
+  # `[:board]`, not `.board`: `/boards` and the :admin pages have no board assign.
+  defp board_in_view?(socket, %{board_slug: slug}) do
+    match?(%{slug: ^slug}, socket.assigns[:board])
+  end
 end

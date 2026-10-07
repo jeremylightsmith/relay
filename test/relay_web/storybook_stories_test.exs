@@ -68,9 +68,11 @@ defmodule RelayWeb.StorybookStoriesTest do
 
     toast = read("notification_toast.story.exs")
 
-    for id <- ~w(:needs_input :in_review :other_board) do
+    for id <- ~w(:needs_input :in_review) do
       assert toast =~ "id: #{id}", "notification_toast story is missing variation #{id}"
     end
+
+    refute toast =~ "board_name", "the toast no longer names a board (RE404)"
 
     index = read("_core_components.index.exs")
     assert index =~ ~s|def entry("notification_settings")|

@@ -56,6 +56,12 @@ defmodule RelayWeb.BrowserNotifyHookTest do
     refute src =~ "innerHTML"
   end
 
+  test "the toast never names a board (RE404: the server only sends the board in view)",
+       %{src: src} do
+    refute src =~ "boardSlug"
+    refute src =~ ~s(data-field="board_name")
+  end
+
   test "app.js registers the hook as BrowserNotify" do
     app = File.read!(@app)
     assert app =~ ~s(import BrowserNotify from "./hooks/browser_notify")

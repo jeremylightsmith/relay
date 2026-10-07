@@ -297,13 +297,13 @@ defmodule RelayWeb.LayoutsTest do
     end
 
     test "renders the hook element, both toast templates and the toast container" do
-      html = render_app(%{board_slug: "my-board", inner_block: inner_block_slot()})
+      html = render_app(%{inner_block: inner_block_slot()})
       d = doc(html)
 
       hook =
         LazyHTML.query(
           d,
-          ~s(#browser-notify[phx-hook="BrowserNotify"][data-sound="#{Relay.Push.web_sound_path()}"][data-board-slug="my-board"])
+          ~s(#browser-notify[phx-hook="BrowserNotify"][data-sound="#{Relay.Push.web_sound_path()}"])
         )
 
       assert Enum.count(hook) == 1
@@ -312,7 +312,7 @@ defmodule RelayWeb.LayoutsTest do
       assert d |> LazyHTML.query(~s(#browser-notify-toasts[phx-update="ignore"])) |> Enum.count() == 1
     end
 
-    test "without a board_slug the hook element carries no data-board-slug" do
+    test "the hook element carries no data-board-slug (RE404: the server filters by board)" do
       d = doc(render_app(%{inner_block: inner_block_slot()}))
 
       hook = LazyHTML.query(d, "#browser-notify")

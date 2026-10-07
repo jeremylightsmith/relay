@@ -8,6 +8,9 @@
 // tab to ask wins, the rest get `null`. A focused tab asks at once, a background tab a beat later,
 // so the tab you are looking at wins.
 //
+// RE404: the server only sends events for the board this tab is showing (pages with no board get
+// none), so a toast never names a board.
+//
 // MODULE-SCOPE STATE: the hook element lives in the layout, so every live navigation destroys and
 // remounts it. The unread count, the original favicon, the listeners and the <title> observer
 // live here, installed once; mounted() only re-points `current` and re-syncs the UI.
@@ -150,12 +153,6 @@ const showToast = msg => {
   setField(toast, "card_ref", msg.card_ref)
   setField(toast, "title", msg.title)
   setField(toast, "card_title", msg.card_title)
-
-  const board = toast.querySelector('[data-field="board_name"]')
-  if (board) {
-    if (current && msg.board_slug === current.el.dataset.boardSlug) board.remove()
-    else board.textContent = "· " + msg.board_name
-  }
 
   // Auto-dismiss, paused while the pointer rests on the toast.
   let timer = null
