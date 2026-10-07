@@ -277,16 +277,18 @@ class _CardScreenState extends ConsumerState<CardScreen> {
       );
     });
 
-    // RE393: no AppBar — the embedded page's web nav bar owns the top bar and
-    // pads itself by env(safe-area-inset-top), so the body must not add a top
-    // inset too (it would double-pad). Its back control calls [navBackHandler].
+    // RE393: no AppBar — the embedded page's web nav bar is the top bar; its
+    // back control calls [navBackHandler]. RE405: env(safe-area-inset-top) is
+    // 0 inside the InAppWebView platform view, so the shell supplies the top
+    // inset via the body SafeArea and paints the status-bar strip with the
+    // surface color (the web base-100), matching the bottom bar.
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
       // Advancing reuses this State (see didUpdateWidget) — and an *updated*
       // InAppWebView keeps the old card's page, since initialUrlRequest only
       // applies on mount. The per-card key remounts the body so the new card
       // actually loads.
       body: SafeArea(
-        top: false,
         child: KeyedSubtree(
           key: ValueKey('card_body_${widget.cardRef}'),
           child:

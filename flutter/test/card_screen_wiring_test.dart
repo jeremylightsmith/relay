@@ -73,6 +73,7 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
   FeedRepository? feed,
   bool seedQueue = true,
   WidgetBuilder? bodyBuilder,
+  ThemeData? theme,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -97,7 +98,10 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp.router(theme: RelayTheme.light, routerConfig: router),
+      child: MaterialApp.router(
+        theme: theme ?? RelayTheme.light,
+        routerConfig: router,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -107,6 +111,64 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
 }
 
 void main() {
+  group('RE405: CardScreen owns the top safe-area inset', () {
+    const body = ValueKey('card_body_RLY-A');
+
+    Scaffold cardScaffold(WidgetTester tester) => tester.widget<Scaffold>(
+      find
+          .ancestor(of: find.byKey(body), matching: find.byType(Scaffold))
+          .first,
+    );
+
+    testWidgets('the card body starts below the status bar', (tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.padding = const FakeViewPadding(top: 47);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPadding);
+
+      await pumpCardHost(tester, api: FakeDecisionApi());
+
+      expect(tester.getTopLeft(find.byKey(body)).dy, 47.0);
+    });
+
+    testWidgets('the body SafeArea applies the top inset', (tester) async {
+      await pumpCardHost(tester, api: FakeDecisionApi());
+
+      final safeArea = tester.widget<SafeArea>(
+        find
+            .ancestor(of: find.byKey(body), matching: find.byType(SafeArea))
+            .first,
+      );
+      expect(safeArea.top, isTrue);
+    });
+
+    testWidgets('the status-bar strip is the light theme surface', (
+      tester,
+    ) async {
+      await pumpCardHost(tester, api: FakeDecisionApi());
+
+      expect(
+        cardScaffold(tester).backgroundColor,
+        RelayTheme.light.colorScheme.surface,
+      );
+    });
+
+    testWidgets('the status-bar strip is the dark theme surface', (
+      tester,
+    ) async {
+      await pumpCardHost(
+        tester,
+        api: FakeDecisionApi(),
+        theme: RelayTheme.dark,
+      );
+
+      expect(
+        cardScaffold(tester).backgroundColor,
+        RelayTheme.dark.colorScheme.surface,
+      );
+    });
+  });
+
   testWidgets(
     'Approve posts the decision and lands on the next card with the banner',
     (tester) async {

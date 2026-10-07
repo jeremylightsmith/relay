@@ -5360,15 +5360,62 @@ defmodule RelayWeb.CoreComponentsTest do
       assert pg_count(doc, "#mockup-viewer-native") == 0
     end
 
-    test "13. an image item gets no zoom, sizer, data-zoom or native hook" do
+    test "RE405 1. an embedded image item fits with the zoom control, no sizer, iframe or width toggle" do
       doc = embed_viewer_doc(@zoom_items, 1)
 
-      assert pg_count(doc, "#mockup-viewer-zoom-wrap") == 0
-      assert pg_count(doc, "#mockup-viewer-frame-sizer") == 0
-      assert pg_count(doc, "[data-zoom]") == 0
+      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
+      assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-kind") == ["image"]
+      assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-zoom") == ["1"]
+      assert pg_count(doc, "#mockup-viewer-frame-box-1[data-render]") == 0
+
       box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
       assert "overflow-auto" in box
+      refute "overflow-x-auto" in box
+      refute "overflow-y-hidden" in box
+
+      assert pg_count(doc, "#mockup-viewer-frame-sizer") == 0
+      # The sheet's tile for the HTML item is a miniature iframe; the frame box has none.
+      assert pg_count(doc, "#mockup-viewer-frame-box-1 iframe") == 0
+      assert pg_count(doc, "#mockup-viewer-frame") == 0
+      assert pg_count(doc, "img#mockup-viewer-image") == 1
+      assert pg_count(doc, "#mockup-viewer-width") == 0
       assert pg_count(doc, "#mockup-viewer-native") == 0
+    end
+
+    test "RE405 2. an embedded HTML item is marked data-kind=html with the phone render" do
+      doc = embed_viewer_doc(@zoom_items, 2)
+
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-kind") == ["html"]
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-render") == ["phone"]
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-zoom") == ["1"]
+      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
+      assert pg_count(doc, "#mockup-viewer-width") == 1
+    end
+
+    test "RE405 3. a non-embedded image item keeps natural size: data-kind, no zoom" do
+      assigns = %{items: @zoom_items}
+
+      doc =
+        ~H"""
+        <CoreComponents.card_mockup_viewer
+          ref="RE9"
+          card={%{title: "Notif"}}
+          stage_name="Review"
+          stage_owner={:human}
+          items={@items}
+          current_key={1}
+          back_patch="/cards/RE9?board=b"
+          item_href={&"/v/#{&1}"}
+        />
+        """
+        |> rendered_to_string()
+        |> LazyHTML.from_fragment()
+
+      assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-kind") == ["image"]
+      assert pg_count(doc, "[data-zoom]") == 0
+      assert pg_count(doc, "#mockup-viewer-zoom-wrap") == 0
+      box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
+      assert "overflow-auto" in box
     end
   end
 
