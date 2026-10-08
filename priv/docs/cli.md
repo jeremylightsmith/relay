@@ -39,17 +39,29 @@ exits non-zero.
 | `./relay describe RLY-12 @description.md` | Set the card's description — the ask as stated. **Not** the same field as `spec` |
 | `./relay spec RLY-12 @spec.md` | Set the card's spec — the design spec authored at the Spec stage |
 | `./relay criteria RLY-12 @criteria.md` | Set the card's acceptance criteria (numbered; read at the review gate) |
-| `./relay plan RLY-12 @plan.md` | Set the card's plan |
+| `./relay plan RLY-12 @plan.md` | Set the card's plan header (tasks go through `tasks add`) |
 | `./relay branch RLY-12 rly-12-…` | Record the branch this card's work lives on |
 | `./relay pr RLY-12 <url>` | Record the card's PR URL |
-| `./relay sub-tasks RLY-12 @tasks.md` | Set the sub-task checklist |
-| `./relay check RLY-12 42` / `uncheck RLY-12 42` | Toggle one sub-task done/undone by id |
+| `./relay tasks add RLY-12 --task "Title" @body.md [--task "Title" @body.md …]` | **Append tasks** — a title and a body each — in one atomic call, after the card's last task, in argument order. Bodies are raw files (`@path`, `-` for stdin at most once, or literal text): no JSON escaping |
+| `./relay tasks list RLY-12` | The card's tasks as `[x]/[ ] #id  title` — titles and metadata, never bodies |
+| `./relay task show RLY-12 42` | One task with its full body — the only way to read a body |
+| `./relay task update RLY-12 42 --title T --body @file` / `task rm RLY-12 42` | Edit one task's title/body (`done` stays with `check`/`uncheck`) / remove one (later tasks move up; other ids and done flags are untouched) |
+| `./relay check RLY-12 42` / `uncheck RLY-12 42` | Toggle one task done/undone by id |
+| `./relay sub-tasks RLY-12 @tasks.md` | Legacy: replace the card's whole task list in one call — prefer `tasks add` |
 | `./relay result RLY-12 @result.json` | Set the card's AI result blob — one fixed shape, see [The AI result blob](#the-ai-result-blob) |
 | `./relay attach RLY-12 shot.png` | Upload a file to the card and print its markdown; `--field url` prints the `/attachments/<id>` path alone |
-| `./relay mockups RLY-12 empty.html full.html --caption "Empty state" --caption "Full"` | Upload HTML mockups and **replace** the card's list in one call (captions pair with files in order; default = filename). `./relay mockups RLY-12 --clear` empties it. Mockups must be **self-contained static HTML** — inline `<style>`/`<script>`, `data:` images/fonts; the one network exception is **Google Fonts** (a `<link>` to `fonts.googleapis.com`, font files from `fonts.gstatic.com`): they run in a sandbox with scripts on and every other request blocked. Humans review them in the drawer's **Mockups** section; agents read the HTML straight from the file |
+| `./relay mockups RLY-12 empty.html full.html --caption "Empty state" --caption "Full"` | Upload mockups and **replace** the card's list in one call (captions pair with files in order; default = filename). A mockup is **HTML or an image** — `.html .png .jpg .jpeg .webp .gif`; any other file is refused before anything uploads. `--clear` empties the list. HTML mockups must be **self-contained static HTML** — inline `<style>`/`<script>`, `data:` images/fonts; the one network exception is **Google Fonts** (`fonts.googleapis.com` / `fonts.gstatic.com`): they run in a sandbox with scripts on and every other request blocked. Humans review them in the drawer's **Mockups** section |
+| `./relay mockups RLY-12 --pull [DIR]` | Download every mockup byte-for-byte as `DIR/NN-<caption-slug>.<ext>` in card order (default `tmp/RLY-12/mockups/`). `--json` prints `[{caption, url, path}]`; a card with none prints `RLY-12: no mockups` and exits 0. Can't be combined with files, `--caption` or `--clear` |
 | `./relay needs-input RLY-12 "…"` | Ask the human a question — blocks the card |
 | `./relay own RLY-12` / `release RLY-12` | Claim for the AI / hand back |
 | `./relay approve RLY-12` / `reject RLY-12 "note"` | Gate: advance / send back |
+| `./relay retry RLY-12 [--at NODE]` | Retry the failed run — from the last node, or from `--at NODE` |
+| `./relay cancel RLY-12 [--reason "…"]` | Cancel the card's active run — the stop half of `retry`. Never moves the card; follow with `move` |
+| `./relay advance RLY-12` | The current task is already done — check it off and continue with the next one |
+| `./relay audit [FLOW]` | **Board health:** run-history findings plus CI parity. Advisory; always exits 0. `--window` |
+| `./relay flow-stats code` | Per-node metrics for a flow — duration, cost, attempts, verdicts. `--window` |
+| `./relay flow` / `flow code` | The board's flows, or one flow's definition. `--json` is the pull — see [Flows as data](#flows-as-data) |
+| `./relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 
 ## The AI result blob
 
@@ -80,6 +92,20 @@ url=$(./relay attach RLY-12 tmp/smoke/01-door.png --field url)   # → /attachme
 Any other key — `deploy_url` at the top level, `image` / `shot` / `path` / `name` inside a
 screen — is refused with `422 invalid_ai_result` naming what you wrote and what exists. The
 refusal is the point: a blob the drawer can't read renders an empty Screenshots strip, silently.
+
+## Depending one card on another
+
+Dependencies exist to head off *parallel implementations of the same thing*, which land as bad
+merges. Two shapes make one:
+
+1. **Producer → consumer.** Card A creates a thing; card B uses it: `./relay depends B A`.
+2. **Co-creation.** Two cards both need a thing that doesn't exist yet. Left alone, each builds its
+   own version. Name one card the producer and point the other at it — or split the thing into its
+   own card and depend both on it.
+
+Touching the same file with no shared new thing is **not** a dependency; leave those parallel. A
+blocked card is undispatchable until every blocker reaches a top-level Done column, so link only
+what you mean.
 
 ## Long arguments
 
@@ -148,3 +174,37 @@ runner pauses until the reset even with no limits configured.
 Any other key inside `limits`, or a value outside 0–1, makes `relay start` refuse to start and
 name the key.
 
+## Runner config
+
+`./relay update` creates `.relay/runner.json` when it is missing, documented inline: every key
+carries a comment, and the `worktrees` block starts commented out. A line whose first
+non-whitespace characters are `//` is a full-line comment; a trailing `//` after a value and
+`/* */` block comments are not supported. The file is yours to tune and commit — `update` never
+overwrites it.
+
+**Worktree hooks.** `"worktrees": {"prepare": ".relay/prepare-worktree.sh", "cleanup":
+".relay/cleanup-worktree.sh"}` (those are also the defaults). `prepare` warms a new per-card
+worktree, and a failure fails the run. `cleanup` runs right before the runner deletes one, to stop
+per-worktree servers or databases; it is best-effort (a failure is logged and the tree is removed
+anyway), times out after 120s, and must be safe to run twice. A flat top-level `"prepare"` still
+works but is deprecated.
+
+## Flows as data
+
+A board's flows — which stages are AI-enabled, what each node does, model/effort, retry and loop
+budgets — are edited in **Settings › Flows**, or pulled and pushed as data:
+
+```bash
+./relay flow code --json > code.json   # nodes, edges, trigger as stage names, isolation, version
+./relay flow-push code code.json
+```
+
+An unchanged push bumps nothing; an edited one bumps the version like an editor save. Include the
+pulled `version` to get compare-and-swap (a `409` means the flow moved under you — re-pull,
+re-apply, push again); omit it for last-write-wins.
+
+Two rules keep custom nodes safe: a node's command should start by checking out the card's branch
+(from `vars.branch`) and end by committing. A task loop (`foreach: card.tasks`) binds one task per
+iteration; each loop node fetches its task's body with `{relay} task show {ref} {task_id}`
+(`{task}` is its title). Legacy `card.sub_tasks` / `sub_tasks` / `{sub_task_id}` names are
+normalized to `tasks` when a flow is loaded or pushed.

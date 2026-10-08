@@ -26,16 +26,20 @@ defmodule Relay.AgentIntegrationDocsTest do
     assert File.read!(Path.join(File.cwd!(), "AGENTS.md")) =~ "relay.md"
   end
 
-  test "the Customizing section doesn't reference the retired relay_config.json action/{branch} schema" do
+  test "relay.md stays the short guide and points at the public docs for the rest" do
     doc = File.read!(@doc_path)
 
-    refute doc =~ "every `action`",
-           "relay.md still describes the retired relay_config.json `action` field"
+    assert doc =~ "$RELAY_URL/docs/cli"
+    refute doc =~ "every `action`", "relay.md still describes the retired relay_config.json `action` field"
+    # relay.md ships into every consuming repo, so it must not carry this repo's deploy steps.
+    refute doc =~ "bin/deploy_"
+    refute doc =~ "ship_to_main"
+  end
 
-    assert doc =~ "vars.branch",
-           "the Customizing section should point at the current run/vars node model"
+  test "the CLI page's Flows-as-data section describes the current run/vars node model" do
+    cli = File.read!(Path.join(File.cwd!(), "priv/docs/cli.md"))
 
-    assert doc =~ "code.json",
-           "the Customizing section should point at the Code flow's `branch` node"
+    assert cli =~ "vars.branch"
+    assert cli =~ "code.json"
   end
 end

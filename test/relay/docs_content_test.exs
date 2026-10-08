@@ -55,7 +55,7 @@ defmodule Relay.DocsContentTest do
       assert doc =~ cmd
     end
 
-    assert relay_md =~ "Restructuring a board"
+    assert cli =~ "Refused (409, nothing written)"
   end
 
   test "authentication.md still explains the API key + env vars" do
@@ -229,10 +229,10 @@ defmodule Relay.DocsContentTest do
 
     api = read("api.md")
     cli = read("cli.md")
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
     domain = File.read!(Path.join(File.cwd!(), "docs/architecture/domain.md"))
 
-    for {name, doc} <- [{"api.md", api}, {"cli.md", cli}, {"relay.md", relay_md}, {"domain.md", domain}] do
+    # relay.md only names `mockups` and links to /docs/cli, so it is not swept here.
+    for {name, doc} <- [{"api.md", api}, {"cli.md", cli}, {"domain.md", domain}] do
       assert doc =~ style_host, "#{name} should name #{style_host} as the mockup stylesheet exception"
       assert doc =~ font_host, "#{name} should name #{font_host} as the mockup font exception"
       refute doc =~ "no network access (inline JS/CSS", "#{name} still calls mockups fully offline"

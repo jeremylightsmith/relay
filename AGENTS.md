@@ -33,6 +33,13 @@ client-side or API surface.
 **Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
 card, work it, and hand it back. See [`relay.md`](relay.md).
 
+**Deploying:** the RE board doesn't deploy from CI. The Code flow squashes and fast-forwards
+the card to `main` (`bin/ship_to_main.sh`), and the **Deploy** stage runs `bin/deploy_fly.sh`,
+then `bin/deploy_ios.sh <REF>` / `bin/deploy_android.sh <REF>` when the commit touched
+`flutter/`. Secrets come from the runner's environment (`.envrc.local` via direnv; restart the
+runner after changing them). The flows live in `.relay/flows/`, and
+[`docs/architecture/runner.md`](docs/architecture/runner.md) has the full picture.
+
 ## Skill discipline
 
 This project ships skills in `.claude/skills/` and a pipeline
