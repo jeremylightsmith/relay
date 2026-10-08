@@ -163,13 +163,34 @@
     {
       "from": "merge",
       "on": "succeeded",
-      "to": "post"
+      "to": "await_ci"
     },
     {
       "from": "merge",
       "max_loops": 2,
       "on": "failed",
       "to": "resync"
+    },
+    {
+      "from": "await_ci",
+      "on": "succeeded",
+      "to": "post"
+    },
+    {
+      "from": "await_ci",
+      "max_loops": 2,
+      "on": "failed",
+      "to": "github_fix"
+    },
+    {
+      "from": "github_fix",
+      "on": "succeeded",
+      "to": "resync"
+    },
+    {
+      "from": "github_fix",
+      "on": "failed",
+      "to": "needs_input"
     },
     {
       "from": "post",
@@ -338,6 +359,18 @@
       "key": "merge",
       "run": "bin/ship_to_main.sh {ref}",
       "type": "shell"
+    },
+    {
+      "key": "await_ci",
+      "run": "bin/await_main_ci.sh",
+      "type": "shell"
+    },
+    {
+      "agent": "ci-fixer",
+      "key": "github_fix",
+      "model": "opus",
+      "run": "The await_ci node failed: main's CI did not pass on the commit card {ref} just shipped (bin/ship_to_main.sh pushed it straight to main; there is no PR). Its output is in the message; the decisive line reads `await_main_ci: FAILED: <reason>`. Work out which case it is, then leave the right commits on branch {branch}, starting from origin/main. The flow then goes back through resync, the gates and merge (which ships your fix to main as a new commit) and waits for CI again.",
+      "type": "agent"
     },
     {
       "key": "post",

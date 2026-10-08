@@ -1,8 +1,16 @@
 ---
 name: ci-fixer
-description: Get a card's change deployed after the `deploy` node failed — the PR's checks went red, it conflicts or never merged, main's CI broke after the merge, or the production deploy (Fly, job "Deploy app") didn't happen. Used by the Code flow's `github_fix` node; the failure arrives in the message.
+description: Get a card's change green on main after the node before `github_fix` failed — on a PR flow, `deploy` (the PR's checks went red, it conflicts or never merged, main's CI broke after the merge, or the Fly deploy didn't happen); on a ship-to-main flow (the RE board), `await_ci` (main's CI failed on the card's squashed commit). Used by the Code flow's `github_fix` node; the failure arrives in the message.
 model: opus
 ---
+
+Two flows end in this agent. **Read the failure's prefix to tell which one you're in:**
+
+- **`await_main_ci:`**: a ship-to-main flow (the RE board). There is no PR. `merge`
+  (`bin/ship_to_main.sh`) squashed the card's branch and pushed it straight to main, and the
+  `await_ci` node (`bin/await_main_ci.sh`) waited for main's CI on that commit. Go to
+  [Ship-to-main failures](#ship-to-main-failures-await_main_ci).
+- **`await_deploy:`**: a PR flow, described next.
 
 The `deploy` node (`bin/await_deploy.sh <pr-url>`) waits for the card's PR to merge and for
 main's CI (`.github/workflows/ci.yml`) to pass and run its **`Deploy app`** job, which deploys
@@ -49,6 +57,20 @@ is broken, or when main is broken by a change that isn't this card's.
 A "no change" case is still a success to report, not a commit to invent: this node does not
 expect commits, so declare `succeeded` and say which case it was and why nothing needed to
 change.
+
+## Ship-to-main failures (`await_main_ci:`)
+
+The card's commit is **already on main**, so a fix is a **new commit** on top of it, and nothing
+is reverted. **Start from main first:** `git fetch origin && git checkout -B "$(git branch
+--show-current)" origin/main`. After you succeed, the flow goes back through `resync` →
+`reverify` → `rebrowser` → `merge`, which ships your commit to main, and `await_ci` waits
+again. Pushing is `merge`'s job; don't push yourself.
+
+| Failure (`await_main_ci: FAILED: …`) | What to do |
+|---|---|
+| `main CI failed again for <sha> after a re-run (<jobs>): <url>` | Read it with `gh run view <id> --log-failed`, reproduce it locally, fix, and commit. If the failure isn't caused by this card's commit (main was already red before it: check `gh run list --workflow ci.yml --branch main`), **escalate** rather than fixing someone else's change under this card. |
+| `main CI run for <sha> was cancelled: <url>` | Nobody meant to stop it. Re-run it with `gh run rerun <id>` and make no change. |
+| `timed out waiting: …` | See what `gh run list --workflow ci.yml --branch main` shows. Slow or queued → no change; stuck → `gh run rerun <id>`; red → the first row. |
 
 ## Report
 The case you picked and the evidence for it: the run URL and the failing test or step. Say what

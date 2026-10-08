@@ -72,7 +72,10 @@ own board) overrides two flows, checked in at
 flowchart LR
     rebrowser["… rebrowser"] -- succeeded --> merge["shell: bin/ship_to_main.sh<br/>(squash, fast-forward push)"]
     merge -- failed --> resync["resync"]
-    merge -- succeeded --> post["agent: post checklist"]
+    merge -- succeeded --> await_ci["shell: bin/await_main_ci.sh<br/>(main's CI on that commit)"]
+    await_ci -- succeeded --> post["agent: post checklist"]
+    await_ci -- failed --> github_fix["agent: ci-fixer"]
+    github_fix -- succeeded --> resync
     post -- succeeded --> codedone[["Code:Done"]]
     codedone --> checkout["shell: checkout -B {branch} origin/main"]
     checkout -- succeeded --> fly["shell: deploy_fly.sh"]
@@ -85,7 +88,12 @@ flowchart LR
 - **Code** (`Plan:Done → Code → Code:Done`) opens no PR. `merge` is `bin/ship_to_main.sh {ref}`:
   it squashes `origin/main..HEAD` into one `<REF> <card title>` commit and pushes it to `main`
   as a plain fast-forward, never with force. A rejected push fails into `resync` (max 2 loops).
-  The `deploy` / `github_fix` nodes are gone, and the card lands on `Code:Done`.
+  `await_ci` (`bin/await_main_ci.sh`) then waits for `ci.yml`'s push run on that exact commit,
+  re-running failed jobs once for flakes. Only a green run moves on to `post` and `Code:Done`, so
+  the Deploy flow never picks up a commit CI hasn't passed. A red one goes to `github_fix`, the
+  `ci-fixer` agent (max 2 loops). It commits a fix on top of `origin/main`, and the flow loops
+  back through `resync` and the gates to ship that fix as a new commit. The PR-era `deploy` node
+  is gone.
 - **Deploy** (`deploy` flow, `Code:Done → Deploy → Review`, `exclusive`, stage WIP 1) only deploys
   what is already on `main`. Its four shell nodes (`max_retries: 1`, each parking on
   `needs_input` when it fails, with no AI fixer) run on our own runners:

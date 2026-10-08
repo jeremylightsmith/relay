@@ -330,6 +330,7 @@ class CardTouchedFlutterTest(ScriptCase):
 
 # ── Deploy scripts (the Deploy flow's nodes) ──────────────────────────────────────────────
 
+AWAIT_MAIN_CI = os.path.join(BIN, "await_main_ci.sh")
 DEPLOY_FLY = os.path.join(BIN, "deploy_fly.sh")
 DEPLOY_IOS = os.path.join(BIN, "deploy_ios.sh")
 DEPLOY_ANDROID = os.path.join(BIN, "deploy_android.sh")
@@ -420,6 +421,109 @@ ANDROID_VARS = {
     "ANDROID_KEY_ALIAS": "upload",
     "PLAY_STORE_CONFIG_JSON_BASE64": base64.b64encode(b'{"type":"service_account"}').decode(),
 }
+
+
+# gh: `run list` prints line N of {seq} on its Nth call (the last line after; "-" = no run yet),
+# `run view` prints {jobs}, and every call is logged.
+GH_STUB = """#!/usr/bin/env bash
+echo "gh $*" >> "{log}"
+case "$1 $2" in
+  "run list")
+    n=$(grep -c '^gh run list' "{log}")
+    total=$(wc -l < "{seq}")
+    [ "$n" -gt "$total" ] && n=$total
+    sed -n "${{n}}p" "{seq}" | sed 's/^-$//'
+    ;;
+  "run view") cat "{jobs}" ;;
+esac
+exit 0
+"""
+
+RUN_URL = "https://github.com/o/r/actions/runs/7"
+
+
+def run_row(status, conclusion="none", attempt=1):
+    return "\t".join(["7", status, conclusion, str(attempt), RUN_URL])
+
+
+class AwaitMainCiTest(ScriptCase):
+    """await_main_ci.sh holds the Code flow until main's CI has passed on the commit it just
+    shipped: it waits for the run to appear and finish, re-runs failed jobs once (flakes), and
+    fails naming the failing jobs, so the ci-fixer has something to go on."""
+
+    def setUp(self):
+        super().setUp()
+        self.gh_log = os.path.join(self.tmp, "gh.log")
+        self.seq = os.path.join(self.tmp, "runs")
+        jobs = os.path.join(self.tmp, "jobs")
+        with open(jobs, "w", encoding="utf-8") as f:
+            f.write("Browser journeys (Playwright)\n")
+        stub_bin(self.tmp, "gh", GH_STUB.format(log=self.gh_log, seq=self.seq, jobs=jobs))
+        self.head = git(self.work, "rev-parse", "HEAD")
+
+    def runs(self, *rows):
+        with open(self.seq, "w", encoding="utf-8") as f:
+            f.write("".join(r + "\n" for r in rows))
+
+    def await_ci(self, *args, **env):
+        overrides = {"STUBS": os.path.dirname(self.relay), "AWAIT_POLL_SECONDS": "0"}
+        overrides.update(env)
+        return run_script(AWAIT_MAIN_CI, list(args), self.work, overrides)
+
+    def gh_calls(self, prefix):
+        with open(self.gh_log, encoding="utf-8") as f:
+            return [line.rstrip("\n") for line in f if line.startswith(prefix)]
+
+    def test_a_green_run_for_head_succeeds(self):
+        self.runs(run_row("completed", "success"))
+        result = self.await_ci()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"await_main_ci: main CI passed for {self.head}: {RUN_URL}", result.stderr)
+        self.assertIn(f"--commit {self.head}", self.gh_calls("gh run list")[0])
+        self.assertIn("--branch main --event push", self.gh_calls("gh run list")[0])
+
+    def test_an_explicit_sha_is_the_commit_awaited(self):
+        self.runs(run_row("completed", "success"))
+        self.await_ci("abc1234")
+        self.assertIn("--commit abc1234", self.gh_calls("gh run list")[0])
+
+    def test_waits_for_the_run_to_appear_and_finish(self):
+        self.runs("-", run_row("in_progress"), run_row("completed", "success"))
+        result = self.await_ci()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.gh_calls("gh run list")), 3)
+
+    def test_a_first_failure_re_runs_the_failed_jobs_once(self):
+        self.runs(run_row("completed", "failure"), run_row("queued", attempt=2),
+                  run_row("completed", "success", attempt=2))
+        result = self.await_ci()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.gh_calls("gh run rerun"), ["gh run rerun 7 --failed"])
+
+    def test_a_failure_after_the_re_run_fails_naming_the_jobs(self):
+        self.runs(run_row("completed", "failure", attempt=2))
+        result = self.await_ci()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(
+            f"await_main_ci: FAILED: main CI failed again for {self.head} after a re-run "
+            f"(Browser journeys (Playwright)): {RUN_URL}",
+            result.stderr,
+        )
+        self.assertEqual(self.gh_calls("gh run rerun"), [])
+
+    def test_a_cancelled_run_fails(self):
+        self.runs(run_row("completed", "cancelled"))
+        result = self.await_ci()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"await_main_ci: FAILED: main CI run for {self.head} was cancelled: {RUN_URL}",
+                      result.stderr)
+
+    def test_gives_up_after_the_timeout(self):
+        self.runs(run_row("in_progress"))
+        result = self.await_ci(AWAIT_TIMEOUT_SECONDS="0")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"await_main_ci: FAILED: timed out waiting: main CI run 7 for {self.head}",
+                      result.stderr)
 
 
 class DeployCase(ScriptCase):

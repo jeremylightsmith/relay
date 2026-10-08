@@ -80,10 +80,8 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
       assert flow.lands_on_stage.name == "Code:Done"
     end
 
-    test "has no deploy or github_fix node", %{flow: flow} do
-      keys = Enum.map(flow.nodes, & &1.key)
-      refute "deploy" in keys
-      refute "github_fix" in keys
+    test "has no PR-era deploy node", %{flow: flow} do
+      refute "deploy" in Enum.map(flow.nodes, & &1.key)
     end
 
     test "merge ships to main via bin/ship_to_main.sh and writes nothing", %{flow: flow} do
@@ -92,13 +90,27 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
       assert merge.writes == []
     end
 
-    test "merge succeeds into post and fails back into resync (max 2 loops)", %{flow: flow} do
-      assert edge?(flow, "merge", "post", :succeeded)
+    test "merge succeeds into await_ci and fails back into resync (max 2 loops)", %{flow: flow} do
+      assert edge?(flow, "merge", "await_ci", :succeeded)
+      refute edge?(flow, "merge", "post", :succeeded)
       assert %{max_loops: 2} = edge(flow, "merge", "resync", :failed)
     end
 
-    test "no edge names deploy or github_fix", %{flow: flow} do
-      refute Enum.any?(flow.edges, &(&1.from in ["deploy", "github_fix"] or &1.to in ["deploy", "github_fix"]))
+    test "await_ci waits for main's CI on the shipped commit before post", %{flow: flow} do
+      await_ci = node(flow, "await_ci")
+      assert await_ci.type == :shell
+      assert await_ci.run == "bin/await_main_ci.sh"
+      assert edge?(flow, "await_ci", "post", :succeeded)
+    end
+
+    test "a red main CI goes to the ci-fixer agent (max 2 loops), which loops back through resync", %{flow: flow} do
+      assert %{max_loops: 2} = edge(flow, "await_ci", "github_fix", :failed)
+
+      github_fix = node(flow, "github_fix")
+      assert github_fix.type == :agent
+      assert github_fix.agent == "ci-fixer"
+      assert edge?(flow, "github_fix", "resync", :succeeded)
+      assert edge?(flow, "github_fix", "needs_input", :failed)
     end
   end
 
@@ -150,10 +162,10 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
 
   test "every bin/ script the deploy and merge nodes run exists and is executable" do
     deploy_runs = Enum.map(doc(@deploy_path)["nodes"], & &1["run"])
-    merge_run = Enum.find(doc(@code_path)["nodes"], &(&1["key"] == "merge"))["run"]
-    scripts = Enum.uniq(Enum.flat_map([merge_run | deploy_runs], &bin_scripts/1))
+    code_runs = for n <- doc(@code_path)["nodes"], n["key"] in ["merge", "await_ci"], do: n["run"]
+    scripts = Enum.uniq(Enum.flat_map(code_runs ++ deploy_runs, &bin_scripts/1))
 
-    for s <- ~w(bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh) do
+    for s <- ~w(bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh bin/await_main_ci.sh) do
       assert s in scripts, s
     end
 
