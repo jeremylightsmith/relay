@@ -12,7 +12,9 @@ defmodule Relay.AppleTokenFixtures do
 
   @doc """
   An RSA-2048 key. Generated once per test run and cached in `:persistent_term` —
-  RSA generation is slow. Use `new_signing_key/0` for a second, different key.
+  RSA generation is slow. Use `new_signing_key/0` for a second, different key. The cache is
+  write-once and every test gets the identical key, so it is not test-varying global state in
+  ADR 0009's sense.
   """
   @spec signing_key() :: JOSE.JWK.t()
   def signing_key do

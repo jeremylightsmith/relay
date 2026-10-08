@@ -1,6 +1,5 @@
 defmodule Relay.Accounts.AppleTokenValidatorTest do
-  # async: false — one case swaps the global `:apple_client_ids` env (restored on exit).
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Relay.AppleTokenFixtures
 
@@ -118,11 +117,14 @@ defmodule Relay.Accounts.AppleTokenValidatorTest do
   end
 
   test "reads the audience allowlist from config", %{key: key} do
-    original = Application.get_env(:relay, :apple_client_ids)
-    on_exit(fn -> Application.put_env(:relay, :apple_client_ids, original) end)
-    Application.put_env(:relay, :apple_client_ids, ["com.example.Other"])
+    Process.put(:apple_client_ids, ["com.example.Other"])
 
     token = apple_token(key, @kid, %{aud: "com.example.Other"})
     assert {:ok, _claims} = AppleTokenValidator.validate_token(token, @raw_nonce)
+  end
+
+  test "the allowlist override is scoped to the test that set it", %{key: key} do
+    token = apple_token(key, @kid, %{aud: "com.example.Other"})
+    assert AppleTokenValidator.validate_token(token, @raw_nonce) == {:error, :invalid_audience}
   end
 end

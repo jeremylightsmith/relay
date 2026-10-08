@@ -6,8 +6,9 @@ defmodule RelayWeb.Api.VersionController do
   nothing surfaces it; at one point the deployed release was identified by checking
   whether `Schemas.Flow.Node` had a `foreach` field. `GIT_SHA` is baked at image build
   time (the `final` stage of the `Dockerfile`, fed by the `flyctl deploy --build-arg` in
-  `.github/workflows/ci.yml`), so this is a **runtime** `System.get_env/1` read — a
-  compile-time read would bake the builder's value into the release.
+  `.github/workflows/ci.yml`), so this is a **runtime** read through `Relay.Config.git_sha/0`
+  (which falls back to `System.get_env("GIT_SHA")`) — a compile-time read would bake the
+  builder's value into the release.
 
   Falls back to `"unknown"` rather than guessing: a local `mix phx.server` and any build
   without the arg should be honest, not misleading.
@@ -19,7 +20,7 @@ defmodule RelayWeb.Api.VersionController do
 
   def show(conn, _params) do
     json(conn, %{
-      sha: System.get_env("GIT_SHA") || "unknown",
+      sha: Relay.Config.git_sha() || "unknown",
       built_at: System.get_env("BUILT_AT") || "unknown",
       version: to_string(Application.spec(:relay, :vsn) || "unknown")
     })

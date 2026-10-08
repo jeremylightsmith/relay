@@ -31,6 +31,7 @@ flowchart LR
     Mailer
     Markdown
     Presence
+    Accounts --> Config
     Accounts --> Repo
     Activity --> Events
     Activity --> Repo
@@ -59,6 +60,7 @@ flowchart LR
     Runs --> Activity
     Runs --> Boards
     Runs --> Cards
+    Runs --> Config
     Runs --> Events
     Runs --> Flows
     Runs --> Repo

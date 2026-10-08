@@ -106,7 +106,7 @@ defmodule Relay.MixProject do
       {:phoenix_test, "~> 0.11", only: :test, runtime: false},
       {:phoenix_test_playwright, "~> 0.15", only: :test, runtime: false},
 
-      # Deterministic async-test config/state propagation across process trees.
+      # Per-test config overrides through the process tree (`Relay.Config`, ADR 0009).
       {:process_tree, "~> 0.3"}
     ]
   end

@@ -9,8 +9,7 @@ if !Code.ensure_loaded?(Relay.Repo.Migrations.BackfillActivityStageIds) do
 end
 
 defmodule Relay.Migrations.BackfillActivityStageIdsTest do
-  # The backfill sweeps the whole activities table, so keep it off the async pool.
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Boards
   alias Relay.Repo.Migrations.BackfillActivityStageIds, as: Migration

@@ -99,7 +99,7 @@ defmodule Relay.Accounts.AppleTokenValidator do
   defp verify_issuer(_claims), do: {:error, :invalid_issuer}
 
   defp verify_audience(%{"aud" => aud}) do
-    if aud in Application.get_env(:relay, :apple_client_ids, []), do: :ok, else: {:error, :invalid_audience}
+    if aud in Relay.Config.get(:apple_client_ids, []), do: :ok, else: {:error, :invalid_audience}
   end
 
   defp verify_audience(_claims), do: {:error, :invalid_audience}

@@ -21,6 +21,7 @@ defmodule Relay.Runs do
       Relay.Activity,
       Relay.Boards,
       Relay.Cards,
+      Relay.Config,
       Relay.Events,
       Relay.Flows,
       Relay.Repo,

@@ -51,7 +51,7 @@ defmodule Relay.Runs.SchedulerSupervisor do
   queries the DB from an un-checked-out process).
   """
   def reconcile(opts \\ []) do
-    if Application.get_env(:relay, :runs_auto_start, false) do
+    if Relay.Config.get(:runs_auto_start, false) do
       Relay.Boards.list_board_ids()
       |> Enum.reject(&scheduler_running?/1)
       |> Enum.each(&ensure_started(&1, opts))

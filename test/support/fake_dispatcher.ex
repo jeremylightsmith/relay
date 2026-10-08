@@ -5,7 +5,7 @@ defmodule Relay.Runs.FakeDispatcher do
   `{:revoked, job}`, then drive `claim_job/report_outcome`.
 
   The dispatcher and its notification target ride on the calling process's `Relay.Runs.Instance`
-  (ADR 0009 rule 1) — this used to be two `Application.put_env/3` calls plus an `on_exit` to undo
+  (ADR 0009 rule 1) — this used to be two application-env writes plus an `on_exit` to undo
   them, which meant one test's dispatch notifications could be delivered to another test's pid.
   The instance registration is keyed by the test's pid and released when it exits, so there is
   nothing to clean up.

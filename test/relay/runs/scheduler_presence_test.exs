@@ -1,7 +1,5 @@
 defmodule Relay.Runs.SchedulerPresenceTest do
-  # async: false — this test flips the global `:runs_auto_start` env and inspects the
-  # application-wide `SchedulerSupervisor` / `SchedulerRegistry`, which every other test shares.
-  use Relay.DataCase, async: false
+  use Relay.DataCase, async: true
 
   alias Relay.Runs.RunnerReaper
   alias Relay.Runs.SchedulerRegistry
@@ -11,23 +9,24 @@ defmodule Relay.Runs.SchedulerPresenceTest do
     start_engine!()
 
     # Boot-time enumeration (`start_all/0`) is gated on this; it is off in test so booting never
-    # queries the DB. The sweep under test is the same policy, so turn it on for this test only.
-    previous = Application.get_env(:relay, :runs_auto_start, false)
-    Application.put_env(:relay, :runs_auto_start, true)
-
-    # The schedulers this test starts are children of the APPLICATION-wide supervisor, so they
-    # outlive the sandbox unless stopped — left running, their next tick queries this test's
-    # rolled-back board and crash-loops, which can exhaust the supervisor's restart intensity
-    # and take down schedulers belonging to later tests (see spec_flow_e2e_test.exs).
-    before = scheduler_pids()
-
-    on_exit(fn ->
-      Application.put_env(:relay, :runs_auto_start, previous)
-      Enum.each(scheduler_pids() -- before, &DynamicSupervisor.terminate_child(SchedulerSupervisor, &1))
-    end)
+    # queries the DB. The sweep under test is the same policy, so turn it on for this test only —
+    # the reaper reads it through `Relay.Config`, which finds it via `$ancestors` / `$callers`.
+    Process.put(:runs_auto_start, true)
 
     user = insert(:user)
     {:ok, board} = Relay.Boards.create_board(user, %{name: "Appeared After Boot"})
+
+    # The scheduler this test starts is a child of the APPLICATION-wide supervisor, so it
+    # outlives the sandbox unless stopped — left running, its next tick queries this test's
+    # rolled-back board and crash-loops, which can exhaust the supervisor's restart intensity
+    # and take down schedulers belonging to later tests (see spec_flow_e2e_test.exs). Stop only
+    # the one registered for this test's board; `[]` (never adopted) is a no-op.
+    board_id = board.id
+
+    on_exit(fn ->
+      for {pid, _} <- Registry.lookup(SchedulerRegistry, board_id),
+          do: DynamicSupervisor.terminate_child(SchedulerSupervisor, pid)
+    end)
 
     # Long interval → the reaper's own timer stays dormant and each sweep is one we trigger. Its
     # sandbox access comes from `callers:`, the same seam the engine tree uses. Started once per
@@ -39,10 +38,6 @@ defmodule Relay.Runs.SchedulerPresenceTest do
       )
 
     %{board: board, reaper: reaper}
-  end
-
-  defp scheduler_pids do
-    SchedulerSupervisor |> DynamicSupervisor.which_children() |> Enum.map(fn {_, pid, _, _} -> pid end)
   end
 
   defp scheduler_running?(board_id), do: Registry.lookup(SchedulerRegistry, board_id) != []

@@ -28,6 +28,7 @@ defmodule Relay do
       BoardWatch,
       Boards,
       Cards,
+      Config,
       Events,
       Flows,
       Flows.Document,

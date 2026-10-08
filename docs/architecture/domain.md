@@ -565,7 +565,10 @@ sharing behavior.
 - **Scaffold** — the five Relay-owned files (`./relay` + the four `relay-*` skills) the board
   serves at `/api/scaffold`, built into `priv/scaffold/` by `mix relay.build_scaffold`
   (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
-- **Markdown**, **Mailer**, **Repo** — rendering, mail, and Ecto plumbing.
+- **Markdown**, **Mailer**, **Repo**, **Config** — rendering, mail, Ecto plumbing, and
+  `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
+  (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`) are read, so a test overrides them with
+  `Process.put/2` instead of mutating app/OS env (RE419, ADR 0009 rule 1).
 
 ## Core schemas
 

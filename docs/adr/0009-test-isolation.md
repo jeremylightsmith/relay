@@ -103,6 +103,8 @@ by another route.
 
 ### The worked example for rule 1 — `Relay.Push`
 
+*See [Amendment (2026-10)](#amendment-2026-10-processtree-for-per-test-config): threading an argument (below) is still preferred when the caller already has the value; `Relay.Config` / `ProcessTree` is for values read deep in a call chain the test doesn't drive.*
+
 Before: `Relay.Push.Delivery.APNS` read `Application.get_env(:relay, Relay.Push)` at call time, so
 `apns_test.exs` had to `Application.put_env/3` in `setup` and restore it in `on_exit`.
 
@@ -217,3 +219,40 @@ costs one line and buys three integrations.
 not on its own compelling. It was done anyway because the global-name and `put_env` coupling is a
 correctness hazard independent of speed: it is why two engine tests could never run together, and
 it is the shape most likely to produce a mysterious cross-test failure as the suite grows.
+
+## Amendment (2026-10): ProcessTree for per-test config
+
+Source: RE419. Rule 1's "process-scoped context" is now concrete: **`Relay.Config`**, a thin seam
+over the `process_tree` library.
+
+- **How a test varies config.** The test `Process.put/2`s the value under the config key
+  (`:apple_client_ids`, `:runs_auto_start`, or `:git_sha`). Production reads it through
+  `Relay.Config.get/2` (app-env keys) or `Relay.Config.git_sha/0` (the OS-env `GIT_SHA`).
+  `ProcessTree.get/2` looks in the calling process's dictionary, then up its `$ancestors`, then
+  its `$callers`. With nothing in any dictionary it falls back to
+  `Application.get_env(:relay, key, default)` / `System.get_env("GIT_SHA")`, so production
+  behaviour is unchanged. Only the values tests actually vary are routed through the seam;
+  boot-time reads stay plain `Application.get_env/3`, as rule 1's sanctioned exception already
+  allows.
+- **Why `cache: false`, always.** By default `ProcessTree` caches a found value in the caller
+  and in every intermediate process it walked through. A long-lived or app-wide process could
+  then keep one test's value for the rest of the run, which is exactly the cross-test leak rule 1
+  forbids. `Relay.Config` never calls `ProcessTree.get/2` without `cache: false`.
+- **`nil` means absent.** `ProcessTree` treats a `nil` value as "not found" and falls through to
+  the real source. To make a value "explicitly unset", store `false`. `git_sha/0` turns a found
+  `false` back into `nil`, while `get/2` returns a found `false` as `false`.
+- **It complements rule 2's `$callers`.** One `$callers`/`$ancestors` chain carries both
+  sandbox ownership and config. A child started with `callers: [self()]` (re-seeded by
+  `Relay.Runs.Instance.adopt_callers/1`), via `start_supervised!`, or as a `Task` sees the test's
+  DB connection and the test's config together, and no other test sees either.
+- **Arguments first, ProcessTree second.** The `Relay.Push` worked example still stands. When the
+  caller already has the value, pass it as an argument. `ProcessTree` is for values read deep in
+  a call chain the test doesn't drive, such as `SchedulerSupervisor.reconcile/1` being called
+  from the reaper's `:sweep`, where no test-facing function has a parameter to thread it through.
+- **Enforcement.** `test/relay/test_isolation_test.exs` scans the tree statically. It fails on any
+  app-env or OS-env write (`put_env` / `delete_env`) in `test/` outside `test/test_helper.exs`.
+  It also fails on any non-browser module that runs `async: false` without a stated reason: a `#`
+  comment directly above the `use` line, or an explanation in the module's `@moduledoc`.
+  The same audit flipped `test/relay/runs/resume_refusal_test.exs` and
+  `test/relay/migrations/backfill_activity_stage_ids_test.exs` to `async: true`. Both were green
+  across the seed matrix (`--seed 1`, `424242`, `999` and three unseeded runs).

@@ -11,7 +11,7 @@ defmodule Relay.Accounts do
   the bearer tokens the native app uses for its JSON calls.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas], exports: [GoogleTokenValidator, AppleTokenValidator]
+  use Boundary, deps: [Relay.Config, Relay.Repo, Schemas], exports: [GoogleTokenValidator, AppleTokenValidator]
 
   import Ecto.Query
 
