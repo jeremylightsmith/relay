@@ -9,7 +9,7 @@ that supersedes the old one (update the old one's status to `Superseded by NNNN`
 
 | # | Title | Status |
 | --- | --- | --- |
-| [0001](0001-client-architecture.md) | Client architecture: LiveView-first with a thin native wrapper | Accepted (2026-07-06) |
+| [0001](0001-client-architecture.md) | Client architecture: LiveView-first with a thin native wrapper | Accepted (2026-07-06), refined by 0005 |
 | [0002](0002-module-boundaries-and-schemas-peer.md) | Module boundaries (`boundary`) + a `Schemas` peer | Accepted (2026-07-07) |
 | [0003](0003-card-state-stage-type-validity.md) | Card state × stage type validity | Accepted (2026-07-11) |
 | [0004](0004-card-ownership-and-the-claim-rule.md) | Card ownership & the claim rule | Accepted (2026-07-11) |
@@ -27,7 +27,9 @@ Start from [`TEMPLATE.md`](TEMPLATE.md). Keep ADRs short. A typical one has: **S
 **Context** (the forces at play), **Decision** (what we chose, stated plainly), **Consequences**
 (what follows — good and bad), and optionally **Alternatives considered**. Use the `## Status`
 section form, never an inline `**Status:**` line. The index's Status cell mirrors the file's status line
-exactly, date included (`Accepted (2026-07-06)`).
+exactly, date included (`Accepted (2026-07-06)`). An Accepted ADR that a later ADR narrows without
+superseding keeps its status line and gains a `Refined by [ADR NNNN](...)` line under it; its index
+cell then appends `, refined by NNNN` (`Accepted (2026-07-06), refined by 0005`).
 
 Under `## Status`, the status line may be followed by an `**Implementation:**` line —
 `**Implementation:** complete.` or `**Implementation:** partial — remaining: <items>.` — and an

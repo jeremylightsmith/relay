@@ -76,7 +76,7 @@ refinement of ADR 0001 or a partial supersede is an **open decision** (see below
 ### 5. Architecture — hybrid thin native shell + reused web views
 Neither extreme: a pure webview wrapper can't push or handle screenshots well; a full native
 rebuild duplicates the product and doubles every change.
-- **Layer 1 — Native shell (Swift/Kotlin):** push, tab bar & navigation, inbox list,
+- **Layer 1 — Native shell (Flutter; iOS-first, Android parked, RLY-103):** push, tab bar & navigation, inbox list,
   approve/reject bar, sheets & in-app browser, screenshot viewer, biometrics/share, voice
   (Whisper).
 - **Layer 2 — Web content (reused LiveView):** card body, spec & plan docs, responsive board
@@ -149,6 +149,52 @@ surfaces.
 **Card breakdown** (on the board, tagged `mobile`; foundations first via `/brainstorm RLY-77`):
 Foundations **RLY-77–81** (+ @mentions **RLY-82**); V1 **RLY-83–90** + **RLY-99**;
 V1.1 **RLY-91, 94–98**; Later **RLY-100–103**.
+
+## What shipped (2026-10-08)
+
+The hybrid shipped as a Flutter app (`flutter/`, iOS-first). Current state:
+
+**Native (Flutter) screens**
+- Sign-in / welcome (Google + Sign in with Apple).
+- Push onboarding (permission prompt + device registration).
+- Needs-you feed (the cross-board inbox).
+- Review queue + review bar (approve / reject).
+- Reject note.
+- Answer — the native structured-question stepper.
+- New-card sheet (RLY-126).
+- Board switcher (RE376 list, RE396 star, RE406 mute).
+- Settings.
+- Voice sheet (on-device Whisper).
+
+The board switcher, new-card sheet and settings were added after the card breakdown above;
+they are in-scope native surfaces under this ADR.
+
+**The API that feeds them** — human-authed, never the agent board-key `/api`:
+
+`/api/auth/native` (native sign-in → Phoenix session):
+- `POST /google`
+- `POST /apple`
+- `GET /me`
+
+`/api/all` (user session cookie for devices, `relayu_` user token for the rest):
+- `POST /devices`
+- `DELETE /devices/:token`
+- `POST /cards`
+- `GET /feed`
+- `GET /boards`
+- `POST /boards/:slug/star`
+- `POST /boards/:slug/mute`
+- `GET /cards/:ref`
+- `POST /cards/:ref/approve`
+- `POST /cards/:ref/reject`
+- `POST /cards/:ref/answer`
+
+**Embedded (chromeless) LiveView surfaces:** board, card body, spec/plan, comments, mockups.
+
+**Placement rule:** default to LiveView; go native only for a decision surface (one tap or a
+short answer that unblocks the baton) or a device capability (push, voice, biometrics, OS
+share/launch), feed it from `/api/all`, and amend this ADR in the same branch for any native
+surface not listed above — stated in full in [`AGENTS.md`](../../AGENTS.md) (Client strategy).
 
 ## Open questions (still genuinely open)
 

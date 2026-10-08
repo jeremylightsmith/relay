@@ -6,7 +6,8 @@ Proposed (YYYY-MM-DD)
 
 <!-- One of: Proposed (date) | Accepted (date) | Superseded by NNNN (date).
      An ADR is immutable once Accepted — to change the decision, write a new ADR that
-     supersedes this one and set this line to `Superseded by NNNN`. -->
+     supersedes this one and set this line to `Superseded by NNNN`. A later ADR that only
+     narrows this one adds a `Refined by [ADR NNNN](...)` line below the status line instead. -->
 
 <!-- Optional, once work ships: the next line after the status line may be
      `**Implementation:** complete.` or `**Implementation:** partial — remaining: <items>.`

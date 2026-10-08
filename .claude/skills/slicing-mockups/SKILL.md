@@ -29,9 +29,12 @@ The name(s) of the changed artboard(s). If not given, ask which — one at a tim
    depicts and each *state* it shows (empty, working, needs-input, in-review, error, …).
    This map is the bounded scope — do **not** walk screens the changed mockups don't cover.
 
-3. **Capture both sides at mobile width.** These are mobile mockups, and the app is the same
-   LiveView the native wrapper hosts (ADR 0001) — so drive the LiveView, not a separate
-   client. For each screen/state:
+3. **Capture both sides at mobile width.** These are mobile mockups; content screens (board,
+   card, spec/plan, comments, mockups) are the LiveView the app embeds, so drive the LiveView.
+   Mockups of ADR 0005's native surfaces (Needs-you inbox, review bar, answer stepper, new-card
+   sheet, board switcher, settings) are Flutter, not LiveView — Playwright can't capture them,
+   so file that gap as a card that says it needs a device/simulator check. For each LiveView
+   screen/state:
    - Drive the running app into that state with the Playwright browser at a mobile viewport
      (~390×844), using seed data or scripted interactions to reach each state, and screenshot
      it. (See the `run` skill to launch the app.)

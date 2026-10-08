@@ -4,6 +4,8 @@
 
 Accepted (2026-07-06)
 
+Refined by [ADR 0005](0005-mobile-app-scope-and-architecture.md) (2026-07-12): the "no separate mobile client / no separate API" stance now holds for content surfaces only; ADR 0005 scopes a small native decision layer and the /api/all API that feeds it.
+
 ## Context
 
 Relay needs a web app and mobile apps (iOS + Android). Two goals shape the client

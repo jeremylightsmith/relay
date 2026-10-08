@@ -31,6 +31,24 @@ defmodule Relay.DocsTaxonomyTest do
       line =~ ~r/^Superseded by \d{4} \(\d{4}-\d{2}-\d{2}\)$/
   end
 
+  # A `Refined by [ADR NNNN](...)` line in an Accepted ADR's Status section records a later ADR
+  # that narrows it without superseding it; the index marks it `, refined by NNNN`.
+  defp refined_by(contents) do
+    status_section =
+      contents
+      |> String.split("\n")
+      |> Enum.drop_while(&(String.trim(&1) != "## Status"))
+      |> Enum.drop(1)
+      |> Enum.take_while(&(not String.starts_with?(&1, "## ")))
+      |> Enum.join("\n")
+
+    for [_, nnnn] <- Regex.scan(~r/^Refined by \[ADR (\d{4})\]/m, status_section), do: nnnn
+  end
+
+  defp expected_index_cell(contents) do
+    Enum.join([status_line(contents) | Enum.map(refined_by(contents), &"refined by #{&1}")], ", ")
+  end
+
   # Index rows keyed by link target: `| [NNNN](file.md) | Title | Status |` → %{"file.md" => "Status"}.
   defp index_status_cells(index) do
     for line <- String.split(index, "\n"),
@@ -118,13 +136,13 @@ defmodule Relay.DocsTaxonomyTest do
                "or `Superseded by NNNN (YYYY-MM-DD)`): #{inspect(offenders)}"
     end
 
-    test "the ADR index Status cell mirrors each file's status line exactly" do
+    test "the ADR index Status cell mirrors each file's status line exactly, plus any refined-by marker" do
       rows = index_status_cells(read("docs/adr/README.md"))
 
       offenders =
         for path <- adr_paths(),
             file = Path.basename(path),
-            expected = status_line(File.read!(path)),
+            expected = expected_index_cell(File.read!(path)),
             not Map.has_key?(rows, file) or rows[file] != expected do
           case Map.fetch(rows, file) do
             {:ok, cell} -> "ADR #{file}: index says #{inspect(cell)}, file says #{inspect(expected)}"
@@ -224,6 +242,145 @@ defmodule Relay.DocsTaxonomyTest do
 
       refute domain =~ "Planned by [ADR 0006]"
       refute domain =~ "for card 04's pull transport"
+    end
+  end
+
+  describe "client strategy (RE422)" do
+    @adr_0001 "docs/adr/0001-client-architecture.md"
+    @adr_0005 "docs/adr/0005-mobile-app-scope-and-architecture.md"
+    @native_scopes ["/api/all", "/api/auth/native"]
+
+    test "AGENTS.md states the hybrid strategy, not the thin-wrapper one" do
+      agents = read("AGENTS.md")
+
+      refute agents =~ "no separate mobile UI or API",
+             "AGENTS.md still claims there is no separate mobile UI or API (ADR 0005 shipped one)"
+
+      refute agents =~ "thin-native-wrapper client strategy"
+
+      for needle <- [
+            @adr_0005,
+            @adr_0001,
+            "/api/all",
+            "/api/auth/native"
+          ] do
+        assert agents =~ needle, "AGENTS.md's client strategy should name `#{needle}`"
+      end
+    end
+
+    test "ADR 0001 stays Accepted and records that ADR 0005 refines it" do
+      adr = read(@adr_0001)
+
+      assert adr =~ "Accepted (2026-07-06)"
+      assert adr =~ "Refined by [ADR 0005](0005-mobile-app-scope-and-architecture.md)"
+    end
+
+    test "the ADR index lists 0001 as Accepted and refined by 0005, and 0005 as Accepted" do
+      index = read("docs/adr/README.md")
+
+      assert index =~ ~r/0001.*\| Accepted \(2026-07-06\), refined by 0005 \|/
+      assert index =~ ~r/0005.*\| Accepted \(2026-07-16\) \|/
+    end
+
+    test "ADR 0005 records what shipped, names Flutter for Layer 1 and stays Accepted" do
+      adr = read(@adr_0005)
+
+      assert adr =~ "## What shipped (2026-10-08)"
+      assert adr =~ ~r/^- \*\*Layer 1 .*Flutter/m, "ADR 0005's Layer 1 line should name Flutter"
+      refute adr =~ "Native shell (Swift/Kotlin)"
+      assert adr =~ "Accepted (2026-07-16)"
+    end
+
+    test "ADR 0005's What shipped section names every native API route in the router" do
+      shipped = adr_0005_what_shipped()
+
+      routes =
+        for %{verb: verb, path: path} <- Phoenix.Router.routes(RelayWeb.Router),
+            prefix <- @native_scopes,
+            String.starts_with?(path, prefix <> "/"),
+            do: {verb |> to_string() |> String.upcase(), String.replace_prefix(path, prefix, "")}
+
+      assert length(routes) == 14,
+             "expected the 14 native routes (3 /api/auth/native + 11 /api/all), got #{inspect(routes)}"
+
+      for {verb, path} <- routes do
+        assert shipped =~ "#{verb} #{path}",
+               "ADR 0005's What shipped section is missing `#{verb} #{path}`"
+      end
+    end
+
+    test "the architecture map describes the hybrid mobile app, not a thin native shell" do
+      readme = read("docs/architecture/README.md")
+
+      refute readme =~ "thin native wrapper"
+      refute readme =~ "thin native shells"
+      assert readme =~ "0005"
+    end
+
+    test "deps.md calls LiveView the primary UI, not the single UI" do
+      deps = read("docs/architecture/deps.md")
+
+      refute deps =~ "LiveView is the single UI"
+      assert deps =~ "primary UI (ADR 0001/0005)"
+    end
+
+    test "vision.md cites ADR 0005 alongside ADR 0001" do
+      assert read("docs/vision.md") =~ "adr/0005-mobile-app-scope-and-architecture.md"
+    end
+
+    test "ADR 0011 names /api/all as the only non-agent API" do
+      adr = read("docs/adr/0011-simplifying-the-factory.md")
+
+      refute adr =~ "ADR 0001 stands: no parallel client or API"
+      refute adr =~ "**ADR 0001** stands"
+      assert adr =~ "/api/all"
+    end
+
+    test "the design and slicing-mockups skills point at ADR 0005, not a thin native wrapper" do
+      for path <- [".claude/skills/design/SKILL.md", ".claude/skills/slicing-mockups/SKILL.md"] do
+        skill = read(path)
+
+        refute skill =~ "thin native wrapper", "#{path} still calls the app a thin native wrapper"
+        refute skill =~ "native wrapper hosts", "#{path} still says a native wrapper hosts the app"
+        assert skill =~ "ADR 0005", "#{path} should point at ADR 0005"
+      end
+    end
+
+    test "the router's /api/all comment cites ADR 0005's native API" do
+      router = read("lib/relay_web/router.ex")
+
+      refute router =~ "scoped exception (ADR 0001)"
+      assert router =~ "ADR 0005's native API"
+    end
+
+    test "no agent-read doc repeats the old thin-wrapper / no-API rule" do
+      stale = [
+        "no separate mobile UI or API",
+        "thin-native-wrapper client strategy",
+        "ADR 0001 stands: no parallel client or API"
+      ]
+
+      offenders =
+        (["AGENTS.md"] ++
+           Path.wildcard("docs/**/*.md") ++
+           Path.wildcard(".claude/{agents,commands,skills}/**/*.md"))
+        |> Enum.reject(&String.starts_with?(&1, ["docs/designs/", "docs/designs-as-is/"]))
+        |> Enum.filter(fn path ->
+          body = File.read!(path)
+          Enum.any?(stale, &String.contains?(body, &1))
+        end)
+
+      assert offenders == [],
+             "these files still repeat the old client-strategy rule: #{inspect(offenders)}"
+    end
+  end
+
+  defp adr_0005_what_shipped do
+    adr = read("docs/adr/0005-mobile-app-scope-and-architecture.md")
+
+    case String.split(adr, "## What shipped (2026-10-08)", parts: 2) do
+      [_, rest] -> rest |> String.split(~r/^## /m, parts: 2) |> hd()
+      [_] -> ""
     end
   end
 end

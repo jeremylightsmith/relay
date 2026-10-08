@@ -149,7 +149,7 @@ subgraph composition. The thing to decline is its size.
 
 - **ADR 0006** stands: Relay owns the graph, the developer owns node behavior, and an agent node
   stays one `claude -p` invocation. Nothing here crosses into owning the agent loop.
-- **ADR 0001** stands: no parallel client or API surface.
+- **ADR 0001/0005** stand: no parallel client; the only non-agent API is ADR 0005's `/api/all`.
 - **Plan fidelity is a settled question.** Contract-only plans (intent + signatures, no code)
   were tried and reverted in favour of plans carrying full code and tests. This ADR is about
   **where** per-task detail lives, not **how much** of it there is. Anyone reading this as

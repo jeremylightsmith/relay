@@ -46,8 +46,9 @@ agents are peers on the same cards — and where the *shape of the board* is the
 4. **Humans stay in control.** Agents propose and execute within scope; humans decide what
    moves forward. The board is the accountability surface.
 5. **One workspace, everywhere.** The same board and the same hand-off model on web and
-   mobile — see [ADR 0001](adr/0001-client-architecture.md) for how we deliver that without
-   duplicating the client.
+   mobile. Content (board, card, spec, comments, mockups) is one shared LiveView; only the
+   decision surfaces are native — see [ADR 0001](adr/0001-client-architecture.md) as refined by
+   [ADR 0005](adr/0005-mobile-app-scope-and-architecture.md).
 
 ## Core concepts (working model)
 

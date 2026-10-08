@@ -22,13 +22,26 @@ no authority**: `.dc.html` snapshots generated *from* the running app by
 shipped. Never treat one as a spec, never hand-edit one, and never write a capture into
 `docs/designs/` — when a capture and the app disagree, the capture is stale.
 
-**Client strategy (important for where code goes):** the LiveView web app is the single
-source of truth for UI and real-time logic. Mobile ships as a **thin native wrapper** around
-that same LiveView UI — so **build features in LiveView, not in a parallel client**. We do
-*not* maintain a separate mobile UI or API today. LiveView Native is a documented future
-upgrade path, adopted for iOS and Android together once the Android client is stable. Full
-rationale in [ADR 0001](docs/adr/0001-client-architecture.md) — read it before adding any
+**Client strategy (important for where code goes):** LiveView is the default home for UI and
+real-time logic. The mobile app (Flutter, iOS-first) is a **hybrid** that embeds that LiveView
+for content — see [ADR 0001](docs/adr/0001-client-architecture.md) as refined by
+[ADR 0005](docs/adr/0005-mobile-app-scope-and-architecture.md); read both before adding any
 client-side or API surface.
+
+- **Native layer (Flutter):** sign-in, push, navigation/tab bar, the Needs-you inbox, the
+  review approve/reject bar and reject note, the answer stepper, voice entry, the new-card
+  sheet, the board switcher, settings. It is fed by the human-authed (user session / user
+  token) `/api/all/*` + `/api/auth/native/*` endpoints — a real, maintained API, not a violation.
+- **Embedded LiveView (chromeless):** board, card body, spec/plan, comments, mockups. Change
+  these in LiveView; never re-implement them natively.
+- **Placement rule:** default to LiveView. Go native only for a *decision surface* (one tap or
+  a short answer that unblocks the baton) or something needing a *device capability* (push,
+  voice, biometrics, OS share/launch); large or fast-changing content stays LiveView. A native
+  surface ADR 0005 doesn't already scope means amending ADR 0005 in the same branch. Native
+  endpoints go under `/api/all` (human user credential) — never extend the agent board-key
+  `/api` for the app, and never add a mobile-only endpoint for something an embedded LiveView
+  already does.
+- **LiveView Native** remains the documented future path, adopted for iOS and Android together.
 
 **Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
 card, work it, and hand it back. See [`relay.md`](relay.md).
@@ -84,7 +97,7 @@ use them.
   running the old runner is genuinely worse than a stopped one.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - **The current-state architecture lives in [`docs/architecture/`](docs/architecture/README.md)** and staying current is a gate: if your branch adds or changes a **context, PubSub topic, API endpoint, or supervised process**, update the matching `docs/architecture/` page in the same branch. The whole-branch final review treats a stale page as a blocking finding.
-- **Architecture decisions live in [`docs/adr/`](docs/adr/README.md)** — read the index before changing cross-cutting structure. Notably [ADR 0001](docs/adr/0001-client-architecture.md) fixes the LiveView-first + thin-native-wrapper client strategy: keep UI and real-time logic in LiveView; do not stand up a parallel mobile client or API.
+- **Architecture decisions live in [`docs/adr/`](docs/adr/README.md)** — read the index before changing cross-cutting structure. Notably [ADR 0001](docs/adr/0001-client-architecture.md) + [ADR 0005](docs/adr/0005-mobile-app-scope-and-architecture.md) fix the LiveView-first, hybrid-native client strategy: keep UI and real-time logic in LiveView; native work is limited to ADR 0005's decision surfaces and the `/api/all` API that feeds them; do not build a parallel mobile client that re-implements content surfaces.
 - **Context boundaries are enforced by [`boundary`](https://hexdocs.pm/boundary)** (wired into the compiler). The web layer (`RelayWeb`) may only call the domain through `Relay`'s exported contexts; contexts may not reach into the web layer. Each context is its own sub-boundary declared in `lib/relay.ex` — when you add a context, give it `use Boundary` and add it to `Relay`'s `exports`. A boundary violation fails compilation.
 - **A magic value is defined exactly once.** Closed sets (statuses, outcomes, job states, node
   kinds, isolation classes) and policy numbers (thresholds, caps, grace windows) live as ONE

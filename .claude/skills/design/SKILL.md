@@ -91,9 +91,11 @@ pick `— RECOMMENDED`; leave `allow_text` true unless the options are exhaustiv
 
 **Worth asking about:** the job the screen does and for whom; what is on it at the decisive
 moment; what must be visible without scrolling; the empty, loading and error states; what it
-replaces; which existing screen it should feel like; mobile (Relay ships a thin native wrapper
-around these same pages); which parts are fixed requirements versus your call; whose baton the
-UI is showing (human = blue `primary`, AI = violet `secondary`).
+replaces; which existing screen it should feel like; mobile (the app embeds these same pages,
+except ADR 0005's native decision surfaces — Needs-you inbox, review bar, answer stepper,
+new-card sheet, board switcher, settings — which are Flutter); which parts are fixed
+requirements versus your call; whose baton the UI is showing (human = blue `primary`, AI =
+violet `secondary`).
 
 **Never ask what you can observe.** How the current screen works, what the data looks like,
 what components exist — look. Spend the human's attention on *judgment*.

@@ -84,7 +84,7 @@ flowchart LR
 
 | Dep | Why we have it |
 | --- | --- |
-| `phoenix`, `phoenix_live_view` | the app; LiveView is the single UI (ADR 0001) |
+| `phoenix`, `phoenix_live_view` | the app; LiveView is the primary UI (ADR 0001/0005) |
 | `ecto_sql` + `postgrex` | persistence |
 | `bandit` | HTTP server |
 | `boundary` | compile-time layer enforcement (ADR 0002) |
