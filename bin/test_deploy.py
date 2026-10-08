@@ -492,7 +492,9 @@ class DeployCase(ScriptCase):
 
 class DeployFlyTest(DeployCase):
     """deploy_fly.sh reproduces CI's `flyctl deploy` and only reports success once the board's
-    /api/version serves HEAD — a deploy that never goes live must fail, not hang."""
+    /api/version serves HEAD — a deploy that never goes live must fail, not hang. It is
+    idempotent: deploying Relay restarts the board, whose boot resume re-runs this node, so a
+    HEAD that is already live must succeed without deploying again (else it loops forever)."""
 
     def relay_versions(self, *shas):
         seq = os.path.join(self.tmp, "versions")
@@ -509,8 +511,16 @@ class DeployFlyTest(DeployCase):
         self.assertIn(FLY_FAIL, result.stderr)
         self.assertEqual(self.commands(), [])
 
-    def test_deploys_head_and_waits_until_it_is_live(self):
+    def test_a_head_that_is_already_live_succeeds_without_deploying(self):
         self.relay_versions(self.head)
+        result = self.run_deploy(DEPLOY_FLY, env={"FLY_API_TOKEN": "x"})
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.commands(), [])
+        self.assertIn(f"deploy_fly: {self.head} is already live — skipping the deploy", result.stdout)
+        self.assertEqual(self.version_calls(), ["version --field sha"])
+
+    def test_deploys_head_and_waits_until_it_is_live(self):
+        self.relay_versions("0000000", self.head)
         result = self.run_deploy(DEPLOY_FLY, env={"FLY_API_TOKEN": "x"})
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
@@ -526,7 +536,7 @@ class DeployFlyTest(DeployCase):
             result.stdout.rstrip("\n").endswith(f"deploy_fly: live at {self.head}"),
             result.stdout,
         )
-        self.assertEqual(self.version_calls(), ["version --field sha"])
+        self.assertEqual(self.version_calls(), ["version --field sha"] * 2)
 
     def test_polls_until_the_live_sha_is_head(self):
         self.relay_versions("0000000", "0000000", self.head)
@@ -549,12 +559,12 @@ class DeployFlyTest(DeployCase):
         )
 
     def test_a_failed_flyctl_deploy_never_polls(self):
-        self.relay_versions(self.head)
+        self.relay_versions("0000000")
         result = self.run_deploy(
             DEPLOY_FLY, env={"FLY_API_TOKEN": "x", "STUB_FLYCTL_EXIT": "3"}
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertEqual(self.version_calls(), [])
+        self.assertEqual(self.version_calls(), ["version --field sha"])  # the pre-check only
 
 
 class DeployIosTest(DeployCase):
