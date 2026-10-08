@@ -64,3 +64,6 @@ npm-debug.log
 .relay-retained
 /__pycache__
 bin/__pycache__
+
+# macOS Finder metadata
+.DS_Store
