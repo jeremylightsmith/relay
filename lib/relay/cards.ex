@@ -566,24 +566,11 @@ defmodule Relay.Cards do
     Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and is_nil(c.archived_at)), :count)
   end
 
-  @doc """
-  The dashless human-facing ref for a board `key` + `ref_number`, e.g. `"RL230"`. The single
-  formatter behind `ref/2` and the board-tile render
-  (`RelayWeb.CoreComponents.stage_column/1`, which holds a key string + a plain card map, not
-  `%Card{}` structs). `Relay.Push.ref/2` mirrors this by hand — Push cannot depend on Cards
-  (a back-dep would be a Boundary cycle).
-  """
-  def format_ref(key, ref_number), do: "#{key}#{ref_number}"
+  @doc "Delegates to `Schemas.Card.format_ref/2`, the single definition of the ref format (RE417)."
+  defdelegate format_ref(key, ref_number), to: Card
 
-  @doc """
-  The human-facing card ref: the board's key immediately followed by the card's per-board
-  ref number, e.g. `"RL230"` (no dash).
-
-  Takes the board explicitly (a refinement of the spec's sketched
-  `Card.ref/1`) so callers that already hold the board don't need
-  `card.board` preloaded.
-  """
-  def ref(%Board{key: key}, %Card{ref_number: ref_number}), do: format_ref(key, ref_number)
+  @doc "Delegates to `Schemas.Card.ref/2`, the single definition of the ref format (RE417)."
+  defdelegate ref(board, card), to: Card
 
   @doc """
   Updates a card's user/agent-editable attributes (`:title`, `:description`,

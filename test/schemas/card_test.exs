@@ -59,10 +59,21 @@ defmodule Schemas.CardTest do
     end
   end
 
-  describe "Cards.ref/2" do
-    test "formats the human-facing ref from the board key and ref_number" do
-      assert Cards.ref(%Board{key: "RLY"}, %Card{ref_number: 12}) == "RLY12"
-      assert Cards.format_ref("RL", 230) == "RL230"
+  describe "Schemas.Card.ref/2 and format_ref/2" do
+    test "ref/2 formats the human-facing ref from the board key and ref_number" do
+      assert Card.ref(%Board{key: "RLY"}, %Card{ref_number: 12}) == "RLY12"
+    end
+
+    test "format_ref/2 is dashless and unpadded" do
+      assert Card.format_ref("RL", 230) == "RL230"
+    end
+
+    test "Cards.ref/2 and Cards.format_ref/2 delegate to the Schemas.Card definition" do
+      expected = Card.ref(%Board{key: "RLY"}, %Card{ref_number: 12})
+
+      assert expected == "RLY12"
+      assert Cards.ref(%Board{key: "RLY"}, %Card{ref_number: 12}) == expected
+      assert Cards.format_ref("RLY", 12) == expected
     end
   end
 

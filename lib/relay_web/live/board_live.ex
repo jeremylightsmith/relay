@@ -3890,7 +3890,7 @@ defmodule RelayWeb.BoardLive do
     options =
       for c <- cards,
           c.id != card.id,
-          do: %{ref: Cards.format_ref(board.key, c.ref_number), title: c.title}
+          do: %{ref: Card.format_ref(board.key, c.ref_number), title: c.title}
 
     socket
     |> assign(:card_dependencies, Cards.list_dependencies(board, card))

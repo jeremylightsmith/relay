@@ -9,8 +9,7 @@ defmodule Relay.Push do
 
   **Depends on `Relay.Members`/`Relay.Repo`, never on `Relay.Cards`** — `Cards`
   calls `Push` from `set_status/3`, so a back-dependency would be a boundary
-  cycle. That is also why the card ref is formatted here rather than reusing
-  `Cards.ref/2`.
+  cycle.
   """
 
   use Boundary, deps: [Relay.Members, Relay.Repo, Schemas]
@@ -254,7 +253,7 @@ defmodule Relay.Push do
   """
   def message(%Card{} = card, %Board{} = board) do
     {title, kind} = copy(card.status)
-    ref = ref(board, card)
+    ref = Card.ref(board, card)
 
     %{
       id: "#{ref}:#{kind}:#{System.unique_integer([:positive])}",
@@ -313,8 +312,4 @@ defmodule Relay.Push do
   # V1 copy, kept in one place so it is trivial to tune.
   defp copy(:needs_input), do: {"Question from the AI", "needs_input"}
   defp copy(:in_review), do: {"Ready for your review", "in_review"}
-
-  # Duplicates `Relay.Cards.ref/2` on purpose: `Push` cannot depend on `Cards`
-  # (Cards calls Push — a back-dep would be a boundary cycle).
-  defp ref(%Board{key: key}, %Card{ref_number: ref_number}), do: "#{key}#{ref_number}"
 end

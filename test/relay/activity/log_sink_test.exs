@@ -43,6 +43,17 @@ defmodule Relay.Activity.LogSinkTest do
 
   defp rows(card), do: Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: [asc: a.id])
 
+  # RE417: LogSink resolves refs with a SQL `? || ?` mirror of the Elixir formatter — pin the two
+  # together so a format change on one side can't silently orphan every log line.
+  test "a ref built by Schemas.Card.format_ref/2 resolves to its card", %{board: board, card: card, sink: sink} do
+    ref = Schemas.Card.format_ref(board.key, card.ref_number)
+
+    :ok = LogSink.enqueue(board.id, [entry(%{ref: ref, text: "pinned"})], sink)
+    :ok = settle(sink)
+
+    assert [%Schemas.Activity{text: "pinned"}] = rows(card)
+  end
+
   test "three casts in one window become one insert_all", %{board: board, card: card, sink: sink} do
     :ok = LogSink.enqueue(board.id, [entry(%{text: "one"})], sink)
     :ok = LogSink.enqueue(board.id, [entry(%{text: "two"})], sink)

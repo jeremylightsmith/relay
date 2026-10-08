@@ -7075,7 +7075,7 @@ defmodule RelayWeb.CoreComponents do
                         id={dom_id}
                         title={card.title}
                         tag={card.tag}
-                        ref={Cards.format_ref(@board_key, card.ref_number)}
+                        ref={Card.format_ref(@board_key, card.ref_number)}
                         status={card.status}
                         stage_type={@type}
                         done={@terminal and card.status == :ready}
@@ -7191,7 +7191,7 @@ defmodule RelayWeb.CoreComponents do
                     id={dom_id}
                     title={card.title}
                     tag={card.tag}
-                    ref={Cards.format_ref(@board_key, card.ref_number)}
+                    ref={Card.format_ref(@board_key, card.ref_number)}
                     status={card.status}
                     stage_type={sub.lane}
                     done={false}
@@ -7221,7 +7221,7 @@ defmodule RelayWeb.CoreComponents do
   # RE389 — whether `card` is the one the drawer has open (BoardLive's :open_ref). Both
   # board_card call sites (main lanes and sub-lanes) ask this, so they cannot drift.
   defp open_card?(nil, _board_key, _card), do: false
-  defp open_card?(open_ref, board_key, card), do: Cards.format_ref(board_key, card.ref_number) == open_ref
+  defp open_card?(open_ref, board_key, card), do: Card.format_ref(board_key, card.ref_number) == open_ref
 
   @doc """
   RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup
@@ -7344,7 +7344,7 @@ defmodule RelayWeb.CoreComponents do
           <.compact_card_row
             :for={{dom_id, card} <- @cards}
             id={dom_id}
-            ref={Cards.format_ref(@board_key, card.ref_number)}
+            ref={Card.format_ref(@board_key, card.ref_number)}
             title={card.title}
             status={card.status}
             active_owner={Cards.active_owner_type(card)}
@@ -7359,7 +7359,7 @@ defmodule RelayWeb.CoreComponents do
           <.compact_card_row
             :for={{dom_id, card} <- sub.cards}
             id={dom_id}
-            ref={Cards.format_ref(@board_key, card.ref_number)}
+            ref={Card.format_ref(@board_key, card.ref_number)}
             title={card.title}
             status={card.status}
             active_owner={Cards.active_owner_type(card)}

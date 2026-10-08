@@ -171,7 +171,7 @@ defmodule Relay.PushTest do
 
       {:ok, _} = Cards.set_status(card, %{status: :needs_input}, :agent)
 
-      ref = "#{board.key}#{card.ref_number}"
+      ref = Cards.ref(board, card)
       assert_received {:push_delivered, "tok-bob", _}
       refute_received {:push_delivered, "tok-alice", _}
 

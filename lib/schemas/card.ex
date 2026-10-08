@@ -3,7 +3,7 @@ defmodule Schemas.Card do
   A card on a board: a titled unit of work living in one stage. `position`
   orders cards within their stage; `ref_number` is the per-board sequence
   behind the human-facing ref (board key + number, e.g. RL12 — see
-  `Relay.Cards.ref/2`). `board_id`, `stage_id`, `position`, and
+  `ref/2` / `format_ref/2`). `board_id`, `stage_id`, `position`, and
   `ref_number` are set programmatically, never cast from input. `branch`
   and `plan` (MMF spec 2026-07-08) carry the runner's git branch and
   implementation plan with the card; both nullable, both cast like
@@ -213,6 +213,24 @@ defmodule Schemas.Card do
   """
   @spec awaiting_review?(t()) :: boolean()
   def awaiting_review?(%__MODULE__{status: status}), do: status == :in_review
+
+  @doc """
+  The dashless human-facing ref for a board `key` + `ref_number`, e.g. `"RL230"` — the one
+  definition of the ref format (RE417). Behind `ref/2`, `Relay.Cards.format_ref/2`, `Relay.Push`,
+  and the board-tile render (`RelayWeb.CoreComponents.stage_column/1`, which holds a key string
+  + a plain card map, not `%Card{}` structs). `Relay.Activity.LogSink` mirrors it in SQL.
+  """
+  @spec format_ref(String.t(), integer()) :: String.t()
+  def format_ref(key, ref_number), do: "#{key}#{ref_number}"
+
+  @doc """
+  The human-facing card ref: the board's key immediately followed by the card's per-board
+  ref number, e.g. `"RL230"` (no dash) — via `format_ref/2`, the one definition (RE417).
+  Takes the board explicitly so callers that already hold the board don't need `card.board`
+  preloaded.
+  """
+  @spec ref(Schemas.Board.t(), t()) :: String.t()
+  def ref(%Schemas.Board{key: key}, %__MODULE__{ref_number: ref_number}), do: format_ref(key, ref_number)
 
   @doc "The closed set of card statuses — the one definition; the docs generate from it (RE239)."
   def statuses, do: Ecto.Enum.values(__MODULE__, :status)
