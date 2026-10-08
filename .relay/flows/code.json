@@ -72,6 +72,17 @@
     {
       "from": "precommit",
       "on": "succeeded",
+      "to": "flutter"
+    },
+    {
+      "from": "flutter",
+      "max_loops": 2,
+      "on": "failed",
+      "to": "final_fix"
+    },
+    {
+      "from": "flutter",
+      "on": "succeeded",
       "to": "browser"
     },
     {
@@ -300,6 +311,11 @@
       "type": "gate"
     },
     {
+      "key": "flutter",
+      "run": "bin/flutter_gate.sh",
+      "type": "gate"
+    },
+    {
       "key": "browser",
       "run": "mix test.browser",
       "type": "gate"
@@ -316,7 +332,7 @@
       "expects_commits": true,
       "key": "final_fix",
       "model": "opus",
-      "run": "Fix everything in the message in one consolidated pass, then leave the branch green: `mix precommit`, plus `mix test.browser` when the browser gate, smoke or acceptance sent you here.",
+      "run": "Fix everything in the message in one consolidated pass, then leave the branch green: `mix precommit`, plus `bin/flutter_gate.sh` when the flutter gate sent you here, plus `mix test.browser` when the browser gate, smoke or acceptance sent you here.",
       "type": "agent"
     },
     {

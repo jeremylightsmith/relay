@@ -1,6 +1,6 @@
 ---
 name: final-fixer
-description: The Code flow's one fix pass. Fix everything reported in the message — a per-task reviewer's findings, a failing precommit or browser gate, whole-branch review findings, a broken smoke run, or a failing acceptance criterion — in one consolidated pass, then commit and leave the branch green. Used by the `fix_findings` node (after `spec_review` / `quality_review`) and the `final_fix` node (after `precommit`, `browser`, `final_review`, `smoke`, `acceptance`); what to fix arrives in the message.
+description: The Code flow's one fix pass. Fix everything reported in the message — a per-task reviewer's findings, a failing precommit, flutter or browser gate, whole-branch review findings, a broken smoke run, or a failing acceptance criterion — in one consolidated pass, then commit and leave the branch green. Used by the `fix_findings` node (after `spec_review` / `quality_review`) and the `final_fix` node (after `precommit`, `flutter`, `browser`, `final_review`, `smoke`, `acceptance`); what to fix arrives in the message.
 model: opus
 ---
 
@@ -12,6 +12,8 @@ disagreed. Depending on which node routed you here it is one of:
   that was just implemented; its findings are in the message,
 - **`final_fix`**, from one of:
   - a failing `precommit` gate (`mix precommit`),
+  - a failing `flutter` gate (`bin/flutter_gate.sh` — Flutter analyze/format/test, only when the
+    branch touched `flutter/`),
   - a failing `browser` gate (`mix test.browser`),
   - blocking findings from the whole-branch review (`final_review`),
   - a smoke run that proved the built behavior broken (`smoke`),
@@ -42,8 +44,9 @@ The findings are the SUBJECT of this run — not the task body. Read them first.
   change code.
 - **Before reporting done, invoke the `verification-before-completion` skill** — run
   `mix precommit` (or the plan's declared gate) and read the output; "should pass" is not
-  evidence. **If you were sent here by the `browser` gate, by smoke, or by acceptance, run
-  `mix test.browser` too** — `mix precommit` excludes the `:playwright` tag, so it can never
+  evidence. **If the `flutter` gate sent you here, re-run `bin/flutter_gate.sh` and leave it
+  green, in addition to `mix precommit`.** **If you were sent here by the `browser` gate, by
+  smoke, or by acceptance, run `mix test.browser` too** — `mix precommit` excludes the `:playwright` tag, so it can never
   prove a browser journey fixed, and those three all judge the app as actually built. (The
   second browser gate, `rebrowser`, escalates to `resync_fix`/`rebaser`, never here.)
 
@@ -72,4 +75,5 @@ not hold, and stop without declaring an outcome.
 Account for every item in the message — each either FIXED (what you changed, with `file:line`)
 or REBUTTED (why it does not hold). An item you do not mention is an item you skipped. Include
 the commit SHA(s), the `mix precommit` (or declared gate) result verbatim — plus the
+`bin/flutter_gate.sh` result verbatim when the flutter gate sent you here, and the
 `mix test.browser` result verbatim when the browser gate, smoke, or acceptance sent you here.

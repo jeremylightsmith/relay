@@ -94,6 +94,16 @@ flowchart LR
   `ci-fixer` agent (max 2 loops). It commits a fix on top of `origin/main`, and the flow loops
   back through `resync` and the gates to ship that fix as a new commit. The PR-era `deploy` node
   is gone.
+- **Flutter gate** (RE424). The Code flow's `flutter` gate (`bin/flutter_gate.sh`) runs between
+  `precommit` and `browser`. It diffs `flutter/` against `git merge-base origin/main HEAD` and
+  exits 0 immediately when the branch didn't touch it; otherwise it runs
+  `bin/flutter_validate.sh` (`flutter pub get`, `flutter analyze`, a non-mutating `dart format`
+  check, `flutter test`), and a failure goes to `final_fix` (max 2 loops), which re-enters at
+  `precommit`. A detection error validates rather than skips. The gate is not repeated in the
+  pre-merge tail (`reverify` / `rebrowser`): a rebase breaks Flutter only when main also changed
+  `flutter/`, and the Deploy flow's `ios` / `android` still validate before any store upload.
+  The board runs the *pushed* flow, so a change to the file takes effect only after
+  `./relay flow-push code .relay/flows/code.json` (then `/relay-doctor`, interactively).
 - **Deploy** (`deploy` flow, `Code:Done → Deploy → Review`, `exclusive`, stage WIP 1) only deploys
   what is already on `main`. Its four shell nodes (`max_retries: 1`, each parking on
   `needs_input` when it fails, with no AI fixer) run on our own runners:

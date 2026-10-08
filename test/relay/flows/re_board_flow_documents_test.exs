@@ -111,6 +111,28 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
       assert edge?(flow, "github_fix", "resync", :succeeded)
       assert edge?(flow, "github_fix", "needs_input", :failed)
     end
+
+    test "flutter is a gate that runs bin/flutter_gate.sh", %{flow: flow} do
+      flutter = node(flow, "flutter")
+      assert flutter.type == :gate
+      assert flutter.run == "bin/flutter_gate.sh"
+    end
+
+    test "the flutter gate sits between precommit and browser", %{flow: flow} do
+      assert edge?(flow, "precommit", "flutter", :succeeded)
+      assert edge?(flow, "flutter", "browser", :succeeded)
+      refute edge?(flow, "precommit", "browser", :succeeded)
+    end
+
+    test "a failing flutter gate goes to final_fix (max 2 loops), which re-runs precommit", %{flow: flow} do
+      assert %{max_loops: 2} = edge(flow, "flutter", "final_fix", :failed)
+      assert edge?(flow, "final_fix", "precommit", :succeeded)
+    end
+
+    test "the pre-merge tail stays Elixir-only — no flutter gate after reverify or rebrowser", %{flow: flow} do
+      refute Enum.any?(flow.edges, &(&1.from in ["reverify", "rebrowser"] and &1.to == "flutter"))
+      assert node(flow, "reverify").run == "mix precommit"
+    end
   end
 
   describe "the pushed deploy flow" do
@@ -159,12 +181,13 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
     refute Map.has_key?(doc(@deploy_path), "version")
   end
 
-  test "every bin/ script the deploy and merge nodes run exists and is executable" do
+  test "every bin/ script the deploy, merge and gate nodes run exists and is executable" do
     deploy_runs = Enum.map(doc(@deploy_path)["nodes"], & &1["run"])
-    code_runs = for n <- doc(@code_path)["nodes"], n["key"] in ["merge", "await_ci"], do: n["run"]
+    code_runs = for n <- doc(@code_path)["nodes"], n["key"] in ["merge", "await_ci", "flutter"], do: n["run"]
     scripts = Enum.uniq(Enum.flat_map(code_runs ++ deploy_runs, &bin_scripts/1))
 
-    for s <- ~w(bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh bin/await_main_ci.sh) do
+    for s <-
+          ~w(bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh bin/await_main_ci.sh bin/flutter_gate.sh) do
       assert s in scripts, s
     end
 

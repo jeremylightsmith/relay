@@ -48,9 +48,9 @@ defmodule RelayWeb.Api.RunRetryTest do
 
   defp failed_run(card, flow) do
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = first}
+    assert_receive {:dispatched, %NodeJob{} = first}, 2_000
     {:ok, _run} = Runs.report_outcome(first, %{outcome: :failed, detail: "first boom"})
-    assert_receive {:dispatched, %NodeJob{} = second}
+    assert_receive {:dispatched, %NodeJob{} = second}, 2_000
     {:ok, run} = Runs.report_outcome(second, %{outcome: :failed, detail: "final boom"})
     Runs.get_run!(run.id)
   end
@@ -117,7 +117,7 @@ defmodule RelayWeb.Api.RunRetryTest do
 
   test "a running run is 422 naming its status", ctx do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, 2_000
 
     body = ctx.conn |> post(~p"/api/runs/#{run.id}/retry", %{}) |> json_response(422) |> Map.fetch!("error")
     assert body["code"] == "not_failed"

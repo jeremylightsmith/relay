@@ -335,6 +335,7 @@ DEPLOY_FLY = os.path.join(BIN, "deploy_fly.sh")
 DEPLOY_IOS = os.path.join(BIN, "deploy_ios.sh")
 DEPLOY_ANDROID = os.path.join(BIN, "deploy_android.sh")
 FLUTTER_VALIDATE = os.path.join(BIN, "flutter_validate.sh")
+FLUTTER_GATE = os.path.join(BIN, "flutter_gate.sh")
 IOS_FASTFILE = os.path.join(REPO_ROOT, "flutter", "ios", "fastlane", "Fastfile")
 ANDROID_FASTFILE = os.path.join(REPO_ROOT, "flutter", "android", "fastlane", "Fastfile")
 
@@ -348,7 +349,7 @@ PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
 VALIDATION = [
     "flutter pub get",
     "flutter analyze",
-    "dart format --set-exit-if-changed .",
+    "dart format --output=none --set-exit-if-changed .",
     "flutter test",
 ]
 
@@ -796,6 +797,136 @@ class DeployAndroidTest(DeployCase):
         self.assertFalse(os.path.exists(self.captured("storefile").strip()))
         self.assertFalse(os.path.exists(self.captured("playpath").strip()))
         self.assertEqual(os.listdir(self.scratch), [])
+
+
+class FlutterGateTest(DeployCase):
+    """The RE Code flow's `flutter` gate: validate the Flutter app before merge, but only when the
+    card's branch (merge-base with origin/main .. HEAD) touched flutter/. A detection error fails
+    toward validating, never toward skipping."""
+
+    SKIP = "flutter_gate: branch did not touch flutter/ — skipping"
+    VALIDATING = "flutter_gate: branch touched flutter/ — validating"
+    NO_BASE = "flutter_gate: could not compute merge-base with origin/main — validating anyway"
+    NO_FLUTTER = "flutter_gate: flutter not found on PATH"
+
+    def setUp(self):
+        super().setUp()
+        git(self.work, "checkout", "-q", "-b", "card")
+
+    def card_commit(self, flutter):
+        files = {"flutter/lib/a.dart": "void a() {}\n"} if flutter else {"lib/a.ex": "a\n"}
+        commit(self.work, files, "RE424 the card")
+
+    def gate(self, **env):
+        return self.run_deploy(FLUTTER_GATE, env=env)
+
+    def path_without_flutter(self):
+        dirs = [os.path.dirname(shutil.which("git")), os.path.dirname(shutil.which("bash")),
+                "/usr/bin", "/bin"]
+        path = os.pathsep.join(dict.fromkeys(dirs))
+        if shutil.which("flutter", path=path):
+            self.skipTest("flutter is installed beside git/bash; cannot build a flutter-less PATH")
+        return path
+
+    def gate_without_flutter(self):
+        return run_script(FLUTTER_GATE, [], self.work, {"PATH": self.path_without_flutter()})
+
+    def test_a_branch_without_flutter_changes_skips(self):
+        self.card_commit(flutter=False)
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.SKIP, result.stdout)
+        self.assertEqual(self.commands(), [])
+
+    def test_a_branch_touching_flutter_runs_the_validator(self):
+        self.card_commit(flutter=True)
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.VALIDATING, result.stdout)
+        self.assertEqual(self.commands(), VALIDATION)
+        for command in VALIDATION:
+            self.assert_cwd(command, "/flutter")
+
+    def test_a_failing_flutter_test_fails_the_gate_with_its_status(self):
+        commit(self.work, {"flutter/test/a_test.dart": "void main() {}\n"}, "RE424 test")
+        result = self.gate(STUB_FLUTTER_FAIL="test")
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(self.commands()[-1], "flutter test")
+
+    def test_a_failing_analyze_stops_the_validation(self):
+        self.card_commit(flutter=True)
+        result = self.gate(STUB_FLUTTER_FAIL="analyze")
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(self.commands(), ["flutter pub get", "flutter analyze"])
+
+    def test_uncommitted_flutter_changes_do_not_count(self):
+        self.card_commit(flutter=False)
+        dirty = os.path.join(self.work, "flutter", "lib", "dirty.dart")
+        os.makedirs(os.path.dirname(dirty), exist_ok=True)
+        with open(dirty, "w", encoding="utf-8") as f:
+            f.write("void dirty() {}\n")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.SKIP, result.stdout)
+        self.assertEqual(self.commands(), [])
+
+    def test_a_missing_merge_base_validates_a_flutter_branch_anyway(self):
+        self.card_commit(flutter=True)
+        git(self.work, "update-ref", "-d", "refs/remotes/origin/main")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.NO_BASE, result.stderr)
+        self.assertEqual(self.commands(), VALIDATION)
+
+    def test_a_missing_merge_base_validates_a_non_flutter_branch_too(self):
+        self.card_commit(flutter=False)
+        git(self.work, "update-ref", "-d", "refs/remotes/origin/main")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.NO_BASE, result.stderr)
+        self.assertEqual(self.commands(), VALIDATION)
+
+    def test_validating_without_flutter_on_path_exits_1(self):
+        self.card_commit(flutter=True)
+        result = self.gate_without_flutter()
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertIn(self.NO_FLUTTER, result.stderr)
+
+    def test_skipping_does_not_need_flutter_on_path(self):
+        self.card_commit(flutter=False)
+        result = self.gate_without_flutter()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.SKIP, result.stdout)
+
+    def test_a_commit_with_thousands_of_flutter_paths_validates(self):
+        # Enough paths to overflow a pipe buffer: a `git diff | grep -q` under pipefail would
+        # SIGPIPE git diff and read as "did not touch flutter/".
+        for i in range(3000):
+            path = os.path.join(self.work, "flutter", "assets", f"f{i:04d}.txt")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{i}\n")
+        git(self.work, "add", "flutter")
+        git(self.work, "commit", "-q", "-m", "RE424 regenerate assets")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.commands(), VALIDATION)
+
+    def test_the_script_never_fetches_checks_out_or_pipes_to_grep(self):
+        with open(FLUTTER_GATE, encoding="utf-8") as f:
+            code = [line for line in f if not line.lstrip().startswith("#")]
+        text = "".join(code)
+        for banned in ("git fetch", "git-fetch", "git checkout", "| grep"):
+            self.assertNotIn(banned, text)
+
+    def test_the_script_is_executable(self):
+        self.assertTrue(os.access(FLUTTER_GATE, os.X_OK))
+
+    def test_flutter_validate_checks_format_without_rewriting_files(self):
+        with open(FLUTTER_VALIDATE, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("dart format --output=none --set-exit-if-changed .", text)
+        self.assertNotIn("dart format --set-exit-if-changed .", text)
 
 
 class FastfileTest(unittest.TestCase):
