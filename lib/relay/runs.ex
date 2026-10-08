@@ -240,7 +240,10 @@ defmodule Relay.Runs do
 
   # ---- Flow metrics (RLY-209) ----
 
-  @metric_windows ~w(7d 30d all)
+  # The ONE window → day-count table, ordered (dropdowns render in this order — not a map).
+  # `nil` days means unbounded.
+  @metric_window_days [{"7d", 7}, {"30d", 30}, {"all", nil}]
+  @metric_windows Enum.map(@metric_window_days, &elem(&1, 0))
 
   @doc "The closed set of metrics windows. Defined once; LiveView, controller and CLI read it."
   def metric_windows, do: @metric_windows
@@ -249,7 +252,7 @@ defmodule Relay.Runs do
   def default_window, do: "30d"
 
   @doc """
-  The cutoff a metrics `window` starts at — `nil` for `"all"`; anything not in
+  The cutoff a metrics `window` starts at — `nil` for an unbounded window; anything not in
   `metric_windows/0` falls back to `default_window/0`. The ONE window → time mapping, shared by
   `node_metrics_for_flow/2` and `Relay.ValueStream.stream_summary/2` (RE146).
   """
@@ -864,9 +867,12 @@ defmodule Relay.Runs do
   defp normalize_window(window) when window in @metric_windows, do: window
   defp normalize_window(_), do: default_window()
 
-  defp window_since("all"), do: nil
-  defp window_since("7d"), do: DateTime.add(now(), -7 * 86_400, :second)
-  defp window_since("30d"), do: DateTime.add(now(), -30 * 86_400, :second)
+  defp window_since(window) do
+    case List.keyfind!(@metric_window_days, window, 0) do
+      {_window, nil} -> nil
+      {_window, days} -> DateTime.add(now(), -days * 86_400, :second)
+    end
+  end
 
   defp round_secs(nil), do: nil
   defp round_secs(seconds), do: round(seconds)

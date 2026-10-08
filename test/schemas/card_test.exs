@@ -152,6 +152,32 @@ defmodule Schemas.CardTest do
     end
   end
 
+  describe "awaiting_human_statuses/0 and needs_you_statuses/0" do
+    test "awaiting_human_statuses/0 is exactly needs_input and in_review, all real statuses" do
+      assert Card.awaiting_human_statuses() == [:needs_input, :in_review]
+      assert Card.awaiting_human_statuses() -- Card.statuses() == []
+    end
+
+    test "needs_you_statuses/0 is awaiting-human plus failed, all real statuses" do
+      assert Card.needs_you_statuses() == [:needs_input, :in_review, :failed]
+      assert Card.needs_you_statuses() -- Card.statuses() == []
+      assert Card.needs_you_statuses() -- Card.awaiting_human_statuses() == [:failed]
+    end
+
+    test "an awaiting-human status is one awaiting an answer or a review; no other status is" do
+      for status <- Card.awaiting_human_statuses() do
+        card = %Card{status: status, archived_at: nil}
+        assert Card.awaiting_answer?(card) or Card.awaiting_review?(card)
+      end
+
+      for status <- Card.statuses() -- Card.awaiting_human_statuses() do
+        card = %Card{status: status, archived_at: nil}
+        refute Card.awaiting_answer?(card)
+        refute Card.awaiting_review?(card)
+      end
+    end
+  end
+
   describe "awaiting_answer?/1 and /2" do
     test "true only for a needs_input card that is not archived" do
       assert Card.awaiting_answer?(%Card{status: :needs_input, archived_at: nil})

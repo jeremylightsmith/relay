@@ -83,6 +83,20 @@ defmodule Schemas.NodeExecution do
   """
   def holding_outcomes, do: @holding_outcomes
 
+  # The outcomes whose `detail` explains why a run stopped.
+  @failure_outcomes [:failed, :partial, :blocked]
+
+  @doc """
+  The outcomes that count as a failure for run forensics — the ones whose `detail` explains why a
+  run stopped or parked. `:partial` has no matching edge, so it degrades onto the node's `:failed`
+  edge and parks (`Engine.degrade_to_failed`, RE253/A9) — it IS a failure, and filtering to
+  `:failed` alone surfaced an EARLIER failure than the one that parked. `:blocked` (RE308) is the
+  reason an infrastructure park stopped. `:needs_input` is not here: a park awaiting an answer is
+  not a failure. The ONE definition of this set — consumers call it, never retype it.
+  """
+  @spec failure_outcomes() :: [atom()]
+  def failure_outcomes, do: @failure_outcomes
+
   @doc "Validates a programmatically-built execution row."
   def changeset(execution) do
     execution

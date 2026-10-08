@@ -188,6 +188,7 @@ defmodule Relay.ValueStreamSummaryTest do
   test "Runs.metric_window_since/1 is the one window → cutoff mapping" do
     assert Runs.metric_window_since("all") == nil
     assert_in_delta DateTime.diff(DateTime.utc_now(), Runs.metric_window_since("7d")), 7 * 86_400, 5
+    assert_in_delta DateTime.diff(DateTime.utc_now(), Runs.metric_window_since("30d")), 30 * 86_400, 5
     assert Runs.metric_window_since("bogus") == Runs.metric_window_since(Runs.default_window())
   end
 end

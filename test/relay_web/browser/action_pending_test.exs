@@ -151,6 +151,9 @@ defmodule RelayWeb.Browser.ActionPendingTest do
     session
     |> assert_has("#flash-info", text: toast, timeout: @reply_timeout)
     |> assert_has(".drawer-card-ref", text: next_ref, timeout: @reply_timeout)
+    # The ref swaps on the patch, but the review panel only renders once the next card's async
+    # body load lands (assign_review/2 in BoardLive's :load_card_body handler) — wait for it.
+    |> assert_has("#review-approve", timeout: @reply_timeout)
     |> unwrap(fn %{frame_id: frame_id} ->
       refute "phx-click-loading" in probe(frame_id, "#review-approve")["classes"]
       assert probe(frame_id, "#review-approve .pending-face")["visibility"] == "hidden"

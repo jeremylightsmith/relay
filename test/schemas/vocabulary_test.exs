@@ -99,6 +99,16 @@ defmodule Schemas.VocabularyTest do
     assert Schemas.NodeExecution.routable_outcomes() -- Schemas.NodeExecution.outcomes() == []
   end
 
+  test "failure_outcomes/0 is exactly the failed/partial/blocked subset of the outcome enum" do
+    assert Schemas.NodeExecution.failure_outcomes() == [:failed, :partial, :blocked]
+    assert Schemas.NodeExecution.failure_outcomes() -- Schemas.NodeExecution.outcomes() == []
+  end
+
+  test "succeeded and needs_input are not failure outcomes" do
+    refute :succeeded in Schemas.NodeExecution.failure_outcomes()
+    refute :needs_input in Schemas.NodeExecution.failure_outcomes()
+  end
+
   test "the edge `when` enum equals when_values/0" do
     assert Ecto.Enum.values(Edge, :when) == Edge.when_values()
   end

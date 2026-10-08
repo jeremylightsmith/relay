@@ -1698,16 +1698,16 @@ defmodule Relay.Cards do
   def needs_input?(%{status: status}), do: status == :needs_input
 
   @doc """
-  The two-bucket "needs-you" fact: `:needs_input`/`:in_review`/`:failed` always count, plus
+  The two-bucket "needs-you" fact: `Schemas.Card.needs_you_statuses/0` always count, plus
   ready-awaiting-human. NOTE this is deliberately broader than the board's amber accent (which
-  is `status in [:needs_input, :in_review]` only) — a ready-awaiting-human card counts in
+  is `Schemas.Card.awaiting_human_statuses/0` only) — a ready-awaiting-human card counts in
   rollups but is NOT painted amber (RLY-48 §2.3). `:failed` counts because a dead run always
   ends up in front of a human (RLY-179) — but it is NOT in `@feed_statuses`, because the
   needs-you feed renders a *question*, and a failed card has none. Pure.
   """
   @spec needs_you?(map(), [Stage.t()], MapSet.t(integer())) :: boolean()
   def needs_you?(%{status: status} = card, stages, ai_stage_ids) do
-    status in [:needs_input, :in_review, :failed] or ready_awaiting_human?(card, stages, ai_stage_ids)
+    status in Card.needs_you_statuses() or ready_awaiting_human?(card, stages, ai_stage_ids)
   end
 
   # The stage that pulls a parked card next: its own stage when that is a work/planning stage
@@ -1811,11 +1811,11 @@ defmodule Relay.Cards do
     end
   end
 
-  @feed_statuses [:needs_input, :in_review]
+  @feed_statuses Card.awaiting_human_statuses()
 
   @doc """
   The signed-in user's cross-board "needs-you" feed (RLY-80): every non-archived card with
-  `status in [:needs_input, :in_review]` on any board they are a member of, most-recently-blocked
+  a status in `Schemas.Card.awaiting_human_statuses/0` on any board they are a member of, most-recently-blocked
   first (`blocked_since` is stamped only for `:needs_input`; `:in_review` falls back to
   `updated_at`, which is when it entered review). Cards come with `:board` and `:stage` preloaded.
 

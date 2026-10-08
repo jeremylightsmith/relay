@@ -78,6 +78,13 @@ defmodule Relay.PushTest do
     end
   end
 
+  describe "notification_statuses/0" do
+    test "is the awaiting-human status set owned by Schemas.Card" do
+      assert Push.notification_statuses() == Schemas.Card.awaiting_human_statuses()
+      assert Push.notification_statuses() == [:needs_input, :in_review]
+    end
+  end
+
   describe "needs_you_count/1" do
     test "counts needs_input and in_review cards across the user's boards" do
       user = insert(:user)

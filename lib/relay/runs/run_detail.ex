@@ -16,6 +16,7 @@ defmodule Relay.Runs.RunDetail do
   """
 
   alias Schemas.Flow
+  alias Schemas.NodeExecution
 
   @type row :: map()
   @type t :: %__MODULE__{}
@@ -232,15 +233,10 @@ defmodule Relay.Runs.RunDetail do
   # ---- failure forensics (was RunComponents.last_failure_detail/1, failure_reason/1,
   #      tripped_node/2, parked_attempt/2), verbatim ----
 
-  # The failure that stopped or parked the run. A :partial has no matching edge, so it degrades
-  # onto the node's :failed edge and parks (Engine.degrade_to_failed) — it IS a failure for
-  # forensics. Filtering to :failed only surfaced an EARLIER failure than the one that parked, so
-  # the escalation drawer's failure text disagreed with its question, which comes from the same
-  # (parking) execution (RE253/A9). A :blocked row (RE308) is the reason an infrastructure park
-  # stopped, so it is the failure the drawer shows.
+  # The failure that stopped or parked the run — see NodeExecution.failure_outcomes/0 for why.
   defp last_failure_detail(nes) do
     nes
-    |> Enum.filter(&(&1.outcome in [:failed, :partial, :blocked]))
+    |> Enum.filter(&(&1.outcome in NodeExecution.failure_outcomes()))
     |> List.last()
     |> then(&(&1 && &1.detail))
   end

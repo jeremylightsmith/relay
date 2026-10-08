@@ -214,6 +214,27 @@ defmodule Schemas.Card do
   @spec awaiting_review?(t()) :: boolean()
   def awaiting_review?(%__MODULE__{status: status}), do: status == :in_review
 
+  # RE418: the statuses where a card explicitly waits on a human.
+  @awaiting_human_statuses [:needs_input, :in_review]
+
+  @doc """
+  The statuses where the card is explicitly waiting on a human: an answer (`awaiting_answer?/1`)
+  or a review (`awaiting_review?/1`) (RE418). The ONE definition of this set — the needs-you
+  feed (`Relay.Cards.needs_you_feed/1`) and the push policy (`Relay.Push.notification_statuses/0`)
+  call it, never retype it.
+  """
+  @spec awaiting_human_statuses() :: [atom()]
+  def awaiting_human_statuses, do: @awaiting_human_statuses
+
+  @doc """
+  The status half of `Relay.Cards.needs_you?/3` (RE418): a strict superset of
+  `awaiting_human_statuses/0` that adds `:failed`. A dead run also needs a human, but the card is
+  not "waiting" — so it is neither pushed nor shown in the needs-you feed. Ready-awaiting-human
+  is a separate, stage-dependent predicate (`Relay.Cards.ready_awaiting_human?/3`), not a status.
+  """
+  @spec needs_you_statuses() :: [atom()]
+  def needs_you_statuses, do: awaiting_human_statuses() ++ [:failed]
+
   @doc """
   The dashless human-facing ref for a board `key` + `ref_number`, e.g. `"RL230"` — the one
   definition of the ref format (RE417). Behind `ref/2`, `Relay.Cards.format_ref/2`, `Relay.Push`,

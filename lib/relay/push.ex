@@ -36,11 +36,12 @@ defmodule Relay.Push do
   @doc "The web-playable copy of the same horn, served by `Plug.Static` (RE399)."
   def web_sound_path, do: "/sounds/jobs_done.mp3"
 
-  @notification_statuses [:needs_input, :in_review]
+  @notification_statuses Card.awaiting_human_statuses()
 
   @doc """
   The push-worthy card statuses: entering one of these notifies the board's humans (APNs and
-  the browser), and they are what `needs_you_count/1` counts. The one place this set lives —
+  the browser), and they are what `needs_you_count/1` counts. This *is*
+  `Schemas.Card.awaiting_human_statuses/0` — the push policy reuses the awaiting-human set — and
   the web layer's toast templates iterate over it.
   """
   def notification_statuses, do: @notification_statuses
