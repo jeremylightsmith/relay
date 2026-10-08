@@ -135,6 +135,14 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
     end
   end
 
+  test "the deploy nodes run their scripts directly, reading secrets from the runner's environment" do
+    runs = Map.new(doc(@deploy_path)["nodes"], &{&1["key"], &1["run"]})
+
+    assert runs["fly"] == "bin/deploy_fly.sh"
+    assert runs["ios"] == "bin/deploy_ios.sh {ref}"
+    assert runs["android"] == "bin/deploy_android.sh {ref}"
+  end
+
   test "neither document carries a top-level version" do
     refute Map.has_key?(doc(@code_path), "version")
     refute Map.has_key?(doc(@deploy_path), "version")
@@ -145,7 +153,7 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
     merge_run = Enum.find(doc(@code_path)["nodes"], &(&1["key"] == "merge"))["run"]
     scripts = Enum.uniq(Enum.flat_map([merge_run | deploy_runs], &bin_scripts/1))
 
-    for s <- ~w(bin/op_deploy.sh bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh) do
+    for s <- ~w(bin/deploy_fly.sh bin/deploy_ios.sh bin/deploy_android.sh bin/ship_to_main.sh) do
       assert s in scripts, s
     end
 

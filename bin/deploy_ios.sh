@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Ship a card's Flutter change to TestFlight. The Deploy flow's iOS step.
 #
-#   bin/op_deploy.sh bin/deploy_ios.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_ios.sh <REF>        (run from the repo root, on origin/main)
 #
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/ — BEFORE looking at any
 #    secret, so a web-only card never fails on missing mobile credentials.
-# 2. Fails fast naming every missing secret (unset, empty, or an unresolved `op://` reference).
+# 2. Fails fast naming every missing secret (unset or empty). Secrets come from the
+#    environment, e.g. exported in .envrc.local in the runner's direnv shell.
 # 3. bin/flutter_validate.sh, then in flutter/ios: `fastlane ios next_build_number` (the next
 #    TestFlight build number), `fastlane deploy` (build, sign via read-only match, upload), and,
 #    unless TESTFLIGHT_EXTERNAL is the literal `false`, `fastlane ios distribute_external`.
@@ -44,9 +45,9 @@ for name in APP_STORE_CONNECT_PRIVATE_KEY APP_STORE_CONNECT_KEY_ID APP_STORE_CON
   MATCH_PASSWORD MATCH_GIT_BASIC_AUTHORIZATION RELAY_BASE_URL GOOGLE_IOS_CLIENT_ID \
   GOOGLE_SERVER_CLIENT_ID; do
   value="${!name:-}"
-  case "$value" in "" | op://*) missing="$missing $name" ;; esac
+  [ -n "$value" ] || missing="$missing $name"
 done
-[ -z "$missing" ] || fail "missing required variables:$missing — run through bin/op_deploy.sh (see .relay/deploy.env)"
+[ -z "$missing" ] || fail "missing required variables:$missing — export them in the runner's environment (e.g. .envrc.local), then restart it"
 
 key_file=""
 number_file=""

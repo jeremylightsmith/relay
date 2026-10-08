@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Ship a card's Flutter change to Google Play's internal track. The Deploy flow's Android step.
 #
-#   bin/op_deploy.sh bin/deploy_android.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_android.sh <REF>        (run from the repo root, on origin/main)
 #
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/.
-# 2. Skips (exit 0) while the Android credentials don't exist yet (RLY-103): their lines ship
-#    commented out in .relay/deploy.env, so any one unset, empty or unresolved means "not yet".
+# 2. Skips (exit 0) while the Android credentials don't exist yet (RLY-103): any one unset or
+#    empty in the environment means "not yet".
 # 3. bin/flutter_validate.sh, then in flutter/android: `fastlane android next_build_number` and
 #    `fastlane deploy` (build the App Bundle, upload to the internal track).
 #
@@ -40,13 +40,10 @@ esac
 
 for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD \
   ANDROID_KEY_ALIAS PLAY_STORE_CONFIG_JSON_BASE64; do
-  value="${!name:-}"
-  case "$value" in
-    "" | op://*)
-      say "Android credentials not configured — skipping Play deploy (RLY-103)"
-      exit 0
-      ;;
-  esac
+  if [ -z "${!name:-}" ]; then
+    say "Android credentials not configured — skipping Play deploy (RLY-103)"
+    exit 0
+  fi
 done
 
 key_properties="$PWD/flutter/android/key.properties" # absolute: the trap runs after the cd below

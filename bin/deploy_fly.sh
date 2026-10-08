@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy HEAD to Fly and wait until the board serves it. The Deploy flow's always-on step.
 #
-#   bin/op_deploy.sh bin/deploy_fly.sh        (needs FLY_API_TOKEN; see .relay/deploy.env)
+#   bin/deploy_fly.sh        (needs FLY_API_TOKEN in the environment, e.g. from .envrc.local)
 #
 # Reproduces CI's `Deploy app` job (`flyctl deploy --remote-only` with the GIT_SHA / BUILT_AT
 # build args the Dockerfile stamps into /api/version), then polls `relay version --field sha`
@@ -16,13 +16,12 @@ fail() {
   exit 1
 }
 
-# Missing = unset, empty, or still an `op://` reference (the script ran outside `op run`).
 missing=""
 for name in FLY_API_TOKEN; do
   value="${!name:-}"
-  case "$value" in "" | op://*) missing="$missing $name" ;; esac
+  [ -n "$value" ] || missing="$missing $name"
 done
-[ -z "$missing" ] || fail "missing required variables:$missing — run through bin/op_deploy.sh (see .relay/deploy.env)"
+[ -z "$missing" ] || fail "missing required variables:$missing — export them in the runner's environment (e.g. .envrc.local), then restart it"
 
 relay="${RELAY:-./relay}"
 poll="${DEPLOY_POLL_SECONDS:-15}"

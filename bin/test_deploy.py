@@ -19,7 +19,6 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.join(REPO_ROOT, "bin")
-DEPLOY_ENV = os.path.join(REPO_ROOT, ".relay", "deploy.env")
 
 SHIP = os.path.join(BIN, "ship_to_main.sh")
 TOUCHED = os.path.join(BIN, "card_touched_flutter.sh")
@@ -84,16 +83,10 @@ def stub_bin(tmp, name, script_body):
 
 
 def deploy_env_names():
-    """Every variable named in .relay/deploy.env, active or commented out. Empty if absent."""
-    if not os.path.exists(DEPLOY_ENV):
-        return set()
-    names = set()
-    with open(DEPLOY_ENV, encoding="utf-8") as f:
-        for line in f:
-            m = re.match(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=", line)
-            if m:
-                names.add(m.group(1))
-    return names
+    """Every deploy variable the scripts read, scrubbed so the developer's own shell (e.g. a
+    direnv-loaded .envrc.local) can't leak into a test."""
+    return {"FLY_API_TOKEN", "FASTLANE_USER", "FASTLANE_PASSWORD", "BETA_GROUP",
+            "TESTFLIGHT_EXTERNAL", *IOS_VARS, *ANDROID_VARS}
 
 
 def run_script(script, args, cwd, env_overrides=None):
@@ -337,7 +330,6 @@ class CardTouchedFlutterTest(ScriptCase):
 
 # ── Deploy scripts (the Deploy flow's nodes) ──────────────────────────────────────────────
 
-OP_DEPLOY = os.path.join(BIN, "op_deploy.sh")
 DEPLOY_FLY = os.path.join(BIN, "deploy_fly.sh")
 DEPLOY_IOS = os.path.join(BIN, "deploy_ios.sh")
 DEPLOY_ANDROID = os.path.join(BIN, "deploy_android.sh")
@@ -345,11 +337,11 @@ FLUTTER_VALIDATE = os.path.join(BIN, "flutter_validate.sh")
 IOS_FASTFILE = os.path.join(REPO_ROOT, "flutter", "ios", "fastlane", "Fastfile")
 ANDROID_FASTFILE = os.path.join(REPO_ROOT, "flutter", "android", "fastlane", "Fastfile")
 
-FLY_FAIL = "deploy_fly: missing required variables: FLY_API_TOKEN"
+SECRETS_HINT = "export them in the runner's environment (e.g. .envrc.local), then restart it"
+FLY_FAIL = f"deploy_fly: missing required variables: FLY_API_TOKEN — {SECRETS_HINT}"
 IOS_SKIP = "deploy_ios: no flutter/ changes for RE408 — skipping iOS"
 ANDROID_SKIP = "deploy_android: no flutter/ changes for RE408 — skipping Android"
 ANDROID_NO_CREDS = "deploy_android: Android credentials not configured — skipping Play deploy (RLY-103)"
-OP_UNAVAILABLE = "op_deploy: 1Password (op) not installed or not signed in — using the inherited environment"
 
 PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
 VALIDATION = [
@@ -517,14 +509,6 @@ class DeployFlyTest(DeployCase):
         self.assertIn(FLY_FAIL, result.stderr)
         self.assertEqual(self.commands(), [])
 
-    def test_an_unresolved_op_reference_counts_as_missing(self):
-        result = self.run_deploy(
-            DEPLOY_FLY, env={"FLY_API_TOKEN": "op://Relay Deploy/fly/credential"}
-        )
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn(FLY_FAIL, result.stderr)
-        self.assertEqual(self.commands(), [])
-
     def test_deploys_head_and_waits_until_it_is_live(self):
         self.relay_versions(self.head)
         result = self.run_deploy(DEPLOY_FLY, env={"FLY_API_TOKEN": "x"})
@@ -593,15 +577,15 @@ class DeployIosTest(DeployCase):
         self.assertIn(IOS_SKIP, result.stdout)
         self.assertEqual(self.commands(), [])
 
-    def test_missing_and_unresolved_variables_are_all_named(self):
+    def test_missing_and_empty_variables_are_all_named(self):
         self.ship_card(flutter=True)
-        env = dict(IOS_VARS, MATCH_PASSWORD="op://Relay Deploy/match/password")
+        env = dict(IOS_VARS, MATCH_PASSWORD="")
         del env["APP_STORE_CONNECT_KEY_ID"]
         result = self.run_ios(**env)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             "deploy_ios: missing required variables: APP_STORE_CONNECT_KEY_ID MATCH_PASSWORD — "
-            "run through bin/op_deploy.sh (see .relay/deploy.env)",
+            f"{SECRETS_HINT}",
             result.stderr,
         )
         self.assertEqual(self.commands(), [])
@@ -675,15 +659,6 @@ class DeployAndroidTest(DeployCase):
         self.assertIn(ANDROID_NO_CREDS, result.stdout.splitlines())
         self.assertEqual(self.commands(), [])
 
-    def test_an_unresolved_credential_skips_the_play_deploy(self):
-        self.ship_card(flutter=True)
-        result = self.run_android(
-            **dict(ANDROID_VARS, PLAY_STORE_CONFIG_JSON_BASE64="op://Relay Deploy/play/json")
-        )
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertIn(ANDROID_NO_CREDS, result.stdout.splitlines())
-        self.assertEqual(self.commands(), [])
-
     def test_builds_and_uploads_with_temporary_signing_files(self):
         self.ship_card(flutter=True)
         result = self.run_android(**dict(ANDROID_VARS, STUB_BUILD_NUMBER="17"))
@@ -707,126 +682,6 @@ class DeployAndroidTest(DeployCase):
         self.assertFalse(os.path.exists(self.captured("storefile").strip()))
         self.assertFalse(os.path.exists(self.captured("playpath").strip()))
         self.assertEqual(os.listdir(self.scratch), [])
-
-
-class OpDeployTest(DeployCase):
-    """op_deploy.sh resolves secrets through `op run` with the repo's env file when 1Password is
-    installed and signed in. Without it, the command runs on the inherited environment (secrets
-    from e.g. .envrc.local), plus the env file's non-secret literals; never an `op://` string."""
-
-    ENV_FILE = (
-        "FLY_API_TOKEN=op://Relay Deploy/fly/credential\n"
-        "# COMMENTED=op://Relay Deploy/x/y\n"
-        "BETA_GROUP=Beta\n"
-        "TESTFLIGHT_EXTERNAL=true\n"
-    )
-    PROBE = 'echo "fly=${FLY_API_TOKEN-unset} group=${BETA_GROUP-unset} ext=${TESTFLIGHT_EXTERNAL-unset}"'
-
-    def setUp(self):
-        super().setUp()
-        commit(self.work, {".relay/deploy.env": self.ENV_FILE}, "deploy env")
-
-    def probe(self, env=None):
-        overrides = {"PATH": self.stubs + ":/usr/bin:/bin"}
-        overrides.update(env or {})
-        return self.run_deploy(OP_DEPLOY, ["sh", "-c", self.PROBE], overrides)
-
-    def test_without_op_runs_on_the_inherited_environment(self):
-        result = self.probe({"FLY_API_TOKEN": "inherited-token"})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fly=inherited-token", result.stdout)
-        self.assertIn(OP_UNAVAILABLE, result.stderr)
-
-    def test_without_op_exports_the_env_files_literals(self):
-        result = self.probe()
-        self.assertIn("group=Beta ext=true", result.stdout)
-
-    def test_without_op_never_exports_an_op_reference(self):
-        result = self.probe()
-        self.assertIn("fly=unset", result.stdout)
-
-    def test_without_op_an_inherited_value_beats_the_files_literal(self):
-        result = self.probe({"TESTFLIGHT_EXTERNAL": "false"})
-        self.assertIn("ext=false", result.stdout)
-
-    def op_stub(self, whoami_exit):
-        stub_bin(
-            self.tmp,
-            "op",
-            "#!/usr/bin/env bash\n"
-            f'echo "op $*" >> "{self.log}"\n'
-            f'[ "$1" = whoami ] && exit {whoami_exit}\n'
-            "exit 0\n",
-        )
-
-    def test_a_signed_out_op_falls_back_to_the_inherited_environment(self):
-        self.op_stub(1)
-        result = self.probe({"FLY_API_TOKEN": "inherited-token"})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fly=inherited-token", result.stdout)
-        self.assertFalse(any(line.startswith("op run") for line in self.tool_lines()))
-
-    def test_runs_the_command_under_op_run_with_the_repo_env_file(self):
-        self.op_stub(0)
-        result = self.run_deploy(OP_DEPLOY, ["bin/deploy_ios.sh", "RE408"])
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        root = git(self.work, "rev-parse", "--show-toplevel")
-        self.assertIn(
-            f"op run --env-file={root}/.relay/deploy.env -- bin/deploy_ios.sh RE408",
-            self.tool_lines(),
-        )
-
-
-class DeployEnvFileTest(unittest.TestCase):
-    """The checked-in .relay/deploy.env names every secret by `op://` reference and holds no
-    secret value — a pasted token or key would be committed to git history."""
-
-    OP_NAMES = {
-        "FLY_API_TOKEN",
-        "APP_STORE_CONNECT_PRIVATE_KEY",
-        "APP_STORE_CONNECT_KEY_ID",
-        "APP_STORE_CONNECT_ISSUER_ID",
-        "MATCH_PASSWORD",
-        "MATCH_GIT_BASIC_AUTHORIZATION",
-        "FASTLANE_USER",
-        "FASTLANE_PASSWORD",
-        "RELAY_BASE_URL",
-        "GOOGLE_IOS_CLIENT_ID",
-        "GOOGLE_SERVER_CLIENT_ID",
-    }
-    LITERALS = {"BETA_GROUP": "Beta", "TESTFLIGHT_EXTERNAL": "true"}
-    ANDROID_NAMES = set(ANDROID_VARS)
-
-    def setUp(self):
-        self.active, self.commented = {}, set()
-        with open(DEPLOY_ENV, encoding="utf-8") as f:
-            for line in f:
-                active = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line.rstrip("\n"))
-                if active:
-                    self.active[active.group(1)] = active.group(2)
-                    continue
-                commented = re.match(r"^\s*#\s*([A-Za-z_][A-Za-z0-9_]*)=", line)
-                if commented:
-                    self.commented.add(commented.group(1))
-
-    def test_active_names_are_the_op_references_and_the_two_literals(self):
-        self.assertEqual(set(self.active), self.OP_NAMES | set(self.LITERALS))
-
-    def test_every_active_secret_is_an_op_reference(self):
-        for name, value in self.active.items():
-            if name in self.LITERALS:
-                self.assertEqual(value, self.LITERALS[name])
-            else:
-                self.assertTrue(value.startswith("op://Relay Deploy/"), f"{name}={value}")
-
-    def test_only_the_android_set_is_commented_out(self):
-        self.assertEqual(self.commented, self.ANDROID_NAMES)
-
-    def test_no_active_value_looks_like_a_pasted_secret(self):
-        for name, value in self.active.items():
-            self.assertLessEqual(len(value), 120, name)
-            self.assertNotIn("BEGIN", value, name)
-            self.assertIsNone(re.fullmatch(r"[A-Za-z0-9+/=]{40,}", value), name)
 
 
 class FastfileTest(unittest.TestCase):

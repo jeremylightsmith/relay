@@ -96,9 +96,9 @@ flowchart LR
 
   `ios` and `android` skip with exit 0 when the card's commit didn't touch `flutter/`
   (`bin/card_touched_flutter.sh`), and Android also skips until its credentials exist (RLY-103).
-- **Secrets** come from 1Password. Each deploy node runs under `bin/op_deploy.sh`, which execs
-  `op run --env-file=.relay/deploy.env -- <cmd>`. `.relay/deploy.env` holds only `op://`
-  references.
+- **Secrets** come from the runner's own environment, which shell nodes inherit. On the RE board
+  that is `.envrc.local`, loaded by direnv in the shell that ran `relay start`. Each deploy
+  script fails fast naming any secret it's missing.
 - **Why `checkout -B` and not `--detach`.** On an `exclusive` flow the runner re-attaches the
   card's branch before every node, and it refuses a detached HEAD unless the command contains
   `checkout -B`. Pointing the card's branch at `origin/main` keeps that guard happy and runs every

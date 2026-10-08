@@ -58,19 +58,19 @@
     {
       "key": "fly",
       "max_retries": 1,
-      "run": "bin/op_deploy.sh bin/deploy_fly.sh",
+      "run": "bin/deploy_fly.sh",
       "type": "shell"
     },
     {
       "key": "ios",
       "max_retries": 1,
-      "run": "bin/op_deploy.sh bin/deploy_ios.sh {ref}",
+      "run": "bin/deploy_ios.sh {ref}",
       "type": "shell"
     },
     {
       "key": "android",
       "max_retries": 1,
-      "run": "bin/op_deploy.sh bin/deploy_android.sh {ref}",
+      "run": "bin/deploy_android.sh {ref}",
       "type": "shell"
     }
   ],

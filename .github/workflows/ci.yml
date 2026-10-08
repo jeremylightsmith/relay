@@ -97,7 +97,7 @@ jobs:
       - run: mix test --only playwright --max-cases 1
 
   # Deploy app - DISABLED by RE408: deploys now run on our own runners in the RE board's
-  # Deploy flow (bin/deploy_fly.sh, via bin/op_deploy.sh), not on GitHub Actions minutes.
+  # Deploy flow (bin/deploy_fly.sh), not on GitHub Actions minutes.
   # Re-enable by uncommenting the job below to restore the CI deploy on push to main.
 #   deploy:
 #     name: Deploy app

@@ -282,20 +282,13 @@ the card on **Code:Done**. The **Deploy** stage (WIP 1) then runs the `deploy` f
 when the card's commit touched `flutter/`. Any failed step parks the card for a human. Both flows
 are checked in under `.relay/flows/` and pushed with `./relay flow-push <key> <file>`.
 
-Secrets come from 1Password. `.relay/deploy.env` is checked in and holds only `op://Relay
-Deploy/…` references; its header lists the vault items. To deploy by hand from the repo root
-(signed in with `op signin`, or with `OP_SERVICE_ACCOUNT_TOKEN` on a headless runner), run:
+Secrets come from the runner's environment. A runner started from a direnv shell at the repo root
+inherits whatever `.envrc.local` exports (`FLY_API_TOKEN`, the App Store Connect key, match, …),
+and every deploy step sees it; restart the runner after changing them. Each script fails fast
+naming any secret it's missing. To deploy by hand from the repo root:
 
 ```bash
-bin/op_deploy.sh bin/deploy_fly.sh
-# equivalently:
-op run --env-file=.relay/deploy.env -- bin/deploy_fly.sh
+bin/deploy_fly.sh
+bin/deploy_ios.sh <REF>
+bin/deploy_android.sh <REF>
 ```
-
-`bin/op_deploy.sh bin/deploy_ios.sh <REF>` and `bin/op_deploy.sh bin/deploy_android.sh <REF>` do
-the same for the stores.
-
-Without a signed-in `op`, `bin/op_deploy.sh` runs the command on the environment it inherited
-instead — for a runner, the direnv shell it was started from, so secrets exported in
-`.envrc.local` reach the deploy. The env file's non-secret literals (`BETA_GROUP`,
-`TESTFLIGHT_EXTERNAL`) still apply unless already set; its `op://` references are ignored.
