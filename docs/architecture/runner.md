@@ -1274,16 +1274,16 @@ from a follow-up review, 37 the branch-checkout non-destructiveness fix above, 3
 failure-line-into-the-transcript fix from the whole-branch review, 39 the `talk_users`
 occupancy count, the bounded placement retry, and the rejected-turn transcript line).
 
-**Two version floors.** `Relay.Runs.min_runner_version/0` was **not** raised for Talk (it was
-21 at the time; RE311 has since raised it to 57 for the reshaped release channel) — a runner
-without Talk is not worse than a stopped one for the flow work it still does correctly. Talk gets
-its own, higher floor instead: `Relay.Runs.min_talk_runner_version/0` (38 then; it now returns
-`max(@min_talk_runner_version, min_runner_version/0)`, so raising the base floor carries it
-along), applied by
-`talk_capable?/1` inside `claim_next_job/1`, which narrows the claim to `NodeJob.flow_kinds()`
-for anything below it. Without that second floor a pre-Talk runner would happily claim the
-first (deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key
-a talk payload does not carry, and reject it to the flow-only outcome route — a 404 that leaves
+**One version floor (talk included).** Talk originally shipped with its own, higher floor
+(38, then 39): `Relay.Runs.min_runner_version/0` was 21 at the time and was **not** raised for
+Talk, because a runner without Talk is not worse than a stopped one for the flow work it still
+does correctly. RE311 then raised the base floor past it (it is 63 today), and RE414 removed the
+separate talk floor. Today `talk_capable?/1` inside `claim_next_job/1` gates talk claims on
+`min_runner_version/0`, narrowing the claim to `NodeJob.flow_kinds()` for anything below it
+(over HTTP such a runner is refused 409 `runner_outdated` first, so the gate is defense-in-depth
+for in-process callers). Without it a pre-Talk runner would happily claim the first
+(deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key a
+talk payload does not carry, and reject it to the flow-only outcome route — a 404 that leaves
 the turn `claimed` forever and wedges Talk for the whole board ([failures.md](failures.md) D4t).
 
 ### Declaring an outcome

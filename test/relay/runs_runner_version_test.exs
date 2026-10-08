@@ -103,11 +103,5 @@ defmodule Relay.RunsRunnerVersionTest do
 
       assert Runs.min_runner_version() <= String.to_integer(declared)
     end
-
-    test "the talk floor is never below the base floor" do
-      # The factory and the runner contract fixture both use the talk floor as "a fully
-      # current runner". If the base floor ever passed it, every one of them would 409.
-      assert Runs.min_talk_runner_version() >= Runs.min_runner_version()
-    end
   end
 end

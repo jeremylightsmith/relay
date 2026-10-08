@@ -308,12 +308,12 @@ defmodule RelayWeb.Api.RunnerContractTest do
   end
 
   # One place builds the `runner` dict for both claim and heartbeat, mirroring ./relay's
-  # runner_ident (RLY-184). The version tracks the server's own minimum so the fixture always
+  # runner_ident (RLY-184). The version tracks `min_runner_version/0` so the fixture always
   # depicts a CURRENT runner — a literal would start 409ing the moment the minimum moves. It
-  # is the TALK minimum (the higher of the two floors, RE268) because this fixture also claims a
-  # talk job, which `Relay.Runs.talk_capable?/1` hides from a runner below it.
+  # also makes the fixture talk-capable: it claims a talk job, which `Relay.Runs.talk_capable?/1`
+  # hides from a runner below that same floor.
   defp runner_ident do
-    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_talk_runner_version()}
+    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_runner_version()}
   end
 
   # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.

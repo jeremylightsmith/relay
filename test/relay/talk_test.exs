@@ -31,7 +31,7 @@ defmodule Relay.TalkTest do
         board: board,
         name: "mac-1",
         capacity: %{"exclusive" => 1},
-        version: Runs.min_talk_runner_version()
+        version: Runs.min_runner_version()
       )
 
     %{board: board, stage: stage, card: card, author: author, runner: runner}

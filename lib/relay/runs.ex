@@ -1561,34 +1561,24 @@ defmodule Relay.Runs do
   @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
 
-  # RE268 — a SECOND, higher floor that applies only to `kind: :talk` jobs. A talk job is
-  # unpinned on a card's first turn and deliberately bypasses the capacity filter, so without
-  # this ANY runner at or above @min_runner_version could take it — including every
-  # pre-Talk runner, which reads `job["isolation"]`, raises `KeyError`, rejects the job and
-  # then 404s on the flow-only outcome route. The turn is left `:claimed` forever (the orphan
-  # reaper deliberately skips talk jobs) and `Talk.post_message/3` refuses every later turn with
-  # `:turn_in_flight` — one stale runner wedges Talk for the whole board.
-  #
-  # Kept separate from @min_runner_version on purpose: raising THAT would also stop old
-  # runners doing the flow work they still handle correctly.
-  @min_talk_runner_version 39
-
-  @doc """
-  The minimum `./relay` RUNNER_VERSION that may claim a `kind: :talk` job (ADR 0009).
-
-  Never below `min_runner_version/0` (RE311): the talk floor is a SECOND, HIGHER floor, and
-  a runner below the base floor is refused every job anyway. Deriving the max here keeps that
-  relationship a fact of the code rather than a number two humans must remember to raise
-  together — `talk_capable?/1`, the runner contract fixture and the test factory all read this
-  as "a fully current runner".
-  """
-  def min_talk_runner_version, do: max(@min_talk_runner_version, @min_runner_version)
-
   @doc """
   Whether this runner is new enough to RUN a talk turn, not merely new enough to claim
-  flow work. See `min_talk_runner_version/0`.
+  flow work (RE268). `claim_next_job/3` narrows a runner below `min_runner_version/0` to
+  `NodeJob.flow_kinds/0`.
+
+  A talk job is unpinned on a card's first turn and deliberately bypasses the capacity filter,
+  so without this gate a pre-Talk runner could take it: it reads `job["isolation"]`, raises
+  `KeyError`, rejects the job and then 404s on the flow-only outcome route. The turn is left
+  `:claimed` forever (the orphan reaper deliberately skips talk jobs) and `Talk.post_message/3`
+  refuses every later turn with `:turn_in_flight` — one stale runner wedges Talk board-wide.
+
+  Talk originally had its own, higher floor (RE268); once RE311 raised the base floor past it,
+  that floor was folded into `min_runner_version/0`, and RE414 removed it. Over HTTP an
+  outdated runner is refused 409 `runner_outdated` before it claims, so this is
+  defense-in-depth for in-process `claim_next_job/1` callers.
   """
-  def talk_capable?(%Runner{version: version}) when is_integer(version), do: version >= min_talk_runner_version()
+  @spec talk_capable?(Runner.t()) :: boolean()
+  def talk_capable?(%Runner{version: version}) when is_integer(version), do: version >= min_runner_version()
 
   def talk_capable?(%Runner{}), do: false
 

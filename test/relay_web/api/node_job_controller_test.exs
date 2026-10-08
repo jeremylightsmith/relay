@@ -92,7 +92,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          "version" => Runs.min_talk_runner_version()
+          "version" => Runs.min_runner_version()
         },
         "capacity" => capacity,
         "running" => running
@@ -138,7 +138,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
           conn,
           ~p"/api/node-jobs/claim?wait=0",
           Jason.encode!(%{
-            "runner" => %{"name" => "idle", "version" => Runs.min_talk_runner_version()},
+            "runner" => %{"name" => "idle", "version" => Runs.min_runner_version()},
             "capacity" => %{"shared_clean" => 1}
           })
         )
@@ -153,7 +153,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             conn,
             ~p"/api/node-jobs/claim",
             Jason.encode!(%{
-              "runner" => %{"name" => "zero-capacity", "version" => Runs.min_talk_runner_version()},
+              "runner" => %{"name" => "zero-capacity", "version" => Runs.min_runner_version()},
               "capacity" => %{"shared_clean" => 0, "exclusive" => 0}
             })
           )
@@ -332,7 +332,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             "name" => "fake",
             "host" => "fake",
             "interval" => 30,
-            "version" => Runs.min_talk_runner_version()
+            "version" => Runs.min_runner_version()
           },
           "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
           "running" => [],
@@ -368,7 +368,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             "name" => "fake",
             "host" => "fake",
             "interval" => 30,
-            "version" => Runs.min_talk_runner_version(),
+            "version" => Runs.min_runner_version(),
             "rate_limit" => nil
           },
           "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
@@ -405,7 +405,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
               "name" => "fake",
               "host" => "fake",
               "interval" => 30,
-              "version" => Runs.min_talk_runner_version(),
+              "version" => Runs.min_runner_version(),
               "rate_limit" => %{"window" => "five_hour"}
             },
             "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
@@ -436,7 +436,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
               "name" => "fake",
               "host" => "fake",
               "interval" => 30,
-              "version" => Runs.min_talk_runner_version()
+              "version" => Runs.min_runner_version()
             },
             "capacity" => %{"shared_clean" => 0, "exclusive" => 0},
             "running" => [],
@@ -463,7 +463,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
             "name" => "fake",
             "host" => "fake",
             "interval" => 30,
-            "version" => Runs.min_talk_runner_version()
+            "version" => Runs.min_runner_version()
           },
           "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
           "running" => running,
@@ -874,7 +874,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "runner" => %{"name" => "current", "host" => "new", "version" => Runs.min_talk_runner_version()},
+            "runner" => %{"name" => "current", "host" => "new", "version" => Runs.min_runner_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })
@@ -892,7 +892,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> post(
           ~p"/api/node-jobs/heartbeat",
           Jason.encode!(%{
-            "runner" => %{"name" => "box", "host" => "h", "version" => Runs.min_talk_runner_version()},
+            "runner" => %{"name" => "box", "host" => "h", "version" => Runs.min_runner_version()},
             "capacity" => %{"shared_clean" => 1},
             "running" => []
           })

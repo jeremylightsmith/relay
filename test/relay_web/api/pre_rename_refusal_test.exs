@@ -48,7 +48,7 @@ defmodule RelayWeb.Api.PreRenameRefusalTest do
         "name" => "new-box",
         "host" => "new.local",
         "interval" => 30,
-        "version" => Runs.min_talk_runner_version()
+        "version" => Runs.min_runner_version()
       },
       "executor" => @legacy_ident,
       "capacity" => %{"shared_clean" => 1},

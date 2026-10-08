@@ -21,7 +21,7 @@ defmodule Relay.Runs.NodeJobKindTest do
         board: board,
         name: "mac-1",
         capacity: %{"shared_clean" => 1, "exclusive" => 1},
-        version: Runs.min_talk_runner_version()
+        version: Runs.min_runner_version()
       )
 
     %{board: board, card: card, runner: runner}
@@ -69,7 +69,7 @@ defmodule Relay.Runs.NodeJobKindTest do
         board: ctx.board,
         name: "mac-2",
         capacity: %{"shared_clean" => 0, "exclusive" => 0},
-        version: Runs.min_talk_runner_version()
+        version: Runs.min_runner_version()
       )
 
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
@@ -82,13 +82,13 @@ defmodule Relay.Runs.NodeJobKindTest do
   # unpinned talk job was visible to EVERY runner the version floor let claim at all,
   # including pre-Talk ones that KeyError on the missing `isolation` and then 404 on the
   # flow-only outcome route, stranding the turn `:claimed` and wedging the whole board.
-  test "a runner below the talk floor never sees a talk job, but still claims flow work", ctx do
+  test "a runner below the runner floor never sees a talk job, but still claims flow work", ctx do
     old =
       insert(:runner,
         board: ctx.board,
         name: "old-box",
         capacity: %{"shared_clean" => 1, "exclusive" => 1},
-        version: Runs.min_talk_runner_version() - 1
+        version: Runs.min_runner_version() - 1
       )
 
     talk_job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
@@ -108,8 +108,8 @@ defmodule Relay.Runs.NodeJobKindTest do
 
   test "a runner that reports no version at all is not talk-capable" do
     refute Runs.talk_capable?(%Schemas.Runner{version: nil})
-    refute Runs.talk_capable?(%Schemas.Runner{version: Runs.min_talk_runner_version() - 1})
-    assert Runs.talk_capable?(%Schemas.Runner{version: Runs.min_talk_runner_version()})
+    refute Runs.talk_capable?(%Schemas.Runner{version: Runs.min_runner_version() - 1})
+    assert Runs.talk_capable?(%Schemas.Runner{version: Runs.min_runner_version()})
   end
 
   test "a talk job is never reported through the flow outcome path", ctx do
