@@ -1448,17 +1448,60 @@ than re-parking: "fix it anyway" returns Fix with the authorization quoted verba
 implementer is instructed to treat as outranking `plan.md` for that task), "waive it" returns
 Approve with the waiver and follow-up recorded.
 
-The contract lives inline in each of the four `.claude/agents/*.md` files rather than in a shared
-reference file, because an agent definition IS its system prompt: the file is loaded whole at
-invocation and has no mechanism for pulling in a sibling, so a shared `references/` file would
-simply never reach the model. (This rationale used to rest on those files shipping to other
-projects through the RLY-181 scaffold manifest. RE304 deleted that manifest, and
-`Relay.Scaffold.items/0` ships no agents at all — every agent is now the repo's own, per ADR
-0010 — but the single-file constraint is a property of how agents load, so it is unchanged. The
-same constraint does still apply for the shipping reason to the four `relay-*` skills, which is
-why `relay-onboard/SKILL.md` restates it there.)
+**Where the contract's text lives — inline vs. `.claude/agents/references/` (RE423).** An agent
+definition IS its system prompt: the `.md` file is loaded whole at invocation (`--agent <name>`)
+and has no include mechanism, so nothing in a sibling file is ever *passively* in context. A
+`references/` file reaches the model only when the agent reads it at runtime, with a `Read` or
+`Bash` tool call, from the card checkout it runs in. That fixes the rule for what goes where:
+
+> **Inline what the agent needs in order to *decide*; put in `references/` what it needs only
+> *after* it has decided.** An agent file is always in context. A reference file reaches the model
+> only when the agent reads it at runtime, so its content must be something the agent only needs
+> once it already knows it needs it.
+
+- **Escalation.** The decision rule (`### Escalate sparingly`, the quote-the-plan test) and the
+  `**Escalate**` verdict in `## Decide` stay inline in each of the three reviewers — a reviewer
+  that never reads the rule can never decide to escalate. The mechanics of *how* to escalate (what
+  the question must say, the two options, what to do on resume) live once, in
+  `.claude/agents/references/escalating.md`, which each reviewer points at. `plan-implementer`
+  carries its own, role-specific escalation text and does **not** point at `references/escalating.md`.
+- **Re-review.** The trigger (a fix commit on top, or a findings block in the prompt), each
+  reviewer's own blocking rule and its own Pass/Approve line stay inline, because they decide the
+  verdict. How to *conduct* a re-review once the agent knows it is in one — re-check only the
+  findings, don't re-run the checklist, never re-raise a rebutted finding — lives once, in
+  `.claude/agents/references/re-review.md`.
+
+**Inline by design** — these paragraphs appear word for word in more than one agent file on
+purpose, and are the only such reviewer prose: (1) the re-review trigger paragraph, in all three
+reviewers; (2) the blocking bullets and the "→ Approve" line shared by `quality-reviewer` and
+`final-reviewer`; (3) the `### Escalate sparingly` decision rule shared by `quality-reviewer` and
+`final-reviewer`; (4) the one-line pointers to the two reference files.
+
+**Probe evidence (2026-10-08, `claude --version` → `2.1.294 (Claude Code)`).** Each of
+`spec-reviewer`, `quality-reviewer` and `final-reviewer` was run headless with the runner's exact
+flags (`claude -p … --permission-mode auto --verbose --output-format stream-json --agent <name>`,
+cwd = the card checkout) and asked — without naming the path — to open the escalation reference,
+then the re-review reference, its definition points to and reply with the first line. All six
+runs read the right file and replied with its heading:
+
+| Agent | escalation reference | re-review reference |
+|---|---|---|
+| `spec-reviewer` | `Read .claude/agents/references/escalating.md` | `Read .claude/agents/references/re-review.md` |
+| `quality-reviewer` | `Bash head -n 1 .claude/agents/references/escalating.md` | `Bash head -n 1 .claude/agents/references/re-review.md` |
+| `final-reviewer` | `Bash head -n 1 .claude/agents/references/escalating.md` | `Bash head -n 1 .claude/agents/references/re-review.md` |
+
+Replies: `# Escalating a plan-mandated finding` and `# Re-reviewing after a fix pass`. An earlier
+version of this page said a `references/` file "would never reach the model"; that is wrong for
+any agent that reads it with a tool, and the probe is what settled it.
+
+**Shipping caveat for the `relay-*` skills.** The four `relay-*` skills still cannot rely on a
+sibling file — not because of how they load, but because of how they ship: `Relay.Scaffold.items/0`
+names `SKILL.md` only, so a reference file next to one would silently vanish from every scaffolded
+repo (which is why `relay-onboard/SKILL.md` says so). Agents are unaffected: `Relay.Scaffold`
+ships no agents at all — every agent is the repo's own, per ADR 0010.
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
-the contract.
+the contract, and fails on any `references/` path an agent file names that does not exist (a
+dangling pointer).
 
 ## Operating invariants
 

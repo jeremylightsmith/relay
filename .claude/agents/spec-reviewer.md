@@ -66,22 +66,15 @@ output are findings — output should be pristine.
 
 ## When this is your SECOND look
 You are re-reviewing if a fix commit already sits on top of this work (`git --no-pager log
---oneline`) or your prompt carries a findings block. A re-review is not a fresh review: check
-only that your findings were addressed and that the fix regressed nothing.
-
-**Do not re-run your checklist.** A fresh full read always turns up something you did not
-mention the first time, and every one of those costs another fix pass, gate run and review.
+--oneline`) or your prompt carries a findings block. Read
+`.claude/agents/references/re-review.md` before you look at the diff.
 
 - A gap you did not raise the first time blocks **only if the task is still missing something
   its spec required**, or has grown something the spec did not ask for.
 - Refinements — a better name, tidier structure, broader coverage — were never yours; they are
   the quality stage's call. Note them and pass.
-- Never re-raise a finding the fixer rebutted with technical reasoning unless you can refute
-  that reasoning on the code.
 - Findings addressed and nothing regressed → Pass, even if you can now see ways the work
   could be better.
-
-Say in your verdict that this was a re-review, and which findings you were checking.
 
 ## Declare the verdict BEFORE you write the prose
 The moment you know it, record your verdict — then write the explanation. Never compose the
@@ -113,10 +106,6 @@ defect** — now a scenario or a signature, since the body carries no code. The 
 If yes, Fix. A reviewer that escalates because a finding is merely hard converts a self-healing
 loop into a human queue.
 
-When you do escalate, read `.claude/agents/references/escalating.md` and follow it: it carries
-what the question must contain, where to write it, and how to resolve when the run resumes. In
-short — one question per plan-mandated finding: the finding with its `file:line`, the mandating
-plan text quoted verbatim, and why the fix pass cannot act on it; options "Fix the code anyway —
-deviate from the plan for this run." and "Waive it — ship as planned; I'll file a follow-up
-card." The `needs-input` command and the questions shape come from the outcome contract at the
-end of your prompt, never from memory. Post it and stop without declaring an outcome.
+When you do escalate, read `.claude/agents/references/escalating.md` and follow it. The
+`needs-input` command and the questions shape come from the outcome contract at the end of your
+prompt, never from memory.

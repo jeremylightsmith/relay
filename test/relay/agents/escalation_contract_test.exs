@@ -15,10 +15,26 @@ defmodule Relay.Agents.EscalationContractTest do
 
   defp agent_files, do: Path.wildcard(".claude/agents/*.md")
 
+  @escalating_ref ".claude/agents/references/escalating.md"
+  @re_review_ref ".claude/agents/references/re-review.md"
+
   defp section(body, heading) do
     case String.split(body, heading, parts: 2) do
       [_, rest] -> rest
       _ -> nil
+    end
+  end
+
+  # Prose is hard-wrapped, so a phrase can straddle a line break — collapse whitespace before
+  # refuting one, or the refute passes vacuously.
+  defp squish(text), do: String.replace(text, ~r/\s+/, " ")
+
+  # Like section/2, but stops at the next `## ` or `### ` heading, so a marker later in the
+  # file cannot satisfy (or trip) an assertion about this section by accident.
+  defp bounded_section(body, heading) do
+    case section(body, heading) do
+      nil -> nil
+      rest -> rest |> String.split(~r/\n\#{2,3} /, parts: 2) |> hd()
     end
   end
 
@@ -39,17 +55,69 @@ defmodule Relay.Agents.EscalationContractTest do
     end
   end
 
-  test "each reviewer specifies the CONTENT of the escalation question" do
+  test "each reviewer points at the escalation mechanics from Escalate sparingly" do
     for name <- @reviewers do
       body = agent(name)
 
-      assert body =~ "file:line", "#{name}.md must require a file:line reference"
-      assert body =~ "quote", "#{name}.md must require the mandating plan text be quoted"
+      assert section(body, "## Decide") =~ "**Escalate**",
+             "#{name}.md's `## Decide` must still offer Escalate"
 
-      assert body =~ "Fix the code anyway",
-             "#{name}.md must offer the 'fix the code anyway' option"
+      assert body =~ "needs-input", "#{name}.md must still name the `needs-input` route"
+      assert body =~ "outcome contract", "#{name}.md must still point at the outcome contract"
 
-      assert body =~ "Waive it", "#{name}.md must offer the 'waive it' option"
+      sparingly = bounded_section(body, "### Escalate sparingly")
+      assert sparingly, "#{name}.md must have a `### Escalate sparingly` section"
+
+      assert sparingly =~ @escalating_ref,
+             "#{name}.md's `### Escalate sparingly` must point at #{@escalating_ref}"
+    end
+  end
+
+  test "the escalation reference carries the CONTENT of the escalation question" do
+    assert File.exists?(@escalating_ref), "#{@escalating_ref} must exist"
+    body = File.read!(@escalating_ref)
+
+    for marker <- ["file:line", "verbatim", "Fix the code anyway", "Waive it"] do
+      assert body =~ marker, "#{@escalating_ref} must carry #{inspect(marker)}"
+    end
+  end
+
+  test "no reviewer restates the escalation mechanics inline" do
+    for name <- @reviewers do
+      refute squish(agent(name)) =~ "In short —",
+             "#{name}.md restates #{@escalating_ref} — point at it instead"
+    end
+  end
+
+  test "each reviewer's SECOND-look section points at the re-review reference" do
+    for name <- @reviewers do
+      second = bounded_section(agent(name), "## When this is your SECOND look")
+      assert second, "#{name}.md must have a `## When this is your SECOND look` section"
+
+      assert second =~ @re_review_ref,
+             "#{name}.md's SECOND-look section must point at #{@re_review_ref}"
+
+      for marker <- ["Do not re-run your checklist", "Never re-raise a finding the fixer rebutted"] do
+        refute squish(second) =~ marker,
+               "#{name}.md restates #{inspect(marker)} — it lives only in #{@re_review_ref}"
+      end
+    end
+  end
+
+  test "the re-review reference carries the shared re-review core" do
+    assert File.exists?(@re_review_ref), "#{@re_review_ref} must exist"
+    body = File.read!(@re_review_ref)
+
+    for marker <- ["Do not re-run your checklist", "rebutted", "re-review"] do
+      assert body =~ marker, "#{@re_review_ref} must carry #{inspect(marker)}"
+    end
+  end
+
+  test "every references/ path an agent file names exists" do
+    for path <- agent_files(),
+        ref <- Regex.scan(~r{\.claude/agents/references/[\w.-]+\.md}, File.read!(path)),
+        ref = hd(ref) do
+      assert File.exists?(ref), "#{path} points at #{ref}, which does not exist"
     end
   end
 
@@ -154,5 +222,26 @@ defmodule Relay.Agents.EscalationContractTest do
 
     assert subsection =~ "sub_tasks",
            "it must state that sub_tasks are seeded only at run start"
+  end
+
+  test "the runner architecture page describes the references/ split the agent files use" do
+    subsection =
+      "docs/architecture/runner.md"
+      |> File.read!()
+      |> section("#### Escalating a plan-mandated finding")
+
+    assert subsection, "runner.md must keep the RLY-190 subsection"
+
+    for ref <- [@escalating_ref, @re_review_ref] do
+      assert subsection =~ Path.relative_to(ref, ".claude/agents"),
+             "runner.md must say what lives in #{ref}"
+    end
+
+    assert subsection =~ "claude --version",
+           "runner.md must cite the claude version the reference-loading probe ran against"
+
+    refute squish(subsection) =~ "would simply never reach the model",
+           "runner.md still claims a references/ file never reaches the model — the probe " <>
+             "showed an agent reads it at runtime"
   end
 end
