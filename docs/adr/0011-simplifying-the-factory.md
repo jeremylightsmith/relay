@@ -4,8 +4,26 @@
 
 Proposed (2026-09-24)
 
+**Implementation:** partial — principle 1 shipped in a lighter form ([RE355 Card tasks as
+addressable objects: bodies, REST endpoints, relay tasks add], [RE357 Cutover: /write-plan writes
+header + relay tasks add, no plan document to parse], [RE367 Rename sub_tasks to tasks in the flow
+contract]; last commit `9ca92c28`, 2026-10-01). Remaining: principle 2 (`./relay ask`, no scratch
+files) and principle 3 (a smaller Code flow, merged reviews, a shared verify block), neither
+started.
+
 <!-- The principles below are a proposal. The sequencing question is deliberately left open —
      see "Not yet decided". Nothing here is Accepted; do not treat it as settled. -->
+
+## As built (2026-10-08)
+
+- The order taken was A first (tasks as rows), not the recommended "B then A".
+- A task row carries a markdown `body` (`lib/schemas/sub_task.ex`), not structured fields.
+- `Relay.Runs.PlanTasks` survives as a legacy fallback at run start (`lib/relay/runs.ex`).
+- `$RELAY_PLAN` is still exported by the runner (`./relay`), now carrying only the plan header.
+- The drawer shows read-only task rows plus a done toggle ([RE356 Card drawer: expandable task
+  rows with bodies, in-flight auto-expand, per-task history]), so repairing a task goes through
+  the CLI/API. That is a partial answer to Q1.
+- Q2–Q5 stay open.
 
 ## Context
 

@@ -2,15 +2,27 @@
 
 ## Status
 
-Proposed (2026-07-12)
+Accepted (2026-07-16)
 
-The hybrid direction is **validated by a spike** and the V1/V1.1 scope is broken into cards
-(see "Resolved decisions" + "Card breakdown"). A few genuine questions remain open; not yet
-Accepted.
+**Implementation:** partial — remaining: [RLY-91 Spec / plan sheet], [RLY-96 Comments thread (text
+reply)], [RLY-97 Screenshot viewer], [RLY-82 @mentions in comments] and its mention push, burst
+batching ("N cards need you"), Android ([RLY-103 Android client], parked in
+`bin/deploy_android.sh`), and the Later items (biometric gate, widgets, offline action queue).
+Open questions Q1 and Q2 stay open.
 
 **Related:** builds on / refines [ADR 0001](0001-client-architecture.md) (LiveView-first with
 a thin native wrapper). Source: `docs/designs/Relay Mobile Brief.dc.html` (platform brief
 v0.1) and `docs/designs/Relay Mobile.dc.html` (tappable Inbox & Board prototype).
+
+## As built (2026-10-08)
+
+- Layer 1 is **Flutter** (`flutter/`), not Swift/Kotlin.
+- Multi-board switching shipped in V1.1 ([RLY-95 Boards list / switch], commit `5d6e426d`), not
+  "Later".
+- A native new-card sheet exists (`flutter/lib/features/board/new_card_sheet.dart`, commit
+  `7a81c9d6`).
+- Per-board mute (RE406, `Membership.muted` in `lib/schemas/membership.ex`) is a partial version of
+  the skipped notification settings.
 
 ## Context
 

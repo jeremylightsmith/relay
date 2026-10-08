@@ -8,6 +8,39 @@ defmodule Relay.DocsTaxonomyTest do
 
   defp read(path), do: File.read!(Path.join(File.cwd!(), path))
 
+  # Only numbered files are ADRs — TEMPLATE.md and README.md live alongside them.
+  defp adr_paths, do: Path.wildcard(Path.join(File.cwd!(), "docs/adr/[0-9][0-9][0-9][0-9]-*.md"))
+
+  # The first non-blank line after `## Status` (some ADRs leave a blank line, some don't).
+  defp status_line(contents) do
+    contents
+    |> String.split("\n")
+    |> Enum.drop_while(&(String.trim(&1) != "## Status"))
+    |> Enum.drop(1)
+    |> Enum.find(&(String.trim(&1) != ""))
+    |> case do
+      nil -> nil
+      line -> String.trim(line)
+    end
+  end
+
+  defp well_formed_status?(nil), do: false
+
+  defp well_formed_status?(line) do
+    line =~ ~r/^(Proposed|Accepted) \(\d{4}-\d{2}-\d{2}\)$/ or
+      line =~ ~r/^Superseded by \d{4} \(\d{4}-\d{2}-\d{2}\)$/
+  end
+
+  # Index rows keyed by link target: `| [NNNN](file.md) | Title | Status |` → %{"file.md" => "Status"}.
+  defp index_status_cells(index) do
+    for line <- String.split(index, "\n"),
+        [_, file] <- [Regex.run(~r/^\|\s*\[\d{4}\]\(([^)]+\.md)\)\s*\|/, line)],
+        into: %{} do
+      cell = line |> String.trim() |> String.trim_trailing("|") |> String.split("|") |> List.last()
+      {file, String.trim(cell)}
+    end
+  end
+
   describe "docs/README.md — the map (ADR 0008)" do
     test "names all nine documentation homes" do
       map = read("docs/README.md")
@@ -64,13 +97,50 @@ defmodule Relay.DocsTaxonomyTest do
       assert template =~ "immutable"
     end
 
-    test "the ADR index lists 0005 as Proposed and records that 0003 was amended in place" do
+    test "the ADR index records the template and the 0003 exception" do
       index = read("docs/adr/README.md")
 
       refute index =~ "| Draft |"
-      assert index =~ ~r/0005.*\| Proposed \|/
       assert index =~ "TEMPLATE.md"
       assert index =~ "0003 was amended in place"
+    end
+
+    test "every ADR's status line is well-formed" do
+      offenders =
+        for path <- adr_paths(),
+            line = status_line(File.read!(path)),
+            not well_formed_status?(line) do
+          {Path.basename(path), line}
+        end
+
+      assert offenders == [],
+             "these ADRs have a malformed status line (want `Proposed|Accepted (YYYY-MM-DD)` " <>
+               "or `Superseded by NNNN (YYYY-MM-DD)`): #{inspect(offenders)}"
+    end
+
+    test "the ADR index Status cell mirrors each file's status line exactly" do
+      rows = index_status_cells(read("docs/adr/README.md"))
+
+      offenders =
+        for path <- adr_paths(),
+            file = Path.basename(path),
+            expected = status_line(File.read!(path)),
+            not Map.has_key?(rows, file) or rows[file] != expected do
+          case Map.fetch(rows, file) do
+            {:ok, cell} -> "ADR #{file}: index says #{inspect(cell)}, file says #{inspect(expected)}"
+            :error -> "ADR #{file}: no row in docs/adr/README.md"
+          end
+        end
+
+      assert offenders == [], "the ADR index disagrees with the files: #{inspect(offenders)}"
+    end
+
+    test "the template and the index document the Implementation line and As built section" do
+      for path <- ["docs/adr/TEMPLATE.md", "docs/adr/README.md"] do
+        doc = read(path)
+        assert doc =~ "**Implementation:**", "#{path} should document the `**Implementation:**` line"
+        assert doc =~ "## As built", "#{path} should document the `## As built` section"
+      end
     end
   end
 

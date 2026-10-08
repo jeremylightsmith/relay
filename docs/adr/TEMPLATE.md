@@ -8,6 +8,12 @@ Proposed (YYYY-MM-DD)
      An ADR is immutable once Accepted — to change the decision, write a new ADR that
      supersedes this one and set this line to `Superseded by NNNN`. -->
 
+<!-- Optional, once work ships: the next line after the status line may be
+     `**Implementation:** complete.` or `**Implementation:** partial — remaining: <items>.`
+     An optional `## As built (YYYY-MM-DD)` section goes directly after this Status section and
+     records where the shipped design differs — it reports on the decision, never amends it, so
+     it is allowed on an Accepted ADR. -->
+
 ## Context
 
 The forces at play: what is true today, what pressure prompted the decision, and what

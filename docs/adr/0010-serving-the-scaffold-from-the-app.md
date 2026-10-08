@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed (2026-08-10)
+Accepted (2026-08-10)
+
+**Implementation:** complete ([RE304 Serve the Relay scaffold from the app: /relay-setup,
+/relay-update, retire init + relay-config], commit `20136b9e`).
 
 Supersedes the bootstrap decision recorded in RLY-208, which removed the scaffold-over-HTTP
 surface from the board server.

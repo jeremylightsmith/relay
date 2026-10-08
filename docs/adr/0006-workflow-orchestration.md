@@ -2,7 +2,27 @@
 
 ## Status
 
-Proposed (2026-07-16)
+Accepted (2026-07-18)
+
+**Implementation:** complete. Only `parallel`/`human` node execution is deferred ([RLY-161 W19 —
+parallel fan-out: git fork-and-join (ensemble + map join)]).
+
+## As built (2026-10-08)
+
+- The runner is `./relay` at the repo root, not `bin/relay`, and it isn't thin: it is
+  ~6k lines.
+- `relay_config.json` is gone; runner capacity lives in `.relay/runner.json`.
+- Per-project overrides are whole flow documents in `.relay/flows/*.json`, pushed with
+  `./relay flow-push` (last push wins), not a layered `.relay/flows.json`.
+- The outcome set adds `blocked` (RE308), reported only by the runner
+  (`lib/schemas/node_execution.ex`).
+- A `foreach` node iterates `card.tasks`, the only accepted source (`lib/schemas/flow/node.ex`).
+- DOT is only a generated render (`docs/designs/flows/code.dot`, generated from `code.json`).
+- `parallel`/`human` are valid node types but do not dispatch (`lib/schemas/flow/node.ex`).
+- `ai_enabled` is no longer a stage column (RE409): a stage is AI-enabled iff a flow works in it
+  (`Relay.Flows.ai_stage_ids/1`); the API still reports it, derived and read-only.
+- The RE board adds a Deploy flow (`.relay/flows/deploy.json`), and its Code flow ends in
+  `await_ci` where the default library's ends in `deploy`.
 
 ## Context
 

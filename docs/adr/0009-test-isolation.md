@@ -2,7 +2,28 @@
 
 ## Status
 
-Proposed (2026-08-05)
+Accepted (2026-08-07)
+
+**Implementation:** partial — remaining: the global `Listener` firehose.
+`lib/relay/runs/listener.ex:63` still calls `Relay.Events.subscribe_firehose()`; there is no
+per-instance topic and no `start_engine!(listener: false)`, so `runner_reaper_test` and
+`board_settings_flow_preflight_test` stay `async: false`.
+
+## As built (2026-10-08)
+
+- The sync tail is still six non-browser modules, the six named under Consequences
+  (`grep -rlE '^(  )?use .*async: false' test --include='*_test.exs' | grep -v browser`, which
+  anchors at module indent; a looser `^\s*use` pattern reports seven because
+  `test/relay/test_isolation_test.exs` carries indented `use … async: false` lines in its
+  heredoc fixtures). The 29 `test/relay_web/browser/` modules also run serial.
+- No test writes the app or OS env any more. The interim `Application.put_env` calls in
+  `scheduler_presence_test` and `apple_token_validator_test` were replaced by `Relay.Config`
+  (ProcessTree), `resume_refusal_test` was flipped to `async: true`, and
+  `test/relay/test_isolation_test.exs` guards both rules (RE419, commit `9b68bcca`; see the
+  2026-10 Amendment).
+- The worked example's bare `apns.ex` / `apns_test.exs` are
+  `lib/relay/push/delivery/apns.ex` and `test/relay/push/delivery/apns_test.exs`; the path has
+  not moved since `babd789a`.
 
 ## Context
 

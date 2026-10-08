@@ -1,7 +1,21 @@
 # ADR 0008 — Documentation taxonomy: what lives where, and why
 
 ## Status
-Proposed (2026-07-30)
+Accepted (2026-07-31)
+
+**Implementation:** complete ([RE239 Execute the documentation consolidation & reorg (ADR 0008)],
+commit `62809e82`). Known gaps 1 (no automated vocabulary-vs-schema drift check), 2 (no bright
+line for site duplication) and 3 (the `runner.md` split; `docs/architecture/runner.md` is still
+~1.5k lines) stay open.
+
+## As built (2026-10-08)
+
+- `docs/designs-as-is/` was added as a tenth home (`docs/README.md`): snapshots generated from the
+  app by `bin/design-capture.mjs`, never a spec.
+- ADR 0003's in-place amendment is recorded as a "Known exception" in `docs/adr/README.md`, not
+  superseded by a new ADR.
+- The "Current-state assessment" table below has been executed (RE239; the guards live in
+  `test/relay/docs_taxonomy_test.exs`). It reads as of 2026-07-30.
 
 ## Context
 

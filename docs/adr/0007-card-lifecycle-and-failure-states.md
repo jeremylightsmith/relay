@@ -1,7 +1,49 @@
 # ADR 0007 — Card lifecycle: the happy path and every failure mode
 
 ## Status
-Proposed (2026-07-22)
+Accepted (2026-07-31)
+
+**Implementation:** complete. The decision is one map, with the failure grid in
+`docs/architecture/failures.md`; the Known gaps are still live debt (see As built).
+
+## As built (2026-10-08)
+
+- [`../architecture/state.md`](../architecture/state.md) and
+  [`../architecture/failures.md`](../architecture/failures.md) are the current reference.
+- The machine table is stale. Node outcomes add `blocked` (RE308); node-job states are
+  `queued/claimed/done/revoked`, with no `running` (`lib/schemas/node_job.ex`). The code flow has
+  21 nodes, not 18 (`docs/designs/flows/code.json`): `branch`, `implement`, `spec_review`,
+  `quality_review`, `fix_findings`, `sync`, `sync_fix`, `precommit`, `browser`, `final_review`,
+  `final_fix`, `smoke`, `acceptance`, `resync`, `resync_fix`, `reverify`, `rebrowser`, `merge`,
+  `deploy`, `github_fix`, `post`. The RE board's own flow (`.relay/flows/code.json`) has `await_ci`
+  in place of `deploy`.
+- Gap 1 (non-atomic dispatch): resolved, as the gap itself records (RLY-233, RE239,
+  `Relay.Runs.leaked?/1`).
+- Gap 2 (outcome delivery): partly closed. The runner's outcome POST is idempotent-retryable
+  (RLY-202), a job the runner holds but no longer runs is requeued (RLY-170,
+  `Relay.Runs.requeue_orphaned_jobs/3`), and repeated outcome-less re-entry is capped (RE410). Left:
+  no operator action re-accepts a known-good outcome.
+- Gap 3 (overloaded `needs_input`): partly closed. An agent that could not run reports `blocked`
+  (RE308), a capacity shortage queues the card (`awaiting_capacity`) or reports a refused resume
+  (`resume_refused`, RE297) instead of asking, and `Relay.Runs.park_kind/1` names
+  question / escalation / infrastructure. Left: all three still share one park reason, and the kind
+  is still derived from the latest node outcome.
+- Gap 4 (capacity vs held worktrees): largely resolved. Every beat declares the runner's held trees
+  (RE311), and `Schemas.Runner.active_holding_states/0` decides that a retained failed-run tree does
+  not occupy an exclusive slot. Left: eviction of retained trees (`max_retained_failed`) is
+  runner-local and reaches the server only on the next beat.
+- Gap 5 (breaker counts infra failures): partly closed. A `blocked` outcome never counts toward
+  the breaker (RE308). Left: a branch mismatch (failures.md E1) still reports `failed` and can
+  trip it.
+- Gap 6 (runs leak past completion): resolved by `Relay.Runs.close_orphaned_runs/0` and the
+  Listener's terminal-close rule, which share the leak definition in `leaked?/1` (RE335).
+- Gap 7 (retry only on `:failed`): partly closed. `Relay.Runs.retry_run/2` also revives escalation
+  and infrastructure parks and takes `at:` to re-enter at a chosen node. Left: a run stranded
+  `:running` still has no resume path short of cancel and re-pull.
+- Gap 8 (lossy runner restart): partly closed. A server restart no longer revokes in-flight jobs
+  (RE410), auto-update re-execs only when the runner is idle, and SIGINT stops claiming and joins
+  in-flight jobs (`./relay`). Left: a SIGTERM or crash still drops an in-flight job, which is
+  recovered by requeue rather than checkpointed.
 
 ## Context
 
