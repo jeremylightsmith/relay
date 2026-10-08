@@ -61,6 +61,7 @@ defmodule Relay.Runs do
   alias Schemas.SubTask
 
   require Logger
+  require Scheduler
 
   @pubsub Relay.PubSub
   @append_index 1_000_000
@@ -2725,8 +2726,8 @@ defmodule Relay.Runs do
       "Restart it to pick up current code."
   end
 
-  defp stopped_work_detail(reason, _bits, age) when reason in [:no_runner, :runner_gone] do
-    "No jobs claimed in #{div(age, 60)}m · no runner is connected to run this board's work."
+  defp stopped_work_detail(reason, _bits, age) when Scheduler.is_no_live_runner(reason) do
+    "No jobs claimed in #{div(age, 60)}m · #{Scheduler.no_live_runner_phrase()} to run this board's work."
   end
 
   defp stopped_work_detail(:runner_rate_limited, bits, age) do
@@ -2906,11 +2907,11 @@ defmodule Relay.Runs do
     }
   end
 
-  defp roster_blocked_verdict(base, {reason, bits}) when reason in [:no_runner, :runner_gone] do
+  defp roster_blocked_verdict(base, {reason, bits}) when Scheduler.is_no_live_runner(reason) do
     %{
       base
       | verdict: :no_runner,
-        detail: "This run's node-job is queued but no runner is connected to claim it.",
+        detail: "This run's node-job is queued but #{Scheduler.no_live_runner_phrase()} to claim it.",
         evidence: Map.merge(base.evidence, bits)
     }
   end

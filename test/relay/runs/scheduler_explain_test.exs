@@ -429,6 +429,11 @@ defmodule Relay.Runs.SchedulerExplainTest do
       assert Scheduler.roster_blocking_reasons() == [:runner_outdated, :no_runner, :runner_gone, :runner_rate_limited]
     end
 
+    test "no_live_runner_reasons/0 is the empty-or-silent roster pair, each one roster-blocking" do
+      assert Scheduler.no_live_runner_reasons() == [:no_runner, :runner_gone]
+      assert Enum.all?(Scheduler.no_live_runner_reasons(), &(&1 in Scheduler.roster_blocking_reasons()))
+    end
+
     test "explain/2 names the pause for a card the flow would dispatch" do
       execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
 

@@ -366,6 +366,26 @@ defmodule Relay.Runs.Scheduler do
     )
   end
 
+  # The capacity_diagnosis/1 reasons that mean NO live runner exists at all — the roster is empty
+  # or every runner has gone silent. Defined once (RE416): `capacity_verdict/3`, the stopped-work
+  # banner and the live-run diagnosis all match on it via `is_no_live_runner/1`.
+  @no_live_runner_reasons [:no_runner, :runner_gone]
+
+  @doc "The `capacity_diagnosis/1` reasons that mean no live runner is on the roster at all."
+  @spec no_live_runner_reasons() :: [atom()]
+  def no_live_runner_reasons, do: @no_live_runner_reasons
+
+  @doc "True when `reason` is one of `no_live_runner_reasons/0`; usable in guards."
+  defguard is_no_live_runner(reason) when reason in @no_live_runner_reasons
+
+  # The capacity_diagnosis/1 reasons that blame the ROSTER — nothing connected will claim queued
+  # work — as opposed to `:awaiting_capacity`, a legitimately busy board. Defined once (RE320):
+  # `Relay.Runs.stopped_work/2` and the live-run diagnosis both gate on it.
+  @roster_blocking_reasons [:runner_outdated] ++ @no_live_runner_reasons ++ [:runner_rate_limited]
+
+  @doc "The `capacity_diagnosis/1` reasons that mean no connected runner will claim queued work."
+  def roster_blocking_reasons, do: @roster_blocking_reasons
+
   defp capacity_verdict(snapshot, flow, evidence) do
     {reason, bits} = capacity_diagnosis(snapshot)
     evidence = Map.merge(evidence, bits)
@@ -389,10 +409,10 @@ defmodule Relay.Runs.Scheduler do
           evidence
         )
 
-      reason when reason in [:no_runner, :runner_gone] ->
+      reason when is_no_live_runner(reason) ->
         verdict(
           :no_runner,
-          "no runner is connected — nothing is running node-jobs for this board.",
+          "#{no_live_runner_phrase()} — nothing is running node-jobs for this board.",
           evidence
         )
 
@@ -518,14 +538,6 @@ defmodule Relay.Runs.Scheduler do
 
   defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
 
-  # The capacity_diagnosis/1 reasons that blame the ROSTER — nothing connected will claim queued
-  # work — as opposed to `:awaiting_capacity`, a legitimately busy board. Defined once (RE320):
-  # `Relay.Runs.stopped_work/2` and the live-run diagnosis both gate on it.
-  @roster_blocking_reasons [:runner_outdated, :no_runner, :runner_gone, :runner_rate_limited]
-
-  @doc "The `capacity_diagnosis/1` reasons that mean no connected runner will claim queued work."
-  def roster_blocking_reasons, do: @roster_blocking_reasons
-
   @doc """
   The roster-level reason no node-job is being claimed on this snapshot, shared by
   `explain/2`'s terminal branch and `Relay.Runs.stopped_work/2` so the board banner, `relay
@@ -573,6 +585,10 @@ defmodule Relay.Runs.Scheduler do
       rate_limited_runners: Enum.map(paused, &Map.put(&1.rate_limit, :name, &1.name))
     })
   end
+
+  @doc false
+  @spec no_live_runner_phrase() :: String.t()
+  def no_live_runner_phrase, do: "no runner is connected"
 
   @doc false
   def running_versions_phrase(%{running_versions: rvs}) do
