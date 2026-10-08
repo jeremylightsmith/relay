@@ -43,6 +43,8 @@ defmodule Relay.Cards do
   alias Schemas.SubTask
   alias Schemas.User
 
+  require Stage
+
   # Approve/reject append the card to the bottom of the target stage;
   # move_card/4 clamps this into range.
   @append_index 1_000_000
@@ -1725,7 +1727,7 @@ defmodule Relay.Cards do
   # (its worker starts it in place), else the next main stage (nil at the terminal stage).
   defp worker_stage(%{stage_id: stage_id}, stages) do
     case Enum.find(stages, &(&1.id == stage_id)) do
-      %Stage{type: type} = current when type in [:work, :planning] -> current
+      %Stage{type: type} = current when Stage.is_work_type(type) -> current
       %Stage{} = current -> next_main_stage(stages, current)
       nil -> nil
     end
@@ -2184,7 +2186,7 @@ defmodule Relay.Cards do
   # RLY-47 — the design's five stage "types" are DERIVED from the schema; there is no
   # stage `type`-per-design column. A "Work/Planning" stage is a main-lane stage whose
   # behavior type is :work or :planning; review gates and Queue/Done never claim (rule 5).
-  defp work_stage?(%Stage{parent_id: nil, type: type}) when type in [:work, :planning], do: true
+  defp work_stage?(%Stage{parent_id: nil, type: type}) when Stage.is_work_type(type), do: true
   defp work_stage?(_), do: false
 
   # An AI-enabled work stage (RE409): a Work/Planning stage some flow works in. The type guard

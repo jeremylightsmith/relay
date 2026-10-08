@@ -3,7 +3,12 @@ defmodule Schemas.StageTest do
 
   alias Schemas.Stage
 
+  require Stage
+
   defp main_changeset(attrs), do: Stage.changeset(%Stage{board_id: 1}, attrs)
+
+  defp classify(t) when Stage.is_work_type(t), do: :work
+  defp classify(_t), do: :other
 
   test "type is required" do
     changeset = main_changeset(%{name: "X", position: 1, category: :unstarted})
@@ -110,6 +115,28 @@ defmodule Schemas.StageTest do
       assert Stage.sublane_rank(:review) == 0
       assert Stage.sublane_rank(:done) == 1
       assert Stage.sublane_rank(:work) == 2
+    end
+  end
+
+  describe "is_work_type/1 guard (RE415)" do
+    test "is true for every work type" do
+      assert Enum.all?(Stage.work_types(), &Stage.is_work_type(&1))
+    end
+
+    test "is false for every non-work stage type" do
+      non_work = Stage.types() -- Stage.work_types()
+      assert non_work != []
+      refute Enum.any?(non_work, &Stage.is_work_type(&1))
+    end
+
+    test "works in a function head" do
+      assert classify(:planning) == :work
+      assert classify(:review) == :other
+    end
+
+    test "is false for non-type inputs" do
+      refute Stage.is_work_type(nil)
+      refute Stage.is_work_type("work")
     end
   end
 end

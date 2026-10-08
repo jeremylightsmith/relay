@@ -72,9 +72,18 @@ defmodule Schemas.Stage do
   def default_status(:review), do: :in_review
   def default_status(:done), do: :ready
 
+  @doc """
+  The stage types where work happens — the types the claim rule and `Relay.ValueStream` treat
+  as work (a `:flow` state, RE146). Defined once.
+  """
+  def work_types, do: @work_types
+
+  @doc "Guard form of `work_types/0`: `type` is a work-stage type. For clauses that can't call a function."
+  defguard is_work_type(type) when type in @work_types
+
   @doc "Whether `status` is valid for a stage of `type` (RLY-48 validity matrix; RLY-133 adds :queued)."
   def valid_status?(status, :queue), do: status in [:ready, :queued]
-  def valid_status?(status, type) when type in [:work, :planning], do: status in [:working, :ready, :needs_input, :failed]
+  def valid_status?(status, type) when is_work_type(type), do: status in [:working, :ready, :needs_input, :failed]
   def valid_status?(status, :review), do: status == :in_review
   def valid_status?(status, :done), do: status in [:ready, :queued]
 
@@ -105,12 +114,6 @@ defmodule Schemas.Stage do
 
   @doc "The closed set of stage types."
   def types, do: Ecto.Enum.values(__MODULE__, :type)
-
-  @doc """
-  The stage types where work happens — the types the claim rule and `Relay.ValueStream` treat
-  as work (a `:flow` state, RE146). Defined once.
-  """
-  def work_types, do: @work_types
 
   @doc """
   The stage types a sub-lane (child stage) may have, in display order — Review before Done

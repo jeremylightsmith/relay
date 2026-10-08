@@ -1,7 +1,8 @@
 # Exclude browser (Playwright) tests by default so `mix test` / `mix precommit`
 # stay fast and never need a browser. CI runs them explicitly via
 # `mix test --only playwright`.
-ExUnit.start(exclude: [:playwright])
+# Generous receive timeout: the full suite runs 36 cases concurrently and the 100ms default flakes under load.
+ExUnit.start(exclude: [:playwright], assert_receive_timeout: 500)
 
 # Only spin up the Playwright driver when :playwright tests are actually
 # included (i.e. `mix test --only playwright`). The fast CI job does not install
