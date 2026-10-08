@@ -3268,6 +3268,15 @@ defmodule RelayWeb.BoardLive do
   # linked process exiting normally doesn't crash the LiveView.
   def handle_info({:EXIT, _pid, _reason}, socket), do: {:noreply, socket}
 
+  # Must stay the LAST `handle_info/2` clause. A message with no clause above — a `Relay.Events`
+  # broadcast this view doesn't consume yet, an orphaned `Task` reply — would otherwise crash
+  # every open board with a `FunctionClauseError`. Logged at debug so it stays visible without
+  # spamming prod logs.
+  def handle_info(msg, socket) do
+    Logger.debug("BoardLive ignored unexpected message: #{inspect(msg)}")
+    {:noreply, socket}
+  end
+
   defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
     insert_note(socket, comment)
   end
