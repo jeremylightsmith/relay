@@ -13,11 +13,15 @@ defmodule Relay.Runs.RunServer do
   Start modes ({:continue, mode}):
     * `{:dispatch, job_id}` — fresh start: the row set already exists,
       just dispatch (skips a job no longer :queued, e.g. after a restart).
-    * `{:reenter, resume_session}` — boot resume, needs-input resume, and
-      hand-back: revoke any leftover non-done job (its dispatcher is
+    * `{:reenter, resume_session}` — boot resume of a run with **no** active
+      job, needs-input resume, and hand-back: revoke any leftover non-done job (its dispatcher is
       gone), enter the current node as a fresh attempt of the same visit.
       `resume_session` is non-nil only on the needs-input path — the only
       re-entry that resumes an AI session.
+      Capped (RE410): when the current node's visit already ends in
+      `Relay.Runs.max_outcomeless_reentries/0` outcome-nil attempts, it
+      revokes the job, stamps the newest of them `:needs_input` and parks the
+      run instead of entering another attempt.
     * `{:reenter_new_visit, resume_session}` — a human retry aimed at a
       different node (`relay retry --at`, RLY-189): identical, except the
       current node is entered on a FRESH visit at attempt 1, matching what a
@@ -27,7 +31,9 @@ defmodule Relay.Runs.RunServer do
       `{:reenter_new_visit, _}`, except the sub_task binding is RE-DERIVED from the
       (now checked-off) cursor instead of inherited.
     * `:attach` — just serialize incoming reports (server was restarted
-      or lazily started by `report_outcome/2`).
+      or lazily started by `report_outcome/2`). Also how boot resume adopts a
+      run whose `queued`/`claimed` job survived the restart (RE410,
+      `Relay.Runs.boot_mode/1`): no revoke, no dispatch.
 
   Both re-entry modes pass the last failed execution's detail forward as
   `findings`, so a node re-entered after a failure sees why. A `{:retry, node}`
@@ -100,8 +106,10 @@ defmodule Relay.Runs.RunServer do
     {:noreply, state}
   end
 
+  # RE410: the only re-entry that continues an existing visit, so the only one with an
+  # outcome-less streak to cap.
   def handle_continue({:reenter, resume_session}, state) do
-    reenter(state, &enter_same_node!(&1, &2, resume_session))
+    reenter(state, &enter_same_node!(&1, &2, resume_session), cap_outcomeless: true)
   end
 
   # RLY-189: a retry re-entering a DIFFERENT node (`relay retry --at`) must start a
@@ -120,25 +128,77 @@ defmodule Relay.Runs.RunServer do
     reenter(state, &enter_new_visit!(&1, &2, resume_session, :rebind))
   end
 
-  defp reenter(state, enter_fun) do
+  defp reenter(state, enter_fun, opts \\ []) do
     run = Repo.get!(Run, state.run_id)
 
     case Runs.load_flow(run) do
       {:ok, flow} ->
-        {:ok, {execution, job}} =
-          Repo.transaction(fn ->
-            Runs.revoke_active_jobs(run)
-            enter_fun.(run, flow)
-          end)
-
-        Runs.broadcast_runs(Runs.board_id_of(run), {:node_started, run, execution})
-        Runs.dispatcher().dispatch(job)
-        {:noreply, state}
+        {:ok, result} = Repo.transaction(fn -> reenter_rows!(run, flow, enter_fun, opts) end)
+        after_reenter(result, run, state)
 
       {:error, :no_flow} ->
         fail_effects(run, nil, "no_flow")
         {:stop, :normal, state}
     end
+  end
+
+  # Inside reenter/3's transaction: revoke the leftover job, then either enter a fresh attempt
+  # or — on the capped same-node path, at the cap — stamp the park instead (RE410).
+  defp reenter_rows!(run, flow, enter_fun, opts) do
+    # Counted BEFORE the revoke, so the attempt being abandoned right now is included.
+    streak = if Keyword.get(opts, :cap_outcomeless, false), do: outcomeless_streak(run), else: []
+    Runs.revoke_active_jobs(run)
+
+    if length(streak) >= Runs.max_outcomeless_reentries() do
+      {:park, stamp_outcomeless_park!(run, hd(streak))}
+    else
+      {:enter, enter_fun.(run, flow)}
+    end
+  end
+
+  defp after_reenter({:enter, {execution, job}}, run, state) do
+    Runs.broadcast_runs(Runs.board_id_of(run), {:node_started, run, execution})
+    Runs.dispatcher().dispatch(job)
+    {:noreply, state}
+  end
+
+  defp after_reenter({:park, execution}, run, state) do
+    park_effects(run, execution)
+    {:stop, :normal, state}
+  end
+
+  # RE410: the trailing run of outcome-nil executions of the current node in its current visit
+  # (the visit enter_same_node!/3 continues), newest first. Any row with an outcome — a :failed,
+  # a :blocked usage-limit wait, the :needs_input this cap itself stamps — ends the streak, which
+  # is what gives a human resume a fresh budget without a counter to reset.
+  defp outcomeless_streak(run) do
+    node = run.current_node
+    visit = max_for(run, node, :visit) || 1
+
+    from(e in NodeExecution,
+      where: e.run_id == ^run.id and e.node_key == ^node and e.visit == ^visit,
+      order_by: [desc: e.attempt]
+    )
+    |> Repo.all()
+    |> Enum.take_while(&is_nil(&1.outcome))
+  end
+
+  # Not Runs.finalize_job!/2: that marks the job :done, but this attempt's job was just revoked.
+  defp stamp_outcomeless_park!(run, execution) do
+    execution
+    |> Ecto.Changeset.change(
+      outcome: :needs_input,
+      finished_at: DateTime.truncate(DateTime.utc_now(), :second),
+      detail: outcomeless_park_detail(run)
+    )
+    |> Repo.update!()
+  end
+
+  defp outcomeless_park_detail(run) do
+    "`#{run.current_node}` was re-entered #{Runs.max_outcomeless_reentries()} times in a row without any " <>
+      "attempt reporting an outcome — usually a server restart killing the job it was running (RE410). " <>
+      "Parked so it can't loop. Check whether the node's side effects (a deploy, a push) already " <>
+      "happened, then answer to resume it."
   end
 
   @impl true
@@ -206,22 +266,7 @@ defmodule Relay.Runs.RunServer do
 
       {{:park, _why}, nil} ->
         # :needs_input (a question / an escalation edge) and :blocked (RE308) park identically.
-        # Card effect BEFORE the run's own parked write (unlike the other
-        # terminal branches): the run row still reads :running in Postgres
-        # while ensure_card_blocked commits, so a concurrent Listener
-        # reconciliation (RLY-132) sees a run it must leave alone rather than
-        # a parked/needs_input run paired with a not-yet-blocked card — which
-        # it would misread as "the answer already arrived" and resume.
-        ensure_card_blocked(run, execution)
-
-        run =
-          case Transitions.transition(run, [:running], :parked, set: [parked_reason: :needs_input]) do
-            {:ok, parked} -> parked
-            {:error, :not_in_expected_state} -> Repo.get!(Run, run.id)
-          end
-
-        Runs.broadcast_runs(board_id, {:run_parked, run})
-        {:stop, :normal, {:ok, run}, state}
+        {:stop, :normal, {:ok, park_effects(run, execution)}, state}
 
       {{:finish, :done}, nil} ->
         finish_effects(run, flow)
@@ -731,6 +776,27 @@ defmodule Relay.Runs.RunServer do
   end
 
   defp log_usage_limit_wait(_decision, _run, _execution), do: :ok
+
+  # The one park sequence, shared by an engine `{:park, _}` and the RE410 outcome-less re-entry
+  # cap; returns the parked run so each caller builds its own GenServer return.
+  #
+  # Card effect BEFORE the run's own parked write (unlike the other terminal branches): the run
+  # row still reads :running in Postgres while ensure_card_blocked commits, so a concurrent
+  # Listener reconciliation (RLY-132) sees a run it must leave alone rather than a
+  # parked/needs_input run paired with a not-yet-blocked card — which it would misread as "the
+  # answer already arrived" and resume.
+  defp park_effects(run, execution) do
+    ensure_card_blocked(run, execution)
+
+    run =
+      case Transitions.transition(run, [:running], :parked, set: [parked_reason: :needs_input]) do
+        {:ok, parked} -> parked
+        {:error, :not_in_expected_state} -> Repo.get!(Run, run.id)
+      end
+
+    Runs.broadcast_runs(Runs.board_id_of(run), {:run_parked, run})
+    run
+  end
 
   # In the real flow the agent has already blocked the card via the
   # needs-input API; ensure it idempotently with the outcome detail as the

@@ -265,9 +265,9 @@ claims it, runs it, and reports back.
 | `queued` | Written by the engine; no runner holds it. | `claimed` (a runner takes it) or `revoked`. |
 | `claimed` | A runner holds the job and is executing the node — it claims and starts its worker in one step, so there is no separate started state (RE255). | `done` or `revoked`. |
 | `done` | The runner reported a typed outcome. Terminal. | — |
-| `revoked` | Withdrawn — the run was cancelled, or the runner stopped heartbeating and the reaper took the job back for re-dispatch. Terminal. | — |
+| `revoked` | Withdrawn — the run was cancelled (`cancel_run`); a human took the card over (`park_claimed/1`); an exclusive run's runner went stale (`park_for_reclaim/1`); or a re-entry withdrew the leftover job — a needs-input resume, a hand-back, a retry, or a boot resume of a run with no active job (`RunServer.reenter/2`). A stale runner's `shared_clean` job is **requeued** to `queued` (`requeue_job/3`), not revoked, and a server restart adopts a live job rather than revoking it (RE410). Terminal. | — |
 
-A revoked job never produces an outcome; the engine re-queues the node instead.
+A revoked job never produces an outcome; a re-entry starts a fresh attempt of the node instead. A same-node re-entry is capped at `Relay.Runs.max_outcomeless_reentries/0` consecutive outcome-less attempts, after which the run parks `needs_input` instead of starting another (RE410, failures A12).
 
 ### Node-job kind
 

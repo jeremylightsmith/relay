@@ -243,9 +243,83 @@ defmodule Relay.Runs.AuditTest do
     end
   end
 
+  describe "outcomeless_attempts (C4)" do
+    # The cap is a policy owned by Relay.Runs; never re-type it here.
+    defp cap, do: Runs.max_outcomeless_reentries()
+
+    defp outcomeless(run, node, attempts, visit \\ 1) do
+      Enum.each(attempts, &exec(run, node, attempt: &1, visit: visit, outcome: nil))
+    end
+
+    test "warns when one node in one visit reaches the cap of outcome-less attempts" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run = run_for(board)
+      outcomeless(run, "implement", 1..cap())
+
+      assert [finding] = findings(flow)
+      assert finding.severity == :warning
+      assert finding.check == :outcomeless_attempts
+      assert finding.node_key == "implement"
+      assert finding.run_id == run.id
+      assert finding.flow_key == "code"
+      assert finding.summary =~ "`implement`"
+      assert finding.summary =~ "#{cap()} times"
+      assert finding.summary =~ "visit 1"
+      assert finding.summary =~ "run #{run.id}"
+      assert finding.evidence =~ "attempts #{Enum.join(1..cap(), ", ")}"
+      assert finding.evidence =~ "run #{run.id}, implement visit 1"
+
+      assert finding.fix ==
+               "Something keeps killing this node's job before it reports (a server restart " <>
+                 "from inside the flow?). Make the node idempotent or move the restart off the flow."
+    end
+
+    test "is silent one attempt below the cap" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run = run_for(board)
+      outcomeless(run, "implement", 1..(cap() - 1))
+
+      assert findings(flow) == []
+    end
+
+    test "counts per {node, visit}, not across visits" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run = run_for(board)
+      outcomeless(run, "implement", 1..(cap() - 1), 1)
+      outcomeless(run, "implement", [1], 2)
+
+      assert findings(flow) == []
+    end
+
+    test "emits one finding per looping node, in node order" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run = run_for(board)
+      outcomeless(run, "implement", 1..cap())
+      outcomeless(run, "spec_review", 1..cap())
+
+      assert [first, second] = findings(flow)
+      assert Enum.map([first, second], & &1.check) == [:outcomeless_attempts, :outcomeless_attempts]
+      assert Enum.map([first, second], & &1.node_key) == ["implement", "spec_review"]
+    end
+
+    test "does not count the needs_input row the re-entry cap stamps" do
+      board = insert(:board)
+      flow = audit_flow(board)
+      run = run_for(board)
+      outcomeless(run, "implement", 1..(cap() - 1))
+      exec(run, "implement", attempt: cap(), outcome: :needs_input)
+
+      assert findings(flow) == []
+    end
+  end
+
   describe "findings/2" do
-    test "checks/0 is the closed set of check ids, including planner_not_migrated" do
-      assert Audit.checks() == [:findings_dropped, :verdict_flipped, :planner_not_migrated]
+    test "checks/0 is the closed set of check ids, including outcomeless_attempts" do
+      assert Audit.checks() == [:findings_dropped, :verdict_flipped, :planner_not_migrated, :outcomeless_attempts]
     end
 
     test "sorts errors before warnings and only emits known severities and checks" do

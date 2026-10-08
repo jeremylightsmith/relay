@@ -3,9 +3,12 @@ defmodule Relay.Runs.Supervisor do
   The runs engine's process tree: the run-id Registry, the
   DynamicSupervisor holding one `RunServer` per `:running` run, the
   card-event `Listener` (baton interplay — RLY-132), and a boot task that
-  resumes — every `:running` run in Postgres restarts its server, which
-  revokes any orphaned non-done job and re-dispatches the current node as
-  a fresh attempt. `:parked` runs stay dormant — parking never holds a
+  resumes every `:running` run in Postgres (`Relay.Runs.resume_all/0`). A run
+  whose `queued`/`claimed` job survived the restart is adopted — its server
+  starts in `:attach`, so nothing is revoked or re-dispatched and the runner
+  keeps working (RE410); only a run with no active job re-enters its current
+  node as a fresh attempt. Boot judges no runner staleness — the
+  `RunnerReaper` does that. `:parked` runs stay dormant — parking never holds a
   process (ADR 0006). `rest_for_one`: a Registry crash restarts everything
   that depends on it, including the Listener (whose reconciliation is
   stateless, so restarting it is safe).

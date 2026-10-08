@@ -19,6 +19,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
   use RelayWeb.ConnCase, async: true
 
   alias Relay.Runs
+  alias Relay.Runs.Audit
   alias Relay.Runs.FakeDispatcher
 
   @fixture_path "test/fixtures/runner_contract.json"
@@ -239,7 +240,8 @@ defmodule RelayWeb.Api.RunnerContractTest do
         # `agent_outcomes` is what an AGENT may declare via `./relay outcome` (NODE_OUTCOMES),
         # which is exactly the routable set. Two pins, so neither side can widen one silently.
         "agent_outcomes" => stringify(Schemas.NodeExecution.routable_outcomes()),
-        "audit_severities" => stringify(Relay.Runs.Audit.severities()),
+        "audit_severities" => stringify(Audit.severities()),
+        "audit_checks" => stringify(Audit.checks()),
         "isolation" => stringify(Schemas.Flow.isolation_classes()),
         "node_types" => %{"runnable" => stringify(Schemas.Flow.Node.runnable_types())},
         # RE268 — `./relay` types "done"/"stopped"/"failed" and "error" as literals on the

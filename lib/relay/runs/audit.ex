@@ -24,6 +24,11 @@ defmodule Relay.Runs.Audit do
       node's skill doesn't write tasks with `relay tasks add`. Names the affected-card count and
       the most recent few; the fix is `/relay-doctor`. Also the telemetry for deleting the
       fallback — when no board reports it, it is safe to remove.
+    * `:outcomeless_attempts` (WARNING; one per `{run, node, visit}`) — one node in one visit
+      has at least `Relay.Runs.max_outcomeless_reentries/0` executions with no outcome:
+      something keeps killing its job before it reports (RE410 — a server restart from inside
+      the flow). Only nil-outcome rows count, so the `:needs_input` row the re-entry cap stamps
+      does not; the check catches pre-cap loops and loops that recur after a resume.
 
   The first two are deliberately conservative. A missing subsequent execution, a nil `sub_task_id` or a
   nil `git_sha` produces NO finding: a false "your gates are lying" is worse than a miss.
@@ -37,7 +42,7 @@ defmodule Relay.Runs.Audit do
   # Ordered most severe first — `severity_rank/1` and every report's ordering read this list,
   # and it is pinned on the wire by test/fixtures/runner_contract.json.
   @severities [:error, :warning]
-  @checks [:findings_dropped, :verdict_flipped, :planner_not_migrated]
+  @checks [:findings_dropped, :verdict_flipped, :planner_not_migrated, :outcomeless_attempts]
 
   # Policy: one node getting lucky on a retry is noise; two distinct nodes flipping in one run
   # is a pattern, so every flip in that run escalates.
@@ -49,7 +54,7 @@ defmodule Relay.Runs.Audit do
 
   @type finding :: %{
           severity: :error | :warning,
-          check: :findings_dropped | :verdict_flipped | :planner_not_migrated,
+          check: :findings_dropped | :verdict_flipped | :planner_not_migrated | :outcomeless_attempts,
           flow_key: String.t(),
           node_key: String.t() | nil,
           run_id: integer() | nil,
@@ -76,7 +81,10 @@ defmodule Relay.Runs.Audit do
     runs
     |> Enum.flat_map(fn run ->
       executions = Enum.sort_by(run.node_executions, & &1.id)
-      dropped_findings(flow, run, executions) ++ flipped_findings(flow, run, executions)
+
+      dropped_findings(flow, run, executions) ++
+        flipped_findings(flow, run, executions) ++
+        outcomeless_findings(flow, run, executions)
     end)
     |> Kernel.++(planner_findings(flow, runs))
     |> Enum.sort_by(&{severity_rank(&1.severity), &1.run_id, &1.check})
@@ -229,4 +237,42 @@ defmodule Relay.Runs.Audit do
   end
 
   defp card_ref(%Run{card: card}), do: Cards.ref(card.board, card)
+
+  # ---- C4: outcome-less attempts ------------------------------------------
+
+  # Policy: the threshold is the RunServer's re-entry cap, `Relay.Runs.max_outcomeless_reentries/0`
+  # — read, never re-typed, so the audit and the engine agree on what "looping" means.
+  defp outcomeless_findings(flow, run, executions) do
+    cap = Relay.Runs.max_outcomeless_reentries()
+
+    executions
+    |> Enum.filter(&is_nil(&1.outcome))
+    |> Enum.group_by(&{&1.node_key, &1.visit})
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.filter(fn {_group, attempts} -> length(attempts) >= cap end)
+    |> Enum.map(fn {{node_key, visit}, attempts} ->
+      outcomeless_finding(flow, run, node_key, visit, attempts)
+    end)
+  end
+
+  defp outcomeless_finding(flow, run, node_key, visit, attempts) do
+    numbers = attempts |> Enum.map(& &1.attempt) |> Enum.sort()
+
+    %{
+      severity: :warning,
+      check: :outcomeless_attempts,
+      flow_key: flow.key,
+      node_key: node_key,
+      run_id: run.id,
+      summary:
+        "node `#{node_key}` was entered #{length(numbers)} times in visit #{visit} of run " <>
+          "#{run.id} without any attempt reporting an outcome",
+      evidence:
+        "relay runs <ref> --json — run #{run.id}, #{node_key} visit #{visit}, " <>
+          "attempts #{Enum.join(numbers, ", ")}",
+      fix:
+        "Something keeps killing this node's job before it reports (a server restart from " <>
+          "inside the flow?). Make the node idempotent or move the restart off the flow."
+    }
+  end
 end

@@ -178,6 +178,7 @@ the evidence, the fix — and split in two:
 |---|---|
 | `findings_dropped` (ERROR) | a review failed inside a `foreach` iteration and the loop-back target's next execution carried a **different** task: the findings were never addressed |
 | `verdict_flipped` (WARNING, ERROR at two nodes in one run) | the same node, same visit, same `git_sha` went `failed` → `succeeded` on a retry: a retry laundered a failure into a pass |
+| `outcomeless_attempts` (WARNING) | one node in one visit was entered `max_outcomeless_reentries` (3)+ times without any attempt reporting an outcome — something keeps killing its job (a server restart from inside the flow?) |
 | `ci_parity` (WARNING) | `.github/workflows/*.yml` requires a verify command that **no enabled flow's gate node runs** — every gate can pass and the PR still fails required CI |
 | `planner_not_migrated` (WARNING) | a run in the window had its tasks seeded by parsing `## Task N:` headings out of `card.plan` (the legacy fallback; the run is marked `tasks_from_plan`) — the plan node's skill doesn't write tasks with `relay tasks add`. The run-history signal for the `tasks-cutover` migration: see [Factory migrations](#factory-migrations) |
 

@@ -3498,6 +3498,14 @@ defmodule Relay.Runs do
   ## Seams for the RunServer, the Listener (Task 3), and the boot resumer.
   ## @doc false: internal engine plumbing, not public context API.
 
+  # RE410: consecutive outcome-less attempts one node may pile up in a visit before the next
+  # same-node re-entry parks the run on needs_input instead of looping (RE408 looped 58×).
+  @max_outcomeless_reentries 3
+
+  @doc "RE410: the most consecutive outcome-less attempts a same-node re-entry tolerates before it parks."
+  @spec max_outcomeless_reentries() :: pos_integer()
+  def max_outcomeless_reentries, do: @max_outcomeless_reentries
+
   @doc false
   def resume_run(%Run{} = run, opts \\ []) do
     case Transitions.transition(run, [:parked], :running,
@@ -4168,7 +4176,18 @@ defmodule Relay.Runs do
     Run
     |> where([r], r.status == :running)
     |> Repo.all()
-    |> Enum.each(&ensure_server(&1, {:reenter, nil}))
+    |> Enum.each(&ensure_server(&1, boot_mode(&1)))
+  end
+
+  # RE410: boot resume reads the start mode off the run's durable job state. A run whose
+  # queued/claimed job survived the restart is adopted (`:attach` — no revoke, no dispatch: the
+  # job stays claimable, or its runner keeps working and reports normally). Only a run with no
+  # active job re-enters. Boot judges no staleness — `last_heartbeat` froze while the server was
+  # down; the RunnerReaper and orphan requeue (`runner_stale?/2`) recover dead runners later.
+  @doc false
+  @spec boot_mode(Run.t()) :: :attach | {:reenter, nil}
+  def boot_mode(%Run{} = run) do
+    if active_job(run), do: :attach, else: {:reenter, nil}
   end
 
   # A run points at the live flow row: a deleted flow (nilified FK or a
