@@ -6567,6 +6567,125 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  RE409 — the violet AI chip: the link to the flow that works in a stage (a stage is
+  AI-enabled iff a flow works in it — `Relay.Flows.stage_flows/1`). Card mockup "AI chip is the
+  flow link — shown iff a flow works in the stage".
+
+  Variants: `:header` (the stage column header — dot · `AI` · ↗, with a daisyUI bottom tooltip),
+  `:mini` (the collapsed strip — the dot alone, tooltip text in `title`) and `:settings` (the board
+  settings stage row — dot · `<key> flow` · ↗, no tooltip). `pager` pads the chip for touch and
+  drops the tooltip. A disabled flow renders grey, dashed and struck through, and still links.
+
+  `read_only` (an archived board) renders an enabled flow as a plain label — no link, no ↗ — and
+  a disabled one as nothing at all.
+
+  Every chip carries `data-flow-key` and `data-flow-enabled`.
+
+  ## Examples
+
+      <.flow_chip id="stage-col-4-ai-listening" flow={%{key: "code", enabled: true}} board_slug="acme" />
+  """
+  attr :id, :string, required: true
+  attr :flow, :map, required: true, doc: "`%{key: String.t(), enabled: boolean()}`"
+  attr :board_slug, :string, default: nil, doc: "required unless read_only"
+  attr :read_only, :boolean, default: false
+  attr :variant, :atom, values: [:header, :mini, :settings], default: :header
+  attr :pager, :boolean, default: false
+
+  def flow_chip(%{read_only: true, flow: %{enabled: false}} = assigns), do: ~H""
+
+  def flow_chip(assigns) do
+    %{key: key, enabled: enabled} = assigns.flow
+    mini? = assigns.variant == :mini
+    tooltip? = not assigns.read_only and assigns.variant == :header and not assigns.pager
+
+    assigns =
+      assigns
+      |> assign(:key, key)
+      |> assign(:enabled, enabled)
+      |> assign(:mini?, mini?)
+      |> assign(:tip, flow_chip_tip(key, enabled))
+      |> assign(:tooltip?, tooltip?)
+      |> assign(:label, if(assigns.variant == :settings, do: "#{key} flow", else: "AI"))
+      |> assign(:chip_style, flow_chip_style(enabled, mini?, assigns.pager))
+
+    ~H"""
+    <.link
+      :if={!@read_only}
+      id={@id}
+      navigate={~p"/board/#{@board_slug}/flows/#{@key}"}
+      class={[
+        "flow-chip group",
+        @tooltip? && "tooltip tooltip-bottom",
+        @enabled &&
+          "border border-transparent bg-[color-mix(in_oklab,var(--color-secondary)_10%,var(--color-base-100))] hover:bg-[color-mix(in_oklab,var(--color-secondary)_18%,var(--color-base-100))] hover:border-[color-mix(in_oklab,var(--color-secondary)_40%,transparent)]"
+      ]}
+      style={@chip_style}
+      data-tip={@tooltip? && @tip}
+      title={@mini? && @tip}
+      aria-label={@tip}
+      data-flow-key={@key}
+      data-flow-enabled={to_string(@enabled)}
+    >
+      <.flow_chip_dot enabled={@enabled} />
+      <span :if={!@mini?} style={if(!@enabled, do: "text-decoration:line-through;")}>{@label}</span>
+      <.icon
+        :if={!@mini?}
+        name="hero-arrow-up-right-mini"
+        class="size-[9px] opacity-55 group-hover:opacity-100"
+      />
+    </.link>
+    <span
+      :if={@read_only}
+      id={@id}
+      class="flow-chip"
+      style={"#{@chip_style}background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));"}
+      title="Relay AI works this stage"
+      data-flow-key={@key}
+      data-flow-enabled={to_string(@enabled)}
+    >
+      <.flow_chip_dot enabled={@enabled} />
+      <span :if={!@mini?}>{@label}</span>
+    </span>
+    """
+  end
+
+  attr :enabled, :boolean, required: true
+
+  defp flow_chip_dot(assigns) do
+    ~H"""
+    <span style={"width:10px;height:10px;border-radius:50%;background:#{if(@enabled, do: "var(--color-secondary)", else: "color-mix(in oklab, var(--color-base-content) 30%, transparent)")};display:flex;align-items:center;justify-content:center;flex:0 0 auto;"}>
+      <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
+      </span>
+    </span>
+    """
+  end
+
+  defp flow_chip_tip(key, true), do: "Edit the #{key} flow →"
+  defp flow_chip_tip(key, false), do: "The #{key} flow is off — edit to turn it on →"
+
+  # Shape shared by every variant; the enabled background/border live in classes (so hover can
+  # deepen them), the disabled look is fixed and inline.
+  defp flow_chip_style(enabled, mini?, pager?) do
+    spacing =
+      cond do
+        mini? -> "padding:3px;gap:0;"
+        pager? -> "padding:6px 9px;gap:4px;font-size:10px;"
+        true -> "padding:2px 6px;gap:4px;font-size:9px;"
+      end
+
+    colors =
+      if enabled,
+        do: "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));",
+        else:
+          "background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);" <>
+            "border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, transparent);"
+
+    "display:inline-flex;align-items:center;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);" <>
+      "border-radius:5px;flex:0 0 auto;text-decoration:none;" <> spacing <> colors
+  end
+
+  @doc """
   Renders one stage as the mockup's rounded stage card
   (`docs/designs/Relay Board.dc.html`): a header (owner square swatch, name,
   count, and a `+` add button) above a row of side-by-side lanes. The main
@@ -6609,7 +6728,14 @@ defmodule RelayWeb.CoreComponents do
   attr :id, :string, required: true
   attr :name, :string, required: true
   attr :type, :atom, values: [:queue, :work, :planning, :review, :done], required: true
-  attr :ai_enabled, :boolean, default: false
+
+  attr :flow, :map,
+    default: nil,
+    doc:
+      "RE409 — the stage's `Relay.Flows.stage_flows/1` entry (`%{key:, enabled:}`) or nil; " <>
+        "any flow makes the stage AI-enabled and renders the AI chip linking to it"
+
+  attr :board_slug, :string, default: nil, doc: "the board's slug, for the AI chip's flow link"
   attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
 
   attr :wip_limit, :integer,
@@ -6706,12 +6832,13 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
       |> assign(:total_count, total_count)
       |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
-      |> assign(:compose_cta, if(assigns.ai_enabled, do: "Hand to AI", else: "Add"))
+      |> assign(:show_flow_chip, assigns.flow != nil and assigns.category != :complete)
+      |> assign(:compose_cta, if(assigns.flow == nil, do: "Add", else: "Hand to AI"))
       |> assign(
         :compose_placeholder,
-        if(assigns.ai_enabled,
-          do: "Describe work to hand to the AI…",
-          else: "Add work to #{assigns.name}…"
+        if(assigns.flow == nil,
+          do: "Add work to #{assigns.name}…",
+          else: "Describe work to hand to the AI…"
         )
       )
 
@@ -6741,6 +6868,14 @@ defmodule RelayWeb.CoreComponents do
           style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:var(--color-field-hover);border:1px dashed var(--color-field-border);cursor:pointer;box-sizing:border-box;"
         >
           <.stage_type_icon type={@type} />
+          <.flow_chip
+            :if={@show_flow_chip}
+            id={"#{@id}-ai-listening"}
+            flow={@flow}
+            board_slug={@board_slug}
+            read_only={@read_only}
+            variant={:mini}
+          />
           <h3
             class="stage-strip-name"
             style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);white-space:nowrap;"
@@ -6774,16 +6909,14 @@ defmodule RelayWeb.CoreComponents do
             >
               {@name}
             </h3>
-            <span
-              :if={@ai_enabled and @category != :complete}
+            <.flow_chip
+              :if={@show_flow_chip}
               id={"#{@id}-ai-listening"}
-              title="Relay AI is listening on this stage"
-              style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));padding:2px 6px;border-radius:5px;flex:0 0 auto;"
-            >
-              <span style="width:10px;height:10px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
-              <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);"></span>
-            </span>AI
-            </span>
+              flow={@flow}
+              board_slug={@board_slug}
+              read_only={@read_only}
+              pager={@pager}
+            />
             <span
               :if={@count}
               class="stage-count"

@@ -44,6 +44,7 @@ flowchart LR
     Cards --> Activity
     Cards --> Boards
     Cards --> Events
+    Cards --> Flows
     Cards --> Members
     Cards --> Push
     Cards --> Repo

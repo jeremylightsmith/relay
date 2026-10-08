@@ -64,6 +64,23 @@ defmodule RelayWeb.Api.StageControllerTest do
       assert spec_review["parent_id"] == stage_named(board, "Spec").id
     end
 
+    test "ai_enabled is derived from flows: true exactly for the stages a seeded flow works in (RE409)",
+         %{conn: conn} do
+      data = conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
+
+      assert data |> Enum.filter(& &1["ai_enabled"]) |> Enum.map(& &1["name"]) == ["Spec", "Plan", "Code"]
+      assert Enum.find(data, &(&1["name"] == "Deploy"))["ai_enabled"] == false
+      for stage <- data, do: assert(Enum.sort(Map.keys(stage)) == Enum.sort(@stage_keys))
+    end
+
+    test "a flow working in Review makes Review ai_enabled (RE409)", %{conn: conn, board: board} do
+      insert_flow_working_in(stage_named(board, "Review"), key: "qa")
+
+      data = conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
+
+      assert Enum.find(data, &(&1["name"] == "Review"))["ai_enabled"] == true
+    end
+
     # Scenario 2
     test "401 without an Authorization header", %{bare: bare} do
       assert bare |> get(~p"/api/stages") |> json_response(401)
@@ -207,12 +224,49 @@ defmodule RelayWeb.Api.StageControllerTest do
       code = stage_named(board, "Code")
 
       message =
-        "send at least one of: name, description, type, ai_enabled, wip_limit, collapsed_by_default, reject_to_stage_id"
+        "send at least one of: name, description, type, wip_limit, collapsed_by_default, reject_to_stage_id"
 
       for body <- [%{}, %{"position" => 1}] do
         assert conn |> patch(~p"/api/stages/#{code.id}", body) |> error(422) ==
                  %{"code" => "invalid_request", "message" => message}
       end
+    end
+  end
+
+  describe "ai_enabled is derived, not writable (RE409)" do
+    @ai_refusal "ai_enabled is derived from flows — point a flow's works_in at this stage instead"
+
+    test "PATCH with ai_enabled is 422 invalid_request", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      assert conn |> patch(~p"/api/stages/#{code.id}", %{"ai_enabled" => true}) |> error(422) ==
+               %{"code" => "invalid_request", "message" => @ai_refusal}
+    end
+
+    test "PATCH with ai_enabled false alongside a name is 422 and writes nothing", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      assert conn |> patch(~p"/api/stages/#{code.id}", %{"ai_enabled" => false, "name" => "Build"}) |> error(422) ==
+               %{"code" => "invalid_request", "message" => @ai_refusal}
+
+      assert Repo.reload!(code).name == "Code"
+    end
+
+    test "POST with ai_enabled is 422 and creates no stage", %{conn: conn, board: board} do
+      body = %{"name" => "QA", "category" => "in_progress", "ai_enabled" => true}
+
+      assert conn |> post(~p"/api/stages", body) |> error(422) ==
+               %{"code" => "invalid_request", "message" => @ai_refusal}
+
+      refute stage_named(board, "QA")
+    end
+
+    test "a PATCH's show render derives ai_enabled from flows", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      data = conn |> patch(~p"/api/stages/#{code.id}", %{"wip_limit" => 3}) |> json_response(200) |> Map.fetch!("data")
+
+      assert data["ai_enabled"] == true
     end
   end
 

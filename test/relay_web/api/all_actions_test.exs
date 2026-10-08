@@ -21,7 +21,7 @@ defmodule RelayWeb.Api.AllActionsTest do
   # A board whose Code stage has a Review sub-lane — the shape every review action needs.
   defp board_with_review(user, key \\ "AAA", slug \\ unique_slug("alpha")) do
     board = member_board(user, key, slug)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     insert(:stage, board: board, name: "Done", category: :complete, type: :done, position: 2)
     {:ok, review} = Boards.enable_lane(code, :review)
     {board, code, review}
@@ -167,7 +167,7 @@ defmodule RelayWeb.Api.AllActionsTest do
 
   test "acting on a board the user is not a member of is 404, not 403", %{conn: conn} do
     other = insert(:board, key: "ZZZ", slug: unique_slug("zeta"))
-    code = insert(:stage, board: other, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: other, name: "Code", type: :work, position: 1)
     {:ok, review} = Boards.enable_lane(code, :review)
     card = insert(:card, stage: review, status: :in_review)
 

@@ -18,6 +18,8 @@ type" column: a **work/planning stage** is a main-lane stage
 such a stage with `ai_enabled: true`; review gates (`type: :review`), queues
 (`type: :queue`), done (`type: :done`), and sub-lanes never claim.
 
+**Superseded detail (RE409):** `ai_enabled` is no longer a stage column; a stage is AI-enabled iff a flow works in it (`Relay.Flows.ai_stage_ids/1`).
+
 ## Decision
 
 1. **The mover decides.** When an **unowned** card enters a stage on a cross-stage move:

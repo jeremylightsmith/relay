@@ -9,7 +9,7 @@ defmodule RelayWeb.Api.CardTasksTest do
   setup %{conn: conn} do
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
-    stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    stage = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     card = insert(:card, stage: stage)
     authed = put_req_header(conn, "authorization", "Bearer " <> token)
 

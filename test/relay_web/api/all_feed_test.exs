@@ -32,7 +32,7 @@ defmodule RelayWeb.Api.AllFeedTest do
     alpha = member_board(user, "AAA", unique_slug("alpha"))
     beta = member_board(user, "BBB", unique_slug("beta"))
 
-    work = insert(:stage, board: alpha, name: "Code", type: :work, ai_enabled: true, position: 1)
+    work = insert(:stage, board: alpha, name: "Code", type: :work, position: 1)
     review = insert(:stage, board: beta, name: "Review", type: :review, position: 1)
 
     older = insert(:card, stage: work, status: :needs_input, blocked_since: ~U[2026-07-10 09:00:00Z])
@@ -53,8 +53,8 @@ defmodule RelayWeb.Api.AllFeedTest do
   test "excludes every status outside the two-type set, diverging from the board rollup",
        %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
-    qa = insert(:stage, board: board, name: "QA", type: :work, ai_enabled: false, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
+    qa = insert(:stage, board: board, name: "QA", type: :work, position: 2)
 
     insert(:card, stage: code, status: :working)
     insert(:card, stage: qa, status: :ready)
@@ -84,7 +84,7 @@ defmodule RelayWeb.Api.AllFeedTest do
 
   test "a needs-input row renders with no second fetch", %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     card = insert(:card, stage: code, status: :working, tag: "mobile")
 
     {:ok, _} =
@@ -116,7 +116,7 @@ defmodule RelayWeb.Api.AllFeedTest do
   test "a legacy string-only question carries reason but no structured questions",
        %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     card = insert(:card, stage: code, status: :working)
     {:ok, _} = Cards.request_input(card, "Which region?", :agent)
 
@@ -129,7 +129,7 @@ defmodule RelayWeb.Api.AllFeedTest do
   test "an in-review row's reason is the PR url when set, else the review stage name",
        %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     {:ok, review} = Boards.enable_lane(code, :review)
 
     with_pr = insert(:card, stage: review, status: :in_review, pr_url: "https://example.com/pr/1")
@@ -144,7 +144,7 @@ defmodule RelayWeb.Api.AllFeedTest do
 
   test "every row carries its stage display name, sublane included", %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     {:ok, review} = Boards.enable_lane(code, :review)
 
     blocked = insert(:card, stage: code, status: :needs_input)
@@ -159,8 +159,8 @@ defmodule RelayWeb.Api.AllFeedTest do
 
   test "every row carries the top-level stage group it files under", %{conn: conn, user: user} do
     board = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
-    spec = insert(:stage, board: board, name: "Spec", type: :planning, ai_enabled: true, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
+    spec = insert(:stage, board: board, name: "Spec", type: :planning, position: 2)
     {:ok, review} = Boards.enable_lane(code, :review)
 
     blocked = insert(:card, stage: spec, status: :needs_input)

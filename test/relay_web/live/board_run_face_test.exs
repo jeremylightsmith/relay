@@ -126,7 +126,7 @@ defmodule RelayWeb.BoardRunFaceTest do
     setup %{user: user} do
       board = insert(:board, owner: user)
       insert(:membership, board: board, user: user)
-      works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)
+      works = insert_ai_stage(%{board: board, name: "Code", position: 1})
       %{board: board, works: works}
     end
 
@@ -198,7 +198,7 @@ defmodule RelayWeb.BoardRunFaceTest do
     setup %{user: user} do
       board = insert(:board, owner: user)
       insert(:membership, board: board, user: user)
-      works = insert(:stage, board: board, name: "Code", position: 1, type: :work, ai_enabled: true)
+      works = insert_ai_stage(%{board: board, name: "Code", position: 1})
       %{board: board, works: works, now: DateTime.truncate(DateTime.utc_now(), :second)}
     end
 

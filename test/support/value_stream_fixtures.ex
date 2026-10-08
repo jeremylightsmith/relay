@@ -22,23 +22,25 @@ defmodule Relay.ValueStreamFixtures do
 
   @doc """
   Backlog, Triage, Next up (queues) | Spec (+ Review, Done substages) | Plan (+ Done) | Code |
-  Review (top-level gate) | Deploy (AI-enabled `:work`, but no flow works in it — as on RE) |
-  Done (terminal), plus RE's three enabled flows (`spec`, `plan`, `code`) wired to their
-  stages. `code_ai_enabled: false` makes Code human-only.
+  Review (top-level gate) | Deploy (`:work`) | Done (terminal), plus RE's three enabled flows
+  (`spec`, `plan`, `code`) wired to their stages. A stage is AI-enabled iff a flow works in it
+  (RE409), so Deploy stays AI-enabled-without-an-enabled-flow — as on RE — through a
+  **disabled** `deploy` flow working in it. `code_flow: false` wires no `code` flow,
+  making Code human-only.
   """
   def re_board(opts \\ []) do
     board = insert(:board, key: "RE")
 
     stages = %{
-      backlog: stage(board, "Backlog", :queue, :unstarted, 1, false),
-      triage: stage(board, "Triage", :queue, :unstarted, 2, false),
-      next_up: stage(board, "Next up", :queue, :unstarted, 3, false),
-      spec: stage(board, "Spec", :planning, :planning, 4, true),
-      plan: stage(board, "Plan", :planning, :planning, 5, true),
-      code: stage(board, "Code", :work, :in_progress, 6, Keyword.get(opts, :code_ai_enabled, true)),
-      review: stage(board, "Review", :review, :in_progress, 7, false),
-      deploy: stage(board, "Deploy", :work, :in_progress, 8, true),
-      done: stage(board, "Done", :done, :complete, 9, false)
+      backlog: stage(board, "Backlog", :queue, :unstarted, 1),
+      triage: stage(board, "Triage", :queue, :unstarted, 2),
+      next_up: stage(board, "Next up", :queue, :unstarted, 3),
+      spec: stage(board, "Spec", :planning, :planning, 4),
+      plan: stage(board, "Plan", :planning, :planning, 5),
+      code: stage(board, "Code", :work, :in_progress, 6),
+      review: stage(board, "Review", :review, :in_progress, 7),
+      deploy: stage(board, "Deploy", :work, :in_progress, 8),
+      done: stage(board, "Done", :done, :complete, 9)
     }
 
     {:ok, spec_review} = Boards.enable_lane(stages.spec, :review)
@@ -47,31 +49,29 @@ defmodule Relay.ValueStreamFixtures do
 
     wire_flow(board, "spec", stages.next_up, stages.spec, spec_review)
     wire_flow(board, "plan", spec_done, stages.plan, plan_done)
-    wire_flow(board, "code", plan_done, stages.code, stages.review)
+
+    if Keyword.get(opts, :code_flow, true) do
+      wire_flow(board, "code", plan_done, stages.code, stages.review)
+    end
+
+    wire_flow(board, "deploy", stages.review, stages.deploy, stages.done, enabled: false)
 
     Map.merge(stages, %{board: board, spec_review: spec_review, spec_done: spec_done, plan_done: plan_done})
   end
 
-  defp wire_flow(board, key, pulls_from, works_in, lands_on) do
+  defp wire_flow(board, key, pulls_from, works_in, lands_on, opts \\ []) do
     insert(:flow,
       board: board,
       key: key,
-      enabled: true,
+      enabled: Keyword.get(opts, :enabled, true),
       pulls_from_stage_id: pulls_from.id,
       works_in_stage_id: works_in.id,
       lands_on_stage_id: lands_on.id
     )
   end
 
-  defp stage(board, name, type, category, position, ai_enabled) do
-    insert(:stage,
-      board: board,
-      name: name,
-      type: type,
-      category: category,
-      position: position,
-      ai_enabled: ai_enabled
-    )
+  defp stage(board, name, type, category, position) do
+    insert(:stage, board: board, name: name, type: type, category: category, position: position)
   end
 
   @doc "A card that now sits in `stage` (`:ready` by default — Done when `stage` is terminal), created at `created_at`."

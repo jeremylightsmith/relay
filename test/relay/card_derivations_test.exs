@@ -7,11 +7,12 @@ defmodule Relay.CardDerivationsTest do
   # A board with a realistic pipeline; each stage is persisted so ids/positions are real.
   setup do
     board = insert(:board, key: "RLY")
-    queue = insert(:stage, board: board, position: 1, category: :unstarted, type: :queue, ai_enabled: false)
-    ai_work = insert(:stage, board: board, position: 2, category: :in_progress, type: :work, ai_enabled: true)
-    human_work = insert(:stage, board: board, position: 3, category: :in_progress, type: :work, ai_enabled: false)
-    review = insert(:stage, board: board, position: 4, category: :in_progress, type: :review, ai_enabled: false)
-    done = insert(:stage, board: board, position: 5, category: :complete, type: :done, ai_enabled: false)
+    queue = insert(:stage, board: board, position: 1, category: :unstarted, type: :queue)
+    # AI-enabled only because a (disabled) flow works in it — no stage flag (RE409).
+    ai_work = insert_ai_stage(board: board, position: 2, category: :in_progress, type: :work)
+    human_work = insert(:stage, board: board, position: 3, category: :in_progress, type: :work)
+    review = insert(:stage, board: board, position: 4, category: :in_progress, type: :review)
+    done = insert(:stage, board: board, position: 5, category: :complete, type: :done)
 
     done_sublane =
       insert(:stage,
@@ -19,8 +20,7 @@ defmodule Relay.CardDerivationsTest do
         parent_id: human_work.id,
         position: 6,
         category: :in_progress,
-        type: :done,
-        ai_enabled: false
+        type: :done
       )
 
     stages = [queue, ai_work, human_work, review, done, done_sublane]
@@ -28,6 +28,7 @@ defmodule Relay.CardDerivationsTest do
     %{
       board: board,
       stages: stages,
+      ai_ids: MapSet.new([ai_work.id]),
       queue: queue,
       ai_work: ai_work,
       human_work: human_work,
@@ -64,50 +65,79 @@ defmodule Relay.CardDerivationsTest do
     end
   end
 
-  describe "ready_awaiting_human?/2" do
+  describe "ready_awaiting_human?/3" do
     test "ready in an AI work stage is ambient (false)", ctx do
       card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :ready)
-      refute Cards.ready_awaiting_human?(card, ctx.stages)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, ctx.ai_ids)
     end
 
     test "ready in a human work stage is awaiting-human (true)", ctx do
       card = insert(:card, board: ctx.board, stage: ctx.human_work, status: :ready)
-      assert Cards.ready_awaiting_human?(card, ctx.stages)
+      assert Cards.ready_awaiting_human?(card, ctx.stages, ctx.ai_ids)
     end
 
     test "ready in a queue whose next column is AI is ambient (false)", ctx do
       card = insert(:card, board: ctx.board, stage: ctx.queue, status: :ready)
-      refute Cards.ready_awaiting_human?(card, ctx.stages)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, ctx.ai_ids)
     end
 
     test "ready at the terminal stage is not awaiting-human (it is Done)", ctx do
       card = insert(:card, board: ctx.board, stage: ctx.done, status: :ready)
-      refute Cards.ready_awaiting_human?(card, ctx.stages)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, ctx.ai_ids)
+    end
+
+    test "ready in a work stage is ambient only when its id is in ai_stage_ids (RE409)", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :ready)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, MapSet.new([ctx.ai_work.id]))
+      assert Cards.ready_awaiting_human?(card, ctx.stages, MapSet.new())
+    end
+
+    test "ready in a queue before a stage in ai_stage_ids is ambient (RE409)", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.queue, status: :ready)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, MapSet.new([ctx.ai_work.id]))
     end
 
     test "a non-ready card is never awaiting-human", ctx do
       card = insert(:card, board: ctx.board, stage: ctx.human_work, status: :working)
-      refute Cards.ready_awaiting_human?(card, ctx.stages)
+      refute Cards.ready_awaiting_human?(card, ctx.stages, ctx.ai_ids)
     end
   end
 
-  describe "needs_you?/2" do
+  describe "needs_you?/3" do
     test "needs_input and in_review always count", ctx do
       ni = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :needs_input)
       ir = insert(:card, board: ctx.board, stage: ctx.review, status: :in_review)
-      assert Cards.needs_you?(ni, ctx.stages)
-      assert Cards.needs_you?(ir, ctx.stages)
+      assert Cards.needs_you?(ni, ctx.stages, ctx.ai_ids)
+      assert Cards.needs_you?(ir, ctx.stages, ctx.ai_ids)
     end
 
     test "ready-awaiting-human counts; ambient ready does not", ctx do
       awaiting = insert(:card, board: ctx.board, stage: ctx.human_work, status: :ready)
       ambient = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :ready)
-      assert Cards.needs_you?(awaiting, ctx.stages)
-      refute Cards.needs_you?(ambient, ctx.stages)
+      assert Cards.needs_you?(awaiting, ctx.stages, ctx.ai_ids)
+      refute Cards.needs_you?(ambient, ctx.stages, ctx.ai_ids)
+    end
+
+    test "a ready card in a queue before an AI stage needs you only when that stage is not AI (RE409)", ctx do
+      card = insert(:card, board: ctx.board, stage: ctx.queue, status: :ready)
+      refute Cards.needs_you?(card, ctx.stages, MapSet.new([ctx.ai_work.id]))
+      assert Cards.needs_you?(card, ctx.stages, MapSet.new())
     end
   end
 
   describe "needs_you_rollup/1" do
+    test "reads AI-ness from flows: awaiting-human before a human stage, stalled in the flow's stage (RE409)",
+         ctx do
+      insert(:card, board: ctx.board, stage: ctx.human_work, status: :ready)
+      stopped = insert(:card, board: ctx.board, stage: ctx.ai_work, status: :working)
+      insert(:card_owner, card: stopped)
+      insert(:activity, card: stopped, type: :failure, text: "agent stopped")
+
+      rollup = Cards.needs_you_rollup(ctx.board)
+      assert rollup.awaiting_human == 1
+      assert rollup.agent_stalled == 1
+    end
+
     test "counts the three buckets across the board", ctx do
       insert(:card, board: ctx.board, stage: ctx.ai_work, status: :needs_input)
       insert(:card, board: ctx.board, stage: ctx.review, status: :in_review)

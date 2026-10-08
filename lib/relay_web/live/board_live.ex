@@ -374,7 +374,7 @@ defmodule RelayWeb.BoardLive do
                 class="board-pager-chip"
                 data-chip-stage-id={stage.id}
                 data-stage-name={stage.name}
-                data-ai={to_string(stage.ai_enabled)}
+                data-ai={to_string(Map.has_key?(@stage_flows, stage.id))}
                 data-collapsed={to_string(collapsed?)}
               >
                 <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
@@ -421,7 +421,8 @@ defmodule RelayWeb.BoardLive do
                   id={"stage-col-#{stage.position}"}
                   name={stage.name}
                   type={stage.type}
-                  ai_enabled={stage.ai_enabled}
+                  flow={Map.get(@stage_flows, stage.id)}
+                  board_slug={@board.slug}
                   category={category}
                   stage_id={stage.id}
                   collapsed={
@@ -563,7 +564,7 @@ defmodule RelayWeb.BoardLive do
         mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :mockups, &1)}
         screenshot_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :screenshots, &1)}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
-        stage_owner={stage_owner(@selected_stage)}
+        stage_owner={stage_owner(@selected_stage, @stage_flows)}
         stages={move_targets(@board, @selected_card)}
         active_owner={Cards.active_owner_type(@selected_card)}
         health={health_state(@health_by_card, @selected_card.id)}
@@ -648,7 +649,7 @@ defmodule RelayWeb.BoardLive do
         ref={Cards.ref(@board, @selected_card)}
         card={@selected_card}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
-        stage_owner={stage_owner(@selected_stage)}
+        stage_owner={stage_owner(@selected_stage, @stage_flows)}
         items={viewer_items(assigns, @viewer.section)}
         current_key={@viewer.key}
         back_patch={viewer_back_path(assigns, Cards.ref(@board, @selected_card))}
@@ -1084,6 +1085,7 @@ defmodule RelayWeb.BoardLive do
     flows = Flows.list_flows(board)
     run_summaries = Runs.run_summaries_for_board(board)
     cards_by_stage = Enum.group_by(cards, & &1.stage_id)
+    stage_flows = Flows.stage_flows(board)
     # RE93 — %{card_id => [unmet blocker id]}. One board-scoped query; the ONE definition of
     # "blocked", shared with the scheduler.
     blocked_by = Cards.unmet_dependencies(board, board.stages)
@@ -1150,11 +1152,12 @@ defmodule RelayWeb.BoardLive do
       |> assign(:agent_log_ids, [])
       |> stream_configure(:agent_logs, dom_id: &"agent-log-#{&1.id}")
       |> assign(:stage_groups, group_stages(board.stages))
+      |> assign(:stage_flows, stage_flows)
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign(:pager_mode, false)
       |> assign_board_derivations(board)
-      |> assign(:health_by_card, health_by_card(cards, board.stages))
+      |> assign(:health_by_card, health_by_card(cards, stage_flows))
       |> assign(:done_revealed, @done_page_size)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
@@ -3227,7 +3230,7 @@ defmodule RelayWeb.BoardLive do
   # heartbeat column reaches this socket, since heartbeats deliberately never broadcast.
   def handle_info(:health_tick, socket) do
     cards = Cards.list_cards(socket.assigns.board)
-    fresh = health_by_card(cards, socket.assigns.board.stages)
+    fresh = health_by_card(cards, socket.assigns.stage_flows)
     previous = socket.assigns.health_by_card
 
     changed = Enum.filter(cards, &(health_state(fresh, &1.id) != health_state(previous, &1.id)))
@@ -3273,9 +3276,10 @@ defmodule RelayWeb.BoardLive do
     stream_insert(socket, :activity, activity, at: 0)
   end
 
-  defp health_by_card(cards, stages) do
+  # `stage_flows` is the socket's `Flows.stage_flows/1` snapshot (RE409): a stage is AI-enabled
+  # iff it has an entry.
+  defp health_by_card(cards, stage_flows) do
     newest = Activity.newest_per_card(Enum.map(cards, & &1.id))
-    ai_stage_ids = MapSet.new(for stage <- stages, stage.ai_enabled, do: stage.id)
     now = DateTime.utc_now()
 
     Map.new(cards, fn card ->
@@ -3286,7 +3290,7 @@ defmodule RelayWeb.BoardLive do
           newest: entry,
           heartbeat_at: card.agent_heartbeat_at,
           ai_active?: Cards.active_owner_type(card) == :ai,
-          ai_stage?: MapSet.member?(ai_stage_ids, card.stage_id),
+          ai_stage?: Map.has_key?(stage_flows, card.stage_id),
           now: now
         })
 
@@ -3519,11 +3523,9 @@ defmodule RelayWeb.BoardLive do
     assign(socket, :health_by_card, Map.put(socket.assigns.health_by_card, card.id, %{state: state, entry: entry}))
   end
 
-  # "Relay AI listens here" — the stage flag that gates the whole health surface
-  # (2026-07-16 rejection). A stage this socket can't see gates closed.
-  defp ai_stage?(socket, stage_id) do
-    match?(%Stage{ai_enabled: true}, find_stage_by_id(socket, stage_id))
-  end
+  # "Relay AI works here" — a flow works in the stage (RE409), the fact that gates the whole
+  # health surface (2026-07-16 rejection). A stage this socket can't see gates closed.
+  defp ai_stage?(socket, stage_id), do: Map.has_key?(socket.assigns.stage_flows, stage_id)
 
   # Groups position-ordered stages under their category, keeping the fixed
   # category order and dropping empty categories (per spec: headers render
@@ -3560,10 +3562,11 @@ defmodule RelayWeb.BoardLive do
   defp lane_label(:done), do: "Done"
   defp lane_label(type), do: type |> Atom.to_string() |> String.capitalize()
 
-  # The owner dot's color: derived from ai_enabled (RLY-46 — the type/ai_enabled model
-  # replaces the owner column; the stage_type_icon redesign lands in its own task).
-  defp stage_owner(%Stage{ai_enabled: true}), do: :ai
-  defp stage_owner(%Stage{}), do: :human
+  # The owner dot's color: AI iff a flow works in the stage (RE409 — derived from
+  # `Flows.stage_flows/1`, read from the socket's snapshot rather than per card).
+  defp stage_owner(%Stage{id: stage_id}, stage_flows) do
+    if Map.has_key?(stage_flows, stage_id), do: :ai, else: :human
+  end
 
   # Streams can't be counted, so lane counts live in their own assign,
   # recomputed from the grouped cards (mount, moves) and bumped on create.
@@ -4402,6 +4405,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:board, board)
       |> assign(:read_only?, Board.archived?(board))
       |> assign(:stage_groups, group_stages(board.stages))
+      |> assign(:stage_flows, Flows.stage_flows(board))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)

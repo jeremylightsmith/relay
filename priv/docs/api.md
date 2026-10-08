@@ -285,8 +285,8 @@ The board's stages, each main stage followed by its substages (Review, then Done
 
 Create a main stage. Body: `name`, and either `category` (appends at the end of that category)
 or ONE of `before` / `after` (a main-stage id — the new stage lands beside it and adopts its
-category); optionally `type` (defaults from the category), `description`, `ai_enabled`,
-`wip_limit`, `collapsed_by_default`. **201** `{"data": stage}`. Both anchors →
+category); optionally `type` (defaults from the category), `description`, `wip_limit`,
+`collapsed_by_default`. **201** `{"data": stage}`. Both anchors →
 `422 invalid_request` (`"send before or after, not both"`).
 
 ```
@@ -296,11 +296,15 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 
 #### PATCH /api/stages/:id
 
-Configure a stage: any of `name`, `description`, `type`, `ai_enabled`, `wip_limit`,
+Configure a stage: any of `name`, `description`, `type`, `wip_limit`,
 `collapsed_by_default`, `reject_to_stage_id` (a main stage). `"wip_limit": null` and
 `"reject_to_stage_id": null` clear. A type change re-snaps the statuses of the cards in it.
 Renaming a main stage renames its substages. **200** `{"data": stage}`. No recognised field →
 `422 invalid_request`.
+
+`ai_enabled` in a stage response is read-only, derived from flows' `works_in` (a stage is
+AI-enabled iff a flow works in it); sending it to `POST` or `PATCH` — any value — is
+`422 invalid_request` and nothing is written.
 
 #### POST /api/stages/:id/place
 

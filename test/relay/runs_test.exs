@@ -414,7 +414,7 @@ defmodule Relay.RunsTest do
       # RLY-179: a dead run leaves the card :failed — a distinct state from :needs_input,
       # because answering cannot resume it. It still enters the needs-you rollup.
       assert card.status == :failed
-      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
+      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board), Relay.Flows.ai_stage_ids(board))
       assert Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Activity{type: :failure}, &1))
       refute Enum.any?(Relay.Activity.list_timeline(card), &match?(%Schemas.Comment{kind: :question}, &1))
       # exactly one :failure entry — mark_failed's, not a duplicate from log_failure_if_final
@@ -440,7 +440,7 @@ defmodule Relay.RunsTest do
 
       card = Relay.Cards.get_card(board, card.id)
       assert card.status == :failed
-      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board))
+      assert Relay.Cards.needs_you?(card, Relay.Boards.list_stages(board), Relay.Flows.ai_stage_ids(board))
     end
 
     test "needs_input parks the run, stores the session, and blocks the card idempotently",

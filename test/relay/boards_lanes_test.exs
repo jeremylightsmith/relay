@@ -2,6 +2,7 @@ defmodule Relay.BoardsLanesTest do
   use Relay.DataCase, async: true
 
   alias Relay.Boards
+  alias Relay.Flows
 
   defp main_stage(attrs \\ []) do
     board = insert(:board)
@@ -9,26 +10,28 @@ defmodule Relay.BoardsLanesTest do
     insert(
       :stage,
       Keyword.merge(
-        [board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 1],
+        [board: board, name: "Code", type: :work, category: :in_progress, position: 1],
         attrs
       )
     )
   end
 
-  test "enable_lane creates a review child, ai_enabled false" do
+  test "enable_lane creates a review child that no flow works in" do
     parent = main_stage()
     assert {:ok, child} = Boards.enable_lane(parent, :review)
     assert child.parent_id == parent.id
     assert child.type == :review
-    assert child.ai_enabled == false
+    refute Flows.ai_stage?(child)
     assert child.category == parent.category
   end
 
-  test "enable_lane's done child is also ai_enabled false" do
-    parent = main_stage(ai_enabled: true)
+  test "enable_lane's done child of an AI-enabled stage is not AI-enabled itself" do
+    parent = main_stage()
+    insert_flow_working_in(parent)
     assert {:ok, child} = Boards.enable_lane(parent, :done)
     assert child.type == :done
-    assert child.ai_enabled == false
+    assert Flows.ai_stage?(parent)
+    refute Flows.ai_stage?(child)
   end
 
   test "enable_lane is idempotent" do

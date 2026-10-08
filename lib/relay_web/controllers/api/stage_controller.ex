@@ -5,39 +5,48 @@ defmodule RelayWeb.Api.StageController do
   Every write goes through the `Relay.Boards` guard rails (`Relay.Cards.update_stage/2` for
   configuration, so a type change re-snaps resident cards); the refusals reach the client via
   `RelayWeb.Api.FallbackController` with `Boards.stage_refusal_message/1`'s sentence.
+
+  `ai_enabled` is read-only (RE409): every render derives it from `Relay.Flows.ai_stage_ids/1`,
+  and a create/update body naming it — any value — is refused 422 before anything is written.
   """
   use RelayWeb, :controller
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Flows
   alias RelayWeb.Api.Params
 
   action_fallback RelayWeb.Api.FallbackController
 
-  @create_fields ~w(name category type description ai_enabled wip_limit collapsed_by_default)a
-  @update_fields ~w(name description type ai_enabled wip_limit collapsed_by_default reject_to_stage_id)
+  @create_fields ~w(name category type description wip_limit collapsed_by_default)a
+  @update_fields ~w(name description type wip_limit collapsed_by_default reject_to_stage_id)
+
+  @ai_enabled_refusal "ai_enabled is derived from flows — point a flow's works_in at this stage instead"
 
   def index(conn, _params) do
-    render(conn, :index, stages: Boards.list_stages(conn.assigns.current_board))
+    board = conn.assigns.current_board
+    render(conn, :index, stages: Boards.list_stages(board), ai_stage_ids: Flows.ai_stage_ids(board))
   end
 
   def create(conn, params) do
     board = conn.assigns.current_board
 
-    with {:ok, anchor} <- create_anchor(board, params),
+    with :ok <- refuse_ai_enabled(params),
+         {:ok, anchor} <- create_anchor(board, params),
          attrs = params |> whitelist(@create_fields) |> Map.merge(anchor),
          {:ok, stage} <- board |> Boards.create_stage(attrs) |> unprocessable() do
       conn
       |> put_status(:created)
-      |> render(:show, stage: stage)
+      |> render_stage(stage)
     end
   end
 
   def update(conn, %{"id" => id} = params) do
-    with {:ok, stage} <- fetch_stage(conn, id),
+    with :ok <- refuse_ai_enabled(params),
+         {:ok, stage} <- fetch_stage(conn, id),
          {:ok, attrs} <- stage_patch(params),
          {:ok, stage} <- stage |> Cards.update_stage(attrs) |> unprocessable() do
-      render(conn, :show, stage: stage)
+      render_stage(conn, stage)
     end
   end
 
@@ -48,7 +57,7 @@ defmodule RelayWeb.Api.StageController do
          {:ok, {side, anchor_id}} <- one_anchor(params),
          {:ok, anchor} <- fetch_anchor(board, anchor_id),
          {:ok, stage} <- Boards.place_stage(stage, [{side, anchor}]) do
-      render(conn, :show, stage: stage)
+      render_stage(conn, stage)
     end
   end
 
@@ -56,7 +65,7 @@ defmodule RelayWeb.Api.StageController do
     with {:ok, stage} <- fetch_stage(conn, id),
          {:ok, lane} <- parse_lane(lane),
          {:ok, substage} <- Boards.enable_lane(stage, lane) do
-      render(conn, :show, stage: substage)
+      render_stage(conn, substage)
     end
   end
 
@@ -72,9 +81,17 @@ defmodule RelayWeb.Api.StageController do
   def delete(conn, %{"id" => id}) do
     with {:ok, stage} <- fetch_stage(conn, id),
          {:ok, deleted} <- Boards.delete_stage(stage) do
-      render(conn, :show, stage: deleted)
+      render_stage(conn, deleted)
     end
   end
+
+  defp render_stage(conn, stage),
+    do: render(conn, :show, stage: stage, ai_stage_ids: Flows.ai_stage_ids(conn.assigns.current_board))
+
+  # The key, not its value: `"ai_enabled": false` or `null` is refused too, so an old caller
+  # never mistakes a silent no-op for a write.
+  defp refuse_ai_enabled(%{"ai_enabled" => _}), do: {:error, {:invalid_request, @ai_enabled_refusal}}
+  defp refuse_ai_enabled(_params), do: :ok
 
   # An unknown, foreign or non-integer path id can't name one of this board's stages: 404.
   defp fetch_stage(conn, id) do

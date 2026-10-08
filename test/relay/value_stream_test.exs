@@ -3,6 +3,7 @@ defmodule Relay.ValueStreamTest do
 
   import Relay.ValueStreamFixtures
 
+  alias Relay.Flows
   alias Relay.ValueStream
 
   describe "stream_states/1" do
@@ -55,6 +56,15 @@ defmodule Relay.ValueStreamTest do
 
       deploy = Enum.find(ValueStream.card_stream(card).spans, &(&1.stage_id == s.deploy.id))
       assert %{kind: :queue, secs: 60, baton: %{agent: 0, human: 0, nobody: 60}} = deploy
+    end
+
+    test "Deploy, AI-enabled only by a disabled flow, is off-stream while Code stays in (RE409)" do
+      s = re_board()
+      assert Flows.ai_stage?(s.deploy)
+
+      names = s.board.id |> ValueStream.stream_states() |> Enum.map(& &1.name)
+      refute "Deploy" in names
+      assert "Code" in names
     end
 
     test "with no enabled flows every work stage stays in the stream" do
@@ -193,8 +203,8 @@ defmodule Relay.ValueStreamTest do
       assert code.baton == %{agent: 550, human: 150, nobody: 200}
     end
 
-    test "a work stage that is not ai_enabled is all human, whatever ran there" do
-      s = re_board(code_ai_enabled: false)
+    test "a work stage no flow works in is all human, whatever ran there" do
+      s = re_board(code_flow: false)
       card = card_in(s.done, at(0))
       walk(card, [{s.next_up, 0}, {s.code, 100}, {s.review, 400}, {s.done, 500}])
       executed(card, "implement", at(150), at(200))
@@ -310,7 +320,7 @@ defmodule Relay.ValueStreamTest do
       next_up = insert(:stage, board: board, name: "Next up", type: :queue, category: :unstarted, position: 1)
 
       code =
-        insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2, ai_enabled: true)
+        insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
 
       done = insert(:stage, board: board, name: "Done", type: :review, category: :complete, position: 3)
       card = card_in(done, at(0))

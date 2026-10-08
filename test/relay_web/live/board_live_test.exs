@@ -322,8 +322,8 @@ defmodule RelayWeb.BoardLiveTest do
     test "composing on an AI-enabled stage shows the handoff CTA and creates a card",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
+      # RE409: the seeded `code` flow works in Code, which is what makes it AI-enabled.
       code = Enum.find(board.stages, &(&1.name == "Code"))
-      {:ok, _} = Boards.update_stage(code, %{ai_enabled: true})
       col = "stage-col-#{code.position}"
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")

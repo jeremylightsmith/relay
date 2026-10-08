@@ -10,8 +10,8 @@ defmodule Relay.CardsRejectTest do
   setup do
     board = insert(:board, key: "RLY")
     spec = insert(:stage, board: board, name: "Spec", type: :queue, category: :unstarted, position: 1)
-    plan = insert(:stage, board: board, name: "Plan", type: :planning, ai_enabled: true, category: :planning, position: 2)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 3)
+    plan = insert(:stage, board: board, name: "Plan", type: :planning, category: :planning, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 3)
     review = insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 4)
     done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 5)
 

@@ -75,12 +75,16 @@ defmodule RelayWeb.BoardLivePagerTest do
       assert has_element?(view, "#stage-chip-#{spec.id} .board-pager-chip-count", "1")
     end
 
-    test "an AI stage's chip is marked for the violet dot treatment",
+    test "a stage a flow works in is marked for the violet dot treatment; one without is not",
          %{conn: conn, board: board} do
-      ai_stage = Enum.find(board.stages, &(is_nil(&1.parent_id) and &1.ai_enabled))
+      # RE409: AI-ness is derived from flows — the seeded `code` flow works in Code, no flow
+      # works in Deploy.
+      code = Enum.find(board.stages, &(is_nil(&1.parent_id) and &1.name == "Code"))
+      deploy = Enum.find(board.stages, &(is_nil(&1.parent_id) and &1.name == "Deploy"))
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#stage-chip-#{ai_stage.id}[data-ai='true'] .board-pager-chip-dot")
+      assert has_element?(view, "#stage-chip-#{code.id}[data-ai='true'] .board-pager-chip-dot")
+      assert has_element?(view, "#stage-chip-#{deploy.id}[data-ai='false']")
     end
   end
 

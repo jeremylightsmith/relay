@@ -8,7 +8,8 @@ defmodule RelayWeb.BoardLiveSubstatesTest do
   setup %{user: user} do
     board = Relay.Boards.get_or_create_default_board(user)
     stages = board.stages
-    ai_work = Enum.find(stages, &(&1.type == :work and &1.ai_enabled))
+    ai_ids = Relay.Flows.ai_stage_ids(board)
+    ai_work = Enum.find(stages, &(&1.type == :work and &1.id in ai_ids))
     human_stage = Enum.find(stages, &(&1.type == :queue))
     review = Enum.find(stages, &(&1.type == :review))
     done = Relay.Boards.terminal_stage(stages)

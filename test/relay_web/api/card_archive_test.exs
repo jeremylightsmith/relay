@@ -13,7 +13,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
     board = insert(:board)
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
     backlog = insert(:stage, board: board, name: "Backlog", position: 1)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 2)
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, backlog: backlog, code: code}
   end

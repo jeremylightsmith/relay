@@ -3,14 +3,16 @@ defmodule RelayWeb.Api.CardJSON do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Flows
   alias RelayWeb.Api.TaskJSON
 
   @doc """
   The shared card shape. `board` supplies the ref + key; `stages` (the board's in-memory stage
   list) drives the derived `done`/`needs_you` facts, and `archived_at` the `archived` flag.
-  Heavy acceptance_criteria/plan/spec live on show/1.
+  `ai_stage_ids` is the board's `Relay.Flows.ai_stage_ids/1`, loaded once per render by the
+  caller — never per card. Heavy acceptance_criteria/plan/spec live on show/1.
   """
-  def data(board, card, stages) do
+  def data(board, card, stages, ai_stage_ids) do
     %{
       id: card.id,
       ref: Cards.ref(board, card),
@@ -22,7 +24,7 @@ defmodule RelayWeb.Api.CardJSON do
       # archived rows from it.
       archived: not is_nil(card.archived_at),
       done: Cards.done?(card, stages),
-      needs_you: Cards.needs_you?(card, stages),
+      needs_you: Cards.needs_you?(card, stages, ai_stage_ids),
       branch: card.branch,
       pr_url: card.pr_url,
       stage_id: card.stage_id,
@@ -38,16 +40,18 @@ defmodule RelayWeb.Api.CardJSON do
   drive behavior; parent_id/wip_limit let the CLI charge sub-lanes to their parent. `stages` is
   the board's in-memory stage list: a substage's `display_name` resolves its parent from it, with
   no per-stage query; a parent missing from the list falls back to `Boards.stage_display_name/1`.
+  `ai_enabled` is read-only and derived (RE409): membership in `ai_stage_ids`, the board's
+  `Relay.Flows.ai_stage_ids/1` loaded once per render by the caller.
   """
-  @spec stage(Schemas.Stage.t(), [Schemas.Stage.t()]) :: map()
-  def stage(stage, stages) do
+  @spec stage(Schemas.Stage.t(), [Schemas.Stage.t()], MapSet.t(integer())) :: map()
+  def stage(stage, stages, ai_stage_ids) do
     %{
       id: stage.id,
       name: stage.name,
       display_name: display_name(stage, stages),
       category: stage.category,
       type: stage.type,
-      ai_enabled: stage.ai_enabled,
+      ai_enabled: MapSet.member?(ai_stage_ids, stage.id),
       position: stage.position,
       wip_limit: stage.wip_limit,
       parent_id: stage.parent_id,
@@ -67,19 +71,20 @@ defmodule RelayWeb.Api.CardJSON do
   end
 
   def index(%{board: board, stages: stages, cards: cards}) do
-    %{data: Enum.map(cards, &data(board, &1, stages))}
+    ai_stage_ids = Flows.ai_stage_ids(board)
+    %{data: Enum.map(cards, &data(board, &1, stages, ai_stage_ids))}
   end
 
-  @doc "The light single-card shape (RLY-98): data/3 alone, none of show/1's heavy fields."
+  @doc "The light single-card shape (RLY-98): data/4 alone, none of show/1's heavy fields."
   def summary(%{board: board, card: card, stages: stages}) do
-    %{data: data(board, card, stages)}
+    %{data: data(board, card, stages, Flows.ai_stage_ids(board))}
   end
 
   def show(%{board: board, card: card, stages: stages, timeline: timeline}) do
     %{
       data:
         board
-        |> data(card, stages)
+        |> data(card, stages, Flows.ai_stage_ids(board))
         |> Map.put(:description, card.description)
         |> Map.put(:acceptance_criteria, card.acceptance_criteria)
         |> Map.put(:plan, card.plan)

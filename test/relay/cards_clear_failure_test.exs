@@ -6,7 +6,7 @@ defmodule Relay.CardsClearFailureTest do
 
   setup do
     board = insert(:board)
-    stage = insert(:stage, board: board, type: :work, ai_enabled: true)
+    stage = insert(:stage, board: board, type: :work)
     card = insert(:card, board: board, stage: stage, status: :failed)
     insert(:card_owner, card: card)
     %{board: board, card: card}

@@ -18,8 +18,8 @@ defmodule Relay.CardsBoardSummariesTest do
 
   test "one row per member board, with the summary facts", %{user: user} do
     alpha = member_board(user, "AAA", unique_slug("alpha"))
-    code = insert(:stage, board: alpha, name: "Code", type: :work, ai_enabled: true, position: 1)
-    human = insert(:stage, board: alpha, name: "Polish", type: :work, ai_enabled: false, position: 2)
+    code = insert_ai_stage(board: alpha, name: "Code", type: :work, position: 1)
+    human = insert(:stage, board: alpha, name: "Polish", type: :work, position: 2)
     review = insert(:stage, board: alpha, name: "Review", type: :review, position: 3)
     # A substage never counts toward stage_count — only top-level stages do.
     insert(:stage, board: alpha, parent_id: code.id, name: "Code Review", type: :review, position: 4)

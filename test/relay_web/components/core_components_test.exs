@@ -297,7 +297,6 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "stage-col-4",
           name: "Code",
           type: :work,
-          ai_enabled: true,
           stage_id: 4,
           board_key: "RLY",
           cards: [
@@ -391,7 +390,6 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "stage-col-6",
           name: "Deploy",
           type: :work,
-          ai_enabled: true,
           stage_id: 6,
           count: 0,
           collapsed: true
@@ -432,7 +430,6 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "stage-col-4",
           name: "Code",
           type: :work,
-          ai_enabled: true,
           stage_id: 4,
           count: 0,
           collapsed: true,
@@ -500,24 +497,112 @@ defmodule RelayWeb.CoreComponentsTest do
       refute html =~ "hero-chevron-left"
     end
 
-    test "shows the violet AI-listening pill on an ai-enabled non-complete stage" do
+    # RE409 — the chip is the link to the stage's flow (card mockup "AI chip is the flow link —
+    # shown iff a flow works in the stage").
+    test "an enabled flow renders the chip as a link to the flow editor" do
       html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-4",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           category: :in_progress,
           stage_id: 4
         )
 
-      assert html =~ ~s(id="stage-col-4-ai-listening")
-      assert html =~ "Relay AI is listening on this stage"
+      chip = chip(html, "stage-col-4-ai-listening")
+      assert LazyHTML.tag(chip) == ["a"]
+      assert LazyHTML.attribute(chip, "href") == ["/board/acme/flows/code"]
+      assert LazyHTML.attribute(chip, "data-tip") == ["Edit the code flow →"]
+      assert LazyHTML.attribute(chip, "data-flow-key") == ["code"]
+      assert LazyHTML.attribute(chip, "data-flow-enabled") == ["true"]
+      assert LazyHTML.to_html(chip) =~ "hero-arrow-up-right-mini"
       assert html =~ "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))"
     end
 
-    test "hides the AI-listening pill on human and complete-category stages" do
-      human =
+    test "a disabled flow renders the dashed, struck-through chip that still links" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Plan",
+          type: :planning,
+          flow: %{key: "plan", enabled: false},
+          board_slug: "acme",
+          category: :planning,
+          stage_id: 4
+        )
+
+      chip = chip(html, "stage-col-4-ai-listening")
+      assert LazyHTML.tag(chip) == ["a"]
+      assert LazyHTML.attribute(chip, "href") == ["/board/acme/flows/plan"]
+      assert LazyHTML.attribute(chip, "data-flow-enabled") == ["false"]
+      assert LazyHTML.attribute(chip, "data-tip") == ["The plan flow is off — edit to turn it on →"]
+      assert LazyHTML.to_html(chip) =~ "dashed"
+      assert LazyHTML.to_html(chip) =~ "line-through"
+    end
+
+    test "read-only with an enabled flow renders a plain label, not a link" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Spec",
+          type: :planning,
+          flow: %{key: "spec", enabled: true},
+          read_only: true,
+          category: :planning,
+          stage_id: 3
+        )
+
+      chip = chip(html, "stage-col-3-ai-listening")
+      assert LazyHTML.tag(chip) == ["span"]
+      assert LazyHTML.attribute(chip, "href") == []
+      assert LazyHTML.attribute(chip, "title") == ["Relay AI works this stage"]
+      refute LazyHTML.to_html(chip) =~ "hero-arrow-up-right-mini"
+      refute html =~ "<a "
+    end
+
+    test "read-only with a disabled flow renders no chip" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Plan",
+          type: :planning,
+          flow: %{key: "plan", enabled: false},
+          read_only: true,
+          category: :planning,
+          stage_id: 3
+        )
+
+      refute html =~ "stage-col-3-ai-listening"
+    end
+
+    test "a collapsed strip carries the chip as a dot-only link" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-6",
+          name: "Code",
+          type: :work,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
+          stage_id: 6,
+          count: 0,
+          collapsed: true
+        )
+
+      link =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-strip-6 a[href='/board/acme/flows/code'][data-flow-key='code']")
+
+      assert Enum.count(link) == 1
+      assert LazyHTML.attribute(link, "id") == ["stage-col-6-ai-listening"]
+      assert LazyHTML.attribute(link, "title") == ["Edit the code flow →"]
+      refute LazyHTML.text(link) =~ "AI"
+    end
+
+    test "no flow renders no chip" do
+      html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-1",
           name: "Backlog",
@@ -526,18 +611,71 @@ defmodule RelayWeb.CoreComponentsTest do
           stage_id: 1
         )
 
-      complete =
+      refute html =~ "ai-listening"
+    end
+
+    test "the pager chip is padded for touch and carries no tooltip" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Spec",
+          type: :planning,
+          flow: %{key: "spec", enabled: true},
+          board_slug: "acme",
+          category: :planning,
+          stage_id: 3,
+          pager: true
+        )
+
+      chip = chip(html, "stage-col-3-ai-listening")
+      assert LazyHTML.attribute(chip, "data-tip") == []
+      [class] = LazyHTML.attribute(chip, "class")
+      refute class =~ "tooltip"
+      [style] = LazyHTML.attribute(chip, "style")
+      assert style =~ "padding:6px 9px"
+    end
+
+    test "a complete-category stage hides the chip even with a flow" do
+      html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-8",
           name: "Done",
           type: :done,
-          ai_enabled: true,
+          flow: %{key: "x", enabled: true},
+          board_slug: "acme",
           category: :complete,
           stage_id: 8
         )
 
-      refute human =~ "ai-listening"
-      refute complete =~ "ai-listening"
+      refute html =~ "ai-listening"
+    end
+
+    test "the compose CTA hands to AI for any flow, enabled or not, and adds without one" do
+      render = fn flow ->
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-4",
+          name: "Code",
+          type: :work,
+          flow: flow,
+          board_slug: "acme",
+          category: :in_progress,
+          stage_id: 4,
+          composing: true,
+          compose_form: to_form(%{"title" => ""}, as: :card)
+        )
+      end
+
+      submit = fn html ->
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-col-4-compose-submit")
+        |> LazyHTML.text()
+        |> String.trim()
+      end
+
+      assert submit.(render.(nil)) == "Add"
+      assert submit.(render.(%{key: "code", enabled: true})) == "Hand to AI"
+      assert submit.(render.(%{key: "code", enabled: false})) == "Hand to AI"
     end
 
     test "the composer is owner-aware: AI stage hands to AI, human stage adds; both submit blue" do
@@ -546,7 +684,8 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "stage-col-4",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           category: :in_progress,
           stage_id: 4,
           composing: true,
@@ -589,7 +728,6 @@ defmodule RelayWeb.CoreComponentsTest do
           id: "stage-col-4",
           name: "Code",
           type: :work,
-          ai_enabled: true,
           stage_id: 4,
           count: 1,
           board_key: "RLY",
@@ -623,6 +761,24 @@ defmodule RelayWeb.CoreComponentsTest do
 
       # stage width: 240 (main) + 34 (strip) + 178 (expanded) = 452
       assert html =~ "width:452px"
+    end
+  end
+
+  describe "flow_chip/1" do
+    test "the settings variant links to the editor and names the flow" do
+      html =
+        render_component(&CoreComponents.flow_chip/1,
+          id: "stage-9-ai-flow",
+          variant: :settings,
+          flow: %{key: "design", enabled: true},
+          board_slug: "acme"
+        )
+
+      chip = html |> LazyHTML.from_fragment() |> LazyHTML.query("#stage-9-ai-flow")
+      assert LazyHTML.tag(chip) == ["a"]
+      assert LazyHTML.attribute(chip, "href") == ["/board/acme/flows/design"]
+      assert LazyHTML.text(chip) =~ "design flow"
+      assert LazyHTML.attribute(chip, "data-tip") == []
     end
   end
 
@@ -5655,5 +5811,9 @@ defmodule RelayWeb.CoreComponentsTest do
              |> LazyHTML.query(~s(li[data-notify-state="default"] button#notify-enable.btn.btn-primary.btn-xs))
              |> LazyHTML.text() =~ "Enable"
     end
+  end
+
+  defp chip(html, id) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query("##{id}")
   end
 end

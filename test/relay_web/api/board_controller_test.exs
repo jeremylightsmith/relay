@@ -8,7 +8,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
   end
 
   test "returns the key's board with stages and cards (status + owners)", %{conn: conn, board: board} do
-    stage = insert(:stage, board: board, name: "Plan", type: :work, ai_enabled: true, position: 1)
+    stage = insert_ai_stage(board: board, name: "Plan", position: 1)
     card = insert(:card, stage: stage, title: "Ship it", status: :working)
     insert(:card_owner, card: card)
 
@@ -28,7 +28,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
   end
 
   test "stage JSON carries wip_limit, type, and parent_id for sub-lane WIP", %{conn: conn, board: board} do
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1, wip_limit: 3)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1, wip_limit: 3)
     _review = insert(:stage, board: board, name: "Code:Review", type: :review, position: 2, parent: code)
 
     body = conn |> get(~p"/api/board") |> json_response(200)
@@ -83,13 +83,41 @@ defmodule RelayWeb.Api.BoardControllerTest do
   end
 
   test "board card JSON omits heavy plan/spec text", %{conn: conn, board: board} do
-    stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    stage = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     insert(:card, stage: stage, title: "Heavy", plan: "big plan text", spec: "big spec text")
 
     [card_json] = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("cards")
 
     refute Map.has_key?(card_json, "plan")
     refute Map.has_key?(card_json, "spec")
+  end
+
+  test "a ready card's needs_you reads AI-ness from flows: false before a flow's stage, true otherwise (RE409)",
+       %{conn: conn, board: board} do
+    ai_queue = insert(:stage, board: board, name: "Next up", type: :queue, position: 1)
+    _ai = insert_ai_stage(board: board, name: "Code", position: 2)
+    human_queue = insert(:stage, board: board, name: "Waiting", type: :queue, position: 3)
+    _human = insert(:stage, board: board, name: "QA", type: :work, category: :in_progress, position: 4)
+    _done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 5)
+    before_ai = insert(:card, stage: ai_queue, title: "before AI", status: :ready)
+    before_human = insert(:card, stage: human_queue, title: "before human", status: :ready)
+
+    body = conn |> get(~p"/api/board") |> json_response(200)
+    needs_you = Map.new(body["cards"], &{&1["id"], &1["needs_you"]})
+
+    assert needs_you[before_ai.id] == false
+    assert needs_you[before_human.id] == true
+  end
+
+  test "stage JSON derives ai_enabled from flows (RE409)", %{conn: conn, board: board} do
+    worked = insert(:stage, board: board, name: "Build", type: :work, position: 1)
+    idle = insert(:stage, board: board, name: "QA", type: :work, position: 2)
+    insert_flow_working_in(worked, key: "build")
+
+    stages = conn |> get(~p"/api/board") |> json_response(200) |> Map.fetch!("stages") |> Map.new(&{&1["id"], &1})
+
+    assert stages[worked.id]["ai_enabled"] == true
+    assert stages[idle.id]["ai_enabled"] == false
   end
 
   describe "GET /api/board/version" do
@@ -106,7 +134,7 @@ defmodule RelayWeb.Api.BoardControllerTest do
       before =
         conn |> get(~p"/api/board/version") |> json_response(200) |> Map.fetch!("version")
 
-      stage = insert(:stage, board: board, name: "Plan", type: :work, ai_enabled: true, position: 1)
+      stage = insert(:stage, board: board, name: "Plan", type: :work, position: 1)
       {:ok, _card} = Relay.Cards.create_card(stage, %{title: "New card"})
 
       after_version =

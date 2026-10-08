@@ -248,7 +248,7 @@ defmodule RelayWeb.Api.CardControllerTest do
     end
 
     test "creates a card into an explicit stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
+      other = insert(:stage, board: board, name: "Code", type: :work, position: 2)
 
       body =
         conn
@@ -260,7 +260,7 @@ defmodule RelayWeb.Api.CardControllerTest do
     end
 
     test "accepts an integer-string stage id", %{conn: conn, board: board} do
-      other = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
+      other = insert(:stage, board: board, name: "Code", type: :work, position: 2)
 
       body =
         conn

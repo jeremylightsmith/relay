@@ -20,7 +20,7 @@ defmodule Relay.CardsComposeAnswerTest do
   end
 
   test "latest_questions returns the card's newest structured questions, else nil" do
-    code = insert(:stage, type: :work, ai_enabled: true)
+    code = insert(:stage, type: :work)
     card = insert(:card, stage: code, status: :working)
 
     refute Cards.latest_questions(card)

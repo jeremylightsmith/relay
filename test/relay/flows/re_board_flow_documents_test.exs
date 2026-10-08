@@ -28,7 +28,6 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
         name: "Deploy",
         category: :in_progress,
         type: :work,
-        ai_enabled: true,
         wip_limit: 1,
         after: code
       })

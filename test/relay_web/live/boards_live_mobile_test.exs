@@ -45,8 +45,7 @@ defmodule RelayWeb.BoardsLiveMobileTest do
         parent_id: code.id,
         position: 99,
         category: :in_progress,
-        type: :done,
-        ai_enabled: false
+        type: :done
       )
 
       insert(:card, board: board, stage: spec)

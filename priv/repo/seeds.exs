@@ -209,18 +209,32 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
     |> Repo.insert!()
 
   stages =
-    for {{sname, category, type, ai, wip}, pos} <- Enum.with_index(stage_specs, 1) do
+    for {{sname, category, type, _flow_works_here, wip}, pos} <- Enum.with_index(stage_specs, 1) do
       %Stage{board_id: board.id}
       |> Stage.changeset(%{
         name: sname,
         position: pos,
         category: category,
         type: type,
-        ai_enabled: ai,
         wip_limit: wip
       })
       |> Repo.insert!()
     end
+
+  # A spec's 4th element means "a flow works here" — AI-enabled is derived from flows (RE409),
+  # so each such stage gets a disabled flow working in it, reusing the library "code" graph.
+  code_flow = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+
+  for {{_sname, _category, _type, true, _wip}, stage} <- Enum.zip(stage_specs, stages) do
+    flow_key = stage.name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
+
+    attrs =
+      code_flow
+      |> Map.delete(:trigger)
+      |> Map.merge(%{key: flow_key, works_in_stage_id: stage.id})
+
+    {:ok, _flow} = Relay.Flows.create_flow(board, attrs)
+  end
 
   last_ref =
     Enum.reduce(stages, 0, fn stage, ref_acc ->
@@ -435,19 +449,19 @@ acme_cards = [
 IO.puts("Seeding boards for #{email}:")
 
 build_board.(
-  %{name: "Weekend Projects", slug: "weekend-projects", key: "WKND", long_docs: false},
+  %{name: "Weekend Projects", slug: "weekend-projects", key: "WK", long_docs: false},
   weekend_stages,
   weekend_cards
 )
 
 build_board.(
-  %{name: "Product Team", slug: "product-team", key: "PROD", long_docs: true},
+  %{name: "Product Team", slug: "product-team", key: "PR", long_docs: true},
   product_stages,
   product_cards
 )
 
 build_board.(
-  %{name: "Acme Platform", slug: "acme-platform", key: "ACME", long_docs: true},
+  %{name: "Acme Platform", slug: "acme-platform", key: "AC", long_docs: true},
   acme_stages,
   acme_cards
 )

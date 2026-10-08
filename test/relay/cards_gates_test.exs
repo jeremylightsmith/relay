@@ -11,28 +11,26 @@ defmodule Relay.CardsGatesTest do
   # Done (review, last — the final gate; approving with no next main stage completes in place).
   setup do
     board = insert(:board, key: "RLY")
-    plan = insert(:stage, board: board, name: "Plan", type: :planning, ai_enabled: true, category: :planning, position: 1)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 2)
+    plan = insert(:stage, board: board, name: "Plan", type: :planning, category: :planning, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
 
     review =
       insert(:stage,
         board: board,
         name: "Review",
         type: :review,
-        ai_enabled: false,
         category: :in_progress,
         position: 3
       )
 
     deploy =
-      insert(:stage, board: board, name: "Deploy", type: :work, ai_enabled: true, category: :in_progress, position: 4)
+      insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 4)
 
     done =
       insert(:stage,
         board: board,
         name: "Done",
         type: :review,
-        ai_enabled: false,
         category: :complete,
         position: 5
       )

@@ -11,7 +11,7 @@ defmodule RelayWeb.BoardHealthTest do
   setup :register_and_log_in_user
 
   # Build the board the way the app does — a real default board with real stages. The
-  # card lives in Code: a real ai_enabled stage, since the strip only renders in one
+  # card lives in Code: a real AI-enabled stage (a flow works in it), since the strip only renders in one
   # (2026-07-16 rejection).
   setup %{user: user} do
     board = Boards.get_or_create_default_board(user)

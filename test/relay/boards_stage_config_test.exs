@@ -2,6 +2,7 @@ defmodule Relay.BoardsStageConfigTest do
   use Relay.DataCase, async: true
 
   alias Relay.Boards
+  alias Relay.Flows
   alias Relay.Repo
   alias Schemas.CardOwner
 
@@ -27,7 +28,7 @@ defmodule Relay.BoardsStageConfigTest do
   end
 
   describe "update_stage/2" do
-    test "persists name, description, type, and ai_enabled" do
+    test "persists name, description, and type" do
       board = seeded_board()
       stage = stage_named(board, "Backlog")
 
@@ -35,8 +36,7 @@ defmodule Relay.BoardsStageConfigTest do
                Boards.update_stage(stage, %{
                  name: "Inbox",
                  description: "Raw ideas land here",
-                 type: :work,
-                 ai_enabled: true
+                 type: :work
                })
 
       assert updated.name == "Inbox"
@@ -45,7 +45,6 @@ defmodule Relay.BoardsStageConfigTest do
       assert reloaded.name == "Inbox"
       assert reloaded.description == "Raw ideas land here"
       assert reloaded.type == :work
-      assert reloaded.ai_enabled == true
     end
 
     test "rejects a blank name and persists nothing" do
@@ -180,7 +179,7 @@ defmodule Relay.BoardsStageConfigTest do
       assert {:ok, stage} = Boards.create_stage(board, :unstarted)
       assert stage.name == "New stage"
       assert stage.type == :queue
-      assert stage.ai_enabled == false
+      refute Flows.ai_stage?(stage)
       assert stage.category == :unstarted
       assert is_nil(stage.parent_id)
 
@@ -281,12 +280,11 @@ defmodule Relay.BoardsStageConfigTest do
                  category: :in_progress,
                  description: "d",
                  wip_limit: 2,
-                 ai_enabled: true,
                  collapsed_by_default: true
                })
 
       assert stage.type == :work
-      assert stage.ai_enabled == true
+      refute Flows.ai_stage?(stage)
       assert stage.wip_limit == 2
       assert stage.description == "d"
       assert stage.collapsed_by_default == true

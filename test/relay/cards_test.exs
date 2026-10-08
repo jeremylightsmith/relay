@@ -689,11 +689,11 @@ defmodule Relay.CardsTest do
   describe "the claim rule on move (RLY-47)" do
     setup %{board: board} do
       %{
-        ai_stage: insert(:stage, board: board, type: :planning, ai_enabled: true, position: 20),
-        human_work: insert(:stage, board: board, type: :work, ai_enabled: false, position: 21),
-        queue_stage: insert(:stage, board: board, type: :queue, ai_enabled: false, position: 22),
-        done_stage: insert(:stage, board: board, type: :done, ai_enabled: false, position: 23),
-        review_stage: insert(:stage, board: board, type: :review, ai_enabled: false, position: 24),
+        ai_stage: insert_ai_stage(board: board, type: :planning, category: :planning, position: 20),
+        human_work: insert(:stage, board: board, type: :work, position: 21),
+        queue_stage: insert(:stage, board: board, type: :queue, position: 22),
+        done_stage: insert(:stage, board: board, type: :done, position: 23),
+        review_stage: insert(:stage, board: board, type: :review, position: 24),
         user: member!(board)
       }
     end
@@ -739,6 +739,47 @@ defmodule Relay.CardsTest do
         assert {:ok, moved} = Cards.move_card(card, target, 0, {:user, user.id})
         assert moved.owners == [], "expected no claim moving into a #{target.type} stage"
       end
+    end
+
+    test "an agent move into a work stage a DISABLED flow works in is claimed by Relay AI (RE409)",
+         %{board: board, stage: stage} do
+      target = insert_ai_stage(board: board, position: 25)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0, :agent)
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "an agent move into a work stage an ENABLED flow works in is claimed by Relay AI (RE409)",
+         %{board: board, stage: stage} do
+      target = insert_ai_stage([board: board, position: 25], enabled: true)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0, :agent)
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "a work stage no flow works in: a human mover claims, an agent mover leaves it unowned (RE409)",
+         %{board: board, stage: stage, user: user} do
+      target = insert(:stage, board: board, type: :work, category: :in_progress, position: 25)
+
+      {:ok, by_human} = Cards.create_card(stage, %{title: "human"})
+      assert {:ok, moved} = Cards.move_card(by_human, target, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+
+      {:ok, by_agent} = Cards.create_card(stage, %{title: "agent"})
+      assert {:ok, moved} = Cards.move_card(by_agent, target, 0, :agent)
+      assert moved.owners == []
+    end
+
+    test "an agent move into a Review main stage a flow works in never claims (RE409)",
+         %{board: board, stage: stage} do
+      review = insert_ai_stage(board: board, type: :review, position: 25)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, review, 0, :agent)
+      assert moved.owners == []
     end
 
     test "an already-owned card keeps its owners across moves — no hand-back (rules 5 & 6)",
@@ -877,7 +918,7 @@ defmodule Relay.CardsTest do
 
     test "a failed card still counts as needing you", %{board: board, card: card} do
       {:ok, updated} = Cards.mark_failed(card, "it died")
-      assert Cards.needs_you?(updated, Relay.Boards.list_stages(board))
+      assert Cards.needs_you?(updated, Relay.Boards.list_stages(board), Relay.Flows.ai_stage_ids(board))
     end
   end
 
@@ -1046,7 +1087,7 @@ defmodule Relay.CardsTest do
 
     test "a non-member human's claim on move is refused and the move rolls back",
          %{board: board, stage: stage, card: card, outsider: outsider} do
-      work = insert(:stage, board: board, type: :work, ai_enabled: false, position: 40)
+      work = insert(:stage, board: board, type: :work, position: 40)
 
       assert {:error, :owner_not_member} = Cards.move_card(card, work, 0, {:user, outsider.id})
       assert Repo.get!(Card, card.id).stage_id == stage.id
@@ -1537,10 +1578,10 @@ defmodule Relay.CardsTest do
       board = insert(:board, key: "RLY")
 
       code =
-        insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 1)
+        insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 1)
 
       done =
-        insert(:stage, board: board, name: "Done", type: :review, ai_enabled: false, category: :complete, position: 2)
+        insert(:stage, board: board, name: "Done", type: :review, category: :complete, position: 2)
 
       %{board: Relay.Repo.preload(board, :stages), code: code, done: done}
     end

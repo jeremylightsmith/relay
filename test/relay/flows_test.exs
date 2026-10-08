@@ -605,6 +605,75 @@ defmodule Relay.FlowsTest do
     end
   end
 
+  describe "stage_flows/1 (RE409)" do
+    setup do
+      board = insert(:board)
+      a = insert(:stage, board: board, type: :work, category: :in_progress)
+      b = insert(:stage, board: board, type: :work, category: :in_progress)
+      %{board: board, a: a, b: b}
+    end
+
+    test "a board with no flows has no AI stages", %{board: board, a: a} do
+      assert Flows.stage_flows(board) == %{}
+      assert Flows.ai_stage_ids(board) == MapSet.new()
+      assert Flows.ai_stage?(a) == false
+    end
+
+    test "an enabled flow working in a stage maps it to that flow", %{board: board, a: a} do
+      insert_flow_working_in(a, key: "code", enabled: true)
+
+      assert Flows.stage_flows(board) == %{a.id => %{key: "code", enabled: true}}
+    end
+
+    test "a disabled flow still makes its works-in stage AI-enabled", %{board: board, a: a} do
+      insert_flow_working_in(a, key: "plan")
+
+      assert Flows.stage_flows(board) == %{a.id => %{key: "plan", enabled: false}}
+      assert Flows.ai_stage?(a) == true
+    end
+
+    test "an enabled flow wins over a disabled flow with a lower key", %{board: board, a: a} do
+      insert_flow_working_in(a, key: "aaa", enabled: false)
+      insert_flow_working_in(a, key: "zzz", enabled: true)
+
+      assert Flows.stage_flows(board)[a.id] == %{key: "zzz", enabled: true}
+    end
+
+    test "among enabled flows the lowest key wins", %{board: board, a: a} do
+      insert_flow_working_in(a, key: "beta", enabled: true, pulls_from_stage_id: insert(:stage, board: board).id)
+      insert_flow_working_in(a, key: "alpha", enabled: true, pulls_from_stage_id: insert(:stage, board: board).id)
+
+      assert Flows.stage_flows(board)[a.id] == %{key: "alpha", enabled: true}
+    end
+
+    test "a flow that works in no stage contributes nothing", %{board: board} do
+      insert(:flow, board: board, key: "loose", works_in_stage_id: nil)
+
+      assert Flows.stage_flows(board) == %{}
+    end
+  end
+
+  describe "ai_stage_ids/1 and ai_stage?/1 (RE409)" do
+    test "are scoped to the board and accept a struct or an id" do
+      board1 = insert(:board)
+      a = insert(:stage, board: board1, type: :work)
+      b = insert(:stage, board: board1, type: :work)
+      without_flow = insert(:stage, board: board1, type: :work)
+      board2 = insert(:board)
+      c = insert(:stage, board: board2, type: :work)
+
+      insert_flow_working_in(a, key: "code", enabled: true)
+      insert_flow_working_in(b, key: "plan")
+      insert_flow_working_in(c, key: "code", enabled: true)
+
+      assert Flows.ai_stage_ids(board1) == MapSet.new([a.id, b.id])
+      assert Flows.ai_stage_ids(board1.id) == MapSet.new([a.id, b.id])
+      assert Flows.ai_stage?(a.id) == true
+      assert Flows.ai_stage?(b) == true
+      assert Flows.ai_stage?(without_flow) == false
+    end
+  end
+
   describe "list_enabled_flows/1" do
     test "returns only enabled flows, in key order" do
       board = insert(:board)

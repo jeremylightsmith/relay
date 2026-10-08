@@ -169,6 +169,46 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  The flow each stage of the board is AI-enabled by (RE409): one entry per stage id that at
+  least one flow — enabled **or** disabled — works in (`works_in_stage_id`), mapped to
+  `%{key, enabled}` of the flow that represents it. When several flows work in one stage an
+  enabled flow wins, then the lowest `key`; `enabled: false` only when every flow there is
+  off. Flows that work in no stage contribute nothing.
+
+  The ONE source of the "AI-enabled stage" fact (AGENTS.md): `ai_stage_ids/1` is built on it
+  and `ai_stage?/1` asks the same `works_in_stage_id` question for one stage. Deliberately
+  type-blind — each reader keeps its own work/planning guard.
+  """
+  @spec stage_flows(Board.t() | integer()) :: %{integer() => %{key: String.t(), enabled: boolean()}}
+  def stage_flows(%Board{id: board_id}), do: stage_flows(board_id)
+
+  def stage_flows(board_id) when is_integer(board_id) do
+    from(f in Flow,
+      where: f.board_id == ^board_id and not is_nil(f.works_in_stage_id),
+      order_by: [desc: f.enabled, asc: f.key],
+      select: {f.works_in_stage_id, %{key: f.key, enabled: f.enabled}}
+    )
+    |> Repo.all()
+    # Rows arrive best-first per stage, so the first row seen for a stage is its flow.
+    |> Enum.reduce(%{}, fn {stage_id, flow}, acc -> Map.put_new(acc, stage_id, flow) end)
+  end
+
+  @doc "The ids of the board's AI-enabled stages — exactly the keys of `stage_flows/1`."
+  @spec ai_stage_ids(Board.t() | integer()) :: MapSet.t(integer())
+  def ai_stage_ids(board), do: board |> stage_flows() |> Map.keys() |> MapSet.new()
+
+  @doc """
+  Whether any flow (enabled or disabled) works in this one stage — the single-stage form of
+  `stage_flows/1`'s fact. No type guard; callers keep their own.
+  """
+  @spec ai_stage?(Stage.t() | integer()) :: boolean()
+  def ai_stage?(%Stage{id: stage_id}), do: ai_stage?(stage_id)
+
+  def ai_stage?(stage_id) when is_integer(stage_id) do
+    Repo.exists?(from f in Flow, where: f.works_in_stage_id == ^stage_id)
+  end
+
+  @doc """
   The board's flow with `key`, trigger stages preloaded — the shape
   `Relay.Flows.Document.encode/1` requires. nil when the board has no such flow.
   """

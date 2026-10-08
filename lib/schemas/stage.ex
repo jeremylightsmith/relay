@@ -6,9 +6,9 @@ defmodule Schemas.Stage do
   the default card state on entry (see ADR 0003). `category` suggests a default `type`
   (`default_type/1`) when a stage is created or crosses category, but any override is allowed.
 
-  A **sub-lane is a child stage**: `parent_id` set, `type in sublane_types/0`. `ai_enabled`
-  ("Relay AI listens here") is only meaningful for `:work`/`:planning` stages and is forced
-  `false` for every other type. `board_id`/`parent_id` are set programmatically, never cast.
+  A **sub-lane is a child stage**: `parent_id` set, `type in sublane_types/0`. "AI-enabled" is
+  not a stage field — it is derived from flows: a stage is AI-enabled iff a flow works in it
+  (`Relay.Flows.ai_stage_ids/1`, RE409). `board_id`/`parent_id` are set programmatically, never cast.
   `wip_limit` is the optional MMF 11 limit (`nil` = no limit). `collapsed_by_default`
   (RLY-111) makes the stage start as its 44px strip regardless of card count and applies to
   any stage type.
@@ -28,7 +28,6 @@ defmodule Schemas.Stage do
     field :position, :integer
     field :category, Ecto.Enum, values: [:unstarted, :planning, :in_progress, :complete]
     field :type, Ecto.Enum, values: @types
-    field :ai_enabled, :boolean, default: false
     field :wip_limit, :integer
     field :collapsed_by_default, :boolean, default: false
 
@@ -49,14 +48,12 @@ defmodule Schemas.Stage do
       :position,
       :category,
       :type,
-      :ai_enabled,
       :wip_limit,
       :collapsed_by_default,
       :reject_to_stage_id
     ])
     |> validate_required([:name, :position, :category, :type])
     |> validate_number(:wip_limit, greater_than: 0)
-    |> normalize_ai_enabled()
     |> validate_child_type()
     |> unique_constraint(:position, name: :stages_board_id_position_index)
     |> unique_constraint(:type, name: :stages_parent_type_index)
@@ -110,8 +107,8 @@ defmodule Schemas.Stage do
   def types, do: Ecto.Enum.values(__MODULE__, :type)
 
   @doc """
-  The stage types where work happens — the only types `ai_enabled` applies to, and the types
-  `Relay.ValueStream` classifies as a `:flow` state (RE146). Defined once.
+  The stage types where work happens — the types the claim rule and `Relay.ValueStream` treat
+  as work (a `:flow` state, RE146). Defined once.
   """
   def work_types, do: @work_types
 
@@ -130,15 +127,6 @@ defmodule Schemas.Stage do
   @spec sublane_rank(atom()) :: non_neg_integer()
   def sublane_rank(type) do
     Enum.find_index(@sublane_types, &(&1 == type)) || length(@sublane_types)
-  end
-
-  # ai_enabled only applies to work/planning; every other type zeroes it (create + type change).
-  defp normalize_ai_enabled(changeset) do
-    if get_field(changeset, :type) in @work_types do
-      changeset
-    else
-      put_change(changeset, :ai_enabled, false)
-    end
   end
 
   # A child stage (parent_id set) must be a review or done sub-lane.

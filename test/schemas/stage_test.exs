@@ -64,16 +64,11 @@ defmodule Schemas.StageTest do
     assert Stage.arrival_status(:working, :done) == :ready
   end
 
-  test "ai_enabled is forced false unless the type is work or planning" do
-    for type <- [:work, :planning] do
-      changeset = main_changeset(%{name: "X", position: 1, category: :in_progress, type: type, ai_enabled: true})
-      assert Ecto.Changeset.get_field(changeset, :ai_enabled) == true
-    end
+  test "ai_enabled is not a stage field — the changeset ignores it (RE409)" do
+    changeset = main_changeset(%{name: "X", position: 1, category: :in_progress, type: :work, ai_enabled: true})
 
-    for type <- [:queue, :review, :done] do
-      changeset = main_changeset(%{name: "X", position: 1, category: :unstarted, type: type, ai_enabled: true})
-      assert Ecto.Changeset.get_field(changeset, :ai_enabled) == false
-    end
+    assert changeset.valid?
+    assert Map.has_key?(Ecto.Changeset.apply_changes(changeset), :ai_enabled) == false
   end
 
   test "changeset casts reject_to_stage_id" do

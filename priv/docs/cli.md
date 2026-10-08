@@ -18,8 +18,8 @@ exits non-zero.
 | `./relay board` | The board: stages with their cards |
 | `./relay card RLY-12` | One card: description, plan, branch, timeline |
 | `./relay stages` | The board's stages in board order — position, name, category, type, `ai:`, `wip:` and `substages:` per main stage, each substage indented beneath it. `--json` prints the list |
-| `./relay stage add "Triage" --after Spec` | **Add a main stage.** Exactly one of `--before STAGE` / `--after STAGE` (it adopts the anchor's category) or `--category C` (appended to that category's end). Optional `--type`, `--description`, `--ai`, `--wip N` |
-| `./relay stage set Code --wip 3` | **Change a main stage's settings**: `--name`, `--description`, `--type` (re-snaps its cards' statuses), `--ai`/`--no-ai`, `--wip N` or `none`, `--collapsed`/`--no-collapsed`, `--reject-to STAGE` or `none`. At least one option |
+| `./relay stage add "Triage" --after Spec` | **Add a main stage.** Exactly one of `--before STAGE` / `--after STAGE` (it adopts the anchor's category) or `--category C` (appended to that category's end). Optional `--type`, `--description`, `--wip N` |
+| `./relay stage set Code --wip 3` | **Change a main stage's settings**: `--name`, `--description`, `--type` (re-snaps its cards' statuses), `--wip N` or `none`, `--collapsed`/`--no-collapsed`, `--reject-to STAGE` or `none`. At least one option |
 | `./relay stage move Code --before Spec` | **Place a main stage** just before/after another; it adopts the anchor's category |
 | `./relay stage lane Code review on` | Turn a main stage's `review` or `done` substage `on` or `off` |
 | `./relay stage rm Triage` | **Remove a main stage** and its substages. Refused (409, nothing written) while the stage or a substage holds live or archived cards, an enabled flow uses it, it is the public intake stage, or it is the last stage. Stages are addressed by exact name or numeric id; an ambiguous name is refused with the ids |

@@ -78,7 +78,6 @@ defmodule Relay.Factory do
       position: sequence(:stage_position, & &1),
       category: :unstarted,
       type: :queue,
-      ai_enabled: false,
       board: build(:board)
     }
   end
@@ -380,5 +379,30 @@ defmodule Relay.Factory do
     }
 
     release |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
+  @doc """
+  A `:flow` on `stage`'s board that works in `stage` (RE409: a stage is AI-enabled iff a flow
+  works in it). Defaults `enabled: false` so it never feeds the scheduler; `attrs` overrides.
+  """
+  def insert_flow_working_in(%Schemas.Stage{} = stage, attrs \\ []) do
+    insert(
+      :flow,
+      Map.merge(
+        %{board: %Schemas.Board{id: stage.board_id}, works_in_stage_id: stage.id, enabled: false},
+        Map.new(attrs)
+      )
+    )
+  end
+
+  @doc """
+  An AI-enabled stage (RE409): inserts a `:stage` (default `type: :work`,
+  `category: :in_progress`, merged with `attrs`) and a flow working in it
+  (`insert_flow_working_in/2` with `flow_attrs`). Returns the stage.
+  """
+  def insert_ai_stage(attrs \\ [], flow_attrs \\ []) do
+    stage = insert(:stage, Map.merge(%{type: :work, category: :in_progress}, Map.new(attrs)))
+    insert_flow_working_in(stage, flow_attrs)
+    stage
   end
 end

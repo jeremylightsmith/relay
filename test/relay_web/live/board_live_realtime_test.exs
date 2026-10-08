@@ -53,7 +53,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
          %{conn: conn, board: board, user: user} do
       # A fresh card always arrives :ready (the schema default); flip it :in_review
       # so the drawer's review-approve button is live — approving moves it to Deploy
-      # (:work, ai_enabled), snapping status to :working (RLY-48 default_status).
+      # (:work, a flow works in it), snapping status to :working (RLY-48 default_status).
       review = Enum.find(board.stages, &(&1.name == "Review"))
       {:ok, card} = Cards.create_card(review, %{title: "Ready for review"})
       {:ok, _card} = Cards.set_status(card, %{"status" => "in_review"})
@@ -569,7 +569,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
     end
 
-    test "an AI-enabled toggle re-tints the column live and never rewrites owners",
+    test "a type change re-tints the column live and never rewrites owners",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, card} = Cards.create_card(code, %{title: "Agent task"})
@@ -578,11 +578,11 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
       {:ok, settings_view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
-      settings_view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
+      settings_view |> element("#stage-#{code.id}-type-planning") |> render_click()
 
       assert has_element?(
                board_view,
-               "#stage-col-#{code.position} .stage-type-icon[data-type='work']"
+               "#stage-col-#{code.position} .stage-type-icon[data-type='planning']"
              )
 
       assert [%Schemas.CardOwner{actor_type: :agent}] = Repo.all(Schemas.CardOwner)

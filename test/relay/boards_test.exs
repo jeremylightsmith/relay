@@ -34,17 +34,17 @@ defmodule Relay.BoardsTest do
       assert board.slug == "ada-lovelace"
 
       assert [
-               %Stage{name: "Backlog", position: 1, type: :queue, ai_enabled: false, category: :unstarted},
-               %Stage{name: "Next up", position: 2, type: :queue, ai_enabled: false, category: :unstarted},
-               %Stage{name: "Spec", position: 3, type: :planning, ai_enabled: true, category: :planning},
-               %Stage{name: "Spec:Review", position: 9, type: :review, ai_enabled: false, category: :planning},
-               %Stage{name: "Spec:Done", position: 10, type: :done, ai_enabled: false, category: :planning},
-               %Stage{name: "Plan", position: 4, type: :planning, ai_enabled: true, category: :planning},
-               %Stage{name: "Plan:Done", position: 11, type: :done, ai_enabled: false, category: :planning},
-               %Stage{name: "Code", position: 5, type: :work, ai_enabled: true, category: :in_progress},
-               %Stage{name: "Review", position: 6, type: :review, ai_enabled: false, category: :in_progress},
-               %Stage{name: "Deploy", position: 7, type: :work, ai_enabled: true, category: :in_progress},
-               %Stage{name: "Done", position: 8, type: :done, ai_enabled: false, category: :complete}
+               %Stage{name: "Backlog", position: 1, type: :queue, category: :unstarted},
+               %Stage{name: "Next up", position: 2, type: :queue, category: :unstarted},
+               %Stage{name: "Spec", position: 3, type: :planning, category: :planning},
+               %Stage{name: "Spec:Review", position: 9, type: :review, category: :planning},
+               %Stage{name: "Spec:Done", position: 10, type: :done, category: :planning},
+               %Stage{name: "Plan", position: 4, type: :planning, category: :planning},
+               %Stage{name: "Plan:Done", position: 11, type: :done, category: :planning},
+               %Stage{name: "Code", position: 5, type: :work, category: :in_progress},
+               %Stage{name: "Review", position: 6, type: :review, category: :in_progress},
+               %Stage{name: "Deploy", position: 7, type: :work, category: :in_progress},
+               %Stage{name: "Done", position: 8, type: :done, category: :complete}
              ] = board.stages
     end
 
@@ -211,6 +211,16 @@ defmodule Relay.BoardsTest do
       assert length(board.stages) == 11
 
       assert Enum.map(board.stages, & &1.name) == @default_hierarchical_names
+    end
+
+    test "a fresh board's AI-enabled stages are exactly the ones its default flows work in (RE409)" do
+      user = insert(:user)
+      {:ok, board} = Boards.create_board(user, %{name: unique_slug("B"), key: "BB"})
+
+      expected = board.stages |> Enum.filter(&(&1.name in ["Spec", "Plan", "Code"])) |> MapSet.new(& &1.id)
+
+      assert MapSet.size(expected) == 3
+      assert Flows.ai_stage_ids(board) == expected
     end
 
     test "accepts string-keyed params (the create form)" do
@@ -667,7 +677,7 @@ defmodule Relay.BoardsTest do
       refute cleared.collapsed_by_default
     end
 
-    test "is not forced false for non-work stage types (unlike ai_enabled)" do
+    test "applies to non-work stage types too" do
       board = insert(:board)
       done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 1)
       review = insert(:stage, board: board, name: "Review", type: :review, category: :in_progress, position: 2)
@@ -677,6 +687,15 @@ defmodule Relay.BoardsTest do
 
       assert {:ok, %Stage{collapsed_by_default: true}} =
                Boards.update_stage(review, %{collapsed_by_default: true})
+    end
+  end
+
+  describe "create_stage/2 ai_enabled (RE409)" do
+    test "an ai_enabled attr is ignored — a new stage is AI-enabled only once a flow works in it" do
+      board = insert(:board)
+
+      assert {:ok, stage} = Boards.create_stage(board, %{name: "QA", category: :in_progress, ai_enabled: true})
+      assert Flows.ai_stage?(stage) == false
     end
   end
 

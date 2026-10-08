@@ -9,13 +9,24 @@ defmodule Relay.Cards do
   """
 
   use Boundary,
-    deps: [Relay.Activity, Relay.Boards, Relay.Events, Relay.Members, Relay.Push, Relay.Repo, Relay.Votes, Schemas]
+    deps: [
+      Relay.Activity,
+      Relay.Boards,
+      Relay.Events,
+      Relay.Flows,
+      Relay.Members,
+      Relay.Push,
+      Relay.Repo,
+      Relay.Votes,
+      Schemas
+    ]
 
   import Ecto.Query
 
   alias Relay.Activity
   alias Relay.Boards
   alias Relay.Events
+  alias Relay.Flows
   alias Relay.Members
   alias Relay.Push
   alias Relay.Repo
@@ -1595,7 +1606,7 @@ defmodule Relay.Cards do
   The card's derived agent health (RLY-112; escalation RLY-148) — `:none | :stopped | :stale | :live`.
 
   Pure: takes a plain map (`:newest` — the card's newest `Schemas.Activity` or `nil`;
-  `:heartbeat_at`; `:ai_active?`; `:ai_stage?` — whether the card's stage is `ai_enabled`;
+  `:heartbeat_at`; `:ai_active?`; `:ai_stage?` — whether a flow works in the card's stage (`Relay.Flows.ai_stage_ids/1`);
   `:now`), touches no DB, and builds no structs, so every branch unit-tests directly.
   Health is derived at render and **never stored**.
 
@@ -1671,17 +1682,20 @@ defmodule Relay.Cards do
   Derived "ready awaiting a human": a `:ready` card whose **puller** (the stage that works it
   next) exists and is not an AI-enabled work/planning stage. A card parked in an AI work stage
   is ambient (its own agent pulls it); parked before a human stage it is on a human; parked at
-  the terminal stage the puller is `nil`, so it is Done, not awaiting-human. Pure.
+  the terminal stage the puller is `nil`, so it is Done, not awaiting-human.
+
+  `ai_stage_ids` is the board's `Relay.Flows.ai_stage_ids/1` (RE409: a stage is AI-enabled iff
+  a flow works in it) — load it once per board, not per card. Pure.
   """
-  def ready_awaiting_human?(%{status: :ready} = card, stages) do
+  @spec ready_awaiting_human?(map(), [Stage.t()], MapSet.t(integer())) :: boolean()
+  def ready_awaiting_human?(%{status: :ready} = card, stages, ai_stage_ids) do
     case worker_stage(card, stages) do
-      %Stage{type: type, ai_enabled: true} when type in [:work, :planning] -> false
-      %Stage{} -> true
+      %Stage{} = stage -> not (stage.type in Stage.work_types() and MapSet.member?(ai_stage_ids, stage.id))
       nil -> false
     end
   end
 
-  def ready_awaiting_human?(_card, _stages), do: false
+  def ready_awaiting_human?(_card, _stages, _ai_stage_ids), do: false
 
   @doc """
   Whether the card is parked on a human's answer — strictly `status == :needs_input`.
@@ -1690,7 +1704,7 @@ defmodule Relay.Cards do
   `RelayWeb.StoryMapFilter`'s Needs-input toggle and
   `RelayWeb.StoryMapComponents.card_face/4`'s `NEEDS YOU` badge both call it, so the filter
   and the badge cannot disagree about which cards it means. Deliberately narrower than
-  `needs_you?/2`, which also counts `:in_review`, `:failed` and ready-awaiting-human. Pure.
+  `needs_you?/3`, which also counts `:in_review`, `:failed` and ready-awaiting-human. Pure.
   """
   def needs_input?(%{status: status}), do: status == :needs_input
 
@@ -1702,8 +1716,9 @@ defmodule Relay.Cards do
   ends up in front of a human (RLY-179) — but it is NOT in `@feed_statuses`, because the
   needs-you feed renders a *question*, and a failed card has none. Pure.
   """
-  def needs_you?(%{status: status} = card, stages) do
-    status in [:needs_input, :in_review, :failed] or ready_awaiting_human?(card, stages)
+  @spec needs_you?(map(), [Stage.t()], MapSet.t(integer())) :: boolean()
+  def needs_you?(%{status: status} = card, stages, ai_stage_ids) do
+    status in [:needs_input, :in_review, :failed] or ready_awaiting_human?(card, stages, ai_stage_ids)
   end
 
   # The stage that pulls a parked card next: its own stage when that is a work/planning stage
@@ -1743,7 +1758,7 @@ defmodule Relay.Cards do
     stages = Boards.list_stages(board)
     cards = list_cards(board)
     newest = Activity.newest_per_card(Enum.map(cards, & &1.id))
-    ai_stage_ids = MapSet.new(for stage <- stages, stage.ai_enabled, do: stage.id)
+    ai_stage_ids = Flows.ai_stage_ids(board)
     now = DateTime.utc_now()
 
     acc = %{needs_input: 0, in_review: 0, awaiting_human: 0, agent_stalled: 0}
@@ -1752,7 +1767,7 @@ defmodule Relay.Cards do
       cond do
         card.status == :needs_input -> Map.update!(acc, :needs_input, &(&1 + 1))
         card.status == :in_review -> Map.update!(acc, :in_review, &(&1 + 1))
-        ready_awaiting_human?(card, stages) -> Map.update!(acc, :awaiting_human, &(&1 + 1))
+        ready_awaiting_human?(card, stages, ai_stage_ids) -> Map.update!(acc, :awaiting_human, &(&1 + 1))
         agent_stalled?(card, newest, ai_stage_ids, now) -> Map.update!(acc, :agent_stalled, &(&1 + 1))
         true -> acc
       end
@@ -2172,9 +2187,9 @@ defmodule Relay.Cards do
   defp work_stage?(%Stage{parent_id: nil, type: type}) when type in [:work, :planning], do: true
   defp work_stage?(_), do: false
 
-  # An AI-enabled work stage: a Work/Planning stage with ai_enabled true.
-  defp ai_stage?(%Stage{ai_enabled: true} = stage), do: work_stage?(stage)
-  defp ai_stage?(_), do: false
+  # An AI-enabled work stage (RE409): a Work/Planning stage some flow works in. The type guard
+  # runs first so a non-work move costs no query.
+  defp ai_work_stage?(%Stage{} = stage), do: work_stage?(stage) and Flows.ai_stage?(stage)
 
   # The claim rule (RLY-47): an UNOWNED card claims an owner when it ENTERS a stage.
   # An already-owned card keeps its owners through every move — this single guard
@@ -2191,7 +2206,7 @@ defmodule Relay.Cards do
       work_stage?(target) and match?({:user, _}, actor) -> put_owners(card, [actor], actor)
       # rule 1: a non-human mover (the runner/API acting as :agent) dropping an unowned
       # card into an AI-enabled stage delegates it to Relay AI.
-      ai_stage?(target) -> put_owners(card, [:agent], actor)
+      ai_work_stage?(target) -> put_owners(card, [:agent], actor)
       # Queue, Done, Review, or an agent moving into a human-only stage: leave unowned.
       true -> card
     end

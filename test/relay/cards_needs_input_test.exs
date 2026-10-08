@@ -10,7 +10,7 @@ defmodule Relay.CardsNeedsInputTest do
 
   setup do
     board = insert(:board, key: "RLY")
-    ai_stage = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    ai_stage = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     human_stage = insert(:stage, board: board, name: "Check", type: :queue, position: 2)
     %{board: board, ai_stage: ai_stage, human_stage: human_stage}
   end
@@ -241,7 +241,7 @@ defmodule Relay.CardsNeedsInputTest do
     test "approve into a work-type stage keeps :needs_input (ADR 0003 — valid there so a dragged blocked card doesn't drop its question)",
          %{board: board} do
       gate = insert(:stage, board: board, name: "Gate", position: 3, type: :review)
-      next = insert(:stage, board: board, name: "Deploy", position: 4, type: :work, ai_enabled: true)
+      next = insert(:stage, board: board, name: "Deploy", position: 4, type: :work)
       {:ok, card} = Cards.create_card(gate, %{title: "Gated"})
       {:ok, blocked} = Cards.request_input(card, "Approve the config?")
 

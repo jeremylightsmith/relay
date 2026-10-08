@@ -181,17 +181,34 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert reloaded_card.status == :in_review
     end
 
-    test "the AI-enabled toggle only renders for work/planning stages", %{conn: conn, board: board} do
+    test "every stage row shows its flow or 'No flow works here' instead of an AI toggle",
+         %{conn: conn, board: board} do
       code = stage_named(board, "Code")
       review = stage_named(board, "Review")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
-      assert has_element?(view, "#stage-#{code.id}-ai-toggle")
-      refute has_element?(view, "#stage-#{review.id}-ai-toggle")
+      for stage <- board.stages, is_nil(stage.parent_id) do
+        refute has_element?(view, "#stage-#{stage.id}-ai-toggle")
+      end
 
-      view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
+      assert has_element?(view, "a#stage-#{code.id}-ai-flow[href='/board/#{board.slug}/flows/code']", "code flow")
+      assert has_element?(view, "#stage-#{review.id}-ai-none", "No flow works here")
+    end
 
-      refute Boards.get_stage(board, code.id).ai_enabled
+    test "the stage row follows a flow toggled in the Flows tab", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      flow = Relay.Flows.get_flow_with_stages(board, "code")
+      refute flow.enabled
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='false']")
+
+      render_patch(view, ~p"/board/#{board.slug}/settings?section=flows")
+      render_click(view, "flow_confirm_toggle", %{"flow-id" => to_string(flow.id)})
+      assert Relay.Flows.get_flow_with_stages(board, "code").enabled
+
+      render_patch(view, ~p"/board/#{board.slug}/settings?section=stages")
+      assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='true']")
     end
   end
 
@@ -368,6 +385,19 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert html =~ "This board is archived (read-only)."
       refute Boards.get_stage(board, stage.id).collapsed_by_default
     end
+
+    @tag :capture_log
+    test "toggle_ai is no longer a handled event, even on an archived board", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "No toggle"})
+      {:ok, board} = Boards.archive_board(board)
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      Process.flag(:trap_exit, true)
+
+      assert {{:function_clause, [{RelayWeb.BoardSettingsLive, :handle_event, ["toggle_ai" | _args], _loc} | _]}, _call} =
+               catch_exit(render_click(view, "toggle_ai", %{"stage-id" => to_string(code.id)}))
+    end
   end
 
   describe "10b sub-lane toggles in the stage card" do
@@ -383,21 +413,6 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
       assert [%{type: :review}] = Boards.sublanes(code)
       assert has_element?(view, "#stage-#{code.id}-row", "always rejects back into its own stage")
-    end
-
-    test "the AI toggle reads AI-ENABLED and shows the violet listens-here pill when on",
-         %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
-      {:ok, _stage} = Boards.update_stage(code, %{ai_enabled: true})
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-
-      assert has_element?(view, "#settings-group-in_progress", "AI-ENABLED")
-      refute has_element?(view, "#settings-group-in_progress", "RELAY AI")
-      assert has_element?(view, "#stage-#{code.id}-ai-hint", "Relay AI listens here")
-
-      view |> element("#stage-#{code.id}-ai-toggle") |> render_click()
-      refute has_element?(view, "#stage-#{code.id}-ai-hint")
     end
 
     test "review and done sub-lane toggles both live in one dashed row, labeled SUB-LANE",

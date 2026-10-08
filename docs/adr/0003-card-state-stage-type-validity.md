@@ -54,6 +54,8 @@ Notable choices baked into the matrix:
   `Relay.Cards.approve/2`), and an already-`:ready` card that later passes back through a
   review stage (e.g. a redo that climbs past its origin) must not be silently reopened.
 
+**Superseded detail (RE409):** `ai_enabled` is no longer a stage column; a stage is AI-enabled iff a flow works in it (`Relay.Flows.ai_stage_ids/1`).
+
 **The snap rule is one code path.** `Relay.Cards.move_card/4` — the single funnel every
 mover uses (drag-and-drop, the drawer's "Move to…", the REST API, the agent runner,
 `approve`/`reject`/`send_back`) — snaps a card's status on every **cross-stage** move: if

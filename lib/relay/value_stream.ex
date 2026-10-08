@@ -27,8 +27,8 @@ defmodule Relay.ValueStream do
   own stage. (`Relay.Cards.reject/3` logs the gate's *main* stage as `from_stage_id`, so the
   decision row's own `from_stage_id` is not the gate.)
 
-  **Known approximations.** `ai_enabled` is read from the stage as it is *now* (the flag has
-  no history). Node roles come from the board's *current* flow for a run's `flow_key`
+  **Known approximations.** A stage's AI-ness (`Relay.Flows.ai_stage_ids/1`: some flow works in
+  it) is read as it is *now* — flow wiring has no history. Node roles come from the board's *current* flow for a run's `flow_key`
   (`Schemas.Flow.node_roles/1`); a node key missing from it is not value-add.
   """
 
@@ -78,14 +78,15 @@ defmodule Relay.ValueStream do
   of the nearest `:flow` state before it — what a Request changes re-runs — else `nil`; every
   other state's is `nil`.
 
-  States come from the flows' triggers: an `ai_enabled` work/planning main stage that no
-  **enabled** flow works in (`works_in_stage_id`) is left out, substages included (RE's
-  `Deploy`). No agent can hold the baton there, so time in it counts as off-stream (a `:queue`
-  span nobody holds). A board with no enabled flows has no triggers to read, so every work
-  stage stays in. A work stage that isn't `ai_enabled` is manual work and always stays in.
+  States come from the flows' triggers: an AI-enabled work/planning main stage (some flow,
+  enabled or not, works in it — `Relay.Flows.ai_stage_ids/1`) that no **enabled** flow works in
+  is left out, substages included (RE's `Deploy`). No agent can hold the baton there, so time
+  in it counts as off-stream (a `:queue` span nobody holds). A board with no enabled flows has
+  no triggers to read, so every work stage stays in. A work stage no flow works in is manual
+  work and always stays in.
   """
   def stream_states(board_id) when is_integer(board_id) do
-    build_states(load_stages(board_id), flow_worked_stage_ids(board_id))
+    build_states(load_stages(board_id), flow_worked_stage_ids(board_id), Flows.ai_stage_ids(board_id))
   end
 
   @doc """
@@ -258,11 +259,12 @@ defmodule Relay.ValueStream do
 
   defp board_context(board_id) do
     stages = load_stages(board_id)
-    states = build_states(stages, flow_worked_stage_ids(board_id))
+    ai_stage_ids = Flows.ai_stage_ids(board_id)
+    states = build_states(stages, flow_worked_stage_ids(board_id), ai_stage_ids)
 
     %{
       stages: stages,
-      stages_by_id: Map.new(stages, &{&1.id, &1}),
+      ai_stage_ids: ai_stage_ids,
       names: display_names(stages),
       states: states,
       state_by_id: Map.new(states, &{&1.stage_id, &1}),
@@ -293,7 +295,7 @@ defmodule Relay.ValueStream do
     end
   end
 
-  defp build_states(stages, worked_ids) do
+  defp build_states(stages, worked_ids, ai_stage_ids) do
     case Boards.terminal_stage(stages) do
       nil ->
         []
@@ -305,7 +307,7 @@ defmodule Relay.ValueStream do
 
         mains
         |> Enum.drop(stream_start_index(mains))
-        |> Enum.filter(&in_stream?(&1, worked_ids))
+        |> Enum.filter(&in_stream?(&1, worked_ids, ai_stage_ids))
         |> Enum.flat_map(&with_substages(&1, subs, terminal))
         |> Enum.map(&%{stage_id: &1.id, name: Map.fetch!(names, &1.id), kind: kind(&1, terminal)})
         |> with_rework_targets()
@@ -331,13 +333,12 @@ defmodule Relay.ValueStream do
     [main | subs |> Map.get(main.id, []) |> Enum.sort_by(&Stage.sublane_rank(&1.type))]
   end
 
-  defp in_stream?(_stage, nil), do: true
+  defp in_stream?(_stage, nil, _ai_stage_ids), do: true
 
-  defp in_stream?(%Stage{ai_enabled: true, type: type} = stage, worked_ids) do
-    type not in Stage.work_types() or MapSet.member?(worked_ids, stage.id)
+  defp in_stream?(%Stage{type: type} = stage, worked_ids, ai_stage_ids) do
+    not (type in Stage.work_types() and MapSet.member?(ai_stage_ids, stage.id)) or
+      MapSet.member?(worked_ids, stage.id)
   end
-
-  defp in_stream?(%Stage{}, _worked_ids), do: true
 
   defp stream_start_index(mains) do
     case Enum.find_index(mains, &(&1.type in Stage.work_types())) do
@@ -518,7 +519,7 @@ defmodule Relay.ValueStream do
   defp span(stay, left_at, kind, visit, ctx, clocks) do
     a = unix(stay.at)
     b = unix(left_at)
-    {baton, value_add} = split(kind, Map.get(ctx.stages_by_id, stay.stage_id), a, b, clocks)
+    {baton, value_add} = split(kind, ai_stage?(stay.stage_id, ctx), a, b, clocks)
 
     %{
       stage_id: stay.stage_id,
@@ -543,17 +544,20 @@ defmodule Relay.ValueStream do
     end
   end
 
-  # Decision 3: inside an ai_enabled flow stage the agent holds the baton for the union of the
+  # Whether a flow works in the span's stage (RE409) — a deleted stage is not in the set.
+  defp ai_stage?(stage_id, ctx), do: MapSet.member?(ctx.ai_stage_ids, stage_id)
+
+  # Decision 3: inside an AI-enabled flow stage the agent holds the baton for the union of the
   # card's executions, a human for its parks (minus agent overlap), nobody for the rest.
-  defp split(:flow, %Stage{ai_enabled: true}, a, b, clocks) do
+  defp split(:flow, true = _ai_stage?, a, b, clocks) do
     agent = clocks.agent |> clip(a, b) |> total()
     busy = (clocks.agent ++ clocks.parks) |> union() |> clip(a, b) |> total()
     value = clocks.value |> clip(a, b) |> total()
     {%{agent: agent, human: busy - agent, nobody: b - a - busy}, value}
   end
 
-  defp split(kind, _stage, a, b, _clocks) when kind in [:flow, :gate], do: {%{agent: 0, human: b - a, nobody: 0}, 0}
-  defp split(_kind, _stage, a, b, _clocks), do: {%{agent: 0, human: 0, nobody: b - a}, 0}
+  defp split(kind, _ai_stage?, a, b, _clocks) when kind in [:flow, :gate], do: {%{agent: 0, human: b - a, nobody: 0}, 0}
+  defp split(_kind, _ai_stage?, a, b, _clocks), do: {%{agent: 0, human: 0, nobody: b - a}, 0}
 
   defp do_node?(exec, roles), do: get_in(roles, [exec.flow_key, exec.node_key]) == :do
 

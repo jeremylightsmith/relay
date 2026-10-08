@@ -19,16 +19,16 @@ defmodule Relay.Boards do
   alias Schemas.Stage
   alias Schemas.User
 
-  # {name, category, type, ai_enabled}
+  # {name, category, type} — AI-enabled is derived from the default flows seeded below (RE409).
   @seed_stages [
-    {"Backlog", :unstarted, :queue, false},
-    {"Next up", :unstarted, :queue, false},
-    {"Spec", :planning, :planning, true},
-    {"Plan", :planning, :planning, true},
-    {"Code", :in_progress, :work, true},
-    {"Review", :in_progress, :review, false},
-    {"Deploy", :in_progress, :work, true},
-    {"Done", :complete, :done, false}
+    {"Backlog", :unstarted, :queue},
+    {"Next up", :unstarted, :queue},
+    {"Spec", :planning, :planning},
+    {"Plan", :planning, :planning},
+    {"Code", :in_progress, :work},
+    {"Review", :in_progress, :review},
+    {"Deploy", :in_progress, :work},
+    {"Done", :complete, :done}
   ]
 
   # Board-progression order is the schema's declaration order — defined once on the schema.
@@ -447,7 +447,7 @@ defmodule Relay.Boards do
 
   @doc """
   Enables a `:review` or `:done` sub-lane on `parent` (a main stage),
-  creating the child stage with `type:` review/done and `ai_enabled: false`.
+  creating the child stage with `type:` review/done.
   Idempotent.
   """
   def enable_lane(%Stage{parent_id: nil} = parent, lane) when lane in @sublane_types do
@@ -461,8 +461,7 @@ defmodule Relay.Boards do
           name: sublane_name(parent.name, lane),
           position: next_position(parent.board_id),
           category: parent.category,
-          type: lane,
-          ai_enabled: false
+          type: lane
         })
         |> Repo.insert()
         |> broadcast_stages_changed(parent.board_id)
@@ -502,9 +501,9 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Updates a stage's editable configuration (name, description, type, ai_enabled, WIP limit, reject_to).
-  `ai_enabled` is normalized by the changeset; a changed `reject_to_stage_id` must be a main stage
-  on the same board.
+  Updates a stage's editable configuration (name, description, type, WIP limit, reject_to).
+  A changed `reject_to_stage_id` must be a main stage on the same board. AI-enabled is not a
+  stage setting — it is derived from flows (`Relay.Flows.ai_stage_ids/1`, RE409).
 
   Renaming a **main** stage cascades the new name to its Review/Done sub-lanes
   (`"<new name>:Review"` / `"<new name>:Done"`, RE385) in the same transaction — a substage's
@@ -612,7 +611,7 @@ defmodule Relay.Boards do
   every earlier category's stages.
 
   With an attrs map (atom keys — `:name`, `:category`, `:type`, `:description`,
-  `:ai_enabled`, `:wip_limit`, `:collapsed_by_default`, plus optionally ONE of `:before` /
+  `:wip_limit`, `:collapsed_by_default`, plus optionally ONE of `:before` /
   `:after` naming an anchor `%Stage{}`; unknown keys are ignored): an anchored stage lands
   directly before/after the anchor and adopts its category (a different `:category` is a
   changeset error); without an anchor `:category` is required and the stage is appended as
@@ -639,7 +638,7 @@ defmodule Relay.Boards do
     end
   end
 
-  @new_stage_fields [:name, :category, :type, :description, :ai_enabled, :wip_limit, :collapsed_by_default]
+  @new_stage_fields [:name, :category, :type, :description, :wip_limit, :collapsed_by_default]
 
   defp create_anchor(board_id, attrs) do
     case {Map.get(attrs, :before), Map.get(attrs, :after)} do
@@ -663,7 +662,7 @@ defmodule Relay.Boards do
   # string "planning" matches an anchor's `:planning`.
   defp new_stage_changeset(board_id, attrs, anchor) do
     stage = %Stage{board_id: board_id, position: 0}
-    fields = attrs |> Map.take(@new_stage_fields) |> Map.put_new(:ai_enabled, false)
+    fields = Map.take(attrs, @new_stage_fields)
     given = stage |> Changeset.cast(fields, [:category]) |> Changeset.get_field(:category)
     category = given || anchor_category(anchor)
 
@@ -1021,9 +1020,9 @@ defmodule Relay.Boards do
   defp seed_stages!(board) do
     @seed_stages
     |> Enum.with_index(1)
-    |> Enum.each(fn {{name, category, type, ai_enabled}, position} ->
+    |> Enum.each(fn {{name, category, type}, position} ->
       %Stage{board_id: board.id}
-      |> Stage.changeset(%{name: name, position: position, category: category, type: type, ai_enabled: ai_enabled})
+      |> Stage.changeset(%{name: name, position: position, category: category, type: type})
       |> Repo.insert!()
     end)
   end

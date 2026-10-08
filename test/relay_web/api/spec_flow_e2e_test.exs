@@ -229,7 +229,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     # RLY-179: the card blocks immediately as :failed (not silently :ready, and not the
     # unanswerable :needs_input) and enters the needs-you rollup.
     assert card.status == :failed
-    assert Cards.needs_you?(card, Relay.Boards.list_stages(board))
+    assert Cards.needs_you?(card, Relay.Boards.list_stages(board), Relay.Flows.ai_stage_ids(board))
 
     # the reported detail reached the human as a plain comment on the card itself (not a
     # generic "The agent's run failed." placeholder) - this is the assertion that would

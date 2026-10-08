@@ -3,6 +3,7 @@ defmodule Relay.BoardsTypeConfigTest do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Flows
   alias Schemas.Stage
 
   setup do
@@ -11,18 +12,18 @@ defmodule Relay.BoardsTypeConfigTest do
     %{user: user, board: board}
   end
 
-  test "a created stage takes its category's default type, ai_enabled false", %{board: board} do
+  test "a created stage takes its category's default type and no flow works in it", %{board: board} do
     {:ok, stage} = Boards.create_stage(board, :planning)
     assert stage.type == :planning
-    assert stage.ai_enabled == false
+    refute Flows.ai_stage?(stage)
   end
 
-  test "switching a stage to a passive type zeroes ai_enabled", %{board: board} do
+  test "switching a stage to a passive type keeps the flow that works in it", %{board: board} do
     code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
-    assert code.ai_enabled
+    assert Flows.ai_stage?(code)
     {:ok, updated} = Boards.update_stage(code, %{type: :review})
     assert updated.type == :review
-    refute updated.ai_enabled
+    assert Flows.ai_stage?(updated)
   end
 
   describe "Cards.update_stage/2 (RE384)" do

@@ -18,7 +18,7 @@ defmodule RelayWeb.Api.AllCreateCardTest do
     board = insert(:board, key: key, slug: slug)
     insert(:membership, board: board, user: user)
     backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 0)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     insert(:stage, board: board, name: "Done", category: :complete, type: :done, position: 2)
     {:ok, review} = Boards.enable_lane(code, :review)
     {board, backlog, review}

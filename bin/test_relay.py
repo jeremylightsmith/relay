@@ -9954,10 +9954,15 @@ class StageCommandsTest(unittest.TestCase):
 
     def test_add_with_category_sends_every_given_option(self):
         self._run(["stage", "add", "QA", "--category", "in_progress", "--description", "d",
-                   "--ai", "--wip", "2"])
+                   "--wip", "2"])
         self.assertEqual(self._writes(), [("POST", "/api/stages", {
-            "name": "QA", "category": "in_progress", "description": "d", "ai_enabled": True,
-            "wip_limit": 2})])
+            "name": "QA", "category": "in_progress", "description": "d", "wip_limit": 2})])
+
+    def test_ai_is_not_a_stage_option(self):
+        # RE409: ai_enabled is derived from flows; the API refuses it, so the CLI has no flag.
+        self._refused(["stage", "add", "QA", "--category", "in_progress", "--ai"])
+        self._refused(["stage", "set", "Code", "--no-ai"])
+        self.assertEqual(self.sent, [])
 
     def test_add_needs_exactly_one_placement(self):
         self._refused(["stage", "add", "X"])
@@ -9971,10 +9976,10 @@ class StageCommandsTest(unittest.TestCase):
             "name": "Build", "wip_limit": 3, "description": "sort new asks"})])
 
     def test_set_clears_and_negates(self):
-        self._run(["stage", "set", "Code", "--wip", "none", "--reject-to", "none", "--no-ai",
+        self._run(["stage", "set", "Code", "--wip", "none", "--reject-to", "none",
                    "--collapsed", "--type", "review"])
         self.assertEqual(self._writes(), [("PATCH", "/api/stages/5", {
-            "wip_limit": None, "reject_to_stage_id": None, "ai_enabled": False,
+            "wip_limit": None, "reject_to_stage_id": None,
             "collapsed_by_default": True, "type": "review"})])
 
     def test_set_reject_to_resolves_the_target(self):

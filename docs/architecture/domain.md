@@ -7,8 +7,8 @@ sharing behavior.
 
 ## Contexts
 
-- **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits,
-  `ai_enabled`); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
+- **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits;
+  AI-enabled is derived — `Relay.Flows.ai_stage_ids/1`: a stage some flow works in); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
   `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
   order being `Schemas.Stage.sublane_types/0`. Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
@@ -30,6 +30,8 @@ sharing behavior.
   `PUT|DELETE /api/stages/:id/substages/:lane`; the refusals map to 409 (`last_stage`,
   `not_empty` with `live`/`archived` counts, `in_use_by_flow` with `flows`, `public_intake`)
   and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
+  The stage JSON's `ai_enabled` key is read-only, derived from `Flows.ai_stage_ids/1` (RE409);
+  a create/update body naming `ai_enabled` (any value) is 422 `invalid_request` and writes nothing.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).
@@ -355,10 +357,10 @@ sharing behavior.
   already exists (transition rows' `from_stage_id` / `to_stage_id`, `:needs_input` →
   `:input_answered` parks, `node_executions`). `stream_states/1` derives the ordered states from
   the board (stream start = the last queue main stage before the first work/planning main stage,
-  through the terminal stage, minus any `ai_enabled` work/planning stage no enabled flow works in,
+  through the terminal stage, minus any AI-enabled (derived from flows) work/planning stage no enabled flow works in,
   such as RE's `Deploy`; kinds `kinds/0` = queue / flow / gate / done). `card_stream/1`
   returns one card's spans with a per-span baton split (`batons/0`: agent = union of the card's
-  node executions inside an `ai_enabled` flow stage, human = parks and gates, nobody = the rest),
+  node executions inside an AI-enabled (derived from flows) flow stage, human = parks and gates, nobody = the rest),
   plus lead time, value-add (agent time on `:do` nodes per `Schemas.Flow.node_roles/1`), flow
   efficiency, cost and per-gate approve/reject counts. **Invariant:** spans tile
   `[started_at, done_at]` — `Σ span.secs == lead_secs` and every span's
@@ -403,7 +405,7 @@ sharing behavior.
   "last N" selector level 2 passes as `card_ids:` — and, on `flow_stream/2`, `queue_wait`,
   `done_runs`, `parked_runs` (an execution ended in `NodeExecution.holding_outcomes/0` or the run
   is parked on `:needs_input`), `first_pass_runs` (no failed `:check` execution) and the
-  foreach's `clean_copies`. Approximations: `ai_enabled` and node roles are read as they are now.
+  foreach's `clean_copies`. Approximations: flows (and so AI-enabled stages) and node roles are read as they are now.
 - **StoryMap** (`Relay.StoryMap`) — the board's second lens (RE265), orthogonal to stages:
   `Schemas.StoryActivity` (big user goals, left to right), `Schemas.StoryStep` (the backbone,
   ordered within an activity; `board_id` denormalized so every read is one board-scoped

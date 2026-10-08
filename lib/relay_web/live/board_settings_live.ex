@@ -13,9 +13,14 @@ defmodule RelayWeb.BoardSettingsLive do
 
   RLY-46: each stage row carries a TYPE dropdown (`queue | work | planning |
   review | done`, `set_type` event, re-snaps resident cards to the new type's
-  valid status) and — for work/planning stages only — a violet AI-ENABLED
-  toggle (`toggle_ai` event, "Relay AI listens here"). The old approval-gate
-  toggle is gone: gating is now implicit in `type: :review`.
+  valid status). The old approval-gate toggle is gone: gating is now implicit
+  in `type: :review`.
+
+  RE409: every stage row's AI row is read-only — the `flow_chip/1` of the flow
+  that works in the stage (linking to its editor), or "No flow works here". A
+  stage is AI-enabled iff a flow works in it (`Relay.Flows.stage_flows/1`),
+  so the way to change it is a flow's *works in* trigger. `:stage_flows` is
+  refreshed by both `refresh_stages/1` and `assign_flows/1`.
 
   RLY-57: a top-level review stage (`type: :review`, no `parent_id`) carries an
   "ON REJECT, SEND TO" dropdown (`set_reject_to` event) that persists
@@ -502,7 +507,7 @@ defmodule RelayWeb.BoardSettingsLive do
                         <input type="hidden" name="stage_id" value={stage.id} />
                       </:hidden>
                     </.boxed_field>
-                    <%!-- TYPE dropdown + AI-ENABLED toggle (RLY-46). --%>
+                    <%!-- TYPE dropdown (RLY-46) + the AI row (RE409). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span
@@ -534,34 +539,27 @@ defmodule RelayWeb.BoardSettingsLive do
                           </ul>
                         </details>
                       </div>
-                      <div
-                        :if={stage.type in [:work, :planning]}
-                        style="display:flex;align-items:center;gap:9px;"
-                      >
+                      <%!-- AI (RE409) — read-only: the flow that works in the stage, or none. --%>
+                      <div style="display:flex;align-items:center;gap:9px;">
                         <span
                           class="font-mono"
                           style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
                         >
-                          AI-ENABLED
+                          AI
                         </span>
-                        <input
-                          id={"stage-#{stage.id}-ai-toggle"}
-                          type="checkbox"
-                          class="toggle toggle-sm toggle-secondary"
-                          checked={stage.ai_enabled}
-                          phx-click="toggle_ai"
-                          phx-value-stage-id={stage.id}
+                        <.flow_chip
+                          :if={flow = Map.get(@stage_flows, stage.id)}
+                          id={"stage-#{stage.id}-ai-flow"}
+                          flow={flow}
+                          board_slug={@board.slug}
+                          variant={:settings}
                         />
                         <span
-                          :if={stage.ai_enabled}
-                          id={"stage-#{stage.id}-ai-hint"}
-                          style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+                          :if={!Map.has_key?(@stage_flows, stage.id)}
+                          id={"stage-#{stage.id}-ai-none"}
+                          class="text-[12px] text-base-content/50"
                         >
-                          <span style="width:11px;height:11px;border-radius:50%;background:var(--color-secondary);display:flex;align-items:center;justify-content:center;">
-                            <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
-                            </span>
-                          </span>
-                          Relay AI listens here
+                          No flow works here
                         </span>
                       </div>
                       <%!-- COLLAPSED toggle (RLY-111) — board-wide default-collapse; any stage type. --%>
@@ -1142,7 +1140,7 @@ defmodule RelayWeb.BoardSettingsLive do
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         save_board_name save_board_slug save_board_key edit_stage save_stage add_stage delete_stage
-        toggle_wip bump_wip reorder_stage toggle_lane set_type toggle_ai set_reject_to
+        toggle_wip bump_wip reorder_stage toggle_lane set_type set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
         flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
         flow_new flow_create_validate flow_create save_public_settings new_key create_key rename_key
@@ -1352,12 +1350,6 @@ defmodule RelayWeb.BoardSettingsLive do
     else
       _refused -> {:noreply, socket}
     end
-  end
-
-  def handle_event("toggle_ai", %{"stage-id" => stage_id}, socket) do
-    stage = find_stage(socket, stage_id)
-    {:ok, _stage} = Boards.update_stage(stage, %{ai_enabled: not stage.ai_enabled})
-    {:noreply, refresh_stages(socket)}
   end
 
   def handle_event("toggle_collapsed_default", %{"stage-id" => stage_id}, socket) do
@@ -1606,6 +1598,7 @@ defmodule RelayWeb.BoardSettingsLive do
     |> assign(:stages, mains)
     |> assign(:stage_groups, groups)
     |> assign(:lane_map, lane_map(board))
+    |> assign(:stage_flows, Flows.stage_flows(board))
   end
 
   defp main_stages_for_intake(stages), do: Enum.filter(stages, &is_nil(&1.parent_id))
@@ -1644,6 +1637,7 @@ defmodule RelayWeb.BoardSettingsLive do
     socket
     |> assign(:flow_rows, rows)
     |> assign(:flow_stages, Boards.list_stages(board))
+    |> assign(:stage_flows, Flows.stage_flows(board))
   end
 
   # Ids in the DOM come from this board's own flow rows.

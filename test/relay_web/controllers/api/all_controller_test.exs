@@ -18,7 +18,7 @@ defmodule RelayWeb.Api.AllControllerTest do
     board
   end
 
-  defp work_stage(board), do: insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 1)
+  defp work_stage(board), do: insert_ai_stage(board: board, name: "Code", type: :work, position: 1)
 
   describe "show" do
     test "returns the light card shape with pr_url", %{conn: conn, user: user} do
@@ -157,7 +157,7 @@ defmodule RelayWeb.Api.AllControllerTest do
          %{conn: conn, user: user} do
       board = member_board(user, "AAA", unique_slug("alpha"))
       code = work_stage(board)
-      human = insert(:stage, board: board, name: "Polish", type: :work, ai_enabled: false, position: 2)
+      human = insert(:stage, board: board, name: "Polish", type: :work, position: 2)
       review = insert(:stage, board: board, name: "Review", type: :review, position: 3)
 
       insert(:card, stage: code, status: :needs_input)

@@ -8,7 +8,7 @@ defmodule Relay.CardsStrandedMoveTest do
   setup do
     board = insert(:board)
     queue = insert(:stage, board: board, name: "Queue", type: :queue, position: 1)
-    code = insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, position: 2)
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 2)
     done = insert(:stage, board: board, name: "Done", type: :done, position: 3)
     flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
     {:ok, board: board, queue: queue, code: code, done: done, flow: flow}

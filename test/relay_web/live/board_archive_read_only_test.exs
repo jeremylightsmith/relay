@@ -209,7 +209,6 @@ defmodule RelayWeb.BoardArchiveReadOnlyTest do
         {"add_stage", %{"category" => "unstarted"}},
         {"delete_stage", %{"stage-id" => "#{stage.id}"}},
         {"set_type", %{"stage-id" => "#{stage.id}", "type" => "work"}},
-        {"toggle_ai", %{"stage-id" => "#{stage.id}"}},
         {"toggle_wip", %{"stage-id" => "#{stage.id}"}},
         {"bump_wip", %{"stage-id" => "#{stage.id}", "delta" => "1"}},
         {"reorder_stage", %{"stage-id" => "#{stage.id}", "direction" => "down"}},

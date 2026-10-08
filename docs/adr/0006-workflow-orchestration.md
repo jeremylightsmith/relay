@@ -312,6 +312,8 @@ and literal example rows: see the
 | `claude` CLI, `gh` auth, git push rights | required on the runner machine | unchanged, required on every runner machine |
 | `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` env hack | required for /exec-plan | **kept** — still needed by long agent nodes on the runner path |
 
+**Superseded detail (RE409):** `ai_enabled` is no longer a stage column; a stage is AI-enabled iff a flow works in it (`Relay.Flows.ai_stage_ids/1`).
+
 Maintenance story in one line: **developers edit files in their repo (table 1); Relay
 maintains the objects (table 2); machines need table 3 once.**
 

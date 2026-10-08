@@ -8,20 +8,19 @@ defmodule RelayWeb.Api.CardGatesTest do
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
 
     code =
-      insert(:stage, board: board, name: "Code", type: :work, ai_enabled: true, category: :in_progress, position: 1)
+      insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 1)
 
     review =
       insert(:stage,
         board: board,
         name: "Review",
         type: :review,
-        ai_enabled: false,
         category: :in_progress,
         position: 2
       )
 
     deploy =
-      insert(:stage, board: board, name: "Deploy", type: :work, ai_enabled: true, category: :in_progress, position: 3)
+      insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
 
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, code: code, review: review, deploy: deploy}

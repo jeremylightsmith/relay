@@ -18,10 +18,82 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-collapsed",
           name: "Deploy",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 6,
           count: 0,
           collapsed: true
+        }
+      },
+      %Variation{
+        id: :flow_enabled,
+        description:
+          "RE409 — a flow works in the stage: the violet AI chip links to its editor " <>
+            "(hover deepens the tint and brightens the ↗)",
+        attributes: %{
+          id: "story-stage-flow-enabled",
+          name: "Spec",
+          type: :planning,
+          category: :planning,
+          flow: %{key: "spec", enabled: true},
+          board_slug: "acme",
+          stage_id: 21,
+          count: 0
+        }
+      },
+      %Variation{
+        id: :flow_disabled,
+        description: "RE409 — the stage's flow is off: grey, dashed, struck-through chip that still links",
+        attributes: %{
+          id: "story-stage-flow-disabled",
+          name: "Plan",
+          type: :planning,
+          category: :planning,
+          flow: %{key: "plan", enabled: false},
+          board_slug: "acme",
+          stage_id: 22,
+          count: 0
+        }
+      },
+      %Variation{
+        id: :flow_collapsed,
+        description: "RE409 — collapsed strip: the chip shrinks to its dot under the type icon, still a link",
+        attributes: %{
+          id: "story-stage-flow-collapsed",
+          name: "Code",
+          type: :work,
+          category: :in_progress,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
+          stage_id: 23,
+          count: 0,
+          collapsed: true
+        }
+      },
+      %Variation{
+        id: :flow_read_only,
+        description: "RE409 — read-only (archived) board: an enabled flow's chip is a plain label, no link",
+        attributes: %{
+          id: "story-stage-flow-read-only",
+          name: "Spec",
+          type: :planning,
+          category: :planning,
+          flow: %{key: "spec", enabled: true},
+          read_only: true,
+          stage_id: 24,
+          count: 0
+        }
+      },
+      %Variation{
+        id: :no_flow,
+        description: "RE409 — no flow works in the stage (e.g. a pulls-from or lands-on stage): no chip",
+        attributes: %{
+          id: "story-stage-no-flow",
+          name: "Next up",
+          type: :queue,
+          category: :unstarted,
+          stage_id: 25,
+          count: 0
         }
       },
       %Variation{
@@ -45,7 +117,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-collapsed-pager",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 10,
           count: 2,
           category: :in_progress,
@@ -116,7 +189,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-pager-expanded",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 11,
           count: 1,
           category: :in_progress,
@@ -154,7 +228,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-code",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 4,
           count: 2,
           category: :in_progress,
@@ -189,7 +264,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-code-sublanes",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 4,
           count: 1,
           board_key: "RLY",
@@ -237,7 +313,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-collapsed-sublanes",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 5,
           count: 1,
           board_key: "RLY",
@@ -266,7 +343,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-plan",
           name: "Plan",
           type: :planning,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 3,
           composing: true,
           compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
@@ -293,7 +371,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-wip-ok",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 7,
           count: 2,
           wip_limit: 3,
@@ -330,7 +409,8 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           id: "story-stage-wip-over",
           name: "Code",
           type: :work,
-          ai_enabled: true,
+          flow: %{key: "code", enabled: true},
+          board_slug: "acme",
           stage_id: 8,
           count: 4,
           wip_limit: 3,
