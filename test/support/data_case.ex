@@ -143,6 +143,28 @@ defmodule Relay.DataCase do
   end
 
   @doc """
+  RE412: makes every later run-server start on this test's engine fail with
+  `{:error, :max_children}` — a `DynamicSupervisor` with `max_children: 0`, registered as this
+  test's `run_supervisor`. Returns its name.
+
+  Call it AFTER `start_engine!/0` and after any setup that still needs a working server (start,
+  park, fail): from here on `DynamicSupervisor.start_child/2` refuses every RunServer.
+  """
+  def refuse_run_server_starts! do
+    n = System.unique_integer([:positive])
+    name = :"relay_runs_refusing_run_supervisor_#{n}"
+
+    ExUnit.Callbacks.start_supervised!(
+      Supervisor.child_spec({DynamicSupervisor, name: name, strategy: :one_for_one, max_children: 0},
+        id: {:refusing_run_sup, n}
+      )
+    )
+
+    :ok = Instance.register(%{run_supervisor: name})
+    name
+  end
+
+  @doc """
   Stops and restarts this test's engine tree under the **same** registry, run-supervisor,
   listener, runner-reaper and capacity names — what a test that simulates an application
   restart needs (the boot-resume `Task` runs again against the same rows), and what a test that
@@ -167,6 +189,34 @@ defmodule Relay.DataCase do
   # `restart_engine!()` reuses the exact names `start_engine!/1` picked, instead of rolling fresh
   # random ones that orphan any `Process.whereis(pinned_name)` the test relies on.
   @engine_opts_key :relay_data_case_engine_opts
+
+  @doc """
+  Blocks until this test's engine boot task (`Relay.Runs.resume_all/0`) has finished. Call it
+  right after `start_engine!/0` in a test that starts runs itself: otherwise the boot task can
+  list a run the test inserts a moment later and adopt it in `:attach` first, so the test's own
+  `{:dispatch, job_id}` start finds the server already running and nothing is dispatched.
+  """
+  def await_engine_boot! do
+    supervisor = Keyword.fetch!(Process.get(@engine_opts_key), :name)
+
+    boot_task =
+      Enum.find_value(Supervisor.which_children(supervisor), fn
+        {:runs_boot_resume, pid, _, _} when is_pid(pid) -> pid
+        _child -> nil
+      end)
+
+    if boot_task do
+      ref = Process.monitor(boot_task)
+
+      receive do
+        {:DOWN, ^ref, :process, ^boot_task, _reason} -> :ok
+      after
+        5_000 -> raise "the engine boot task did not finish within 5s"
+      end
+    end
+
+    :ok
+  end
 
   defp start_engine_tree!(opts) do
     instance = Instance.current()

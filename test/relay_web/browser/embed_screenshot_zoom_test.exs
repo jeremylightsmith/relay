@@ -15,6 +15,10 @@ defmodule RelayWeb.Browser.EmbedScreenshotZoomTest do
   @moduletag :playwright
   @moduletag browser_context_opts: [viewport: %{width: 390, height: 844}]
 
+  # The suite-wide Playwright ceiling (config/test.exs) — a hand-rolled 5s wait flaked under
+  # full-suite load while the image was still fetching/decoding.
+  @wait_timeout :phoenix_test |> Application.compile_env!(:playwright) |> Keyword.fetch!(:timeout)
+
   setup do
     user = Accounts.ensure_dev_user!()
     board = Boards.get_or_create_default_board(user)
@@ -48,7 +52,7 @@ defmodule RelayWeb.Browser.EmbedScreenshotZoomTest do
   # Card mode renders only fixed overlays, so wait for attachment rather than visibility.
   defp await_attached(conn, selector) do
     unwrap(conn, fn %{frame_id: frame_id} ->
-      {:ok, _} = Frame.wait_for_selector(frame_id, selector: selector, state: "attached", timeout: 5_000)
+      {:ok, _} = Frame.wait_for_selector(frame_id, selector: selector, state: "attached", timeout: @wait_timeout)
     end)
   end
 
@@ -60,7 +64,7 @@ defmodule RelayWeb.Browser.EmbedScreenshotZoomTest do
         Frame.wait_for_function(frame_id,
           expression:
             "(() => { const i = document.querySelector('#mockup-viewer-image'); return i && i.complete && i.naturalWidth > 0 })()",
-          timeout: 5_000
+          timeout: @wait_timeout
         )
     end)
   end

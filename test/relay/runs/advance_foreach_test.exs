@@ -106,6 +106,18 @@ defmodule Relay.Runs.AdvanceForeachTest do
     assert exec.attempt == 1
   end
 
+  @tag :capture_log
+  test "it fails the run and card when the re-entered run's server cannot start (RE412)", ctx do
+    flow = foreach_flow(ctx.board)
+    %{run: run, card: card} = stuck(ctx.board, flow, 2)
+    refuse_run_server_starts!()
+
+    assert {:error, :run_server_unavailable} = Runs.advance_foreach(run)
+
+    assert Runs.get_run!(run.id).status == :failed
+    assert Repo.get!(Schemas.Card, card.id).status == :failed
+  end
+
   test "it routes to the foreach_exhausted target when that was the last task", ctx do
     flow = foreach_flow(ctx.board)
     %{run: run, tasks: [only]} = stuck(ctx.board, flow, 1)

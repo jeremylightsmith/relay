@@ -433,7 +433,9 @@ that stays server-side.
   value); an already-finalized (`:done`) job is **first-writer-wins** — 200 with the run's
   recorded `run_state`, ignoring the resent payload, so a retried outcome POST after a dropped
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
-  or `:revoked` (zombie) job answers 409 `conflict`. The body's optional `resume_at` (RE267,
+  or `:revoked` (zombie) job answers 409 `conflict`. A run whose server can't start answers
+  **503 `run_server_unavailable`**: the outcome is not recorded, the job stays claimed and the run
+  `:running`, and the runner's idempotent retry re-POSTs it (RE412). The body's optional `resume_at` (RE267,
   ISO-8601 UTC) is read only with outcome `blocked` — an unparseable value is dropped to nil, never
   refused — and makes the engine requeue the node until that reset instead of parking it
   ([failures.md](failures.md) A11b). The node outcomes (including the runner-only `blocked`,

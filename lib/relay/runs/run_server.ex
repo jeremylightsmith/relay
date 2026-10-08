@@ -35,6 +35,9 @@ defmodule Relay.Runs.RunServer do
       run whose `queued`/`claimed` job survived the restart (RE410,
       `Relay.Runs.boot_mode/1`): no revoke, no dispatch.
 
+  `init/1` refuses (`:ignore`) a run that is missing or no longer `:running` (RE412), so no
+  start mode ever runs for a run that a concurrent close or park already took over.
+
   Both re-entry modes pass the last failed execution's detail forward as
   `findings`, so a node re-entered after a failure sees why. A `{:retry, node}`
   goes further (RE251): it carries the ORIGINATING findings — what sent the node
@@ -93,8 +96,16 @@ defmodule Relay.Runs.RunServer do
 
   @impl true
   def init(opts) do
+    # First: the re-seeded `$callers` chain is what gives this process its DB connection.
     Instance.adopt_callers(opts)
-    {:ok, %{run_id: Keyword.fetch!(opts, :run_id)}, {:continue, Keyword.fetch!(opts, :mode)}}
+    run_id = Keyword.fetch!(opts, :run_id)
+
+    # RE412: a run that went terminal or parked before its server came up has nothing to
+    # serialize — `:ignore` lets `Runs.ensure_server/2` report `{:error, :run_not_running}`.
+    case Repo.get(Run, run_id) do
+      %Run{status: :running} -> {:ok, %{run_id: run_id}, {:continue, Keyword.fetch!(opts, :mode)}}
+      _gone_or_not_running -> :ignore
+    end
   end
 
   @impl true

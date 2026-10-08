@@ -1233,8 +1233,20 @@ defmodule Relay.Runs do
       {:ok, {card, run, execution, job}} ->
         broadcast_runs(card.board_id, {:run_started, run})
         broadcast_runs(card.board_id, {:node_started, run, execution})
-        {:ok, _pid} = ensure_server(run, {:dispatch, job.id})
-        {:ok, run}
+
+        case ensure_server(run, {:dispatch, job.id}) do
+          {:ok, _pid} ->
+            {:ok, run}
+
+          # The start committed; a concurrent close/park won the race to the server, so the run
+          # is already someone else's to finish — not ours to abandon.
+          {:error, :run_not_running} ->
+            {:ok, run}
+
+          {:error, {:server_start_failed, _} = reason} ->
+            abandon_serverless_run(run, reason)
+            {:error, :run_server_unavailable}
+        end
 
       {:error, %Changeset{errors: errors}} ->
         if Keyword.has_key?(errors, :card_id), do: {:error, :active_run_exists}, else: {:error, :invalid}
@@ -1350,8 +1362,7 @@ defmodule Relay.Runs do
       run = Repo.get!(Run, job.run_id)
 
       if job.state in NodeJob.active_states() and run.status == :running do
-        {:ok, pid} = ensure_server(run, :attach)
-        GenServer.call(pid, {:report_outcome, job.id, attrs}, :infinity)
+        call_report_outcome(run, job.id, attrs, 1)
       else
         {:error, :job_not_active}
       end
@@ -1361,6 +1372,37 @@ defmodule Relay.Runs do
   end
 
   def report_outcome(%NodeJob{}, _attrs), do: {:error, :invalid_outcome}
+
+  # RE412: the attach path never raises and never fails the run. A server that can't start
+  # answers `:run_server_unavailable` (the API maps it to 503 and the runner's idempotent outcome
+  # POST retries); a run closed meanwhile is `:job_not_active` via `RunServer.init/1`'s `:ignore`.
+  # A server that stops under the call (`:noproc`/`:normal`) is re-attached once — then `init`'s
+  # guard and `handle_call`'s recheck decide. Any other exit is a real crash and propagates.
+  defp call_report_outcome(run, job_id, attrs, retries_left) do
+    case ensure_server(run, :attach) do
+      {:ok, pid} ->
+        try do
+          GenServer.call(pid, {:report_outcome, job_id, attrs}, :infinity)
+        catch
+          :exit, reason ->
+            cond do
+              not server_gone_exit?(reason) -> exit(reason)
+              retries_left > 0 -> call_report_outcome(run, job_id, attrs, retries_left - 1)
+              true -> {:error, :run_server_unavailable}
+            end
+        end
+
+      {:error, :run_not_running} ->
+        {:error, :job_not_active}
+
+      {:error, {:server_start_failed, _reason}} ->
+        {:error, :run_server_unavailable}
+    end
+  end
+
+  defp server_gone_exit?({reason, _call}) when reason in [:noproc, :normal], do: true
+  defp server_gone_exit?(reason) when reason in [:noproc, :normal], do: true
+  defp server_gone_exit?(_reason), do: false
 
   @doc "queued → claimed (04's claim endpoint becomes a thin wrapper). Race-proof via a guarded UPDATE."
   def claim_job(%NodeJob{} = job, runner_name) when is_binary(runner_name) do
@@ -3504,8 +3546,20 @@ defmodule Relay.Runs do
          ) do
       {:ok, updated} ->
         broadcast_runs(board_id_of(updated), {:run_resumed, updated})
-        {:ok, _pid} = ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)})
-        {:ok, updated}
+
+        case ensure_server(updated, {:reenter, Keyword.get(opts, :resume_session)}) do
+          {:ok, _pid} ->
+            {:ok, updated}
+
+          # Something closed or re-parked the run between the transition and the server start:
+          # this resume was overtaken, which reads exactly like resuming a run that isn't parked.
+          {:error, :run_not_running} ->
+            {:error, :not_parked}
+
+          {:error, {:server_start_failed, _} = reason} ->
+            abandon_serverless_run(updated, reason)
+            {:error, :run_server_unavailable}
+        end
 
       {:error, :not_in_expected_state} ->
         {:error, :not_parked}
@@ -3906,8 +3960,20 @@ defmodule Relay.Runs do
       {:ok, run} ->
         clear_card_block(run, actor)
         broadcast_runs(board_id_of(run), {:run_resumed, run})
-        {:ok, _pid} = ensure_server(run, mode)
-        {:ok, run}
+
+        case ensure_server(run, mode) do
+          {:ok, _pid} ->
+            {:ok, run}
+
+          # A concurrent transition took the revived run out of :running before its server came
+          # up — the same race the :not_in_expected_state arm below maps, so the same code.
+          {:error, :run_not_running} ->
+            {:error, :active_run_exists}
+
+          {:error, {:server_start_failed, _} = reason} ->
+            abandon_serverless_run(run, reason)
+            {:error, :run_server_unavailable}
+        end
 
       # A concurrent transition flipped this run out of :failed under us — a from-state guard
       # the old changeset path lacked. check_retryable/1 + check_no_active_run/1 mean the only
@@ -3946,6 +4012,7 @@ defmodule Relay.Runs do
   def retry_refusal_code(:no_foreach), do: "no_foreach"
   def retry_refusal_code(:no_exhausted_edge), do: "no_exhausted_edge"
   def retry_refusal_code(:not_bound), do: "not_bound"
+  def retry_refusal_code(:run_server_unavailable), do: "run_server_unavailable"
 
   @doc """
   The human sentence for a `retry_run/2` or `advance_foreach/2` refusal — what a person reads when
@@ -3996,6 +4063,11 @@ defmodule Relay.Runs do
 
   def retry_refusal_message(:not_bound) do
     "This run is not working a specific task, so there is nothing to check off and skip past."
+  end
+
+  def retry_refusal_message(:run_server_unavailable) do
+    "The engine couldn't start this run's server. The run is marked failed — try again, and " <>
+      "check the server logs if it keeps happening."
   end
 
   @doc "The machine token for a `cancel_run/2` refusal — what tests and the API's `error.code` match on."
@@ -4167,7 +4239,17 @@ defmodule Relay.Runs do
     Run
     |> where([r], r.status == :running)
     |> Repo.all()
-    |> Enum.each(&ensure_server(&1, boot_mode(&1)))
+    |> Enum.each(&boot_server/1)
+  end
+
+  # RE412: one run's server failing to start must not take the rest of boot resume down with it.
+  defp boot_server(run) do
+    case ensure_server(run, boot_mode(run)) do
+      {:ok, _pid} -> :ok
+      # Closed or parked since the query read it — nothing left to resume.
+      {:error, :run_not_running} -> :ok
+      {:error, {:server_start_failed, _} = reason} -> abandon_serverless_run(run, reason)
+    end
   end
 
   # RE410: boot resume reads the start mode off the run's durable job state. A run whose
@@ -4424,6 +4506,24 @@ defmodule Relay.Runs do
     run
   end
 
+  @server_start_failed_card_detail "The engine could not start this run's server, so the run was marked failed. " <>
+                                     "Press Retry to try again; if it keeps failing, check the server logs."
+
+  # RE412: a run whose RunServer could not start has nothing to drive it — fail it visibly instead
+  # of leaving a `:running` row no process owns. Re-reads the row so `close_run!/3` guards on the
+  # run's REAL status (callers hold the post-transition struct, and a concurrent close makes this
+  # a no-op rather than a raise).
+  @spec abandon_serverless_run(Run.t(), term()) :: Run.t()
+  defp abandon_serverless_run(%Run{} = run, reason) do
+    revoke_active_jobs(run)
+
+    Logger.error("run server failed to start run_id=#{run.id} card_id=#{run.card_id} reason=#{inspect(reason)}")
+
+    Run
+    |> Repo.get!(run.id)
+    |> fail_run("run server failed to start: " <> inspect(reason), @server_start_failed_card_detail)
+  end
+
   @doc """
   The one definition of "mark this run's card failed" (RE297) — shared by `fail_run/3` and
   `RunServer`'s routed failure branch, which closes its own run.
@@ -4532,6 +4632,8 @@ defmodule Relay.Runs do
   # neither a sandbox connection nor a way back to the caller's engine instance. Pass the chain
   # down explicitly; RunServer.init/1 re-seeds it. In production `callers` is `[self()]` and
   # nothing is registered against it, so this changes nothing.
+  @spec ensure_server(Run.t(), term()) ::
+          {:ok, pid()} | {:error, :run_not_running} | {:error, {:server_start_failed, term()}}
   defp ensure_server(%Run{id: id}, mode) do
     instance = Instance.current()
 
@@ -4541,6 +4643,9 @@ defmodule Relay.Runs do
     case DynamicSupervisor.start_child(instance.run_supervisor, spec) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
+      # RunServer.init/1 refused: the run is no longer :running (RE412).
+      :ignore -> {:error, :run_not_running}
+      {:error, reason} -> {:error, {:server_start_failed, reason}}
     end
   end
 

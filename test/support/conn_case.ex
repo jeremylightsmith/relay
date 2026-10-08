@@ -32,6 +32,7 @@ defmodule RelayWeb.ConnCase do
           start_engine!: 1,
           restart_engine!: 0,
           restart_engine!: 1,
+          refuse_run_server_starts!: 0,
           unique_slug: 1
         ]
 

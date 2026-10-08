@@ -611,6 +611,21 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert body["error"]["code"] == "conflict"
     end
 
+    test "a run whose server cannot start is 503 run_server_unavailable and the job stays claimed",
+         %{conn: conn, board: board, flow: flow} do
+      {run, id} = claim_one(conn, board, flow)
+      refuse_run_server_starts!()
+
+      body =
+        conn
+        |> post(~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => "succeeded", "detail" => "x"}))
+        |> json_response(503)
+
+      assert body["error"]["code"] == "run_server_unavailable"
+      assert Relay.Repo.get!(Schemas.NodeJob, id).state == :claimed
+      assert Runs.get_run!(run.id).status == :running
+    end
+
     test "an unknown job id is 404", %{conn: conn} do
       assert conn
              |> post(~p"/api/node-jobs/999999/outcome", Jason.encode!(%{"outcome" => "succeeded"}))

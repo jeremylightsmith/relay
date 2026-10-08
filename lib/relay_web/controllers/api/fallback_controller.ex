@@ -205,6 +205,16 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "conflict", message: "This job is no longer held by your claim")
   end
 
+  def call(conn, {:error, :run_server_unavailable}) do
+    conn
+    |> put_status(:service_unavailable)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "run_server_unavailable",
+      message: "The run's server could not start, so the outcome was not recorded. Retry the request."
+    )
+  end
+
   def call(conn, {:error, :would_strand_run}) do
     conn
     |> put_status(:conflict)
