@@ -6,7 +6,7 @@ defmodule Relay do
   Contexts are also responsible for managing your data, regardless
   if it comes from the database, an external API or others.
 
-  Each context (e.g. `Relay.Repo`, `Relay.Mailer`, and future domain contexts)
+  Each context (e.g. `Relay.Repo`, `Relay.Cards`, and future domain contexts)
   is its own `Boundary` sub-boundary; add new ones to `exports` below so the web
   layer can reach them. See `docs/adr/` for the architecture rules.
   """
@@ -15,7 +15,6 @@ defmodule Relay do
     deps: [Schemas],
     exports: [
       Repo,
-      Mailer,
       Accounts,
       Accounts.GoogleTokenValidator,
       Accounts.AppleTokenValidator,

@@ -50,15 +50,6 @@ config :phoenix, :json_library, Jason
 # adapter; prod overrides to S3 (Tigris) in config/runtime.exs.
 config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.Local
 
-# Configure the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
-
 # Push (RLY-81). The Log adapter is the default so dev runs — and the whole
 # trigger→recipient→dispatch pipeline is exercisable — without Apple credentials.
 # config/runtime.exs swaps in the real APNS adapter in prod when creds are present.

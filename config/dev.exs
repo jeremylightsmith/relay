@@ -87,12 +87,9 @@ config :relay, RelayWeb.Endpoint,
     ]
   ]
 
-# Enable dev routes for dashboard and mailbox
+# Enable dev routes (dashboard, storybook)
 config :relay, dev_routes: true
 
 # RLY-133: per-board schedulers run in dev; the engine stays Noop until a real
 # adapter onto Relay.Runs's run-execution engine is wired up.
 config :relay, runs_auto_start: true
-
-# Disable swoosh api client as it is only required for production adapters.
-config :swoosh, :api_client, false

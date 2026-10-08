@@ -28,7 +28,7 @@ defmodule Mix.Tasks.Relay.DepsGraphTest do
     test "keeps isolated nodes that appear in no edge" do
       dot = """
       digraph {
-        "Mailer" [shape=box];
+        "Presence" [shape=box];
         "Cards" [shape=box];
         "Repo" [shape=box];
 
@@ -38,7 +38,7 @@ defmodule Mix.Tasks.Relay.DepsGraphTest do
 
       mermaid = DepsGraph.dot_to_mermaid(dot)
 
-      assert mermaid =~ ~r/^\s{4}Mailer$/m
+      assert mermaid =~ ~r/^\s{4}Presence$/m
     end
 
     test "sanitizes node names that are not valid mermaid ids into id+label form" do

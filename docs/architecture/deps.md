@@ -28,7 +28,6 @@ verifies it's current).
 <!-- BEGIN generated: boundary-graph -->
 ```mermaid
 flowchart LR
-    Mailer
     Markdown
     Presence
     Accounts --> Config
@@ -92,7 +91,6 @@ flowchart LR
 | `req` (+ its `finch`) | the only sanctioned HTTP client; a dedicated h2 Finch pool exists for APNs |
 | `ueberauth` + `ueberauth_google` | Google sign-in |
 | `jose` | APNs JWT signing; Apple identity-token verification |
-| `swoosh` | mail |
 | `esbuild`, `tailwind` (+ daisyUI in `assets/`) | asset pipeline; daisyUI is the component kit |
 | `heroicons` | the `<.icon>` component |
 | `lazy_html` | test-side HTML assertions |

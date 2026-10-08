@@ -26,9 +26,6 @@ config :phoenix_test,
     ecto_sandbox_stop_owner_delay: 50
   ]
 
-# In test we don't send emails
-config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
-
 # Push (RLY-81): the Test adapter messages the caller, and `async: false` runs
 # dispatch inline in the test process — so deliveries land in the test's mailbox
 # and DB reads stay on the test's sandbox connection.
@@ -87,9 +84,6 @@ config :relay, dev_routes: true
 # Share the test's DB transaction with the browser session (see the SQL sandbox
 # plug in RelayWeb.Endpoint, compiled only when this flag is set).
 config :relay, sql_sandbox: true
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
 
 # Dummy Google OAuth credentials — tests never contact real Google; the
 # request-phase redirect is asserted but never followed.
