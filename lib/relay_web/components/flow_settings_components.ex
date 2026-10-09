@@ -1,202 +1,421 @@
 defmodule RelayWeb.FlowSettingsComponents do
   @moduledoc """
-  Function components for the board settings **Flows** pane (RLY-142),
-  matching `docs/designs/Relay Flows.dc.html`. Page-specific — no storybook
-  entry; all events live on `RelayWeb.BoardSettingsLive`. Recorded artboard
-  deviations (kebab-carried origin, inlined cutover ritual, and the
-  mockup-only Configured/First-run state switcher) are pinned in the card's spec.
-  The artboard's "+ New flow" button ships as of RLY-158. Editing a flow's
-  definition now navigates to the full-page editor (`RelayWeb.FlowEditorLive`,
-  RLY-143); the row meta line shows the current version.
+  The stage row's flow pieces on Board Settings → Stages (RE431, card mockup "A — stage row owns
+  its flow"). A stage holds at most one flow (RE429), so the row is the flow's home — there is no
+  Flows tab any more.
 
-  The first-run explainer names only the flows Relay ships (`Flows.default_key?/1`), never
-  every row on the board (RLY-160).
+    * `flow_band/1` — the violet FLOW band on a work/planning stage that holds a flow (the
+      `flow_chip/1` link to the editor, `flow_meta/1`, the customized badge, the On/Off toggle
+      and the ⋯ menu), the dashed no-flow band with **+ Add flow** on one that doesn't, and the
+      queue note on a queue stage. Review and done stages render nothing. The reset / delete
+      confirms and the RLY-182 readiness report open inside the band.
+    * `copy_flow_panel/1` — the **Copy to another stage…** picker under a band: free work
+      stages only, with the copy's key previewed.
+    * `add_flow_panel/1` — the **+ Add flow** panel inside the no-flow band: a default-library
+      flow not yet on the board, or a blank one, with its pulls-from / lands-on previewed.
+    * `delete_stage_panel/1` — the inline red confirm a stage's × opens: it names the flow the
+      stage takes with it (RE429 cascades it), says run history stays, and shows a
+      `Relay.Boards.stage_refusal_message/1` refusal in place instead of a flash.
+    * `stage_neighbours/1` — the read-only PULLS FROM → WORKS IN → LANDS ON row, worked out from
+      board order (`Relay.Flows.neighbours/2`); the caller passes display names already resolved.
+
+  Every event lives on `RelayWeb.BoardSettingsLive`. Stories live under
+  `storybook/flow_settings_components/`.
   """
 
   use RelayWeb, :html
 
+  alias Phoenix.HTML.Form
   alias Relay.Flows
   alias Schemas.Flow
+  alias Schemas.Stage
 
   @doc ~S|Humanized flow name: "spec" → "Spec", "spec-copy" → "Spec copy".|
   def flow_name(%Flow{key: key}), do: key |> String.replace("-", " ") |> String.capitalize()
 
-  attr :rows, :list, required: true, doc: "%{flow: %Flow{}, customized?: bool, resettable?: bool} maps"
+  @doc ~S|The ONE copy of a flow's version/size label: `"v6 · 4 nodes"` ("1 node" for one).|
+  @spec flow_meta(Flow.t()) :: String.t()
+  def flow_meta(%Flow{version: version} = flow), do: "v#{version} · #{nodes_label(flow)}"
 
-  attr :panel, :any,
+  defp nodes_label(%Flow{nodes: [_single]}), do: "1 node"
+  defp nodes_label(%Flow{nodes: nodes}), do: "#{length(nodes)} nodes"
+
+  @doc """
+  Whether a `Relay.Runs.preflight_flow/1` snapshot has any warning row — the readiness report
+  opens after a flow is turned on only when this is true (it reports, never blocks).
+  """
+  @spec preflight_warns?(Flow.t(), map()) :: boolean()
+  def preflight_warns?(%Flow{} = flow, preflight), do: Enum.any?(preflight_rows(flow, preflight), &(not &1.ok?))
+
+  @doc """
+  The FLOW block at the foot of a main-stage row: the violet band when the stage holds a flow,
+  the dashed no-flow band (with **+ Add flow**) on a work stage without one, the queue note on a
+  queue stage, and nothing on a review or done stage.
+  """
+  attr :stage, :map, required: true, doc: "the main stage — needs `id`, `name` and `type`"
+
+  attr :row, :map,
+    default: nil,
+    doc: "nil | %{flow: %Flow{}, customized?: boolean(), resettable?: boolean()}"
+
+  attr :neighbours, :map,
     required: true,
-    doc: "nil | {flow_id, :confirm} | {flow_id, :reset} | {flow_id, :delete} | {:new, form}"
+    doc: "%{pulls_from: String.t() | nil, lands_on: String.t() | nil} — display names, resolved"
 
-  attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
-  attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
+  attr :slug, :string, required: true, doc: "the board slug, for the editor links"
+  attr :panel, :atom, default: nil, doc: "this stage's open panel kind (`@panel`), or nil"
+  attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for an open :preflight panel"
+  attr :read_only?, :boolean, default: false, doc: "archived board — hides the mutating controls"
 
-  attr :stages, :list,
-    required: true,
-    doc: "the stages a new flow may take (`Relay.Flows.assignable_stages/2`), for the create form's Stage select"
+  attr :copy_targets, :list,
+    default: [],
+    doc: "the free work stages a copy could go on (`Flows.assignable_stages(board, nil)`); empty disables Copy"
 
-  attr :board_stages, :list,
-    required: true,
-    doc: "the board's stages in board order, for the create form's derived pickup/drop-off preview"
+  slot :inner_block, doc: "rendered inside the no-flow band, below its first line"
 
-  attr :read_only?, :boolean, required: true, doc: "archived board — hides the create affordance"
-
-  def flows_pane(assigns) do
+  def flow_band(%{stage: %{type: :queue}} = assigns) do
     ~H"""
-    <section id="flows-pane">
-      <%!-- Mirrors the board view's read-only banner (board_live.ex:109-124): the
-            "+ New flow" button is silently absent for an archived board, so state why. --%>
-      <div
-        :if={@read_only?}
-        id="flows-read-only-banner"
-        style="display:flex;align-items:center;gap:10px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13.5px;"
-      >
-        <.icon name="hero-archive-box" class="size-4" />
-        <span>This board is archived (read-only). Flows can't be created or changed.</span>
-      </div>
-
-      <%!-- Artboard lines 63-76: header is a flex row with the create button in a
-            right-hand column. The artboard's Configured/First-run state switcher above
-            the button is a mockup-only affordance and is deliberately not shipped. --%>
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;">
-        <div>
-          <.page_heading class="mb-1.5">
-            Flows
-          </.page_heading>
-          <%!-- Artboard blurb minus the versioning sentence (deferred to RLY-152). --%>
-          <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:600px;">
-            A flow is the automation attached to a stage transition — it pulls work from one
-            stage, runs a graph of agent and shell steps, and lands the card on the next stage
-            when it succeeds.
-          </p>
-        </div>
-        <div
-          :if={!@read_only?}
-          id="flows-header-actions"
-          style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex:0 0 auto;margin-top:4px;"
-        >
-          <button
-            type="button"
-            id="new-flow-button"
-            phx-click="flow_new"
-            style="display:flex;align-items:center;gap:6px;background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;"
-          >
-            <span style="font-size:15px;line-height:1;">+</span>New flow
-          </button>
-        </div>
-      </div>
-
-      <.new_flow_panel
-        :if={new_form(@panel)}
-        form={new_form(@panel)}
-        stages={@stages}
-        board_stages={@board_stages}
-      />
-
-      <div
-        :if={@rows == []}
-        id="flows-empty"
-        style="margin-top:22px;border:1px dashed color-mix(in oklab, var(--color-base-content) 20%, var(--color-base-100));border-radius:12px;background:var(--color-base-100);padding:26px 24px;font-size:13.5px;line-height:1.6;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:640px;"
-      >
-        No flows on this board yet. Default flows are seeded when a board is created;
-        existing boards get them with the Spec-flow cutover (RLY-136).
-      </div>
-
-      <%= if @rows != [] do %>
-        <.first_run_banner :if={Enum.all?(@rows, &(not &1.flow.enabled))} rows={@rows} />
-        <.legend />
-        <.flows_table rows={@rows} panel={@panel} preflight={@preflight} slug={@slug} />
-        <p
-          id="flows-footer-note"
-          style="font-size:12px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);margin:16px 2px 0 2px;max-width:640px;"
-        >
-          Disabling a flow is a cutover — cards stop being picked up at that transition and
-          wait for a human. Enabling one starts handing new cards to the AI immediately.
-        </p>
-      <% end %>
-    </section>
+    <div
+      id={"stage-#{@stage.id}-queue-note"}
+      class="flex flex-wrap items-center gap-2.5 rounded-[10px] bg-base-200/60 px-3.5 py-2.5"
+    >
+      <.flow_label />
+      <span class="text-[12.5px] text-base-content/60">
+        Queue — cards rest here. The next stage's flow pulls from it.
+      </span>
+    </div>
     """
   end
 
-  # @panel's create variant carries the form itself; the row-keyed :confirm/:reset
-  # variants are tuples whose first element is an integer id, so they never collide.
-  defp new_form({:new, form}), do: form
-  defp new_form(_panel), do: nil
+  def flow_band(%{stage: %{type: type}} = assigns) do
+    cond do
+      type not in Stage.work_types() -> ~H""
+      is_nil(assigns.row) -> no_flow_band(assigns)
+      true -> band(assigns)
+    end
+  end
 
-  attr :form, :any, required: true
-  attr :stages, :list, required: true
-  attr :board_stages, :list, required: true
+  defp no_flow_band(assigns) do
+    ~H"""
+    <div
+      id={"stage-#{@stage.id}-no-flow"}
+      class="rounded-[10px] border border-dashed border-base-300 px-3.5 py-3"
+    >
+      <div class="flex flex-wrap items-center gap-2.5">
+        <.flow_label />
+        <span class="text-[13px] text-base-content/60">
+          No flow — people work this stage by hand.
+        </span>
+        <span class="flex-1"></span>
+        <button
+          :if={!@read_only?}
+          type="button"
+          id={"stage-#{@stage.id}-add-flow"}
+          phx-click="flow_add"
+          phx-value-stage-id={@stage.id}
+          class="btn btn-sm btn-outline gap-1.5"
+          style="color:color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-content));border-color:color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100));"
+        >
+          + Add flow
+        </button>
+      </div>
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
 
-  defp new_flow_panel(assigns) do
-    assigns = assign(assigns, :derived, derived_neighbours(assigns.form[:stage_id].value, assigns.board_stages))
+  defp band(assigns) do
+    %{flow: flow} = assigns.row
+
+    assigns =
+      assigns
+      |> assign(:flow, flow)
+      |> assign(:missing?, is_nil(assigns.neighbours.pulls_from) or is_nil(assigns.neighbours.lands_on))
 
     ~H"""
     <div
-      id="new-flow-panel"
-      style="margin:20px 0 4px 0;background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));border-radius:12px;padding:14px 16px;max-width:640px;"
+      id={"stage-#{@stage.id}-flow-band"}
+      class="rounded-[10px] px-3.5 py-3 flex flex-col gap-2.5"
+      style="background:color-mix(in oklab, var(--color-secondary) 4%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 18%, var(--color-base-100));"
     >
-      <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
-        New flow
-      </div>
-      <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
-        (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
-        L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
-      <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;">
-        Pick a key and the stage this flow works in — it picks cards up from the stage before
-        it and lands them on the stage after it. It is created switched off with an empty graph
-        — add its steps in the editor, then turn it on here.
-      </p>
-      <.form
-        for={@form}
-        id="new-flow-form"
-        class="action-group"
-        phx-submit="flow_create"
-        phx-change="flow_create_validate"
-      >
-        <.input
-          field={@form[:key]}
-          type="text"
-          id="new-flow-key"
-          label="Key"
-          placeholder="deploy-gate"
+      <div class="flex flex-wrap items-center gap-2.5">
+        <.flow_label
+          id={"stage-#{@stage.id}-flow-label"}
+          style="color:color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-content));"
         />
-        <.input
-          field={@form[:stage_id]}
-          type="select"
-          id="new-flow-stage"
-          label="STAGE"
-          prompt="—"
-          options={stage_options(@stages)}
+        <.flow_chip
+          id={"stage-#{@stage.id}-ai-flow"}
+          flow={@flow}
+          board_slug={@slug}
+          variant={:settings}
         />
-        <p
-          :if={@derived}
-          id="new-flow-derived"
-          class="font-mono"
-          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin:2px 0 6px 0;"
+        <span id={"flow-#{@flow.id}-meta"} class="font-mono text-[11px] text-base-content/55">
+          {flow_meta(@flow)}
+        </span>
+        <span
+          :if={@row.customized?}
+          id={"flow-#{@flow.id}-customized"}
+          class="rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-[0.05em]"
+          style="color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));"
         >
-          pulls from {stage_label(@derived.pulls_from)} → lands on {stage_label(@derived.lands_on)}
-        </p>
-        <.input
-          field={@form[:isolation]}
-          type="select"
-          id="new-flow-isolation"
-          label="Isolation"
-          options={[{"Shared clean", "shared_clean"}, {"Exclusive", "exclusive"}]}
-        />
-        <div style="display:flex;gap:8px;margin-top:12px;">
-          <.button
-            type="submit"
-            id="new-flow-create"
-            class=""
-            style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
-            pending="Creating…"
+          customized
+        </span>
+        <span class="flex-1"></span>
+        <span id={"stage-#{@stage.id}-flow-onoff"} class="text-[12px] text-base-content/60">
+          {if @flow.enabled, do: "On", else: "Off"}
+        </span>
+        <button
+          type="button"
+          id={"flow-#{@flow.id}-toggle"}
+          phx-click="flow_toggle"
+          phx-value-flow-id={@flow.id}
+          aria-pressed={to_string(@flow.enabled)}
+          aria-label={"Toggle the #{flow_name(@flow)} flow"}
+          disabled={@missing? or @read_only?}
+          title={
+            if(@missing?,
+              do: "This stage is at the end of the board — a flow needs a stage on both sides"
+            )
+          }
+          style={toggle_style(@flow.enabled, @missing?)}
+        >
+          <span style={knob_style(@flow.enabled)}></span>
+        </button>
+        <details class="dropdown dropdown-end" id={"flow-#{@flow.id}-menu"}>
+          <summary
+            aria-label={"Actions for the #{flow_name(@flow)} flow"}
+            class="flex size-7 cursor-pointer list-none items-center justify-center rounded-md border border-base-300 bg-base-100 text-[15px] text-base-content/70 [&::-webkit-details-marker]:hidden"
           >
-            Create flow
-          </.button>
+            ⋯
+          </summary>
+          <ul class="menu dropdown-content z-10 w-60 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg">
+            <li>
+              <.link navigate={~p"/board/#{@slug}/flows/#{@flow.key}"} id={"flow-#{@flow.id}-open"}>
+                ✎ Open in flow editor
+              </.link>
+            </li>
+            <li :if={!@read_only?} class={@copy_targets == [] && "menu-disabled"}>
+              <button
+                type="button"
+                id={"flow-#{@flow.id}-copy"}
+                phx-click="flow_copy"
+                phx-value-flow-id={@flow.id}
+                disabled={@copy_targets == []}
+              >
+                ⧉ Copy to another stage…
+                <span :if={@copy_targets == []} class="text-[11px] opacity-70">
+                  — every work stage already has a flow
+                </span>
+              </button>
+            </li>
+            <li :if={@row.resettable? and !@read_only?}>
+              <button
+                type="button"
+                id={"flow-#{@flow.id}-reset"}
+                phx-click="flow_reset"
+                phx-value-flow-id={@flow.id}
+              >
+                ↺ Reset to default
+              </button>
+            </li>
+            <li :if={!@read_only?} class={@flow.enabled && "menu-disabled"}>
+              <button
+                type="button"
+                id={"flow-#{@flow.id}-delete"}
+                phx-click="flow_delete"
+                phx-value-flow-id={@flow.id}
+                disabled={@flow.enabled}
+              >
+                🗑 Delete flow
+                <span :if={@flow.enabled} class="text-[11px] opacity-70">— turn it off first</span>
+              </button>
+            </li>
+          </ul>
+        </details>
+      </div>
+      <.stage_neighbours
+        id={"stage-#{@stage.id}-neighbours"}
+        pulls_from={@neighbours.pulls_from}
+        works_in={@stage.name}
+        lands_on={@neighbours.lands_on}
+      />
+      <.reset_confirm :if={@panel == :reset} flow={@flow} />
+      <.delete_confirm :if={@panel == :delete_flow} flow={@flow} />
+      <div
+        :if={@panel == :preflight and @preflight}
+        class="flex flex-col gap-2 rounded-[10px] bg-base-100 px-4 py-3"
+        style="border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
+      >
+        <.preflight_list flow={@flow} preflight={@preflight} />
+        <div>
           <button
             type="button"
-            id="new-flow-cancel"
+            id={"flow-#{@flow.id}-preflight-dismiss"}
             phx-click="flow_cancel_panel"
-            style="background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            class="btn btn-sm btn-ghost"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The **Copy to another stage…** picker (RE431), opened from a flow's ⋯ menu and rendered under
+  its band. `targets` are the free main work stages (`Relay.Flows.assignable_stages/2`), and
+  `copy_key` previews the key the copy will get (`Relay.Flows.copy_key/2`). Submits
+  `flow_confirm_copy` with `flow_id` and `copy[stage_id]`; changes send `flow_copy_change`.
+  """
+  attr :flow, Flow, required: true
+  attr :form, Form, required: true, doc: "`as: :copy`, field `stage_id`"
+  attr :targets, :list, required: true, doc: "[%{id: integer(), name: String.t()}]"
+  attr :copy_key, :string, default: nil, doc: "the selected target's copy key, or nil"
+
+  def copy_flow_panel(assigns) do
+    ~H"""
+    <div
+      id={"flow-#{@flow.id}-copy-panel"}
+      class="flex flex-col gap-2 rounded-[10px] border border-base-300 bg-base-100 px-4 py-3 shadow-sm"
+    >
+      <div class="text-[13px] font-semibold">
+        Copy the <span class="font-mono">{@flow.key}</span> flow to another stage
+      </div>
+      <.form
+        for={@form}
+        id={"flow-#{@flow.id}-copy-form"}
+        phx-change="flow_copy_change"
+        phx-submit="flow_confirm_copy"
+        class="flex flex-wrap items-center gap-2 [&_.fieldset]:mb-0"
+      >
+        <input type="hidden" name="flow_id" value={@flow.id} />
+        <.input
+          field={@form[:stage_id]}
+          id={"flow-#{@flow.id}-copy-target"}
+          type="select"
+          aria-label="Stage to copy the flow to"
+          options={Enum.map(@targets, &{&1.name, &1.id})}
+          class="select select-sm w-48"
+        />
+        <button type="submit" id={"flow-#{@flow.id}-copy-submit"} class="btn btn-sm btn-secondary">
+          Copy flow
+        </button>
+        <button
+          type="button"
+          id={"flow-#{@flow.id}-copy-cancel"}
+          phx-click="flow_cancel_panel"
+          class="btn btn-sm btn-ghost"
+        >
+          Cancel
+        </button>
+      </.form>
+      <div class="text-[11.5px] text-base-content/60">
+        Only stages without a flow are listed. The copy starts <b>off</b>
+        and gets its own name (<span id={"flow-#{@flow.id}-copy-key"} class="font-mono">{@copy_key}</span>)
+        — edit it from its stage.
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The **+ Add flow** panel (RE431), rendered inside a work stage's dashed no-flow band. Offers
+  the default-library flows not yet on the board (`addable_defaults`, from
+  `Relay.Flows.addable_defaults/1`) or a **Blank flow**, and previews where the new flow would
+  pull from and land on. Submits `flow_confirm_add` with `stage_id` and `add[source]` /
+  `add[default_key]`; changes send `flow_add_change`.
+  """
+  attr :stage, :map, required: true, doc: "needs `id` and `name`"
+  attr :form, Form, required: true, doc: "`as: :add`, fields `source` and `default_key`"
+  attr :addable_defaults, :list, required: true, doc: "library keys not yet on the board"
+
+  attr :neighbours, :map,
+    required: true,
+    doc: "%{pulls_from: String.t() | nil, lands_on: String.t() | nil} — display names, resolved"
+
+  def add_flow_panel(assigns) do
+    assigns = assign(assigns, :library?, assigns.addable_defaults != [])
+
+    ~H"""
+    <div
+      id={"stage-#{@stage.id}-add-flow-panel"}
+      class="mt-2 rounded-lg border border-base-300 bg-base-100 p-3 shadow-sm"
+    >
+      <div class="mb-2 text-[12.5px] font-semibold">Add a flow to {@stage.name}</div>
+      <.form
+        for={@form}
+        id={"stage-#{@stage.id}-add-flow-form"}
+        phx-change="flow_add_change"
+        phx-submit="flow_confirm_add"
+      >
+        <input type="hidden" name="stage_id" value={@stage.id} />
+        <div class="flex flex-col gap-1.5 text-[13px]">
+          <label class="flex items-center gap-2">
+            <input
+              type="radio"
+              id={"stage-#{@stage.id}-add-source-default"}
+              name={@form[:source].name}
+              value="default"
+              class="radio radio-xs radio-secondary"
+              checked={@library? and @form[:source].value == "default"}
+              disabled={!@library?}
+            /> Start from the default library
+            <select
+              :if={@library?}
+              id={"stage-#{@stage.id}-add-default-key"}
+              name={@form[:default_key].name}
+              aria-label="Default library flow"
+              class="select select-xs ml-1 w-32"
+            >
+              {Phoenix.HTML.Form.options_for_select(@addable_defaults, @form[:default_key].value)}
+            </select>
+            <span :if={!@library?} class="text-[11.5px] text-base-content/60">
+              — every library flow is already on the board
+            </span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input
+              type="radio"
+              id={"stage-#{@stage.id}-add-source-blank"}
+              name={@form[:source].name}
+              value="blank"
+              class="radio radio-xs radio-secondary"
+              checked={!@library? or @form[:source].value == "blank"}
+            /> Blank flow
+          </label>
+        </div>
+        <div
+          id={"stage-#{@stage.id}-add-flow-preview"}
+          class="mt-2 text-[11.5px] text-base-content/60"
+        >
+          Would pull from
+          <.neighbour_chip
+            id={"stage-#{@stage.id}-add-flow-pulls-from"}
+            name={@neighbours.pulls_from}
+            kind={:pulls}
+          /> and land on
+          <.neighbour_chip
+            id={"stage-#{@stage.id}-add-flow-lands-on"}
+            name={@neighbours.lands_on}
+            kind={:lands}
+          />.
+          It starts <b>off</b>
+          — turn it on when it's ready.
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button
+            type="submit"
+            id={"stage-#{@stage.id}-add-flow-submit"}
+            class="btn btn-sm btn-secondary"
+          >
+            Add flow
+          </button>
+          <button
+            type="button"
+            id={"stage-#{@stage.id}-add-flow-cancel"}
+            phx-click="flow_cancel_panel"
+            class="btn btn-sm btn-ghost"
           >
             Cancel
           </button>
@@ -206,262 +425,88 @@ defmodule RelayWeb.FlowSettingsComponents do
     """
   end
 
-  defp stage_options(stages), do: Enum.map(stages, &{&1.name, &1.id})
+  attr :id, :string, default: nil
 
-  # The form's stage value arrives as a string (params) or "" (untouched); nil = no preview.
-  defp derived_neighbours(value, board_stages) do
-    case Integer.parse(to_string(value || "")) do
-      {stage_id, ""} -> Flows.neighbours(stage_id, board_stages)
-      _ -> nil
-    end
-  end
+  attr :style, :string, default: "color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
 
-  defp stage_label(nil), do: "—"
-  defp stage_label(%{name: name}), do: name
-
-  attr :rows, :list, required: true
-
-  defp first_run_banner(assigns) do
-    assigns =
-      assign(assigns, :shipped_rows, Enum.filter(assigns.rows, &Flows.default_key?(&1.flow.key)))
-
+  defp flow_label(assigns) do
     ~H"""
-    <div
-      :if={@shipped_rows != []}
-      id="flows-first-run"
-      style="display:flex;align-items:flex-start;gap:12px;background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));border-radius:12px;padding:15px 17px;margin-top:20px;"
-    >
-      <span style="width:24px;height:24px;border-radius:7px;background:var(--color-primary);color:var(--color-primary-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
-        i
-      </span>
-      <div style="flex:1;">
-        <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 25%, var(--color-base-content));margin-bottom:3px;">
-          Flows are off until you turn them on
-        </div>
-        <%!-- `oklch 0.44 0.04 250` is a slate-grey, not Human-blue: C 0.04 is a Rule-N near-neutral
-          (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
-          L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
-        <p style="font-size:13px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:620px;">
-          This board ships with the {flow_names(@shipped_rows)} defaults, but nothing runs
-          automatically yet — every card waits for a human. Turn a flow on to start handing
-          its stage to the AI. Cut over one flow at a time; you can always turn it back off.
-        </p>
-      </div>
-    </div>
+    <span id={@id} class="font-mono text-[11px]" style={@style}>FLOW</span>
     """
   end
 
-  defp legend(assigns) do
+  @error_ink "color:color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));"
+
+  @doc """
+  The inline delete-stage confirm (card mockup A). A stage holds at most one flow and deleting the
+  stage deletes it, so when `flow` is set the panel names it — key, `flow_meta/1` — and points at
+  **Copy to another stage…** for keeping it. `error` is a refusal from `Boards.delete_stage/1`,
+  rendered inside the panel. Confirm sends `"confirm_delete_stage"`; Cancel `"flow_cancel_panel"`.
+  """
+  attr :stage, :map, required: true, doc: "needs `id` and `name`"
+  attr :flow, Flow, default: nil, doc: "the flow on the stage, deleted with it"
+  attr :error, :string, default: nil, doc: "a refusal sentence to show in the panel"
+
+  def delete_stage_panel(assigns) do
+    assigns = assign(assigns, :ink, @error_ink)
+
     ~H"""
     <div
-      id="flows-legend"
-      class="font-mono"
-      style="display:flex;gap:18px;flex-wrap:wrap;margin:22px 0 12px 0;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+      id={"stage-#{@stage.id}-delete-panel"}
+      class="flex items-start gap-3 rounded-[10px] px-4 py-3.5"
+      style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));"
     >
-      <span style="display:flex;align-items:center;gap:6px;">
-        <span style="width:8px;height:8px;border-radius:2px;background:var(--color-accent);"></span>
-        shared_clean — many runs, fresh checkout each
-      </span>
-      <span style="display:flex;align-items:center;gap:6px;">
-        <span style="width:8px;height:8px;border-radius:2px;background:var(--color-warning);"></span>
-        exclusive — one run per machine, holds the tree
-      </span>
-    </div>
-    """
-  end
-
-  attr :rows, :list, required: true
-  attr :panel, :any, required: true
-  attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
-  attr :slug, :string, required: true
-
-  defp flows_table(assigns) do
-    ~H"""
-    <div
-      id="flows-table"
-      style="border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 4%, transparent);"
-    >
-      <div style="overflow-x:auto;">
-        <div style="min-width:660px;">
-          <div
-            class="font-mono"
-            style="display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--color-field-hover);border-bottom:1px solid var(--color-base-300);font-size:10.5px;font-weight:600;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
-          >
-            <span style="flex:0 0 150px;">FLOW</span>
-            <span style="flex:1;min-width:0;white-space:nowrap;">
-              TRIGGER · pulls / works / lands
-            </span>
-            <span style="flex:0 0 108px;">ISOLATION</span>
-            <span style="flex:0 0 60px;text-align:center;">ON</span>
-            <span style="flex:0 0 34px;"></span>
-          </div>
-
-          <div
-            :for={row <- @rows}
-            style="border-bottom:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
-          >
-            <div id={"flow-row-#{row.flow.id}"} style={row_style(row.flow.enabled)}>
-              <div style="flex:0 0 150px;display:flex;flex-direction:column;gap:3px;min-width:0;">
-                <span style="font-size:14px;font-weight:600;color:var(--color-base-content);letter-spacing:-0.01em;">
-                  {flow_name(row.flow)}
-                </span>
-                <span
-                  class="font-mono"
-                  style="display:flex;align-items:center;gap:8px;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
-                >
-                  <span id={"flow-#{row.flow.id}-nodes-count"}>
-                    v{row.flow.version} · {nodes_label(row.flow)}
-                  </span>
-                  <span
-                    :if={row.customized?}
-                    id={"flow-#{row.flow.id}-customized"}
-                    style="font-size:9px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));padding:2px 6px;border-radius:4px;"
-                  >
-                    customized
-                  </span>
-                </span>
-              </div>
-
-              <div
-                id={"flow-#{row.flow.id}-trigger"}
-                style="flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;row-gap:4px;"
-              >
-                <.stage_chip stage={row.flow.pulls_from_stage} style={chip_style(:pulls)} />
-                <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
-                  →
-                </span>
-                <.stage_chip stage={row.flow.stage} style={chip_style(:works)} />
-                <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
-                  →
-                </span>
-                <.stage_chip stage={row.flow.lands_on_stage} style={chip_style(:lands)} />
-              </div>
-
-              <div style="flex:0 0 108px;">
-                <span
-                  id={"flow-#{row.flow.id}-isolation"}
-                  class="font-mono"
-                  style={iso_style(row.flow.isolation, row.flow.enabled)}
-                >
-                  <span style={iso_dot(row.flow.isolation)}></span>{row.flow.isolation}
-                </span>
-              </div>
-
-              <div style="flex:0 0 60px;display:flex;justify-content:center;">
-                <button
-                  type="button"
-                  id={"flow-#{row.flow.id}-toggle"}
-                  phx-click="flow_toggle"
-                  phx-value-flow-id={row.flow.id}
-                  aria-pressed={to_string(row.flow.enabled)}
-                  aria-label={"Toggle the #{flow_name(row.flow)} flow"}
-                  disabled={trigger_missing?(row.flow)}
-                  title={
-                    if(trigger_missing?(row.flow),
-                      do: "A trigger stage is missing — set it before enabling this flow",
-                      else: nil
-                    )
-                  }
-                  style={toggle_style(row.flow.enabled, trigger_missing?(row.flow))}
-                >
-                  <span style={knob_style(row.flow.enabled)}></span>
-                </button>
-              </div>
-
-              <div style="flex:0 0 34px;display:flex;justify-content:flex-end;">
-                <details class="dropdown dropdown-end" id={"flow-#{row.flow.id}-menu"}>
-                  <summary
-                    aria-label={"Actions for the #{flow_name(row.flow)} flow"}
-                    style="list-style:none;width:28px;height:28px;border-radius:7px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:pointer;"
-                  >
-                    ⋯
-                  </summary>
-                  <ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-100 p-1 shadow action-group">
-                    <li>
-                      <.link
-                        navigate={~p"/board/#{@slug}/flows/#{row.flow.key}"}
-                        id={"flow-#{row.flow.id}-edit"}
-                      >
-                        ✎ Edit flow
-                      </.link>
-                    </li>
-                    <li :if={row.resettable?}>
-                      <button
-                        type="button"
-                        id={"flow-#{row.flow.id}-reset"}
-                        phx-click="flow_reset"
-                        phx-value-flow-id={row.flow.id}
-                      >
-                        ↺ Reset to default
-                      </button>
-                    </li>
-                    <li :if={not row.flow.enabled}>
-                      <button
-                        type="button"
-                        id={"flow-#{row.flow.id}-delete"}
-                        phx-click="flow_delete"
-                        phx-value-flow-id={row.flow.id}
-                        style="color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
-                      >
-                        🗑 Delete flow
-                      </button>
-                    </li>
-                  </ul>
-                </details>
-              </div>
-            </div>
-
-            <.toggle_confirm
-              :if={@panel == {row.flow.id, :confirm}}
-              flow={row.flow}
-              preflight={@preflight}
-            />
-            <.reset_confirm :if={@panel == {row.flow.id, :reset}} flow={row.flow} />
-            <.delete_confirm :if={@panel == {row.flow.id, :delete}} flow={row.flow} />
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  attr :flow, Flow, required: true
-  attr :preflight, :any, default: nil
-
-  defp toggle_confirm(assigns) do
-    ~H"""
-    <div
-      id={"flow-#{@flow.id}-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
-    >
-      <span style="width:22px;height:22px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
+      <span class="flex size-[22px] flex-none items-center justify-center rounded-full bg-error text-[13px] font-bold text-error-content">
         !
       </span>
-      <div style="flex:1;">
-        <div style="font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));margin-bottom:3px;">
-          {confirm_title(@flow)}
+      <div class="min-w-0 flex-1">
+        <div
+          id={"stage-#{@stage.id}-delete-title"}
+          class="mb-1 text-[13.5px] font-semibold"
+          style={@ink}
+        >
+          Delete the {@stage.name} stage?
         </div>
-        <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 40%, var(--color-base-content));margin:0 0 10px 0;max-width:560px;">
-          {confirm_body(@flow)}
-        </p>
-        <.preflight_list :if={@preflight} flow={@flow} preflight={@preflight} />
-        <div class="action-group" style="display:flex;gap:8px;">
-          <.button
-            type="button"
-            id={"flow-#{@flow.id}-confirm-cta"}
-            phx-click="flow_confirm_toggle"
-            phx-value-flow-id={@flow.id}
-            class=""
-            style="background:var(--color-warning);color:var(--color-warning-content);border:none;border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
-            pending={confirm_pending(@flow)}
+        <%= if @flow do %>
+          <p
+            id={"stage-#{@stage.id}-delete-flow"}
+            class="mb-1.5 max-w-[560px] text-[12.5px] leading-normal"
+            style={@ink}
           >
-            {confirm_cta(@flow)}
-          </.button>
+            This also deletes flow
+            <code class="rounded bg-base-100 px-1 font-mono font-semibold">{@flow.key}</code>
+            ({flow_meta(@flow)}) and its version history. A stage has at most one flow, so the
+            flow can't outlive it.
+          </p>
+          <p id={"stage-#{@stage.id}-delete-history"} class="mb-3 text-[12px] text-base-content/60">
+            Run history stays — past runs keep the name <span class="font-mono">{@flow.key}</span>.
+            Want to keep the flow? Copy it to another stage first (⋯ → Copy to another stage).
+          </p>
+        <% end %>
+        <p
+          :if={@error}
+          id={"stage-#{@stage.id}-delete-refusal"}
+          role="alert"
+          class="mb-3 text-[12.5px] font-semibold leading-normal"
+          style={@ink}
+        >
+          {@error}
+        </p>
+        <div class={["flex flex-wrap gap-2", is_nil(@flow) && is_nil(@error) && "mt-2"]}>
           <button
             type="button"
-            id={"flow-#{@flow.id}-confirm-cancel"}
+            id={"stage-#{@stage.id}-delete-confirm"}
+            phx-click="confirm_delete_stage"
+            phx-value-stage-id={@stage.id}
+            class="btn btn-sm btn-error"
+          >
+            {if @flow, do: "Delete stage and flow", else: "Delete stage"}
+          </button>
+          <button
+            type="button"
+            id={"stage-#{@stage.id}-delete-cancel"}
             phx-click="flow_cancel_panel"
-            style="background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));border-radius:7px;padding:8px 15px;font-size:13px;font-weight:600;"
+            class="btn btn-sm btn-ghost"
           >
             Cancel
           </button>
@@ -471,17 +516,96 @@ defmodule RelayWeb.FlowSettingsComponents do
     """
   end
 
+  @doc """
+  The read-only PULLS FROM → WORKS IN → LANDS ON row for a stage's flow, labelled "worked out
+  from board order". Names arrive resolved (sub-lanes as `"Plan · Done"`); a `nil` end — the
+  stage is first or last on the board — renders `none` in the warning chip style.
+  """
+  attr :id, :string, required: true
+  attr :pulls_from, :string, default: nil
+  attr :works_in, :string, required: true
+  attr :lands_on, :string, default: nil
+
+  def stage_neighbours(assigns) do
+    ~H"""
+    <div id={@id} class="flex flex-wrap items-center gap-1.5 gap-y-1">
+      <span
+        class="mr-1 font-mono text-[11px]"
+        style="color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+      >
+        PULLS FROM
+      </span>
+      <.neighbour_chip id={"#{@id}-pulls-from"} name={@pulls_from} kind={:pulls} />
+      <span class="text-[12px] text-base-content/40">→</span>
+      <.neighbour_chip id={"#{@id}-works-in"} name={@works_in} kind={:works} />
+      <span class="text-[12px] text-base-content/40">→</span>
+      <span
+        class="mr-1 font-mono text-[11px]"
+        style="color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+      >
+        LANDS ON
+      </span>
+      <.neighbour_chip id={"#{@id}-lands-on"} name={@lands_on} kind={:lands} />
+      <span
+        id={"#{@id}-hint"}
+        class="ml-1 inline-flex items-center gap-1 text-[11px] text-base-content/50"
+        title="Worked out from the board order — reorder stages to change it"
+      >
+        <span class="font-mono">ⓘ</span> worked out from board order
+      </span>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :name, :string, default: nil
+  attr :kind, :atom, required: true
+
+  defp neighbour_chip(%{name: nil} = assigns) do
+    ~H"""
+    <span id={@id} style={chip_style(:missing)}>none</span>
+    """
+  end
+
+  defp neighbour_chip(assigns) do
+    ~H"""
+    <span id={@id} style={chip_style(@kind)}>{@name}</span>
+    """
+  end
+
+  @chip_base "font-family:var(--font-mono);font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap;"
+
+  defp chip_style(:pulls),
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border:1px solid var(--color-base-300);"
+
+  defp chip_style(:works),
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));"
+
+  defp chip_style(:lands),
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));"
+
+  defp chip_style(:missing),
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
+
   attr :flow, Flow, required: true
   attr :preflight, :map, required: true
 
-  # Reports, never blocks: the confirm CTA above stays live in every state a row can show.
+  # Reports, never blocks: the flow is already on by the time this list opens.
   defp preflight_list(assigns) do
     assigns = assign(assigns, :rows, preflight_rows(assigns.flow, assigns.preflight))
 
     ~H"""
     <ul
       id={"flow-#{@flow.id}-preflight"}
-      style="list-style:none;margin:0 0 12px 0;padding:0;display:flex;flex-direction:column;gap:5px;max-width:560px;"
+      style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;max-width:560px;"
     >
       <li
         :for={row <- @rows}
@@ -613,106 +737,6 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp count([_one], noun), do: "1 #{noun}"
   defp count(list, noun), do: "#{length(list)} #{noun}s"
 
-  attr :stage, :any, required: true, doc: "a preloaded %Schemas.Stage{} or nil (missing trigger)"
-  attr :style, :string, required: true
-
-  defp stage_chip(%{stage: nil} = assigns) do
-    ~H"""
-    <span class="font-mono" style={chip_style(:missing)}>missing stage</span>
-    """
-  end
-
-  defp stage_chip(assigns) do
-    ~H"""
-    <span class="font-mono" style={@style}>{@stage.name}</span>
-    """
-  end
-
-  defp confirm_title(%Flow{enabled: false} = flow), do: "Turn on the #{flow_name(flow)} flow?"
-  defp confirm_title(%Flow{} = flow), do: "Turn off the #{flow_name(flow)} flow?"
-
-  # Enable body = the artboard's behavioral line (minus the version phrase, RLY-152). The
-  # runner-readiness ritual that used to be inlined here is now <.preflight_list> (RLY-182),
-  # which answers the same question with facts instead of a reminder.
-  defp confirm_body(%Flow{enabled: false} = flow) do
-    "New cards reaching #{pulls_name(flow)} will be handed to the AI automatically. " <>
-      "Cards already sitting there won't move until you say so."
-  end
-
-  defp confirm_body(%Flow{} = flow) do
-    "Cards reaching #{pulls_name(flow)} will stop being picked up and wait for a human " <>
-      "instead. Runs already in flight finish normally. Turn the flow back on any time " <>
-      "to resume automatic dispatch."
-  end
-
-  defp confirm_cta(%Flow{enabled: false} = flow), do: "Turn on #{flow_name(flow)}"
-  defp confirm_cta(%Flow{} = flow), do: "Turn off #{flow_name(flow)}"
-
-  # RE394 — the CTA's pressed-face label, keyed on the same `enabled` as `confirm_cta/1`.
-  defp confirm_pending(%Flow{enabled: false}), do: "Turning on…"
-  defp confirm_pending(%Flow{}), do: "Turning off…"
-
-  # The confirm is unreachable when there is nothing to pull from (the toggle
-  # is disabled), but stay total for arbitrary data.
-  defp pulls_name(%Flow{pulls_from_stage: %{name: name}}), do: name
-  defp pulls_name(%Flow{}), do: "its pulls-from stage"
-
-  # A flow always has its stage (RE429); what it can lack is a derived neighbour — on the
-  # board's first or last stage — the same gap `Relay.Runs.Preflight` reports as `:missing`.
-  defp trigger_missing?(%Flow{} = flow), do: is_nil(flow.pulls_from_stage) or is_nil(flow.lands_on_stage)
-
-  defp flow_names(rows) do
-    case Enum.map(rows, &flow_name(&1.flow)) do
-      [one] -> one
-      names -> Enum.join(Enum.drop(names, -1), ", ") <> " and " <> List.last(names)
-    end
-  end
-
-  defp nodes_label(%Flow{nodes: [_single]}), do: "1 node"
-  defp nodes_label(%Flow{nodes: nodes}), do: "#{length(nodes)} nodes"
-
-  defp row_style(enabled?) do
-    "display:flex;align-items:center;gap:14px;padding:14px 18px;" <>
-      if(enabled?, do: "", else: "background:var(--color-field-bg);")
-  end
-
-  @chip_base "font-size:11.5px;font-weight:500;border-radius:6px;padding:4px 9px;white-space:nowrap;"
-
-  defp chip_style(:pulls),
-    do:
-      @chip_base <>
-        "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border:1px solid var(--color-base-300);"
-
-  defp chip_style(:works),
-    do:
-      @chip_base <>
-        "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));"
-
-  defp chip_style(:lands),
-    do:
-      @chip_base <>
-        "color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));"
-
-  defp chip_style(:missing),
-    do:
-      @chip_base <>
-        "color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
-
-  defp iso_style(isolation, enabled?) do
-    "display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:6px;" <>
-      case isolation do
-        :shared_clean ->
-          "background:color-mix(in oklab, var(--color-accent) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content));"
-
-        :exclusive ->
-          "background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
-      end <>
-      if(enabled?, do: "", else: "opacity:0.55;")
-  end
-
-  defp iso_dot(:shared_clean), do: "width:6px;height:6px;border-radius:2px;background:var(--color-accent);"
-  defp iso_dot(:exclusive), do: "width:6px;height:6px;border-radius:2px;background:var(--color-warning);"
-
   defp toggle_style(enabled?, missing?) do
     "width:38px;height:22px;border-radius:11px;position:relative;transition:background 0.18s;border:none;padding:0;" <>
       if(enabled?,
@@ -741,7 +765,7 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id={"flow-#{@flow.id}-reset-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
+      style="display:flex;align-items:flex-start;gap:12px;background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
     >
       <span style="width:22px;height:22px;border-radius:50%;background:var(--color-warning);color:var(--color-warning-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         !
@@ -788,7 +812,7 @@ defmodule RelayWeb.FlowSettingsComponents do
     ~H"""
     <div
       id={"flow-#{@flow.id}-delete-confirm"}
-      style="display:flex;align-items:flex-start;gap:12px;margin:0 18px 16px 18px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
+      style="display:flex;align-items:flex-start;gap:12px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));border-radius:10px;padding:14px 16px;"
     >
       <span style="width:22px;height:22px;border-radius:50%;background:var(--color-error);color:var(--color-error-content);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto;">
         !

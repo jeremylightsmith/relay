@@ -629,6 +629,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
       assert has_element?(board_view, "#category-unstarted h3", "New stage")
 
       settings_view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      settings_view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
       refute render(board_view) =~ "Deploy"
     end
   end

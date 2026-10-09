@@ -192,7 +192,7 @@ defmodule Relay.Flows do
   @doc """
   The stages a flow may be put on (RE429): the board's main stages of a work type
   (`Schemas.Stage.work_types/0`) that hold no flow, plus `flow`'s own stage, in board order.
-  The single source of the Stage-select options in the new-flow form and the flow editor —
+  The single source of the Stage-select options in the stage row's Copy picker and the flow editor —
   the same rule `create_flow/2` / `update_flow/2` validate.
   """
   @spec assignable_stages(Board.t() | integer(), Flow.t() | nil) :: [Stage.t()]
@@ -376,7 +376,7 @@ defmodule Relay.Flows do
   @spec copy_flow(Flow.t(), Stage.t()) :: {:ok, Flow.t()} | {:error, Changeset.t()}
   def copy_flow(%Flow{} = flow, %Stage{} = stage) do
     attrs = %{
-      key: unique_key(flow.board_id, "#{flow.key}-#{stage_slug(stage.name)}"),
+      key: copy_key(flow, stage),
       isolation: flow.isolation,
       stage_id: stage.id,
       nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
@@ -384,6 +384,70 @@ defmodule Relay.Flows do
     }
 
     Repo.transaction(fn -> insert_flow!(%Board{id: flow.board_id}, attrs) end)
+  end
+
+  @doc """
+  The key `copy_flow/2` gives a copy of `flow` on `stage` — `"<key>-<stage-slug>"`, suffixed
+  until unique. Backs the stage row's Copy-to-another-stage key preview (RE431), so the preview
+  and the copy can never disagree.
+  """
+  @spec copy_key(Flow.t(), Stage.t()) :: String.t()
+  def copy_key(%Flow{} = flow, %Stage{} = stage) do
+    unique_key(flow.board_id, "#{flow.key}-#{stage_slug(stage.name)}")
+  end
+
+  @doc """
+  The default-library keys, in library order, that have no flow with that key on `board` —
+  what the stage row's **+ Add flow** panel offers to re-add (RE431).
+  """
+  @spec addable_defaults(Board.t() | integer()) :: [String.t()]
+  def addable_defaults(%Board{id: board_id}), do: addable_defaults(board_id)
+
+  def addable_defaults(board_id) when is_integer(board_id) do
+    taken = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
+
+    for %{key: key} <- DefaultLibrary.all(), not MapSet.member?(taken, key), do: key
+  end
+
+  @doc """
+  Puts a new, **disabled** flow at v1 (with its v1 snapshot) on `stage` — the stage row's
+  **+ Add flow** (RE431). `{:default, key}` takes that library flow's definition under
+  `unique_key(board, key)`; `:blank` makes a bare `start → done` graph keyed by the stage-name
+  slug (`"flow"` when the name has none). Validated like `create_flow/2`: an occupied, non-work
+  or substage `stage` returns `{:error, changeset}` with the error on `:stage_id`. A key not in
+  the library returns `{:error, :not_a_default}`.
+  """
+  @spec add_flow(Stage.t(), {:default, String.t()} | :blank) ::
+          {:ok, Flow.t()} | {:error, :not_a_default} | {:error, Changeset.t()}
+  def add_flow(%Stage{} = stage, {:default, key}) when is_binary(key) do
+    case default_for(key) do
+      nil ->
+        {:error, :not_a_default}
+
+      default ->
+        attrs =
+          default
+          |> Map.delete(:trigger)
+          |> Map.merge(%{stage_id: stage.id, key: unique_key(stage.board_id, key)})
+
+        insert_on_stage(stage, attrs)
+    end
+  end
+
+  def add_flow(%Stage{} = stage, :blank) do
+    base = with "" <- stage_slug(stage.name), do: "flow"
+
+    insert_on_stage(stage, %{
+      key: unique_key(stage.board_id, base),
+      isolation: :shared_clean,
+      stage_id: stage.id,
+      nodes: [],
+      edges: [%{from: "start", to: "done"}]
+    })
+  end
+
+  defp insert_on_stage(%Stage{board_id: board_id}, attrs) do
+    Repo.transaction(fn -> insert_flow!(%Board{id: board_id}, attrs) end)
   end
 
   defp stage_slug(name) do
@@ -581,7 +645,7 @@ defmodule Relay.Flows do
 
   @doc """
   The first key of the form `base`, `base-2`, `base-3`, … not already taken on `board`.
-  Backs both `copy_flow/2`'s key and the create form's prefilled default key.
+  Backs both `copy_flow/2`'s key (`copy_key/2`) and `add_flow/2`'s.
   """
   def unique_key(%Board{id: board_id}, base) when is_binary(base), do: unique_key(board_id, base)
 
@@ -601,8 +665,8 @@ defmodule Relay.Flows do
   Called at deploy from `Relay.Release.migrate/0` and by `mix relay.flows.sync_defaults`.
 
   A flow is upgraded only when it is **library-managed**, detected as `version == 1`: seeding
-  creates flows at v1 and the only path that bumps a flow past 1 is a human editing it in
-  Settings › Flows (`save_definition/2`). So `version > 1` means hand-edited — its edits are
+  creates flows at v1 and the only path that bumps a flow past 1 is a human editing it from
+  Settings › Stages (the stage's FLOW band → the flow editor, `save_definition/2`). So `version > 1` means hand-edited — its edits are
   preserved (skipped). A v1 flow already identical to the library is left untouched (unchanged).
 
   Crucially the upgrade KEEPS the flow at version 1 (it does not route through `save_definition/2`,

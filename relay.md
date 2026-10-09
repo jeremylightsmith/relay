@@ -6,7 +6,7 @@ Python 3). `./relay start` runs as a runner and claims jobs from the server; set
 `$RELAY_URL/docs/architecture-runner`.
 
 **Dispatch is server-side.** Which cards are ready, which flow runs them, and what each step does
-are configured per board in **Settings › Flows**, never in this repo.
+are configured per board in **Settings › Stages** (the stage's FLOW band), never in this repo.
 
 **Full reference:** `$RELAY_URL/docs/cli` (every command and flag, runner config, flows as data),
 `$RELAY_URL/docs/api`, `$RELAY_URL/docs/statuses-and-outcomes`.
@@ -70,7 +70,7 @@ or `@path`.
 ## Working inside a flow
 
 If your skill runs as a flow node, learn what your step should write (spec, plan, criteria) from
-the installed skills, **Settings › Flows** and `./relay why`. Don't hard-code it. Write results
+the installed skills, **Settings › Stages** (the stage's FLOW band) and `./relay why`. Don't hard-code it. Write results
 with the verbs above so they travel on the card.
 
 If your node's work is already committed on the branch, don't fake a commit or escalate:

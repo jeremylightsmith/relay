@@ -70,7 +70,7 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
     assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
     assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
-    refute has_element?(view, "#top-bar-crumb-flows")
+    refute has_element?(view, "#top-bar-crumb-stages")
     assert has_element?(view, "#runners-title", BoardSettingsLive.section_label(:runners))
     assert has_element?(view, ~s(#runners-back[href="/board/#{board.slug}"]))
   end

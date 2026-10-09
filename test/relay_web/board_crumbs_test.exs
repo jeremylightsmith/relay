@@ -25,23 +25,23 @@ defmodule RelayWeb.BoardCrumbsTest do
            ] = BoardCrumbs.settings_section(@board)
   end
 
-  test "flows/1 adds the Flows crumb, labelled by the settings section it opens" do
-    flows_label = BoardSettingsLive.section_label(:flows)
-
+  test "flows/2 ends on the Stages crumb, deep-linked to the flow's stage row" do
     assert [
              %{id: "top-bar-crumb-boards"},
              %{id: "top-bar-crumb-board"},
              %{id: "top-bar-crumb-settings"},
              %{
-               id: "top-bar-crumb-flows",
-               label: ^flows_label,
-               to: "/board/payments/settings?section=flows"
+               id: "top-bar-crumb-stages",
+               label: "Stages",
+               to: "/board/payments/settings?section=stages#stage-7-row"
              }
-           ] = BoardCrumbs.flows(@board)
+           ] = BoardCrumbs.flows(@board, %{stage_id: 7})
+
+    assert "Stages" == BoardSettingsLive.section_label(:stages)
   end
 
   test "only the root crumb carries an icon" do
-    [_root | rest] = BoardCrumbs.flows(@board)
+    [_root | rest] = BoardCrumbs.flows(@board, %{stage_id: 7})
     refute Enum.any?(rest, &Map.has_key?(&1, :icon))
   end
 

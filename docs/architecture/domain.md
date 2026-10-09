@@ -126,13 +126,22 @@ sharing behavior.
   `stage_occupied`**, sentence from `stage_occupied_message/1`) → `create_flow/2` or
   `save_definition/2` → reconcile `enabled` through `enable_flow/1`/`disable_flow/1`, all in one
   transaction so a push never half-applies.
-  The Flows settings tab (RLY-142) is backed by `customized?/1`
+  Flows are managed from **Board Settings › Stages** (RE431 — the RLY-142 Flows tab is gone;
+  `?section=flows` lands on Stages): each main-stage row owns its flow through a FLOW band
+  (`RelayWeb.FlowSettingsComponents.flow_band/1` — chip, `v<n> · <m> nodes`, a direct On/Off
+  toggle, a ⋯ menu) and a read-only PULLS FROM → WORKS IN → LANDS ON row worked out by
+  `neighbours/2`. The band is backed by `customized?/1`
   (normalized nodes/edges/isolation comparison against the library — stage wiring never
   counts), `default_key?/1`, `copy_flow/2` (a disabled `<key>-<stage>` copy on another empty
-  stage), `unique_key/2` (the `base`/`base-2`/… generator behind copy keys and the create form's
-  prefilled key), create-from-scratch (RLY-158 — the tab's "+ New flow" panel collects a key,
-  one Stage (from `assignable_stages/2`) and isolation, then calls `create_flow/2` with an empty
-  `start → done` skeleton and hands off to the editor; the flow is created disabled), and
+  stage — the band's **Copy to another stage…**, which replaces the old Duplicate; its picker
+  lists only `assignable_stages(board, nil)` and previews the key with `copy_key/2`, which
+  `copy_flow/2` itself calls so the preview and the copy never disagree), `unique_key/2`
+  (the `base`/`base-2`/… generator behind copy keys), and — replacing the tab's "+ New flow"
+  create-from-scratch panel (RLY-158), which is gone — the no-flow band's **+ Add flow**, backed
+  by `addable_defaults/1` (the library keys, in library order, not yet on the board) and
+  `add_flow/2` (`{:default, key}` seeds that library definition, `:blank` a bare `start → done`
+  graph keyed by the stage slug or `flow`; either way a disabled v1 flow with its snapshot,
+  validated by the same one-stage rule as `create_flow/2`), and
   `reset_to_default/1` (restores the shipped definition via `save_definition/2`, so a reset
   bumps the version and snapshots like any other save; stage and `enabled` untouched), and
   `delete_flow/1` (RLY-221 — removes a flow from this board, disable-first: an enabled flow

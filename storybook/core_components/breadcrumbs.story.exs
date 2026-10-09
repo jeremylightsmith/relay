@@ -28,10 +28,10 @@ defmodule Storybook.Components.CoreComponents.Breadcrumbs do
     board = %{id: "top-bar-crumb-board", label: "Payments", to: "/board/payments"}
     settings = %{id: "top-bar-crumb-settings", label: "Settings", to: "/board/payments/settings"}
 
-    flows = %{
-      id: "top-bar-crumb-flows",
-      label: "Flows",
-      to: "/board/payments/settings?section=flows"
+    stages = %{
+      id: "top-bar-crumb-stages",
+      label: "Stages",
+      to: "/board/payments/settings?section=stages"
     }
 
     [
@@ -51,11 +51,11 @@ defmodule Storybook.Components.CoreComponents.Breadcrumbs do
       %Variation{
         id: :flow_deep,
         description:
-          "Flow editor / metrics — Boards / <board> / Settings / Flows / <flow>; below md the " <>
+          "Flow editor / metrics — Boards / <board> / Settings / Stages / <flow>; below md the " <>
             "middle crumbs collapse to …",
         attributes: %{
           id: "crumbs-flow",
-          crumbs: scoped("flow", [boards, board, settings, flows])
+          crumbs: scoped("flow", [boards, board, settings, stages])
         }
       },
       %Variation{

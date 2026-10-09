@@ -1,8 +1,8 @@
 defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   @moduledoc """
-  The enable confirm's readiness list (RLY-182). Asserts on the per-check element ids, not on
-  prose, per AGENTS.md. The CTA must stay clickable in EVERY state — this feature reports, it
-  never blocks.
+  The readiness report shown after turning a flow on from its stage row's band (RLY-182, RE431).
+  Asserts on the per-check element ids, not on prose, per AGENTS.md. The toggle flips directly —
+  this feature reports, it never blocks — and the list opens only when some check warns.
   """
 
   # async: false — start_engine!/1's Listener subscribes to the global `Relay.Events` firehose
@@ -28,9 +28,9 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
     %{board: board}
   end
 
-  defp open_confirm(conn, board, key) do
+  defp toggle(conn, board, key) do
     flow = Flows.get_flow!(board, key)
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=flows")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
     view |> element("#flow-#{flow.id}-toggle") |> render_click()
     {view, flow}
   end
@@ -50,21 +50,18 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
     runner
   end
 
-  test "with no runner connected the runner check fails and the CTA still works",
+  test "with no runner connected the flow turns on and the runner check warns",
        %{conn: conn, board: board} do
-    {view, flow} = open_confirm(conn, board, "plan")
+    {view, flow} = toggle(conn, board, "plan")
 
+    assert Flows.get_flow!(board, "plan").enabled
     assert has_element?(view, "#flow-#{flow.id}-preflight")
     assert has_element?(view, "#flow-#{flow.id}-preflight-runner.preflight-warn")
-    assert has_element?(view, "#flow-#{flow.id}-confirm-cta")
 
     # The Plan flow requires the write-plan skill — with no runner connected, that can't be
     # checked, so the skills row must read as unresolved rather than a false green.
     assert has_element?(view, "#flow-#{flow.id}-preflight-skills.preflight-warn")
     refute has_element?(view, "#flow-#{flow.id}-preflight-capacity")
-
-    view |> element("#flow-#{flow.id}-confirm-cta") |> render_click()
-    assert Flows.get_flow!(board, "plan").enabled
   end
 
   test "a runner silent long enough to be reaped reads as no runner connected, not a candidate",
@@ -76,7 +73,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
       last_heartbeat: gone_at
     )
 
-    {view, flow} = open_confirm(conn, board, "plan")
+    {view, flow} = toggle(conn, board, "plan")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-runner.preflight-warn")
     assert has_element?(view, "#flow-#{flow.id}-preflight-skills.preflight-warn")
@@ -86,7 +83,7 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
   test "an exclusive flow with no exclusive capacity fails the capacity check",
        %{conn: conn, board: board} do
     connect_runner(board, capacity: %{shared_clean: 3, exclusive: 0}, capabilities: %{"agents" => [], "skills" => []})
-    {view, flow} = open_confirm(conn, board, "code")
+    {view, flow} = toggle(conn, board, "code")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-capacity.preflight-warn")
     assert render(view) =~ "exclusive"
@@ -98,43 +95,44 @@ defmodule RelayWeb.BoardSettingsFlowPreflightTest do
       capabilities: %{"agents" => ["plan-implementer"], "skills" => []}
     )
 
-    {view, flow} = open_confirm(conn, board, "code")
+    {view, flow} = toggle(conn, board, "code")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-agents.preflight-warn")
     assert render(view) =~ "smoke-tester"
   end
 
-  test "a fully-satisfied flow passes every check with nothing missing",
+  test "a fully-satisfied flow turns on with no readiness list at all",
        %{conn: conn, board: board} do
     connect_runner(board, capabilities: %{"agents" => [], "skills" => ["write-plan"]})
-    {view, flow} = open_confirm(conn, board, "plan")
+    {view, flow} = toggle(conn, board, "plan")
 
-    for check <- ~w(stages runner capacity agents skills) do
-      assert has_element?(view, "#flow-#{flow.id}-preflight-#{check}.preflight-ok")
-    end
-
-    refute has_element?(view, "#flow-#{flow.id}-preflight-unreported")
+    assert Flows.get_flow!(board, "plan").enabled
+    refute has_element?(view, "#flow-#{flow.id}-preflight")
   end
 
   test "a runner that never reported gets a caveat, not a missing-agents alarm",
        %{conn: conn, board: board} do
     connect_runner(board, capabilities: nil)
-    {view, flow} = open_confirm(conn, board, "code")
+    {view, flow} = toggle(conn, board, "code")
 
     assert has_element?(view, "#flow-#{flow.id}-preflight-unreported")
     assert has_element?(view, "#flow-#{flow.id}-preflight-agents.preflight-ok")
   end
 
-  test "the disable confirm shows no preflight at all", %{conn: conn, board: board} do
+  test "turning a flow off shows no preflight at all", %{conn: conn, board: board} do
     {:ok, _flow} = board |> Flows.get_flow!("plan") |> Flows.enable_flow()
-    {view, flow} = open_confirm(conn, board, "plan")
+    {view, flow} = toggle(conn, board, "plan")
 
+    refute Flows.get_flow!(board, "plan").enabled
     refute has_element?(view, "#flow-#{flow.id}-preflight")
-    assert has_element?(view, "#flow-#{flow.id}-confirm-cta")
   end
 
-  test "the stale engine note is gone", %{conn: conn, board: board} do
-    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=flows")
-    refute has_element?(view, "#flows-engine-note")
+  test "Got it dismisses the readiness list", %{conn: conn, board: board} do
+    {view, flow} = toggle(conn, board, "plan")
+    assert has_element?(view, "#flow-#{flow.id}-preflight")
+
+    view |> element("#flow-#{flow.id}-preflight-dismiss") |> render_click()
+    refute has_element?(view, "#flow-#{flow.id}-preflight")
+    assert Flows.get_flow!(board, "plan").enabled
   end
 end

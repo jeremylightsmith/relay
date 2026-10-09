@@ -16,15 +16,25 @@ defmodule RelayWeb.BoardSettingsLive do
   valid status). The old approval-gate toggle is gone: gating is now implicit
   in `type: :review`.
 
-  RE409: every stage row's AI row is read-only — the `flow_chip/1` of the flow
-  on the stage (linking to its editor), or "No flow works here". A stage is
-  AI-enabled iff a flow is on it (`Relay.Flows.stage_flows/1`), so the way to
-  change it is a flow's Stage. `:stage_flows` is refreshed by both
-  `refresh_stages/1` and `assign_flows/1`.
+  RE431: the stage row owns its flow — there is no Flows tab (`?section=flows`
+  lands on Stages). Each main stage ends in `RelayWeb.FlowSettingsComponents.flow_band/1`:
+  the violet FLOW band (chip → editor, `v<n> · <m> nodes`, a direct On/Off
+  toggle, the ⋯ menu with Open / Copy to another stage… / Reset / Delete) and
+  the PULLS FROM → WORKS IN → LANDS ON row worked out from board order
+  (`Relay.Flows.neighbours/2`), or the no-flow band, or the queue note.
+  `refresh_stages/1` is the one reload point (`@stage_rows`, `@all_stages`,
+  `@neighbours`), run after every mutation and on every `{:stages_changed, _}`.
+  At most one inline panel is open, `@panel :: nil | {stage_id, kind}`; turning a
+  flow on opens the RLY-182 readiness report as `{stage_id, :preflight}` when a
+  check warns (it never blocks).
 
-  RE429: a flow belongs to one stage, so deleting a stage deletes its flow — the
-  delete confirm names it (``"… This also deletes flow `ship` (v3)."``) — and a
+  RE429: a flow belongs to one stage, so deleting a stage deletes its flow, and a
   stage holding a flow can't be retyped to a non-work type (flashed refusal).
+  RE431: the stage's × opens `{stage_id, :delete_stage}` — the inline red
+  `FlowSettingsComponents.delete_stage_panel/1`, which names the flow it also
+  deletes (`` This also deletes flow `ship` (v3 · 0 nodes) … ``); confirming
+  (`confirm_delete_stage`) deletes both, and a `Boards.delete_stage/1` refusal
+  shows inside the panel (`@panel_error`), not as a flash.
 
   RLY-57: a top-level review stage (`type: :review`, no `parent_id`) carries an
   "ON REJECT, SEND TO" dropdown (`set_reject_to` event) that persists
@@ -114,13 +124,6 @@ defmodule RelayWeb.BoardSettingsLive do
             {section_label(:public)}
           </.link>
           <.link
-            patch={~p"/board/#{@board.slug}/settings?section=flows"}
-            id="settings-tab-flows"
-            style={tab_style(@section == :flows)}
-          >
-            {section_label(:flows)}
-          </.link>
-          <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
             id="settings-tab-members"
             style={tab_style(@section == :members)}
@@ -177,13 +180,6 @@ defmodule RelayWeb.BoardSettingsLive do
             {section_label(:public)}
           </.link>
           <.link
-            patch={~p"/board/#{@board.slug}/settings?section=flows"}
-            id="settings-nav-flows"
-            style={nav_style(@section == :flows)}
-          >
-            {section_label(:flows)}
-          </.link>
-          <.link
             patch={~p"/board/#{@board.slug}/settings?section=members"}
             id="settings-nav-members"
             style={nav_style(@section == :members)}
@@ -197,6 +193,13 @@ defmodule RelayWeb.BoardSettingsLive do
           >
             {section_label(:keys)}
           </.link>
+          <div
+            id="settings-flows-moved-note"
+            class="mt-1 rounded-lg border border-dashed border-base-300 px-2.5 py-1.5 text-[11px] leading-snug text-base-content/50"
+          >
+            Flows moved into <b class="text-base-content/70">Stages</b>
+            — each stage row owns its flow.
+          </div>
 
           <div
             class="font-mono"
@@ -402,8 +405,9 @@ defmodule RelayWeb.BoardSettingsLive do
                   Complete
                 </b>
                 — so everyone knows what a stage <i>means</i>. Use the arrows to move a stage
-                up or down — cross into another category and it takes on that meaning. Set
-                whether each stage is AI-enabled, its WIP limit, and whether it has Review and Done lanes.
+                up or down — cross into another category and it takes on that meaning. Each stage
+                can have <b style="color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">one AI flow</b>: it pulls from the column before the stage and lands on the
+                column after it — reorder stages and the flow follows.
               </p>
 
               <%!-- All four groups always render so an emptied category stays reachable. --%>
@@ -483,7 +487,6 @@ defmodule RelayWeb.BoardSettingsLive do
                           id={"stage-#{stage.id}-delete"}
                           phx-click="delete_stage"
                           phx-value-stage-id={stage.id}
-                          data-confirm={delete_stage_confirm(@stage_flows, stage)}
                           title="Delete stage"
                           style="width:26px;height:26px;border-radius:6px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));font-size:14px;padding:0;margin-left:4px;"
                         >
@@ -491,6 +494,12 @@ defmodule RelayWeb.BoardSettingsLive do
                         </button>
                       </div>
                     </div>
+                    <FlowSettingsComponents.delete_stage_panel
+                      :if={panel_kind(@panel, stage.id) == :delete_stage}
+                      stage={stage}
+                      flow={@stage_rows[stage.id] && @stage_rows[stage.id].flow}
+                      error={@panel_error}
+                    />
                     <.boxed_field
                       id={"stage-#{stage.id}-description"}
                       value={stage.description}
@@ -511,7 +520,7 @@ defmodule RelayWeb.BoardSettingsLive do
                         <input type="hidden" name="stage_id" value={stage.id} />
                       </:hidden>
                     </.boxed_field>
-                    <%!-- TYPE dropdown (RLY-46) + the AI row (RE409). --%>
+                    <%!-- TYPE dropdown (RLY-46). --%>
                     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:center;gap:9px;">
                         <span
@@ -542,29 +551,6 @@ defmodule RelayWeb.BoardSettingsLive do
                             </li>
                           </ul>
                         </details>
-                      </div>
-                      <%!-- AI (RE409) — read-only: the flow that works in the stage, or none. --%>
-                      <div style="display:flex;align-items:center;gap:9px;">
-                        <span
-                          class="font-mono"
-                          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
-                        >
-                          AI
-                        </span>
-                        <.flow_chip
-                          :if={flow = Map.get(@stage_flows, stage.id)}
-                          id={"stage-#{stage.id}-ai-flow"}
-                          flow={flow}
-                          board_slug={@board.slug}
-                          variant={:settings}
-                        />
-                        <span
-                          :if={!Map.has_key?(@stage_flows, stage.id)}
-                          id={"stage-#{stage.id}-ai-none"}
-                          class="text-[12px] text-base-content/50"
-                        >
-                          No flow works here
-                        </span>
                       </div>
                       <%!-- COLLAPSED toggle (RLY-111) — board-wide default-collapse; any stage type. --%>
                       <div style="display:flex;align-items:center;gap:9px;">
@@ -737,6 +723,34 @@ defmodule RelayWeb.BoardSettingsLive do
                     >
                       A review sub-lane always rejects back into its own stage — nothing to configure.
                     </span>
+                    <%!-- RE431 — the stage row owns its flow: the FLOW band (or no-flow band / queue note). --%>
+                    <FlowSettingsComponents.flow_band
+                      stage={stage}
+                      row={Map.get(@stage_rows, stage.id)}
+                      neighbours={Map.fetch!(@neighbours, stage.id)}
+                      slug={@board.slug}
+                      panel={panel_kind(@panel, stage.id)}
+                      preflight={@flow_preflight}
+                      read_only?={@read_only?}
+                      copy_targets={@copy_targets}
+                    >
+                      <FlowSettingsComponents.add_flow_panel
+                        :if={panel_kind(@panel, stage.id) == :add}
+                        stage={stage}
+                        form={@add_form}
+                        addable_defaults={@addable_defaults}
+                        neighbours={Map.fetch!(@neighbours, stage.id)}
+                      />
+                    </FlowSettingsComponents.flow_band>
+                    <FlowSettingsComponents.copy_flow_panel
+                      :if={
+                        panel_kind(@panel, stage.id) == :copy and Map.has_key?(@stage_rows, stage.id)
+                      }
+                      flow={@stage_rows[stage.id].flow}
+                      form={@copy_form}
+                      targets={@copy_targets}
+                      copy_key={@copy_key}
+                    />
                   </div>
                 </div>
                 <button
@@ -750,17 +764,6 @@ defmodule RelayWeb.BoardSettingsLive do
                 </button>
               </div>
             </section>
-
-            <FlowSettingsComponents.flows_pane
-              :if={@section == :flows}
-              rows={@flow_rows}
-              panel={@flow_panel}
-              preflight={@flow_preflight}
-              slug={@board.slug}
-              stages={@flow_stages}
-              board_stages={@flow_board_stages}
-              read_only?={@read_only?}
-            />
 
             <section :if={@section == :members} id="members-pane">
               <.page_heading class="mb-1">
@@ -1126,11 +1129,12 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:editing_stage, nil)
      |> assign(:stage_form, nil)
      |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
-     |> assign(:flow_rows, [])
-     |> assign(:flow_stages, [])
-     |> assign(:flow_board_stages, [])
-     |> assign(:flow_panel, nil)
+     |> assign(:panel, nil)
      |> assign(:flow_preflight, nil)
+     |> assign(:panel_error, nil)
+     |> assign(:copy_form, to_form(%{}, as: :copy))
+     |> assign(:copy_key, nil)
+     |> assign(:add_form, to_form(%{}, as: :add))
      |> assign_members()
      |> refresh_stages()}
   end
@@ -1138,18 +1142,18 @@ defmodule RelayWeb.BoardSettingsLive do
   @impl true
   def handle_params(params, _uri, socket) do
     socket = assign(socket, :section, section(params))
-    socket = if socket.assigns.section == :flows, do: assign_flows(socket), else: socket
     socket = if socket.assigns.section == :keys, do: socket, else: assign(socket, :revealed, nil)
     {:noreply, socket}
   end
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_board_name save_board_slug save_board_key edit_stage save_stage add_stage delete_stage
+        save_board_name save_board_slug save_board_key edit_stage save_stage add_stage confirm_delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type set_reject_to
-        toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
+        toggle_collapsed_default invite_member remove_member flow_toggle
         flow_reset flow_confirm_reset flow_delete flow_confirm_delete
-        flow_new flow_create_validate flow_create save_public_settings new_key create_key rename_key
+        flow_copy flow_copy_change flow_confirm_copy flow_add flow_add_change flow_confirm_add
+        save_public_settings new_key create_key rename_key
         regenerate_key revoke_key
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
@@ -1440,100 +1444,160 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, refresh_stages(socket)}
   end
 
+  # RE431 — the × opens the inline delete panel (it names the flow the stage takes with it);
+  # nothing is written until `confirm_delete_stage`.
   def handle_event("delete_stage", %{"stage-id" => stage_id}, socket) do
-    case Boards.delete_stage(find_stage(socket, stage_id)) do
-      {:ok, _stage} ->
-        {:noreply, refresh_stages(socket)}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, Boards.stage_refusal_message(reason))}
+    case find_stage(socket, stage_id) do
+      nil -> {:noreply, socket}
+      stage -> {:noreply, socket |> close_panel() |> assign(:panel, {stage.id, :delete_stage})}
     end
   end
 
-  # RLY-142 — the toggle never flips directly: it opens the inline cutover
-  # confirm; only the confirm CTA persists.
-  # RLY-182 — and the confirm carries a readiness preflight, computed HERE: on click, in
-  # the enable direction only. Disabling needs no readiness check, and computing on every
-  # render would cost a query per page load for an answer nobody asked for. It is a
-  # snapshot — it does not live-update while the banner is open.
-  def handle_event("flow_toggle", %{"flow-id" => flow_id}, socket) do
-    flow = find_flow(socket, flow_id)
-    preflight = if flow.enabled, do: nil, else: Runs.preflight_flow(flow)
+  # A refusal stays inside the open panel rather than flashing. A stage already gone (deleted in
+  # another tab) just closes the panel.
+  def handle_event("confirm_delete_stage", %{"stage-id" => stage_id}, socket) do
+    case find_stage(socket, stage_id) do
+      nil ->
+        {:noreply, socket |> close_panel() |> refresh_stages()}
 
-    {:noreply,
-     socket
-     |> assign(:flow_panel, {flow.id, :confirm})
-     |> assign(:flow_preflight, preflight)}
+      stage ->
+        case Boards.delete_stage(stage) do
+          {:ok, _stage} -> {:noreply, socket |> close_panel() |> refresh_stages()}
+          {:error, reason} -> {:noreply, assign(socket, :panel_error, Boards.stage_refusal_message(reason))}
+        end
+    end
+  end
+
+  # RE431 — the band's toggle flips the flow directly (the RLY-142 cutover confirm is gone).
+  # RLY-182's readiness preflight survives as a report AFTER turning a flow on: computed here, on
+  # the off→on click only, and opened as `{stage_id, :preflight}` only when some check warns. It
+  # never blocks, and it is a snapshot — it does not live-update while open.
+  def handle_event("flow_toggle", %{"flow-id" => flow_id}, socket) do
+    case find_flow(socket, flow_id) do
+      nil -> {:noreply, socket}
+      flow -> {:noreply, toggle_flow(socket, flow)}
+    end
   end
 
   def handle_event("flow_cancel_panel", _params, socket) do
-    {:noreply, close_flow_panel(socket)}
-  end
-
-  def handle_event("flow_confirm_toggle", %{"flow-id" => flow_id}, socket) do
-    flow = find_flow(socket, flow_id)
-    result = if flow.enabled, do: Flows.disable_flow(flow), else: Flows.enable_flow(flow)
-
-    socket =
-      case result do
-        {:ok, _flow} -> socket
-        {:error, changeset} -> put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
-      end
-
-    {:noreply, socket |> close_flow_panel() |> assign_flows()}
+    {:noreply, close_panel(socket)}
   end
 
   def handle_event("flow_reset", %{"flow-id" => flow_id}, socket) do
-    {:noreply, socket |> assign(:flow_panel, {parse_flow_id(flow_id), :reset}) |> assign(:flow_preflight, nil)}
+    {:noreply, open_flow_panel(socket, flow_id, :reset)}
   end
 
   def handle_event("flow_confirm_reset", %{"flow-id" => flow_id}, socket) do
-    socket =
-      case Flows.reset_to_default(find_flow(socket, flow_id)) do
+    with_flow(socket, flow_id, fn flow ->
+      case Flows.reset_to_default(flow) do
         {:ok, _flow} -> socket
         {:error, :not_a_default} -> put_flash(socket, :error, "Only flows from the default library can be reset.")
         {:error, changeset} -> put_flash(socket, :error, "Could not reset the flow: #{flow_errors(changeset)}.")
       end
-
-    {:noreply, socket |> close_flow_panel() |> assign_flows()}
+    end)
   end
 
   def handle_event("flow_delete", %{"flow-id" => flow_id}, socket) do
-    {:noreply, socket |> assign(:flow_panel, {parse_flow_id(flow_id), :delete}) |> assign(:flow_preflight, nil)}
+    {:noreply, open_flow_panel(socket, flow_id, :delete_flow)}
   end
 
   def handle_event("flow_confirm_delete", %{"flow-id" => flow_id}, socket) do
-    socket =
-      case Flows.delete_flow(find_flow(socket, flow_id)) do
+    with_flow(socket, flow_id, fn flow ->
+      case Flows.delete_flow(flow) do
         {:ok, _flow} -> socket
-        {:error, :flow_enabled} -> put_flash(socket, :error, "Disable the flow before deleting it.")
+        {:error, :flow_enabled} -> put_flash(socket, :error, "Turn the flow off before deleting it.")
         {:error, changeset} -> put_flash(socket, :error, "Could not delete the flow: #{flow_errors(changeset)}.")
       end
-
-    {:noreply, socket |> close_flow_panel() |> assign_flows()}
+    end)
   end
 
-  # RLY-158 — create from scratch. The panel is a {:new, form} variant of @flow_panel
-  # rendered above the table, so it works on a board with no flows at all. Cancel reuses
-  # the shared "flow_cancel_panel" event.
-  def handle_event("flow_new", _params, socket) do
-    form = new_flow_form(%{"key" => Flows.unique_key(socket.assigns.board, "new-flow")})
-    {:noreply, socket |> assign(:flow_panel, {:new, form}) |> assign(:flow_preflight, nil)}
+  # RE431 — Copy to another stage…: the picker is keyed by the SOURCE flow's stage and offers
+  # only `@copy_targets` (`Flows.assignable_stages(board, nil)`, the one "free work stage" rule).
+  def handle_event("flow_copy", %{"flow-id" => flow_id}, socket) do
+    case {find_flow(socket, flow_id), socket.assigns.copy_targets} do
+      {nil, _targets} ->
+        {:noreply, socket}
+
+      {_flow, []} ->
+        {:noreply, socket}
+
+      {flow, [first | _]} ->
+        {:noreply,
+         socket
+         |> close_panel()
+         |> assign(:panel, {flow.stage_id, :copy})
+         |> assign_copy_form(flow, first.id)}
+    end
   end
 
-  def handle_event("flow_create_validate", %{"flow" => params}, socket) do
-    {:noreply, assign(socket, :flow_panel, {:new, new_flow_form(params)})}
+  def handle_event("flow_copy_change", %{"copy" => %{"stage_id" => stage_id}} = params, socket) do
+    case find_flow(socket, params["flow_id"]) do
+      nil -> {:noreply, socket}
+      flow -> {:noreply, assign_copy_form(socket, flow, stage_id)}
+    end
   end
 
-  def handle_event("flow_create", %{"flow" => params}, socket) do
-    board = socket.assigns.board
+  def handle_event("flow_confirm_copy", %{"flow_id" => flow_id, "copy" => %{"stage_id" => stage_id}}, socket) do
+    case {find_flow(socket, flow_id), find_copy_target(socket, stage_id)} do
+      {nil, _target} ->
+        {:noreply, socket}
 
-    case create_new_flow(board, params) do
-      {:ok, flow} ->
-        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/flows/#{flow.key}")}
+      {_flow, nil} ->
+        {:noreply, put_flash(socket, :error, "Pick a stage without a flow.")}
 
-      {:error, errors} ->
-        {:noreply, assign(socket, :flow_panel, {:new, new_flow_form(params, errors)})}
+      {flow, target} ->
+        socket =
+          case Flows.copy_flow(flow, target) do
+            {:ok, _copy} -> socket
+            {:error, changeset} -> put_flash(socket, :error, "Could not copy the flow: #{flow_errors(changeset)}.")
+          end
+
+        {:noreply, socket |> close_panel() |> refresh_stages()}
+    end
+  end
+
+  # RE431 — + Add flow on a work stage with no flow: a default-library flow not yet on the board,
+  # or a blank one. The panel renders inside that stage's no-flow band.
+  def handle_event("flow_add", %{"stage-id" => stage_id}, socket) do
+    case find_flow_free_stage(socket, stage_id) do
+      nil ->
+        {:noreply, socket}
+
+      stage ->
+        defaults = socket.assigns.addable_defaults
+        source = if defaults == [], do: "blank", else: "default"
+
+        {:noreply,
+         socket
+         |> close_panel()
+         |> assign(:panel, {stage.id, :add})
+         |> assign(:add_form, to_form(%{"source" => source, "default_key" => List.first(defaults)}, as: :add))}
+    end
+  end
+
+  def handle_event("flow_add_change", %{"add" => params}, socket) do
+    {:noreply, assign(socket, :add_form, to_form(Map.take(params, ["source", "default_key"]), as: :add))}
+  end
+
+  def handle_event("flow_confirm_add", %{"stage_id" => stage_id, "add" => params}, socket) do
+    case find_flow_free_stage(socket, stage_id) do
+      nil ->
+        {:noreply, socket}
+
+      stage ->
+        socket =
+          case Flows.add_flow(stage, add_source(params)) do
+            {:ok, _flow} ->
+              socket
+
+            {:error, :not_a_default} ->
+              put_flash(socket, :error, "That flow isn't in the default library.")
+
+            {:error, changeset} ->
+              put_flash(socket, :error, "Could not add the flow: #{flow_errors(changeset)}.")
+          end
+
+        {:noreply, socket |> close_panel() |> refresh_stages()}
     end
   end
 
@@ -1549,14 +1613,10 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
-  # RLY-142: trigger chips render stage names, so track renames/deletes live
-  # while the Flows section is open.
+  # RE431: every stage row shows its flow and the neighbours worked out from board order, so
+  # any stage change (rename, reorder, add, delete — or a flow change on it) re-reads both.
   def handle_info({:stages_changed, _board_id}, socket) do
-    if socket.assigns.section == :flows do
-      {:noreply, assign_flows(socket)}
-    else
-      {:noreply, socket}
-    end
+    {:noreply, refresh_stages(socket)}
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}
@@ -1564,29 +1624,32 @@ defmodule RelayWeb.BoardSettingsLive do
   @doc """
   The display name of a settings section (RE334) — the ONE place it is written. The rail, the
   mobile tab strip, the top-bar title, the Runners page title and `RelayWeb.BoardCrumbs`'
-  `Flows` crumb all call this, so a rename lands everywhere at once.
+  `Stages` crumb all call this, so a rename lands everywhere at once.
   """
   def section_label(:general), do: "General"
   def section_label(:stages), do: "Stages"
   def section_label(:public), do: "Public board"
-  def section_label(:flows), do: "Flows"
   def section_label(:members), do: "Members"
   def section_label(:keys), do: "API keys"
   def section_label(:runners), do: "Runners"
 
   defp section(%{"section" => "public"}), do: :public
   defp section(%{"section" => "stages"}), do: :stages
-  defp section(%{"section" => "flows"}), do: :flows
+  # RE431 — the Flows tab is gone; its old links land on Stages, where each row owns its flow.
+  defp section(%{"section" => "flows"}), do: :stages
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
   defp section(_params), do: :general
 
-  # Reloads the main stages and lane map from the DB after any mutation, and
-  # groups them for the pane. All four categories always render so an
-  # emptied category keeps its "+ Add stage" button.
+  # Reloads the main stages, lane map and every row's flow from the DB after any mutation, and
+  # groups them for the pane. All four categories always render so an emptied category keeps its
+  # "+ Add stage" button. The one reload point — it leaves `@editing_stage`, `@panel` and
+  # `@lane_nonce` alone, since it also runs on every `{:stages_changed, _}` (a panel whose stage
+  # is gone is closed).
   defp refresh_stages(socket) do
     board = socket.assigns.board
-    mains = board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id))
+    all_stages = Boards.list_stages(board)
+    mains = Enum.filter(all_stages, &is_nil(&1.parent_id))
 
     groups =
       Enum.map(@categories, fn category ->
@@ -1597,8 +1660,44 @@ defmodule RelayWeb.BoardSettingsLive do
     |> assign(:stages, mains)
     |> assign(:stage_groups, groups)
     |> assign(:lane_map, lane_map(board))
-    |> assign(:stage_flows, Flows.stage_flows(board))
+    |> assign(:all_stages, all_stages)
+    |> assign(:neighbours, Map.new(mains, &{&1.id, neighbour_names(&1.id, all_stages)}))
+    |> assign(:stage_rows, stage_rows(board))
+    |> assign(:copy_targets, Flows.assignable_stages(board, nil))
+    |> assign(:addable_defaults, Flows.addable_defaults(board))
+    |> drop_orphan_panel()
   end
+
+  # A panel stays open across a refresh — unless its stage is gone (deleted in another tab).
+  defp drop_orphan_panel(%{assigns: %{panel: {stage_id, _kind}, stages: stages}} = socket) do
+    if Enum.any?(stages, &(&1.id == stage_id)), do: socket, else: close_panel(socket)
+  end
+
+  defp drop_orphan_panel(socket), do: socket
+
+  # One entry per stage that holds a flow (RE429: at most one each).
+  defp stage_rows(board) do
+    board
+    |> Flows.list_flows()
+    |> Map.new(fn flow ->
+      customized? = Flows.customized?(flow)
+      {flow.stage_id, %{flow: flow, customized?: customized?, resettable?: customized? and Flows.default_key?(flow.key)}}
+    end)
+  end
+
+  # The pulls-from / lands-on rule is `Flows.neighbours/2`'s; a sub-lane neighbour renders as
+  # `"Plan · Done"` through `Boards.stage_display_name/2`, never its stored `"Plan:Done"` name.
+  defp neighbour_names(stage_id, all_stages) do
+    stage_id
+    |> Flows.neighbours(all_stages)
+    |> Map.new(fn {side, stage} -> {side, display_name(stage, all_stages)} end)
+  end
+
+  defp display_name(nil, _all_stages), do: nil
+  defp display_name(%Stage{parent_id: nil} = stage, _all_stages), do: Boards.stage_display_name(stage, stage)
+
+  defp display_name(%Stage{parent_id: parent_id} = stage, all_stages),
+    do: Boards.stage_display_name(stage, Enum.find(all_stages, &(&1.id == parent_id)))
 
   defp main_stages_for_intake(stages), do: Enum.filter(stages, &is_nil(&1.parent_id))
 
@@ -1622,43 +1721,88 @@ defmodule RelayWeb.BoardSettingsLive do
     Enum.find(socket.assigns.stages, &(&1.id == id))
   end
 
-  defp assign_flows(socket) do
-    board = socket.assigns.board
-
-    rows =
-      board
-      |> Flows.list_flows()
-      |> Enum.map(fn flow ->
-        customized? = Flows.customized?(flow)
-        %{flow: flow, customized?: customized?, resettable?: customized? and Flows.default_key?(flow.key)}
-      end)
-
-    socket
-    |> assign(:flow_rows, rows)
-    |> assign(:flow_stages, Flows.assignable_stages(board, nil))
-    |> assign(:flow_board_stages, Boards.list_stages(board))
-    |> assign(:stage_flows, Flows.stage_flows(board))
-  end
-
-  # RE429 — deleting a stage deletes the flow on it, so the confirm says which one.
-  defp delete_stage_confirm(stage_flows, stage) do
-    case Map.get(stage_flows, stage.id) do
-      nil -> "Delete this stage?"
-      flow -> "Delete this stage? This also deletes flow `#{flow.key}` (v#{flow.version})."
+  # Ids in the DOM come from this board's own stage rows; a foreign or malformed id resolves to
+  # nil and the event is ignored rather than crashing the view.
+  defp find_flow(socket, flow_id) do
+    case Integer.parse(to_string(flow_id)) do
+      {id, ""} -> Enum.find_value(Map.values(socket.assigns.stage_rows), &(&1.flow.id == id && &1.flow))
+      _other -> nil
     end
   end
 
-  # Ids in the DOM come from this board's own flow rows.
-  defp find_flow(socket, flow_id) do
-    id = parse_flow_id(flow_id)
-    Enum.find(socket.assigns.flow_rows, &(&1.flow.id == id)).flow
+  # A copy target resolves ONLY from `@copy_targets`, so a foreign or occupied id is nil.
+  defp find_copy_target(socket, stage_id) do
+    case Integer.parse(to_string(stage_id)) do
+      {id, ""} -> Enum.find(socket.assigns.copy_targets, &(&1.id == id))
+      _other -> nil
+    end
   end
 
-  defp parse_flow_id(flow_id), do: String.to_integer(flow_id)
+  # The board's own main stage for `stage_id`; `Flows.add_flow/2` validates the rest.
+  defp find_flow_free_stage(socket, stage_id) do
+    case Integer.parse(to_string(stage_id)) do
+      {id, ""} -> Enum.find(socket.assigns.stages, &(&1.id == id))
+      _other -> nil
+    end
+  end
 
-  # The preflight is a snapshot bound to one open confirm — it dies with the panel.
-  defp close_flow_panel(socket) do
-    socket |> assign(:flow_panel, nil) |> assign(:flow_preflight, nil)
+  defp assign_copy_form(socket, flow, stage_id) do
+    target = find_copy_target(socket, stage_id)
+
+    socket
+    |> assign(:copy_form, to_form(%{"stage_id" => target && target.id}, as: :copy))
+    |> assign(:copy_key, target && Flows.copy_key(flow, target))
+  end
+
+  defp add_source(%{"source" => "default"} = params), do: {:default, params["default_key"] || ""}
+  defp add_source(_params), do: :blank
+
+  # `@panel` is `{stage_id, kind}`; each row is handed only its own kind (or nil).
+  defp panel_kind({stage_id, kind}, stage_id), do: kind
+  defp panel_kind(_panel, _stage_id), do: nil
+
+  defp open_flow_panel(socket, flow_id, kind) do
+    case find_flow(socket, flow_id) do
+      nil -> socket
+      flow -> socket |> close_panel() |> assign(:panel, {flow.stage_id, kind})
+    end
+  end
+
+  # The preflight snapshot and any refusal are bound to one open panel — they die with it.
+  defp close_panel(socket) do
+    assign(socket, panel: nil, flow_preflight: nil, panel_error: nil)
+  end
+
+  defp with_flow(socket, flow_id, fun) do
+    case find_flow(socket, flow_id) do
+      nil -> {:noreply, socket}
+      flow -> {:noreply, flow |> fun.() |> close_panel() |> refresh_stages()}
+    end
+  end
+
+  defp toggle_flow(socket, flow) do
+    result = if flow.enabled, do: Flows.disable_flow(flow), else: Flows.enable_flow(flow)
+
+    case result do
+      {:ok, _flow} ->
+        socket |> close_panel() |> refresh_stages() |> open_preflight(flow)
+
+      {:error, changeset} ->
+        put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
+    end
+  end
+
+  # `flow` is the pre-toggle struct: only an off→on flip gets a readiness report.
+  defp open_preflight(socket, %{enabled: true}), do: socket
+
+  defp open_preflight(socket, flow) do
+    preflight = Runs.preflight_flow(flow)
+
+    if FlowSettingsComponents.preflight_warns?(flow, preflight) do
+      assign(socket, panel: {flow.stage_id, :preflight}, flow_preflight: preflight)
+    else
+      socket
+    end
   end
 
   defp flow_errors(changeset) do
@@ -1666,45 +1810,6 @@ defmodule RelayWeb.BoardSettingsLive do
     |> Enum.map(fn {_field, {message, _meta}} -> message end)
     |> Enum.uniq()
     |> Enum.join("; ")
-  end
-
-  @new_flow_required_fields [:stage_id]
-
-  # The form names a blank stage "is required" before create_flow/2 would say "can't be blank".
-  defp create_new_flow(board, params) do
-    case Enum.filter(@new_flow_required_fields, &blank_param?(params[to_string(&1)])) do
-      [] ->
-        attrs =
-          params
-          |> Map.take(["key", "isolation" | Enum.map(@new_flow_required_fields, &to_string/1)])
-          |> Map.merge(%{"nodes" => [], "edges" => [%{"from" => "start", "to" => "done"}]})
-
-        case Flows.create_flow(board, attrs) do
-          {:ok, flow} -> {:ok, flow}
-          {:error, changeset} -> {:error, changeset.errors}
-        end
-
-      missing ->
-        {:error, Enum.map(missing, &{&1, {"is required", []}})}
-    end
-  end
-
-  defp blank_param?(nil), do: true
-  defp blank_param?(value) when is_binary(value), do: String.trim(value) == ""
-
-  defp new_flow_form(params, errors \\ []) do
-    defaults = %{
-      "key" => "",
-      "isolation" => "shared_clean",
-      "stage_id" => ""
-    }
-
-    # <.input> hides errors on fields LiveView still marks unused, and a stage the
-    # user never touched is exactly the field we need the error on — so drop the
-    # markers before building the form.
-    params = Map.reject(params, fn {key, _} -> String.starts_with?(key, "_unused_") end)
-
-    to_form(Map.merge(defaults, params), as: :flow, errors: errors)
   end
 
   defp assign_members(socket) do

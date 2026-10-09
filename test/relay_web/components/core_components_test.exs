@@ -4556,7 +4556,7 @@ defmodule RelayWeb.CoreComponentsTest do
       %{label: "Boards", to: "/boards", id: "top-bar-crumb-boards", icon: "hero-squares-2x2"},
       %{label: "Payments", to: "/board/payments", id: "top-bar-crumb-board"},
       %{label: "Settings", to: "/board/payments/settings", id: "top-bar-crumb-settings"},
-      %{label: "Flows", to: "/board/payments/settings?section=flows", id: "top-bar-crumb-flows"}
+      %{label: "Stages", to: "/board/payments/settings?section=stages", id: "top-bar-crumb-stages"}
     ]
 
     test "renders nothing for an empty trail" do
@@ -4607,7 +4607,7 @@ defmodule RelayWeb.CoreComponentsTest do
       refute crumb_class(doc, "#top-bar-crumb-boards-segment") =~ "hidden"
       assert crumb_class(doc, "#top-bar-crumb-board-segment") =~ "hidden md:flex"
       assert crumb_class(doc, "#top-bar-crumb-settings-segment") =~ "hidden md:flex"
-      refute crumb_class(doc, "#top-bar-crumb-flows-segment") =~ "hidden"
+      refute crumb_class(doc, "#top-bar-crumb-stages-segment") =~ "hidden"
       assert crumb_class(doc, "#top-bar-crumb-ellipsis") =~ "md:hidden"
     end
 

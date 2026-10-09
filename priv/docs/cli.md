@@ -192,7 +192,7 @@ works but is deprecated.
 ## Flows as data
 
 A board's flows — which stages are AI-enabled, what each node does, model/effort, retry and loop
-budgets — are edited in **Settings › Flows**, or pulled and pushed as data:
+budgets — are edited in **Settings › Stages** (the stage's FLOW band), or pulled and pushed as data:
 
 ```bash
 ./relay flow code --json > code.json   # nodes, edges, trigger as stage names, isolation, version

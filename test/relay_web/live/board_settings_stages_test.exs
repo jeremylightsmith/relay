@@ -14,6 +14,16 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
   defp stage_named(board, name), do: Enum.find(board.stages, &(&1.name == name))
 
+  defp text_of(view, selector) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.split()
+    |> Enum.join(" ")
+  end
+
   describe "two-pane shell" do
     test "renders the rail with Stages active and stage cards grouped by category",
          %{conn: conn, board: board} do
@@ -182,33 +192,28 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert reloaded_card.status == :in_review
     end
 
-    test "every stage row shows its flow or 'No flow works here' instead of an AI toggle",
+    test "the flow chip lives in the stage's FLOW band, never an AI row",
          %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      review = stage_named(board, "Review")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       for stage <- board.stages, is_nil(stage.parent_id) do
         refute has_element?(view, "#stage-#{stage.id}-ai-toggle")
+        refute has_element?(view, "#stage-#{stage.id}-ai-none")
       end
 
-      assert has_element?(view, "a#stage-#{code.id}-ai-flow[href='/board/#{board.slug}/flows/code']", "code flow")
-      assert has_element?(view, "#stage-#{review.id}-ai-none", "No flow works here")
+      assert has_element?(view, "#stage-#{code.id}-flow-band #stage-#{code.id}-ai-flow")
     end
 
-    test "the stage row follows a flow toggled in the Flows tab", %{conn: conn, board: board} do
+    test "the stage row's chip follows its band toggle", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
-      flow = Relay.Flows.get_flow_with_stages(board, "code")
+      flow = Relay.Flows.get_flow!(board, "code")
       refute flow.enabled
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
       assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='false']")
 
-      render_patch(view, ~p"/board/#{board.slug}/settings?section=flows")
-      render_click(view, "flow_confirm_toggle", %{"flow-id" => to_string(flow.id)})
-      assert Relay.Flows.get_flow_with_stages(board, "code").enabled
-
-      render_patch(view, ~p"/board/#{board.slug}/settings?section=stages")
+      view |> element("#flow-#{flow.id}-toggle") |> render_click()
       assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='true']")
     end
   end
@@ -227,57 +232,37 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stage-#{new_stage.id}-name-display")
     end
 
-    test "delete removes an empty stage", %{conn: conn, board: board} do
+    test "1. the × opens the delete panel inside the row and deletes nothing", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      refute has_element?(view, "[id^='stage-'][id$='-delete'][data-confirm]")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      assert has_element?(view, "#stage-#{deploy.id}-row #stage-#{deploy.id}-delete-panel")
+      assert Boards.get_stage(board, deploy.id)
+    end
+
+    test "2. a stage without a flow gets a plain panel and confirming deletes it", %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
 
       view |> element("#stage-#{deploy.id}-delete") |> render_click()
 
+      assert text_of(view, "#stage-#{deploy.id}-delete-title") == "Delete the Deploy stage?"
+      refute has_element?(view, "#stage-#{deploy.id}-delete-flow")
+      assert text_of(view, "#stage-#{deploy.id}-delete-confirm") == "Delete stage"
+
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
+
       refute has_element?(view, "#stage-#{deploy.id}-row")
       assert Boards.get_stage(board, deploy.id) == nil
     end
 
-    test "deleting a stage with cards flashes and deletes nothing", %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
-      insert(:card, stage: code)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-
-      html = view |> element("#stage-#{code.id}-delete") |> render_click()
-
-      assert html =~ "That stage still holds 1 live and 0 archived card(s) — move them out first."
-      assert has_element?(view, "#stage-#{code.id}-row")
-      assert Boards.get_stage(board, code.id)
-    end
-
-    test "deleting a stage whose sub-lane has cards flashes and deletes nothing",
-         %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
-      {:ok, review} = Boards.enable_lane(code, :review)
-      insert(:card, stage: review)
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-
-      html = view |> element("#stage-#{code.id}-delete") |> render_click()
-
-      assert html =~ "That stage still holds 1 live and 0 archived card(s) — move them out first."
-      assert Boards.get_stage(board, code.id)
-    end
-
-    test "deleting the only remaining stage flashes", %{conn: conn, board: board} do
-      [keep | rest] = Enum.filter(board.stages, &is_nil(&1.parent_id))
-      Enum.each(rest, fn stage -> {:ok, _} = Boards.delete_stage(stage) end)
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-      html = view |> element("#stage-#{keep.id}-delete") |> render_click()
-
-      assert html =~ "at least one stage"
-      assert Boards.get_stage(board, keep.id)
-    end
-
-    test "32. a flow-holding stage's delete confirm names the flow, and deleting takes the flow with it",
+    test "3. a flow-holding stage's panel names the flow, and confirming takes the flow with it",
          %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
-      code = stage_named(board, "Code")
-      backlog = stage_named(board, "Backlog")
 
       {:ok, ship} =
         Relay.Flows.create_flow(board, %{
@@ -294,25 +279,131 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       {:ok, _} = Relay.Flows.enable_flow(ship)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-
-      assert has_element?(
-               view,
-               ~s|#stage-#{deploy.id}-delete[data-confirm="Delete this stage? This also deletes flow `ship` (v3)."]|
-             )
-
-      assert has_element?(
-               view,
-               ~s|#stage-#{code.id}-delete[data-confirm="Delete this stage? This also deletes flow `code` (v1)."]|
-             )
-
-      assert has_element?(view, ~s(#stage-#{backlog.id}-delete[data-confirm="Delete this stage?"]))
-
       view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      flow_text = text_of(view, "#stage-#{deploy.id}-delete-flow")
+      assert flow_text =~ "This also deletes flow"
+      assert flow_text =~ "ship"
+      assert flow_text =~ "(v3 · 0 nodes)"
+      assert flow_text =~ "and its version history"
+
+      history = text_of(view, "#stage-#{deploy.id}-delete-history")
+      assert history =~ "Run history stays"
+      assert history =~ "Copy to another stage"
+
+      assert text_of(view, "#stage-#{deploy.id}-delete-confirm") == "Delete stage and flow"
+
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
 
       refute has_element?(view, "#flash-error")
       refute has_element?(view, "#stage-#{deploy.id}-row")
       assert Boards.get_stage(board, deploy.id) == nil
       assert Relay.Flows.get_flow(board, "ship") == nil
+    end
+
+    test "4. confirming a stage with cards shows the refusal in the panel, not a flash",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 live and 0 archived card(s) — move them out first."
+
+      refute has_element?(view, "#flash-error")
+      assert has_element?(view, "#stage-#{code.id}-delete-panel")
+      assert Boards.get_stage(board, code.id)
+    end
+
+    test "5. confirming a stage whose sub-lane has cards shows the refusal in the panel",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: review)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 live and 0 archived card(s) — move them out first."
+
+      assert Boards.get_stage(board, code.id)
+    end
+
+    test "6. confirming the only remaining stage shows the refusal in the panel", %{conn: conn, board: board} do
+      [keep | rest] = Enum.filter(board.stages, &is_nil(&1.parent_id))
+      Enum.each(rest, fn stage -> {:ok, _} = Boards.delete_stage(stage) end)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      view |> element("#stage-#{keep.id}-delete") |> render_click()
+      view |> element("#stage-#{keep.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{keep.id}-delete-refusal") =~ "at least one stage"
+      assert Boards.get_stage(board, keep.id)
+    end
+
+    test "8. cancel closes the panel, and reopening clears a shown refusal", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      view |> element("#stage-#{deploy.id}-delete-cancel") |> render_click()
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      assert Boards.get_stage(board, deploy.id)
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+      assert has_element?(view, "#stage-#{code.id}-delete-refusal")
+
+      view |> element("#stage-#{code.id}-delete-cancel") |> render_click()
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+
+      assert has_element?(view, "#stage-#{code.id}-delete-panel")
+      refute has_element?(view, "#stage-#{code.id}-delete-refusal")
+    end
+
+    test "9. an archived board refuses confirm_delete_stage", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, _} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = render_click(view, "confirm_delete_stage", %{"stage-id" => to_string(deploy.id)})
+
+      assert html =~ "This board is archived (read-only)."
+      assert Boards.get_stage(board, deploy.id)
+    end
+
+    test "a panel whose stage was deleted elsewhere closes on refresh", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      {:ok, _} = Boards.delete_stage(deploy)
+      send(view.pid, {:stages_changed, board.id})
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+    end
+
+    test "confirming a stage deleted elsewhere closes the panel instead of crashing",
+         %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      {:ok, _} = Boards.delete_stage(deploy)
+
+      render_click(view, "confirm_delete_stage", %{"stage-id" => to_string(deploy.id)})
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
     end
 
     test "33. retyping a flow-holding stage to a non-work type flashes the refusal",
@@ -326,14 +417,15 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert Boards.get_stage(board, code.id).type == :work
     end
 
-    test "deleting the public intake stage flashes", %{conn: conn, board: board} do
+    test "7. confirming the public intake stage shows the refusal in the panel", %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
       {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: deploy.id})
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-      html = view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
 
-      assert html =~ "This is the public intake stage — pick another in Public settings first."
+      assert text_of(view, "#stage-#{deploy.id}-delete-refusal") =~ "public intake stage"
       assert has_element?(view, "#stage-#{deploy.id}-row")
     end
 

@@ -352,7 +352,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
                "Settings"
              )
 
-      refute has_element?(view, "#top-bar-crumb-flows")
+      refute has_element?(view, "#top-bar-crumb-stages")
       assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:stages))
       refute has_element?(view, "#settings-title", "Board settings")
     end
@@ -375,7 +375,7 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      for section <- [:general, :stages, :public, :flows, :members, :keys, :runners] do
+      for section <- [:general, :stages, :public, :members, :keys, :runners] do
         label = BoardSettingsLive.section_label(section)
         assert has_element?(view, "#settings-nav-#{section}", label)
         assert has_element?(view, "#settings-tab-#{section}", label)

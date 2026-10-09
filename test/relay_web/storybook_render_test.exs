@@ -152,7 +152,27 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "Boards"
     assert html =~ "Payments"
     assert html =~ "Settings"
-    assert html =~ "Flows"
+    assert html =~ "Stages"
+    refute html =~ "section=flows"
+  end
+
+  test "GET /storybook/flow_settings_components/flow_band renders the band, no-flow and queue variations (RE431)",
+       %{conn: conn} do
+    html = conn |> get("/storybook/flow_settings_components/flow_band") |> html_response(200)
+
+    assert html =~ "code flow"
+    assert html =~ "v4 · 7 nodes"
+    assert html =~ "No flow — people work this stage by hand."
+    assert html =~ "cards rest here"
+  end
+
+  test "GET /storybook/flow_settings_components/stage_neighbours renders the full and missing-end rows (RE431)",
+       %{conn: conn} do
+    html = conn |> get("/storybook/flow_settings_components/stage_neighbours") |> html_response(200)
+
+    assert html =~ "Plan · Done"
+    assert html =~ "worked out from board order"
+    assert html =~ "none"
   end
 
   test "GET /storybook/flow_graph shows the RE333 branching variation — a diverging branch and several terminals",

@@ -29,10 +29,10 @@ The ritual below is ordered so neither window is ever open.
    that loaded its configuration at startup will still be pulling the stage until it is
    actually stopped — check the process, not the config file.
 
-3. **Turn the flow on** in the board's **Settings › Flows**. The toggle is the only enable
-   path — there is no CLI or mix task. It shows a runner-readiness warning before turning
-   on: if no runner is connected and advertising capacity, cards will queue with no
-   dispatcher to pick them up.
+3. **Turn the flow on** in the board's **Settings › Stages** — the toggle on the stage's
+   FLOW band. The toggle is the only enable path — there is no CLI or mix task. Turning it
+   on shows a runner-readiness report when a check warns: if no runner is connected and
+   advertising capacity, cards will queue with no dispatcher to pick them up.
 
 4. **Confirm a runner is advertising the right capacity class.** Start (or check)
    `relay start` and open the board's **Runners** view at `/board/:slug/runners`. The
@@ -67,7 +67,7 @@ The ritual below is ordered so neither window is ever open.
 
 ## Rollback
 
-1. **Disable the flow** in **Settings › Flows**. This stops new dispatch immediately and is
+1. **Disable the flow** in **Settings › Stages** (the stage's FLOW band). This stops new dispatch immediately and is
    always the first move.
 2. Work `<Stage>` cards by hand until the flow is fixed.
 3. If the flow definition itself is at fault, revert the deploy that introduced it.

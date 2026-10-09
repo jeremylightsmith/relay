@@ -30,9 +30,12 @@ defmodule RelayWeb.BoardCrumbs do
   @spec settings_section(%{name: String.t(), slug: String.t()}) :: [crumb()]
   def settings_section(board), do: [boards(), board_crumb(board), settings(board)]
 
-  @doc "The flow editor and metrics: `Boards / <board> / Settings / Flows / <flow>`."
-  @spec flows(%{name: String.t(), slug: String.t()}) :: [crumb()]
-  def flows(board), do: settings_section(board) ++ [flows_crumb(board)]
+  @doc """
+  The flow editor and metrics: `Boards / <board> / Settings / Stages / <flow>` — the Stages crumb
+  deep-links to the row of the stage the flow works in, where the flow lives (RE431).
+  """
+  @spec flows(%{name: String.t(), slug: String.t()}, %{stage_id: integer()}) :: [crumb()]
+  def flows(board, flow), do: settings_section(board) ++ [stages_crumb(board, flow)]
 
   @doc """
   The mockup viewer (RE380): `Boards / <board> / <card title>` — the page's title is "Mockups".
@@ -56,11 +59,11 @@ defmodule RelayWeb.BoardCrumbs do
     %{id: "top-bar-crumb-settings", label: "Settings", to: ~p"/board/#{board.slug}/settings"}
   end
 
-  defp flows_crumb(board) do
+  defp stages_crumb(board, %{stage_id: stage_id}) do
     %{
-      id: "top-bar-crumb-flows",
-      label: BoardSettingsLive.section_label(:flows),
-      to: ~p"/board/#{board.slug}/settings?section=flows"
+      id: "top-bar-crumb-stages",
+      label: BoardSettingsLive.section_label(:stages),
+      to: ~p"/board/#{board.slug}/settings?section=stages" <> "#stage-#{stage_id}-row"
     }
   end
 end

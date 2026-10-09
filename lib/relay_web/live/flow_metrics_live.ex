@@ -19,7 +19,7 @@ defmodule RelayWeb.FlowMetricsLive do
         {:ok,
          socket
          |> put_flash(:error, "That flow doesn't exist.")
-         |> push_navigate(to: ~p"/board/#{slug}/settings?section=flows")}
+         |> push_navigate(to: ~p"/board/#{slug}/settings?section=stages")}
 
       flow ->
         {:ok,
@@ -186,7 +186,12 @@ defmodule RelayWeb.FlowMetricsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.flows(@board)}>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      wide
+      crumbs={BoardCrumbs.flows(@board, @flow)}
+    >
       <:title>
         <span id="flow-title" class="truncate" title={humanize(@flow.key)}>
           {humanize(@flow.key)}

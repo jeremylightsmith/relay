@@ -135,7 +135,7 @@ node-job engine (`Relay.Runs`) — no per-stage config file, no board-runner pol
 runs whatever node it is handed; it knows nothing about stages, columns, or which flow a
 job belongs to. Board-specific facts (stages, prompts, per-node budgets) live entirely in
 `Flow`/`Flow.Node`/`Flow.Edge` rows, seeded from
-[`docs/designs/flows/`](../designs/flows/README.md) and editable in Settings › Flows.
+[`docs/designs/flows/`](../designs/flows/README.md) and editable in Settings › Stages (each stage row's FLOW band).
 
 **Shared-budget arbitration: rightmost flow wins ties.** `Relay.Runs.Capacity` keys free
 slots `runner_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per

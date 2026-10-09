@@ -126,8 +126,8 @@ resumes on its own when the window resets. Leave a key out for no limit on that 
 ## 5. Enable a flow
 
 Flows are seeded **disabled**, so nothing dispatches until you turn one on. Open
-**Settings › Flows** on your board and enable the **Spec** flow — it is the cheapest one
-to start with, and it is the first stage a new card meets.
+**Settings › Stages** on your board and turn on the **Spec** flow in the Spec stage's FLOW
+band — it is the cheapest one to start with, and it is the first stage a new card meets.
 
 The confirm dialog reminds you that a runner must be connected and advertising capacity
 before cards will move — it does not check for you, so confirm that yourself on the
@@ -157,8 +157,8 @@ See [Statuses & outcomes](/docs/statuses-and-outcomes) for what each state means
 A card that just sits in *Next up* is almost always one of four things. Check them in this
 order:
 
-1. **No flow is enabled for that stage.** Open **Settings › Flows** and confirm the flow
-   covering that card's stage is on. This is the most common cause on a new board.
+1. **No flow is enabled for that stage.** Open **Settings › Stages** and confirm the FLOW
+   band on that card's stage is on. This is the most common cause on a new board.
 2. **No runner is advertising capacity.** Open `/board/<slug>/runners`. If the roster is
    empty, or your machine shows **STALE** or **GONE** rather than **FRESH**, `relay start`
    has stopped or lost the board — restart it and re-check.

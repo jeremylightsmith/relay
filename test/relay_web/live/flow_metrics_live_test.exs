@@ -386,16 +386,25 @@ defmodule RelayWeb.FlowMetricsLiveTest do
     assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
     assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
 
+    code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
+
     assert has_element?(
              view,
-             ~s(#top-bar-crumb-flows[href="/board/#{board.slug}/settings?section=flows"]),
-             BoardSettingsLive.section_label(:flows)
+             ~s(#top-bar-crumb-stages[href="/board/#{board.slug}/settings?section=stages#stage-#{code.id}-row"]),
+             BoardSettingsLive.section_label(:stages)
            )
+
+    refute has_element?(view, ~s([href*="section=flows"]))
 
     assert has_element?(view, "#flow-title", "code")
 
-    # The old in-page trail linked the board and the Flows section from inside <main>.
+    # The old in-page trail linked the board and the settings section from inside <main>.
     refute has_element?(view, ~s(main a[href="/board/#{board.slug}"]))
-    refute has_element?(view, ~s(main a[href="/board/#{board.slug}/settings?section=flows"]))
+    refute has_element?(view, ~s(main a[href^="/board/#{board.slug}/settings"]))
+  end
+
+  test "an unknown flow key redirects to the Stages settings", %{conn: conn, board: board} do
+    assert {:error, {:live_redirect, %{to: to}}} = live(conn, ~p"/board/#{board.slug}/flows/nope/metrics")
+    assert to == "/board/#{board.slug}/settings?section=stages"
   end
 end

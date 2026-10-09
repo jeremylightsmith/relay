@@ -850,6 +850,77 @@ defmodule Relay.FlowsTest do
       assert {:ok, %Flow{enabled: true}} = Flows.enable_flow(flow)
     end
 
+    test "RE431 1. addable_defaults/1 lists library keys missing from the board", ctx do
+      assert Flows.addable_defaults(ctx.board) == []
+
+      {:ok, _} = Flows.delete_flow(ctx.code_flow)
+      assert Flows.addable_defaults(ctx.board) == ["code"]
+      assert Flows.addable_defaults(ctx.board.id) == ["code"]
+    end
+
+    test "RE431 2. add_flow/2 seeds a library flow onto a free stage, disabled, at v1", ctx do
+      {:ok, _} = Flows.delete_flow(ctx.code_flow)
+      deploy = ctx.stages["Deploy"]
+      deploy_id = deploy.id
+
+      assert {:ok, %Flow{key: "code", enabled: false, version: 1, stage_id: ^deploy_id} = flow} =
+               Flows.add_flow(deploy, {:default, "code"})
+
+      assert length(flow.nodes) == 21
+      assert Flows.customized?(flow) == false
+      assert %Schemas.FlowVersion{} = Flows.get_version(flow, 1)
+    end
+
+    test "RE431 3. add_flow/2 :blank makes a start→done flow keyed by the stage slug", ctx do
+      {:ok, qa} = Relay.Boards.create_stage(ctx.board, %{name: "QA", category: :in_progress})
+
+      assert {:ok, flow} = Flows.add_flow(qa, :blank)
+      assert flow.key == "qa"
+      assert flow.nodes == []
+      assert Enum.map(flow.edges, &{&1.from, &1.to}) == [{"start", "done"}]
+      assert flow.isolation == :shared_clean
+      assert flow.enabled == false
+      assert flow.stage_id == qa.id
+    end
+
+    test "RE431 3b. add_flow/2 :blank suffixes a taken slug key", ctx do
+      {:ok, _} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Deploy"].id, %{key: "qa"}))
+      {:ok, qa} = Relay.Boards.create_stage(ctx.board, %{name: "QA", category: :in_progress})
+
+      assert {:ok, flow} = Flows.add_flow(qa, :blank)
+      assert flow.key == "qa-2"
+    end
+
+    test "RE431 4. add_flow/2 :blank falls back to `flow` for a slugless name", ctx do
+      {:ok, stage} = Relay.Boards.create_stage(ctx.board, %{name: "!!!", category: :in_progress})
+
+      assert {:ok, flow} = Flows.add_flow(stage, :blank)
+      assert flow.key == "flow"
+    end
+
+    test "RE431 5. add_flow/2 refuses a key that isn't in the default library", ctx do
+      before = flow_count(ctx.board)
+
+      assert {:error, :not_a_default} = Flows.add_flow(ctx.stages["Deploy"], {:default, "nope"})
+      assert flow_count(ctx.board) == before
+    end
+
+    test "RE431 6. add_flow/2 refuses an occupied stage with the error on stage_id", ctx do
+      assert {:error, cs} = Flows.add_flow(ctx.stages["Plan"], :blank)
+      assert "stage already has flow `plan`" in errors_on(cs).stage_id
+    end
+
+    test "RE431 7. copy_key/2 previews exactly the key copy_flow/2 gives", ctx do
+      {:ok, qa} = Relay.Boards.create_stage(ctx.board, %{name: "QA", category: :in_progress})
+      assert Flows.copy_key(ctx.code_flow, qa) == "code-qa"
+
+      {:ok, _} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Deploy"].id, %{key: "code-qa"}))
+      assert Flows.copy_key(ctx.code_flow, qa) == "code-qa-2"
+
+      assert {:ok, copy} = Flows.copy_flow(ctx.code_flow, qa)
+      assert copy.key == "code-qa-2"
+    end
+
     test "28. upsert_from_document/3 resolves the trigger stage (legacy triggers too)", ctx do
       doc =
         ctx.board
