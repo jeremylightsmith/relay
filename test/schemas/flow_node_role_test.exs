@@ -158,7 +158,13 @@ defmodule Schemas.FlowNodeRoleTest do
 
   defp build(nodes, edges) do
     changeset =
-      Flow.changeset(%Flow{board_id: 1}, %{key: "roles", isolation: :shared_clean, nodes: nodes, edges: edges})
+      Flow.changeset(%Flow{board_id: 1}, %{
+        key: "roles",
+        isolation: :shared_clean,
+        stage_id: 1,
+        nodes: nodes,
+        edges: edges
+      })
 
     {changeset, Ecto.Changeset.apply_changes(changeset)}
   end

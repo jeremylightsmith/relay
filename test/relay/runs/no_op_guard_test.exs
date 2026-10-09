@@ -23,20 +23,18 @@ defmodule Relay.Runs.NoOpGuardTest do
   defp marked_flow(board, opts \\ []) do
     expects = Keyword.get(opts, :expects_commits, true)
     retries = Keyword.get(opts, :max_retries, 1)
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
     works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
 
     impl_base = %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: expects}
     impl = if retries, do: Map.put(impl_base, :max_retries, retries), else: impl_base
+
+    :ok = clear_spec_flow!(board)
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "marked-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [%{key: "seed", type: :shell, run: "true"}, impl],
         edges: [
           %{from: "start", to: "seed"},
@@ -182,17 +180,15 @@ defmodule Relay.Runs.NoOpGuardTest do
     # A foreach flow whose marked head is also the loop tail: on a real success it would
     # check the sub_task off, but the override makes it :failed, so the box stays unchecked.
     board = ctx.board
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
     works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
+
+    :ok = clear_spec_flow!(board)
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "marked-foreach-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [
           %{key: "seed", type: :shell, run: "true"},
           %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"}
@@ -243,9 +239,7 @@ defmodule Relay.Runs.NoOpGuardTest do
   # Note `impl` is NOT the loop tail here (the `when` guards sit on `review`), so a successful
   # impl does not check its sub_task off — which is precisely the state that armed RE306.
   defp looping_flow(board, foreach?) do
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
     works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
 
     impl = %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true}
     impl = if foreach?, do: Map.put(impl, :foreach, "card.tasks"), else: impl
@@ -260,13 +254,13 @@ defmodule Relay.Runs.NoOpGuardTest do
         [%{from: "review", to: "done", on: :succeeded}]
       end
 
+    :ok = clear_spec_flow!(board)
+
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "looping-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [
           %{key: "seed", type: :shell, run: "true"},
           impl,
@@ -397,5 +391,16 @@ defmodule Relay.Runs.NoOpGuardTest do
     }
 
     assert Relay.Runs.Engine.decide(code, [current], current) == {:transition, "fix_findings", nil}
+  end
+
+  # A stage holds exactly one flow: take the board's seeded "spec" flow off Spec so a test
+  # flow can work there (it then pulls from "Next up" and lands on Spec:Review, by board order).
+  defp clear_spec_flow!(board) do
+    if spec = Relay.Flows.get_flow(board, "spec") do
+      {:ok, spec} = Relay.Flows.disable_flow(spec)
+      {:ok, _} = Relay.Flows.delete_flow(spec)
+    end
+
+    :ok
   end
 end

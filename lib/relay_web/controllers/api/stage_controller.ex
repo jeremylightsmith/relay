@@ -21,7 +21,7 @@ defmodule RelayWeb.Api.StageController do
   @create_fields ~w(name category type description wip_limit collapsed_by_default)a
   @update_fields ~w(name description type wip_limit collapsed_by_default reject_to_stage_id)
 
-  @ai_enabled_refusal "ai_enabled is derived from flows — point a flow's works_in at this stage instead"
+  @ai_enabled_refusal "ai_enabled is derived from flows — put a flow on this stage instead"
 
   def index(conn, _params) do
     board = conn.assigns.current_board

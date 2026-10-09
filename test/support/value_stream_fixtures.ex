@@ -23,9 +23,9 @@ defmodule Relay.ValueStreamFixtures do
   @doc """
   Backlog, Triage, Next up (queues) | Spec (+ Review, Done substages) | Plan (+ Done) | Code |
   Review (top-level gate) | Deploy (`:work`) | Done (terminal), plus RE's three enabled flows
-  (`spec`, `plan`, `code`) wired to their stages. A stage is AI-enabled iff a flow works in it
+  (`spec`, `plan`, `code`) each on its stage. A stage is AI-enabled iff a flow belongs to it
   (RE409), so Deploy stays AI-enabled-without-an-enabled-flow — as on RE — through a
-  **disabled** `deploy` flow working in it. `code_flow: false` wires no `code` flow,
+  **disabled** `deploy` flow on it. `code_flow: false` wires no `code` flow,
   making Code human-only.
   """
   def re_board(opts \\ []) do
@@ -47,27 +47,21 @@ defmodule Relay.ValueStreamFixtures do
     {:ok, spec_done} = Boards.enable_lane(stages.spec, :done)
     {:ok, plan_done} = Boards.enable_lane(stages.plan, :done)
 
-    wire_flow(board, "spec", stages.next_up, stages.spec, spec_review)
-    wire_flow(board, "plan", spec_done, stages.plan, plan_done)
+    wire_flow(board, "spec", stages.spec)
+    wire_flow(board, "plan", stages.plan)
 
     if Keyword.get(opts, :code_flow, true) do
-      wire_flow(board, "code", plan_done, stages.code, stages.review)
+      wire_flow(board, "code", stages.code)
     end
 
-    wire_flow(board, "deploy", stages.review, stages.deploy, stages.done, enabled: false)
+    wire_flow(board, "deploy", stages.deploy, enabled: false)
 
     Map.merge(stages, %{board: board, spec_review: spec_review, spec_done: spec_done, plan_done: plan_done})
   end
 
-  defp wire_flow(board, key, pulls_from, works_in, lands_on, opts \\ []) do
-    insert(:flow,
-      board: board,
-      key: key,
-      enabled: Keyword.get(opts, :enabled, true),
-      pulls_from_stage_id: pulls_from.id,
-      works_in_stage_id: works_in.id,
-      lands_on_stage_id: lands_on.id
-    )
+  # RE429: a flow belongs to one stage; its pickup and drop-off come from board order.
+  defp wire_flow(board, key, stage, opts \\ []) do
+    insert(:flow, board: board, key: key, enabled: Keyword.get(opts, :enabled, true), stage_id: stage.id)
   end
 
   defp stage(board, name, type, category, position) do

@@ -170,8 +170,8 @@ defmodule Relay.Runs do
 
   @doc """
   The card's runs newest-first, node executions preloaded chronologically. Each run's
-  `flow: :works_in_stage` is join-preloaded in the runs query itself (RE426, no per-run N+1):
-  `flow` is nil when the flow was deleted, `works_in_stage` nil when the flow has no work stage.
+  `flow: :stage` is join-preloaded in the runs query itself (RE426, no per-run N+1): `flow` is
+  nil when the flow was deleted (a flow always has its stage, RE429).
   """
   def list_runs_for_card(%Card{id: card_id}) do
     node_executions = from ne in NodeExecution, order_by: [asc: ne.id]
@@ -179,10 +179,10 @@ defmodule Relay.Runs do
     Repo.all(
       from r in Run,
         left_join: f in assoc(r, :flow),
-        left_join: s in assoc(f, :works_in_stage),
+        left_join: s in assoc(f, :stage),
         where: r.card_id == ^card_id,
         order_by: [desc: r.inserted_at, desc: r.id],
-        preload: [flow: {f, works_in_stage: s}, node_executions: ^node_executions]
+        preload: [flow: {f, stage: s}, node_executions: ^node_executions]
     )
   end
 
@@ -1105,7 +1105,8 @@ defmodule Relay.Runs do
 
   @doc """
   The enabled flow that will pick this card up, or nil. Queued (spec decision):
-  an enabled flow pulls from the card's stage, the card is AI-ready (:ready +
+  an enabled flow pulls from the card's stage — its derived `pulls_from_stage`, so `flows` must
+  come from `Relay.Flows.list_flows/1` (RE429) — the card is AI-ready (:ready +
   baton with AI), no unmet dependency (RE93), and no active run exists. Pure —
   no scheduler/NodeJob read.
 
@@ -1120,15 +1121,15 @@ defmodule Relay.Runs do
       Policy.pullable?(%{status: card.status, active_owner: active_owner, blocked_by: blocked_by})
 
     if pullable? and not active_run? do
-      Enum.find(flows, &(&1.enabled and &1.pulls_from_stage_id == card.stage_id))
+      Enum.find(flows, &(&1.enabled and stage_id(&1.pulls_from_stage) == card.stage_id))
     end
   end
 
   @doc """
   What the board card face shows: {:run, summary} for an active run, or for a
-  terminal run while the card still sits in one of that run's flow's trigger
-  stages (pulls-from / works-in / lands-on — the spec's "hasn't moved on" rule
-  made precise, so a done run's totals survive landing on lands-on);
+  terminal run while the card still sits in its flow's stage or one of the flow's derived
+  neighbours (pulls-from / lands-on — the spec's "hasn't moved on" rule made precise, so a done
+  run's totals survive landing; `flows` come from `Relay.Flows.list_flows/1`, RE429);
   {:queued, flow} when queued; nil → legacy strip logic.
 
   `blocked_by` is the card's unmet-blocker id list (RE93), threaded through to `queued_flow/5`.
@@ -1157,13 +1158,12 @@ defmodule Relay.Runs do
         false
 
       flow ->
-        card.stage_id in [
-          flow.pulls_from_stage_id,
-          flow.works_in_stage_id,
-          flow.lands_on_stage_id
-        ]
+        card.stage_id in [stage_id(flow.pulls_from_stage), flow.stage_id, stage_id(flow.lands_on_stage)]
     end
   end
+
+  defp stage_id(nil), do: nil
+  defp stage_id(%{id: id}), do: id
 
   ## Lifecycle
 
@@ -1175,13 +1175,13 @@ defmodule Relay.Runs do
   must target a real node, and the card must have no active run (the
   partial unique index backs this against races). Creates the run + first
   execution + queued job in one transaction, moves the card to the flow's
-  works-in stage as `:agent` (the claim rule assigns Relay AI on an
+  stage as `:agent` (the claim rule assigns Relay AI on an
   unowned card), then explicitly sets the card `:working` via
   `set_status/3` — ADR 0003's move-time snap only overrides an INVALID
   status, and `:ready` is already valid on a work-type stage, so the
   hand-over to the AI needs its own explicit status set. Broadcasts,
   starts a `RunServer`, and dispatches. A card already sitting in the
-  works-in stage is NOT re-moved (rejection re-entry: a gratuitous
+  stage is NOT re-moved (rejection re-entry: a gratuitous
   append-move would clear the CHANGES REQUESTED banner via
   `move_card`'s rejection-clearing rule) but is still set `:working`.
   `opts[:context]` is a STRING-keyed map (e.g.
@@ -1279,11 +1279,11 @@ defmodule Relay.Runs do
   # happen through set_status/3.
   defp move_into_work_lane(card, flow) do
     moved =
-      if card.stage_id == flow.works_in_stage_id do
+      if card.stage_id == flow.stage_id do
         card
       else
-        works_in = Repo.get!(Stage, flow.works_in_stage_id)
-        {:ok, moved} = Cards.move_card(card, works_in, @append_index, :agent)
+        work_lane = Repo.get!(Stage, flow.stage_id)
+        {:ok, moved} = Cards.move_card(card, work_lane, @append_index, :agent)
         moved
       end
 
@@ -3652,7 +3652,7 @@ defmodule Relay.Runs do
   # that card sits in was that dead end's last link, so retry re-adopts that flow
   # (`Flows.working_flow/1` — the same lookup rejection re-entry uses).
   #
-  # `:no_flow` survives for the genuinely unresolvable case: no ENABLED flow works in the
+  # `:no_flow` survives for the genuinely unresolvable case: no ENABLED flow is on the
   # card's stage, so there is nothing to re-enter and `retry_refusal_message(:no_flow)` is the
   # honest answer.
   defp retry_flow(%Run{flow_id: nil} = run) do

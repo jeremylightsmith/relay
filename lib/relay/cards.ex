@@ -2068,17 +2068,17 @@ defmodule Relay.Cards do
   @doc """
   The active run a move of `card` into `target_stage` would strand, or `nil`.
 
-  A move strands a run when `card` has an active (`:running`/`:parked`) run whose flow's work
-  lane (`works_in_stage`) is NOT `target_stage` — i.e. the card is being pulled out of the lane
+  A move strands a run when `card` has an active (`:running`/`:parked`) run whose flow's stage
+  (`flow.stage_id`, RE429) is NOT `target_stage` — i.e. the card is being pulled out of the lane
   its run works in (to Done, back to a queue, into another flow's lane). A within-lane reorder
-  (destination == the run's `works_in_stage`) and a card with no active run both return `nil`.
+  (destination == the run's flow stage) and a card with no active run both return `nil`.
 
-  Anchored on the run's `works_in_stage`, NOT `card.stage_id`, so the engine's own
-  pull-into-lane move — which carries the card from its pull stage INTO `works_in_stage` while
-  the run is already active — is transparent: its destination IS the work lane, so it never
-  strands (the land-on-completion move runs after the run is terminal, so it has no active run
-  either). Boundary: `Cards` reads `Schemas.Run`/`Schemas.Flow` directly because `Runs` depends
-  on `Cards`, not the reverse; the closed active-status set comes from `Run.active_statuses/0`.
+  Anchored on the run's flow stage, NOT `card.stage_id`, so the engine's own pull-into-lane
+  move — which carries the card from its pull stage INTO the flow's stage while the run is
+  already active — is transparent: its destination IS the work lane, so it never strands (the
+  land-on-completion move runs after the run is terminal, so it has no active run either).
+  Boundary: `Cards` reads `Schemas.Run`/`Schemas.Flow` directly because `Runs` depends on
+  `Cards`, not the reverse; the closed active-status set comes from `Run.active_statuses/0`.
   """
   def stranded_run(%Card{id: card_id}, %Stage{id: target_stage_id}) do
     Repo.one(
@@ -2086,7 +2086,7 @@ defmodule Relay.Cards do
         join: f in Flow,
         on: f.id == r.flow_id,
         where: r.card_id == ^card_id and r.status in ^Run.active_statuses(),
-        where: f.works_in_stage_id != ^target_stage_id,
+        where: f.stage_id != ^target_stage_id,
         select: r
     )
   end
@@ -2216,7 +2216,8 @@ defmodule Relay.Cards do
   The ONE entry point for editing a stage's configuration (RE384) — Board Settings and the
   REST API both call it. Delegates to `Relay.Boards.update_stage/2` (same attrs, atom or
   string keys) and, when the write changed the stage's `type`, re-snaps its resident cards
-  via `snap_cards_in/1`. Returns `Boards.update_stage/2`'s result unchanged. Lives here, not
+  via `snap_cards_in/1`. Returns `Boards.update_stage/2`'s result unchanged — including its
+  `{:error, {:holds_flow, _}}` refusal (RE429). Lives here, not
   in `Relay.Boards`, because `Boards → Cards` would be a boundary cycle.
   """
   def update_stage(%Stage{} = stage, attrs) do

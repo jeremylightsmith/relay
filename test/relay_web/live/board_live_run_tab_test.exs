@@ -255,7 +255,7 @@ defmodule RelayWeb.BoardLiveRunTabTest do
   test "a queued card shows the Run tab with the queued state", ctx do
     flow = Flows.get_flow!(ctx.board, "code")
     {:ok, flow} = Flows.enable_flow(flow)
-    stage = Enum.find(ctx.board.stages, &(&1.id == flow.pulls_from_stage_id))
+    stage = Flows.neighbours(flow).pulls_from
     {:ok, card} = Cards.create_card(stage, %{title: "Waiting"})
     {:ok, card} = Cards.assign_ai(card)
     ref = Cards.ref(ctx.board, card)

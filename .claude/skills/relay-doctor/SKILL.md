@@ -85,7 +85,7 @@ in `lib/relay/flows.ex` — check the two still agree:
 |---|---|---|---|
 | 1 | node's `agent` is in the capabilities inventory | nodes with `agent` | **error** |
 | 2 | agent node's leading `/name` is in the inventory's skills | agent nodes | **error** |
-| 3 | `trigger.pulls_from` / `works_in` / `lands_on` all non-null | per flow | **error** if enabled, **warning** if not |
+| 3 | `trigger.stage` non-null, and `derived.pulls_from` / `derived.lands_on` non-null | per flow | **error** if enabled, **warning** if not |
 | 4 | leading binaries of a `run` exist on PATH *on this machine* | shell + gate nodes | **error** |
 | 5 | a fresh runner advertises capacity in the flow's `isolation` class | per flow | **warning** |
 | 6 | at least one connected runner is **not** `outdated` | board-wide | **warning** |

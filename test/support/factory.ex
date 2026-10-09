@@ -101,13 +101,24 @@ defmodule Relay.Factory do
     card |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
-  # Full-control factory: `board` (when overridden) must be persisted. Trigger stage ids and
-  # `enabled` are set explicitly by the caller.
+  # Full-control factory: `board` (when overridden) must be persisted. A flow belongs to exactly
+  # one stage (RE429): pass `stage:` or `stage_id:`; with neither, a fresh `:work` main stage is
+  # inserted on the flow's board so the NOT NULL / one-flow-per-stage rules hold. `enabled` is
+  # set explicitly by the caller.
   def flow_factory(attrs) do
     {board, attrs} = Map.pop_lazy(attrs, :board, fn -> insert(:board) end)
+    {stage, attrs} = Map.pop(attrs, :stage)
+
+    stage_id =
+      cond do
+        Map.has_key?(attrs, :stage_id) -> attrs.stage_id
+        stage -> stage.id
+        true -> insert(:stage, board: board, type: :work, category: :in_progress).id
+      end
 
     flow = %Schemas.Flow{
       board_id: board.id,
+      stage_id: stage_id,
       key: sequence(:flow_key, &"flow-#{&1}"),
       enabled: false,
       isolation: :shared_clean,
@@ -382,14 +393,14 @@ defmodule Relay.Factory do
   end
 
   @doc """
-  A `:flow` on `stage`'s board that works in `stage` (RE409: a stage is AI-enabled iff a flow
-  works in it). Defaults `enabled: false` so it never feeds the scheduler; `attrs` overrides.
+  A `:flow` on `stage`'s board that belongs to `stage` (RE409/RE429: a stage is AI-enabled iff
+  a flow belongs to it). Defaults `enabled: false` so it never feeds the scheduler; `attrs` overrides.
   """
   def insert_flow_working_in(%Schemas.Stage{} = stage, attrs \\ []) do
     insert(
       :flow,
       Map.merge(
-        %{board: %Schemas.Board{id: stage.board_id}, works_in_stage_id: stage.id, enabled: false},
+        %{board: %Schemas.Board{id: stage.board_id}, stage_id: stage.id, enabled: false},
         Map.new(attrs)
       )
     )

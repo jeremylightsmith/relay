@@ -68,7 +68,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
       board: board,
       code: code
     } do
-      flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+      flow = insert(:flow, board: board, key: "code", stage_id: code.id)
 
       for status <- Schemas.Run.active_statuses() do
         card = insert(:card, stage: code)
@@ -87,7 +87,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
     end
 
     test "a card whose runs are all terminal archives normally", %{conn: conn, board: board, code: code} do
-      flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+      flow = insert(:flow, board: board, key: "code", stage_id: code.id)
 
       for status <- Schemas.Run.terminal_statuses() do
         card = insert(:card, stage: code)
@@ -164,7 +164,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
     end
 
     test "is not guarded by an active run", %{conn: conn, board: board, code: code} do
-      flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+      flow = insert(:flow, board: board, key: "code", stage_id: code.id)
       card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
       insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: hd(Schemas.Run.active_statuses()))
 

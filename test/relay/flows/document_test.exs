@@ -35,7 +35,7 @@ defmodule Relay.Flows.DocumentTest do
       assert doc["version"] == 1
       assert doc["enabled"] == false
       assert doc["isolation"] == "exclusive"
-      assert doc["trigger"] == %{"pulls_from" => "Plan:Done", "works_in" => "Code", "lands_on" => "Review"}
+      assert doc["trigger"] == %{"stage" => "Code"}
       assert is_list(doc["nodes"])
       assert hd(doc["nodes"])["key"] == "branch"
       assert length(doc["nodes"]) == 21
@@ -106,9 +106,9 @@ defmodule Relay.Flows.DocumentTest do
       assert hd(attrs.edges).on == nil
     end
 
-    test "keeps the trigger as stage names and allows nulls" do
+    test "reads a legacy three-key trigger's works_in as the stage" do
       {:ok, attrs} = Document.decode(@minimal)
-      assert attrs.trigger == %{pulls_from: "Next up", works_in: "Spec", lands_on: nil}
+      assert attrs.trigger == %{stage: "Spec"}
     end
 
     test "omits key / enabled / version / trigger when the document omits them" do
@@ -178,6 +178,65 @@ defmodule Relay.Flows.DocumentTest do
 
     test "decode!/1 raises on an invalid document" do
       assert_raise ArgumentError, fn -> Document.decode!(%{}) end
+    end
+  end
+
+  describe "the one-stage trigger (RE429)" do
+    test "26. encode emits {stage: name} and decode reads it back as a fixed point" do
+      doc = encoded(library_board(), "code")
+      assert doc["trigger"] == %{"stage" => "Code"}
+
+      assert {:ok, %{trigger: %{stage: "Code"}}} = Document.decode(doc)
+
+      # Re-encoding the decoded trigger reproduces the same document's trigger.
+      reencoded = Document.encode(%{Flows.get_flow_with_stages(library_board(), "code") | key: "code"})
+      assert reencoded["trigger"] == doc["trigger"]
+      assert Document.decode!(reencoded) == Document.decode!(doc)
+    end
+
+    test "27. legacy triggers read works_in; stage wins; bad keys and values are refused" do
+      legacy = %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"}
+      assert {:ok, %{trigger: %{stage: "Code"}}} = Document.decode(%{@minimal | "trigger" => legacy})
+
+      both = %{"stage" => "Deploy", "works_in" => "Code"}
+      assert {:ok, %{trigger: %{stage: "Deploy"}}} = Document.decode(%{@minimal | "trigger" => both})
+
+      assert {:error, "unknown trigger key: from"} = Document.decode(%{@minimal | "trigger" => %{"from" => "X"}})
+
+      assert {:error, "trigger.stage must be a stage name or null"} =
+               Document.decode(%{@minimal | "trigger" => %{"stage" => 3}})
+
+      assert {:ok, %{trigger: %{stage: nil}}} = Document.decode(%{@minimal | "trigger" => nil})
+    end
+  end
+
+  # RE429: the API ships a read-only `derived` block beside the document; a pull carries it,
+  # so a push must accept it and drop it on the floor.
+  describe "the derived block (RE429)" do
+    test "28. decode accepts a derived block and drops it from the attrs" do
+      doc = Map.put(@minimal, "derived", %{"pulls_from" => "A", "lands_on" => "B"})
+
+      assert {:ok, attrs} = Document.decode(doc)
+      refute Map.has_key?(attrs, :derived)
+      assert attrs == Document.decode!(@minimal)
+    end
+
+    test "29. derived/1 names the flow's worked-out pickup and drop-off stages" do
+      flow = %Flow{
+        pulls_from_stage: %Schemas.Stage{name: "Plan:Done"},
+        lands_on_stage: %Schemas.Stage{name: "Code:Done"}
+      }
+
+      assert Document.derived(flow) == %{"pulls_from" => "Plan:Done", "lands_on" => "Code:Done"}
+    end
+
+    test "30. derived/1 is nil at either end of the board" do
+      assert Document.derived(%Flow{pulls_from_stage: nil, lands_on_stage: nil}) ==
+               %{"pulls_from" => nil, "lands_on" => nil}
+    end
+
+    test "31. encode/1 never emits derived — it stays the canonical document" do
+      refute Map.has_key?(encoded(library_board(), "code"), "derived")
     end
   end
 
@@ -306,9 +365,7 @@ defmodule Relay.Flows.DocumentTest do
         version: 1,
         enabled: false,
         isolation: :shared_clean,
-        pulls_from_stage: nil,
-        works_in_stage: nil,
-        lands_on_stage: nil,
+        stage: nil,
         nodes: [
           %Flow.Node{key: "a", type: :agent, role: :check},
           %Flow.Node{key: "b", type: :agent, role: :fix},
@@ -327,7 +384,9 @@ defmodule Relay.Flows.DocumentTest do
     test "import keeps every authored role, and export → re-import preserves them" do
       board = library_board()
 
-      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "roles", @roles_doc)
+      # Deploy is the default board's one flow-free work stage (RE429: one flow per stage).
+      roles_doc = Map.put(@roles_doc, "trigger", %{"stage" => "Deploy"})
+      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "roles", roles_doc)
 
       exported = encoded(board, "roles")
       assert Enum.map(exported["nodes"], &Map.get(&1, "role")) == ["do", "check", "fix", nil]
@@ -370,7 +429,7 @@ defmodule Relay.Flows.DocumentTest do
 
     test "a legacy document, saved, encodes back canonical" do
       board = library_board()
-      doc = Map.put(@minimal, "nodes", [@legacy_node])
+      doc = @minimal |> Map.put("nodes", [@legacy_node]) |> Map.put("trigger", %{"stage" => "Deploy"})
 
       assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "tiny", doc)
 

@@ -11,7 +11,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
     assert length(code.nodes) == 21
     assert length(code.edges) == 44
     assert code.isolation == :exclusive
-    assert code.trigger == %{pulls_from: "Plan:Done", works_in: "Code", lands_on: "Review"}
+    assert code.trigger == %{stage: "Code"}
 
     # `@external_resource` is accumulated, so it appears three times in the attribute list —
     # Keyword.get_values/2, not `kw[:external_resource]`, which would return only the first.
@@ -23,6 +23,20 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     assert length(resources) == 3
     assert Enum.any?(resources, &String.ends_with?(to_string(&1), "docs/designs/flows/code.json"))
+  end
+
+  # RE429: the library files carry the one-stage trigger, not the legacy three-key one.
+  test "the library triggers name one stage each, spelled {\"stage\": name} in every file" do
+    assert Map.new(DefaultLibrary.all(), &{&1.key, &1.trigger}) == %{
+             "spec" => %{stage: "Spec"},
+             "plan" => %{stage: "Plan"},
+             "code" => %{stage: "Code"}
+           }
+
+    for key <- ~w(spec plan code) do
+      raw = "../../../docs/designs/flows/#{key}.json" |> Path.expand(__DIR__) |> File.read!() |> Jason.decode!()
+      assert Map.keys(raw["trigger"]) == ["stage"], "#{key}.json trigger: #{inspect(raw["trigger"])}"
+    end
   end
 
   test "decode is dense, so every node carries every field (the customized?/1 comparison depends on it)" do
@@ -111,7 +125,7 @@ defmodule Relay.Flows.DefaultLibraryTest do
   defp library_struct(key) do
     attrs = Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
-    %Schemas.Flow{board_id: 1}
+    %Schemas.Flow{board_id: 1, stage_id: 1}
     |> Schemas.Flow.changeset(attrs)
     |> Ecto.Changeset.apply_action!(:build)
   end

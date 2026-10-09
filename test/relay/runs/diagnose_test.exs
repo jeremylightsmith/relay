@@ -22,14 +22,14 @@ defmodule Relay.Runs.DiagnoseTest do
   end
 
   test "a flow with no connected runner is no_runner", %{board: board, queue: queue, works: works} do
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
     card = insert(:card, stage: queue, status: :ready)
 
     assert %{verdict: :no_runner, evidence: %{flow_key: "code"}} = Runs.diagnose(board, card)
   end
 
   test "an outdated-only roster surfaces :runner_outdated through diagnose", %{board: board, queue: queue, works: works} do
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
     insert(:runner, board: board, name: "old", version: 0)
     card = insert(:card, stage: queue, status: :ready)
 
@@ -219,8 +219,7 @@ defmodule Relay.Runs.DiagnoseTest do
   end
 
   test "a refused parked run is :resume_refused and carries the RE297 evidence", %{board: board, works: works} do
-    queue = insert(:stage, board: board, name: "Plan:Done2", position: 3, type: :queue)
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
 
     card = insert(:card, stage: works, status: :working)
     run = insert(:run, card: card, status: :parked, parked_reason: :runner_gone, current_node: nil)
@@ -390,7 +389,7 @@ defmodule Relay.Runs.DiagnoseTest do
 
   test "a runner registered on another board contributes no capacity to this board's diagnosis (RE338)",
        %{board: board, queue: queue, works: works} do
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
     card = insert(:card, stage: queue, status: :ready)
     other = insert(:board)
     version = Runs.min_runner_version()
@@ -417,7 +416,7 @@ defmodule Relay.Runs.DiagnoseTest do
     # The planner says "would dispatch on the next tick", but only a running scheduler ticks. With
     # none registered for the board, that answer hid an hours-long stall on every board.
     setup %{board: board, queue: queue, works: works} do
-      insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+      insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
       card = insert(:card, stage: queue, status: :ready)
 
       {:ok, runner} =

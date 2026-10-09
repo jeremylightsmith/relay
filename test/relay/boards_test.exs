@@ -280,19 +280,19 @@ defmodule Relay.BoardsTest do
       refute Enum.any?([code, plan, spec], & &1.enabled)
 
       for flow <- [code, plan, spec],
-          trigger_id <- [flow.pulls_from_stage_id, flow.works_in_stage_id, flow.lands_on_stage_id] do
-        assert trigger_id in stage_ids
+          stage_id <- [flow.pulls_from_stage.id, flow.stage_id, flow.lands_on_stage.id] do
+        assert stage_id in stage_ids
       end
 
-      assert spec.pulls_from_stage_id == stage_id.("Next up")
-      assert spec.works_in_stage_id == stage_id.("Spec")
-      assert spec.lands_on_stage_id == stage_id.("Spec:Review")
-      assert plan.pulls_from_stage_id == stage_id.("Spec:Done")
-      assert plan.works_in_stage_id == stage_id.("Plan")
-      assert plan.lands_on_stage_id == stage_id.("Plan:Done")
-      assert code.pulls_from_stage_id == stage_id.("Plan:Done")
-      assert code.works_in_stage_id == stage_id.("Code")
-      assert code.lands_on_stage_id == stage_id.("Review")
+      assert spec.pulls_from_stage.id == stage_id.("Next up")
+      assert spec.stage_id == stage_id.("Spec")
+      assert spec.lands_on_stage.id == stage_id.("Spec:Review")
+      assert plan.pulls_from_stage.id == stage_id.("Spec:Done")
+      assert plan.stage_id == stage_id.("Plan")
+      assert plan.lands_on_stage.id == stage_id.("Plan:Done")
+      assert code.pulls_from_stage.id == stage_id.("Plan:Done")
+      assert code.stage_id == stage_id.("Code")
+      assert code.lands_on_stage.id == stage_id.("Review")
     end
   end
 

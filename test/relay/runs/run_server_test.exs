@@ -54,16 +54,10 @@ defmodule Relay.Runs.RunServerTest do
     board = insert(:board)
     pulls = insert(:stage, board: board, name: "Plan:Done", position: 1)
     works = insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 2)
-    lands = insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 3)
+    # Pickup / drop-off come from board order: Plan:Done before Code, Review after it.
+    insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 3)
 
-    attrs =
-      Map.merge(code_shaped_flow_attrs(), %{
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id
-      })
-
-    {:ok, flow} = Relay.Flows.create_flow(board, attrs)
+    {:ok, flow} = Relay.Flows.create_flow(board, Map.put(code_shaped_flow_attrs(), :stage_id, works.id))
     {:ok, flow} = Relay.Flows.enable_flow(flow)
 
     card = insert(:card, stage: pulls, plan: "### Task 1: Alpha\n\n### Task 2: Beta\n\n### Task 3: Gamma\n")

@@ -20,17 +20,15 @@ defmodule RelayWeb.Api.RestartStalledTest do
   end
 
   defp park_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+    # A stage holds at most one flow (RE429): clear the seeded disabled `spec` flow off Spec.
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "park-flow",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: review.id,
+        stage_id: spec.id,
         nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}"}],
         edges: [
           %{from: "start", to: "brainstorm"},

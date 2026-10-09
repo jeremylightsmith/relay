@@ -81,6 +81,16 @@ the MMF design specs).
   `role` on any node (`Schemas.Flow.Node.roles/0`) and an authored role always wins; an unset one
   is guessed by `Schemas.Flow.node_roles/1` — every inbound edge `on: failed` → Fix, a `gate` →
   Check, otherwise Do. Display-only: the engine and the runner never branch on it.
+- **Flow trigger** — the one main stage a flow works in (`flows.stage_id`; a work-type stage,
+  `Schemas.Stage.work_types/0`, holding at most one flow — RE429). A flow document spells it
+  `"trigger": {"stage": "<name>"}`. **The pull-from / land-on rule:** where the flow *pulls from*
+  (pickup) and *lands on* (drop-off) are never stored — they are worked out from board order by
+  `Relay.Flows.neighbours/2`: it pulls from the stage immediately before its own, and lands on
+  the stage immediately after it (its own first substage when it has one, else the next main
+  stage); either is none at the board's ends. Drop-off is resolved when the run lands, so
+  reordering stages moves both. The API shows them read-only as `"derived": {"pulls_from",
+  "lands_on"}` beside the document; a legacy `pulls_from` / `works_in` / `lands_on` trigger is
+  still accepted, reading only `works_in`.
 - **Review gate** — the Approve / Request-changes decision shown for a card whose stage is
   `:review`-type (main or substage). **Approve advances the card to the next stage or substage;**
   **Request changes** sends it back to a derived destination.

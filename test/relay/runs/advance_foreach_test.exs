@@ -22,19 +22,17 @@ defmodule Relay.Runs.AdvanceForeachTest do
   # a foreach flow refuses to start at all without sub_tasks (failures.md B1).
   defp foreach_flow(board, opts \\ []) do
     exhausted? = Keyword.get(opts, :exhausted_edge, true)
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
     works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
 
     exhausted = if exhausted?, do: [%{from: "review", to: "wrap", on: :succeeded, when: :foreach_exhausted}], else: []
+
+    :ok = clear_spec_flow!(board)
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "advance-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [
           %{key: "seed", type: :shell, run: "true"},
           %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"},
@@ -198,23 +196,31 @@ defmodule Relay.Runs.AdvanceForeachTest do
     refute Runs.advance_foreach_available?(advanced)
   end
 
-  # A flow with no foreach node at all, for the :no_foreach refusal.
+  # A flow with no foreach node at all, for the :no_foreach refusal. It is never run, only
+  # repointed to, so it sits on Deploy — the default board's one flow-free work stage.
   defp no_foreach_flow(board) do
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
-    works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
+    works = Enum.find(board.stages, &(&1.name == "Deploy"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "plain-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [%{key: "impl", type: :agent, run: "impl {ref}"}],
         edges: [%{from: "start", to: "impl"}, %{from: "impl", to: "done", on: :succeeded}]
       })
 
     flow
+  end
+
+  # A stage holds exactly one flow: take the board's seeded "spec" flow off Spec so a test
+  # flow can work there (it then pulls from "Next up" and lands on Spec:Review, by board order).
+  defp clear_spec_flow!(board) do
+    if spec = Relay.Flows.get_flow(board, "spec") do
+      {:ok, spec} = Relay.Flows.disable_flow(spec)
+      {:ok, _} = Relay.Flows.delete_flow(spec)
+    end
+
+    :ok
   end
 end

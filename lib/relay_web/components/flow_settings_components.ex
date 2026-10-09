@@ -29,7 +29,15 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :preflight, :any, default: nil, doc: "Runs.preflight_flow/1's snapshot for the open enable confirm, or nil"
   attr :slug, :string, required: true, doc: "the board slug, for the Edit item's editor link"
-  attr :stages, :list, required: true, doc: "the board's stages, unfiltered, for the create form's pickers"
+
+  attr :stages, :list,
+    required: true,
+    doc: "the stages a new flow may take (`Relay.Flows.assignable_stages/2`), for the create form's Stage select"
+
+  attr :board_stages, :list,
+    required: true,
+    doc: "the board's stages in board order, for the create form's derived pickup/drop-off preview"
+
   attr :read_only?, :boolean, required: true, doc: "archived board — hides the create affordance"
 
   def flows_pane(assigns) do
@@ -77,7 +85,12 @@ defmodule RelayWeb.FlowSettingsComponents do
         </div>
       </div>
 
-      <.new_flow_panel :if={new_form(@panel)} form={new_form(@panel)} stages={@stages} />
+      <.new_flow_panel
+        :if={new_form(@panel)}
+        form={new_form(@panel)}
+        stages={@stages}
+        board_stages={@board_stages}
+      />
 
       <div
         :if={@rows == []}
@@ -111,8 +124,11 @@ defmodule RelayWeb.FlowSettingsComponents do
 
   attr :form, :any, required: true
   attr :stages, :list, required: true
+  attr :board_stages, :list, required: true
 
   defp new_flow_panel(assigns) do
+    assigns = assign(assigns, :derived, derived_neighbours(assigns.form[:stage_id].value, assigns.board_stages))
+
     ~H"""
     <div
       id="new-flow-panel"
@@ -125,8 +141,9 @@ defmodule RelayWeb.FlowSettingsComponents do
         (see `delete_style/1` in story_map_components.ex). Rule B needed `primary` at 55% to reach
         L 0.44, landing at C 0.09 — a blue statement this helper copy never made. --%>
       <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 12px 0;">
-        Pick a key and the three stages this flow triggers on. It is created switched off with
-        an empty graph — add its steps in the editor, then turn it on here.
+        Pick a key and the stage this flow works in — it picks cards up from the stage before
+        it and lands them on the stage after it. It is created switched off with an empty graph
+        — add its steps in the editor, then turn it on here.
       </p>
       <.form
         for={@form}
@@ -143,29 +160,21 @@ defmodule RelayWeb.FlowSettingsComponents do
           placeholder="deploy-gate"
         />
         <.input
-          field={@form[:pulls_from_stage_id]}
+          field={@form[:stage_id]}
           type="select"
-          id="new-flow-pulls-from"
-          label="PULLS FROM"
+          id="new-flow-stage"
+          label="STAGE"
           prompt="—"
           options={stage_options(@stages)}
         />
-        <.input
-          field={@form[:works_in_stage_id]}
-          type="select"
-          id="new-flow-works-in"
-          label="WORKS IN"
-          prompt="—"
-          options={stage_options(@stages)}
-        />
-        <.input
-          field={@form[:lands_on_stage_id]}
-          type="select"
-          id="new-flow-lands-on"
-          label="LANDS ON SUCCESS"
-          prompt="—"
-          options={stage_options(@stages)}
-        />
+        <p
+          :if={@derived}
+          id="new-flow-derived"
+          class="font-mono"
+          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);margin:2px 0 6px 0;"
+        >
+          pulls from {stage_label(@derived.pulls_from)} → lands on {stage_label(@derived.lands_on)}
+        </p>
         <.input
           field={@form[:isolation]}
           type="select"
@@ -198,6 +207,17 @@ defmodule RelayWeb.FlowSettingsComponents do
   end
 
   defp stage_options(stages), do: Enum.map(stages, &{&1.name, &1.id})
+
+  # The form's stage value arrives as a string (params) or "" (untouched); nil = no preview.
+  defp derived_neighbours(value, board_stages) do
+    case Integer.parse(to_string(value || "")) do
+      {stage_id, ""} -> Flows.neighbours(stage_id, board_stages)
+      _ -> nil
+    end
+  end
+
+  defp stage_label(nil), do: "—"
+  defp stage_label(%{name: name}), do: name
 
   attr :rows, :list, required: true
 
@@ -310,7 +330,7 @@ defmodule RelayWeb.FlowSettingsComponents do
                 <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
                   →
                 </span>
-                <.stage_chip stage={row.flow.works_in_stage} style={chip_style(:works)} />
+                <.stage_chip stage={row.flow.stage} style={chip_style(:works)} />
                 <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;">
                   →
                 </span>
@@ -364,19 +384,6 @@ defmodule RelayWeb.FlowSettingsComponents do
                       >
                         ✎ Edit flow
                       </.link>
-                    </li>
-                    <li>
-                      <%!-- RE394 — `text-left` keeps the stacked faces anchored left in the menu row. --%>
-                      <.button
-                        type="button"
-                        id={"flow-#{row.flow.id}-duplicate"}
-                        phx-click="flow_duplicate"
-                        phx-value-flow-id={row.flow.id}
-                        class="text-left"
-                        pending="Duplicating…"
-                      >
-                        ⧉ Duplicate
-                      </.button>
                     </li>
                     <li :if={row.resettable?}>
                       <button
@@ -645,15 +652,14 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp confirm_pending(%Flow{enabled: false}), do: "Turning on…"
   defp confirm_pending(%Flow{}), do: "Turning off…"
 
-  # The confirm is unreachable when the pulls-from trigger is nil (the toggle
+  # The confirm is unreachable when there is nothing to pull from (the toggle
   # is disabled), but stay total for arbitrary data.
   defp pulls_name(%Flow{pulls_from_stage: %{name: name}}), do: name
   defp pulls_name(%Flow{}), do: "its pulls-from stage"
 
-  defp trigger_missing?(%Flow{} = flow) do
-    is_nil(flow.pulls_from_stage_id) or is_nil(flow.works_in_stage_id) or
-      is_nil(flow.lands_on_stage_id)
-  end
+  # A flow always has its stage (RE429); what it can lack is a derived neighbour — on the
+  # board's first or last stage — the same gap `Relay.Runs.Preflight` reports as `:missing`.
+  defp trigger_missing?(%Flow{} = flow), do: is_nil(flow.pulls_from_stage) or is_nil(flow.lands_on_stage)
 
   defp flow_names(rows) do
     case Enum.map(rows, &flow_name(&1.flow)) do

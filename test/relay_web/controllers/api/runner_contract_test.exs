@@ -221,6 +221,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # set is recorded from the real route, never typed.
     [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
 
+    # RE429 — `./relay flow` prints `pulls_from → stage → lands_on` from a flow document's
+    # one-key trigger and its read-only `derived` block; both key sets come from the real route.
+    flow_doc = exclusive.conn |> get(~p"/api/flows/contract") |> json_response(200) |> Map.fetch!("data")
+
     # RE427 — `./relay card` prints each note image as an `[image]` line and `relay images --pull`
     # downloads it; both read these keys off a real comment entry, so record them from the route.
     {:ok, images_card} = Relay.Cards.create_card(exclusive.next_up, %{title: "Note images card"})
@@ -298,6 +302,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "stage_categories" => stringify(Schemas.Stage.categories())
       },
       "stages" => %{"stage_keys" => stage_object |> Map.keys() |> Enum.sort()},
+      "flows" => %{
+        "trigger_keys" => flow_doc["trigger"] |> Map.keys() |> Enum.sort(),
+        "derived_keys" => flow_doc["derived"] |> Map.keys() |> Enum.sort()
+      },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
         "shared_clean_agent" => normalize(shared_clean_agent),
@@ -335,6 +343,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert document["note_images"]["image"] == ["download_path", "filename", "url"]
     assert "images" in document["note_images"]["comment_entry"]
     assert document["version"] == 10
+    assert document["flows"] == %{"trigger_keys" => ["stage"], "derived_keys" => ["lands_on", "pulls_from"]}
 
     assert_matches_fixture!(document)
   end
@@ -363,8 +372,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
     %{key: "work", type: :shell, run: "mix precommit"}
   end
 
-  # One board per flow. Flows are unique-per-`pulls_from_stage_id` only while enabled, and the
-  # board seeds its own default flows — a second board is cheaper and more deterministic than
+  # One board per flow. A stage holds at most one flow (RE429) and the board seeds its own
+  # (disabled) default flows, so the seeded `spec` flow is removed to free Spec — whose pickup
+  # is Next up — for the contract flow. A second board is cheaper and more deterministic than
   # hunting for a free stage on the first.
   defp board_with_flow(user, name, key, isolation, node) do
     {:ok, board} = Relay.Boards.create_board(user, %{name: name, key: key})
@@ -373,15 +383,13 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "contract",
         isolation: isolation,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: spec.id,
         nodes: [node],
         edges: [
           %{from: "start", to: "work"},

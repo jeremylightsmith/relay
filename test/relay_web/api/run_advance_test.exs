@@ -20,17 +20,15 @@ defmodule RelayWeb.Api.RunAdvanceTest do
   end
 
   defp foreach_flow(board) do
-    pulls = Enum.find(board.stages, &(&1.name == "Next up"))
+    # A stage holds at most one flow (RE429): clear the seeded disabled `spec` flow off Spec.
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
     works = Enum.find(board.stages, &(&1.name == "Spec"))
-    lands = Enum.find(board.stages, &(&1.name == "Plan"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "advance-api-#{System.unique_integer([:positive])}",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: works.id,
         nodes: [
           %{key: "impl", type: :agent, run: "impl {ref}", expects_commits: true, foreach: "card.tasks"},
           %{key: "review", type: :agent, run: "review {ref}"},

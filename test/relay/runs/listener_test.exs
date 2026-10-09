@@ -44,19 +44,17 @@ defmodule Relay.Runs.ListenerTest do
   # test below is about the generic "a :failed run doesn't get auto re-entered" listener
   # behavior, not that library flow specifically, so it uses a custom flow shaped like the
   # pre-RLY-194 "spec" flow: a single "brainstorm" node with no :failed edge at all, so two
-  # failures still end the run :failed. Same trigger stages as "spec" so card events route to it.
+  # failures still end the run :failed. It replaces "spec" on the Spec stage so card events route to it.
   defp dead_end_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
+
+    :ok = clear_spec_flow!(board)
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "dead-end",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: review.id,
+        stage_id: spec.id,
         nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
         edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
       })
@@ -185,8 +183,8 @@ defmodule Relay.Runs.ListenerTest do
 
   test "no re-entry when the card's latest run failed — a human must intervene",
        %{user: user, board: board, flow: spec_flow, card: card} do
-    # Swap the enabled "spec" flow for the dead-end shape: only one flow may be enabled
-    # per trigger stage, so the seeded "spec" must be disabled first.
+    # Swap the enabled "spec" flow for the dead-end shape: a stage holds one flow, so the
+    # seeded "spec" is disabled here and dead_end_flow/1 clears it off Spec.
     {:ok, _} = Relay.Flows.disable_flow(spec_flow)
     flow = dead_end_flow(board)
 
@@ -424,5 +422,16 @@ defmodule Relay.Runs.ListenerTest do
 
     assert_receive {:run_started, %Run{card_id: card_id, context: %{"changes_requested" => "redo it"}}}
     assert card_id == live.id
+  end
+
+  # A stage holds exactly one flow: take the board's seeded "spec" flow off Spec so a test
+  # flow can work there (it then pulls from "Next up" and lands on Spec:Review, by board order).
+  defp clear_spec_flow!(board) do
+    if spec = Relay.Flows.get_flow(board, "spec") do
+      {:ok, spec} = Relay.Flows.disable_flow(spec)
+      {:ok, _} = Relay.Flows.delete_flow(spec)
+    end
+
+    :ok
   end
 end

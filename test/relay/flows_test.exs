@@ -5,8 +5,8 @@ defmodule Relay.FlowsTest do
   alias Relay.Repo
   alias Schemas.Flow
 
-  # Stages a flow trigger can point at. Top-level stages are enough here —
-  # sub-lane trigger resolution is covered in flows_seed_test.exs (Task 2).
+  # A board with a planning stage a flow can sit on (RE429: a flow belongs to one main
+  # work/planning stage); its neighbours are worked out from board order.
   defp board_with_stages do
     board = insert(:board)
     pulls = insert(:stage, board: board, name: "Next up", position: 1)
@@ -33,25 +33,25 @@ defmodule Relay.FlowsTest do
     for {^field, {msg, _opts}} <- changeset.errors, do: msg
   end
 
-  defp triggers(ctx) do
-    %{pulls_from_stage_id: ctx.pulls.id, works_in_stage_id: ctx.works.id, lands_on_stage_id: ctx.lands.id}
+  defp triggers(ctx), do: %{stage_id: ctx.works.id}
+
+  # A stage holds one flow (RE429), so a test that only cares about the graph gets a fresh main
+  # work stage of its own unless it names one.
+  defp create_flow(board, attrs) do
+    Flows.create_flow(
+      board,
+      Map.put_new_lazy(attrs, :stage_id, fn -> insert(:stage, board: board, type: :work, category: :in_progress).id end)
+    )
   end
 
   describe "create_flow/2 and reads" do
     test "creates a valid flow, disabled, and reads it back board-scoped" do
-      %{board: board, pulls: pulls, works: works, lands: lands} = board_with_stages()
+      %{board: board, works: works} = board_with_stages()
 
-      assert {:ok, %Flow{} = flow} =
-               Flows.create_flow(
-                 board,
-                 valid_attrs(%{
-                   pulls_from_stage_id: pulls.id,
-                   works_in_stage_id: works.id,
-                   lands_on_stage_id: lands.id
-                 })
-               )
+      assert {:ok, %Flow{} = flow} = Flows.create_flow(board, valid_attrs(%{stage_id: works.id}))
 
       assert flow.board_id == board.id
+      assert flow.stage_id == works.id
       assert flow.enabled == false
       assert [%Flow{key: "custom"}] = Flows.list_flows(board)
       assert %Flow{key: "custom"} = Flows.get_flow(board, "custom")
@@ -59,28 +59,30 @@ defmodule Relay.FlowsTest do
       assert_raise Ecto.NoResultsError, fn -> Flows.get_flow!(board, "missing") end
     end
 
-    test "list_flows/1 orders by key and preloads trigger stages" do
-      %{board: board, pulls: pulls} = board_with_stages()
-      {:ok, _} = Flows.create_flow(board, valid_attrs(%{key: "zeta"}))
-      {:ok, _} = Flows.create_flow(board, valid_attrs(%{key: "alpha", pulls_from_stage_id: pulls.id}))
+    test "list_flows/1 orders by key, preloads the stage and derives its neighbours" do
+      %{board: board, pulls: pulls, works: works, lands: lands} = board_with_stages()
+      {:ok, _} = create_flow(board, valid_attrs(%{key: "zeta"}))
+      {:ok, _} = create_flow(board, valid_attrs(%{key: "alpha", stage_id: works.id}))
 
       assert [%Flow{key: "alpha"} = alpha, %Flow{key: "zeta"}] = Flows.list_flows(board)
+      assert alpha.stage.id == works.id
       assert alpha.pulls_from_stage.id == pulls.id
+      assert alpha.lands_on_stage.id == lands.id
     end
 
     test "key is unique per board but shared across boards" do
       %{board: board} = board_with_stages()
-      {:ok, _} = Flows.create_flow(board, valid_attrs())
+      {:ok, _} = create_flow(board, valid_attrs())
 
-      assert {:error, changeset} = Flows.create_flow(board, valid_attrs())
+      assert {:error, changeset} = create_flow(board, valid_attrs())
       assert %{key: [_]} = errors_on(changeset)
 
-      assert {:ok, _} = Flows.create_flow(insert(:board), valid_attrs())
+      assert {:ok, _} = create_flow(insert(:board), valid_attrs())
     end
 
     test "update_flow/2 revalidates the graph and replaces embeds" do
       %{board: board} = board_with_stages()
-      {:ok, flow} = Flows.create_flow(board, valid_attrs())
+      {:ok, flow} = create_flow(board, valid_attrs())
 
       assert {:error, changeset} = Flows.update_flow(flow, %{edges: [%{from: "start", to: "ghost"}]})
       assert ~s(edge to "ghost" does not name a node) in messages_on(changeset, :edges)
@@ -106,7 +108,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert {:ok, flow} = create_flow(board, attrs)
       assert %{foreach: "card.tasks"} = Enum.find(flow.nodes, &(&1.key == "work"))
       assert %{when: :foreach_remaining} = Enum.find(flow.edges, &(&1.to == "work" and &1.from == "work"))
     end
@@ -128,7 +130,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert {:ok, flow} = create_flow(board, attrs)
       assert %{foreach: "card.tasks", reads: [:tasks], run: "a {task_id}"} = Enum.find(flow.nodes, &(&1.key == "work"))
     end
 
@@ -145,7 +147,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert "only one edge may leave a node per outcome" in messages_on(changeset, :edges)
     end
 
@@ -161,7 +163,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert "a flow with guarded edges must have exactly one foreach node" in messages_on(changeset, :edges)
     end
 
@@ -170,7 +172,7 @@ defmodule Relay.FlowsTest do
 
       attrs = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", foreach: "card.comments"}]})
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert %{nodes: [%{foreach: [~s(must be "card.tasks")]}]} = errors_on(changeset)
     end
 
@@ -178,7 +180,7 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       ok = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
-      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert {:ok, flow} = create_flow(board, ok)
       assert %{agent: "plan-implementer"} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       bad =
@@ -187,7 +189,7 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :gate, run: "true", agent: "plan-implementer"}]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert {:error, changeset} = create_flow(board, bad)
       assert %{nodes: [%{agent: ["is only valid on an agent node"]}]} = errors_on(changeset)
     end
 
@@ -195,11 +197,11 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       ok = valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", expects_commits: true}]})
-      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert {:ok, flow} = create_flow(board, ok)
       assert %{expects_commits: true} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       default = valid_attrs(%{key: "custom-ec", nodes: [%{key: "work", type: :agent, run: "a"}]})
-      assert {:ok, flow} = Flows.create_flow(board, default)
+      assert {:ok, flow} = create_flow(board, default)
       assert %{expects_commits: false} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       bad =
@@ -208,7 +210,7 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :gate, run: "true", expects_commits: true}]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert {:error, changeset} = create_flow(board, bad)
       assert %{nodes: [%{expects_commits: ["is only valid on an agent node"]}]} = errors_on(changeset)
     end
 
@@ -220,11 +222,11 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :agent, run: "a", reads: [:spec], writes: [:plan]}]
         })
 
-      assert {:ok, flow} = Flows.create_flow(board, ok)
+      assert {:ok, flow} = create_flow(board, ok)
       assert %{reads: [:spec], writes: [:plan]} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       default = valid_attrs(%{key: "custom-c0", nodes: [%{key: "work", type: :agent, run: "a"}]})
-      assert {:ok, flow} = Flows.create_flow(board, default)
+      assert {:ok, flow} = create_flow(board, default)
       assert %{reads: [], writes: []} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       # NOT agent-only: the Code flow's `branch` node is a shell node that writes `branch`.
@@ -234,7 +236,7 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :shell, run: "true", writes: [:branch]}]
         })
 
-      assert {:ok, flow} = Flows.create_flow(board, shell)
+      assert {:ok, flow} = create_flow(board, shell)
       assert %{writes: [:branch]} = Enum.find(flow.nodes, &(&1.key == "work"))
 
       bad =
@@ -243,12 +245,14 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :agent, run: "a", writes: [:nonsense_field]}]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, bad)
+      assert {:error, changeset} = create_flow(board, bad)
       assert %{nodes: [%{writes: ["is invalid"]}]} = errors_on(changeset)
     end
   end
 
-  describe "duplicate_flow/1 and save_definition/2 round-trip foreach/when (regression)" do
+  describe "copy_flow/2 and save_definition/2 round-trip foreach/when (regression)" do
+    defp free_stage(board), do: insert(:stage, board: board, type: :work, category: :in_progress)
+
     defp foreach_attrs do
       valid_attrs(%{
         nodes: [
@@ -264,11 +268,11 @@ defmodule Relay.FlowsTest do
       })
     end
 
-    test "duplicate_flow/1 preserves foreach and when instead of stripping them" do
+    test "copy_flow/2 preserves foreach and when instead of stripping them" do
       %{board: board} = board_with_stages()
-      {:ok, original} = Flows.create_flow(board, foreach_attrs())
+      {:ok, original} = create_flow(board, foreach_attrs())
 
-      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert {:ok, copy} = Flows.copy_flow(original, free_stage(board))
       assert %{foreach: "card.tasks"} = Enum.find(copy.nodes, &(&1.key == "work"))
       assert %{when: :foreach_remaining} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "work"))
       assert %{when: :foreach_exhausted} = Enum.find(copy.edges, &(&1.from == "work" and &1.to == "after"))
@@ -276,7 +280,7 @@ defmodule Relay.FlowsTest do
 
     test "save_definition/2 preserves foreach and when in both the flow and its snapshot" do
       %{board: board} = board_with_stages()
-      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+      {:ok, flow} = create_flow(board, foreach_attrs())
 
       assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
       assert %{foreach: "card.tasks"} = Enum.find(updated.nodes, &(&1.key == "work"))
@@ -288,7 +292,7 @@ defmodule Relay.FlowsTest do
 
     test "save_definition/2 flags a foreach-only change as a definition change (bumps version)" do
       %{board: board} = board_with_stages()
-      {:ok, flow} = Flows.create_flow(board, foreach_attrs())
+      {:ok, flow} = create_flow(board, foreach_attrs())
 
       unguarded_attrs =
         foreach_attrs()
@@ -308,17 +312,17 @@ defmodule Relay.FlowsTest do
       valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "a", agent: "plan-implementer"}]})
     end
 
-    test "duplicate_flow/1 preserves agent instead of stripping it" do
+    test "copy_flow/2 preserves agent instead of stripping it" do
       %{board: board} = board_with_stages()
-      {:ok, original} = Flows.create_flow(board, agent_attrs())
+      {:ok, original} = create_flow(board, agent_attrs())
 
-      assert {:ok, copy} = Flows.duplicate_flow(original)
+      assert {:ok, copy} = Flows.copy_flow(original, free_stage(board))
       assert %{agent: "plan-implementer"} = Enum.find(copy.nodes, &(&1.key == "work"))
     end
 
     test "save_definition/2 preserves agent in both the flow and its snapshot" do
       %{board: board} = board_with_stages()
-      {:ok, flow} = Flows.create_flow(board, agent_attrs())
+      {:ok, flow} = create_flow(board, agent_attrs())
 
       assert {:ok, updated} = Flows.save_definition(flow, %{isolation: :exclusive})
       assert %{agent: "plan-implementer"} = Enum.find(updated.nodes, &(&1.key == "work"))
@@ -333,7 +337,7 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       assert {:error, changeset} =
-               Flows.create_flow(board, valid_attrs(%{nodes: [%{key: "work", type: "teleport", run: "x"}]}))
+               create_flow(board, valid_attrs(%{nodes: [%{key: "work", type: "teleport", run: "x"}]}))
 
       assert [%{type: ["is invalid"]}] = errors_on(changeset).nodes
     end
@@ -344,7 +348,7 @@ defmodule Relay.FlowsTest do
       attrs =
         valid_attrs(%{edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: "exploded"}]})
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert [%{}, %{on: ["is invalid"]}] = errors_on(changeset).edges
     end
 
@@ -356,7 +360,7 @@ defmodule Relay.FlowsTest do
           edges: [%{from: "start", to: "work"}, %{from: "work", to: "missing", on: :succeeded}]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert ~s(edge to "missing" does not name a node) in messages_on(changeset, :edges)
     end
 
@@ -366,13 +370,13 @@ defmodule Relay.FlowsTest do
       attrs =
         valid_attrs(%{edges: [%{from: "start", to: "work"}, %{from: "done", to: "work", on: :succeeded}]})
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert ~s(edge from "done" does not name a node) in messages_on(changeset, :edges)
 
       attrs =
         valid_attrs(%{edges: [%{from: "start", to: "work"}, %{from: "work", to: "start", on: :succeeded}]})
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert ~s(edge to "start" does not name a node) in messages_on(changeset, :edges)
     end
 
@@ -389,7 +393,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:ok, _flow} = Flows.create_flow(board, ok)
+      assert {:ok, _flow} = create_flow(board, ok)
 
       bad_from =
         valid_attrs(%{
@@ -397,7 +401,7 @@ defmodule Relay.FlowsTest do
           edges: [%{from: "start", to: "work"}, %{from: "needs_input", to: "work", on: :succeeded}]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, bad_from)
+      assert {:error, changeset} = create_flow(board, bad_from)
       assert ~s(edge from "needs_input" does not name a node) in messages_on(changeset, :edges)
     end
 
@@ -405,7 +409,7 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       assert {:error, changeset} =
-               Flows.create_flow(
+               create_flow(
                  board,
                  valid_attrs(%{
                    nodes: [%{key: "needs_input", type: :agent, run: "x"}],
@@ -420,7 +424,7 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       assert {:error, changeset} =
-               Flows.create_flow(
+               create_flow(
                  board,
                  valid_attrs(%{
                    nodes: [%{key: "start", type: :agent, run: "x"}],
@@ -431,7 +435,7 @@ defmodule Relay.FlowsTest do
       assert [%{key: [_]}] = errors_on(changeset).nodes
 
       assert {:error, changeset} =
-               Flows.create_flow(
+               create_flow(
                  board,
                  valid_attrs(%{
                    nodes: [%{key: "work", type: :agent, run: "a"}, %{key: "work", type: :shell, run: "b"}]
@@ -445,12 +449,12 @@ defmodule Relay.FlowsTest do
       %{board: board} = board_with_stages()
 
       {:error, changeset} =
-        Flows.create_flow(board, valid_attrs(%{edges: [%{from: "work", to: "done", on: :succeeded}]}))
+        create_flow(board, valid_attrs(%{edges: [%{from: "work", to: "done", on: :succeeded}]}))
 
       assert "exactly one edge must leave start" in messages_on(changeset, :edges)
 
       {:error, changeset} =
-        Flows.create_flow(
+        create_flow(
           board,
           valid_attrs(%{
             edges: [%{from: "start", to: "work", on: :succeeded}, %{from: "work", to: "done", on: :succeeded}]
@@ -460,7 +464,7 @@ defmodule Relay.FlowsTest do
       assert "the start edge cannot carry an outcome" in messages_on(changeset, :edges)
 
       {:error, changeset} =
-        Flows.create_flow(
+        create_flow(
           board,
           valid_attrs(%{edges: [%{from: "start", to: "work"}, %{from: "work", to: "done"}]})
         )
@@ -481,7 +485,7 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:error, changeset} = Flows.create_flow(board, attrs)
+      assert {:error, changeset} = create_flow(board, attrs)
       assert "only one edge may leave a node per outcome" in messages_on(changeset, :edges)
     end
 
@@ -499,14 +503,14 @@ defmodule Relay.FlowsTest do
           ]
         })
 
-      assert {:ok, _flow} = Flows.create_flow(board, attrs)
+      assert {:ok, _flow} = create_flow(board, attrs)
     end
 
     test "rejects non-positive max_retries and max_loops" do
       %{board: board} = board_with_stages()
 
       assert {:error, changeset} =
-               Flows.create_flow(
+               create_flow(
                  board,
                  valid_attrs(%{nodes: [%{key: "work", type: :agent, run: "x", max_retries: 0}]})
                )
@@ -514,7 +518,7 @@ defmodule Relay.FlowsTest do
       assert [%{max_retries: [_]}] = errors_on(changeset).nodes
 
       assert {:error, changeset} =
-               Flows.create_flow(
+               create_flow(
                  board,
                  valid_attrs(%{
                    edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :failed, max_loops: -1}]
@@ -532,23 +536,22 @@ defmodule Relay.FlowsTest do
           nodes: [%{key: "work", type: :agent, run: "go", timeout_minutes: 25}]
         })
 
-      assert {:ok, flow} = Flows.create_flow(board, attrs)
+      assert {:ok, flow} = create_flow(board, attrs)
       assert [%{timeout_minutes: 25}] = flow.nodes
 
       assert {:error, changeset} =
-               Flows.create_flow(board, valid_attrs(%{nodes: [%{key: "w", type: :agent, timeout_minutes: 0}]}))
+               create_flow(board, valid_attrs(%{nodes: [%{key: "w", type: :agent, timeout_minutes: 0}]}))
 
       assert %{nodes: [%{timeout_minutes: ["must be greater than 0"]}]} = errors_on(changeset)
     end
 
-    test "rejects a trigger stage belonging to a different board" do
+    test "rejects a stage belonging to a different board" do
       %{board: board} = board_with_stages()
-      %{pulls: foreign_stage} = board_with_stages()
+      %{works: foreign_stage} = board_with_stages()
 
-      assert {:error, changeset} =
-               Flows.create_flow(board, valid_attrs(%{pulls_from_stage_id: foreign_stage.id}))
+      assert {:error, changeset} = create_flow(board, valid_attrs(%{stage_id: foreign_stage.id}))
 
-      assert %{pulls_from_stage_id: ["stage is not on this board"]} = errors_on(changeset)
+      assert %{stage_id: ["stage is not on this board"]} = errors_on(changeset)
     end
   end
 
@@ -557,51 +560,18 @@ defmodule Relay.FlowsTest do
       board_with_stages()
     end
 
-    test "enables a fully-triggered flow", ctx do
-      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+    test "enables a flow; disable_flow/1 turns it back off", ctx do
+      {:ok, flow} = create_flow(ctx.board, valid_attrs(triggers(ctx)))
 
-      assert {:ok, %Flow{enabled: true}} = Flows.enable_flow(flow)
+      assert {:ok, %Flow{enabled: true} = flow} = Flows.enable_flow(flow)
+      assert {:ok, %Flow{enabled: false}} = Flows.disable_flow(flow)
     end
 
-    test "refuses to enable a flow with a missing trigger stage (AC 5)", ctx do
-      {:ok, flow} =
-        Flows.create_flow(
-          ctx.board,
-          valid_attrs(%{pulls_from_stage_id: ctx.pulls.id, works_in_stage_id: ctx.works.id})
-        )
+    test "deleting the flow's stage deletes the flow (RE429)", ctx do
+      {:ok, _flow} = create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      Repo.delete!(ctx.works)
 
-      assert {:error, changeset} = Flows.enable_flow(flow)
-      assert %{lands_on_stage_id: ["must be set before the flow can be enabled"]} = errors_on(changeset)
-      assert Flows.get_flow(ctx.board, "custom").enabled == false
-    end
-
-    test "at most one enabled flow per pulls-from stage (AC 4)", ctx do
-      {:ok, first} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
-      {:ok, second} = Flows.create_flow(ctx.board, valid_attrs(Map.put(triggers(ctx), :key, "rival")))
-
-      assert {:ok, _} = Flows.enable_flow(first)
-      assert {:error, changeset} = Flows.enable_flow(second)
-      assert %{pulls_from_stage_id: ["another enabled flow already pulls from this stage"]} = errors_on(changeset)
-      assert Flows.get_flow(ctx.board, "rival").enabled == false
-    end
-
-    test "disable_flow/1 frees the pulls-from slot", ctx do
-      {:ok, first} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
-      {:ok, second} = Flows.create_flow(ctx.board, valid_attrs(Map.put(triggers(ctx), :key, "rival")))
-
-      {:ok, first} = Flows.enable_flow(first)
-      assert {:ok, %Flow{enabled: false}} = Flows.disable_flow(first)
-      assert {:ok, %Flow{enabled: true}} = Flows.enable_flow(second)
-    end
-
-    test "deleting a trigger stage nilifies the trigger; the flow can't be enabled", ctx do
-      {:ok, _flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
-      Repo.delete!(ctx.lands)
-
-      flow = Flows.get_flow(ctx.board, "custom")
-      assert flow.lands_on_stage_id == nil
-      assert {:error, changeset} = Flows.enable_flow(flow)
-      assert %{lands_on_stage_id: ["must be set before the flow can be enabled"]} = errors_on(changeset)
+      assert Flows.get_flow(ctx.board, "custom") == nil
     end
   end
 
@@ -619,37 +589,23 @@ defmodule Relay.FlowsTest do
       assert Flows.ai_stage?(a) == false
     end
 
-    test "an enabled flow working in a stage maps it to that flow", %{board: board, a: a} do
+    test "an enabled flow on a stage maps it to that flow", %{board: board, a: a} do
       insert_flow_working_in(a, key: "code", enabled: true)
 
-      assert Flows.stage_flows(board) == %{a.id => %{key: "code", enabled: true}}
+      assert Flows.stage_flows(board) == %{a.id => %{key: "code", enabled: true, version: 1}}
     end
 
-    test "a disabled flow still makes its works-in stage AI-enabled", %{board: board, a: a} do
+    test "a disabled flow still makes its stage AI-enabled", %{board: board, a: a} do
       insert_flow_working_in(a, key: "plan")
 
-      assert Flows.stage_flows(board) == %{a.id => %{key: "plan", enabled: false}}
+      assert Flows.stage_flows(board) == %{a.id => %{key: "plan", enabled: false, version: 1}}
       assert Flows.ai_stage?(a) == true
     end
 
-    test "an enabled flow wins over a disabled flow with a lower key", %{board: board, a: a} do
-      insert_flow_working_in(a, key: "aaa", enabled: false)
-      insert_flow_working_in(a, key: "zzz", enabled: true)
+    test "a second flow can't share a stage (flows_stage_id_index)", %{a: a} do
+      insert_flow_working_in(a, key: "first")
 
-      assert Flows.stage_flows(board)[a.id] == %{key: "zzz", enabled: true}
-    end
-
-    test "among enabled flows the lowest key wins", %{board: board, a: a} do
-      insert_flow_working_in(a, key: "beta", enabled: true, pulls_from_stage_id: insert(:stage, board: board).id)
-      insert_flow_working_in(a, key: "alpha", enabled: true, pulls_from_stage_id: insert(:stage, board: board).id)
-
-      assert Flows.stage_flows(board)[a.id] == %{key: "alpha", enabled: true}
-    end
-
-    test "a flow that works in no stage contributes nothing", %{board: board} do
-      insert(:flow, board: board, key: "loose", works_in_stage_id: nil)
-
-      assert Flows.stage_flows(board) == %{}
+      assert_raise Ecto.ConstraintError, fn -> insert_flow_working_in(a, key: "second") end
     end
   end
 
@@ -677,21 +633,9 @@ defmodule Relay.FlowsTest do
   describe "list_enabled_flows/1" do
     test "returns only enabled flows, in key order" do
       board = insert(:board)
-      works = insert(:stage, board: board)
-      lands = insert(:stage, board: board)
 
-      # each *enabled* flow needs its own pulls-from stage — the DB enforces at
-      # most one enabled flow per pulls-from stage (flows_one_enabled_per_pulls_from_index).
-      on = fn key, enabled ->
-        insert(:flow,
-          board: board,
-          key: key,
-          enabled: enabled,
-          pulls_from_stage_id: insert(:stage, board: board).id,
-          works_in_stage_id: works.id,
-          lands_on_stage_id: lands.id
-        )
-      end
+      # each flow gets its own stage — a stage holds at most one flow (RE429).
+      on = fn key, enabled -> insert(:flow, board: board, key: key, enabled: enabled) end
 
       _b = on.("b-flow", true)
       _a = on.("a-flow", true)
@@ -703,21 +647,9 @@ defmodule Relay.FlowsTest do
   end
 
   describe "list_enabled_flow_snapshots/1 (RE402)" do
-    test "projects only enabled flows, in key order, to the snapshot flow shape" do
+    test "projects only enabled flows, in key order, to %{key, stage_id, isolation}" do
       board = insert(:board)
-      works = insert(:stage, board: board)
-      lands = insert(:stage, board: board)
-
-      on = fn key, enabled ->
-        insert(:flow,
-          board: board,
-          key: key,
-          enabled: enabled,
-          pulls_from_stage_id: insert(:stage, board: board).id,
-          works_in_stage_id: works.id,
-          lands_on_stage_id: lands.id
-        )
-      end
+      on = fn key, enabled -> insert(:flow, board: board, key: key, enabled: enabled) end
 
       b = on.("b", true)
       a = on.("a", true)
@@ -725,78 +657,19 @@ defmodule Relay.FlowsTest do
 
       snaps = Flows.list_enabled_flow_snapshots(board.id)
 
-      assert Enum.map(snaps, & &1.key) == ["a", "b"]
       assert Enum.map(snaps, & &1.key) == board |> Flows.list_enabled_flows() |> Enum.map(& &1.key)
 
-      assert Enum.all?(
-               snaps,
-               &(&1 |> Map.keys() |> Enum.sort() == [:isolation, :key, :pulls_from_stage_id, :works_in_stage_id])
-             )
-
       assert [
-               %{
-                 key: "a",
-                 pulls_from_stage_id: a.pulls_from_stage_id,
-                 works_in_stage_id: works.id,
-                 isolation: a.isolation
-               },
-               %{
-                 key: "b",
-                 pulls_from_stage_id: b.pulls_from_stage_id,
-                 works_in_stage_id: works.id,
-                 isolation: b.isolation
-               }
+               %{key: "a", stage_id: a.stage_id, isolation: a.isolation},
+               %{key: "b", stage_id: b.stage_id, isolation: b.isolation}
              ] == snaps
-    end
-  end
-
-  describe "trigger_fields/0 and enabled_flow_keys_using/1 (RE384)" do
-    test "trigger_fields/0 lists the three trigger stage fields" do
-      assert Flows.trigger_fields() == [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
-    end
-
-    test "returns the sorted keys of enabled flows using any of the stages" do
-      board = insert(:board)
-      s1 = insert(:stage, board: board)
-      s2 = insert(:stage, board: board)
-      other = fn -> insert(:stage, board: board).id end
-
-      insert(:flow,
-        board: board,
-        key: "b",
-        enabled: true,
-        pulls_from_stage_id: s1.id,
-        works_in_stage_id: other.(),
-        lands_on_stage_id: other.()
-      )
-
-      insert(:flow,
-        board: board,
-        key: "a",
-        enabled: true,
-        pulls_from_stage_id: other.(),
-        works_in_stage_id: other.(),
-        lands_on_stage_id: s2.id
-      )
-
-      insert(:flow,
-        board: board,
-        key: "c",
-        enabled: false,
-        pulls_from_stage_id: other.(),
-        works_in_stage_id: s1.id,
-        lands_on_stage_id: other.()
-      )
-
-      assert Flows.enabled_flow_keys_using([s1.id, s2.id]) == ["a", "b"]
-      assert Flows.enabled_flow_keys_using([]) == []
     end
   end
 
   describe "delete_flow/1" do
     test "deletes a disabled flow and cascades its version snapshots" do
       ctx = board_with_stages()
-      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      {:ok, flow} = create_flow(ctx.board, valid_attrs(triggers(ctx)))
 
       assert Flows.get_version(flow, 1)
       assert {:ok, %Flow{}} = Flows.delete_flow(flow)
@@ -806,7 +679,7 @@ defmodule Relay.FlowsTest do
 
     test "refuses to delete an enabled flow" do
       ctx = board_with_stages()
-      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      {:ok, flow} = create_flow(ctx.board, valid_attrs(triggers(ctx)))
       {:ok, flow} = Flows.enable_flow(flow)
 
       assert {:error, :flow_enabled} = Flows.delete_flow(flow)
@@ -815,11 +688,185 @@ defmodule Relay.FlowsTest do
 
     test "deleting a disabled flow nil-s the flow_id of its active runs" do
       ctx = board_with_stages()
-      {:ok, flow} = Flows.create_flow(ctx.board, valid_attrs(triggers(ctx)))
+      {:ok, flow} = create_flow(ctx.board, valid_attrs(triggers(ctx)))
       run = insert(:run, flow_id: flow.id, status: :running)
 
       assert {:ok, _} = Flows.delete_flow(flow)
       assert Repo.reload(run).flow_id == nil
+    end
+  end
+
+  # RE429: a flow belongs to exactly one main work/planning stage; pickup and drop-off are
+  # worked out from board order. The default board seeds `spec` on Spec, `plan` on Plan and
+  # `code` on Code (all disabled); Deploy is the only flow-free work stage.
+  describe "one stage per flow (RE429)" do
+    setup do
+      {:ok, board} = Relay.Boards.create_board(insert(:user), %{name: "One stage"})
+      stages = Map.new(Repo.all(from s in Schemas.Stage, where: s.board_id == ^board.id), &{&1.name, &1})
+      %{board: board, stages: stages, code_flow: Flows.get_flow(board, "code")}
+    end
+
+    defp one_stage_attrs(stage_id, overrides \\ %{}) do
+      Map.merge(
+        %{key: "qa", isolation: :shared_clean, stage_id: stage_id, nodes: [], edges: [%{from: "start", to: "done"}]},
+        overrides
+      )
+    end
+
+    defp flow_count(board), do: Repo.aggregate(from(f in Flow, where: f.board_id == ^board.id), :count)
+
+    test "1. a stage that already holds a flow refuses a second one, naming the occupant", ctx do
+      before = flow_count(ctx.board)
+
+      assert {:error, cs} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Code"].id))
+      assert "stage already has flow `code`" in errors_on(cs).stage_id
+      assert flow_count(ctx.board) == before
+    end
+
+    test "2. a disabled flow still occupies its stage", ctx do
+      refute ctx.code_flow.enabled
+
+      assert {:error, cs} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Code"].id))
+      assert "stage already has flow `code`" in errors_on(cs).stage_id
+    end
+
+    test "3. flows attach to main work/planning stages only", ctx do
+      assert {:error, cs} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Spec:Review"].id))
+      assert "flows attach to main stages only, not substages" in errors_on(cs).stage_id
+
+      for name <- ["Next up", "Review", "Done"] do
+        assert {:error, cs} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages[name].id))
+        assert "a flow can only work in a work or planning stage" in errors_on(cs).stage_id
+      end
+    end
+
+    test "4. the stage must be on the flow's board and is required", ctx do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other"})
+      other_deploy = Repo.get_by!(Schemas.Stage, board_id: other.id, name: "Deploy")
+
+      assert {:error, cs} = Flows.create_flow(ctx.board, one_stage_attrs(other_deploy.id))
+      assert "stage is not on this board" in errors_on(cs).stage_id
+
+      assert {:error, cs} = Flows.create_flow(ctx.board, Map.delete(one_stage_attrs(nil), :stage_id))
+      assert "can't be blank" in errors_on(cs).stage_id
+    end
+
+    test "5. a flow created on Deploy reads back with its derived neighbours", ctx do
+      deploy = ctx.stages["Deploy"]
+
+      assert {:ok, flow} = Flows.create_flow(ctx.board, one_stage_attrs(deploy.id))
+      assert flow.stage_id == deploy.id
+      assert flow.enabled == false
+
+      read = Flows.get_flow_with_stages(ctx.board, "qa")
+      assert read.stage.name == "Deploy"
+      assert read.pulls_from_stage.name == "Review"
+      assert read.lands_on_stage.name == "Done"
+    end
+
+    test "6. update_flow/2 refuses an occupied stage but allows the flow's own", ctx do
+      {:ok, flow} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Deploy"].id))
+
+      assert {:error, cs} = Flows.update_flow(flow, %{stage_id: ctx.stages["Code"].id})
+      assert "stage already has flow `code`" in errors_on(cs).stage_id
+
+      assert {:ok, _} = Flows.update_flow(flow, %{stage_id: ctx.stages["Deploy"].id})
+    end
+
+    test "7. stage_flows/1 maps each flow's stage to its key, enabled and version", ctx do
+      assert Flows.stage_flows(ctx.board) == %{
+               ctx.stages["Spec"].id => %{key: "spec", enabled: false, version: 1},
+               ctx.stages["Plan"].id => %{key: "plan", enabled: false, version: 1},
+               ctx.stages["Code"].id => %{key: "code", enabled: false, version: 1}
+             }
+    end
+
+    test "8. the enabled-flow readers key on stage_id", ctx do
+      code = ctx.stages["Code"]
+      {:ok, code_flow} = Flows.enable_flow(ctx.code_flow)
+
+      assert Flows.list_enabled_flow_snapshots(ctx.board.id) == [
+               %{key: "code", stage_id: code.id, isolation: code_flow.isolation}
+             ]
+
+      assert %Flow{key: "code"} = Flows.working_flow(%Schemas.Card{board_id: ctx.board.id, stage_id: code.id})
+      assert Flows.stage_flow(ctx.stages["Deploy"]) == nil
+      assert Flows.ai_stage?(code)
+      refute Flows.ai_stage?(ctx.stages["Deploy"])
+    end
+
+    test "9. assignable_stages/2 lists empty main work stages plus the flow's own", ctx do
+      assert Enum.map(Flows.assignable_stages(ctx.board, nil), & &1.name) == ["Deploy"]
+      assert Enum.map(Flows.assignable_stages(ctx.board, ctx.code_flow), & &1.name) == ["Code", "Deploy"]
+    end
+
+    test "10. neighbours/1 reads the flow's board order fresh", ctx do
+      assert %{pulls_from: pulls_from, lands_on: lands_on} = Flows.neighbours(ctx.code_flow)
+      assert pulls_from.name == "Plan:Done"
+      assert lands_on.name == "Review"
+    end
+
+    test "11. copy_flow/2 copies the definition onto an empty stage, disabled, at v1", ctx do
+      {:ok, code_flow} =
+        Flows.save_definition(ctx.code_flow, %{
+          nodes: [%{key: "a", type: :shell, run: "true"}, %{key: "b", type: :shell, run: "true"}],
+          edges: [
+            %{from: "start", to: "a"},
+            %{from: "a", to: "b", on: :succeeded},
+            %{from: "b", to: "done", on: :succeeded}
+          ]
+        })
+
+      {:ok, code_flow} = Flows.enable_flow(code_flow)
+      deploy = ctx.stages["Deploy"]
+
+      assert {:ok, copy} = Flows.copy_flow(code_flow, deploy)
+      assert copy.key == "code-deploy"
+      assert copy.enabled == false
+      assert copy.stage_id == deploy.id
+      assert copy.version == 1
+      assert Enum.map(copy.nodes, &{&1.key, &1.run}) == [{"a", "true"}, {"b", "true"}]
+      assert Enum.map(copy.edges, &{&1.from, &1.to, &1.on}) == Enum.map(code_flow.edges, &{&1.from, &1.to, &1.on})
+      assert copy.isolation == code_flow.isolation
+      assert %Schemas.FlowVersion{} = Flows.get_version(copy, 1)
+
+      assert {:error, cs} = Flows.copy_flow(code_flow, ctx.stages["Plan"])
+      assert "stage already has flow `plan`" in errors_on(cs).stage_id
+    end
+
+    test "12. copy_flow/2 suffixes a taken key", ctx do
+      {:ok, qa} = Relay.Boards.create_stage(ctx.board, %{name: "QA", category: :in_progress})
+      assert qa.type == :work
+      {:ok, _} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Deploy"].id, %{key: "code-qa"}))
+
+      assert {:ok, copy} = Flows.copy_flow(ctx.code_flow, qa)
+      assert copy.key == "code-qa-2"
+      assert copy.stage_id == qa.id
+    end
+
+    test "13. enable_flow/1 has no trigger-completeness check", ctx do
+      {:ok, flow} = Flows.create_flow(ctx.board, one_stage_attrs(ctx.stages["Deploy"].id))
+
+      assert {:ok, %Flow{enabled: true}} = Flows.enable_flow(flow)
+    end
+
+    test "28. upsert_from_document/3 resolves the trigger stage (legacy triggers too)", ctx do
+      doc =
+        ctx.board
+        |> Flows.get_flow_with_stages("code")
+        |> Relay.Flows.Document.encode()
+        |> Map.put("trigger", %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"})
+
+      assert {:ok, :updated, flow} = Flows.upsert_from_document(ctx.board, "code", doc)
+      assert flow.stage_id == ctx.stages["Code"].id
+
+      new_doc = %{"key" => "ship", "isolation" => "shared_clean", "edges" => [%{"from" => "start", "to" => "done"}]}
+
+      assert {:error, {:unknown_stages, ["Nope"]}} =
+               Flows.upsert_from_document(ctx.board, "ship", Map.put(new_doc, "trigger", %{"stage" => "Nope"}))
+
+      assert {:error, {:invalid, cs}} = Flows.upsert_from_document(ctx.board, "ship", new_doc)
+      assert "can't be blank" in errors_on(cs).stage_id
     end
   end
 end

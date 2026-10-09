@@ -222,16 +222,18 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
     end
 
   # A spec's 4th element means "a flow works here" — AI-enabled is derived from flows (RE409),
-  # so each such stage gets a disabled flow working in it, reusing the library "code" graph.
+  # so each such stage gets a disabled flow on it, reusing the library "code" graph. A stage
+  # holds at most one flow (RE429), so one the board's default flows already occupy is skipped.
   code_flow = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
 
-  for {{_sname, _category, _type, true, _wip}, stage} <- Enum.zip(stage_specs, stages) do
+  for {{_sname, _category, _type, true, _wip}, stage} <- Enum.zip(stage_specs, stages),
+      is_nil(Relay.Flows.stage_flow(stage)) do
     flow_key = stage.name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
 
     attrs =
       code_flow
       |> Map.delete(:trigger)
-      |> Map.merge(%{key: flow_key, works_in_stage_id: stage.id})
+      |> Map.merge(%{key: flow_key, stage_id: stage.id})
 
     {:ok, _flow} = Relay.Flows.create_flow(board, attrs)
   end

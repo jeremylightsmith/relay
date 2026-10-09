@@ -4,6 +4,7 @@ defmodule RelayWeb.Api.FallbackController do
 
   alias Relay.Boards
   alias Relay.Cards
+  alias Relay.Flows
   alias RelayWeb.Api.ErrorJSON
   alias RelayWeb.ChangesetErrors
 
@@ -64,6 +65,18 @@ defmodule RelayWeb.Api.FallbackController do
     )
   end
 
+  # RE429 — a stage holds one flow; the sentence is Relay.Flows' one copy.
+  def call(conn, {:error, {:stage_occupied, %{stage: stage, flow: flow} = details}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "stage_occupied",
+      message: Flows.stage_occupied_message(details),
+      details: %{stage: stage, flow: flow}
+    )
+  end
+
   # RE93 — both refusals are 422, and both take their sentence from Relay.Cards, the ONE
   # rendering, so the API and the card drawer cannot word the same refusal differently.
   def call(conn, {:error, {:unknown_refs, refs}}) do
@@ -98,8 +111,9 @@ defmodule RelayWeb.Api.FallbackController do
   def call(conn, {:error, {:not_empty, %{live: live, archived: archived}} = reason}),
     do: stage_refusal(conn, :conflict, "not_empty", reason, %{live: live, archived: archived})
 
-  def call(conn, {:error, {:in_use_by_flow, keys} = reason}),
-    do: stage_refusal(conn, :conflict, "in_use_by_flow", reason, %{flows: keys})
+  # RE429 — a stage holding a flow can't become a non-work type.
+  def call(conn, {:error, {:holds_flow, %{flow: key}} = reason}),
+    do: stage_refusal(conn, :conflict, "holds_flow", reason, %{flow: key})
 
   def call(conn, {:error, reason}) when reason in [:last_stage, :not_empty, :public_intake],
     do: stage_refusal(conn, :conflict, Atom.to_string(reason), reason, %{})

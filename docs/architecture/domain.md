@@ -16,11 +16,12 @@ sharing behavior.
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
   an anchor the same way (`reorder_stage/2` stays the ↑/↓ step). `delete_stage/1` refuses, in
   order: the last main stage (`:last_stage`), any card in the stage or its substages —
-  archived included — (`{:not_empty, %{live:, archived:}}`), an **enabled** flow using any of
-  them (`{:in_use_by_flow, keys}`, via `Flows.enabled_flow_keys_using/1`; a disabled flow's
-  trigger and a reject-to target are still nilified by the FK), and the public intake stage
-  (`:public_intake`). `disable_lane/2` refuses the same three for the lane alone (bare
-  `:not_empty`); a substage passed to `delete_stage/1` / `place_stage/2` / `enable_lane/2` is
+  archived included — (`{:not_empty, %{live:, archived:}}`), and the public intake stage
+  (`:public_intake`). A flow never blocks a delete (RE429): the stage's flow goes with it
+  (`flows.stage_id on_delete: :delete_all`; its runs keep `flow_key`, `flow_id` is nilified),
+  and a reject-to target is nilified by the FK. `disable_lane/2` refuses the same for the lane
+  alone (bare `:not_empty`). Changing a flow-holding stage to a non-work type
+  (`Relay.Cards.update_stage/2`) is `{:holds_flow, %{stage:, flow:}}`; a substage passed to `delete_stage/1` / `place_stage/2` / `enable_lane/2` is
   `:not_a_main_stage`. `stage_refusal_message/1` is the one rendering of every refusal (Settings
   flash and API alike). A stage's **type** changes only through `Relay.Cards.update_stage/2`,
   which wraps `update_stage/2` and re-snaps resident cards when the type changed (it lives in
@@ -28,7 +29,7 @@ sharing behavior.
   Over REST (`RelayWeb.Api.StageController`, any board key): `GET|POST /api/stages`,
   `PATCH|DELETE /api/stages/:id`, `POST /api/stages/:id/place`, and
   `PUT|DELETE /api/stages/:id/substages/:lane`; the refusals map to 409 (`last_stage`,
-  `not_empty` with `live`/`archived` counts, `in_use_by_flow` with `flows`, `public_intake`)
+  `not_empty` with `live`/`archived` counts, `holds_flow` with `flow`, `public_intake`)
   and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
   The stage JSON's `ai_enabled` key is read-only, derived from `Flows.ai_stage_ids/1` (RE409);
   a create/update body naming `ai_enabled` (any value) is 422 `invalid_request` and writes nothing.
@@ -55,8 +56,22 @@ sharing behavior.
   membership). A muted member gets no APNs push for that board; browser notifications, badges
   and the needs-you counts are unaffected. Muting never moves a row in the display order.
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
-  rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, three trigger stage FKs
-  stored as ids with nilify-on-delete) with the node/edge graph embedded as jsonb; `"start"`/
+  rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, and the one stage the flow
+  works in, `stage_id`) with the node/edge graph embedded as jsonb.
+  **One stage (RE429):** a flow belongs to exactly one **main** stage of a work type
+  (`Schemas.Stage.work_types/0`) — `stage_id` is `NOT NULL`, unique (`flows_stage_id_index`:
+  a stage holds zero or one flows, disabled ones included) and `on_delete: :delete_all`
+  (deleting a stage deletes its flow; `runs.flow_id` is nilified, `runs.flow_key` kept).
+  Where it **pulls from** (pickup) and **lands on** (drop-off) are never stored: they are worked
+  out from board order (`Schemas.Stage.order_stages/1`) by `Relay.Flows.neighbours/2` — the
+  stage immediately before it, and the stage immediately after it (its own first substage when it
+  has one, else the next main stage), `nil` at either end. `neighbours/1` is the DB convenience
+  the engine asks at the moment it needs the answer (drop-off is resolved when the run lands);
+  `list_flows/1` / `get_flow_with_stages/2` fill the virtual `pulls_from_stage` /
+  `lands_on_stage` fields on every read. `stage_flow/1` is the stage's flow (or nil),
+  `assignable_stages/2` the stages a flow may be put on, `copy_flow/2` copies a definition onto
+  another empty stage (disabled, v1).
+  `"start"`/ `"start"`/
   `"done"`/`"needs_input"` are edge sentinels (`"needs_input"` is `to`-only and parks the run —
   RLY-194); nodes carry an optional `timeout_minutes` (validated `> 0`) and an agent-only
   `expects_commits` boolean (default `false`, RLY-194) marking a node whose reported success
@@ -79,18 +94,17 @@ sharing behavior.
   compile time via `@external_resource` — those files are the source of truth, and
   `Relay.Flows.Document` is the one serializer both they and the API go through)
   — `Boards.create_board/2` calls it after enabling the `Spec:Review`/`Spec:Done`/`Plan:Done`
-  sub-lanes so every trigger resolves. Flows seed disabled; at most one enabled flow may pull
-  from a stage (partial unique index). Nothing executes yet — the engine is the Runs card (02).
+  sub-lanes so every trigger resolves. Flows seed disabled. Nothing executes yet — the engine is the Runs card (02).
   **Versioning (RLY-152, absorbed into the flow editor card):** every flow's definition
   (nodes, edges, isolation) is versioned — `flows.version` holds the current number, and each
   version is snapshotted immutably into `flow_versions` (`belongs_to :flow`, `version`,
   `isolation`, embedded `nodes`/`edges`; no `updated_at`, never edited after insert). A flow
   always has a snapshot row for its current version — created on `create_flow/2`,
-  `duplicate_flow/1`, and `seed_default_flows!/1`, and on every bump — the invariant a future
+  `copy_flow/2`, and `seed_default_flows!/1`, and on every bump — the invariant a future
   Runs pin-to-version feature relies on. `save_definition/2` is the one path that changes a
   flow's definition after creation: it validates like `update_flow/2`, then bumps `version` to
-  n+1 and writes a new snapshot **only if** the definition changed; a trigger-only change
-  (including a stage rename) saves with no bump, since triggers are per-board wiring and not
+  n+1 and writes a new snapshot **only if** the definition changed; a stage-only change
+  (including a stage rename) saves with no bump, since the stage is per-board wiring and not
   part of the versioned definition. `get_version/2` fetches an immutable snapshot by number;
   `mid_run_count/1` returns the real count of cards currently mid-run on a flow — runs whose
   status is active (`Schemas.Run.active_statuses/0`, i.e. running or parked) — and feeds both
@@ -99,22 +113,28 @@ sharing behavior.
   JSON document — `encode/1` (sparse: nil and schema-default fields omitted) and `decode/1`
   (dense: every node/edge field present, filled from the schema default, so `customized?/1`'s
   field-by-field comparison against the embedded structs stays exact). `decode ∘ encode` is a
-  fixed point, which is what makes pull → push unchanged a no-op. Triggers serialize as stage
-  **names**, not ids, so a document is portable across boards.
+  fixed point, which is what makes pull → push unchanged a no-op. The trigger serializes as
+  one stage **name**, `{"stage": "<name>"}`, not an id, so a document is portable across boards;
+  a legacy three-key trigger (`pulls_from` / `works_in` / `lands_on`) still decodes, reading only
+  `works_in`. `Document.derived/1` is the read-only `{"pulls_from", "lands_on"}` name pair the
+  API puts beside the document (`GET /api/flows[/:key]` and the `PUT` response:
+  `"derived"`); `encode/1` never emits it and `decode/1` accepts and ignores it, so a pulled
+  file pushes back unchanged.
   `upsert_from_document/3` is the write path behind `PUT /api/flows/:key`: decode → key check →
-  resolve trigger names → optional compare-and-swap on `version` → `create_flow/2` or
+  resolve the trigger's stage name → optional compare-and-swap on `version` → refuse a stage
+  another key already holds (`{:stage_occupied, %{stage:, flow:}}`, API **422
+  `stage_occupied`**, sentence from `stage_occupied_message/1`) → `create_flow/2` or
   `save_definition/2` → reconcile `enabled` through `enable_flow/1`/`disable_flow/1`, all in one
   transaction so a push never half-applies.
   The Flows settings tab (RLY-142) is backed by `customized?/1`
-  (normalized nodes/edges/isolation comparison against the library — trigger wiring never
-  counts), `default_key?/1`, `duplicate_flow/1` (disabled `<key>-copy` clone),
-  `unique_key/2` (the `base`/`base-2`/… generator behind both `-copy` and the create form's
+  (normalized nodes/edges/isolation comparison against the library — stage wiring never
+  counts), `default_key?/1`, `copy_flow/2` (a disabled `<key>-<stage>` copy on another empty
+  stage), `unique_key/2` (the `base`/`base-2`/… generator behind copy keys and the create form's
   prefilled key), create-from-scratch (RLY-158 — the tab's "+ New flow" panel collects a key,
-  all three trigger stages and isolation, then calls `create_flow/2` with an empty
-  `start → done` skeleton and hands off to the editor; the flow is created disabled, so
-  creation can never breach the one-enabled-flow-per-stage rule), and
+  one Stage (from `assignable_stages/2`) and isolation, then calls `create_flow/2` with an empty
+  `start → done` skeleton and hands off to the editor; the flow is created disabled), and
   `reset_to_default/1` (restores the shipped definition via `save_definition/2`, so a reset
-  bumps the version and snapshots like any other save; triggers and `enabled` untouched), and
+  bumps the version and snapshots like any other save; stage and `enabled` untouched), and
   `delete_flow/1` (RLY-221 — removes a flow from this board, disable-first: an enabled flow
   returns `{:error, :flow_enabled}`, a disabled one is deleted and the DB cascade nil-s each
   active run's `flow_id` (`runs.flow_id on_delete: :nilify_all`) and removes its version
@@ -124,7 +144,7 @@ sharing behavior.
   default (`nil` for a non-library key) — nodes grouped added/removed/changed (changed lists
   the differing fields), edges as `{from, to, on}` tuples grouped added/removed.
   **Editor (RLY-143):** `RelayWeb.FlowEditorLive`, a full-page LiveView at
-  `/board/:slug/flows/:key`, edits a flow's working copy (nodes/edges/isolation/triggers) with
+  `/board/:slug/flows/:key`, edits a flow's working copy (nodes/edges/isolation/stage) with
   inline validation against `Schemas.Flow.changeset/2`, saves through `save_definition/2`
   behind a "Save as v(n+1)" confirm modal, and offers the diff-vs-default / reset-to-default
   affordance for customized library flows. The graph is rendered by the shared
@@ -153,7 +173,7 @@ sharing behavior.
   per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
   `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
-  private builder, so the summary shape is defined exactly once. `list_runs_for_card/1` join-preloads each run's `flow: :works_in_stage` in the runs query (no per-run N+1), so `RunDetail` carries `stage_name` — the run's work stage's name, nil when the flow or its work stage is gone (RE426). Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)). The four metrics roll-ups (`node_metrics_for_flow/2`, `node_waits_for_flow/2`, `execution_spans_for_flow/2`, `flow_metrics_summary/2`) take `card_id:` (one card, RE235) or `card_ids:` (a list — RE349's Last-N population, `card_id:` winning when both are given); either drops the window. `first_node_queue_wait/2` (RE349) is the mean `claimed_at − inserted_at` of the `NodeJob.flow_kinds/0` job bound to each in-population run's first execution — the value stream's queue triangle.
+  private builder, so the summary shape is defined exactly once. `list_runs_for_card/1` join-preloads each run's `flow: :stage` in the runs query (no per-run N+1), so `RunDetail` carries `stage_name` — the run's work stage's name, nil when the flow or its work stage is gone (RE426). Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)). The four metrics roll-ups (`node_metrics_for_flow/2`, `node_waits_for_flow/2`, `execution_spans_for_flow/2`, `flow_metrics_summary/2`) take `card_id:` (one card, RE235) or `card_ids:` (a list — RE349's Last-N population, `card_id:` winning when both are given); either drops the window. `first_node_queue_wait/2` (RE349) is the mean `claimed_at − inserted_at` of the `NodeJob.flow_kinds/0` job bound to each in-population run's first execution — the value stream's queue triangle.
   **The board-health audit** (RE249): `Relay.Runs.audit/2` / `Relay.Runs.Audit.findings/2`, a pure function over runs (`:node_executions` and `card: :board` preloaded) on the metrics' `metric_windows/0` vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory. Four checks — `findings_dropped`, `verdict_flipped`, `planner_not_migrated` (RE368), reading the `runs.tasks_from_plan` fact `start_run` sets when the legacy plan-parse fallback seeded the card's tasks, and `outcomeless_attempts` (RE410), one WARNING per `{run, node, visit}` with at least `Relay.Runs.max_outcomeless_reentries/0` outcome-nil executions.
   **The dispatcher seam**: the `Relay.Runs.Dispatcher` behaviour, resolved through `Relay.Runs.Instance` (`config :relay, :runs_dispatcher` in production, a per-test instance under test — RE298 / ADR 0009).
   Card writes go through `Relay.Cards`, so ADR 0003/0004 rules apply automatically.
@@ -183,7 +203,7 @@ sharing behavior.
   (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup
   (`needs_input` / `in_review` / `awaiting_human` / `agent_stalled` — RLY-148) surfaced by
   `GET /api/board` and the boards-home badges. A move that would strand a live run
-  (`Cards.stranded_run/2`: an active run whose flow `works_in_stage` is not the destination) is
+  (`Cards.stranded_run/2`: an active run whose flow's `stage` is not the destination) is
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
@@ -620,7 +640,7 @@ erDiagram
     Stage ||--o{ Card : holds
     Board ||--o{ Card : has
     Board ||--o{ Flow : "flow definitions"
-    Stage |o--o{ Flow : "trigger (pulls-from / works-in / lands-on)"
+    Stage ||--o| Flow : "works in (one flow per stage; pickup / drop-off derived)"
     Flow ||--o{ FlowVersion : "immutable version snapshots"
     Card ||--o{ SubTask : has
     Card ||--o{ CardDependency : "blocked by (RE93)"

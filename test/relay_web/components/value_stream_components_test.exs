@@ -135,7 +135,10 @@ defmodule RelayWeb.ValueStreamComponentsTest do
   describe "level 2 (RE349)" do
     setup do
       attrs = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
-      flow = %Schemas.Flow{board_id: 1} |> Schemas.Flow.changeset(attrs) |> Ecto.Changeset.apply_action!(:build)
+
+      flow =
+        %Schemas.Flow{board_id: 1, stage_id: 1} |> Schemas.Flow.changeset(attrs) |> Ecto.Changeset.apply_action!(:build)
+
       %{layout: FL.layout(flow)}
     end
 

@@ -34,7 +34,10 @@ defmodule Storybook.ValueStream.FlowMap do
 
   defp code_flow do
     attrs = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
-    %Schemas.Flow{board_id: 0} |> Schemas.Flow.changeset(attrs) |> Ecto.Changeset.apply_action!(:build)
+
+    %Schemas.Flow{board_id: 0}
+    |> Schemas.Flow.changeset(Map.put(attrs, :stage_id, 0))
+    |> Ecto.Changeset.apply_action!(:build)
   end
 
   defp sends do

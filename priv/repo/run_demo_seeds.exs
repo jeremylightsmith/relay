@@ -374,7 +374,7 @@ run =
 add_ne.(run, %{node: "implement", outcome: nil, duration_s: 45, cost: cost.("0.21")})
 
 # 9 · Queued: AI-ready card in the enabled code flow's pulls-from stage, no run.
-queued_stage = Enum.find(board.stages, &(&1.id == code_flow.pulls_from_stage_id))
+queued_stage = Flows.neighbours(code_flow).pulls_from
 {:ok, queued} = Cards.create_card(queued_stage, %{title: "Bulk move cards between stages"})
 {:ok, _queued} = Cards.assign_ai(queued)
 

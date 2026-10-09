@@ -21,8 +21,7 @@ defmodule RelayWeb.BoardLiveDependencyGateTest do
       board: board,
       key: "code",
       enabled: true,
-      pulls_from_stage_id: next_up.id,
-      works_in_stage_id: code.id
+      stage_id: code.id
     )
 
     a = insert(:card, stage: next_up, ref_number: 1, status: :ready, title: "Dependent")

@@ -262,7 +262,7 @@ refuses the same things with the same sentence. A stage refusal carries extra ke
 | 404 | `not_found` | the path `:id` is unknown, not an integer, or another board's stage |
 | 409 | `last_stage` | deleting the board's only main stage |
 | 409 | `not_empty` | the stage (or a substage) holds cards, **archived included** — a stage delete adds `"live": n, "archived": m`; a lane disable carries no counts |
-| 409 | `in_use_by_flow` | an **enabled** flow pulls from / works in / lands on it — adds `"flows": [key]` |
+| 409 | `holds_flow` | `PATCH` changes the `type` of a stage that holds a flow to one that isn't `work`/`planning` — adds `"flow": key` |
 | 409 | `public_intake` | it is the board's public intake stage |
 | 422 | `invalid_anchor` | `before` / `after` doesn't name another main stage on this board (unknown, foreign or non-integer anchors included) |
 | 422 | `not_a_main_stage` | the route needs a main stage and `:id` is a substage |
@@ -302,8 +302,8 @@ Configure a stage: any of `name`, `description`, `type`, `wip_limit`,
 Renaming a main stage renames its substages. **200** `{"data": stage}`. No recognised field →
 `422 invalid_request`.
 
-`ai_enabled` in a stage response is read-only, derived from flows' `works_in` (a stage is
-AI-enabled iff a flow works in it); sending it to `POST` or `PATCH` — any value — is
+`ai_enabled` in a stage response is read-only, derived from flows (a stage is AI-enabled iff
+a flow is on it); sending it to `POST` or `PATCH` — any value — is
 `422 invalid_request` and nothing is written.
 
 #### POST /api/stages/:id/place
@@ -320,13 +320,14 @@ Any other `:lane` → `422 invalid_request` (`"lane must be one of: review, done
 #### DELETE /api/stages/:id/substages/:lane
 
 Disable a lane. **200** `{"data": {"lane": "review", "disabled": true}}` — `disabled: false`
-when the lane wasn't enabled. Refused with `not_empty`, `in_use_by_flow` or `public_intake`.
+when the lane wasn't enabled. Refused with `not_empty` or `public_intake`.
 
 #### DELETE /api/stages/:id
 
 Delete a main stage and its substages. **200** `{"data": stage}` (the deleted stage). Refused,
-in order, with `last_stage`, `not_empty` (with counts), `in_use_by_flow`, `public_intake`. A
-disabled flow's trigger and another stage's reject-to pointing here are cleared.
+in order, with `last_stage`, `not_empty` (with counts), `public_intake`. The flow on the stage,
+enabled or not, is deleted with it (its runs keep their `flow_key`); another stage's reject-to
+pointing here is cleared.
 
 ### POST /api/cards/:ref/move
 

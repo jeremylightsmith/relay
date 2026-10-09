@@ -287,11 +287,11 @@ defmodule Relay.ValueStream do
     |> Map.new()
   end
 
-  # Stage ids an enabled flow works in, or `nil` when the board has no enabled flows.
+  # Stage ids an enabled flow is on, or `nil` when the board has no enabled flows.
   defp flow_worked_stage_ids(board_id) do
     case Flows.list_enabled_flows(%Board{id: board_id}) do
       [] -> nil
-      flows -> MapSet.new(flows, & &1.works_in_stage_id)
+      flows -> MapSet.new(flows, & &1.stage_id)
     end
   end
 

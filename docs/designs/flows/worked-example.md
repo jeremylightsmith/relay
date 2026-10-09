@@ -48,12 +48,14 @@ See [`docs/runbooks/flow-cutover.md`](../../runbooks/flow-cutover.md) for the cu
 Files it pulls in: [`.claude/skills/brainstorm/`](../../../.claude/skills/brainstorm/SKILL.md)
 (the behavior — stays in both worlds, developer-owned).
 
-**Tomorrow** — the `Flow` row (trigger stored as stage ids; names shown for readability):
+**Tomorrow** — the `Flow` row (the one stage stored as an id; name shown for readability. Since
+RE429 the trigger is one stage — pickup and drop-off are worked out from board order, never
+stored; the API shows them as a read-only `"derived"` block):
 
 ```jsonc
 { "key": "spec", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "shared_clean",
-  "trigger": { "from": "Next up", "stage": "Spec", "done": "Spec:Review" },
+  "trigger": { "stage": "Spec" },   // derived: pulls_from "Next up", lands_on "Spec:Review"
   "nodes": {
     "brainstorm": { "type": "agent", "run": "/brainstorm {ref}", "max_retries": 1 }
   },
@@ -97,7 +99,7 @@ Files it pulls in: [`.claude/commands/write-plan.md`](../../../.claude/commands/
 ```jsonc
 { "key": "plan", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "shared_clean",
-  "trigger": { "from": "Spec:Done", "stage": "Plan", "done": "Plan:Done" },
+  "trigger": { "stage": "Plan" },   // derived: pulls_from "Spec:Done", lands_on "Plan:Done"
   "nodes": {
     "write_plan": { "type": "agent", "run": "/write-plan {ref}", "max_retries": 1 }
   },
@@ -158,7 +160,7 @@ it yet.
 ```jsonc
 { "key": "code", "board_id": 1, "enabled": false, "origin": "default", "version": 1,
   "isolation": "exclusive",
-  "trigger": { "from": "Plan:Done", "stage": "Code", "done": "Review" },
+  "trigger": { "stage": "Code" },   // derived: pulls_from "Plan:Done", lands_on "Review"
   "nodes": { /* the 18 nodes of code.json — branch, implement (foreach: "card.tasks"),
                 spec_review, quality_review, precommit, final_review, final_fix,
                 smoke, smoke_fix, acceptance, acceptance_fix, post, merge. The next_task
@@ -208,7 +210,7 @@ seeded from [`spec.json`](spec.json) (13 lines), [`plan.json`](plan.json) (13), 
 erDiagram
     Board ||--o{ Stage : has
     Board ||--o{ Flow : "3 rows: spec, plan, code"
-    Flow }o--|| Stage : "trigger: from / stage / done"
+    Flow |o--|| Stage : "works in (one flow per stage)"
     Flow ||--o{ Run : "one per card traversal"
     Card ||--o{ Run : has
     Card ||--o{ SubTask : "parsed from plan (RLY-139)"
@@ -263,7 +265,7 @@ Every row involved (abridged JSON; timestamps trimmed):
 // Flow — one of the three seeded rows (nodes/edges = code.json, not repeated here)
 { "key": "code", "board_id": 1, "enabled": true, "origin": "default", "version": 1,
   "isolation": "exclusive",
-  "trigger": { "from_stage_id": 41, "stage_id": 47, "done_stage_id": 51 } }
+  "stage_id": 47 }   // pickup / drop-off worked out from board order (RE429)
 
 // Runner — one registered machine (was: relay_config.json's pools block)
 { "id": 3, "name": "jeremy-mbp", "board_id": 1,

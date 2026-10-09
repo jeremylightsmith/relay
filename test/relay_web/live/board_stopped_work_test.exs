@@ -9,9 +9,9 @@ defmodule RelayWeb.BoardStoppedWorkTest do
     start_capacity!()
     board = insert(:board, owner: user)
     insert(:membership, board: board, user: user)
-    queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)
-    works = insert_ai_stage(%{board: board, name: "Code", position: 2})
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    # Plan:Done sits right before Code, so it is the code flow's derived pickup (RE429).
+    insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)
+    works = insert_ai_stage(%{board: board, name: "Code", position: 2}, key: "code", enabled: true)
     {:ok, board: board, works: works}
   end
 

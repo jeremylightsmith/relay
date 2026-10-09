@@ -10,7 +10,7 @@ defmodule Relay.CardsStrandedMoveTest do
     queue = insert(:stage, board: board, name: "Queue", type: :queue, position: 1)
     code = insert(:stage, board: board, name: "Code", type: :work, position: 2)
     done = insert(:stage, board: board, name: "Done", type: :done, position: 3)
-    flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+    flow = insert(:flow, board: board, key: "code", stage_id: code.id)
     {:ok, board: board, queue: queue, code: code, done: done, flow: flow}
   end
 
@@ -26,7 +26,7 @@ defmodule Relay.CardsStrandedMoveTest do
       assert id == run.id
     end
 
-    test "nil for a within-lane reorder (destination == works_in_stage)", ctx do
+    test "nil for a within-lane reorder (destination == the flow's stage)", ctx do
       card = insert(:card, stage: ctx.code)
       with_run(card, ctx.flow, :running)
       assert Cards.stranded_run(card, ctx.code) == nil

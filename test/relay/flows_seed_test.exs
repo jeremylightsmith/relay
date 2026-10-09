@@ -3,6 +3,7 @@ defmodule Relay.FlowsSeedTest do
 
   alias Relay.Boards
   alias Relay.Flows
+  alias Relay.Repo
   alias Schemas.Flow
 
   # A board shaped like the default seed will be after Task 3: the stage
@@ -31,7 +32,7 @@ defmodule Relay.FlowsSeedTest do
     }
   end
 
-  test "seeds the three default flows, disabled, triggers resolved by stage name (AC 1)" do
+  test "seeds the three default flows, disabled, each on its trigger stage (AC 1, RE429)" do
     ctx = library_board()
 
     assert :ok = Flows.seed_default_flows!(ctx.board)
@@ -41,19 +42,13 @@ defmodule Relay.FlowsSeedTest do
 
     refute Enum.any?([code, plan, spec], & &1.enabled)
 
-    assert spec.pulls_from_stage_id == ctx.next_up.id
-    assert spec.works_in_stage_id == ctx.spec.id
-    assert spec.lands_on_stage_id == ctx.spec_review.id
+    assert spec.stage_id == ctx.spec.id
     assert spec.isolation == :shared_clean
 
-    assert plan.pulls_from_stage_id == ctx.spec_done.id
-    assert plan.works_in_stage_id == ctx.plan.id
-    assert plan.lands_on_stage_id == ctx.plan_done.id
+    assert plan.stage_id == ctx.plan.id
     assert plan.isolation == :shared_clean
 
-    assert code.pulls_from_stage_id == ctx.plan_done.id
-    assert code.works_in_stage_id == ctx.code.id
-    assert code.lands_on_stage_id == ctx.review.id
+    assert code.stage_id == ctx.code.id
     assert code.isolation == :exclusive
   end
 
@@ -155,26 +150,42 @@ defmodule Relay.FlowsSeedTest do
     assert [%{run: "/my-custom-brainstorm {ref}"}] = Flows.get_flow(ctx.board, "spec").nodes
   end
 
-  test "a board missing a trigger sub-lane seeds that trigger as nil; the flow can't be enabled" do
+  test "14. a library flow whose stage the board lacks is skipped, never seeded stageless (RE429)" do
     board = insert(:board)
     insert(:stage, board: board, name: "Next up", position: 1)
     spec = insert(:stage, board: board, name: "Spec", category: :planning, type: :planning, position: 2)
-    plan = insert(:stage, board: board, name: "Plan", category: :planning, type: :planning, position: 3)
-    insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 4)
-    insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 5)
+    code = insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 3)
     {:ok, _} = Boards.enable_lane(spec, :review)
-    {:ok, _} = Boards.enable_lane(spec, :done)
-    # No Plan:Done — the plan flow's lands_on and the code flow's pulls_from won't resolve.
 
     assert :ok = Flows.seed_default_flows!(board)
 
-    plan_flow = Flows.get_flow(board, "plan")
-    assert plan_flow.lands_on_stage_id == nil
-    assert plan_flow.works_in_stage_id == plan.id
-    assert Flows.get_flow(board, "code").pulls_from_stage_id == nil
+    assert Flows.get_flow(board, "spec").stage_id == spec.id
+    assert Flows.get_flow(board, "code").stage_id == code.id
+    assert Flows.get_flow(board, "plan") == nil
+    assert Repo.aggregate(from(f in Flow, where: is_nil(f.stage_id)), :count) == 0
+  end
 
-    assert {:error, changeset} = Flows.enable_flow(plan_flow)
-    assert %{lands_on_stage_id: ["must be set before the flow can be enabled"]} = errors_on(changeset)
+  test "15. a library flow is not seeded onto a stage that already holds a flow (RE429)" do
+    ctx = library_board()
+
+    {:ok, mine} =
+      Flows.create_flow(ctx.board, %{
+        key: "my-spec",
+        isolation: :shared_clean,
+        stage_id: ctx.spec.id,
+        nodes: [],
+        edges: [%{from: "start", to: "done"}]
+      })
+
+    assert :ok = Flows.seed_default_flows!(ctx.board)
+    assert Flows.get_flow(ctx.board, "spec") == nil
+    assert Flows.get_flow(ctx.board, "my-spec").updated_at == mine.updated_at
+    assert Flows.get_flow(ctx.board, "my-spec").stage_id == ctx.spec.id
+
+    keys = ctx.board |> Flows.list_flows() |> Enum.map(& &1.key)
+    assert :ok = Flows.seed_default_flows!(ctx.board)
+    assert ctx.board |> Flows.list_flows() |> Enum.map(& &1.key) == keys
+    assert keys == ["code", "my-spec", "plan"]
   end
 
   test "the seeded flows carry the card contract and still read as uncustomized (RE244)" do

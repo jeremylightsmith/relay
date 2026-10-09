@@ -48,7 +48,7 @@ defmodule RelayWeb.Api.CardActionsTest do
     code: code
   } do
     done = insert(:stage, board: board, name: "Done", type: :done, position: 3)
-    flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+    flow = insert(:flow, board: board, key: "code", stage_id: code.id)
     card = insert(:card, stage: code)
     insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: :parked)
 

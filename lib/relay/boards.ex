@@ -310,24 +310,9 @@ defmodule Relay.Boards do
     |> order_stages()
   end
 
-  @doc """
-  Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
-  `position`, each immediately followed by its substages in `Stage.sublane_rank/1` order
-  (Review before Done). Children whose parent is not in the list are appended at the end
-  by `position`, so nothing is dropped. Pure — no Repo access.
-  """
+  @doc "Orders an in-memory stage list hierarchically — see `Schemas.Stage.order_stages/1`."
   @spec order_stages([Stage.t()]) :: [Stage.t()]
-  def order_stages(stages) when is_list(stages) do
-    {mains, children} = Enum.split_with(stages, &is_nil(&1.parent_id))
-    mains = Enum.sort_by(mains, & &1.position)
-    main_ids = MapSet.new(mains, & &1.id)
-    {nested, orphans} = Enum.split_with(children, &MapSet.member?(main_ids, &1.parent_id))
-    by_parent = Enum.group_by(nested, & &1.parent_id)
-
-    Enum.flat_map(mains, fn main ->
-      [main | by_parent |> Map.get(main.id, []) |> Enum.sort_by(&{Stage.sublane_rank(&1.type), &1.position})]
-    end) ++ Enum.sort_by(orphans, & &1.position)
-  end
+  defdelegate order_stages(stages), to: Stage
 
   defp order_board_stages(nil), do: nil
   defp order_board_stages(%Board{} = board), do: %{board | stages: order_stages(board.stages)}
@@ -474,9 +459,9 @@ defmodule Relay.Boards do
   Disables `parent`'s `lane` sub-lane. Returns `{:ok, :disabled}` when the
   child is removed, `{:ok, :not_enabled}` when there is nothing to remove.
   Refuses — writing and broadcasting nothing — in this order: the lane holds
-  any card, archived included (`:not_empty`); an enabled flow uses the lane
-  (`{:in_use_by_flow, keys}`); it is the board's public intake stage
-  (`:public_intake`). Render a refusal with `stage_refusal_message/1`.
+  any card, archived included (`:not_empty`); it is the board's public intake stage
+  (`:public_intake`). Flows are not consulted: a flow sits on a main stage, and its drop-off is
+  worked out from board order (RE429). Render a refusal with `stage_refusal_message/1`.
   """
   def disable_lane(%Stage{} = parent, lane) when lane in @sublane_types do
     case get_sublane(parent, lane) do
@@ -485,7 +470,6 @@ defmodule Relay.Boards do
 
       %Stage{} = child ->
         with :ok <- refuse_any_card(child),
-             :ok <- refuse_enabled_flows([child.id]),
              :ok <- refuse_public_intake(parent.board_id, [child.id]) do
           {:ok, _} = Repo.delete(child)
           broadcast_stages_changed({:ok, :disabled}, parent.board_id)
@@ -505,6 +489,10 @@ defmodule Relay.Boards do
   A changed `reject_to_stage_id` must be a main stage on the same board. AI-enabled is not a
   stage setting — it is derived from flows (`Relay.Flows.ai_stage_ids/1`, RE409).
 
+  A stage holding a flow can't change to a type outside `Schemas.Stage.work_types/0`: that is
+  `{:error, {:holds_flow, %{stage: name, flow: key}}}` with nothing written or broadcast (RE429 —
+  a flow only works in a work stage; delete the flow first).
+
   Renaming a **main** stage cascades the new name to its Review/Done sub-lanes
   (`"<new name>:Review"` / `"<new name>:Done"`, RE385) in the same transaction — a substage's
   name is its API identifier, so it must never drift from its parent. Nothing else cascades,
@@ -517,6 +505,20 @@ defmodule Relay.Boards do
       |> Stage.changeset(attrs)
       |> validate_reject_to_stage(stage)
 
+    with :ok <- refuse_retype_holding_flow(stage, Changeset.get_change(changeset, :type)) do
+      write_stage(stage, changeset)
+    end
+  end
+
+  defp refuse_retype_holding_flow(_stage, nil), do: :ok
+
+  defp refuse_retype_holding_flow(%Stage{} = stage, type) do
+    flow = if type in Stage.work_types(), do: nil, else: Flows.stage_flow(stage)
+
+    if flow, do: {:error, {:holds_flow, %{stage: stage.name, flow: flow.key}}}, else: :ok
+  end
+
+  defp write_stage(stage, changeset) do
     new_name = Changeset.get_change(changeset, :name)
 
     if is_nil(stage.parent_id) and is_binary(new_name) do
@@ -739,16 +741,15 @@ defmodule Relay.Boards do
   def place_stage(%Stage{}, _placement), do: {:error, :invalid_anchor}
 
   @doc """
-  Deletes a main stage; its Review/Done children cascade via the `parent_id` FK. A disabled
-  flow's trigger and another stage's reject-to pointing here are nilified by their FKs.
-  Refuses — writing and broadcasting nothing — in this order:
+  Deletes a main stage; its Review/Done children cascade via the `parent_id` FK, and so does the
+  flow on it, enabled or not (`flows.stage_id on_delete: :delete_all`, RE429) — its runs keep
+  their `flow_key` while `flow_id` is nilified. Another stage's reject-to pointing here is
+  nilified by its FK. Refuses — writing and broadcasting nothing — in this order:
 
     1. the board's only main stage → `:last_stage`;
     2. the stage or a substage holds cards, archived included →
        `{:not_empty, %{live: n, archived: n}}`;
-    3. an **enabled** flow pulls from / works in / lands on the stage or a substage →
-       `{:in_use_by_flow, keys}`;
-    4. the stage or a substage is the board's public intake stage → `:public_intake`.
+    3. the stage or a substage is the board's public intake stage → `:public_intake`.
 
   A substage is `{:error, :not_a_main_stage}` (only `disable_lane/2` removes one). Render a
   refusal with `stage_refusal_message/1`.
@@ -758,7 +759,6 @@ defmodule Relay.Boards do
 
     with :ok <- refuse_last_stage(stage),
          :ok <- refuse_cards(ids),
-         :ok <- refuse_enabled_flows(ids),
          :ok <- refuse_public_intake(stage.board_id, ids) do
       {:ok, deleted} = Repo.delete(stage)
       broadcast_stages_changed({:ok, deleted}, stage.board_id)
@@ -769,7 +769,7 @@ defmodule Relay.Boards do
 
   @doc """
   The ONE human sentence for every stage refusal `create_stage/2`, `place_stage/2`,
-  `delete_stage/1`, `enable_lane/2` and `disable_lane/2` return — rendered by both Board
+  `update_stage/2`, `delete_stage/1`, `enable_lane/2` and `disable_lane/2` return — rendered by both Board
   Settings and the REST API (the `Relay.Cards.dependency_error_message/1` precedent).
   """
   def stage_refusal_message(:last_stage), do: "A board needs at least one stage."
@@ -779,8 +779,8 @@ defmodule Relay.Boards do
 
   def stage_refusal_message(:not_empty), do: "That lane still has cards — move them out first."
 
-  def stage_refusal_message({:in_use_by_flow, keys}),
-    do: "Flow(s) #{Enum.join(keys, ", ")} use this stage — disable or re-point them first."
+  def stage_refusal_message({:holds_flow, %{stage: stage, flow: key}}),
+    do: "Stage #{stage} holds flow `#{key}` — delete the flow first."
 
   def stage_refusal_message(:public_intake),
     do: "This is the public intake stage — pick another in Public settings first."
@@ -807,13 +807,6 @@ defmodule Relay.Boards do
 
   defp refuse_any_card(%Stage{id: id}) do
     if Repo.exists?(from c in Card, where: c.stage_id == ^id), do: {:error, :not_empty}, else: :ok
-  end
-
-  defp refuse_enabled_flows(stage_ids) do
-    case Flows.enabled_flow_keys_using(stage_ids) do
-      [] -> :ok
-      keys -> {:error, {:in_use_by_flow, keys}}
-    end
   end
 
   defp refuse_public_intake(board_id, stage_ids) do
@@ -1042,10 +1035,9 @@ defmodule Relay.Boards do
     end)
   end
 
-  # RLY-131: the default flow library's triggers land on the Spec:Review,
-  # Spec:Done, and Plan:Done sub-lanes, so every new board enables them
-  # (in this order — they take positions 9–11) before seeding the disabled
-  # default flows, which then resolve every trigger name.
+  # RLY-131: every new board enables the Spec:Review, Spec:Done and Plan:Done sub-lanes (in
+  # this order — they take positions 9–11) before seeding the disabled default flows onto
+  # Spec, Plan and Code; their pickup and drop-off are worked out from this order (RE429).
   defp seed_lanes_and_flows!(board) do
     spec = Repo.get_by!(Stage, board_id: board.id, name: "Spec")
     plan = Repo.get_by!(Stage, board_id: board.id, name: "Plan")

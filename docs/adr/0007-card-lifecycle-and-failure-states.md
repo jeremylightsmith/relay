@@ -112,11 +112,12 @@ restated here.
 ### The happy path
 
 A card is *pulled* by the scheduler when it's `:ready`/`:queued`, agent-owned (baton ≠ human), has
-no active run, and sits in an enabled flow's `pulls_from` stage with WIP room and a free isolation
+no active run, and sits in the stage an enabled flow pulls from (the stage before the flow's own
+in board order, `Relay.Flows.neighbours/2` — RE429) with WIP room and a free isolation
 slot (`fresh_eligible?`, `lib/relay/runs/scheduler.ex:152`; `Policy.pullable?/1`,
 `lib/relay/runs/policy.ex:24`). A run is inserted `:running`, the card moves to the flow's
-`works_in` stage and goes `:working`, and the engine walks nodes until it reaches `done` (card
-lands on the flow's `lands_on` stage) or a review gate (card `:in_review`, waiting for a human).
+stage and goes `:working`, and the engine walks nodes until it reaches `done` (card lands on the
+stage after the flow's own, worked out when the run lands) or a review gate (card `:in_review`, waiting for a human).
 
 The three flows (`lib/relay/flows/default_library.ex`), each **loaded from**
 `docs/designs/flows/*.json`:
@@ -220,7 +221,7 @@ transactionally coupled.**
 1. **Dispatch is non-atomic — the "active run in a `:done` stage" window. → RESOLVED (RLY-233 /
    #190 + RE239).** Dispatch is now atomic: `start_seeded_run/4` moves the card into the flow's
    work lane *then* inserts the run in one transaction, so no *committed* state ever pairs an active
-   run with a card still at its (often `:done`-type) `pulls_from` stage. The residual was purely
+   run with a card still at the (often `:done`-type) stage the flow pulls from. The residual was purely
    observational — the `Listener`'s terminal-close rule read the card stage and the active run in
    two separate queries and could straddle a concurrent `Spec:Done → Plan` dispatch, seeing the
    stale done stage beside the fresh plan run and cancelling it (the live RE239 incident: a plan run

@@ -8,7 +8,7 @@ defmodule Relay.Runs.StoppedWorkTest do
     board = insert(:board)
     queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)
     works = insert(:stage, board: board, name: "Code", position: 2, type: :work)
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
     {:ok, board: board, queue: queue, works: works}
   end
 

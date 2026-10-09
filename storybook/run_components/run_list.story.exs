@@ -25,11 +25,11 @@ defmodule Storybook.RunComponents.RunList do
     )
   end
 
-  # `flow: %{works_in_stage: …}` is how RunDetail resolves `stage_name` (RE426).
+  # `flow: %{stage: …}` is how RunDetail resolves `stage_name` (RE426).
   defp detail(stage, run_attrs, nes) do
     run =
       Map.merge(
-        %{current_node: nil, flow_version: nil, flow: %{works_in_stage: %{name: stage}}},
+        %{current_node: nil, flow_version: nil, flow: %{stage: %{name: stage}}},
         Map.put(run_attrs, :node_executions, nes)
       )
 

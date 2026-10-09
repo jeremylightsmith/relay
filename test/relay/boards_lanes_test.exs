@@ -90,24 +90,6 @@ defmodule Relay.BoardsLanesTest do
   end
 
   describe "disable_lane/2 guard rails (RE384)" do
-    test "refuses a lane an enabled flow lands on" do
-      parent = main_stage()
-      {:ok, done} = Boards.enable_lane(parent, :done)
-      board = Relay.Repo.get!(Schemas.Board, parent.board_id)
-
-      insert(:flow,
-        board: board,
-        key: "code",
-        enabled: true,
-        pulls_from_stage_id: insert(:stage, board: board, position: 50).id,
-        works_in_stage_id: parent.id,
-        lands_on_stage_id: done.id
-      )
-
-      assert {:error, {:in_use_by_flow, ["code"]}} = Boards.disable_lane(parent, :done)
-      assert [%{type: :done}] = Boards.sublanes(parent)
-    end
-
     test "refuses the public intake lane" do
       parent = main_stage()
       {:ok, review} = Boards.enable_lane(parent, :review)

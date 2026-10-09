@@ -28,10 +28,8 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     view
   end
 
-  defp stage_ids(board) do
-    [pulls, works, lands | _] = Boards.list_stages(board)
-    %{pulls: pulls.id, works: works.id, lands: lands.id}
-  end
+  # Deploy is the default board's one flow-free work stage (RE429: one flow per stage).
+  defp deploy_id(board), do: Enum.find(Boards.list_stages(board), &(&1.name == "Deploy")).id
 
   describe "navigation" do
     test "rail and mobile strip both carry a Flows entry that opens the pane",
@@ -132,13 +130,24 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flow-#{plan.id}-customized", "customized")
     end
 
-    test "a flow with a missing trigger stage shows a warning chip and a disabled toggle",
+    test "a flow with nothing before it to pull from shows a warning chip and a disabled toggle",
          %{conn: conn, board: board} do
-      {:ok, spec} = Flows.update_flow(flow(board, "spec"), %{pulls_from_stage_id: nil})
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, backlog} = Boards.update_stage(backlog, %{type: :work})
+
+      {:ok, first} =
+        Flows.create_flow(board, %{
+          key: "first",
+          isolation: :shared_clean,
+          stage_id: backlog.id,
+          nodes: [],
+          edges: [%{from: "start", to: "done"}]
+        })
+
       view = open_flows(conn, board)
 
-      assert has_element?(view, "#flow-#{spec.id}-trigger", "missing stage")
-      assert has_element?(view, "#flow-#{spec.id}-toggle[disabled]")
+      assert has_element?(view, "#flow-#{first.id}-trigger", "missing stage")
+      assert has_element?(view, "#flow-#{first.id}-toggle[disabled]")
     end
 
     test "renaming a trigger stage updates the chips live", %{conn: conn, board: board} do
@@ -164,15 +173,11 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
     test "the first-run banner names only the flows Relay ships, not user-created ones",
          %{conn: conn, board: board} do
-      ids = stage_ids(board)
-
       {:ok, _created} =
         Flows.create_flow(board, %{
           "key" => "smoke-gate",
           "isolation" => "shared_clean",
-          "pulls_from_stage_id" => ids.pulls,
-          "works_in_stage_id" => ids.works,
-          "lands_on_stage_id" => ids.lands,
+          "stage_id" => deploy_id(board),
           "nodes" => [],
           "edges" => [%{"from" => "start", "to" => "done"}]
         })
@@ -188,15 +193,11 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
     test "the first-run banner is suppressed when no shipped flow is left on the board",
          %{conn: conn, board: board} do
-      ids = stage_ids(board)
-
       {:ok, _created} =
         Flows.create_flow(board, %{
           "key" => "smoke-gate",
           "isolation" => "shared_clean",
-          "pulls_from_stage_id" => ids.pulls,
-          "works_in_stage_id" => ids.works,
-          "lands_on_stage_id" => ids.lands,
+          "stage_id" => deploy_id(board),
           "nodes" => [],
           "edges" => [%{"from" => "start", "to" => "done"}]
         })
@@ -292,15 +293,6 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#new-flow-form.action-group #new-flow-create.pending-action[type=submit]")
       refute has_element?(view, "#new-flow-cancel.pending-action")
     end
-
-    test "the row menu's Duplicate presses to Duplicating… inside the menu group", %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      view = open_flows(conn, board)
-
-      assert has_element?(view, "#flow-#{spec.id}-menu ul.action-group #flow-#{spec.id}-duplicate.pending-action")
-      assert text_at(face(view, "#flow-#{spec.id}-duplicate"), ".pending-face") == "Duplicating…"
-      refute has_element?(view, "#flow-#{spec.id}-duplicate.btn")
-    end
   end
 
   describe "enable/disable cutover confirm" do
@@ -351,31 +343,6 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flow-#{spec.id}-toggle[aria-pressed='false']")
     end
 
-    test "an enable conflict surfaces as an error flash naming the reason",
-         %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      {:ok, _} = Flows.enable_flow(spec)
-
-      {:ok, rival} =
-        Flows.create_flow(board, %{
-          key: "rival",
-          isolation: :shared_clean,
-          pulls_from_stage_id: spec.pulls_from_stage_id,
-          works_in_stage_id: spec.works_in_stage_id,
-          lands_on_stage_id: spec.lands_on_stage_id,
-          nodes: [%{key: "n", type: :agent, run: "x"}],
-          edges: [%{from: "start", to: "n"}, %{from: "n", to: "done", on: :succeeded}]
-        })
-
-      view = open_flows(conn, board)
-      view |> element("#flow-#{rival.id}-toggle") |> render_click()
-      view |> element("#flow-#{rival.id}-confirm-cta") |> render_click()
-
-      assert render(view) =~ "another enabled flow already pulls from this stage"
-      refute Flows.get_flow!(board, "rival").enabled
-      assert has_element?(view, "#flow-#{rival.id}-toggle[aria-pressed='false']")
-    end
-
     test "an archived board rejects the toggle as read-only", %{conn: conn, board: board} do
       spec = flow(board, "spec")
       {:ok, _} = Boards.archive_board(board)
@@ -403,37 +370,6 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       view = open_flows(conn, board)
       code = flow(board, "code")
       assert has_element?(view, "#flow-#{code.id}-nodes-count", "v#{code.version}")
-    end
-
-    test "Duplicate adds a disabled customized copy with no Reset item",
-         %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      view = open_flows(conn, board)
-
-      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
-
-      copy = Flows.get_flow!(board, "spec-copy")
-      refute copy.enabled
-      assert has_element?(view, "#flow-row-#{copy.id}", "Spec copy")
-      assert has_element?(view, "#flow-#{copy.id}-customized", "customized")
-      assert has_element?(view, "#flow-#{copy.id}-toggle[aria-pressed='false']")
-      refute has_element?(view, "#flow-#{copy.id}-reset")
-    end
-
-    test "enabling a duplicate that pulls from the same stage surfaces the conflict (AC 3)",
-         %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      {:ok, _} = Flows.enable_flow(spec)
-      view = open_flows(conn, board)
-
-      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
-      copy = Flows.get_flow!(board, "spec-copy")
-
-      view |> element("#flow-#{copy.id}-toggle") |> render_click()
-      view |> element("#flow-#{copy.id}-confirm-cta") |> render_click()
-
-      assert render(view) =~ "another enabled flow already pulls from this stage"
-      refute Flows.get_flow!(board, "spec-copy").enabled
     end
 
     test "Reset to default shows only for customized library flows, confirms, and restores the default",
@@ -467,17 +403,6 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       refute has_element?(view, "#flow-#{plan.id}-customized")
       refute has_element?(view, "#flow-#{plan.id}-reset")
       refute has_element?(view, "#flow-#{plan.id}-reset-confirm")
-    end
-
-    test "an archived board rejects Duplicate as read-only", %{conn: conn, board: board} do
-      spec = flow(board, "spec")
-      {:ok, _} = Boards.archive_board(board)
-      view = open_flows(conn, board)
-
-      view |> element("#flow-#{spec.id}-duplicate") |> render_click()
-
-      assert render(view) =~ "archived (read-only)"
-      assert Flows.get_flow(board, "spec-copy") == nil
     end
   end
 
@@ -542,31 +467,55 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     end
   end
 
-  describe "new-flow stage pickers (RE385)" do
-    test "the works-in picker lists each substage directly under its parent", %{
-      conn: conn,
-      board: board
-    } do
-      html = conn |> open_new_flow(board) |> render()
+  describe "one Stage select (RE429)" do
+    defp option_texts(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
 
-      assert html
-             |> LazyHTML.from_fragment()
-             |> LazyHTML.query("#new-flow-works-in option")
-             |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim())) ==
-               [
-                 "—",
-                 "Backlog",
-                 "Next up",
-                 "Spec",
-                 "Spec:Review",
-                 "Spec:Done",
-                 "Plan",
-                 "Plan:Done",
-                 "Code",
-                 "Review",
-                 "Deploy",
-                 "Done"
-               ]
+    test "30. the new-flow form picks one stage and previews the derived pickup and drop-off",
+         %{conn: conn, board: board} do
+      view = open_new_flow(conn, board)
+      deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
+
+      assert option_texts(view, "#new-flow-stage option") == ["—", "Deploy"]
+      assert has_element?(view, "#new-flow-stage[name='flow[stage_id]']")
+      refute has_element?(view, "#new-flow-pulls-from")
+      refute has_element?(view, "#new-flow-works-in")
+      refute has_element?(view, "#new-flow-lands-on")
+
+      view |> form("#new-flow-form", %{"flow" => %{"stage_id" => deploy.id}}) |> render_change()
+      assert has_element?(view, "#new-flow-derived", "Review")
+      assert has_element?(view, "#new-flow-derived", "Done")
+
+      view
+      |> form("#new-flow-form", %{"flow" => %{"key" => "nostage", "stage_id" => ""}})
+      |> render_submit()
+
+      assert has_element?(view, "#new-flow-form", "is required")
+      assert Flows.get_flow(board, "nostage") == nil
+
+      assert {:error, {:live_redirect, _}} =
+               view
+               |> form("#new-flow-form", %{"flow" => %{"key" => "ship", "stage_id" => deploy.id}})
+               |> render_submit()
+
+      assert %Flow{enabled: false} = ship = Flows.get_flow(board, "ship")
+      assert ship.stage_id == deploy.id
+    end
+
+    test "31. rows carry no Duplicate item and chip the derived trigger",
+         %{conn: conn, board: board} do
+      code = flow(board, "code")
+      view = open_flows(conn, board)
+
+      refute has_element?(view, "#flow-#{code.id}-duplicate")
+      assert has_element?(view, "#flow-#{code.id}-trigger", "Plan:Done")
+      assert has_element?(view, "#flow-#{code.id}-trigger", "Code")
+      assert has_element?(view, "#flow-#{code.id}-trigger", "Review")
     end
   end
 
@@ -577,23 +526,14 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
 
       assert has_element?(view, "#new-flow-form")
       assert has_element?(view, "#new-flow-key[value='new-flow']")
-      assert has_element?(view, "#new-flow-pulls-from")
-      assert has_element?(view, "#new-flow-works-in")
-      assert has_element?(view, "#new-flow-lands-on")
+      assert has_element?(view, "#new-flow-stage")
       assert has_element?(view, "#new-flow-isolation option[value='shared_clean'][selected]")
-    end
-
-    test "the pickers offer sub-lane stages, not just top-level ones",
-         %{conn: conn, board: board} do
-      view = open_new_flow(conn, board)
-
-      assert has_element?(view, "#new-flow-pulls-from", "Spec:Review")
     end
 
     test "creating a flow persists it disabled and navigates to the editor",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
+      deploy = deploy_id(board)
 
       assert {:error, {:live_redirect, %{to: to}}} =
                view
@@ -601,9 +541,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
                  "flow" => %{
                    "key" => "deploy-gate",
                    "isolation" => "shared_clean",
-                   "pulls_from_stage_id" => to_string(ids.pulls),
-                   "works_in_stage_id" => to_string(ids.works),
-                   "lands_on_stage_id" => to_string(ids.lands)
+                   "stage_id" => to_string(deploy)
                  }
                })
                |> render_submit()
@@ -615,15 +553,13 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert created.version == 1
       assert created.nodes == []
       assert [%{from: "start", to: "done", on: nil}] = created.edges
-      assert created.pulls_from_stage_id == ids.pulls
-      assert created.works_in_stage_id == ids.works
-      assert created.lands_on_stage_id == ids.lands
+      assert created.stage_id == deploy
     end
 
     test "creating a flow lands on an editor that actually renders (no crash on the empty graph)",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
+      deploy = deploy_id(board)
 
       assert {:error, {:live_redirect, %{to: to}}} =
                view
@@ -631,9 +567,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
                  "flow" => %{
                    "key" => "deploy-gate",
                    "isolation" => "shared_clean",
-                   "pulls_from_stage_id" => to_string(ids.pulls),
-                   "works_in_stage_id" => to_string(ids.works),
-                   "lands_on_stage_id" => to_string(ids.lands)
+                   "stage_id" => to_string(deploy)
                  }
                })
                |> render_submit()
@@ -648,16 +582,14 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
     test "the created flow's row shows 0 nodes and an off toggle",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
+      deploy = deploy_id(board)
 
       view
       |> form("#new-flow-form", %{
         "flow" => %{
           "key" => "deploy-gate",
           "isolation" => "shared_clean",
-          "pulls_from_stage_id" => to_string(ids.pulls),
-          "works_in_stage_id" => to_string(ids.works),
-          "lands_on_stage_id" => to_string(ids.lands)
+          "stage_id" => to_string(deploy)
         }
       })
       |> render_submit()
@@ -669,10 +601,9 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert has_element?(view, "#flow-#{created.id}-toggle[aria-pressed='false']")
     end
 
-    test "a blank trigger stage keeps the panel open with an inline error",
+    test "a blank stage keeps the panel open with an inline error",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
 
       html =
         view
@@ -680,9 +611,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
           "flow" => %{
             "key" => "deploy-gate",
             "isolation" => "shared_clean",
-            "pulls_from_stage_id" => "",
-            "works_in_stage_id" => to_string(ids.works),
-            "lands_on_stage_id" => to_string(ids.lands)
+            "stage_id" => ""
           }
         })
         |> render_submit()
@@ -692,10 +621,10 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
       assert Flows.get_flow(board, "deploy-gate") == nil
     end
 
-    test "a duplicate key keeps the panel open and preserves the stage selections",
+    test "a duplicate key keeps the panel open and preserves the stage selection",
          %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
+      deploy = deploy_id(board)
 
       html =
         view
@@ -703,23 +632,19 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
           "flow" => %{
             "key" => "spec",
             "isolation" => "shared_clean",
-            "pulls_from_stage_id" => to_string(ids.pulls),
-            "works_in_stage_id" => to_string(ids.works),
-            "lands_on_stage_id" => to_string(ids.lands)
+            "stage_id" => to_string(deploy)
           }
         })
         |> render_submit()
 
       assert has_element?(view, "#new-flow-form")
       assert html =~ "has already been taken"
-      assert has_element?(view, "#new-flow-pulls-from option[value='#{ids.pulls}'][selected]")
-      assert has_element?(view, "#new-flow-works-in option[value='#{ids.works}'][selected]")
-      assert has_element?(view, "#new-flow-lands-on option[value='#{ids.lands}'][selected]")
+      assert has_element?(view, "#new-flow-stage option[value='#{deploy}'][selected]")
     end
 
     test "a malformed key is rejected inline", %{conn: conn, board: board} do
       view = open_new_flow(conn, board)
-      ids = stage_ids(board)
+      deploy = deploy_id(board)
 
       html =
         view
@@ -727,9 +652,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
           "flow" => %{
             "key" => "Deploy Gate!",
             "isolation" => "shared_clean",
-            "pulls_from_stage_id" => to_string(ids.pulls),
-            "works_in_stage_id" => to_string(ids.works),
-            "lands_on_stage_id" => to_string(ids.lands)
+            "stage_id" => to_string(deploy)
           }
         })
         |> render_submit()
@@ -755,9 +678,7 @@ defmodule RelayWeb.BoardSettingsFlowsTest do
         "flow" => %{
           "key" => "sneaky",
           "isolation" => "shared_clean",
-          "pulls_from_stage_id" => "1",
-          "works_in_stage_id" => "1",
-          "lands_on_stage_id" => "1"
+          "stage_id" => "1"
         }
       })
 

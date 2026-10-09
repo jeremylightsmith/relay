@@ -8796,7 +8796,8 @@ class FlowPullPushTest(unittest.TestCase):
         "version": 7,
         "enabled": True,
         "isolation": "exclusive",
-        "trigger": {"pulls_from": "Plan:Done", "works_in": "Code", "lands_on": "Review"},
+        "trigger": {"stage": "Code"},
+        "derived": {"pulls_from": "Plan:Done", "lands_on": "Code:Done"},
         "nodes": [
             {"key": "branch", "type": "shell", "run": "{relay} git-fetch && git checkout -B {branch} origin/main"},
             {"key": "implement", "type": "agent", "model": "sonnet", "agent": "plan-implementer",
@@ -8855,7 +8856,7 @@ class FlowPullPushTest(unittest.TestCase):
         self.assertIn("enabled", out)
         self.assertIn("exclusive", out)
         self.assertIn("Plan:Done", out)
-        self.assertIn("Review", out)
+        self.assertIn("Code:Done", out)
         self.assertIn("2 nodes", out)
         self.assertIn("2 edges", out)
         self.assertIn("implement", out)
@@ -8871,9 +8872,44 @@ class FlowPullPushTest(unittest.TestCase):
         self.assertIn("exclusive", out)
 
     def test_a_null_trigger_field_renders_without_crashing(self):
-        doc = dict(self.DOC, trigger={"pulls_from": None, "works_in": None, "lands_on": None})
+        doc = dict(self.DOC, trigger={"stage": None}, derived={"pulls_from": None, "lands_on": None})
         self.assertIn("—", relay.format_flow(doc))
         self.assertIn("—", relay.format_flow_list([doc]))
+
+    # ---- RE429: one stage in the trigger, pickup and drop-off from the server's `derived` ----
+
+    def _without_derived(self, **overrides):
+        doc = {k: v for k, v in self.DOC.items() if k != "derived"}
+        doc.update(overrides)
+        return doc
+
+    def test_the_trigger_chain_reads_pickup_and_drop_off_from_derived(self):
+        self.assertIn("trigger: Plan:Done → Code → Code:Done", relay.format_flow(self.DOC))
+        row = relay.format_flow_list([self.DOC]).splitlines()[1]
+        self.assertTrue(row.endswith("Plan:Done → Code → Code:Done"), row)
+
+    def test_a_null_derived_end_renders_as_a_dash(self):
+        doc = dict(self.DOC, derived={"pulls_from": None, "lands_on": "Code:Done"})
+        self.assertEqual(relay._trigger_chain(doc), "— → Code → Code:Done")
+
+    def test_no_derived_block_renders_the_stage_alone(self):
+        self.assertEqual(relay._trigger_chain(self._without_derived()), "Code")
+
+    def test_a_legacy_three_key_trigger_renders_its_works_in_stage(self):
+        doc = self._without_derived(trigger={"pulls_from": "A", "works_in": "Code", "lands_on": "B"})
+        self.assertEqual(relay._trigger_chain(doc), "Code")
+
+    def test_a_null_trigger_and_no_derived_renders_a_dash(self):
+        self.assertEqual(relay._trigger_chain(self._without_derived(trigger=None)), "—")
+
+    def test_the_trigger_chain_reads_the_contract_pinned_keys(self):
+        names = {"stage": "Code", "pulls_from": "Plan:Done", "lands_on": "Code:Done"}
+        flows = CONTRACT["flows"]
+        doc = {
+            "trigger": {k: names.get(k, k) for k in flows["trigger_keys"]},
+            "derived": {k: names.get(k, k) for k in flows["derived_keys"]},
+        }
+        self.assertEqual(relay._trigger_chain(doc), "Plan:Done → Code → Code:Done")
 
     # ---- push ----
 

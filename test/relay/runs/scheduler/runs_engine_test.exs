@@ -28,7 +28,7 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
     run = Runs.active_run(Relay.Repo.get!(Schemas.Card, card.id))
     assert run.status == :running
     moved = Relay.Repo.get!(Schemas.Card, card.id)
-    assert moved.stage_id == flow.works_in_stage_id
+    assert moved.stage_id == flow.stage_id
     assert moved.status == :working
   end
 
@@ -53,15 +53,14 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
   test "start_run/3 logs a warning on a permanent failure instead of swallowing it silently",
        %{board: board} do
     next_up = Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Next up"))
-    spec_stage = Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Spec"))
+    # Deploy is the default board's one flow-free work stage.
+    deploy = Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Deploy"))
 
     {:ok, human_flow} =
       Relay.Flows.create_flow(board, %{
         key: "human",
         isolation: :shared_clean,
-        pulls_from_stage_id: spec_stage.id,
-        works_in_stage_id: spec_stage.id,
-        lands_on_stage_id: next_up.id,
+        stage_id: deploy.id,
         nodes: [%{key: "review", type: :human}],
         edges: [%{from: "start", to: "review"}, %{from: "review", to: "done", on: :succeeded}]
       })
@@ -119,18 +118,16 @@ defmodule Relay.Runs.Scheduler.RunsEngineTest do
 
   test "active_runs/1 resolves pinned_runner_name to that board's runner id",
        %{board: board, next_up: next_up, flow: spec_flow} do
-    # The setup block already enables "spec" pulling from "Next up" — disable it first so
-    # this test's own exclusive flow (also pulling from "Next up") doesn't collide with the
-    # one-enabled-flow-per-pulls_from_stage unique index.
-    {:ok, _} = Relay.Flows.disable_flow(spec_flow)
+    # The setup block already enables "spec" on Spec — a stage holds one flow, so remove it
+    # and put this test's own exclusive flow (also pulling from "Next up") there instead.
+    {:ok, spec_flow} = Relay.Flows.disable_flow(spec_flow)
+    {:ok, _} = Relay.Flows.delete_flow(spec_flow)
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "excl",
         isolation: :exclusive,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Spec")).id,
-        lands_on_stage_id: Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Plan")).id,
+        stage_id: Enum.find(Relay.Boards.list_stages(board), &(&1.name == "Spec")).id,
         nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
         edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
       })

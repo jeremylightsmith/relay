@@ -5,7 +5,14 @@ defmodule Relay.Flows.Document do
   and by the Flow Editor's save path indirectly (both go through `Schemas.Flow.changeset/2`).
 
   Pure: no `Repo`, no board, no stage ids. The two things that need the database — resolving
-  trigger stage NAMES to ids, and saving — stay in `Relay.Flows`.
+  the trigger's stage NAME to an id, and saving — stay in `Relay.Flows`.
+
+  ## The trigger (RE429)
+
+  A flow belongs to one stage, so the trigger is `{"stage": "<name>"}`. Pickup and drop-off are
+  worked out from board order and never part of the document. The pre-RE429 three-key trigger
+  (`pulls_from` / `works_in` / `lands_on`) is still accepted: `stage` wins when present, else
+  `works_in` is read as the stage, and `pulls_from` / `lands_on` are ignored.
 
   ## Sparse out, dense in
 
@@ -37,9 +44,11 @@ defmodule Relay.Flows.Document do
   alias Schemas.NodeExecution
   alias Schemas.Stage
 
-  @top_level ~w(key version enabled isolation trigger nodes edges)
-  @trigger_keys ~w(pulls_from works_in lands_on)
-  @trigger_fields [:pulls_from, :works_in, :lands_on]
+  # `derived` is the API's read-only pickup / drop-off block (`derived/1`): a pulled file carries
+  # it, so a push accepts it and never reads it.
+  @top_level ~w(key version enabled isolation trigger nodes edges derived)
+  # `stage` is canonical; the other three are the legacy (pre-RE429) trigger, still accepted.
+  @trigger_keys ~w(stage pulls_from works_in lands_on)
 
   # Marks "the document did not carry this key" — distinct from "carried null".
   @absent :__absent__
@@ -47,7 +56,7 @@ defmodule Relay.Flows.Document do
   # ---------------------------------------------------------------- encode
 
   @doc """
-  A flow as the canonical, JSON-ready document. Requires the trigger stage associations to be
+  A flow as the canonical, JSON-ready document. Requires the `:stage` association to be
   preloaded (`Relay.Flows.get_flow_with_stages/2` or `Relay.Flows.list_flows/1`); an unloaded
   association raises rather than silently emitting a triggerless document.
   """
@@ -57,14 +66,24 @@ defmodule Relay.Flows.Document do
       "version" => flow.version,
       "enabled" => flow.enabled,
       "isolation" => Atom.to_string(flow.isolation),
-      "trigger" => %{
-        "pulls_from" => stage_name(flow.pulls_from_stage),
-        "works_in" => stage_name(flow.works_in_stage),
-        "lands_on" => stage_name(flow.lands_on_stage)
-      },
+      "trigger" => %{"stage" => stage_name(flow.stage)},
       "nodes" => Enum.map(flow.nodes || [], &sparse(&1, Flow.Node.fields(), %Flow.Node{})),
       "edges" => Enum.map(flow.edges || [], &sparse(&1, Flow.Edge.fields(), %Flow.Edge{}))
     }
+  end
+
+  @doc """
+  Where `flow` picks cards up and drops them off, by stage name — the read-only `"derived"`
+  block the API puts beside the document (RE429). Read from the virtual `pulls_from_stage` /
+  `lands_on_stage` that `Relay.Flows.list_flows/1` / `get_flow_with_stages/2` fill from the
+  board's current order; `nil` at either end of the board.
+
+  Not part of `encode/1`: the canonical document (the library files, `customized?/1`, the
+  `decode ∘ encode` fixed point) stays derived-free, and `decode/1` ignores `"derived"`.
+  """
+  @spec derived(Flow.t()) :: %{String.t() => String.t() | nil}
+  def derived(%Flow{pulls_from_stage: pulls_from, lands_on_stage: lands_on}) do
+    %{"pulls_from" => stage_name(pulls_from), "lands_on" => stage_name(lands_on)}
   end
 
   defp stage_name(nil), do: nil
@@ -72,7 +91,7 @@ defmodule Relay.Flows.Document do
 
   defp stage_name(%Ecto.Association.NotLoaded{}) do
     raise ArgumentError,
-          "Relay.Flows.Document.encode/1 requires the flow's trigger stages to be preloaded"
+          "Relay.Flows.Document.encode/1 requires the flow's stage to be preloaded"
   end
 
   defp sparse(item, fields, defaults) do
@@ -91,7 +110,7 @@ defmodule Relay.Flows.Document do
   # ---------------------------------------------------------------- decode
 
   @doc """
-  A document as dense, changeset-ready attrs with the trigger as stage NAMES.
+  A document as dense, changeset-ready attrs with the trigger as `%{stage: name | nil}`.
 
   Returns exactly the attr shape `Relay.Flows.DefaultLibrary.all/0` returns, which is already
   what `seed_default_flows!/1`, `customized?/1`, `diff_from_default/1` and `reset_to_default/1`
@@ -156,23 +175,20 @@ defmodule Relay.Flows.Document do
   defp decode_trigger(doc) do
     case Map.fetch(doc, "trigger") do
       :error -> {:ok, @absent}
-      {:ok, nil} -> {:ok, Map.new(@trigger_fields, &{&1, nil})}
-      {:ok, trigger} when is_map(trigger) -> trigger_names(trigger)
+      {:ok, nil} -> {:ok, %{stage: nil}}
+      {:ok, trigger} when is_map(trigger) -> trigger_stage(trigger)
       {:ok, _other} -> {:error, "trigger must be an object"}
     end
   end
 
-  defp trigger_names(trigger) do
+  defp trigger_stage(trigger) do
     with :ok <- reject_unknown(Map.keys(trigger), @trigger_keys, "trigger key") do
-      Enum.reduce_while(@trigger_fields, {:ok, %{}}, &reduce_trigger_field(&1, &2, trigger))
-    end
-  end
+      key = if Map.has_key?(trigger, "stage"), do: "stage", else: "works_in"
 
-  defp reduce_trigger_field(field, {:ok, acc}, trigger) do
-    case Map.get(trigger, Atom.to_string(field)) do
-      nil -> {:cont, {:ok, Map.put(acc, field, nil)}}
-      name when is_binary(name) -> {:cont, {:ok, Map.put(acc, field, name)}}
-      _other -> {:halt, {:error, "trigger.#{field} must be a stage name or null"}}
+      case Map.get(trigger, key) do
+        name when is_binary(name) or is_nil(name) -> {:ok, %{stage: name}}
+        _other -> {:error, "trigger.#{key} must be a stage name or null"}
+      end
     end
   end
 

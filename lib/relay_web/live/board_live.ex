@@ -4467,6 +4467,9 @@ defmodule RelayWeb.BoardLive do
       |> assign(:read_only?, Board.archived?(board))
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_flows, Flows.stage_flows(board))
+      # RE429 — pulls-from / lands-on are derived from board order at read time, so a reorder,
+      # substage toggle or stage delete changes them (or drops a flow): re-read before the faces.
+      |> assign(:flows, Flows.list_flows(board))
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)

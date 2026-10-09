@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
     insert(:membership, board: board, user: user)
     code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
     done = insert(:stage, board: board, name: "Done", type: :done, position: 2)
-    flow = insert(:flow, board: board, key: "code", works_in_stage_id: code.id)
+    flow = insert(:flow, board: board, key: "code", stage_id: code.id)
     card = insert(:card, stage: code, title: "Live card")
     run = insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: :parked, current_node: "implement")
     %{board: board, code: code, done: done, card: card, run: run}

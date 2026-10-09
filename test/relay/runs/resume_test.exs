@@ -119,19 +119,17 @@ defmodule Relay.Runs.ResumeTest do
 
   test "after an adopting boot the reaper still parks an exclusive run whose runner went stale",
        %{board: board, flow: spec_flow} do
-    # Only one enabled flow may pull from a stage — step the spec flow aside for this one.
-    {:ok, _} = Relay.Flows.disable_flow(spec_flow)
+    # A stage holds one flow — remove the spec flow so this one can work in Spec.
+    {:ok, spec_flow} = Relay.Flows.disable_flow(spec_flow)
+    {:ok, _} = Relay.Flows.delete_flow(spec_flow)
     next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
 
     {:ok, excl} =
       Relay.Flows.create_flow(board, %{
         key: "excl",
         isolation: :exclusive,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: spec.id,
         nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
         edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
       })

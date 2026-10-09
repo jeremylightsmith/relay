@@ -17,10 +17,14 @@ defmodule RelayWeb.BoardSettingsLive do
   in `type: :review`.
 
   RE409: every stage row's AI row is read-only — the `flow_chip/1` of the flow
-  that works in the stage (linking to its editor), or "No flow works here". A
-  stage is AI-enabled iff a flow works in it (`Relay.Flows.stage_flows/1`),
-  so the way to change it is a flow's *works in* trigger. `:stage_flows` is
-  refreshed by both `refresh_stages/1` and `assign_flows/1`.
+  on the stage (linking to its editor), or "No flow works here". A stage is
+  AI-enabled iff a flow is on it (`Relay.Flows.stage_flows/1`), so the way to
+  change it is a flow's Stage. `:stage_flows` is refreshed by both
+  `refresh_stages/1` and `assign_flows/1`.
+
+  RE429: a flow belongs to one stage, so deleting a stage deletes its flow — the
+  delete confirm names it (``"… This also deletes flow `ship` (v3)."``) — and a
+  stage holding a flow can't be retyped to a non-work type (flashed refusal).
 
   RLY-57: a top-level review stage (`type: :review`, no `parent_id`) carries an
   "ON REJECT, SEND TO" dropdown (`set_reject_to` event) that persists
@@ -479,7 +483,7 @@ defmodule RelayWeb.BoardSettingsLive do
                           id={"stage-#{stage.id}-delete"}
                           phx-click="delete_stage"
                           phx-value-stage-id={stage.id}
-                          data-confirm="Delete this stage?"
+                          data-confirm={delete_stage_confirm(@stage_flows, stage)}
                           title="Delete stage"
                           style="width:26px;height:26px;border-radius:6px;border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));font-size:14px;padding:0;margin-left:4px;"
                         >
@@ -754,6 +758,7 @@ defmodule RelayWeb.BoardSettingsLive do
               preflight={@flow_preflight}
               slug={@board.slug}
               stages={@flow_stages}
+              board_stages={@flow_board_stages}
               read_only?={@read_only?}
             />
 
@@ -1123,6 +1128,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:invite_form, to_form(%{"email" => ""}, as: :invite))
      |> assign(:flow_rows, [])
      |> assign(:flow_stages, [])
+     |> assign(:flow_board_stages, [])
      |> assign(:flow_panel, nil)
      |> assign(:flow_preflight, nil)
      |> assign_members()
@@ -1142,7 +1148,7 @@ defmodule RelayWeb.BoardSettingsLive do
         save_board_name save_board_slug save_board_key edit_stage save_stage add_stage delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle flow_confirm_toggle
-        flow_duplicate flow_reset flow_confirm_reset flow_delete flow_confirm_delete
+        flow_reset flow_confirm_reset flow_delete flow_confirm_delete
         flow_new flow_create_validate flow_create save_public_settings new_key create_key rename_key
         regenerate_key revoke_key
       ) do
@@ -1335,8 +1341,11 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event("set_type", %{"stage-id" => stage_id, "type" => type}, socket)
       when type in ~w(queue work planning review done) do
     stage = find_stage(socket, stage_id)
-    {:ok, _updated} = Cards.update_stage(stage, %{type: String.to_existing_atom(type)})
-    {:noreply, refresh_stages(socket)}
+
+    case Cards.update_stage(stage, %{type: String.to_existing_atom(type)}) do
+      {:ok, _updated} -> {:noreply, refresh_stages(socket)}
+      {:error, {:holds_flow, _} = reason} -> {:noreply, put_flash(socket, :error, Boards.stage_refusal_message(reason))}
+    end
   end
 
   # RE344 — Boards.update_stage/2 refuses a target that isn't a main stage on this board; a
@@ -1469,16 +1478,6 @@ defmodule RelayWeb.BoardSettingsLive do
       case result do
         {:ok, _flow} -> socket
         {:error, changeset} -> put_flash(socket, :error, "Could not update the flow: #{flow_errors(changeset)}.")
-      end
-
-    {:noreply, socket |> close_flow_panel() |> assign_flows()}
-  end
-
-  def handle_event("flow_duplicate", %{"flow-id" => flow_id}, socket) do
-    socket =
-      case Flows.duplicate_flow(find_flow(socket, flow_id)) do
-        {:ok, _copy} -> socket
-        {:error, changeset} -> put_flash(socket, :error, "Could not duplicate the flow: #{flow_errors(changeset)}.")
       end
 
     {:noreply, socket |> close_flow_panel() |> assign_flows()}
@@ -1636,8 +1635,17 @@ defmodule RelayWeb.BoardSettingsLive do
 
     socket
     |> assign(:flow_rows, rows)
-    |> assign(:flow_stages, Boards.list_stages(board))
+    |> assign(:flow_stages, Flows.assignable_stages(board, nil))
+    |> assign(:flow_board_stages, Boards.list_stages(board))
     |> assign(:stage_flows, Flows.stage_flows(board))
+  end
+
+  # RE429 — deleting a stage deletes the flow on it, so the confirm says which one.
+  defp delete_stage_confirm(stage_flows, stage) do
+    case Map.get(stage_flows, stage.id) do
+      nil -> "Delete this stage?"
+      flow -> "Delete this stage? This also deletes flow `#{flow.key}` (v#{flow.version})."
+    end
   end
 
   # Ids in the DOM come from this board's own flow rows.
@@ -1660,17 +1668,15 @@ defmodule RelayWeb.BoardSettingsLive do
     |> Enum.join("; ")
   end
 
-  @new_flow_trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
+  @new_flow_required_fields [:stage_id]
 
-  # The all-three-triggers-required rule is a *form* rule, not a context rule:
-  # create_flow/2 itself happily creates a flow with no triggers (that's how a
-  # seeded flow with an unresolvable stage name lands).
+  # The form names a blank stage "is required" before create_flow/2 would say "can't be blank".
   defp create_new_flow(board, params) do
-    case Enum.filter(@new_flow_trigger_fields, &blank_param?(params[to_string(&1)])) do
+    case Enum.filter(@new_flow_required_fields, &blank_param?(params[to_string(&1)])) do
       [] ->
         attrs =
           params
-          |> Map.take(["key", "isolation" | Enum.map(@new_flow_trigger_fields, &to_string/1)])
+          |> Map.take(["key", "isolation" | Enum.map(@new_flow_required_fields, &to_string/1)])
           |> Map.merge(%{"nodes" => [], "edges" => [%{"from" => "start", "to" => "done"}]})
 
         case Flows.create_flow(board, attrs) do
@@ -1690,9 +1696,7 @@ defmodule RelayWeb.BoardSettingsLive do
     defaults = %{
       "key" => "",
       "isolation" => "shared_clean",
-      "pulls_from_stage_id" => "",
-      "works_in_stage_id" => "",
-      "lands_on_stage_id" => ""
+      "stage_id" => ""
     }
 
     # <.input> hides errors on fields LiveView still marks unused, and a stage the

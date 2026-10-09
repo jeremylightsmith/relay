@@ -12,9 +12,10 @@ defmodule Relay.RunsPreflightTest do
   alias Relay.Flows
   alias Relay.Runs
   alias Relay.Runs.Capacity
-
   # The Plan flow's trigger (`Relay.Flows.DefaultLibrary`) is "Spec:Done" -> "Plan" ->
   # "Plan:Done" — the sub-lanes only exist once enabled, same setup as flows_seed_test.exs.
+  alias Relay.Runs.Preflight
+
   setup do
     start_engine!()
     board = insert(:board)
@@ -122,12 +123,26 @@ defmodule Relay.RunsPreflightTest do
     refute result.ready?
   end
 
-  test "a nilified trigger stage is reported as missing", %{board: board, flow: flow} do
-    {:ok, flow} = flow |> Ecto.Changeset.change(lands_on_stage_id: nil) |> Relay.Repo.update()
-    connect(board, capabilities: full())
+  test "23. a flow on the board's first main stage has nowhere to pull from (RE429)", %{board: board} do
+    spec_flow = Flows.get_flow!(board, "spec")
+    connect(board, capabilities: %{"agents" => [], "skills" => ["brainstorm"]})
 
-    result = Runs.preflight_flow(flow)
-    assert result.stages == {:missing, [:lands_on]}
+    result = Preflight.run(spec_flow)
+    assert result.stages == {:missing, [:pulls_from]}
     refute result.ready?
+
+    {:ok, default_board} = Boards.create_board(insert(:user), %{name: "Preflight"})
+    deploy = Relay.Repo.get_by!(Schemas.Stage, board_id: default_board.id, name: "Deploy")
+
+    {:ok, ship} =
+      Flows.create_flow(default_board, %{
+        key: "ship",
+        isolation: :shared_clean,
+        stage_id: deploy.id,
+        nodes: [],
+        edges: [%{from: "start", to: "done"}]
+      })
+
+    assert Preflight.run(ship).stages == :ok
   end
 end

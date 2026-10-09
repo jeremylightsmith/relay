@@ -1,7 +1,7 @@
 {
   "key": "spec",
   "isolation": "shared_clean",
-  "trigger": { "pulls_from": "Next up", "works_in": "Spec", "lands_on": "Spec:Review" },
+  "trigger": { "stage": "Spec" },
   "nodes": [
     {
       "key": "brainstorm",

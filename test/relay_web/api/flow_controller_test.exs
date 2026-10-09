@@ -36,7 +36,7 @@ defmodule RelayWeb.Api.FlowControllerTest do
       assert Enum.map(data, & &1["key"]) == ["code", "plan", "spec"]
       code = Enum.find(data, &(&1["key"] == "code"))
       assert is_list(code["nodes"])
-      assert code["trigger"]["pulls_from"] == "Plan:Done"
+      assert code["trigger"] == %{"stage" => "Code"}
     end
 
     test "401s without a bearer token", %{conn: conn} do
@@ -69,6 +69,8 @@ defmodule RelayWeb.Api.FlowControllerTest do
         |> pull("code")
         |> Map.delete("version")
         |> Map.put("key", "legacy-code")
+        # A stage holds one flow (RE429): `code` already sits on Code, so the copy goes on Deploy.
+        |> Map.put("trigger", %{"stage" => "Deploy"})
         |> Jason.encode!()
         |> String.replace("card.tasks", "card.sub_tasks")
         |> String.replace(~s("tasks"), ~s("sub_tasks"))
@@ -119,7 +121,7 @@ defmodule RelayWeb.Api.FlowControllerTest do
       doc = %{
         "key" => "audit",
         "isolation" => "shared_clean",
-        "trigger" => %{"pulls_from" => nil, "works_in" => nil, "lands_on" => nil},
+        "trigger" => %{"stage" => "Deploy"},
         "nodes" => [%{"key" => "look", "type" => "agent", "run" => "/audit {ref}"}],
         "edges" => [
           %{"from" => "start", "to" => "look"},
@@ -186,7 +188,8 @@ defmodule RelayWeb.Api.FlowControllerTest do
 
     test "a version on a flow that doesn't exist is ignored, not a conflict", %{conn: conn} do
       doc = pull(conn, "spec")
-      body = push_doc(conn, "brand-new", Map.merge(doc, %{"key" => "brand-new", "version" => 42}))
+      new_doc = Map.merge(doc, %{"key" => "brand-new", "version" => 42, "trigger" => %{"stage" => "Deploy"}})
+      body = push_doc(conn, "brand-new", new_doc)
       assert json_response(body, 201)["data"]["version"] == 1
     end
 
@@ -198,14 +201,15 @@ defmodule RelayWeb.Api.FlowControllerTest do
 
     test "an unresolvable trigger stage is a 422 naming it, and writes nothing", %{conn: conn, board: board} do
       doc = pull(conn, "plan")
-      broken = put_in(doc, ["trigger", "lands_on"], "Nonexistent Stage")
+      plan_stage_id = Flows.get_flow!(board, "plan").stage_id
+      broken = put_in(doc, ["trigger", "stage"], "Nonexistent Stage")
 
       body = conn |> push_doc("plan", broken) |> json_response(422)
 
       assert body["error"]["code"] == "unknown_stages"
       assert body["error"]["message"] =~ "Nonexistent Stage"
-      assert Flows.get_flow!(board, "plan").lands_on_stage_id
-      assert pull(conn, "plan")["trigger"]["lands_on"] == "Plan:Done"
+      assert Flows.get_flow!(board, "plan").stage_id == plan_stage_id
+      assert pull(conn, "plan")["trigger"] == %{"stage" => "Plan"}
     end
 
     test "a malformed document is a 422 invalid_document naming the reason", %{conn: conn} do
@@ -251,26 +255,22 @@ defmodule RelayWeb.Api.FlowControllerTest do
       assert body["error"]["message"] =~ "must be greater than 0"
     end
 
-    test "arming a flow whose pulls_from stage already has an enabled flow is a 422, and rolls the write back",
+    # RE429: a stage holds at most one flow, so moving `plan` onto Spec (where `spec` sits)
+    # fails the write — and the arm in the same push rolls back with it.
+    test "moving a flow onto a stage that already holds one is a 422, and rolls the write back",
          %{conn: conn, board: board} do
-      spec = Flows.get_flow!(board, "spec")
-      {:ok, _} = Flows.enable_flow(spec)
-
       plan = pull(conn, "plan")
 
       colliding =
         plan
-        |> put_in(["trigger", "pulls_from"], "Next up")
+        |> put_in(["trigger", "stage"], "Spec")
         |> Map.put("enabled", true)
 
-      body = conn |> push_doc("plan", colliding) |> json_response(422)
-      assert body["error"]["code"] == "invalid"
+      assert conn |> push_doc("plan", colliding) |> json_response(422)
 
-      # The whole push rolled back: plan is still disabled AND still pulls from its own stage.
-      reread = Flows.get_flow!(board, "plan")
-      refute reread.enabled
-      refute reread.pulls_from_stage_id == spec.pulls_from_stage_id
-      assert pull(conn, "plan")["trigger"]["pulls_from"] == "Spec:Done"
+      # The whole push rolled back: plan is still disabled AND still on its own stage.
+      refute Flows.get_flow!(board, "plan").enabled
+      assert pull(conn, "plan")["trigger"] == %{"stage" => "Plan"}
     end
 
     test "401s without a bearer token", %{conn: conn} do
@@ -281,20 +281,92 @@ defmodule RelayWeb.Api.FlowControllerTest do
     end
   end
 
+  # RE429: a flow document carries ONE stage; where it picks cards up and drops them off is
+  # worked out from board order and shipped beside it as a read-only `derived` block.
+  describe "the one-stage trigger and the derived block (RE429)" do
+    setup %{board: board} do
+      stages = Map.new(Boards.list_stages(board), &{&1.name, &1})
+      {:ok, _code_done} = Boards.enable_lane(stages["Code"], :done)
+      {:ok, stages: stages}
+    end
+
+    defp audit_doc(stage) do
+      %{
+        "key" => "audit",
+        "isolation" => "shared_clean",
+        "trigger" => %{"stage" => stage},
+        "nodes" => [%{"key" => "look", "type" => "agent", "run" => "/audit {ref}"}],
+        "edges" => [
+          %{"from" => "start", "to" => "look"},
+          %{"from" => "look", "to" => "done", "on" => "succeeded"}
+        ]
+      }
+    end
+
+    test "1. GET /api/flows/:key carries the stage and the derived pickup and drop-off", %{conn: conn} do
+      doc = pull(conn, "code")
+
+      assert doc["trigger"] == %{"stage" => "Code"}
+      assert doc["derived"] == %{"pulls_from" => "Plan:Done", "lands_on" => "Code:Done"}
+    end
+
+    test "2. GET /api/flows gives every flow a stage and a derived block; the last main stage lands nowhere",
+         %{conn: conn, stages: stages} do
+      {:ok, _} = Boards.delete_stage(stages["Done"])
+      assert conn |> push_doc("audit", audit_doc("Deploy")) |> json_response(201)
+
+      data = conn |> get(~p"/api/flows") |> json_response(200) |> Map.fetch!("data")
+
+      for doc <- data do
+        assert is_binary(doc["trigger"]["stage"])
+        assert doc["derived"] |> Map.keys() |> Enum.sort() == ["lands_on", "pulls_from"]
+      end
+
+      audit = Enum.find(data, &(&1["key"] == "audit"))
+      assert audit["derived"] == %{"pulls_from" => "Review", "lands_on" => nil}
+    end
+
+    test "3. pushing a new key onto a stage that holds another flow is a 422 stage_occupied, writing nothing",
+         %{conn: conn} do
+      body = conn |> push_doc("qa", "Code" |> audit_doc() |> Map.put("key", "qa")) |> json_response(422)
+
+      assert body["error"]["code"] == "stage_occupied"
+      assert body["error"]["message"] == "stage `Code` already has flow `code` — delete it or push to that key"
+      assert Map.take(body["error"], ["stage", "flow"]) == %{"stage" => "Code", "flow" => "code"}
+      assert conn |> get(~p"/api/flows/qa") |> json_response(404)
+    end
+
+    test "4. a legacy three-key trigger still pushes: only works_in is read", %{conn: conn, board: board, stages: stages} do
+      legacy = conn |> pull("code") |> Map.put("trigger", %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"})
+
+      body = conn |> push_doc("code", legacy) |> json_response(200) |> Map.fetch!("data")
+
+      assert body["trigger"] == %{"stage" => "Code"}
+      assert Flows.get_flow!(board, "code").stage_id == stages["Code"].id
+    end
+
+    test "5. a pulled document, derived block and all, pushes back unchanged as a no-op", %{conn: conn} do
+      doc = pull(conn, "code")
+      assert Map.has_key?(doc, "derived")
+
+      body = conn |> push_doc("code", doc) |> json_response(200) |> Map.fetch!("data")
+
+      assert body["version"] == doc["version"]
+      assert body == doc
+    end
+  end
+
   describe "after a stage rename (RE385)" do
-    test "pulled flows name the renamed substages", %{conn: conn, board: board} do
+    test "pulled flows name the renamed stage", %{conn: conn, board: board} do
       spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))
       {:ok, _} = Boards.update_stage(spec, %{name: "Specify"})
 
       docs = for key <- ["code", "plan", "spec"], into: %{}, do: {key, pull(conn, key)}
 
-      assert docs["spec"]["trigger"]["lands_on"] == "Specify:Review"
-      assert docs["plan"]["trigger"]["pulls_from"] == "Specify:Done"
+      assert docs["spec"]["trigger"] == %{"stage" => "Specify"}
 
       for {_key, doc} <- docs do
-        encoded = Jason.encode!(doc)
-        refute encoded =~ "Spec:Review"
-        refute encoded =~ "Spec:Done"
+        refute Jason.encode!(doc) =~ ~s("stage":"Spec")
       end
     end
   end

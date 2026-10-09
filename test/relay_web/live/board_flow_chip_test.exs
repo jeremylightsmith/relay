@@ -14,7 +14,6 @@ defmodule RelayWeb.BoardFlowChipTest do
   setup %{user: user} do
     {:ok, board} = Boards.create_board(user, %{name: "Chips"})
     spec = stage_named(board, "Spec")
-    next_up = stage_named(board, "Next up")
 
     {:ok, _design} =
       Boards.create_stage(board, %{name: "Design", category: :planning, type: :planning, before: spec})
@@ -22,13 +21,8 @@ defmodule RelayWeb.BoardFlowChipTest do
     board = Boards.get_board!(user, board.slug)
     design = stage_named(board, "Design")
 
-    insert(:flow,
-      board: board,
-      key: "design",
-      works_in_stage_id: design.id,
-      pulls_from_stage_id: next_up.id,
-      lands_on_stage_id: spec.id
-    )
+    # Pickup (Next up) and drop-off (Spec) are derived from Design's position between them.
+    insert(:flow, board: board, key: "design", stage_id: design.id)
 
     %{board: board, design: design}
   end

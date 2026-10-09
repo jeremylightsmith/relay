@@ -57,8 +57,8 @@ defmodule Relay.FlowsNodeRequirementsTest do
   end
 
   test "the shipped Code flow yields its nine agent names", %{} do
-    board = insert(:board)
-    :ok = Flows.seed_default_flows!(board)
+    # create_board/2 lays out the default stages and seeds the library flows onto them.
+    {:ok, board} = Relay.Boards.create_board(insert(:user), %{name: "Requirements"})
     result = board |> Flows.get_flow!("code") |> Flows.node_requirements()
 
     assert result.agents == [
@@ -75,8 +75,8 @@ defmodule Relay.FlowsNodeRequirementsTest do
   end
 
   test "the shipped Plan flow yields the write-plan skill" do
-    board = insert(:board)
-    :ok = Flows.seed_default_flows!(board)
+    # create_board/2 lays out the default stages and seeds the library flows onto them.
+    {:ok, board} = Relay.Boards.create_board(insert(:user), %{name: "Requirements"})
 
     assert %{skills: ["write-plan"], agents: []} =
              board |> Flows.get_flow!("plan") |> Flows.node_requirements()

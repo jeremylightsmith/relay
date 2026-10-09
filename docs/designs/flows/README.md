@@ -23,7 +23,7 @@ third column: same job, their vocabulary.
 
 | What | Pre-cutover (Relay) | Fabro's version | ADR 0006 |
 | --- | --- | --- | --- |
-| Macro pipeline (stage → stage) | `relay_config.json` `pipeline` | board is derived; graph chains via `house` sub-workflow nodes | the board itself + each flow's `trigger` |
+| Macro pipeline (stage → stage) | `relay_config.json` `pipeline` | board is derived; graph chains via `house` sub-workflow nodes | the board itself + each flow's `trigger` (one stage; pickup / drop-off worked out from board order — RE429) |
 | Spec behavior | `.claude/skills/brainstorm` | first half of `implement-issue`'s `plan` node | [`spec.json`](spec.json) → same repo skill |
 | Plan behavior | `.claude/skills/write-plan` (via `.claude/commands`) | second half of the same `plan` node (writes the plan to the card) | [`plan.json`](plan.json) → same repo skill |
 | Code orchestration | `execute-plan.js` (485 lines, Claude Workflow engine) | `implement-plan/workflow.fabro` (35 lines of DOT) | [`code.json`](code.json) (157 lines of data) |

@@ -36,7 +36,7 @@ defmodule Relay.Runs.SchedulerTest do
     %{
       key: key,
       pulls_from_stage_id: pulls_from,
-      works_in_stage_id: works_in,
+      stage_id: works_in,
       isolation: Keyword.get(opts, :isolation, :shared_clean)
     }
   end

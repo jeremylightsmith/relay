@@ -10,7 +10,7 @@ defmodule RelayWeb.ValueStreamFlowLayoutTest do
   defp library_flow(key) do
     attrs = Enum.find(DefaultLibrary.all(), &(&1.key == key))
 
-    %Schemas.Flow{board_id: 1}
+    %Schemas.Flow{board_id: 1, stage_id: 1}
     |> Schemas.Flow.changeset(attrs)
     |> Ecto.Changeset.apply_action!(:build)
   end

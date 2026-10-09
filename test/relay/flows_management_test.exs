@@ -5,9 +5,9 @@ defmodule Relay.FlowsManagementTest do
   alias Relay.Flows
   alias Schemas.Flow
 
-  # A board whose stages resolve every default trigger, with the three
-  # default flows seeded (mirrors Boards.create_board/2's shape — same
-  # helper shape as Relay.FlowsSeedTest).
+  # A board whose stages hold every default flow, with the three default
+  # flows seeded (mirrors Boards.create_board/2's shape — same helper shape
+  # as Relay.FlowsSeedTest), plus a flow-free "Deploy" work stage to copy onto.
   defp seeded_board do
     board = insert(:board)
     insert(:stage, board: board, name: "Next up", position: 1)
@@ -15,12 +15,17 @@ defmodule Relay.FlowsManagementTest do
     plan = insert(:stage, board: board, name: "Plan", category: :planning, type: :planning, position: 3)
     insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 4)
     insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 5)
+    insert(:stage, board: board, name: "Deploy", category: :in_progress, type: :work, position: 6)
     {:ok, _} = Boards.enable_lane(spec, :review)
     {:ok, _} = Boards.enable_lane(spec, :done)
     {:ok, _} = Boards.enable_lane(plan, :done)
     :ok = Flows.seed_default_flows!(board)
     board
   end
+
+  defp deploy_stage(board), do: Repo.get_by!(Schemas.Stage, board_id: board.id, name: "Deploy")
+
+  defp copy_onto_deploy(board, key), do: Flows.copy_flow(Flows.get_flow!(board, key), deploy_stage(board))
 
   describe "customized?/1" do
     test "a freshly seeded default flow is not customized" do
@@ -46,16 +51,15 @@ defmodule Relay.FlowsManagementTest do
       assert Flows.customized?(flow)
     end
 
-    test "trigger wiring never counts as customization" do
+    test "moving the flow to another stage never counts as customization" do
       board = seeded_board()
-      other = insert(:stage, board: board, name: "Elsewhere", position: 20)
-      {:ok, flow} = Flows.update_flow(Flows.get_flow!(board, "spec"), %{pulls_from_stage_id: other.id})
+      {:ok, flow} = Flows.update_flow(Flows.get_flow!(board, "spec"), %{stage_id: deploy_stage(board).id})
       refute Flows.customized?(flow)
     end
 
     test "a non-library key is always customized" do
       board = seeded_board()
-      {:ok, copy} = Flows.duplicate_flow(Flows.get_flow!(board, "spec"))
+      {:ok, copy} = copy_onto_deploy(board, "spec")
       assert Flows.customized?(copy)
     end
   end
@@ -73,7 +77,7 @@ defmodule Relay.FlowsManagementTest do
   describe "diff_from_default/1" do
     test "nil for a non-library key" do
       board = seeded_board()
-      {:ok, copy} = Flows.duplicate_flow(Flows.get_flow!(board, "spec"))
+      {:ok, copy} = copy_onto_deploy(board, "spec")
       assert Flows.diff_from_default(copy) == nil
     end
 
@@ -149,35 +153,22 @@ defmodule Relay.FlowsManagementTest do
     end
   end
 
-  describe "duplicate_flow/1" do
-    test "copies definition and triggers, disabled, under <key>-copy" do
+  describe "copy_flow/2" do
+    test "copies the definition onto a free stage, disabled, under <key>-<stage-slug>" do
       board = seeded_board()
       {:ok, original} = Flows.enable_flow(Flows.get_flow!(board, "spec"))
 
-      assert {:ok, %Flow{} = copy} = Flows.duplicate_flow(original)
-      assert copy.key == "spec-copy"
+      assert {:ok, %Flow{} = copy} = Flows.copy_flow(original, deploy_stage(board))
+      assert copy.key == "spec-deploy"
       refute copy.enabled
       assert copy.isolation == original.isolation
-      assert copy.pulls_from_stage_id == original.pulls_from_stage_id
-      assert copy.works_in_stage_id == original.works_in_stage_id
-      assert copy.lands_on_stage_id == original.lands_on_stage_id
+      assert copy.stage_id == deploy_stage(board).id
 
       assert Enum.map(copy.nodes, &{&1.key, &1.type, &1.run, &1.max_retries}) ==
                Enum.map(original.nodes, &{&1.key, &1.type, &1.run, &1.max_retries})
 
       assert Enum.map(copy.edges, &{&1.from, &1.to, &1.on, &1.max_loops}) ==
                Enum.map(original.edges, &{&1.from, &1.to, &1.on, &1.max_loops})
-    end
-
-    test "suffixes -2, -3, … when the copy key is taken" do
-      board = seeded_board()
-      original = Flows.get_flow!(board, "spec")
-      {:ok, first} = Flows.duplicate_flow(original)
-      assert first.key == "spec-copy"
-      {:ok, second} = Flows.duplicate_flow(original)
-      assert second.key == "spec-copy-2"
-      {:ok, third} = Flows.duplicate_flow(original)
-      assert third.key == "spec-copy-3"
     end
   end
 
@@ -200,7 +191,7 @@ defmodule Relay.FlowsManagementTest do
       assert reset.isolation == :shared_clean
       assert [%{key: "write_plan", run: "/write-plan {ref}", max_retries: 1}] = reset.nodes
       assert reset.enabled
-      assert reset.pulls_from_stage_id == flow.pulls_from_stage_id
+      assert reset.stage_id == flow.stage_id
     end
 
     test "reset bumps the version and writes a new snapshot" do
@@ -221,7 +212,7 @@ defmodule Relay.FlowsManagementTest do
 
     test "returns {:error, :not_a_default} for a non-library key" do
       board = seeded_board()
-      {:ok, copy} = Flows.duplicate_flow(Flows.get_flow!(board, "spec"))
+      {:ok, copy} = copy_onto_deploy(board, "spec")
       assert {:error, :not_a_default} = Flows.reset_to_default(copy)
     end
   end
@@ -231,16 +222,12 @@ defmodule Relay.FlowsManagementTest do
       %{board: seeded_board()}
     end
 
-    test "a skeleton flow with all three triggers is created disabled at v1", %{board: board} do
-      spec = Flows.get_flow!(board, "spec")
-
+    test "a skeleton flow on a free stage is created disabled at v1", %{board: board} do
       assert {:ok, flow} =
                Flows.create_flow(board, %{
                  key: "deploy-gate",
                  isolation: :shared_clean,
-                 pulls_from_stage_id: spec.pulls_from_stage_id,
-                 works_in_stage_id: spec.works_in_stage_id,
-                 lands_on_stage_id: spec.lands_on_stage_id,
+                 stage_id: deploy_stage(board).id,
                  nodes: [],
                  edges: [%{from: "start", to: "done"}]
                })
@@ -257,6 +244,7 @@ defmodule Relay.FlowsManagementTest do
                Flows.create_flow(board, %{
                  key: "Deploy Gate!",
                  isolation: :shared_clean,
+                 stage_id: deploy_stage(board).id,
                  nodes: [],
                  edges: [%{from: "start", to: "done"}]
                })
@@ -270,6 +258,7 @@ defmodule Relay.FlowsManagementTest do
                  Flows.create_flow(board, %{
                    key: key <> "-x",
                    isolation: :shared_clean,
+                   stage_id: insert(:stage, board: board, type: :work, category: :in_progress).id,
                    nodes: [],
                    edges: [%{from: "start", to: "done"}]
                  })
@@ -281,6 +270,7 @@ defmodule Relay.FlowsManagementTest do
                Flows.create_flow(board, %{
                  key: "spec",
                  isolation: :shared_clean,
+                 stage_id: deploy_stage(board).id,
                  nodes: [],
                  edges: [%{from: "start", to: "done"}]
                })
@@ -296,6 +286,7 @@ defmodule Relay.FlowsManagementTest do
         Flows.create_flow(board, %{
           key: "spec-2",
           isolation: :shared_clean,
+          stage_id: deploy_stage(board).id,
           nodes: [],
           edges: [%{from: "start", to: "done"}]
         })
@@ -303,40 +294,20 @@ defmodule Relay.FlowsManagementTest do
       assert Flows.unique_key(board, "spec") == "spec-3"
     end
 
-    test "duplicate_flow/1 still suffixes -copy then -copy-2", %{board: board} do
+    test "creating on a stage that already holds a flow is refused", %{board: board} do
       spec = Flows.get_flow!(board, "spec")
 
-      assert {:ok, first} = Flows.duplicate_flow(spec)
-      assert first.key == "spec-copy"
-
-      assert {:ok, second} = Flows.duplicate_flow(spec)
-      assert second.key == "spec-copy-2"
-    end
-
-    test "creating on an already-enabled stage succeeds but enabling is refused", %{board: board} do
-      spec = Flows.get_flow!(board, "spec")
-      {:ok, spec} = Flows.enable_flow(spec)
-      assert spec.enabled
-
-      assert {:ok, rival} =
+      assert {:error, changeset} =
                Flows.create_flow(board, %{
                  key: "spec-rival",
                  isolation: :shared_clean,
-                 pulls_from_stage_id: spec.pulls_from_stage_id,
-                 works_in_stage_id: spec.works_in_stage_id,
-                 lands_on_stage_id: spec.lands_on_stage_id,
+                 stage_id: spec.stage_id,
                  nodes: [%{key: "n", type: :agent, run: "x"}],
                  edges: [%{from: "start", to: "n"}, %{from: "n", to: "done", on: :succeeded}]
                })
 
-      refute rival.enabled
-
-      assert {:error, changeset} = Flows.enable_flow(rival)
-
-      assert "another enabled flow already pulls from this stage" in errors_on(changeset).pulls_from_stage_id
-
-      refute Flows.get_flow!(board, "spec-rival").enabled
-      assert Enum.map(Flows.list_enabled_flows(board), & &1.key) == ["spec"]
+      assert "stage already has flow `spec`" in errors_on(changeset).stage_id
+      assert Flows.get_flow(board, "spec-rival") == nil
     end
   end
 

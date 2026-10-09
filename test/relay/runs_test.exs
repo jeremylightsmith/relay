@@ -114,18 +114,23 @@ defmodule Relay.RunsTest do
     end)
   end
 
-  defp retry_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-    spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
+  # A stage holds one flow (RE429): these fixtures put their own flow on Spec (pulling from
+  # Next up), so the board's seeded, disabled `spec` flow is removed first.
+  defp free_spec!(board) do
+    case Relay.Flows.get_flow(board, "spec") do
+      nil -> :ok
+      seeded -> {:ok, _} = Relay.Flows.delete_flow(seeded)
+    end
 
+    Enum.find(board.stages, &(&1.name == "Spec"))
+  end
+
+  defp retry_flow(board) do
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "retry",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: free_spec!(board).id,
         nodes: [
           %{key: "work", type: :agent, run: "work {ref}", max_retries: 1},
           %{key: "fallback", type: :agent, run: "fallback {ref}"}
@@ -148,17 +153,11 @@ defmodule Relay.RunsTest do
   # tests are about that engine-level dead-end behavior itself, so they need a custom flow
   # that (like the old "spec") has a node with no :failed edge at all.
   defp dead_end_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-    spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    review = Enum.find(board.stages, &(&1.name == "Spec:Review")) || spec
-
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "dead-end",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: review.id,
+        stage_id: free_spec!(board).id,
         nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
         edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
       })
@@ -168,17 +167,11 @@ defmodule Relay.RunsTest do
   end
 
   defp exclusive_flow(board, key) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-    spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
-
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: key,
         isolation: :exclusive,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: free_spec!(board).id,
         nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
         edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
       })
@@ -194,7 +187,7 @@ defmodule Relay.RunsTest do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
       next_up_id = card.stage_id
-      works_in = flow.works_in_stage_id
+      works_in = flow.stage_id
       test_pid = self()
 
       subscriber =
@@ -270,7 +263,7 @@ defmodule Relay.RunsTest do
 
       # The move claimed the card for Relay AI and snapped it :working in Spec.
       card = Relay.Cards.get_card(board, card.id)
-      assert card.stage_id == flow.works_in_stage_id
+      assert card.stage_id == flow.stage_id
       assert card.status == :working
       assert Relay.Cards.active_owner_type(card) == :ai
 
@@ -293,7 +286,7 @@ defmodule Relay.RunsTest do
       assert_receive {:run_finished, %Run{status: :done, current_node: nil}}
 
       card = Relay.Cards.get_card(board, card.id)
-      assert card.stage_id == flow.lands_on_stage_id
+      assert card.stage_id == Enum.find(board.stages, &(&1.name == "Spec:Review")).id
       assert card.status == :in_review
 
       assert [%NodeExecution{node_key: "brainstorm", outcome: :succeeded, detail: "spec written"}] =
@@ -312,16 +305,11 @@ defmodule Relay.RunsTest do
       card = Relay.Cards.get_card(board, card.id)
       assert Runs.start_run(card, flow) == {:error, :active_run_exists}
 
-      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-      spec = Enum.find(board.stages, &(&1.name == "Spec"))
-
       {:ok, human_flow} =
         Relay.Flows.create_flow(board, %{
           key: "human",
           isolation: :shared_clean,
-          pulls_from_stage_id: spec.id,
-          works_in_stage_id: spec.id,
-          lands_on_stage_id: next_up.id,
+          stage_id: Enum.find(board.stages, &(&1.name == "Deploy")).id,
           nodes: [%{key: "review", type: :human}],
           edges: [%{from: "start", to: "review"}, %{from: "review", to: "done", on: :succeeded}]
         })
@@ -359,6 +347,89 @@ defmodule Relay.RunsTest do
       assert {:error, :active_run_exists} = Runs.start_run(card, flow)
       # The losing attempt left the card exactly where the winning run put it — no extra move.
       assert Relay.Cards.get_card(board, card.id).stage_id == moved.stage_id
+    end
+  end
+
+  # RE429: drop-off is worked out from board order when the run LANDS, not when it starts.
+  describe "landing from board order (RE429)" do
+    defp hand_board(specs) do
+      board = insert(:board)
+
+      stages =
+        specs
+        |> Enum.with_index(1)
+        |> Map.new(fn {{name, type}, position} ->
+          {name, insert(:stage, board: board, name: name, type: type, category: :in_progress, position: position)}
+        end)
+
+      {board, stages}
+    end
+
+    defp one_node_flow(board, stage) do
+      {:ok, flow} =
+        Relay.Flows.create_flow(board, %{
+          key: "land",
+          isolation: :shared_clean,
+          stage_id: stage.id,
+          nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
+          edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
+        })
+
+      {:ok, flow} = Relay.Flows.enable_flow(flow)
+      flow
+    end
+
+    defp ready_card(stage) do
+      {:ok, card} = Relay.Cards.create_card(stage, %{title: "land me"})
+      card
+    end
+
+    test "20. the card lands where the board says at landing time" do
+      {board, %{"Q" => q, "W" => w, "A" => a, "B" => b}} =
+        hand_board([{"Q", :queue}, {"W", :work}, {"A", :queue}, {"B", :queue}])
+
+      :ok = Runs.subscribe(board.id)
+      flow = one_node_flow(board, w)
+      card = ready_card(q)
+
+      assert {:ok, %Run{status: :running} = run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, %NodeJob{} = job}
+
+      {:ok, _} = Relay.Boards.place_stage(b, before: a)
+      assert Enum.map(Relay.Boards.list_stages(board), & &1.name) == ["Q", "W", "B", "A"]
+
+      assert {:ok, %Run{status: :done}} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "ok"})
+      assert_receive {:run_finished, %Run{id: run_id, status: :done}}
+      assert run_id == run.id
+
+      assert Repo.get!(Card, card.id).stage_id == b.id
+    end
+
+    test "21. a flow on the board's last main stage leaves the card where it is" do
+      {board, %{"Q" => q, "W" => w}} = hand_board([{"Q", :queue}, {"W", :work}])
+      :ok = Runs.subscribe(board.id)
+      flow = one_node_flow(board, w)
+      card = ready_card(q)
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, %NodeJob{} = job}
+
+      assert {:ok, %Run{status: :done}} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "ok"})
+      assert_receive {:run_finished, %Run{status: :done}}
+
+      assert Repo.get!(Card, card.id).stage_id == w.id
+    end
+
+    test "22. queued_flow/5 reads the derived pulls-from of the flows passed in", %{board: board} do
+      enabled_flow(board, "plan")
+      flows = Relay.Flows.list_flows(board)
+      card = card_in(board, "Spec:Done", "queued")
+      card = %{card | status: :ready}
+
+      assert %Schemas.Flow{key: "plan"} = Runs.queued_flow(card, :ai, flows, nil, [])
+
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+      assert Runs.queued_flow(%{card | stage_id: next_up.id}, :ai, flows, nil, []) == nil
     end
   end
 
@@ -1097,17 +1168,12 @@ defmodule Relay.RunsTest do
 
     test "parks an exclusive run instead of requeuing", %{board: board} do
       # A one-node exclusive flow so the queued job is exclusive.
-      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-      spec = Enum.find(board.stages, &(&1.name == "Spec"))
-      plan = Enum.find(board.stages, &(&1.name == "Plan"))
 
       {:ok, flow} =
         Relay.Flows.create_flow(board, %{
           key: "excl",
           isolation: :exclusive,
-          pulls_from_stage_id: next_up.id,
-          works_in_stage_id: spec.id,
-          lands_on_stage_id: plan.id,
+          stage_id: free_spec!(board).id,
           nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
           edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
         })
@@ -1132,17 +1198,11 @@ defmodule Relay.RunsTest do
     end
 
     test "park_for_reclaim/1 revokes a lingering active job even when the run isn't :running", %{board: board} do
-      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-      spec = Enum.find(board.stages, &(&1.name == "Spec"))
-      plan = Enum.find(board.stages, &(&1.name == "Plan"))
-
       {:ok, flow} =
         Relay.Flows.create_flow(board, %{
           key: "excl3",
           isolation: :exclusive,
-          pulls_from_stage_id: next_up.id,
-          works_in_stage_id: spec.id,
-          lands_on_stage_id: plan.id,
+          stage_id: free_spec!(board).id,
           nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
           edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
         })
@@ -1219,14 +1279,8 @@ defmodule Relay.RunsTest do
     board = insert(:board)
     pulls = insert(:stage, board: board, name: "Plan:Done", position: 1)
     works = insert(:stage, board: board, name: "Code", category: :in_progress, type: :work, position: 2)
-    lands = insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 3)
-
-    attrs =
-      Map.merge(foreach_flow_attrs(Keyword.get(opts, :head_max_retries)), %{
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id
-      })
+    _lands = insert(:stage, board: board, name: "Review", category: :in_progress, type: :review, position: 3)
+    attrs = Map.put(foreach_flow_attrs(Keyword.get(opts, :head_max_retries)), :stage_id, works.id)
 
     {:ok, flow} = Relay.Flows.create_flow(board, attrs)
     {:ok, flow} = Relay.Flows.enable_flow(flow)

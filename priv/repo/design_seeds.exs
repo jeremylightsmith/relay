@@ -584,7 +584,7 @@ add_ne.(run3, %{node: "merge", duration_s: 220, cost: cost.("2.00")})
 # ---------------------------------------------------------------------------
 # 9 · Queued — AI-ready in the code flow's pulls-from stage, no run yet.
 # ---------------------------------------------------------------------------
-queued_stage = Enum.find(board.stages, &(&1.id == code_flow.pulls_from_stage_id)) || stage.("Plan")
+queued_stage = Flows.neighbours(code_flow).pulls_from || stage.("Plan")
 
 queued =
   new_card.(queued_stage.name, %{

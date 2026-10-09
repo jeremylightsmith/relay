@@ -193,7 +193,7 @@ defmodule Relay.Runs.Scheduler.Server do
     snapshot = %Snapshot{
       stages: Enum.map(stages, &stage_snap/1),
       cards: cards,
-      flows: Relay.Flows.list_enabled_flow_snapshots(board_id),
+      flows: flow_snaps(board_id, stages),
       runs: runs,
       capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> counting_capacity(runners),
       runners: runners
@@ -293,6 +293,15 @@ defmodule Relay.Runs.Scheduler.Server do
     case Scheduler.take_slot(cap, run.isolation, :any) do
       :none -> cap
       {_runner_id, updated} -> updated
+    end
+  end
+
+  # Each enabled flow plus its derived pickup (RE429): the stage before it in the board order
+  # `stages` is already in (`Boards.list_scheduler_stages/1` returns `order_stages/1` order).
+  defp flow_snaps(board_id, stages) do
+    for flow <- Relay.Flows.list_enabled_flow_snapshots(board_id) do
+      pulls_from = Relay.Flows.neighbours(flow.stage_id, stages).pulls_from
+      Map.put(flow, :pulls_from_stage_id, pulls_from && pulls_from.id)
     end
   end
 

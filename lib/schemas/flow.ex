@@ -1,9 +1,11 @@
 defmodule Schemas.Flow do
   @moduledoc """
   A workflow definition (ADR 0006 / RLY-131): per-board declarative graph
-  data. The trigger is three stage FKs stored as **ids** (names are display-
-  only via the preloaded associations) with `on_delete: :nilify_all` —
-  deleting a stage disarms the flow rather than blocking. Nodes and edges
+  data. A flow belongs to exactly one main work/planning **stage** (RE429): `stage_id` is
+  `NOT NULL` and unique (`flows_stage_id_index`), and deleting the stage deletes the flow.
+  Where it picks cards up and drops them off is never stored — `pulls_from_stage` /
+  `lands_on_stage` are virtual, filled from the board's current order by `Relay.Flows`'
+  readers (`Relay.Flows.neighbours/2`); they are nil on a flow read any other way. Nodes and edges
   are embedded jsonb; `"start"`/`"done"`/`"needs_input"` are edge-endpoint
   sentinels, not nodes — `"needs_input"` (RLY-194) is `to`-only and parks
   the run. `board_id` and `enabled` are set programmatically by
@@ -22,9 +24,11 @@ defmodule Schemas.Flow do
     field :isolation, Ecto.Enum, values: [:shared_clean, :exclusive]
 
     belongs_to :board, Schemas.Board
-    belongs_to :pulls_from_stage, Schemas.Stage
-    belongs_to :works_in_stage, Schemas.Stage
-    belongs_to :lands_on_stage, Schemas.Stage
+    belongs_to :stage, Schemas.Stage
+
+    # Worked out from board order on read (RE429), never persisted.
+    field :pulls_from_stage, :any, virtual: true
+    field :lands_on_stage, :any, virtual: true
 
     embeds_many :nodes, Schemas.Flow.Node, on_replace: :delete
     embeds_many :edges, Schemas.Flow.Edge, on_replace: :delete
@@ -88,13 +92,14 @@ defmodule Schemas.Flow do
 
   @doc """
   Validates a flow definition. `board_id` must already be set on the struct.
-  Trigger-stage-belongs-to-board is validated in `Relay.Flows` — it needs
-  the database, which the Schemas boundary (`deps: []`) can't reach.
+  Whether the stage is on the board, a main work stage and free is validated in `Relay.Flows` —
+  it needs the database, which the Schemas boundary (`deps: []`) can't reach; the unique index
+  is the race backstop.
   """
   def changeset(flow, attrs) do
     flow
-    |> cast(attrs, [:key, :isolation, :pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id])
-    |> validate_required([:key, :isolation])
+    |> cast(attrs, [:key, :isolation, :stage_id])
+    |> validate_required([:key, :isolation, :stage_id])
     |> validate_format(:key, ~r/^[a-z0-9]+(-[a-z0-9]+)*$/, message: "must be lowercase letters, numbers and dashes")
     |> cast_embed(:nodes)
     |> cast_embed(:edges)
@@ -104,6 +109,7 @@ defmodule Schemas.Flow do
     |> validate_unique_routing()
     |> validate_foreach_guards()
     |> unique_constraint(:key, name: :flows_board_id_key_index)
+    |> unique_constraint(:stage_id, name: :flows_stage_id_index, message: "stage already has a flow")
   end
 
   defp validate_unique_node_keys(changeset) do

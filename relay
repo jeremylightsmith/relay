@@ -58,8 +58,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 80
-RUNNER_FINGERPRINT = "d40f6ce7eb74110e9b2325d694739575e88f37d9db94cd3b00d03cf86c8786d9"
+RUNNER_VERSION = 81
+RUNNER_FINGERPRINT = "3acac83a7a0d20f50dbbdf86f9461f757665a241f9fe032f621648a863b96fd8"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -1240,8 +1240,16 @@ def _read_file(path):
 
 
 def _trigger_chain(doc):
+    """`pulls_from → stage → lands_on` (RE429). The trigger names ONE stage; pickup and drop-off
+    are worked out from board order and come from the server's read-only `derived` block. A
+    document without `derived` prints the stage alone; a legacy three-key trigger's `works_in`
+    is its stage. Key names pinned by runner_contract.json's "flows" section."""
     t = doc.get("trigger") or {}
-    return " → ".join((t.get(k) or "—") for k in ("pulls_from", "works_in", "lands_on"))
+    stage = t.get("stage") or t.get("works_in") or "—"
+    derived = doc.get("derived")
+    if not isinstance(derived, dict):
+        return stage
+    return f"{derived.get('pulls_from') or '—'} → {stage} → {derived.get('lands_on') or '—'}"
 
 
 def format_flow(doc):

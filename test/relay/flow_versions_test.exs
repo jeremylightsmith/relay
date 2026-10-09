@@ -3,17 +3,18 @@ defmodule Relay.FlowVersionsTest do
 
   alias Relay.Flows
 
-  # Mirrors flows_test.exs helpers.
+  # Two work stages ("Spec", "Code") a flow may sit on, between queue stages.
   defp board_with_stages do
     board = insert(:board)
-    for name <- ["Next up", "Spec", "Spec:Review"], do: insert(:stage, board: board, name: name)
+    insert(:stage, board: board, name: "Next up")
+    for name <- ["Spec", "Code"], do: insert(:stage, board: board, name: name, type: :work, category: :in_progress)
+    insert(:stage, board: board, name: "Review")
     %{board: board}
   end
 
-  defp triggers(board) do
-    [pulls, works, lands] = board |> Relay.Boards.list_stages() |> Enum.take(3)
-    %{pulls_from_stage_id: pulls.id, works_in_stage_id: works.id, lands_on_stage_id: lands.id}
-  end
+  defp stage_named(board, name), do: Enum.find(Relay.Boards.list_stages(board), &(&1.name == name))
+
+  defp triggers(board), do: %{stage_id: stage_named(board, "Spec").id}
 
   defp valid_attrs(board, extra \\ %{}) do
     Map.merge(
@@ -57,16 +58,15 @@ defmodule Relay.FlowVersionsTest do
       assert [%{run: "changed"}] = v2.nodes
     end
 
-    test "a trigger-only change saves without a version bump or new snapshot" do
+    test "a stage-only change saves without a version bump or new snapshot" do
       %{board: board} = board_with_stages()
       {:ok, flow} = Flows.create_flow(board, valid_attrs(board))
-      [_, _, _ | _] = stages = Relay.Boards.list_stages(board)
-      other = List.last(stages)
+      other = stage_named(board, "Code")
 
-      {:ok, saved} = Flows.save_definition(flow, %{lands_on_stage_id: other.id})
+      {:ok, saved} = Flows.save_definition(flow, %{stage_id: other.id})
 
       assert saved.version == 1
-      assert saved.lands_on_stage_id == other.id
+      assert saved.stage_id == other.id
       assert Flows.get_version(saved, 2) == nil
     end
 
@@ -82,24 +82,20 @@ defmodule Relay.FlowVersionsTest do
       assert Flows.get_version(flow, 2) == nil
     end
 
-    test "an enabled flow saved to pull from another enabled flow's stage errors gracefully" do
+    test "an enabled flow saved onto another flow's stage errors gracefully" do
       %{board: board} = board_with_stages()
-      [pulls, other_pulls, _lands] = Relay.Boards.list_stages(board)
+      spec = stage_named(board, "Spec")
+      code = stage_named(board, "Code")
 
       {:ok, rival} = Flows.create_flow(board, valid_attrs(board, %{key: "rival"}))
       {:ok, _rival} = Flows.enable_flow(rival)
 
-      {:ok, flow} =
-        Flows.create_flow(board, valid_attrs(board, %{key: "custom", pulls_from_stage_id: other_pulls.id}))
-
+      {:ok, flow} = Flows.create_flow(board, valid_attrs(board, %{key: "custom", stage_id: code.id}))
       {:ok, flow} = Flows.enable_flow(flow)
 
-      assert {:error, changeset} = Flows.save_definition(flow, %{pulls_from_stage_id: pulls.id})
-
-      assert %{pulls_from_stage_id: ["another enabled flow already pulls from this stage"]} =
-               errors_on(changeset)
-
-      assert Repo.reload(flow).pulls_from_stage_id == other_pulls.id
+      assert {:error, changeset} = Flows.save_definition(flow, %{stage_id: spec.id})
+      assert %{stage_id: ["stage already has flow `rival`"]} = errors_on(changeset)
+      assert Repo.reload(flow).stage_id == code.id
     end
   end
 
@@ -107,7 +103,9 @@ defmodule Relay.FlowVersionsTest do
     test "counts only active runs on this flow, ignoring terminal and other-flow runs" do
       %{board: board} = board_with_stages()
       {:ok, flow} = Flows.create_flow(board, valid_attrs(board))
-      {:ok, other} = Flows.create_flow(board, valid_attrs(board, %{key: "other"}))
+
+      {:ok, other} =
+        Flows.create_flow(board, valid_attrs(board, %{key: "other", stage_id: stage_named(board, "Code").id}))
 
       insert(:run, flow_id: flow.id, status: :running)
       insert(:run, flow_id: flow.id, status: :parked)

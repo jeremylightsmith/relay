@@ -84,6 +84,15 @@
     },
     "running": []
   },
+  "flows": {
+    "derived_keys": [
+      "lands_on",
+      "pulls_from"
+    ],
+    "trigger_keys": [
+      "stage"
+    ]
+  },
   "heartbeat": {
     "request": {
       "capabilities": {

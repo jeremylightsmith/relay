@@ -36,12 +36,12 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
     # flow_editor_live_test.exs) — while still pushing the (buggy, field-stripped) working
     # copy's node list through `persist/1` exactly like any other save. This is the "unrelated,
     # unchanged-definition save" path the bug hits.
-    code = Flows.get_flow!(board, "code")
-    other = Enum.find(board.stages, &(&1.id != code.pulls_from_stage_id))
+    # Deploy is the default board's only flow-free work stage, so the flow may move there.
+    deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
 
     view
-    |> element("#trigger-pulls-from")
-    |> render_change(%{"stage_id" => to_string(other.id)})
+    |> element("#trigger-stage")
+    |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
 
     view |> element("#flow-editor-save") |> render_click()
 
@@ -76,10 +76,12 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/plan")
 
-    plan = Flows.get_flow!(board, "plan")
-    other = Enum.find(board.stages, &(&1.id != plan.pulls_from_stage_id))
+    deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
 
-    view |> element("#trigger-pulls-from") |> render_change(%{"stage_id" => to_string(other.id)})
+    view
+    |> element("#trigger-stage")
+    |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+
     view |> element("#flow-editor-save") |> render_click()
 
     assert contract.(Flows.get_flow!(board, "plan")) == before

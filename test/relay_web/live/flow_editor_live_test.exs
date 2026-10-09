@@ -13,6 +13,9 @@ defmodule RelayWeb.FlowEditorLiveTest do
     %{board: Boards.get_or_create_default_board(user)}
   end
 
+  # Deploy is the default board's one flow-free work stage (RE429: one flow per stage).
+  defp deploy_id(board), do: Enum.find(board.stages, &(&1.name == "Deploy")).id
+
   test "mounts the editor for a flow key and shows the version chip", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
     assert has_element?(view, "#flow-editor-version-chip", "v1")
@@ -49,31 +52,37 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#top-bar-crumb-boards")
   end
 
-  test "the works-in trigger picker lists each substage directly under its parent", %{
-    conn: conn,
-    board: board
-  } do
+  test "34. the trigger bar is one Stage select with read-only derived pickup and drop-off (RE429)",
+       %{conn: conn, board: board} do
+    deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
-    html = render(view)
 
-    assert html
-           |> LazyHTML.from_fragment()
-           |> LazyHTML.query("#trigger-works-in option")
-           |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim())) ==
-             [
-               "—",
-               "Backlog",
-               "Next up",
-               "Spec",
-               "Spec:Review",
-               "Spec:Done",
-               "Plan",
-               "Plan:Done",
-               "Code",
-               "Review",
-               "Deploy",
-               "Done"
-             ]
+    options =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#trigger-stage option")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+    assert options == ["Code", "Deploy"]
+    assert has_element?(view, "#trigger-stage option[selected]", "Code")
+    refute has_element?(view, "#trigger-pulls-from")
+    refute has_element?(view, "#trigger-works-in")
+    refute has_element?(view, "#trigger-lands-on")
+    assert has_element?(view, "#trigger-derived-pulls-from", "Plan:Done")
+    assert has_element?(view, "#trigger-derived-lands-on", "Review")
+
+    view |> element("#trigger-stage") |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#flow-editor-save") |> render_click()
+
+    code = Flows.get_flow!(board, "code")
+    assert code.stage_id == deploy.id
+    assert code.version == 1
+    assert has_element?(view, "#flow-editor-version-chip", "v1")
+    assert has_element?(view, "#trigger-derived-pulls-from", "Review")
+    assert has_element?(view, "#trigger-derived-lands-on", "Done")
   end
 
   test "404s on an unknown flow key", %{conn: conn, board: board} do
@@ -89,6 +98,7 @@ defmodule RelayWeb.FlowEditorLiveTest do
       Flows.create_flow(board, %{
         key: "loopy",
         isolation: :shared_clean,
+        stage_id: deploy_id(board),
         nodes: [
           %{key: "work", type: :agent, run: "a", foreach: "card.tasks"},
           %{key: "after", type: :gate, run: "true"}
@@ -108,15 +118,11 @@ defmodule RelayWeb.FlowEditorLiveTest do
 
   test "mounts and renders the editor for a just-created scratch flow (nodes: [], start → done)",
        %{conn: conn, board: board} do
-    [pulls, works, lands | _] = Boards.list_stages(board)
-
     {:ok, flow} =
       Flows.create_flow(board, %{
         key: "deploy-gate",
         isolation: :shared_clean,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id,
+        stage_id: deploy_id(board),
         nodes: [],
         edges: [%{from: "start", to: "done"}]
       })
@@ -125,42 +131,6 @@ defmodule RelayWeb.FlowEditorLiveTest do
 
     assert has_element?(view, "#flow-graph")
     assert has_element?(view, "#flow-editor-version-chip", "v1")
-  end
-
-  test "editing a trigger stage marks dirty and saves without a version bump", %{conn: conn, board: board} do
-    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
-    code = Flows.get_flow!(board, "code")
-    other = Enum.find(board.stages, &(&1.id != code.pulls_from_stage_id))
-
-    view
-    |> element("#trigger-pulls-from")
-    |> render_change(%{"stage_id" => to_string(other.id)})
-
-    assert has_element?(view, "#flow-editor-unsaved-bar")
-
-    view |> element("#flow-editor-save") |> render_click()
-    # trigger-only change: no modal, saves directly, version stays v1
-    assert has_element?(view, "#flow-editor-version-chip", "v1")
-    assert Flows.get_flow!(board, "code").pulls_from_stage_id == other.id
-  end
-
-  test "saving a trigger change that collides with another enabled flow's pulls-from stage shows an inline error",
-       %{conn: conn, board: board} do
-    code = Flows.get_flow!(board, "code")
-    spec = Flows.get_flow!(board, "spec")
-    {:ok, code} = Flows.enable_flow(code)
-    {:ok, spec} = Flows.enable_flow(spec)
-
-    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
-
-    view
-    |> element("#trigger-pulls-from")
-    |> render_change(%{"stage_id" => to_string(spec.pulls_from_stage_id)})
-
-    view |> element("#flow-editor-save") |> render_click()
-
-    assert has_element?(view, "#flow-editor-errors", "another enabled flow already pulls from this stage")
-    assert Flows.get_flow!(board, "code").pulls_from_stage_id == code.pulls_from_stage_id
   end
 
   # RE394 — the editor's persisting actions show the shared client-side pressed face.
@@ -679,16 +649,14 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-editor-version-chip")
   end
 
-  test "trigger pickers show substages under a renamed parent's new name (RE385)", %{conn: conn, board: board} do
+  test "the derived read-outs follow a renamed neighbour (RE385, RE429)", %{conn: conn, board: board} do
     spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))
     {:ok, _} = Boards.update_stage(spec, %{name: "Specify"})
 
     {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/spec")
 
-    assert has_element?(view, "#trigger-lands-on option[selected]", "Specify:Review")
-    assert has_element?(view, "#trigger-works-in option", "Specify:Review")
-    assert has_element?(view, "#trigger-works-in option", "Specify:Done")
+    assert has_element?(view, "#trigger-stage option[selected]", "Specify")
+    assert has_element?(view, "#trigger-derived-lands-on", "Specify:Review")
     refute html =~ "Spec:Review"
-    refute html =~ "Spec:Done"
   end
 end

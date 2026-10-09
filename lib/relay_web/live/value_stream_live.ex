@@ -106,7 +106,7 @@ defmodule RelayWeb.ValueStreamLive do
     states = ValueStream.stream_states(board.id)
 
     socket
-    |> assign(:flows, board |> Flows.list_enabled_flows() |> Map.new(&{&1.works_in_stage_id, &1}))
+    |> assign(:flows, board |> Flows.list_enabled_flows() |> Map.new(&{&1.stage_id, &1}))
     |> assign(:first, states |> List.first() |> state_name())
     |> assign(:last, states |> List.last() |> state_name())
     |> assign(:state_count, length(states))

@@ -7,11 +7,13 @@ defmodule Relay.RunsReadSideTest do
   describe "happy_path/1" do
     test "walks the start edge then :succeeded edges to done" do
       board = insert(:board)
+      stage = insert(:stage, board: board, type: :work, category: :in_progress)
 
       {:ok, flow} =
         Flows.create_flow(board, %{
           key: "mini",
           isolation: :shared_clean,
+          stage_id: stage.id,
           nodes: [
             %{key: "a", type: :agent, run: "a"},
             %{key: "b", type: :agent, run: "b"},
@@ -48,7 +50,7 @@ defmodule Relay.RunsReadSideTest do
     test "a run whose flow works in a stage exposes that stage's name on its detail" do
       board = insert(:board)
       stage = insert(:stage, board: board, name: "Spec")
-      flow = insert(:flow, board: board, key: "spec", works_in_stage_id: stage.id)
+      flow = insert(:flow, board: board, key: "spec", stage_id: stage.id)
       card = insert(:card, stage: stage)
       insert(:run, card: card, flow_id: flow.id, flow_key: "spec")
 
@@ -70,17 +72,6 @@ defmodule Relay.RunsReadSideTest do
       assert detail.flow_key == "code"
     end
 
-    test "a run whose flow has no work stage has a nil stage_name" do
-      board = insert(:board)
-      flow = insert(:flow, board: board, works_in_stage_id: nil)
-      card = insert(:card, stage: insert(:stage, board: board))
-      insert(:run, card: card, flow_id: flow.id, flow_key: flow.key)
-
-      assert [run] = Runs.list_runs_for_card(card)
-
-      assert Runs.run_detail(run, nil).stage_name == nil
-    end
-
     test "lists runs with flow and stage in a constant 2 queries regardless of run count" do
       board = insert(:board)
       card_a = insert(:card, stage: insert(:stage, board: board))
@@ -88,7 +79,7 @@ defmodule Relay.RunsReadSideTest do
 
       seed_run = fn card, name ->
         stage = insert(:stage, board: board, name: name)
-        flow = insert(:flow, board: board, works_in_stage_id: stage.id)
+        flow = insert(:flow, board: board, stage_id: stage.id)
         run = insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: :done)
         insert(:node_execution, run: run, node: "branch")
         insert(:node_execution, run: run, node: "implement")
@@ -305,10 +296,10 @@ defmodule Relay.RunsReadSideTest do
       user = insert(:user)
       {:ok, board} = Relay.Boards.create_board(user, %{name: "Queued"})
       board = Relay.Repo.preload(board, :stages)
-      flow = Flows.get_flow!(board, "code")
-      {:ok, flow} = Flows.enable_flow(flow)
-      pulls_from = Enum.find(board.stages, &(&1.id == flow.pulls_from_stage_id))
-      %{board: board, flow: flow, pulls_from: pulls_from}
+      {:ok, _} = board |> Flows.get_flow!("code") |> Flows.enable_flow()
+      # queued_flow/5 reads the flow's derived pickup, so load it the way the board does.
+      flow = Flows.get_flow_with_stages(board, "code")
+      %{board: board, flow: flow, pulls_from: flow.pulls_from_stage}
     end
 
     test "ready + AI baton + enabled flow pulls from stage + no active run", ctx do
@@ -346,8 +337,9 @@ defmodule Relay.RunsReadSideTest do
       user = insert(:user)
       {:ok, board} = Relay.Boards.create_board(user, %{name: "Face"})
       board = Relay.Repo.preload(board, :stages)
-      flow = Flows.get_flow!(board, "code")
-      {:ok, flow} = Flows.enable_flow(flow)
+      {:ok, _} = board |> Flows.get_flow!("code") |> Flows.enable_flow()
+      # face_summary/5 reads the flow's derived pickup and drop-off, so load them the way the board does.
+      flow = Flows.get_flow_with_stages(board, "code")
       %{board: board, flow: flow}
     end
 
@@ -359,8 +351,7 @@ defmodule Relay.RunsReadSideTest do
     end
 
     test "a terminal run stays on the face while the card sits in the flow's trigger stages", ctx do
-      lands_on = Enum.find(ctx.board.stages, &(&1.id == ctx.flow.lands_on_stage_id))
-      card = insert(:card, stage: lands_on, status: :in_review)
+      card = insert(:card, stage: ctx.flow.lands_on_stage, status: :in_review)
       summary = %{status: :done, flow_key: "code"}
 
       assert {:run, ^summary} = Runs.face_summary(card, :human, [ctx.flow], %{card.id => summary}, [])
@@ -369,11 +360,7 @@ defmodule Relay.RunsReadSideTest do
     test "a terminal run drops off once the card moves on", ctx do
       elsewhere =
         Enum.find(ctx.board.stages, fn s ->
-          s.id not in [
-            ctx.flow.pulls_from_stage_id,
-            ctx.flow.works_in_stage_id,
-            ctx.flow.lands_on_stage_id
-          ]
+          s.id not in [ctx.flow.pulls_from_stage.id, ctx.flow.stage_id, ctx.flow.lands_on_stage.id]
         end)
 
       card = insert(:card, stage: elsewhere, status: :ready)
@@ -383,16 +370,14 @@ defmodule Relay.RunsReadSideTest do
     end
 
     test "queued when no run and the enabled flow pulls from the card's stage", ctx do
-      pulls_from = Enum.find(ctx.board.stages, &(&1.id == ctx.flow.pulls_from_stage_id))
-      card = insert(:card, stage: pulls_from, status: :ready)
+      card = insert(:card, stage: ctx.flow.pulls_from_stage, status: :ready)
 
       assert {:queued, %Schemas.Flow{key: "code"}} =
                Runs.face_summary(card, :ai, [ctx.flow], %{}, [])
     end
 
     test "an unowned ready card on a pulls-from stage shows the queued pill (RLY-206 nudge)", ctx do
-      pulls_from = Enum.find(ctx.board.stages, &(&1.id == ctx.flow.pulls_from_stage_id))
-      card = insert(:card, stage: pulls_from, status: :ready)
+      card = insert(:card, stage: ctx.flow.pulls_from_stage, status: :ready)
 
       assert {:queued, %Schemas.Flow{key: "code"}} =
                Runs.face_summary(card, nil, [ctx.flow], %{}, [])

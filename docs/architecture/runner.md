@@ -128,7 +128,8 @@ CI still runs the tests on pushes to `main` and on PRs. Its deploy jobs (`ci.yml
 `flutter-deploy.yml`'s `workflow_dispatch` still works for a manual store build.
 
 A card in any AI-enabled stage is dispatched by `Relay.Runs.Scheduler` (folding over every
-enabled `Flow` on the board, rightmost `works_in` stage position first) straight to the
+enabled `Flow` on the board, rightmost flow stage position first; each flow pulls from the
+stage before its own in board order, worked out by `Relay.Flows.neighbours/2`) straight to the
 node-job engine (`Relay.Runs`) — no per-stage config file, no board-runner poll loop.
 `relay start` claims the resulting `NodeJob` rows over the node-job REST API (below) and
 runs whatever node it is handed; it knows nothing about stages, columns, or which flow a
@@ -139,7 +140,7 @@ job belongs to. Board-specific facts (stages, prompts, per-node budgets) live en
 **Shared-budget arbitration: rightmost flow wins ties.** `Relay.Runs.Capacity` keys free
 slots `runner_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per
 flow** (`capacity.ex:5-7`), and `Relay.Runs.Scheduler.plan/1` threads one shared capacity
-accumulator through its fold, sorted rightmost `works_in` stage position first
+accumulator through its fold, sorted rightmost flow stage (`flows.stage_id`) position first
 (`scheduler.ex:38-45`, rule documented at `scheduler.ex:9-13`). So when two flows share an
 isolation class and both have eligible cards under scarce capacity, the flow closer to Done
 draws first — intended WIP discipline, not starvation, even though under real scarcity it
@@ -301,14 +302,22 @@ never 403s):
   serialized in stable `key` order. One round trip is all `relay doctor` (RLY-240) needs.
 - `GET /api/flows/:key` (`RelayWeb.Api.FlowController.show/2`) — one flow as the canonical
   `Relay.Flows.Document` (RLY-241): `key`, `version`, `enabled`, `isolation`, the trigger as
-  stage **names** (portable across boards), and the ordered `nodes`/`edges` arrays. Sparse —
-  nil fields and schema defaults are omitted. 404s an unknown key.
+  the one stage **name** the flow works in, `{"stage": "<name>"}` (portable across boards), and
+  the ordered `nodes`/`edges` arrays. Sparse — nil fields and schema defaults are omitted.
+  Beside the document sits a read-only `"derived": {"pulls_from", "lands_on"}` block (RE429,
+  `Relay.Flows.Document.derived/1`): the stage names worked out from current board order, `null`
+  at either end. `./relay flow` prints it as `pulls_from → stage → lands_on`; both key sets are
+  pinned in `test/fixtures/runner_contract.json` (`"flows"`). 404s an unknown key.
 - `PUT /api/flows/:key` (`RelayWeb.Api.FlowController.update/2`) — upsert a flow from a document
   via `Relay.Flows.upsert_from_document/3`, in one transaction: `Schemas.Flow.changeset/2`'s
   graph validation, `save_definition/2`'s version-bump semantics (an unchanged push bumps
   nothing — pull → push is a genuine no-op), and `enable_flow/1`/`disable_flow/1`'s arming rules.
+  The response renders through the same view as `GET`, `derived` included. `derived` on input is
+  accepted and ignored (a pulled file pushes back unchanged); a legacy three-key trigger is
+  accepted, reading only `works_in`.
   `201` on create, `200` on update. Refusals: `422 invalid_document` / `key_mismatch` /
-  `unknown_stages` / `invalid`, and `409 stale_version` when the document carries a `version`
+  `unknown_stages` / `stage_occupied` (the named stage already holds another key's flow —
+  `error.stage` / `error.flow` name it) / `invalid`, and `409 stale_version` when the document carries a `version`
   that no longer matches (absent `version` = last-write-wins).
 - CLI: `./relay why REF` / `./relay runs REF` / `./relay runners` /
   `./relay version` / `./relay flow-stats KEY` / `./relay flow [KEY]` /

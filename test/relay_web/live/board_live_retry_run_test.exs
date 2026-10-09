@@ -26,17 +26,15 @@ defmodule RelayWeb.BoardLiveRetryRunTest do
   # it uses a custom flow shaped like the pre-RLY-194 "spec" flow: a single "brainstorm" node
   # with max_retries: 1 and no :failed edge at all, so two failures still end the run :failed.
   defp dead_end_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
     spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    review = Enum.find(board.stages, &(&1.name == "Spec:Review"))
+    # The seeded (disabled) spec flow holds Spec; a stage holds one flow (RE429).
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "dead-end",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: review.id,
+        stage_id: spec.id,
         nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
         edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
       })

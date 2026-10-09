@@ -211,6 +211,14 @@ below are cut over)
 | Plan | Spec:Done | Plan | Plan:Done | `write-plan` (agent) | **Cut over (RLY-138)** |
 | Code | Plan:Done | Code | Review | branch → implement ⇄ review loop → precommit gate → smoke → merge | **Cut over (RLY-139)** |
 
+> **Note (2026-10, RE429):** a flow's trigger is now **one stage** — the "Works in" column
+> above. "Pulls from" and "On success →" are no longer stored or authored: they are worked out
+> from board order (`Relay.Flows.neighbours/2` — the stage before, and the stage after, the
+> flow's own), and drop-off is resolved when the run lands. A stage holds at most one flow, and
+> deleting a stage deletes its flow. Flow documents spell the trigger `{"stage": "<name>"}`;
+> the API adds a read-only `"derived": {"pulls_from", "lands_on"}` block. The table and the
+> example below are kept as the decision recorded them.
+
 **Example flow definition** — the Spec flow, the simplest one and the first to build:
 
 ```jsonc

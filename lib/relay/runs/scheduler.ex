@@ -6,7 +6,7 @@ defmodule Relay.Runs.Scheduler do
   the `ready ↔ queued` reconciliation. No processes, no DB — every ported rule
   unit-tests directly.
 
-  Ported semantics: process enabled flows **rightmost works-in stage first**
+  Ported semantics: process enabled flows **rightmost stage first**
   (by stage `position`, descending — not config order); within a flow, resume
   parked runs before pulling fresh; WIP limits count a column **plus its
   sub-lanes**; `:needs_input` and `:failed` cards are skipped (a dead run is
@@ -46,7 +46,7 @@ defmodule Relay.Runs.Scheduler do
 
     acc =
       snapshot.flows
-      |> Enum.sort_by(&works_in_position(&1, stage_by_id), :desc)
+      |> Enum.sort_by(&stage_position(&1, stage_by_id), :desc)
       |> Enum.reduce(acc0, fn flow, acc ->
         acc
         |> resume_runs(flow, snapshot.runs, children, card_by_id)
@@ -63,17 +63,17 @@ defmodule Relay.Runs.Scheduler do
 
   # --- flow ordering ---
 
-  defp works_in_position(flow, stage_by_id) do
-    case stage_by_id[flow.works_in_stage_id] do
+  defp stage_position(flow, stage_by_id) do
+    case stage_by_id[flow.stage_id] do
       nil -> -1
       stage -> stage.position
     end
   end
 
-  # --- resume parked runs whose card sits in this flow's works-in stage (or a sub-lane) ---
+  # --- resume parked runs whose card sits in this flow's stage (or a sub-lane) ---
 
   defp resume_runs(acc, flow, runs, children, card_by_id) do
-    lane_ids = lane_ids(flow.works_in_stage_id, children)
+    lane_ids = lane_ids(flow.stage_id, children)
 
     runs
     |> Enum.filter(fn run ->
@@ -131,9 +131,9 @@ defmodule Relay.Runs.Scheduler do
   # --- then pull fresh from this flow's pulls-from stage ---
 
   defp fresh_pulls(acc, flow, stage_by_id, children, cards_by_stage, run_by_card) do
-    works_in = flow.works_in_stage_id
-    wip_limit = wip_limit(stage_by_id, works_in)
-    base_used = used(children, cards_by_stage, works_in)
+    flow_stage = flow.stage_id
+    wip_limit = wip_limit(stage_by_id, flow_stage)
+    base_used = used(children, cards_by_stage, flow_stage)
 
     cards_by_stage
     |> Map.get(flow.pulls_from_stage_id, [])
@@ -143,17 +143,17 @@ defmodule Relay.Runs.Scheduler do
         not fresh_eligible?(card, acc.decided, run_by_card) ->
           {:cont, acc}
 
-        wip_full?(wip_limit, base_used, Map.get(acc.wip_extra, works_in, 0)) ->
+        wip_full?(wip_limit, base_used, Map.get(acc.wip_extra, flow_stage, 0)) ->
           # WIP full: stop pulling fresh for this flow; remaining stay :ready (not queued).
           {:halt, acc}
 
         true ->
-          {:cont, place_fresh(acc, card, flow, works_in)}
+          {:cont, place_fresh(acc, card, flow, flow_stage)}
       end
     end)
   end
 
-  defp place_fresh(acc, card, flow, works_in) do
+  defp place_fresh(acc, card, flow, flow_stage) do
     case take_slot(acc.capacity, flow.isolation, :any) do
       :none ->
         # WIP had room but no capacity → queue, keep scanning (do NOT consume WIP).
@@ -164,7 +164,7 @@ defmodule Relay.Runs.Scheduler do
           acc
           | capacity: capacity,
             decided: MapSet.put(acc.decided, card.id),
-            wip_extra: Map.update(acc.wip_extra, works_in, 1, &(&1 + 1)),
+            wip_extra: Map.update(acc.wip_extra, flow_stage, 1, &(&1 + 1)),
             dispatches: acc.dispatches ++ [{:start, card.id, flow.key, runner_id}]
         }
     end
@@ -342,7 +342,7 @@ defmodule Relay.Runs.Scheduler do
       wip_full?(evidence.wip_limit, evidence.wip_used, 0) ->
         verdict(
           :wip_full,
-          "The #{flow.key} flow's works-in column is at its WIP limit " <>
+          "The #{flow.key} flow's column is at its WIP limit " <>
             "(#{evidence.wip_used}/#{evidence.wip_limit}), so it is not pulling anything new.",
           evidence
         )
@@ -494,7 +494,7 @@ defmodule Relay.Runs.Scheduler do
     stage_by_id = Map.new(snapshot.stages, &{&1.id, &1})
     children = children_index(snapshot.stages)
     cards_by_stage = Enum.group_by(snapshot.cards, & &1.stage_id)
-    works_in = flow && flow.works_in_stage_id
+    flow_stage = flow && flow.stage_id
 
     %{
       card_id: card.id,
@@ -518,8 +518,8 @@ defmodule Relay.Runs.Scheduler do
       # current_node (snapshot.ex:44-51); only the DB row has it. `resume_refused_since` is
       # layered there for the same reason.
       current_node: nil,
-      wip_limit: works_in && wip_limit(stage_by_id, works_in),
-      wip_used: works_in && used(children, cards_by_stage, works_in)
+      wip_limit: flow_stage && wip_limit(stage_by_id, flow_stage),
+      wip_used: flow_stage && used(children, cards_by_stage, flow_stage)
     }
   end
 

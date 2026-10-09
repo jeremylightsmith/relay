@@ -223,15 +223,14 @@ defmodule Relay.Runs.ResumeRefusalTest do
     stages = Relay.Boards.list_stages(board)
     next_up = Enum.find(stages, &(&1.name == "Next up"))
     spec = Enum.find(stages, &(&1.name == "Spec"))
-    plan_stage = Enum.find(stages, &(&1.name == "Plan"))
+    # Spec holds the seeded (disabled) `spec` flow; a stage holds one flow, so clear it.
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "excl",
         isolation: :exclusive,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan_stage.id,
+        stage_id: spec.id,
         nodes: [%{key: "work", type: :agent, run: "work {ref}"}],
         edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
       })
@@ -279,10 +278,10 @@ defmodule Relay.Runs.ResumeRefusalTest do
       %{run: run, flow: flow} = park_pinned(board)
 
       # Replacing a flow: disable, delete (the FK cascade nilifies runs.flow_id), recreate on
-      # the same trigger stages. The run now reads `isolation: nil` in `active_runs/1` —
+      # the same stage. The run now reads `isolation: nil` in `active_runs/1` —
       # undispatchable forever, with no next transition to fail on. This is run 368.
       {:ok, flow} = Relay.Flows.disable_flow(flow)
-      attrs = Map.take(flow, [:isolation, :pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id])
+      attrs = Map.take(flow, [:isolation, :stage_id])
       {:ok, _deleted} = Relay.Flows.delete_flow(flow)
 
       {:ok, replacement} =

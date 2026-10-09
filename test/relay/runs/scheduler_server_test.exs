@@ -99,9 +99,7 @@ defmodule Relay.Runs.Scheduler.ServerTest do
         key: "spec",
         enabled: true,
         isolation: isolation,
-        pulls_from_stage_id: pulls.id,
-        works_in_stage_id: works.id,
-        lands_on_stage_id: lands.id
+        stage_id: works.id
       )
 
     card = insert(:card, stage: pulls, status: card_status)

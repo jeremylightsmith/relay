@@ -24,19 +24,20 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     %{conn: conn, board: board}
   end
 
+  # The Spec stage (pickup: Next up) with the board's seeded disabled `spec` flow removed, so a
+  # test flow can work there — a stage holds at most one flow (RE429).
+  defp free_spec_stage!(board) do
+    {:ok, _} = Relay.Flows.delete_flow(Relay.Flows.get_flow!(board, "spec"))
+    Enum.find(board.stages, &(&1.name == "Spec"))
+  end
+
   # A one-node flow with an edge for every terminal outcome → deterministic routing.
   defp four_outcome_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-    spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
-
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "four",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: free_spec_stage!(board).id,
         nodes: [%{key: "work", type: :agent, run: "work {ref}", agent: "plan-implementer"}],
         edges: [
           %{from: "start", to: "work"},
@@ -52,17 +53,11 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
 
   # The Code shape: one exclusive node, so a claim exercises the exclusive capacity path.
   defp exclusive_flow(board) do
-    next_up = Enum.find(board.stages, &(&1.name == "Next up"))
-    spec = Enum.find(board.stages, &(&1.name == "Spec"))
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
-
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "excl",
         isolation: :exclusive,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: plan.id,
+        stage_id: free_spec_stage!(board).id,
         nodes: [%{key: "work", type: :shell, run: "mix precommit"}],
         edges: [
           %{from: "start", to: "work"},

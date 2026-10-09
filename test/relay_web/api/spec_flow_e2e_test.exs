@@ -51,20 +51,18 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
   # about the generic "a node that exhausts its retries fails the run" behavior, not that
   # library flow specifically, so it swaps in a custom flow shaped like the pre-RLY-194
   # "spec" flow: a single "brainstorm" node with no :failed edge at all, so two failures
-  # still end the run :failed. Same trigger stages as "spec" so the card still routes to it.
+  # still end the run :failed. Same stage as "spec" so the card still routes to it.
   defp dead_end_flow(board) do
-    {:ok, _} = Relay.Flows.disable_flow(Relay.Flows.get_flow!(board, "spec"))
-    next_up = stage_named(board, "Next up")
+    # A stage holds at most one flow (RE429): retire the seeded `spec` flow off Spec first.
+    {:ok, seeded} = Relay.Flows.disable_flow(Relay.Flows.get_flow!(board, "spec"))
+    {:ok, _} = Relay.Flows.delete_flow(seeded)
     spec = stage_named(board, "Spec")
-    review = stage_named(board, "Spec:Review")
 
     {:ok, flow} =
       Relay.Flows.create_flow(board, %{
         key: "dead-end",
         isolation: :shared_clean,
-        pulls_from_stage_id: next_up.id,
-        works_in_stage_id: spec.id,
-        lands_on_stage_id: review.id,
+        stage_id: spec.id,
         nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1}],
         edges: [%{from: "start", to: "brainstorm"}, %{from: "brainstorm", to: "done", on: :succeeded}]
       })

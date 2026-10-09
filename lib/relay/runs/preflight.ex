@@ -47,7 +47,7 @@ defmodule Relay.Runs.Preflight do
 
   @type t :: %{
           ready?: boolean(),
-          stages: :ok | {:missing, [:pulls_from | :works_in | :lands_on]},
+          stages: :ok | {:missing, [:pulls_from | :lands_on]},
           requires: %{agents: [String.t()], skills: [String.t()]},
           runners: :none_connected | {:ok, String.t()} | {:no_candidate, [detail()]},
           unreported: [String.t()]
@@ -127,17 +127,11 @@ defmodule Relay.Runs.Preflight do
     capacity |> Map.get(runner_id, %{}) |> Map.get(isolation, 0)
   end
 
-  # The stage FKs are `on_delete: :nilify_all`, so deleting a trigger stage disarms the flow
-  # by nilling its id — which is exactly the orphaned-flow case this check exists to catch.
+  # A flow always has its stage (RE429); what it can lack is somewhere to pick cards up from or
+  # drop them off at — a flow on the board's first or last stage. Read fresh from board order.
   defp stage_check(%Flow{} = flow) do
-    missing =
-      for {key, id} <- [
-            pulls_from: flow.pulls_from_stage_id,
-            works_in: flow.works_in_stage_id,
-            lands_on: flow.lands_on_stage_id
-          ],
-          is_nil(id),
-          do: key
+    neighbours = Flows.neighbours(flow)
+    missing = for key <- [:pulls_from, :lands_on], is_nil(Map.fetch!(neighbours, key)), do: key
 
     if missing == [], do: :ok, else: {:missing, missing}
   end

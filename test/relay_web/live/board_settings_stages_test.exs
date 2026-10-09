@@ -165,7 +165,8 @@ defmodule RelayWeb.BoardSettingsStagesTest do
 
     test "the TYPE dropdown changes a stage's type and re-snaps a resident card's status",
          %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
+      # Deploy holds no flow, so it may become a non-work type (RE429).
+      code = stage_named(board, "Deploy")
       card = insert(:card, stage: code, status: :working)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
@@ -272,23 +273,57 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert Boards.get_stage(board, keep.id)
     end
 
-    test "deleting a stage an enabled flow works in flashes the flow", %{conn: conn, board: board} do
+    test "32. a flow-holding stage's delete confirm names the flow, and deleting takes the flow with it",
+         %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
+      code = stage_named(board, "Code")
+      backlog = stage_named(board, "Backlog")
 
-      insert(:flow,
-        board: board,
-        key: "ship",
-        enabled: true,
-        pulls_from_stage_id: stage_named(board, "Backlog").id,
-        works_in_stage_id: deploy.id,
-        lands_on_stage_id: stage_named(board, "Done").id
-      )
+      {:ok, ship} =
+        Relay.Flows.create_flow(board, %{
+          key: "ship",
+          isolation: :shared_clean,
+          stage_id: deploy.id,
+          nodes: [],
+          edges: [%{from: "start", to: "done"}]
+        })
+
+      {:ok, ship} = Relay.Flows.save_definition(ship, %{isolation: :exclusive})
+      {:ok, ship} = Relay.Flows.save_definition(ship, %{isolation: :shared_clean})
+      assert ship.version == 3
+      {:ok, _} = Relay.Flows.enable_flow(ship)
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-      html = view |> element("#stage-#{deploy.id}-delete") |> render_click()
 
-      assert html =~ "Flow(s) ship use this stage — disable or re-point them first."
-      assert has_element?(view, "#stage-#{deploy.id}-row")
+      assert has_element?(
+               view,
+               ~s|#stage-#{deploy.id}-delete[data-confirm="Delete this stage? This also deletes flow `ship` (v3)."]|
+             )
+
+      assert has_element?(
+               view,
+               ~s|#stage-#{code.id}-delete[data-confirm="Delete this stage? This also deletes flow `code` (v1)."]|
+             )
+
+      assert has_element?(view, ~s(#stage-#{backlog.id}-delete[data-confirm="Delete this stage?"]))
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      refute has_element?(view, "#flash-error")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+      assert Boards.get_stage(board, deploy.id) == nil
+      assert Relay.Flows.get_flow(board, "ship") == nil
+    end
+
+    test "33. retyping a flow-holding stage to a non-work type flashes the refusal",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = render_click(view, "set_type", %{"stage-id" => "#{code.id}", "type" => "queue"})
+
+      assert html =~ "Stage Code holds flow `code` — delete the flow first."
+      assert Boards.get_stage(board, code.id).type == :work
     end
 
     test "deleting the public intake stage flashes", %{conn: conn, board: board} do
@@ -302,33 +337,8 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       assert has_element?(view, "#stage-#{deploy.id}-row")
     end
 
-    test "turning off a lane an enabled flow lands on flashes the flow", %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
-      {:ok, done} = Boards.enable_lane(code, :done)
-
-      board
-      |> Relay.Flows.get_flow("code")
-      |> Ecto.Changeset.change(
-        enabled: true,
-        pulls_from_stage_id: stage_named(board, "Backlog").id,
-        works_in_stage_id: code.id,
-        lands_on_stage_id: done.id
-      )
-      |> Repo.update!()
-
-      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
-
-      html =
-        view
-        |> element(~s(#stage-#{code.id}-row input[phx-click="toggle_lane"][phx-value-lane="done"]))
-        |> render_click()
-
-      assert html =~ "Flow(s) code use this stage — disable or re-point them first."
-      assert [%{type: :done}] = Boards.sublanes(code)
-    end
-
     test "changing a stage's type re-snaps its cards", %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
+      code = stage_named(board, "Deploy")
       {:ok, card} = Relay.Cards.create_card(code, %{title: "WIP"})
       {:ok, card} = Relay.Cards.set_status(card, %{status: :working})
 

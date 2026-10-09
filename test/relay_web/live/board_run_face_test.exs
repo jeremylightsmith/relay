@@ -93,7 +93,7 @@ defmodule RelayWeb.BoardRunFaceTest do
   test "a queued card face names the flow", %{conn: conn, board: board} do
     flow = Flows.get_flow!(board, "code")
     {:ok, flow} = Flows.enable_flow(flow)
-    stage = Enum.find(board.stages, &(&1.id == flow.pulls_from_stage_id))
+    stage = Flows.neighbours(flow).pulls_from
     {:ok, card} = Cards.create_card(stage, %{title: "Waiting"})
     {:ok, card} = Cards.assign_ai(card)
     ref = Cards.ref(board, card)
@@ -108,7 +108,8 @@ defmodule RelayWeb.BoardRunFaceTest do
        %{conn: conn, board: board} do
     flow = Flows.get_flow!(board, "code")
     backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
-    true = backlog.id not in [flow.pulls_from_stage_id, flow.works_in_stage_id, flow.lands_on_stage_id]
+    %{pulls_from: pulls_from, lands_on: lands_on} = Flows.neighbours(flow)
+    true = backlog.id not in [pulls_from.id, flow.stage_id, lands_on.id]
     {:ok, card} = Cards.create_card(backlog, %{title: "Moved on"})
     insert(:run, card: card, status: :done, current_node: nil, finished_at: DateTime.utc_now())
     ref = Cards.ref(board, card)

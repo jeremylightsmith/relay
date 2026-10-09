@@ -16,12 +16,16 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
 
   defp doc(path), do: path |> File.read!() |> Jason.decode!()
 
-  # A board shaped like RE after RE408: Code has its done sublane, and Deploy sits after Code.
+  # A board shaped like RE after RE408: Code has its done sublane, and Deploy sits after Code
+  # (the default board's Deploy, after Review, is replaced by one right after Code — a flow's
+  # pickup and drop-off come from board order).
   defp re_board do
     user = insert(:user)
     {:ok, board} = Boards.create_board(user, %{name: "RE board"})
-    code = Enum.find(Boards.list_stages(board), &(&1.name == "Code" and is_nil(&1.parent_id)))
+    stages = Boards.list_stages(board)
+    code = Enum.find(stages, &(&1.name == "Code" and is_nil(&1.parent_id)))
     {:ok, _done} = Boards.enable_lane(code, :done)
+    {:ok, _} = Boards.delete_stage(Enum.find(stages, &(&1.name == "Deploy")))
 
     {:ok, _deploy} =
       Boards.create_stage(board, %{
@@ -66,7 +70,7 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
     assert flow.enabled == true
     assert flow.isolation == :exclusive
     assert flow.pulls_from_stage.name == "Code:Done"
-    assert flow.works_in_stage.name == "Deploy"
+    assert flow.stage.name == "Deploy"
     assert flow.lands_on_stage.name == "Review"
   end
 
@@ -194,8 +198,14 @@ defmodule Relay.Flows.ReBoardFlowDocumentsTest do
     for s <- scripts, do: assert(executable?(s), "#{s} is missing or not executable")
   end
 
+  # RE429: the checked-in documents carry the one-stage trigger.
+  test "the RE board's flow files name one stage each" do
+    assert doc(@code_path)["trigger"] == %{"stage" => "Code"}
+    assert doc(@deploy_path)["trigger"] == %{"stage" => "Deploy"}
+  end
+
   test "a trigger naming an unknown stage is refused — the push runs real validation" do
-    bad = put_in(doc(@code_path), ["trigger", "lands_on"], "Nowhere")
+    bad = put_in(doc(@code_path), ["trigger"], %{"stage" => "Nowhere"})
     assert {:error, {:unknown_stages, ["Nowhere"]}} = Flows.upsert_from_document(re_board(), "code", bad)
   end
 

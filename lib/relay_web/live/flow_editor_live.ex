@@ -5,6 +5,11 @@ defmodule RelayWeb.FlowEditorLive do
   and saves via Relay.Flows.save_definition/2 behind a Save-as-v(n+1) confirm modal. Matches
   docs/designs/Relay Flow Editor.dc.html. Read-only members (archived board) see the graph and
   inspector with every mutating control disabled.
+
+  RE429: the trigger bar is one Stage select (`Relay.Flows.assignable_stages/2` — free main
+  work stages plus the flow's own) and two read-only derived read-outs, pulls-from and
+  lands-on, worked out from board order (`Relay.Flows.neighbours/2`) for the working copy's
+  stage. A stage-only change saves with no version bump.
   """
   use RelayWeb, :live_view
 
@@ -49,13 +54,12 @@ defmodule RelayWeb.FlowEditorLive do
       nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
       edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields())),
       isolation: flow.isolation,
-      pulls_from_stage_id: flow.pulls_from_stage_id,
-      works_in_stage_id: flow.works_in_stage_id,
-      lands_on_stage_id: flow.lands_on_stage_id
+      stage_id: flow.stage_id
     }
 
     socket
     |> assign(:flow, flow)
+    |> assign(:assignable_stages, Flows.assignable_stages(socket.assigns.board, flow))
     |> assign(:working, working)
     |> assign(:dirty?, false)
     |> assign(:errors, [])
@@ -95,9 +99,7 @@ defmodule RelayWeb.FlowEditorLive do
     Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())) != working.nodes or
       Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields())) != working.edges or
       flow.isolation != working.isolation or
-      flow.pulls_from_stage_id != working.pulls_from_stage_id or
-      flow.works_in_stage_id != working.works_in_stage_id or
-      flow.lands_on_stage_id != working.lands_on_stage_id
+      flow.stage_id != working.stage_id
   end
 
   defp definition_dirty?(flow, working) do
@@ -164,10 +166,10 @@ defmodule RelayWeb.FlowEditorLive do
     {:noreply, assign(socket, :modal, nil)}
   end
 
-  def handle_event("validate_trigger", %{"field" => field, "stage_id" => id}, socket) do
-    key = String.to_existing_atom(field <> "_stage_id")
+  # The trigger bar's one field (RE429). Matched explicitly — never atomize user input.
+  def handle_event("validate_trigger", %{"field" => "stage", "stage_id" => id}, socket) do
     id = if id == "", do: nil, else: String.to_integer(id)
-    {:noreply, apply_working(socket, &Map.put(&1, key, id))}
+    {:noreply, apply_working(socket, &Map.put(&1, :stage_id, id))}
   end
 
   # low-level working-copy node-field edit (the inspector form/chips/steppers emit this).
@@ -314,9 +316,7 @@ defmodule RelayWeb.FlowEditorLive do
       nodes: w.nodes,
       edges: w.edges,
       isolation: w.isolation,
-      pulls_from_stage_id: w.pulls_from_stage_id,
-      works_in_stage_id: w.works_in_stage_id,
-      lands_on_stage_id: w.lands_on_stage_id
+      stage_id: w.stage_id
     }
 
     case Flows.save_definition(socket.assigns.flow, attrs) do
@@ -428,34 +428,25 @@ defmodule RelayWeb.FlowEditorLive do
             TRIGGER
           </span>
           <.trigger_select
-            id="trigger-pulls-from"
-            field="pulls_from"
+            id="trigger-stage"
+            field="stage"
+            label="STAGE"
+            value={@working.stage_id}
+            stages={@assignable_stages}
+            disabled={@read_only?}
+          />
+          <.derived_stage
+            id="trigger-derived-pulls-from"
             label="PULLS FROM"
-            value={@working.pulls_from_stage_id}
-            stages={@stages}
-            disabled={@read_only?}
+            stage={neighbours(@working, @stages).pulls_from}
           />
           <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">
             →
           </span>
-          <.trigger_select
-            id="trigger-works-in"
-            field="works_in"
-            label="WORKS IN"
-            value={@working.works_in_stage_id}
-            stages={@stages}
-            disabled={@read_only?}
-          />
-          <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">
-            →
-          </span>
-          <.trigger_select
-            id="trigger-lands-on"
-            field="lands_on"
+          <.derived_stage
+            id="trigger-derived-lands-on"
             label="LANDS ON SUCCESS"
-            value={@working.lands_on_stage_id}
-            stages={@stages}
-            disabled={@read_only?}
+            stage={neighbours(@working, @stages).lands_on}
           />
         </div>
 
@@ -474,7 +465,7 @@ defmodule RelayWeb.FlowEditorLive do
               layout={@layout}
               selected={@selected}
               interactive?={!@read_only?}
-              lands_on={stage_name(@stages, @working.lands_on_stage_id)}
+              lands_on={stage_label(neighbours(@working, @stages).lands_on)}
               connecting_target?={connecting_target?(@connecting)}
             />
           </div>
@@ -649,6 +640,28 @@ defmodule RelayWeb.FlowEditorLive do
   # ---- render helpers ----
 
   attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :stage, :any, required: true, doc: "the derived neighbour stage, or nil at either end of the board"
+
+  # A read-only derived neighbour (RE429): worked out from board order, never picked.
+  defp derived_stage(assigns) do
+    ~H"""
+    <div style="display:flex;flex-direction:column;gap:3px;">
+      <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+        {@label}
+      </span>
+      <span
+        id={@id}
+        class="font-mono"
+        style="padding:6px 10px;font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+      >
+        {stage_label(@stage) || "—"}
+      </span>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
   attr :field, :string, required: true
   attr :label, :string, required: true
   attr :value, :any, default: nil
@@ -667,7 +680,6 @@ defmodule RelayWeb.FlowEditorLive do
         disabled={@disabled}
         style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
       >
-        <option value="">—</option>
         <option :for={s <- @stages} value={s.id} selected={s.id == @value}>{s.name}</option>
       </select>
     </form>
@@ -690,7 +702,11 @@ defmodule RelayWeb.FlowEditorLive do
     do:
       "background:color-mix(in oklab, var(--color-primary) 45%, var(--color-base-100));color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.7;"
 
-  defp stage_name(stages, id), do: Enum.find_value(stages, &(&1.id == id && &1.name))
+  # Pulls-from / lands-on for the working copy's stage, from the board's order (RE429).
+  defp neighbours(working, stages), do: Flows.neighbours(working.stage_id, stages)
+
+  defp stage_label(nil), do: nil
+  defp stage_label(%{name: name}), do: name
 
   defp connecting_target?(%{from: from}), do: not is_nil(from)
   defp connecting_target?(_), do: false

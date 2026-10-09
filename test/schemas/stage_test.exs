@@ -139,4 +139,33 @@ defmodule Schemas.StageTest do
       refute Stage.is_work_type("work")
     end
   end
+
+  describe "order_stages/1" do
+    defp stage(id, name, position, parent_id \\ nil, type \\ :work) do
+      %Stage{id: id, name: name, position: position, parent_id: parent_id, type: type}
+    end
+
+    test "orders mains by position, each followed by its Review then Done substage" do
+      stages = [
+        stage(1, "A", 2),
+        stage(2, "B", 1),
+        stage(3, "A:Done", 9, 1, :done),
+        stage(4, "A:Review", 10, 1, :review)
+      ]
+
+      for permutation <- [stages, Enum.reverse(stages), Enum.shuffle(stages)] do
+        assert permutation |> Stage.order_stages() |> Enum.map(& &1.name) == ["B", "A", "A:Review", "A:Done"]
+      end
+    end
+
+    test "returns [] for []" do
+      assert Stage.order_stages([]) == []
+    end
+
+    test "appends a child whose parent is not in the list, dropping nothing" do
+      stages = [stage(10, "X:Review", 2, 999, :review), stage(1, "A", 1)]
+
+      assert stages |> Stage.order_stages() |> Enum.map(& &1.name) == ["A", "X:Review"]
+    end
+  end
 end

@@ -1,14 +1,15 @@
 defmodule Relay.Flows do
   @moduledoc """
   The Flows context (ADR 0006 / RLY-131): workflow definitions as
-  declarative graph data owned by Relay. A flow is a per-board row — a
-  trigger (three stage ids), an isolation requirement the runner maps
-  (`:shared_clean` / `:exclusive`), and an embedded node/edge graph.
-  Nothing here executes; the engine arrives with the Runs card (02).
+  declarative graph data owned by Relay. A flow is a per-board row — the ONE
+  main work/planning stage it belongs to (RE429), an isolation requirement the
+  runner maps (`:shared_clean` / `:exclusive`), and an embedded node/edge graph.
+  Where it picks cards up and drops them off is worked out from board order by
+  `neighbours/2`, never stored.
 
   Graph-shape validation lives on `Schemas.Flow.changeset/2`; validation
-  that needs the database — trigger stages belong to the flow's board, at
-  most one enabled flow per pulls-from stage — lives here and still returns
+  that needs the database — the stage is on the flow's board, a main work
+  stage, and holds no other flow — lives here and still returns
   `{:error, changeset}`.
   """
 
@@ -29,69 +30,32 @@ defmodule Relay.Flows do
 
   require Logger
 
-  @trigger_fields [:pulls_from_stage_id, :works_in_stage_id, :lands_on_stage_id]
-
-  @doc "The three trigger stage fields every flow carries (pulls from / works in / lands on)."
-  def trigger_fields, do: @trigger_fields
-
   @doc """
-  Keys of the **enabled** flows any of whose trigger stages is in `stage_ids` — sorted and
-  deduped. The stage guard rails (`Relay.Boards.delete_stage/1`, `disable_lane/2`) refuse a
-  stage an enabled flow still uses; a disabled flow's trigger is simply nilified by the FK.
+  The board's flows in stable `key` order, `:stage` preloaded and the virtual `pulls_from_stage` /
+  `lands_on_stage` worked out from the board's CURRENT order (`neighbours/2`).
   """
-  def enabled_flow_keys_using([]), do: []
-
-  def enabled_flow_keys_using(stage_ids) when is_list(stage_ids) do
-    uses_stage =
-      Enum.reduce(@trigger_fields, dynamic(false), fn field, acc ->
-        dynamic([f], ^acc or field(f, ^field) in ^stage_ids)
-      end)
-
-    Repo.all(
-      from f in Flow,
-        where: f.enabled == true,
-        where: ^uses_stage,
-        distinct: true,
-        order_by: f.key,
-        select: f.key
-    )
-  end
-
-  @doc "The board's flows in stable `key` order, trigger stages preloaded."
   def list_flows(%Board{id: board_id}) do
-    Repo.all(
-      from f in Flow,
-        where: f.board_id == ^board_id,
-        order_by: f.key,
-        preload: [:pulls_from_stage, :works_in_stage, :lands_on_stage]
-    )
+    from(f in Flow, where: f.board_id == ^board_id, order_by: f.key, preload: :stage)
+    |> Repo.all()
+    |> with_neighbours(board_id)
   end
 
   @doc "The board's **enabled** flows in stable `key` order (the scheduler's input)."
   def list_enabled_flows(%Board{id: board_id}), do: Repo.all(enabled_flows_query(board_id))
 
   @doc """
-  The board's **enabled** flows projected to `Relay.Runs.Scheduler.Snapshot.flow/0` —
-  `%{key, pulls_from_stage_id, works_in_stage_id, isolation}` — in `key` order. The same
-  predicate as `list_enabled_flows/1`; the lean read the scheduler snapshot uses (RE402).
+  The board's **enabled** flows as `%{key, stage_id, isolation}` in `key` order — the same
+  predicate as `list_enabled_flows/1`; the lean read the scheduler snapshot builds on (RE402).
+  The scheduler adds each flow's derived `pulls_from_stage_id` itself, from the ordered stages
+  it already holds (`Relay.Runs.Scheduler.Server.build_snapshot/2`).
   """
   @spec list_enabled_flow_snapshots(integer()) :: [
-          %{
-            key: String.t(),
-            pulls_from_stage_id: integer(),
-            works_in_stage_id: integer(),
-            isolation: :shared_clean | :exclusive
-          }
+          %{key: String.t(), stage_id: integer(), isolation: :shared_clean | :exclusive}
         ]
   def list_enabled_flow_snapshots(board_id) do
     board_id
     |> enabled_flows_query()
-    |> select([f], %{
-      key: f.key,
-      pulls_from_stage_id: f.pulls_from_stage_id,
-      works_in_stage_id: f.works_in_stage_id,
-      isolation: f.isolation
-    })
+    |> select([f], %{key: f.key, stage_id: f.stage_id, isolation: f.isolation})
     |> Repo.all()
   end
 
@@ -150,47 +114,45 @@ defmodule Relay.Flows do
   end
 
   @doc """
-  The enabled flow whose work lane is `card`'s CURRENT stage, or nil — "which flow owns this
-  card where it now sits", answered from the card's stage alone rather than from any run FK.
+  The enabled flow on `card`'s CURRENT stage, or nil — "which flow owns this card where it now
+  sits", answered from the card's stage alone rather than from any run FK. A stage holds at most
+  one flow (RE429), so the answer is unique.
 
   The ONE place that lookup lives (AGENTS.md): rejection re-entry (`Relay.Runs.Listener`) and
   retry's re-adoption of a replaced flow (`Relay.Runs.retry_run/2`, RE297) both ask it, and a
-  second copy could answer differently about the same card. `key` order with `limit: 1` keeps
-  the answer deterministic when two enabled flows share a work lane — nothing forbids that,
-  since only `pulls_from_stage_id` carries the partial unique index.
+  second copy could answer differently about the same card.
   """
   def working_flow(%Card{board_id: board_id, stage_id: stage_id}) do
-    Repo.one(
-      from f in Flow,
-        where: f.board_id == ^board_id and f.works_in_stage_id == ^stage_id and f.enabled,
-        order_by: f.key,
-        limit: 1
-    )
+    Repo.one(from f in Flow, where: f.board_id == ^board_id and f.stage_id == ^stage_id and f.enabled)
   end
 
+  @doc "The flow on `stage` (enabled or not), or nil — a stage holds at most one (RE429)."
+  @spec stage_flow(Stage.t() | integer()) :: Flow.t() | nil
+  def stage_flow(%Stage{id: stage_id}), do: stage_flow(stage_id)
+  def stage_flow(stage_id) when is_integer(stage_id), do: Repo.get_by(Flow, stage_id: stage_id)
+
   @doc """
-  The flow each stage of the board is AI-enabled by (RE409): one entry per stage id that at
-  least one flow — enabled **or** disabled — works in (`works_in_stage_id`), mapped to
-  `%{key, enabled}` of the flow that represents it. When several flows work in one stage an
-  enabled flow wins, then the lowest `key`; `enabled: false` only when every flow there is
-  off. Flows that work in no stage contribute nothing.
+  The flow each stage of the board is AI-enabled by (RE409): one entry per stage that holds a
+  flow — enabled **or** disabled — mapped to `%{key, enabled, version}`. A stage holds at most
+  one flow (RE429), so there is nothing to break a tie on. `version` feeds the stage-delete
+  confirm ("This also deletes flow `ship` (v3).").
 
   The ONE source of the "AI-enabled stage" fact (AGENTS.md): `ai_stage_ids/1` is built on it
-  and `ai_stage?/1` asks the same `works_in_stage_id` question for one stage. Deliberately
-  type-blind — each reader keeps its own work/planning guard.
+  and `ai_stage?/1` asks the same `stage_id` question for one stage. Deliberately type-blind —
+  each reader keeps its own work/planning guard.
   """
-  @spec stage_flows(Board.t() | integer()) :: %{integer() => %{key: String.t(), enabled: boolean()}}
+  @spec stage_flows(Board.t() | integer()) :: %{
+          integer() => %{key: String.t(), enabled: boolean(), version: pos_integer()}
+        }
   def stage_flows(%Board{id: board_id}), do: stage_flows(board_id)
 
   def stage_flows(board_id) when is_integer(board_id) do
     from(f in Flow,
-      where: f.board_id == ^board_id and not is_nil(f.works_in_stage_id),
-      order_by: [desc: f.enabled, asc: f.key],
-      select: {f.works_in_stage_id, %{key: f.key, enabled: f.enabled}}
+      where: f.board_id == ^board_id,
+      select: {f.stage_id, %{key: f.key, enabled: f.enabled, version: f.version}}
     )
     |> Repo.all()
-    # Rows arrive best-first per stage, so the first row seen for a stage is its flow.
-    |> Enum.reduce(%{}, fn {stage_id, flow}, acc -> Map.put_new(acc, stage_id, flow) end)
+    |> Map.new()
   end
 
   @doc "The ids of the board's AI-enabled stages — exactly the keys of `stage_flows/1`."
@@ -198,26 +160,96 @@ defmodule Relay.Flows do
   def ai_stage_ids(board), do: board |> stage_flows() |> Map.keys() |> MapSet.new()
 
   @doc """
-  Whether any flow (enabled or disabled) works in this one stage — the single-stage form of
+  Where a flow working in stage `stage_id` picks cards up and drops them off (RE429), worked
+  out from board order: `stages` is the board's stages already in `Schemas.Stage.order_stages/1`
+  order, substages included. `pulls_from` is the stage immediately before it, `lands_on` the
+  stage immediately after it — its own first substage (Review before Done) when it has one,
+  otherwise the next main stage. `nil` at either end of the board; both `nil` for a stage id
+  not in the list. Returns the elements passed in (structs or maps), not ids. Pure.
+
+  The ONE source of the pulls-from / lands-on rule (AGENTS.md).
+  """
+  @spec neighbours(integer(), [Stage.t() | map()]) :: %{
+          pulls_from: Stage.t() | map() | nil,
+          lands_on: Stage.t() | map() | nil
+        }
+  def neighbours(stage_id, stages) when is_list(stages) do
+    case Enum.find_index(stages, &(&1.id == stage_id)) do
+      nil -> %{pulls_from: nil, lands_on: nil}
+      0 -> %{pulls_from: nil, lands_on: Enum.at(stages, 1)}
+      index -> %{pulls_from: Enum.at(stages, index - 1), lands_on: Enum.at(stages, index + 1)}
+    end
+  end
+
+  @doc """
+  Where `flow` picks cards up and drops them off, read from its board's stages FRESH — the DB
+  convenience over `neighbours/2`. The engine asks this at the moment it needs the answer
+  (`Relay.Runs.RunServer` at landing, `Relay.Runs.Preflight`), never a cached copy.
+  """
+  @spec neighbours(Flow.t()) :: %{pulls_from: Stage.t() | nil, lands_on: Stage.t() | nil}
+  def neighbours(%Flow{board_id: board_id, stage_id: stage_id}), do: neighbours(stage_id, board_stages(board_id))
+
+  @doc """
+  The stages a flow may be put on (RE429): the board's main stages of a work type
+  (`Schemas.Stage.work_types/0`) that hold no flow, plus `flow`'s own stage, in board order.
+  The single source of the Stage-select options in the new-flow form and the flow editor —
+  the same rule `create_flow/2` / `update_flow/2` validate.
+  """
+  @spec assignable_stages(Board.t() | integer(), Flow.t() | nil) :: [Stage.t()]
+  def assignable_stages(%Board{id: board_id}, flow), do: assignable_stages(board_id, flow)
+
+  def assignable_stages(board_id, flow) when is_integer(board_id) do
+    own_stage_id = flow && flow.stage_id
+    occupied = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.stage_id))
+
+    board_id
+    |> board_stages()
+    |> Enum.filter(fn stage ->
+      is_nil(stage.parent_id) and stage.type in Stage.work_types() and
+        (stage.id == own_stage_id or not MapSet.member?(occupied, stage.id))
+    end)
+  end
+
+  @doc """
+  Whether any flow (enabled or disabled) is on this one stage — the single-stage form of
   `stage_flows/1`'s fact. No type guard; callers keep their own.
   """
   @spec ai_stage?(Stage.t() | integer()) :: boolean()
   def ai_stage?(%Stage{id: stage_id}), do: ai_stage?(stage_id)
 
   def ai_stage?(stage_id) when is_integer(stage_id) do
-    Repo.exists?(from f in Flow, where: f.works_in_stage_id == ^stage_id)
+    Repo.exists?(from f in Flow, where: f.stage_id == ^stage_id)
   end
 
   @doc """
-  The board's flow with `key`, trigger stages preloaded — the shape
-  `Relay.Flows.Document.encode/1` requires. nil when the board has no such flow.
+  The board's flow with `key`, `:stage` preloaded and its derived `pulls_from_stage` /
+  `lands_on_stage` filled — the shape `Relay.Flows.Document.encode/1` requires. nil when the
+  board has no such flow.
   """
   def get_flow_with_stages(%Board{id: board_id}, key) when is_binary(key) do
-    Repo.one(
-      from f in Flow,
-        where: f.board_id == ^board_id and f.key == ^key,
-        preload: [:pulls_from_stage, :works_in_stage, :lands_on_stage]
-    )
+    from(f in Flow, where: f.board_id == ^board_id and f.key == ^key, preload: :stage)
+    |> Repo.one()
+    |> with_neighbours(board_id)
+  end
+
+  # The board's stages in `Schemas.Stage.order_stages/1` order — `Relay.Flows` may not call
+  # `Relay.Boards` (which depends on it), so it reads the rows and asks the schema for the order.
+  defp board_stages(board_id) do
+    Stage.order_stages(Repo.all(from s in Stage, where: s.board_id == ^board_id))
+  end
+
+  # Fill the virtual neighbours from the board's CURRENT order (RE429) — computed on every read.
+  defp with_neighbours(nil, _board_id), do: nil
+
+  defp with_neighbours(%Flow{} = flow, board_id), do: hd(with_neighbours([flow], board_id))
+
+  defp with_neighbours(flows, board_id) when is_list(flows) do
+    stages = if flows == [], do: [], else: board_stages(board_id)
+
+    Enum.map(flows, fn flow ->
+      %{pulls_from: pulls_from, lands_on: lands_on} = neighbours(flow.stage_id, stages)
+      %{flow | pulls_from_stage: pulls_from, lands_on_stage: lands_on}
+    end)
   end
 
   @doc """
@@ -236,7 +268,7 @@ defmodule Relay.Flows do
     changeset =
       %Flow{board_id: board.id}
       |> Flow.changeset(attrs)
-      |> validate_trigger_stages(board.id)
+      |> validate_stage()
 
     case Repo.insert(changeset) do
       {:ok, flow} -> snapshot!(flow)
@@ -245,36 +277,23 @@ defmodule Relay.Flows do
   end
 
   @doc """
-  Updates a flow's definition with the same validation as `create_flow/2`. Also guards the
-  one-enabled-per-pulls-from-stage rule (mirrors `enable_flow/1`) — an already-enabled flow can
-  change its `pulls_from_stage_id` right into another enabled flow's, and the partial unique
-  index would otherwise raise instead of returning `{:error, changeset}`.
+  Updates a flow's definition with the same validation as `create_flow/2` — including moving
+  it to another stage, which must be free (a flow staying on its own stage is no collision).
   """
   def update_flow(%Flow{} = flow, attrs) do
     flow
     |> Flow.changeset(attrs)
-    |> validate_trigger_stages(flow.board_id)
-    |> Changeset.unique_constraint(:pulls_from_stage_id,
-      name: :flows_one_enabled_per_pulls_from_index,
-      message: "another enabled flow already pulls from this stage"
-    )
+    |> validate_stage()
     |> Repo.update()
   end
 
   @doc """
-  Enables a flow. Requires all three trigger stage ids set and no other
-  enabled flow pulling from the same stage — the partial unique index backs
-  the latter, so two racing enables can't both win. Returns
-  `{:ok, flow} | {:error, changeset}`.
+  Enables a flow. A flow always has its stage and a stage holds one flow (RE429), so there is
+  nothing left to check. Returns `{:ok, flow} | {:error, changeset}`.
   """
   def enable_flow(%Flow{} = flow) do
     flow
     |> Changeset.change(enabled: true)
-    |> validate_trigger_completeness()
-    |> Changeset.unique_constraint(:pulls_from_stage_id,
-      name: :flows_one_enabled_per_pulls_from_index,
-      message: "another enabled flow already pulls from this stage"
-    )
     |> Repo.update()
   end
 
@@ -299,31 +318,25 @@ defmodule Relay.Flows do
   @doc """
   Idempotently seeds the default library onto `board`: inserts each default
   flow whose `key` the board lacks and never touches existing rows, so edits
-  survive re-seeding. The authored trigger stage *names* are resolved
-  against the board's stages at seed time; an unresolvable name seeds as nil
-  (such a flow can't be enabled until its trigger is set — can't happen on
-  boards seeded by `Relay.Boards.create_board/2`, but keeps the function
-  total for arbitrary boards).
+  survive re-seeding. The authored trigger stage *name* is resolved against the
+  board's stages at seed time; a default is created only when that names a stage
+  on the board that can take it (a free main work stage, the rule `create_flow/2`
+  validates) — otherwise it is skipped. A stageless flow never exists (RE429).
   """
   def seed_default_flows!(%Board{id: board_id} = board) do
     existing = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
     stage_ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
 
-    for %{trigger: trigger} = default <- DefaultLibrary.all(),
-        not MapSet.member?(existing, default.key) do
-      attrs =
-        default
-        |> Map.delete(:trigger)
-        |> Map.merge(%{
-          pulls_from_stage_id: stage_ids[trigger.pulls_from],
-          works_in_stage_id: stage_ids[trigger.works_in],
-          lands_on_stage_id: stage_ids[trigger.lands_on]
-        })
+    for %{trigger: %{stage: name}} = default <- DefaultLibrary.all(),
+        not MapSet.member?(existing, default.key),
+        stage_id = stage_ids[name],
+        not is_nil(stage_id) do
+      changeset =
+        %Flow{board_id: board.id}
+        |> Flow.changeset(default |> Map.delete(:trigger) |> Map.put(:stage_id, stage_id))
+        |> validate_stage()
 
-      %Flow{board_id: board.id}
-      |> Flow.changeset(attrs)
-      |> Repo.insert!()
-      |> snapshot!()
+      if changeset.valid?, do: changeset |> Repo.insert!() |> snapshot!()
     end
 
     :ok
@@ -333,7 +346,7 @@ defmodule Relay.Flows do
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
   library's dense attr maps and the embedded structs compare field-by-field.
-  A flow whose key isn't a library key at all (e.g. a duplicate) is always
+  A flow whose key isn't a library key at all (e.g. a copy) is always
   customized. Trigger wiring never counts: triggers are per-board and a
   stage rename must not flag a flow.
   """
@@ -353,35 +366,36 @@ defmodule Relay.Flows do
   def default_key?(key) when is_binary(key), do: default_for(key) != nil
 
   @doc """
-  Creates a disabled copy of `flow` on the same board — same nodes, edges,
-  isolation, and trigger stages — under key `"<key>-copy"` (then `-copy-2`,
-  `-copy-3`, … until unique). Inserts a v1 snapshot in the same transaction.
-  Returns `{:ok, flow} | {:error, changeset}`.
+  Copies `flow`'s definition (nodes, edges, isolation) onto `stage` as a new, **disabled** flow
+  at v1 (RE429 — replaces Duplicate: a stage holds one flow, so a copy needs a stage of its
+  own). `stage` must pass the same rule as `create_flow/2` — on the flow's board, a main work
+  stage, holding no flow — or the result is `{:error, changeset}` with the error on `:stage_id`.
+  The key is `"<key>-<stage-slug>"` (`code` onto `QA` → `code-qa`), suffixed `-2`, `-3`, …
+  until unique. Inserts the v1 snapshot in the same transaction.
   """
-  def duplicate_flow(%Flow{} = flow) do
+  @spec copy_flow(Flow.t(), Stage.t()) :: {:ok, Flow.t()} | {:error, Changeset.t()}
+  def copy_flow(%Flow{} = flow, %Stage{} = stage) do
     attrs = %{
-      key: unique_key(flow.board_id, "#{flow.key}-copy"),
+      key: unique_key(flow.board_id, "#{flow.key}-#{stage_slug(stage.name)}"),
       isolation: flow.isolation,
-      pulls_from_stage_id: flow.pulls_from_stage_id,
-      works_in_stage_id: flow.works_in_stage_id,
-      lands_on_stage_id: flow.lands_on_stage_id,
+      stage_id: stage.id,
       nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
       edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
     }
 
-    Repo.transaction(fn ->
-      case Repo.insert(Flow.changeset(%Flow{board_id: flow.board_id}, attrs)) do
-        {:ok, copy} -> snapshot!(copy)
-        {:error, cs} -> Repo.rollback(cs)
-      end
-    end)
+    Repo.transaction(fn -> insert_flow!(%Board{id: flow.board_id}, attrs) end)
+  end
+
+  defp stage_slug(name) do
+    name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
   end
 
   @doc """
   The editor's save path. Validates the working copy like `update_flow/2`. When the
   **definition** (nodes, edges, isolation) changed, bumps `version` to n+1 and writes a new
-  immutable snapshot; a trigger-only change saves with no bump (triggers are per-board wiring,
-  not part of the versioned definition). Runs entirely in one transaction.
+  immutable snapshot; a stage-only change saves with no bump (the stage is per-board wiring,
+  not part of the versioned definition). Runs entirely in one transaction. The returned flow
+  has `:stage` preloaded and its derived neighbours filled.
   """
   def save_definition(%Flow{} = flow, attrs) do
     fn -> save_and_maybe_bump(flow, attrs) end
@@ -393,7 +407,7 @@ defmodule Relay.Flows do
   Creates or updates `key`'s flow on `board` from a canonical `Relay.Flows.Document` (RLY-241) —
   the `PUT /api/flows/:key` write path, and the reconcile engine's.
 
-  One transaction, in order: decode → key check → resolve the trigger stage NAMES against this
+  One transaction, in order: decode → key check → resolve the trigger's stage NAME against this
   board → optional compare-and-swap on `version` → write → reconcile `enabled`. Any step failing
   rolls the whole thing back; a push must never half-apply.
 
@@ -409,10 +423,14 @@ defmodule Relay.Flows do
   and stale is `{:error, :stale_version}` with no write. A `version` on a flow that does not exist
   is ignored — pull → someone deletes → push recreates at v1 is desirable, not a conflict.
 
-  Returns `{:ok, :created | :updated, flow}` with the trigger stages preloaded, or one of
+  A trigger absent from the document leaves the flow's stage alone; a new flow with no stage is
+  `{:error, {:invalid, changeset}}` (`"can't be blank"` on `:stage_id`).
+
+  Returns `{:ok, :created | :updated, flow}` with its stage preloaded, or one of
   `{:error, {:invalid_document, reason}}`, `{:error, :key_mismatch}`,
-  `{:error, {:unknown_stages, names}}`, `{:error, :stale_version}`,
-  `{:error, {:invalid, changeset}}`.
+  `{:error, {:unknown_stages, names}}`, `{:error, {:stage_occupied, %{stage: name, flow: key}}}`
+  (the trigger names a stage another flow already holds — render with `stage_occupied_message/1`),
+  `{:error, :stale_version}`, `{:error, {:invalid, changeset}}`.
   """
   def upsert_from_document(%Board{} = board, key, doc) when is_binary(key) and is_map(doc) do
     with {:ok, attrs} <- decode_document(doc),
@@ -445,11 +463,14 @@ defmodule Relay.Flows do
     existing = get_flow(board, key)
     check_document_version!(existing, Map.get(attrs, :version))
 
+    stage = resolve_trigger!(board, Map.get(attrs, :trigger))
+    check_stage_free!(stage, key, Map.get(attrs, :trigger))
+
     definition =
       attrs
       |> Map.take([:isolation, :nodes, :edges])
       |> Map.put(:key, key)
-      |> Map.merge(resolve_trigger!(board, Map.get(attrs, :trigger)))
+      |> Map.merge(stage)
 
     {tag, flow} = write_document!(board, existing, definition)
     reconcile_enabled!(flow, Map.get(attrs, :enabled))
@@ -462,35 +483,43 @@ defmodule Relay.Flows do
   defp check_document_version!(%Flow{version: version}, version), do: :ok
   defp check_document_version!(_flow, _stale), do: Repo.rollback(:stale_version)
 
-  # Names, not ids — that is what makes a document portable across boards. An explicit null is
-  # allowed and resolves to nil (the flow is deliberately un-armed); a trigger absent from the
-  # document leaves the flow's current wiring alone.
+  # A name, not an id — that is what makes a document portable across boards. A null stage
+  # resolves to nil and fails the changeset (a flow always has a stage); a trigger absent from
+  # the document leaves the flow's current stage alone.
   defp resolve_trigger!(_board, nil), do: %{}
+  defp resolve_trigger!(_board, %{stage: nil}), do: %{stage_id: nil}
 
-  defp resolve_trigger!(%Board{id: board_id}, trigger) do
-    ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
-
-    pairs = [
-      {:pulls_from_stage_id, trigger.pulls_from},
-      {:works_in_stage_id, trigger.works_in},
-      {:lands_on_stage_id, trigger.lands_on}
-    ]
-
-    missing = Enum.uniq(for {_field, name} <- pairs, is_binary(name), not is_map_key(ids, name), do: name)
-
-    if missing == [] do
-      Map.new(pairs, fn {field, name} -> {field, name && Map.get(ids, name)} end)
-    else
-      Repo.rollback({:unknown_stages, missing})
+  defp resolve_trigger!(%Board{id: board_id}, %{stage: name}) do
+    case Repo.one(from s in Stage, where: s.board_id == ^board_id and s.name == ^name, select: s.id) do
+      nil -> Repo.rollback({:unknown_stages, [name]})
+      stage_id -> %{stage_id: stage_id}
     end
   end
+
+  # A stage holds one flow (RE429): a push naming a stage another key already sits on is refused
+  # before any write, naming the occupant — the push never silently moves or replaces a flow.
+  defp check_stage_free!(%{stage_id: stage_id}, key, %{stage: name}) when is_integer(stage_id) do
+    case stage_flow(stage_id) do
+      %Flow{key: other} when other != key -> Repo.rollback({:stage_occupied, %{stage: name, flow: other}})
+      _free_or_own -> :ok
+    end
+  end
+
+  defp check_stage_free!(_stage, _key, _trigger), do: :ok
+
+  @doc """
+  The sentence for `{:error, {:stage_occupied, details}}` from `upsert_from_document/3` — the one
+  copy, so every surface words the refusal the same way.
+  """
+  @spec stage_occupied_message(%{stage: String.t(), flow: String.t()}) :: String.t()
+  def stage_occupied_message(%{stage: stage, flow: flow}),
+    do: "stage `#{stage}` already has flow `#{flow}` — delete it or push to that key"
 
   defp write_document!(board, nil, definition), do: {:created, insert_flow!(board, definition)}
 
   defp write_document!(_board, %Flow{} = flow, definition), do: {:updated, save_and_maybe_bump(flow, definition)}
 
-  # Route through enable_flow/1 / disable_flow/1 so the existing rules apply — trigger
-  # completeness, and the one-enabled-flow-per-pulls_from-stage unique index.
+  # Route through enable_flow/1 / disable_flow/1 so any rule they carry applies here too.
   defp reconcile_enabled!(_flow, nil), do: :ok
   defp reconcile_enabled!(%Flow{enabled: enabled}, enabled), do: :ok
 
@@ -539,8 +568,7 @@ defmodule Relay.Flows do
 
   @doc """
   Replaces the flow's nodes, edges, and isolation with the default library
-  definition for its key. Triggers and `enabled` are untouched, so a reset
-  can never trip the one-enabled-per-pulls-from rule. Routes through
+  definition for its key. The stage and `enabled` are untouched. Routes through
   `save_definition/2`, so a reset bumps the version and snapshots like any
   save. Returns `{:error, :not_a_default}` for a non-library key.
   """
@@ -553,7 +581,7 @@ defmodule Relay.Flows do
 
   @doc """
   The first key of the form `base`, `base-2`, `base-3`, … not already taken on `board`.
-  Backs both Duplicate's `-copy` suffix and the create form's prefilled default key.
+  Backs both `copy_flow/2`'s key and the create form's prefilled default key.
   """
   def unique_key(%Board{id: board_id}, base) when is_binary(base), do: unique_key(board_id, base)
 
@@ -645,7 +673,7 @@ defmodule Relay.Flows do
   end
 
   defp preload_saved({:ok, flow}) do
-    {:ok, Repo.preload(flow, [:pulls_from_stage, :works_in_stage, :lands_on_stage])}
+    {:ok, flow |> Repo.preload(:stage, force: true) |> with_neighbours(flow.board_id)}
   end
 
   defp preload_saved(other), do: other
@@ -666,7 +694,7 @@ defmodule Relay.Flows do
 
   # Overwrite `flow`'s definition with the library `default`, KEEPING version at 1, and refresh the
   # v1 snapshot so it matches. Deliberately NOT `save_definition/2`: that bumps the version, which
-  # would make the next library sync skip this flow (version > 1). Triggers/enabled are untouched;
+  # would make the next library sync skip this flow (version > 1). Stage/enabled are untouched;
   # runs read the live row (RLY-152), so this row overwrite is what reaches new runs.
   defp sync_flow_to_default!(flow, default) do
     attrs = %{
@@ -725,27 +753,34 @@ defmodule Relay.Flows do
     }
   end
 
-  defp validate_trigger_completeness(changeset) do
-    Enum.reduce(@trigger_fields, changeset, fn field, cs ->
-      if Changeset.get_field(cs, field) do
-        cs
-      else
-        Changeset.add_error(cs, field, "must be set before the flow can be enabled")
-      end
-    end)
+  # The one-stage rule (RE429), checked in order: the stage is on the flow's board, a main
+  # stage, of a work type, and holds no other flow (the occupant named). A missing stage is left
+  # to `validate_required/2`; `flows_stage_id_index` backstops a race on occupancy.
+  defp validate_stage(changeset) do
+    case Changeset.get_field(changeset, :stage_id) do
+      nil -> changeset
+      stage_id -> stage_error(changeset, Repo.get(Stage, stage_id))
+    end
   end
 
-  defp validate_trigger_stages(changeset, board_id) do
-    board_stage_ids = MapSet.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: s.id))
+  defp stage_error(changeset, stage) do
+    board_id = Changeset.get_field(changeset, :board_id)
 
-    Enum.reduce(@trigger_fields, changeset, fn field, cs ->
-      id = Changeset.get_field(cs, field)
-
-      if is_nil(id) or MapSet.member?(board_stage_ids, id) do
-        cs
-      else
-        Changeset.add_error(cs, field, "stage is not on this board")
+    message =
+      cond do
+        is_nil(stage) or stage.board_id != board_id -> "stage is not on this board"
+        not is_nil(stage.parent_id) -> "flows attach to main stages only, not substages"
+        stage.type not in Stage.work_types() -> "a flow can only work in a work or planning stage"
+        occupant = occupant_key(stage.id, changeset.data.id) -> "stage already has flow `#{occupant}`"
+        true -> nil
       end
-    end)
+
+    if message, do: Changeset.add_error(changeset, :stage_id, message), else: changeset
+  end
+
+  defp occupant_key(stage_id, own_id) do
+    query = from f in Flow, where: f.stage_id == ^stage_id, select: f.key
+    query = if own_id, do: where(query, [f], f.id != ^own_id), else: query
+    Repo.one(query)
   end
 end

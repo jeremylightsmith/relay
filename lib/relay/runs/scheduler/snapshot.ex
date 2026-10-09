@@ -15,8 +15,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       count, so `explain/2` can name the refs from this snapshot's own card list without a DB
       read. `[]` when nothing blocks it. `active_owner` is computed there by the same
       `Relay.Cards.active_owner_type/1`.
-    * `flows` — **enabled** flows only: `[%{key, pulls_from_stage_id,
-      works_in_stage_id, isolation}]`; `isolation` is `:shared_clean | :exclusive`.
+    * `flows` — **enabled** flows only: `[%{key, stage_id, pulls_from_stage_id, isolation}]`;
+      `stage_id` is the flow's own (work) stage, `pulls_from_stage_id` the stage before it in
+      board order (`Relay.Flows.neighbours/2`, nil when none — RE429), computed during assembly
+      (`Server.build_snapshot/2`); `isolation` is `:shared_clean | :exclusive`.
     * `runs` — **active** runs only (`status in Schemas.Run.active_statuses()`):
       `[%{id, card_id, status, flow_key, isolation, pinned_runner_id, parked_reason}]`.
       `parked_reason` is `nil | :needs_input | :claimed | :runner_gone` — only a
@@ -59,8 +61,8 @@ defmodule Relay.Runs.Scheduler.Snapshot do
         }
   @type flow :: %{
           key: String.t(),
-          pulls_from_stage_id: term(),
-          works_in_stage_id: term(),
+          stage_id: term(),
+          pulls_from_stage_id: term() | nil,
           isolation: :shared_clean | :exclusive
         }
   @type run :: %{

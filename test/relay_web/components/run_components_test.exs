@@ -566,7 +566,7 @@ defmodule RelayWeb.RunComponentsTest do
   describe "run_list/1" do
     @now ~U[2026-10-08 12:00:00Z]
 
-    defp stage(name), do: %{works_in_stage: %{name: name}}
+    defp stage(name), do: %{stage: %{name: name}}
 
     defp ago_s(seconds), do: DateTime.add(@now, -seconds, :second)
 

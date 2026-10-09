@@ -18,38 +18,43 @@ defmodule Relay.BoardsTypeConfigTest do
     refute Flows.ai_stage?(stage)
   end
 
-  test "switching a stage to a passive type keeps the flow that works in it", %{board: board} do
+  test "switching a stage that holds a flow to a passive type is refused (RE429)", %{board: board} do
     code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
     assert Flows.ai_stage?(code)
-    {:ok, updated} = Boards.update_stage(code, %{type: :review})
-    assert updated.type == :review
-    assert Flows.ai_stage?(updated)
+
+    assert {:error, {:holds_flow, %{stage: "Code", flow: "code"}}} =
+             Boards.update_stage(code, %{type: :review})
+
+    assert Relay.Repo.reload!(code).type == :work
+    assert Flows.ai_stage?(code)
   end
 
   describe "Cards.update_stage/2 (RE384)" do
+    # Deploy is the default board's flow-free work stage: retyping a flow-holding stage to a
+    # non-work type is refused (RE429), which is not what these tests are about.
     setup %{board: board} do
-      code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
-      {:ok, card} = Cards.create_card(code, %{title: "WIP"})
+      deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
+      {:ok, card} = Cards.create_card(deploy, %{title: "WIP"})
       {:ok, card} = Cards.set_status(card, %{status: :working})
-      %{code: code, card: card}
+      %{deploy: deploy, card: card}
     end
 
-    test "changing a stage's type re-snaps its resident cards", %{code: code, card: card} do
-      assert {:ok, %Stage{type: :queue}} = Cards.update_stage(code, %{type: :queue})
+    test "changing a stage's type re-snaps its resident cards", %{deploy: deploy, card: card} do
+      assert {:ok, %Stage{type: :queue}} = Cards.update_stage(deploy, %{type: :queue})
       assert Relay.Repo.reload!(card).status == :ready
     end
 
-    test "a change that keeps the type leaves cards alone", %{board: board, code: code, card: card} do
+    test "a change that keeps the type leaves cards alone", %{board: board, deploy: deploy, card: card} do
       :ok = Relay.Events.subscribe(board.id)
       card_id = card.id
 
-      assert {:ok, %Stage{name: "Build"}} = Cards.update_stage(code, %{name: "Build"})
+      assert {:ok, %Stage{name: "Build"}} = Cards.update_stage(deploy, %{name: "Build"})
       assert Relay.Repo.reload!(card).status == :working
       refute_receive {:card_upserted, %{id: ^card_id}}
     end
 
-    test "an invalid change returns the changeset", %{code: code} do
-      assert {:error, %Ecto.Changeset{}} = Cards.update_stage(code, %{name: ""})
+    test "an invalid change returns the changeset", %{deploy: deploy} do
+      assert {:error, %Ecto.Changeset{}} = Cards.update_stage(deploy, %{name: ""})
     end
   end
 

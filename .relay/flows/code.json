@@ -399,8 +399,6 @@
     }
   ],
   "trigger": {
-    "lands_on": "Code:Done",
-    "pulls_from": "Plan:Done",
-    "works_in": "Code"
+    "stage": "Code"
   }
 }

@@ -22,19 +22,8 @@ defmodule RelayWeb.Api.StageControllerTest do
 
   defp error(conn, status), do: conn |> json_response(status) |> Map.fetch!("error")
 
-  defp enabled_flow(board, key, field, stage) do
-    triggers =
-      Map.put(
-        %{
-          pulls_from_stage_id: stage_named(board, "Backlog").id,
-          works_in_stage_id: stage_named(board, "Code").id,
-          lands_on_stage_id: stage_named(board, "Review").id
-        },
-        field,
-        stage.id
-      )
-
-    insert(:flow, Map.merge(%{board: board, key: key, enabled: true}, triggers))
+  defp enabled_flow(board, key, stage) do
+    insert(:flow, board: board, key: key, enabled: true, stage_id: stage.id)
   end
 
   describe "GET /api/stages" do
@@ -187,13 +176,29 @@ defmodule RelayWeb.Api.StageControllerTest do
 
     # Scenario 9
     test "a type change re-snaps the resident cards", %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
+      # Deploy holds no flow, so it may become a queue (RE429).
+      code = stage_named(board, "Deploy")
       card = insert(:card, stage: code, status: :working)
 
       data = conn |> patch(~p"/api/stages/#{code.id}", %{"type" => "queue"}) |> json_response(200) |> Map.fetch!("data")
 
       assert data["type"] == "queue"
       assert Repo.reload!(card).status == :ready
+    end
+
+    # RE429 scenario 35 — a flow-holding stage can't become a non-work type.
+    test "retyping a flow-holding stage to a non-work type is a 409 holds_flow", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      err = conn |> patch(~p"/api/stages/#{code.id}", %{"type" => "queue"}) |> error(409)
+
+      assert err == %{
+               "code" => "holds_flow",
+               "message" => "Stage Code holds flow `code` — delete the flow first.",
+               "flow" => "code"
+             }
+
+      assert Repo.reload!(code).type == :work
     end
 
     # Scenario 10
@@ -234,7 +239,7 @@ defmodule RelayWeb.Api.StageControllerTest do
   end
 
   describe "ai_enabled is derived, not writable (RE409)" do
-    @ai_refusal "ai_enabled is derived from flows — point a flow's works_in at this stage instead"
+    @ai_refusal "ai_enabled is derived from flows — put a flow on this stage instead"
 
     test "PATCH with ai_enabled is 422 invalid_request", %{conn: conn, board: board} do
       code = stage_named(board, "Code")
@@ -357,17 +362,6 @@ defmodule RelayWeb.Api.StageControllerTest do
       assert conn |> delete(~p"/api/stages/#{code.id}/substages/done") |> error(409) ==
                %{"code" => "not_empty", "message" => "That lane still has cards — move them out first."}
     end
-
-    # Scenario 20 (lane half)
-    test "refuses a lane an enabled flow lands on", %{conn: conn, board: board} do
-      code = stage_named(board, "Code")
-      {:ok, done} = Boards.enable_lane(code, :done)
-      enabled_flow(board, "ship", :lands_on_stage_id, done)
-
-      err = conn |> delete(~p"/api/stages/#{code.id}/substages/done") |> error(409)
-      assert err["code"] == "in_use_by_flow"
-      assert err["flows"] == ["ship"]
-    end
   end
 
   describe "DELETE /api/stages/:id" do
@@ -393,16 +387,13 @@ defmodule RelayWeb.Api.StageControllerTest do
              }
     end
 
-    # Scenario 20
-    test "refuses a stage an enabled flow works in", %{conn: conn, board: board} do
+    # RE429 scenario 35 — deleting a stage deletes its flow, enabled or not.
+    test "deletes a stage holding an enabled flow, and the flow with it", %{conn: conn, board: board} do
       deploy = stage_named(board, "Deploy")
-      enabled_flow(board, "ship", :works_in_stage_id, deploy)
+      enabled_flow(board, "ship", deploy)
 
-      assert conn |> delete(~p"/api/stages/#{deploy.id}") |> error(409) == %{
-               "code" => "in_use_by_flow",
-               "message" => "Flow(s) ship use this stage — disable or re-point them first.",
-               "flows" => ["ship"]
-             }
+      assert conn |> delete(~p"/api/stages/#{deploy.id}") |> json_response(200) |> get_in(["data", "name"]) == "Deploy"
+      assert Relay.Flows.get_flow(board, "ship") == nil
     end
 
     # Scenario 21

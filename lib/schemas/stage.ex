@@ -18,6 +18,8 @@ defmodule Schemas.Stage do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @types [:queue, :work, :planning, :review, :done]
   @work_types [:work, :planning]
   @sublane_types [:review, :done]
@@ -130,6 +132,29 @@ defmodule Schemas.Stage do
   @spec sublane_rank(atom()) :: non_neg_integer()
   def sublane_rank(type) do
     Enum.find_index(@sublane_types, &(&1 == type)) || length(@sublane_types)
+  end
+
+  @doc """
+  Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
+  `position`, each immediately followed by its substages in `sublane_rank/1` order
+  (Review before Done). Children whose parent is not in the list are appended at the end
+  by `position`, so nothing is dropped. Pure — no Repo access. Works on any struct or map
+  with `:id`, `:parent_id`, `:position` and `:type`.
+
+  The ONE board-order rule: `Relay.Boards.order_stages/1` delegates here, and
+  `Relay.Flows.neighbours/2` reads a list in this order.
+  """
+  @spec order_stages([t() | map()]) :: [t() | map()]
+  def order_stages(stages) when is_list(stages) do
+    {mains, children} = Enum.split_with(stages, &is_nil(&1.parent_id))
+    mains = Enum.sort_by(mains, & &1.position)
+    main_ids = MapSet.new(mains, & &1.id)
+    {nested, orphans} = Enum.split_with(children, &MapSet.member?(main_ids, &1.parent_id))
+    by_parent = Enum.group_by(nested, & &1.parent_id)
+
+    Enum.flat_map(mains, fn main ->
+      [main | by_parent |> Map.get(main.id, []) |> Enum.sort_by(&{sublane_rank(&1.type), &1.position})]
+    end) ++ Enum.sort_by(orphans, & &1.position)
   end
 
   # A child stage (parent_id set) must be a review or done sub-lane.

@@ -31,7 +31,7 @@ defmodule RelayWeb.Api.DiagnosisControllerTest do
     queue: queue,
     works: works
   } do
-    insert(:flow, board: board, key: "code", enabled: true, pulls_from_stage_id: queue.id, works_in_stage_id: works.id)
+    insert(:flow, board: board, key: "code", enabled: true, stage_id: works.id)
     card = insert(:card, stage: queue, status: :ready)
 
     body = conn |> get(~p"/api/cards/#{ref(board, card)}/diagnosis") |> json_response(200) |> Map.fetch!("data")

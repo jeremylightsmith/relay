@@ -1,7 +1,7 @@
 {
   "key": "code",
   "isolation": "exclusive",
-  "trigger": { "pulls_from": "Plan:Done", "works_in": "Code", "lands_on": "Review" },
+  "trigger": { "stage": "Code" },
   "nodes": [
     {
       "key": "branch",

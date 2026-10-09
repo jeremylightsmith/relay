@@ -67,6 +67,7 @@ defmodule Relay.Runs.RunServer do
 
   import Ecto.Query
 
+  alias Relay.Flows
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Engine
@@ -76,7 +77,6 @@ defmodule Relay.Runs.RunServer do
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
-  alias Schemas.Stage
   alias Schemas.SubTask
 
   # RE251: the fixed separator between a retry's ORIGIN findings and the latest attempt's failure
@@ -823,18 +823,20 @@ defmodule Relay.Runs.RunServer do
     :ok
   end
 
-  # Run closed :done → the card lands on the flow's lands-on stage (the
-  # move's snap sets the arrival status, e.g. :in_review at Spec:Review).
-  # A disarmed trigger (deleted stage → nil FK) skips the move rather than
-  # crashing a finished run.
+  # Run closed :done → the card lands on the stage after the flow's, worked out from the
+  # board's order NOW (RE429 — `Relay.Flows.neighbours/1` reads it fresh, so a reorder during
+  # the run is honoured). The move's snap sets the arrival status (e.g. :in_review at
+  # Spec:Review). A flow on the board's last stage has nowhere to land: the card stays put.
   defp finish_effects(run, flow) do
-    if flow.lands_on_stage_id do
-      card = Repo.get!(Card, run.card_id)
-      lands_on = Repo.get!(Stage, flow.lands_on_stage_id)
-      {:ok, _card} = Relay.Cards.move_card(card, lands_on, 1_000_000, :agent)
-    end
+    case Flows.neighbours(flow).lands_on do
+      nil ->
+        :ok
 
-    :ok
+      lands_on ->
+        card = Repo.get!(Card, run.card_id)
+        {:ok, _card} = Relay.Cards.move_card(card, lands_on, 1_000_000, :agent)
+        :ok
+    end
   end
 
   # Run failed → flag the card with the node's actual output so a human sees it at

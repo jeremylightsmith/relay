@@ -57,7 +57,8 @@ defmodule Relay.BoardsStageConfigTest do
 
     test "changing the stage type never touches card owner rows" do
       board = seeded_board()
-      stage = stage_named(board, "Code")
+      # Deploy holds no flow, so it may become a review stage (RE429).
+      stage = stage_named(board, "Deploy")
       card = insert(:card, stage: stage)
       human = insert(:user)
       owner_row = insert(:card_owner, card: card, user: human)
@@ -411,22 +412,6 @@ defmodule Relay.BoardsStageConfigTest do
   describe "delete_stage/1 guard rails (RE384)" do
     defp archived_card(stage), do: insert(:card, stage: stage, archived_at: DateTime.utc_now(:second))
 
-    # Each enabled flow needs its own pulls-from stage (one enabled flow per pulls-from stage).
-    defp enabled_flow(board, key, field, stage, pulls_from \\ "Backlog") do
-      triggers =
-        Map.put(
-          %{
-            pulls_from_stage_id: stage_named(board, pulls_from).id,
-            works_in_stage_id: stage_named(board, "Code").id,
-            lands_on_stage_id: stage_named(board, "Review").id
-          },
-          field,
-          stage.id
-        )
-
-      insert(:flow, Map.merge(%{board: board, key: key, enabled: true}, triggers))
-    end
-
     test "an empty stage with no enabled flows is deleted" do
       board = seeded_board()
       deploy = stage_named(board, "Deploy")
@@ -454,38 +439,49 @@ defmodule Relay.BoardsStageConfigTest do
       assert {:error, {:not_empty, %{live: 2, archived: 1}}} = Boards.delete_stage(code)
     end
 
-    test "refuses a stage an enabled flow works in" do
-      board = seeded_board()
-      deploy = stage_named(board, "Deploy")
-      flow = enabled_flow(board, "ship", :works_in_stage_id, deploy)
-
-      assert {:error, {:in_use_by_flow, ["ship"]}} = Boards.delete_stage(deploy)
-      assert Repo.reload!(flow).works_in_stage_id == deploy.id
-    end
-
-    test "refuses a stage whose substage enabled flows land on, naming them sorted" do
-      board = seeded_board()
-      plan_done = stage_named(board, "Plan:Done")
-      enabled_flow(board, "zeta", :lands_on_stage_id, plan_done)
-      enabled_flow(board, "alpha", :lands_on_stage_id, plan_done, "Next up")
-
-      assert {:error, {:in_use_by_flow, ["alpha", "zeta"]}} = Boards.delete_stage(stage_named(board, "Plan"))
-    end
-
-    test "a disabled flow does not block the delete and its trigger is nilified" do
+    test "16. deleting a stage deletes its flow; run history keeps the flow key (RE429)" do
       board = seeded_board()
       deploy = stage_named(board, "Deploy")
 
-      flow =
-        insert(:flow,
-          board: board,
-          key: "idle",
-          enabled: false,
-          works_in_stage_id: deploy.id
-        )
+      {:ok, ship} =
+        Flows.create_flow(board, %{
+          key: "ship",
+          isolation: :shared_clean,
+          stage_id: deploy.id,
+          nodes: [],
+          edges: [%{from: "start", to: "done"}]
+        })
+
+      {:ok, ship} = Flows.enable_flow(ship)
+      card = insert(:card, stage: stage_named(board, "Done"))
+      run = insert(:run, card: card, flow_id: ship.id, flow_key: "ship", status: :done)
+      assert Flows.get_version(ship, 1)
 
       assert {:ok, _} = Boards.delete_stage(deploy)
-      assert Repo.reload!(flow).works_in_stage_id == nil
+      assert Flows.get_flow(board, "ship") == nil
+      assert %{flow_id: nil, flow_key: "ship"} = Repo.reload!(run)
+      refute Flows.get_version(ship, 1)
+    end
+
+    test "17. disabling a lane no longer consults flows (RE429)" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      {:ok, _} = Flows.enable_flow(Flows.get_flow(board, "code"))
+      {:ok, _} = Boards.enable_lane(code, :done)
+
+      assert {:ok, :disabled} = Boards.disable_lane(Repo.reload!(code), :done)
+    end
+
+    test "18. a stage holding a flow cannot be retyped to a non-work type (RE429)" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      deploy = stage_named(board, "Deploy")
+
+      assert {:error, {:holds_flow, %{stage: "Code", flow: "code"}}} = Relay.Cards.update_stage(code, %{type: :queue})
+      assert Repo.reload!(code).type == :work
+
+      assert {:ok, _} = Relay.Cards.update_stage(code, %{type: :planning})
+      assert {:ok, _} = Relay.Cards.update_stage(deploy, %{type: :queue})
     end
 
     test "refuses the public intake stage" do
@@ -529,8 +525,8 @@ defmodule Relay.BoardsStageConfigTest do
 
       assert Boards.stage_refusal_message(:not_empty) == "That lane still has cards — move them out first."
 
-      assert Boards.stage_refusal_message({:in_use_by_flow, ["code", "plan"]}) ==
-               "Flow(s) code, plan use this stage — disable or re-point them first."
+      assert Boards.stage_refusal_message({:holds_flow, %{stage: "Code", flow: "code"}}) ==
+               "Stage Code holds flow `code` — delete the flow first."
 
       assert Boards.stage_refusal_message(:public_intake) ==
                "This is the public intake stage — pick another in Public settings first."
@@ -581,21 +577,10 @@ defmodule Relay.BoardsStageConfigTest do
       :ok = Relay.Events.subscribe(board.id)
       code = stage_named(board, "Code")
       insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
-      deploy = stage_named(board, "Deploy")
-
-      insert(:flow,
-        board: board,
-        key: "ship",
-        enabled: true,
-        pulls_from_stage_id: stage_named(board, "Backlog").id,
-        works_in_stage_id: deploy.id,
-        lands_on_stage_id: stage_named(board, "Done").id
-      )
-
       {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: stage_named(board, "Next up").id})
 
       {:error, {:not_empty, _}} = Boards.delete_stage(code)
-      {:error, {:in_use_by_flow, ["ship"]}} = Boards.delete_stage(deploy)
+      {:error, {:holds_flow, _}} = Boards.update_stage(stage_named(board, "Code"), %{type: :queue})
       {:error, :public_intake} = Boards.delete_stage(stage_named(board, "Next up"))
 
       refute_receive {:stages_changed, _board_id}

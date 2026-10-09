@@ -21,8 +21,7 @@ defmodule Relay.Runs.SchedulerDependenciesTest do
       board: board,
       key: "code",
       enabled: true,
-      pulls_from_stage_id: next_up.id,
-      works_in_stage_id: code.id
+      stage_id: code.id
     )
 
     a = insert(:card, stage: next_up, ref_number: 1, status: :ready)
@@ -34,6 +33,17 @@ defmodule Relay.Runs.SchedulerDependenciesTest do
   end
 
   defp snapshot(board), do: elem(SchedulerServer.build_snapshot(board.id, NoRuns), 0)
+
+  test "24. build_snapshot/2 projects each enabled flow's stage and derived pulls-from (RE429)" do
+    {:ok, board} = Relay.Boards.create_board(insert(:user), %{name: "Snapshot"})
+    {:ok, code_flow} = board |> Relay.Flows.get_flow!("code") |> Relay.Flows.enable_flow()
+    code = Relay.Repo.get_by!(Schemas.Stage, board_id: board.id, name: "Code")
+    plan_done = Relay.Repo.get_by!(Schemas.Stage, board_id: board.id, name: "Plan:Done")
+
+    assert snapshot(board).flows == [
+             %{key: "code", stage_id: code.id, pulls_from_stage_id: plan_done.id, isolation: code_flow.isolation}
+           ]
+  end
 
   test "build_snapshot/2 carries the unmet blocker ids onto the card map", ctx do
     {:ok, _} = Cards.set_dependencies(ctx.board, ctx.a, ["RE2"])
