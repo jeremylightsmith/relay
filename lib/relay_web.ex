@@ -37,6 +37,31 @@ defmodule RelayWeb do
   defdelegate attachment_path?(path), to: Schemas.Attachment, as: :path?
 
   @doc """
+  RE428 — the absolute URL an attachment is served from (`attachment_path/1` on this endpoint),
+  e.g. `"http://localhost:4002/attachments/<id>"`. It is what the link a reject note or an answer
+  carries points at, so the agent reading the text can resolve it.
+  """
+  @spec attachment_url(Ecto.UUID.t()) :: String.t()
+  def attachment_url(id), do: RelayWeb.Endpoint.url() <> attachment_path(id)
+
+  @doc """
+  The markdown image link for an attachment: `"![<filename>](<url>)"`. `filename` is user data, so
+  `\\`, `[`, `]` and `)` are backslash-escaped and the alt text always round-trips to the literal
+  name. The one builder: `RelayWeb.Api.CardJSON.attachment/1` and the reject/answer image links
+  (RE428) both call it.
+  """
+  @spec image_markdown(String.t(), String.t()) :: String.t()
+  def image_markdown(filename, url), do: "![#{escape_markdown_text(filename)}](#{url})"
+
+  defp escape_markdown_text(text) do
+    text
+    |> String.replace("\\", "\\\\")
+    |> String.replace("[", "\\[")
+    |> String.replace("]", "\\]")
+    |> String.replace(")", "\\)")
+  end
+
+  @doc """
   Legacy RE370 link; redirects to the BoardLive viewer. `MockupViewerLive` serves it as a
   membership-scoped redirect to the card's drawer URL plus `mockup=<id>` (RE380), so old links
   keep working; nothing in Relay's UI links here any more. `RelayWeb.AttachmentPathTest` pins it

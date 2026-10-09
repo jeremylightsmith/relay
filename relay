@@ -58,8 +58,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 81
-RUNNER_FINGERPRINT = "3acac83a7a0d20f50dbbdf86f9461f757665a241f9fe032f621648a863b96fd8"
+RUNNER_VERSION = 82
+RUNNER_FINGERPRINT = "7a6d142333d3ff926035814753616742440dafae772add8db7b11fd94d2f5153"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -912,6 +912,16 @@ def dependency_lines(c):
     return lines
 
 
+def origin_suffix(origin):
+    """RE428 — where an image note came from, printed after its author. The kinds are pinned by
+    runner_contract.json's note_images.origin_kinds; an older server sends no origin -> ""."""
+    if not origin:
+        return ""
+    if origin.get("kind") == "answer":
+        return f' · from answer Q{origin.get("question")}'
+    return f' · from {origin.get("kind")}'
+
+
 def print_card(c):
     r = c.get("rejection")
     if r:
@@ -946,6 +956,7 @@ def print_card(c):
         who = e.get("author", {}).get("name", "?")
         if e.get("kind") == "comment":
             body = e.get("body")
+            who += origin_suffix(e.get("origin"))
             print(f"  - {who}: {body}" if body else f"  - {who}:")
             for img in e.get("images") or []:
                 print(f'    [image] {img["filename"]} {base}{img["download_path"]}')

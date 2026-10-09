@@ -54,6 +54,26 @@ defmodule RelayWeb.StorybookRenderTest do
     assert doc |> LazyHTML.query("#note-image-row-single-single-wide a img.max-w-\\[240px\\]") |> Enum.count() == 1
   end
 
+  test "GET the RE428 note origin tag story renders both tags", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/note_origin_tag") |> html_response(200)
+
+    assert html =~ "FROM ANSWER · Q2"
+    assert html =~ "FROM REJECTION"
+  end
+
+  test "GET the review panel story renders the RE428 reject image box", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/card_review_panel") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("#review-reject-images") |> Enum.count() >= 1
+  end
+
+  test "GET the needs-input panel story renders the RE428 answer image box", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/needs_input_panel") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("#needs-input-images") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("#needs-input-images-attach") |> Enum.count() >= 1
+  end
+
   test "GET the RE427 image control story renders each state", %{conn: conn} do
     html = conn |> get("/storybook/core_components/image_attach_box") |> html_response(200)
     doc = LazyHTML.from_document(html)

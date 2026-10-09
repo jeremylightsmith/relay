@@ -41,7 +41,7 @@ or `@path`.
 
 | Command | What it does |
 |---|---|
-| `./relay board` · `./relay card RLY-12` | The board · one card (each note image prints as an `[image] <filename> <url>` line under its note) |
+| `./relay board` · `./relay card RLY-12` | The board · one card (each note image prints as an `[image] <filename> <url>` line under its note; an image note from an answer or a rejection prints `· from answer Q<n>` / `· from rejection` after its author) |
 | `./relay search "words"` | Find a card by ref or title |
 | `./relay why RLY-12` | **Why isn't this card moving?** |
 | `./relay runs RLY-12` · `./relay runners` · `./relay version` | Run detail · connected runners · deployed SHA |

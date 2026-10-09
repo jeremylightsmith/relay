@@ -238,7 +238,13 @@ defmodule RelayWeb.Api.RunnerContractTest do
       })
 
     {:ok, _note} =
-      Relay.Activity.add_comment(images_card, %{actor: {:user, user.id}, body: "see shot", image_ids: [note_image.id]})
+      Relay.Activity.add_comment(images_card, %{
+        actor: {:user, user.id},
+        body: "see shot",
+        image_ids: [note_image.id],
+        # RE428 — an image note carries its origin; `./relay card` prints it after the author.
+        origin: {:answer, 2}
+      })
 
     note_entry =
       exclusive.conn
@@ -250,10 +256,12 @@ defmodule RelayWeb.Api.RunnerContractTest do
     [note_image_item] = note_entry["images"]
 
     document = %{
-      "version" => 10,
+      "version" => 11,
       "note_images" => %{
         "comment_entry" => note_entry |> Map.keys() |> Enum.sort(),
-        "image" => note_image_item |> Map.keys() |> Enum.sort()
+        "image" => note_image_item |> Map.keys() |> Enum.sort(),
+        # RE428 — the origin kinds `./relay card` prints; the one set is Schemas.Comment.origins/0.
+        "origin_kinds" => Enum.map(Schemas.Comment.origins(), &Atom.to_string/1)
       },
       "mockups" => %{
         "download_path" => Schemas.Attachment.api_path("<attachment-id>"),
@@ -342,7 +350,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     assert document["note_images"]["image"] == ["download_path", "filename", "url"]
     assert "images" in document["note_images"]["comment_entry"]
-    assert document["version"] == 10
+    assert "origin" in document["note_images"]["comment_entry"]
+    assert note_entry["origin"] == %{"kind" => "answer", "question" => 2}
+    assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
+    assert document["version"] == 11
     assert document["flows"] == %{"trigger_keys" => ["stage"], "derived_keys" => ["lands_on", "pulls_from"]}
 
     assert_matches_fixture!(document)

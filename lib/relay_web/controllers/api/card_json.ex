@@ -112,33 +112,23 @@ defmodule RelayWeb.Api.CardJSON do
       data: %{
         id: attachment.id,
         url: path,
-        markdown: "![#{escape_markdown_text(attachment.filename)}](#{path})"
+        markdown: RelayWeb.image_markdown(attachment.filename, path)
       }
     }
   end
 
-  # `filename` is accepted verbatim from the ingest body, so it can contain
-  # markdown-special characters. Escape `[` and `]` (would prematurely open/close
-  # the image alt text) and `)` (harmless here but defensive) so the generated
-  # markdown always round-trips to the literal filename as alt text.
-  defp escape_markdown_text(text) do
-    text
-    |> String.replace("\\", "\\\\")
-    |> String.replace("[", "\\[")
-    |> String.replace("]", "\\]")
-    |> String.replace(")", "\\)")
-  end
-
   # RE427 — a note's images, in position order; [] when none. `./relay card` prints them as
   # `[image]` lines and `relay images --pull` downloads `download_path` (pinned under
-  # runner_contract.json's `note_images`).
+  # runner_contract.json's `note_images`). RE428 — `origin` is always present (nil for a plain
+  # note) so the runner can rely on the key; `./relay card` prints it after the author.
   defp entry(%Schemas.Comment{} = c) do
     %{
       kind: "comment",
       body: c.body,
       author: author(c),
       inserted_at: c.inserted_at,
-      images: Enum.map(c.images, &note_image/1)
+      images: Enum.map(c.images, &note_image/1),
+      origin: origin(c)
     }
   end
 
@@ -150,6 +140,10 @@ defmodule RelayWeb.Api.CardJSON do
   defp entry(%Schemas.Activity{} = a) do
     %{kind: "activity", type: a.type, text: a.text, meta: a.meta, author: author(a), inserted_at: a.inserted_at}
   end
+
+  defp origin(%Schemas.Comment{origin: nil}), do: nil
+  defp origin(%Schemas.Comment{origin: :answer, origin_question: question}), do: %{kind: "answer", question: question}
+  defp origin(%Schemas.Comment{origin: kind}), do: %{kind: Atom.to_string(kind)}
 
   defp note_image(%Schemas.Attachment{} = image) do
     %{

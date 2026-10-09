@@ -1351,12 +1351,14 @@ defmodule Relay.RunsTest do
     end
 
     test "a card with pre-written tasks never parses the plan and logs no deprecation (RE357)" do
-      %{flow: flow, card: card} = setup_foreach(plan: "# Goal\n\nHeader only.\n")
+      %{board: board, flow: flow, card: card} = setup_foreach(plan: "# Goal\n\nHeader only.\n")
       {:ok, _tasks} = Relay.Cards.add_tasks(card, [%{title: "Alpha", body: "Do alpha."}])
 
       log = capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
 
-      refute log =~ "deprecated"
+      # capture_log sees every process's log, and this module is async: the sibling
+      # fallback test logs its own "deprecated: <ref>" concurrently. Scope to this card.
+      refute log =~ "deprecated: #{Relay.Cards.ref(board, card)} "
     end
 
     test "the no-tasks block names the fix when a plan is present (RE357)" do

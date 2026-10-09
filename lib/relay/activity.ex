@@ -28,7 +28,9 @@ defmodule Relay.Activity do
   (`:comment | :question | :changes_requested`, programmatic, defaults to
   `:comment`), and (RE427) optional `:image_ids` — ids of image attachments
   already uploaded to this card and not yet on a note, linked to the comment in
-  the given order (defaults to `[]`; with at least one the body may be blank).
+  the given order (defaults to `[]`; with at least one the body may be blank), and (RE428)
+  an optional programmatic `:origin` — `nil` (default) | `:rejection` | `{:answer, n}` (the
+  1-based question number) — stored as the comment's `origin` / `origin_question`.
 
   Returns `{:ok, comment}` with the author and `:images` (position order, `[]`
   when none) preloaded, or `{:error, changeset}`. Too many images
@@ -38,11 +40,21 @@ defmodule Relay.Activity do
   """
   def add_comment(%Card{} = card, %{actor: actor} = attrs) do
     {actor_type, user_id} = split_actor(actor)
+    {origin, origin_question} = split_origin(Map.get(attrs, :origin))
     image_ids = attrs |> Map.get(:image_ids, []) |> Enum.uniq()
+
+    comment = %Comment{
+      card_id: card.id,
+      actor_type: actor_type,
+      user_id: user_id,
+      kind: Map.get(attrs, :kind, :comment),
+      origin: origin,
+      origin_question: origin_question
+    }
 
     changeset =
       Comment.changeset(
-        %Comment{card_id: card.id, actor_type: actor_type, user_id: user_id, kind: Map.get(attrs, :kind, :comment)},
+        comment,
         Map.take(attrs, [:body]),
         length(image_ids)
       )
@@ -51,6 +63,10 @@ defmodule Relay.Activity do
     |> insert_with_images(card, image_ids)
     |> broadcast_appended(card)
   end
+
+  defp split_origin(nil), do: {nil, nil}
+  defp split_origin({:answer, question}), do: {:answer, question}
+  defp split_origin(origin) when is_atom(origin), do: {origin, nil}
 
   # Validated before the transaction so an invalid comment never rolls back a caller's
   # surrounding transaction; only a failed image link (which needs the inserted id) does.

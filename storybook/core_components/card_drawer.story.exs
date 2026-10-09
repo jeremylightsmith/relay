@@ -38,6 +38,34 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :notes_with_origin_tags,
+        description:
+          "RE428 — image notes carry where they came from: FROM ANSWER · Q2 and FROM REJECTION after " <>
+            "the time; an ordinary note has no tag.",
+        attributes: %{
+          id: "story-drawer-origin-tags",
+          ref: "RLY-7",
+          board_slug: "storybook-board",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :live,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          stages: [
+            %{id: 3, name: "Plan", current?: false},
+            %{id: 4, name: "Code", current?: true},
+            %{id: 7, name: "Done", current?: false}
+          ],
+          conversation: origin_conversation(),
+          note_count: length(origin_conversation()),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :stage_menu_open,
         attributes: %{
           id: "story-drawer-stage-menu",
@@ -670,6 +698,44 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
          kind: :question,
          body: "Should the export include archived cards?",
          inserted_at: ~U[2026-07-06 16:05:00Z]
+       }}
+    ]
+  end
+
+  # RE428 — two image notes with their origin, then a plain note.
+  defp origin_conversation do
+    ada = %Schemas.User{id: 1, name: "Ada Lovelace", email: "ada@example.com"}
+    image = fn id, name -> %Schemas.Attachment{id: id, filename: name} end
+
+    [
+      {"timeline-comment-11",
+       %Schemas.Comment{
+         id: 11,
+         actor_type: :user,
+         user: ada,
+         body: "",
+         origin: :answer,
+         origin_question: 2,
+         images: [image.("story-answer-shot", "billing-page.png")],
+         inserted_at: ~U[2026-07-06 16:20:00Z]
+       }},
+      {"timeline-comment-12",
+       %Schemas.Comment{
+         id: 12,
+         actor_type: :user,
+         user: ada,
+         body: "",
+         origin: :rejection,
+         images: [image.("story-reject-shot", "empty-mobile.png")],
+         inserted_at: ~U[2026-07-07 09:10:00Z]
+       }},
+      {"timeline-comment-13",
+       %Schemas.Comment{
+         id: 13,
+         actor_type: :user,
+         user: ada,
+         body: "Plain note — no origin tag.",
+         inserted_at: ~U[2026-07-07 09:12:00Z]
        }}
     ]
   end

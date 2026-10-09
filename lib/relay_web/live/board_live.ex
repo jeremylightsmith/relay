@@ -608,6 +608,10 @@ defmodule RelayWeb.BoardLive do
         uploads={@uploads}
         note_images_pending={@note_images_pending}
         note_image_errors={@note_image_errors}
+        reject_images_pending={@reject_images_pending}
+        reject_image_errors={@reject_image_errors}
+        answer_images_pending={@answer_images_pending}
+        answer_image_errors={@answer_image_errors}
         question={@question}
         answer_form={@answer_form}
         answer_questions={@answer_questions}
@@ -684,6 +688,11 @@ defmodule RelayWeb.BoardLive do
             reject_form={@reject_form}
             reject_error={@reject_error}
             embed={@embed}
+            uploads={@uploads}
+            reject_images_pending={@reject_images_pending}
+            reject_image_errors={@reject_image_errors}
+            answer_images_pending={@answer_images_pending}
+            answer_image_errors={@answer_image_errors}
           />
         </:gate>
       </.card_mockup_viewer>
@@ -1216,7 +1225,9 @@ defmodule RelayWeb.BoardLive do
       |> assign_run_diagnostics(board, run_summaries)
       |> assign(:note_ids, MapSet.new())
       |> assign(:note_image_comments, [])
-      |> allow_note_images()
+      |> allow_image_upload(:note_images)
+      |> allow_image_upload(:reject_images)
+      |> allow_image_upload(:answer_images)
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
       |> stream_configure(:talk_events, dom_id: &"talk-event-#{&1.id}")
@@ -1518,6 +1529,7 @@ defmodule RelayWeb.BoardLive do
          |> assign(:answer_questions, latest_questions(card, activity))
          |> assign(:answer_step, 0)
          |> assign(:answer_values, %{})
+         |> reset_images(:answer_images)
          |> assign_review(card)
          |> assign(:card_runs, runs)
          |> assign_in_flight_task(card, :refresh)
@@ -2667,7 +2679,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply,
      socket
      |> assign(:comment_form, to_form(comment_params, as: :comment))
-     |> check_new_note_images()}
+     |> check_new_images(:note_images)}
   end
 
   # RE427 — ⌘↩ submits through `form.requestSubmit()`, which ignores the disabled Add note
@@ -2676,7 +2688,7 @@ defmodule RelayWeb.BoardLive do
     do: {:noreply, socket}
 
   def handle_event("post_comment", %{"comment" => comment_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    image_ids = Enum.map(socket.assigns.note_images_pending, & &1.id)
+    image_ids = Enum.map(pending_images(socket, :note_images), & &1.id)
 
     case Activity.add_comment(card, %{actor: current_actor(socket), body: comment_params["body"], image_ids: image_ids}) do
       # `add_comment` broadcasts `:timeline_appended`, and this LiveView is subscribed to
@@ -2690,7 +2702,7 @@ defmodule RelayWeb.BoardLive do
          socket
          |> insert_note(comment)
          |> assign(:comment_form, empty_comment_form())
-         |> reset_note_images()}
+         |> reset_images(:note_images)}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :comment_form, to_form(changeset))}
@@ -2700,29 +2712,52 @@ defmodule RelayWeb.BoardLive do
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
 
   # RE427 — the ✕ on a thumbnail still uploading.
-  def handle_event("cancel_note_image", %{"ref" => ref}, socket), do: {:noreply, cancel_upload(socket, :note_images, ref)}
+  def handle_event("cancel_note_image", %{"ref" => ref}, socket), do: {:noreply, cancel_image(socket, :note_images, ref)}
 
   # RE427 — the ✕ on an uploaded thumbnail: it leaves the note; the attachment stays, unlinked.
-  def handle_event("remove_note_image", %{"id" => id}, socket),
-    do: {:noreply, update(socket, :note_images_pending, &Enum.reject(&1, fn image -> image.id == id end))}
+  def handle_event("remove_note_image", %{"id" => id}, socket), do: {:noreply, remove_image(socket, :note_images, id)}
 
   # MMF 14 — the drawer's amber panel submits the human's answer: log it,
   # return the baton (working on an AI-meant stage, queued otherwise), and
   # clear the block. Attributed to the signed-in user; refresh_card re-streams
   # the board card so the amber badge flips off (and MMF 18 broadcasts do the
   # same everywhere else).
+  #
+  # RE428 — the single answer box's images are step 0's; they post as one FROM ANSWER · Q1 note
+  # with the answer. ⌘↵ submits past the disabled Send, so the server refuses while one uploads.
+  # A failed answer resets nothing: the text and the pending images stay for a retry.
+  def handle_event("answer_input", _params, %{assigns: %{uploads: %{answer_images: %{entries: [_ | _]}}}} = socket),
+    do: {:noreply, socket}
+
   def handle_event(
         "answer_input",
         %{"answer" => %{"body" => body}},
         %{assigns: %{selected_card: %Card{status: :needs_input} = card}} = socket
       ) do
-    case Cards.answer_input(card, body, current_actor(socket)) do
-      {:ok, card} -> {:noreply, after_answer(socket, card)}
+    case Cards.answer_input(card, body, current_actor(socket), image_notes: answer_image_notes(socket)) do
+      {:ok, card} -> {:noreply, socket |> after_answer(card) |> reset_images(:answer_images)}
       {:error, _changeset} -> {:noreply, socket}
     end
   end
 
   def handle_event("answer_input", _params, socket), do: {:noreply, socket}
+
+  # RE428 — the single answer box's change: it holds the typed text server-side, announces newly
+  # chosen images, and carries the `.ImagePaste` hook's link edits back.
+  def handle_event("answer_change", %{"answer" => %{"body" => _} = params}, socket) do
+    {:noreply,
+     socket
+     |> assign(:answer_form, to_form(params, as: :answer))
+     |> check_new_images(:answer_images)}
+  end
+
+  def handle_event("answer_change", _params, socket), do: {:noreply, socket}
+
+  # RE428 — the ✕ on an answer image still uploading, and on an uploaded one.
+  def handle_event("cancel_answer_image", %{"ref" => ref}, socket),
+    do: {:noreply, cancel_image(socket, :answer_images, ref)}
+
+  def handle_event("remove_answer_image", %{"id" => id}, socket), do: {:noreply, remove_image(socket, :answer_images, id)}
 
   # RLY-71/RE323 — stepper: clicking an option records it for its step (single-select) and
   # commits that step — the next question, or the whole batch sent on the last one. A click
@@ -2746,13 +2781,18 @@ defmodule RelayWeb.BoardLive do
 
   # RLY-71 — stepper: a typed custom answer for the current step (see record_text/3). Clearing
   # the box unanswers the step so Next stays disabled until the human picks or types something.
+  # RE428 — the same change announces newly chosen images, and carries the hook's link edits.
   def handle_event(
         "answer_custom",
         %{"answer" => %{"index" => index, "text" => text}},
         %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket
       ) do
     step = String.to_integer(index)
-    {:noreply, assign(socket, :answer_values, record_text(socket.assigns, step, text))}
+
+    {:noreply,
+     socket
+     |> assign(:answer_values, record_text(socket.assigns, step, text))
+     |> check_new_images(:answer_images)}
   end
 
   def handle_event("answer_custom", _params, socket), do: {:noreply, socket}
@@ -2773,6 +2813,12 @@ defmodule RelayWeb.BoardLive do
 
   def handle_event("answer_commit", _params, socket), do: {:noreply, socket}
 
+  # RE428 — while an answer image uploads, the stepper stays on its step and nothing is sent: a
+  # finishing upload always belongs to the step on screen (the reused textarea swaps its text on
+  # a step change, which would strand the image's link).
+  def handle_event(event, _params, %{assigns: %{uploads: %{answer_images: %{entries: [_ | _]}}}} = socket)
+      when event in ["answer_next", "answer_back", "answer_goto", "answer_submit"], do: {:noreply, socket}
+
   # RLY-71 — stepper navigation, clamped to the question range.
   def handle_event("answer_next", _params, %{assigns: %{selected_card: %Card{status: :needs_input}}} = socket) do
     {:noreply, advance_step(socket)}
@@ -2785,7 +2831,7 @@ defmodule RelayWeb.BoardLive do
         _params,
         %{assigns: %{selected_card: %Card{status: :needs_input}, answer_step: step}} = socket
       ) do
-    {:noreply, assign(socket, :answer_step, max(step - 1, 0))}
+    {:noreply, go_to_step(socket, max(step - 1, 0))}
   end
 
   def handle_event("answer_back", _params, socket), do: {:noreply, socket}
@@ -2796,7 +2842,7 @@ defmodule RelayWeb.BoardLive do
         %{assigns: %{selected_card: %Card{status: :needs_input}, answer_questions: questions}} = socket
       ) do
     step = index |> String.to_integer() |> max(0) |> min(length(questions) - 1)
-    {:noreply, assign(socket, :answer_step, step)}
+    {:noreply, go_to_step(socket, step)}
   end
 
   def handle_event("answer_goto", _params, socket), do: {:noreply, socket}
@@ -2890,18 +2936,40 @@ defmodule RelayWeb.BoardLive do
   def handle_event("review_approve", _params, socket), do: {:noreply, socket}
 
   def handle_event("review_open_reject", _params, socket) do
-    {:noreply, assign(socket, reject_open: true, reject_form: empty_reject_form(), reject_error: nil)}
+    {:noreply,
+     socket
+     |> assign(reject_open: true, reject_form: empty_reject_form(), reject_error: nil)
+     |> reset_images(:reject_images)}
   end
 
   # RE380 — the reject note is held server-side as it is typed, so a re-render (switching mockups
   # in the viewer) never wipes a half-written note. The panel's open state and error are untouched.
+  # RE428 — the same change announces newly chosen images, and carries the `.ImagePaste` hook's
+  # link edits back (it dispatches `input` after each).
   def handle_event("review_reject_change", %{"reject" => params}, socket) do
-    {:noreply, assign(socket, reject_form: to_form(params, as: :reject))}
+    {:noreply,
+     socket
+     |> assign(reject_form: to_form(params, as: :reject))
+     |> check_new_images(:reject_images)}
   end
 
   def handle_event("review_cancel_reject", _params, socket) do
-    {:noreply, assign(socket, reject_open: false, reject_error: nil)}
+    {:noreply,
+     socket
+     |> assign(reject_open: false, reject_error: nil)
+     |> reset_images(:reject_images)}
   end
+
+  # RE428 — the ✕ on a reject image still uploading, and on an uploaded one.
+  def handle_event("cancel_reject_image", %{"ref" => ref}, socket),
+    do: {:noreply, cancel_image(socket, :reject_images, ref)}
+
+  def handle_event("remove_reject_image", %{"id" => id}, socket), do: {:noreply, remove_image(socket, :reject_images, id)}
+
+  # RE428 — ⌘↩ submits through `form.requestSubmit()`, which ignores the disabled Reject button,
+  # so the server itself refuses to reject while an image is still uploading.
+  def handle_event("review_reject", _params, %{assigns: %{uploads: %{reject_images: %{entries: [_ | _]}}}} = socket),
+    do: {:noreply, socket}
 
   def handle_event(
         "review_reject",
@@ -2916,10 +2984,17 @@ defmodule RelayWeb.BoardLive do
        )}
     else
       lane = lane_ids(socket, card)
+      image_ids = Enum.map(pending_images(socket, :reject_images), & &1.id)
 
-      case Cards.reject(card, note, current_actor(socket)) do
-        {:ok, updated} -> {:noreply, after_review_decision(socket, :rejected, card, updated, lane)}
-        {:error, _reason} -> {:noreply, socket}
+      case Cards.reject(card, note, current_actor(socket), image_ids: image_ids) do
+        {:ok, updated} ->
+          {:noreply,
+           socket
+           |> after_review_decision(:rejected, card, updated, lane)
+           |> reset_images(:reject_images)}
+
+        {:error, _reason} ->
+          {:noreply, socket}
       end
     end
   end
@@ -3897,6 +3972,7 @@ defmodule RelayWeb.BoardLive do
     |> assign_question(card, activity)
     |> assign(:answer_step, 0)
     |> assign(:answer_values, %{})
+    |> reset_images(:answer_images)
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
     # the card may have parked/resumed a run since the last refresh
@@ -4045,6 +4121,10 @@ defmodule RelayWeb.BoardLive do
 
   # RE323 — the one advance-or-send rule for the needs-input stepper: a non-final step moves on
   # to the next question, the final step sends the batch. Next and Send to AI are the two halves.
+  # RE428 — an option click or ⌘↵ while an answer image uploads records the value but commits
+  # nothing (see the in-flight answer_* clause).
+  defp commit_step(%{assigns: %{uploads: %{answer_images: %{entries: [_ | _]}}}} = socket), do: socket
+
   defp commit_step(%{assigns: %{answer_questions: questions, answer_step: step}} = socket)
        when step < length(questions) - 1, do: advance_step(socket)
 
@@ -4057,15 +4137,32 @@ defmodule RelayWeb.BoardLive do
   defp maybe_commit_step(socket, _step), do: socket
 
   defp advance_step(%{assigns: %{answer_questions: questions, answer_step: step}} = socket),
-    do: assign(socket, :answer_step, min(step + 1, length(questions) - 1))
+    do: go_to_step(socket, min(step + 1, length(questions) - 1))
 
-  # RLY-71 — compose one numbered Q->A comment and reuse Cards.answer_input/3, which records the
-  # comment, resumes the card, and logs one :input_answered (unchanged contract).
+  # RE428 — a step change shows the target step's images; the refused-image errors were the
+  # previous step's.
+  defp go_to_step(socket, step) do
+    socket
+    |> assign(:answer_step, step)
+    |> put_image_errors(:answer_images, [])
+  end
+
+  # RLY-71 — compose one numbered Q->A comment and reuse Cards.answer_input/4, which records the
+  # comment, resumes the card, and logs one :input_answered (unchanged contract). RE428 — each
+  # question's images post as its own FROM ANSWER · Q<n> note, in the same transaction.
   defp submit_answers(%{assigns: %{selected_card: card, answer_questions: questions, answer_values: values}} = socket) do
-    case Cards.answer_input(card, Cards.compose_answer(questions, values), current_actor(socket)) do
-      {:ok, updated} -> after_answer(socket, updated)
+    answer = Cards.compose_answer(questions, values)
+
+    case Cards.answer_input(card, answer, current_actor(socket), image_notes: answer_image_notes(socket)) do
+      {:ok, updated} -> socket |> after_answer(updated) |> reset_images(:answer_images)
       {:error, _changeset} -> socket
     end
+  end
+
+  # RE428 — `[{question number, image ids}]` for every question with pending images, ascending.
+  defp answer_image_notes(socket) do
+    for {step, [_ | _] = images} <- Enum.sort(socket.assigns.answer_images_pending),
+        do: {step + 1, Enum.map(images, & &1.id)}
   end
 
   # RLY-71/RE323 — the stepper's answer_values after typing `text` for `step`. Non-blank text is
@@ -4100,21 +4197,25 @@ defmodule RelayWeb.BoardLive do
   # refresh so the panel appears/disappears as the status changes and the
   # note sub-panel collapses after a transition.
   defp assign_review(socket, %Card{status: :in_review} = card) do
-    assign(socket,
+    socket
+    |> assign(
       review_gate: review_gate_info(socket, card),
       reject_open: false,
       reject_form: empty_reject_form(),
       reject_error: nil
     )
+    |> reset_images(:reject_images)
   end
 
   defp assign_review(socket, _card) do
-    assign(socket,
+    socket
+    |> assign(
       review_gate: nil,
       reject_open: false,
       reject_form: empty_reject_form(),
       reject_error: nil
     )
+    |> reset_images(:reject_images)
   end
 
   # Gate info for the review panel, or nil unless the card sits in a review-type stage —
@@ -5097,17 +5198,19 @@ defmodule RelayWeb.BoardLive do
           |> assign(:spec_form, nil)
           |> assign(:plan_form, nil)
           |> assign(:comment_form, empty_comment_form())
-          |> reset_note_images()
+          |> reset_images(:note_images)
           |> assign(:answer_form, empty_answer_form())
           |> assign(:body_loading?, true)
           |> assign(:question, nil)
           |> assign(:answer_questions, nil)
           |> assign(:answer_step, 0)
           |> assign(:answer_values, %{})
+          |> reset_images(:answer_images)
           |> assign(:review_gate, nil)
           |> assign(:reject_open, false)
           |> assign(:reject_form, empty_reject_form())
           |> assign(:reject_error, nil)
+          |> reset_images(:reject_images)
           |> close_header_popovers()
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
@@ -5166,7 +5269,9 @@ defmodule RelayWeb.BoardLive do
           body_loading?: false
         )
         |> reset_talk()
-        |> reset_note_images()
+        |> reset_images(:note_images)
+        |> reset_images(:reject_images)
+        |> reset_images(:answer_images)
         |> stream_notes([])
         |> stream(:activity, [], reset: true)
     end
@@ -5373,53 +5478,143 @@ defmodule RelayWeb.BoardLive do
 
   defp empty_comment_form, do: to_form(%{"body" => ""}, as: :comment)
 
-  # RE427 — a Note's images upload the moment they land (auto_upload), each into an unlinked
-  # attachment on the open card; Add note links them. LiveView's max_entries only counts entries
-  # still in flight, so check_new_note_images/1 enforces the per-note cap against the pending ones.
-  defp allow_note_images(socket) do
+  # RE427 / RE428 — images upload the moment they land (auto_upload), each into an unlinked
+  # attachment on the open card. One helper set serves every image upload — `:note_images` (the
+  # Notes composer; Add note links them), `:reject_images` (Request changes; Reject posts them
+  # as a FROM REJECTION note) and `:answer_images` (answering, per question; Send posts a
+  # FROM ANSWER · Q<n> note per question) — with one set of limits. LiveView's max_entries only counts entries
+  # still in flight, so check_new_images/2 enforces the per-note cap against the pending ones.
+  # A *linked* upload (link_box/1 names its image_attach_box) also has the box's `.ImagePaste`
+  # hook keep a `![name](url)` line per image in the textarea, driven by `image_link_*` pushes.
+  defp allow_image_upload(socket, name) do
     socket
-    |> allow_upload(:note_images,
+    |> allow_upload(name,
       accept: Attachment.image_types(),
       max_entries: Comment.max_images(),
       max_file_size: Attachment.max_bytes(),
       auto_upload: true,
-      progress: &handle_note_image_progress/3
+      progress: &handle_image_progress/3
     )
-    |> assign(note_images_pending: [], note_image_errors: [])
+    |> assign(pending_assign(name), no_pending(name))
+    |> assign(errors_assign(name), [])
+    |> assign_new(:announced_image_refs, fn -> MapSet.new() end)
   end
 
-  # A card switch, a close and a successful post all start the composer over. An entry still in
+  defp pending_assign(:note_images), do: :note_images_pending
+  defp pending_assign(:reject_images), do: :reject_images_pending
+  defp pending_assign(:answer_images), do: :answer_images_pending
+
+  defp errors_assign(:note_images), do: :note_image_errors
+  defp errors_assign(:reject_images), do: :reject_image_errors
+  defp errors_assign(:answer_images), do: :answer_image_errors
+
+  # The empty pending value: one list per box, except answers — one list per question (the
+  # stepper's 0-based step; the single answer box is step 0).
+  defp no_pending(:answer_images), do: %{}
+  defp no_pending(_name), do: []
+
+  # The image_attach_box whose textarea carries the upload's links; nil = no links.
+  defp link_box(:note_images), do: nil
+  defp link_box(:reject_images), do: "review-reject-images"
+  defp link_box(:answer_images), do: "needs-input-images"
+
+  # For answers, the images of the question on screen.
+  defp pending_images(socket, :answer_images),
+    do: Map.get(socket.assigns.answer_images_pending, socket.assigns.answer_step, [])
+
+  defp pending_images(socket, name), do: Map.fetch!(socket.assigns, pending_assign(name))
+
+  defp put_pending_image(socket, :answer_images, image), do: update_answer_images(socket, &(&1 ++ [image]))
+
+  defp put_pending_image(socket, name, image), do: update(socket, pending_assign(name), &(&1 ++ [image]))
+
+  defp remove_pending_image(socket, :answer_images, id),
+    do: update_answer_images(socket, &Enum.reject(&1, fn image -> image.id == id end))
+
+  defp remove_pending_image(socket, name, id),
+    do: update(socket, pending_assign(name), &Enum.reject(&1, fn image -> image.id == id end))
+
+  defp update_answer_images(%{assigns: %{answer_step: step}} = socket, fun),
+    do: update(socket, :answer_images_pending, &Map.put(&1, step, fun.(Map.get(&1, step, []))))
+
+  defp put_image_errors(socket, name, errors), do: assign(socket, errors_assign(name), errors)
+
+  defp add_image_error(socket, name, error),
+    do: put_image_errors(socket, name, Map.fetch!(socket.assigns, errors_assign(name)) ++ [error])
+
+  # A card switch, a close and a successful post all start the box over. An entry still in
   # flight belongs to the card being left, so it is cancelled rather than landing on the next one.
-  defp reset_note_images(socket) do
-    socket.assigns.uploads.note_images.entries
-    |> Enum.reduce(socket, &cancel_upload(&2, :note_images, &1.ref))
-    |> assign(note_images_pending: [], note_image_errors: [])
+  defp reset_images(socket, name) do
+    socket.assigns.uploads
+    |> Map.fetch!(name)
+    |> Map.fetch!(:entries)
+    |> Enum.reduce(socket, &cancel_upload(&2, name, &1.ref))
+    |> assign(pending_assign(name), no_pending(name))
+    |> put_image_errors(name, [])
   end
 
-  defp handle_note_image_progress(:note_images, entry, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+  defp handle_image_progress(name, entry, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     if entry.done? do
-      {:noreply, store_note_image(socket, card, entry)}
+      {:noreply, store_image(socket, name, card, entry)}
     else
       {:noreply, socket}
     end
   end
 
-  defp handle_note_image_progress(:note_images, entry, socket),
-    do: {:noreply, cancel_upload(socket, :note_images, entry.ref)}
+  defp handle_image_progress(name, entry, socket), do: {:noreply, cancel_upload(socket, name, entry.ref)}
 
-  defp store_note_image(socket, card, entry) do
+  defp store_image(socket, name, card, entry) do
     bytes = consume_uploaded_entry(socket, entry, &read_upload/1)
     attrs = %{filename: entry.client_name, content_type: entry.client_type, bytes: bytes}
+    socket = forget_announced(socket, entry.ref)
 
     case Attachments.create_attachment(card, attrs) do
       {:ok, attachment} ->
         image = %{id: attachment.id, filename: attachment.filename, src: Attachment.path(attachment.id)}
-        update(socket, :note_images_pending, &(&1 ++ [image]))
+
+        socket
+        |> put_pending_image(name, image)
+        |> push_link(name, "image_link_done", %{placeholder: image_placeholder(entry), markdown: image_link(image)})
 
       {:error, _changeset} ->
-        update(socket, :note_image_errors, &(&1 ++ ["#{entry.client_name} couldn’t be attached."]))
+        socket
+        |> add_image_error(name, "#{entry.client_name} couldn’t be attached.")
+        |> push_link(name, "image_link_failed", %{placeholder: image_placeholder(entry)})
     end
   end
+
+  # The ✕ on a thumbnail still uploading: the entry is dropped, and so is its placeholder line.
+  defp cancel_image(socket, name, ref) do
+    placeholders = for entry <- socket.assigns.uploads[name].entries, entry.ref == ref, do: image_placeholder(entry)
+
+    placeholders
+    |> Enum.reduce(socket, &push_link(&2, name, "image_link_failed", %{placeholder: &1}))
+    |> cancel_upload(name, ref)
+    |> forget_announced(ref)
+  end
+
+  # The ✕ on an uploaded thumbnail: it leaves the box (the attachment stays, unlinked), and its
+  # link leaves the text.
+  defp remove_image(socket, name, id) do
+    removed = Enum.filter(pending_images(socket, name), &(&1.id == id))
+
+    removed
+    |> Enum.reduce(socket, &push_link(&2, name, "image_link_remove", %{markdown: image_link(&1)}))
+    |> remove_pending_image(name, id)
+  end
+
+  defp image_placeholder(entry), do: RelayWeb.image_markdown("Uploading #{entry.client_name}…", "")
+
+  defp image_link(image), do: RelayWeb.image_markdown(image.filename, RelayWeb.attachment_url(image.id))
+
+  defp push_link(socket, name, event, payload) do
+    case link_box(name) do
+      nil -> socket
+      box -> push_event(socket, event, Map.put(payload, :box, box))
+    end
+  end
+
+  defp forget_announced(socket, ref), do: update(socket, :announced_image_refs, &MapSet.delete(&1, ref))
 
   # The temp file LiveView wrote the chunks to; it is deleted once the consume callback returns.
   # sobelow_skip ["Traversal.FileModule"]
@@ -5428,34 +5623,49 @@ defmodule RelayWeb.BoardLive do
   # Runs on the phx-change that announces newly chosen/dropped/pasted files (they are not yet
   # preflighted): refuses each bad file by name and anything past the note's room, cancelling them
   # so the rest of the batch still uploads. The typed text is untouched (it is the same change).
-  defp check_new_note_images(socket) do
-    conf = socket.assigns.uploads.note_images
+  # For a linked upload each accepted new file gets its placeholder line — once: a further change
+  # before its preflight (the hook's own `input`, a keystroke) must not announce it again.
+  defp check_new_images(socket, name) do
+    conf = socket.assigns.uploads[name]
 
     if Enum.all?(conf.entries, & &1.preflighted?) do
       socket
     else
       {bad, good} = Enum.split_with(conf.entries, &(upload_errors(conf, &1) != []))
-      room = max(Comment.max_images() - length(socket.assigns.note_images_pending), 0)
-      over = Enum.drop(good, room)
+      room = max(Comment.max_images() - length(pending_images(socket, name)), 0)
+      {accepted, over} = Enum.split(good, room)
 
       errors =
-        Enum.map(bad, &note_image_error(&1, upload_errors(conf, &1))) ++
+        Enum.map(bad, &image_error(&1, upload_errors(conf, &1))) ++
           if(over == [], do: [], else: [over_cap_error()])
 
       (bad ++ over)
-      |> Enum.reduce(socket, &cancel_upload(&2, :note_images, &1.ref))
-      |> assign(:note_image_errors, errors)
+      |> Enum.reduce(socket, &cancel_upload(&2, name, &1.ref))
+      |> put_image_errors(name, errors)
+      |> announce_images(name, Enum.reject(accepted, & &1.preflighted?))
     end
+  end
+
+  defp announce_images(socket, name, entries) do
+    Enum.reduce(entries, socket, fn entry, socket ->
+      if MapSet.member?(socket.assigns.announced_image_refs, entry.ref) or link_box(name) == nil do
+        socket
+      else
+        socket
+        |> update(:announced_image_refs, &MapSet.put(&1, entry.ref))
+        |> push_link(name, "image_link_placeholder", %{placeholder: image_placeholder(entry)})
+      end
+    end)
   end
 
   @mb 1_048_576
 
-  defp note_image_error(entry, [:too_large | _]) do
+  defp image_error(entry, [:too_large | _]) do
     size = :erlang.float_to_binary(entry.client_size / @mb, decimals: 1)
     "#{entry.client_name} is #{size} MB — the limit is #{div(Attachment.max_bytes(), @mb)} MB."
   end
 
-  defp note_image_error(entry, _not_accepted) do
+  defp image_error(entry, _not_accepted) do
     {last, rest} = List.pop_at(Attachment.image_type_names(), -1)
     "#{entry.client_name} isn’t an image (#{Enum.join(rest, ", ")} or #{last})."
   end

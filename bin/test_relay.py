@@ -467,6 +467,34 @@ class PrintCardTest(unittest.TestCase):
         self.assertNotIn("[image]", text)
         self.assertIn("  - Jeremy: no pics\n  - Jeremy: old server\n", text)
 
+    def test_print_card_tags_an_answer_image_note_with_its_question(self):
+        card = self.note_card({"body": None, "origin": {"kind": "answer", "question": 2}, "images": [
+            {"filename": "phone.png", "url": "/attachments/b2",
+             "download_path": "/api/attachments/b2"}]})
+        lines = self.print_with_url(card).splitlines()
+        i = lines.index("  - Jeremy · from answer Q2:")
+        self.assertEqual(lines[i:i + 2], ["  - Jeremy · from answer Q2:",
+                                          "    [image] phone.png http://x/api/attachments/b2"])
+
+    def test_print_card_tags_a_rejection_image_note(self):
+        card = self.note_card({"body": "", "origin": {"kind": "rejection"}, "images": [
+            {"filename": "tall.png", "url": "/attachments/d4",
+             "download_path": "/api/attachments/d4"}]})
+        self.assertIn("  - Jeremy · from rejection:", self.print_with_url(card).splitlines())
+
+    def test_print_card_tags_a_bodied_origin_note_after_the_author(self):
+        card = self.note_card({"body": "see", "origin": {"kind": "answer", "question": 1}})
+        self.assertIn("  - Jeremy · from answer Q1: see", self.print_with_url(card).splitlines())
+
+    def test_print_card_without_origin_prints_as_before(self):
+        card = self.note_card({"body": "see", "origin": None}, {"body": "see"})
+        lines = self.print_with_url(card).splitlines()
+        self.assertEqual(lines.count("  - Jeremy: see"), 2)
+
+    def test_print_card_reads_the_contract_pinned_origin(self):
+        self.assertIn("origin", CONTRACT["note_images"]["comment_entry"])
+        self.assertEqual(CONTRACT["note_images"]["origin_kinds"], ["answer", "rejection"])
+
     def test_print_card_reads_the_contract_pinned_note_image_keys(self):
         self.assertIn("images", CONTRACT["note_images"]["comment_entry"])
         self.assertTrue({"filename", "download_path", "url"}

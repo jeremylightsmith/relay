@@ -80,4 +80,18 @@ defmodule RelayWeb.AttachmentPathTest do
                Phoenix.Router.route_info(RelayWeb.Router, "GET", path, "localhost")
     end
   end
+
+  describe "attachment_url/1 and image_markdown/2 (RE428)" do
+    test "the absolute url is the endpoint url plus the attachment path" do
+      assert RelayWeb.attachment_url("x") == RelayWeb.Endpoint.url() <> "/attachments/x"
+    end
+
+    test "the markdown escapes the filename's brackets" do
+      assert RelayWeb.image_markdown("a[1].png", "http://h/attachments/x") == "![a\\[1\\].png](http://h/attachments/x)"
+    end
+
+    test "backslashes and closing parens are escaped too, as CardJSON always did" do
+      assert RelayWeb.image_markdown(~S"a\b).png", "/u") == ~S"![a\\b\).png](/u)"
+    end
+  end
 end

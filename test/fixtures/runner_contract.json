@@ -162,12 +162,17 @@
       "body",
       "images",
       "inserted_at",
-      "kind"
+      "kind",
+      "origin"
     ],
     "image": [
       "download_path",
       "filename",
       "url"
+    ],
+    "origin_kinds": [
+      "answer",
+      "rejection"
     ]
   },
   "outcome": {
@@ -377,7 +382,7 @@
       }
     }
   },
-  "version": 10,
+  "version": 11,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",

@@ -255,6 +255,39 @@ defmodule Relay.Push.TriggerTest do
       assert payload["kind"] == "in_review"
       refute_received {:push_delivered, _, _}
     end
+
+    # RE428: answer_input/4 runs its notes, answer and status flip in one transaction;
+    # the resume-into-:in_review push must still go out once it commits.
+    test "answering a :needs_input card in a review stage delivers the review push after commit" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      review_stage = insert(:stage, board: board, type: :review)
+      card = insert(:card, stage: review_stage, status: :needs_input)
+
+      assert {:ok, answered} = Cards.answer_input(card, "go ahead", :agent)
+      assert answered.status == :in_review
+
+      assert_received {:push_delivered, "tok-alice", payload}
+      assert payload["kind"] == "in_review"
+      refute_received {:push_delivered, _, _}
+    end
+
+    # RE428: reject/4 wraps its move in a transaction; a reject landing in a review-type
+    # target must still deliver the push move_card would have sent.
+    test "rejecting into a review-type target delivers the review push after commit" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      target = insert(:stage, board: board, type: :review, position: 0)
+      review = insert(:stage, board: board, type: :review, position: 1, reject_to_stage_id: target.id)
+      card = insert(:card, stage: review, status: :needs_input)
+
+      assert {:ok, rejected} = Cards.reject(card, "redo it", :agent)
+      assert rejected.status == :in_review
+
+      assert_received {:push_delivered, "tok-alice", payload}
+      assert payload["kind"] == "in_review"
+      refute_received {:push_delivered, _, _}
+    end
   end
 
   describe "card_status_changed/3 directly" do

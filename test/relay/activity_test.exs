@@ -168,6 +168,44 @@ defmodule Relay.ActivityTest do
     end
   end
 
+  describe "add_comment/2 with :origin (RE428)" do
+    setup %{card: card} do
+      %{image: insert(:attachment, card: card, filename: "shot.png")}
+    end
+
+    test "{:answer, 2} stores origin :answer and origin_question 2 on an image-only note",
+         %{card: card, user: user, image: image} do
+      assert {:ok, %Comment{} = c} =
+               Activity.add_comment(card, %{
+                 actor: {:user, user.id},
+                 body: "",
+                 image_ids: [image.id],
+                 origin: {:answer, 2}
+               })
+
+      assert c.origin == :answer
+      assert c.origin_question == 2
+      assert c.body == ""
+      assert Enum.map(c.images, & &1.id) == [image.id]
+      assert %Comment{origin: :answer, origin_question: 2} = Repo.get!(Comment, c.id)
+    end
+
+    test ":rejection stores origin :rejection and no origin_question", %{card: card, user: user, image: image} do
+      assert {:ok, c} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "", image_ids: [image.id], origin: :rejection})
+
+      assert c.origin == :rejection
+      assert c.origin_question == nil
+    end
+
+    test "without :origin both are nil", %{card: card, user: user, image: image} do
+      assert {:ok, c} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "", image_ids: [image.id]})
+
+      assert c.origin == nil
+      assert c.origin_question == nil
+    end
+  end
+
   describe "log/2" do
     test "persists an entry with type, meta, and actor, user preloaded", %{card: card, user: user} do
       assert {:ok, %Schemas.Activity{} = entry} =

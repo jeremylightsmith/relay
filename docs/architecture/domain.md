@@ -193,7 +193,12 @@ sharing behavior.
   `needs_input`, `failed`, …), sub-tasks, spec/plan/branch/pr fields, approve/reject
   (after a decision, `next_awaiting_review/4` names the next card in the lane awaiting review —
   `Schemas.Card.awaiting_review?/1` — in `stage_column/2` order, wrapping, for the review drawer
-  to advance to, RE388), needs-input questions. `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
+  to advance to, RE388), needs-input questions. `answer_input/4` (`image_notes:
+  [{question_number, image_ids}]`) and `reject/4` (`image_ids:`) post each non-empty image
+  list as an image-only note tagged with its origin (`{:answer, n}` / `:rejection`) *before*
+  the answer / changes-requested comment, all in one `Repo.transaction` — a failed answer or
+  reject (or a bad image id) leaves no note behind; empty opts behave exactly as `/3` (RE428).
+  `failed` (RLY-179) is set only by `Relay.Cards.mark_failed/3` when a
   run ends terminally — a separate path from `needs_input`'s genuine question.
   **Tasks** (RE355) are addressable `sub_tasks` rows with a nullable markdown `body`:
   `list_tasks/1`, `get_task/2`, `add_tasks/2`, `update_task/3` and `delete_task/2` write one row
@@ -363,6 +368,10 @@ sharing behavior.
   nothing persists). Every comment it returns or broadcasts — and every comment from
   `list_timeline/1` / `list_conversation/1` — has `:images` preloaded in position order; the
   `{:timeline_appended, …}` broadcast is sent only after the comment and its links commit.
+  It also takes an optional programmatic `:origin` (RE428) — `nil` | `:rejection` |
+  `{:answer, n}` — stored as `comments.origin` (`Ecto.Enum` over `Schemas.Comment.origins/0`,
+  the one definition) + `comments.origin_question` (set only for `:answer`, ≥ 1; the changeset
+  errors on `:origin_question` otherwise). Neither is ever cast from input.
 - **AgentLog** — stateless live relay of runner feed lines to the board's log sheet
   (subscribe-only; no server buffer, no backfill — RLY-55).
 - **Events** — the realtime seam: contexts broadcast semantic domain events after each
@@ -388,20 +397,44 @@ sharing behavior.
   are second-precision, so they can't order it) link it to the comment, and `Schemas.Comment`
   `has_many :images`. An image is uploaded unlinked the moment it lands and linked only by
   `Relay.Activity.add_comment/2`; uploads whose note never posts stay unlinked (no cleanup yet).
-  The web composer is BoardLive's `:note_images` upload (`auto_upload`, `progress:` callback →
-  `Relay.Attachments.create_attachment/2` on the open card, appended to `@note_images_pending`);
-  `validate_comment` enforces the per-note cap against the pending ones (LiveView's `max_entries`
-  only counts entries in flight) and refuses bad files by name into `@note_image_errors`;
-  `post_comment` passes the pending ids as `image_ids` and refuses while an entry is in flight.
-  The control is `CoreComponents.image_attach_box/1` + `image_attach_button/1` +
-  `image_attach_hint/1` (drop target, ⌘V `.ImagePaste` hook) — desktop web only: below the
-  `drawer:` breakpoint and in the native embed the composer is view-only.
+  BoardLive has three image uploads sharing ONE helper set and one set of limits
+  (`allow_image_upload/2`, `check_new_images/2`, `reset_images/2`, … keyed by upload name):
+  `:note_images` (the Notes composer) and (RE428) `:reject_images` (the Request-changes note) and
+  `:answer_images` (the needs-input answer, per question).
+  Each is `auto_upload` with a `progress:` callback → `Relay.Attachments.create_attachment/2` on
+  the open card, appended to `@note_images_pending` / `@reject_images_pending` /
+  `@answer_images_pending` — the last a map from the 0-based stepper step (the single answer box
+  is step 0) to that question's list, so each question has its own cap; the box's
+  `phx-change` (`validate_comment` / `review_reject_change` / `answer_custom` / `answer_change`)
+  enforces the per-note cap against the
+  pending ones (LiveView's `max_entries` only counts entries in flight) and refuses bad files by
+  name into `@note_image_errors` / `@reject_image_errors` / `@answer_image_errors`. `post_comment`
+  passes the pending ids as
+  `image_ids`; `review_reject` passes them to `Relay.Cards.reject/4` (`image_ids:`), which posts
+  them as one `origin: :rejection` note atomically with the rejection; Send to AI (`answer_submit`
+  / `answer_input`) passes `image_notes: [{question, ids}]` to `Relay.Cards.answer_input/4`, which
+  posts one `origin: :answer` note per question with images, atomically with the answer. All
+  refuse to submit while an entry is in flight, and the stepper also holds its step (Back / Next /
+  an option click commit nothing) so a finishing upload belongs to the question on screen. The control is `CoreComponents.image_attach_box/1` +
+  `image_attach_button/1` + `image_attach_hint/1` (drop target, ⌘V `.ImagePaste` hook) — desktop
+  web only: below the `drawer:` breakpoint and in the native embed it is view-only. A box with a
+  `link_target` (the reject note, `#review-reject-images` → `#review-request-note`; the answer,
+  `#needs-input-images` → `#needs-input-text` / `#needs-input-answer`) keeps the
+  GitHub-style links: the server pushes `image_link_placeholder` `%{box, placeholder}` when a file
+  is accepted, `image_link_done` `%{box, placeholder, markdown}` once stored (`markdown` =
+  `RelayWeb.image_markdown/2` over the absolute `RelayWeb.attachment_url/1`), `image_link_failed`
+  `%{box, placeholder}` on a failed store or a cancelled upload, and `image_link_remove`
+  `%{box, markdown}` on ✕; the hook edits the textarea and dispatches `input`, so the form's
+  `phx-change` stores the text server-side. The Notes list tags an image note's origin with
+  `CoreComponents.note_origin_tag/1` (`FROM ANSWER · Q<n>` / `FROM REJECTION`).
   The policy values live once: `Schemas.Comment.max_images/0` (6), `Schemas.Attachment.max_bytes/0`
   (the 5 MB cap) and `Schemas.Attachment.image_type_names/0` (display names of `image_types/0`,
   same order). On the card API every comment timeline entry carries
   `images: [%{filename, url, download_path}]` (`url` = `/attachments/<id>`, `download_path` =
-  `/api/attachments/<id>`; `[]` when none) — the key sets are pinned under
-  `runner_contract.json`'s `note_images`. Images are served under the app-wide CSP. **HTML** gets its own
+  `/api/attachments/<id>`; `[]` when none) and (RE428) `origin` — `null` |
+  `{"kind": "answer", "question": n}` | `{"kind": "rejection"}`, always present — the key sets
+  and the origin kinds (`origin_kinds`) are pinned under `runner_contract.json`'s `note_images`;
+  `./relay card` prints the origin after the author (`· from answer Q2` / `· from rejection`). Images are served under the app-wide CSP. **HTML** gets its own
   branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
   `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
   'unsafe-inline' https://fonts.googleapis.com; img-src data:; font-src data:

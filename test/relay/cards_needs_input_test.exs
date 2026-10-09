@@ -206,6 +206,64 @@ defmodule Relay.CardsNeedsInputTest do
     end
   end
 
+  describe "answer_input/4 with image_notes (RE428)" do
+    setup %{ai_stage: stage} do
+      user = insert(:user)
+      {:ok, card} = Cards.create_card(stage, %{title: "Two questions"})
+
+      {:ok, card} =
+        Cards.request_input(card, [%{"prompt" => "Which region?"}, %{"prompt" => "Which phone?"}])
+
+      %{card: card, user: user}
+    end
+
+    test "posts one origin-tagged image note per question in order, then the answer",
+         %{card: card, user: user} do
+      a = insert(:attachment, card: card, filename: "a.png")
+      b = insert(:attachment, card: card, filename: "b.png")
+      c = insert(:attachment, card: card, filename: "c.png")
+      answer = "1. Which region? → x\n2. Which phone? → y"
+
+      assert {:ok, %Card{status: :working}} =
+               Cards.answer_input(card, answer, {:user, user.id}, image_notes: [{1, [b.id, c.id]}, {2, [a.id]}])
+
+      [_question, note1, note2, answer_comment] = Activity.list_conversation(card)
+
+      assert %Comment{origin: :answer, origin_question: 1, body: "", user_id: user_id} = note1
+      assert user_id == user.id
+      assert Enum.map(note1.images, & &1.id) == [b.id, c.id]
+      assert %Comment{origin: :answer, origin_question: 2, body: ""} = note2
+      assert Enum.map(note2.images, & &1.id) == [a.id]
+      assert %Comment{body: ^answer, origin: nil, origin_question: nil, images: []} = answer_comment
+
+      assert card |> Activity.list_timeline() |> Enum.count(&match?(%Schemas.Activity{type: :input_answered}, &1)) == 1
+    end
+
+    test "a blank answer rolls back the image notes", %{card: card, user: user} do
+      a = insert(:attachment, card: card, filename: "a.png")
+      before = length(Activity.list_conversation(card))
+
+      assert {:error, %Ecto.Changeset{}} = Cards.answer_input(card, "   ", {:user, user.id}, image_notes: [{1, [a.id]}])
+
+      assert length(Activity.list_conversation(card)) == before
+      assert Repo.get!(Schemas.Attachment, a.id).comment_id == nil
+      assert Repo.get!(Card, card.id).status == :needs_input
+    end
+
+    test "an image from another card is an :images error and nothing is answered", %{card: card, user: user} do
+      foreign = insert(:attachment, card: insert(:card))
+      before = length(Activity.list_conversation(card))
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Cards.answer_input(card, "ok", {:user, user.id}, image_notes: [{1, [foreign.id]}])
+
+      assert errors_on(changeset)[:images]
+      assert length(Activity.list_conversation(card)) == before
+      refute Enum.any?(Activity.list_conversation(card), &(&1.body == "ok"))
+      assert Repo.get!(Card, card.id).status == :needs_input
+    end
+  end
+
   describe "blocked_since across the other status paths" do
     test "set_status into :needs_input stamps blocked_since without any question entry",
          %{ai_stage: stage} do

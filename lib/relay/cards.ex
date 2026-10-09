@@ -2306,23 +2306,39 @@ defmodule Relay.Cards do
   card to the destination (arrival status via `move_card/4`'s snap), posts `note` as a comment,
   logs a `:rejected` entry, and sets the single open `rejection` embed. Returns `{:ok, card}` or
   `{:error, :not_in_review | :missing_note | :invalid_target | changeset}`.
+
+  RE428 — `opts[:image_ids]` (default `[]`): image attachments on this card, posted first as
+  one image note from `actor` with `origin: :rejection`. The note and the reject are one
+  transaction: any failure (including a bad image id or too many images — the note's
+  changeset) leaves neither behind. `note` itself is unchanged.
   """
-  def reject(%Card{} = card, note, actor \\ :agent) when is_binary(note) do
+  def reject(%Card{} = card, note, actor \\ :agent, opts \\ []) when is_binary(note) do
     stage = current_stage(card)
 
     cond do
       stage.type != :review -> {:error, :not_in_review}
       String.trim(note) == "" -> {:error, :missing_note}
-      true -> do_reject(card, stage, note, actor)
+      true -> do_reject(card, stage, note, actor, Keyword.get(opts, :image_ids, []))
     end
   end
 
-  defp do_reject(card, stage, note, actor) do
+  defp do_reject(card, stage, note, actor, image_ids) do
     from_stage = current_main_stage(card)
 
     case reject_destination(stage, from_stage) do
-      nil -> {:error, :invalid_target}
-      %Stage{} = target -> move_and_reject(card, from_stage, target, note, actor)
+      nil ->
+        {:error, :invalid_target}
+
+      %Stage{} = target ->
+        fn -> note_images_and_reject(card, from_stage, target, note, actor, image_ids) end
+        |> in_transaction()
+        |> maybe_notify(card.status, actor)
+    end
+  end
+
+  defp note_images_and_reject(card, from_stage, target, note, actor, image_ids) do
+    with :ok <- post_image_note(card, actor, :rejection, image_ids) do
+      move_and_reject(card, from_stage, target, note, actor)
     end
   end
 
@@ -2529,13 +2545,58 @@ defmodule Relay.Cards do
   timeline; no new endpoint. The comment posts first, so a blank answer
   fails before any status change. Reuses `set_status`/`Relay.Activity`,
   so the usual events fire (MMF 18).
+
+  RE428 — `opts[:image_notes]` (default `[]`) is `[{question_number, image_ids}]`: for each
+  non-empty list, in ascending question order, one image note from `actor` tagged
+  `origin: {:answer, question_number}` posts before the answer. Notes and answer are one
+  transaction — a blank answer or a bad image id (the note's changeset) leaves nothing behind.
   """
-  def answer_input(%Card{} = card, answer, actor \\ :agent) when is_binary(answer) do
-    with {:ok, _comment} <- Activity.add_comment(card, %{actor: actor, body: answer}),
-         {:ok, updated} <- set_status(card, %{status: resume_status(card)}, actor),
-         {:ok, _entry} <- Activity.log(updated, %{type: :input_answered, actor: actor}) do
-      {:ok, updated}
+  def answer_input(%Card{} = card, answer, actor \\ :agent, opts \\ []) when is_binary(answer) do
+    image_notes = opts |> Keyword.get(:image_notes, []) |> Enum.sort_by(&elem(&1, 0))
+
+    fn ->
+      with :ok <- post_answer_image_notes(card, actor, image_notes),
+           {:ok, _comment} <- Activity.add_comment(card, %{actor: actor, body: answer}),
+           {:ok, updated} <- set_status(card, %{status: resume_status(card)}, actor),
+           {:ok, _entry} <- Activity.log(updated, %{type: :input_answered, actor: actor}) do
+        {:ok, updated}
+      end
     end
+    |> in_transaction()
+    |> maybe_notify(card.status, actor)
+  end
+
+  defp post_answer_image_notes(card, actor, image_notes) do
+    Enum.reduce_while(image_notes, :ok, fn {question, image_ids}, :ok ->
+      case post_image_note(card, actor, {:answer, question}, image_ids) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  # RE428 — an image-only note carrying where it came from; nothing to post without images.
+  defp post_image_note(_card, _actor, _origin, []), do: :ok
+
+  defp post_image_note(card, actor, origin, image_ids) do
+    case Activity.add_comment(card, %{actor: actor, body: "", image_ids: image_ids, origin: origin}) do
+      {:ok, _note} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  # Runs `fun` (returning `{:ok, value} | {:error, reason}`) in one transaction, rolling back
+  # everything it wrote on an error and returning that same error. Relay.Push.dispatch/1 refuses
+  # to fire inside an open transaction (RLY-81), so any set_status inside `fun` sends no push:
+  # callers re-run maybe_notify/3 with the pre-transaction status once this commits, exactly as
+  # move_card/4 does.
+  defp in_transaction(fun) do
+    Repo.transaction(fn ->
+      case fun.() do
+        {:ok, value} -> value
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   # Where an answered card resumes: the stage type's default status decides

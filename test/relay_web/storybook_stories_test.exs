@@ -59,6 +59,24 @@ defmodule RelayWeb.StorybookStoriesTest do
     assert read("_core_components.index.exs") =~ ~s|def entry("note_image_row")|
   end
 
+  test "note_origin_tag story covers both origins and is indexed (RE428)" do
+    src = read("note_origin_tag.story.exs")
+
+    for id <- ~w(:from_answer :from_rejection), do: assert(src =~ "id: #{id}", "note_origin_tag story is missing #{id}")
+
+    assert src =~ "&RelayWeb.CoreComponents.note_origin_tag/1"
+    assert read("_core_components.index.exs") =~ ~s|def entry("note_origin_tag")|
+  end
+
+  test "the review panel and drawer stories show the RE428 image states" do
+    assert read("card_review_panel.story.exs") =~ "id: :drawer_reject_with_images"
+    assert read("card_drawer.story.exs") =~ "id: :notes_with_origin_tags"
+  end
+
+  test "the needs-input panel story shows the RE428 answer images" do
+    assert read("needs_input_panel.story.exs") =~ "id: :question_stepper_with_images"
+  end
+
   test "image_attach_box story covers every image-control state and is indexed (RE427)" do
     src = read("image_attach_box.story.exs")
 

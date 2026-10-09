@@ -5099,6 +5099,94 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "note_origin_tag/1 (RE428)" do
+    @origin_tag_classes "rounded bg-base-200 px-1.5 py-px font-mono text-[9.5px] font-semibold tracking-[0.04em] text-base-content/60"
+
+    defp origin_doc(attrs) do
+      (&CoreComponents.note_origin_tag/1) |> render_component(Map.merge(%{id: "t"}, attrs)) |> LazyHTML.from_fragment()
+    end
+
+    test "an answer note's tag names its question" do
+      doc = origin_doc(%{origin: :answer, question: 2})
+
+      assert count(doc, "span#t") == 1
+      assert doc |> LazyHTML.query("span#t") |> LazyHTML.text() |> String.trim() == "FROM ANSWER · Q2"
+      assert classes(doc, "span#t") == @origin_tag_classes
+    end
+
+    test "a rejection note's tag" do
+      doc = origin_doc(%{origin: :rejection, question: nil})
+
+      assert doc |> LazyHTML.query("span#t") |> LazyHTML.text() |> String.trim() == "FROM REJECTION"
+      assert classes(doc, "span#t") == @origin_tag_classes
+    end
+
+    test "an ordinary note renders nothing" do
+      assert (&CoreComponents.note_origin_tag/1) |> render_component(id: "t", origin: nil) |> String.trim() == ""
+    end
+  end
+
+  describe "image_attach_box/1 link_target and image_attach_button/1 label (RE428)" do
+    defp story_upload do
+      %Phoenix.LiveView.UploadConfig{
+        name: :reject_images,
+        ref: "phx-test-reject-images",
+        accept: Enum.join(Schemas.Attachment.image_types(), ","),
+        max_entries: Schemas.Comment.max_images(),
+        max_file_size: Schemas.Attachment.max_bytes(),
+        auto_upload?: true,
+        entries: []
+      }
+    end
+
+    defp box_doc(attrs) do
+      assigns = Map.merge(%{upload: story_upload()}, attrs)
+
+      ~H"""
+      <CoreComponents.image_attach_box id="box" upload={@upload} {Map.take(assigns, [:link_target])}>
+        <textarea id="note"></textarea>
+      </CoreComponents.image_attach_box>
+      """
+      |> rendered_to_string()
+      |> LazyHTML.from_fragment()
+    end
+
+    test "a linked box names its textarea in data-link-target" do
+      assert attr_of(box_doc(%{link_target: "review-request-note"}), "#box", "data-link-target") == [
+               "review-request-note"
+             ]
+    end
+
+    test "an unlinked box (the Notes composer) has no data-link-target" do
+      assert attr_of(box_doc(%{}), "#box", "data-link-target") == []
+    end
+
+    test "a labelled 📎 shows its text and stays hidden below drawer:" do
+      doc =
+        (&CoreComponents.image_attach_button/1)
+        |> render_component(id: "attach", upload: story_upload(), label: "Attach images")
+        |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#attach > span:not(.sr-only)") |> LazyHTML.text() |> String.trim() ==
+               "Attach images"
+
+      cls = doc |> classes("#attach") |> String.split()
+      for c <- ~w(hidden drawer:inline-flex), do: assert(c in cls, "button lacks #{c}: #{inspect(cls)}")
+    end
+
+    test "an unlabelled 📎 is RE427's icon button with sr-only text" do
+      doc =
+        (&CoreComponents.image_attach_button/1)
+        |> render_component(id: "attach", upload: story_upload())
+        |> LazyHTML.from_fragment()
+
+      assert count(doc, "#attach .hero-paper-clip") == 1
+      assert doc |> LazyHTML.query("#attach > span.sr-only") |> LazyHTML.text() |> String.trim() == "Attach images"
+      assert count(doc, "#attach > span:not(.sr-only):not(.hero-paper-clip)") == 0
+      assert "w-[27px]" in (doc |> classes("#attach") |> String.split())
+    end
+  end
+
   describe "mockup_viewer_header/1 count_noun (RE427)" do
     test "the count reads '<noun> n of N' and no noun label renders" do
       doc =

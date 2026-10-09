@@ -79,6 +79,31 @@ defmodule RelayWeb.Api.CardControllerTest do
       assert entry["images"] == []
     end
 
+    test "GET /api/cards/:ref gives each comment its origin (RE428)", %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      user = insert(:user)
+      a = insert(:attachment, card: card, filename: "a.png")
+      b = insert(:attachment, card: card, filename: "b.png")
+
+      {:ok, _} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "plain note"})
+
+      {:ok, _} =
+        Activity.add_comment(card, %{actor: {:user, user.id}, body: "", image_ids: [a.id], origin: {:answer, 2}})
+
+      {:ok, _} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "", image_ids: [b.id], origin: :rejection})
+
+      body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+      comments = Enum.filter(body["timeline"], &(&1["kind"] == "comment"))
+
+      assert Enum.all?(comments, &Map.has_key?(&1, "origin"))
+
+      assert Enum.map(comments, & &1["origin"]) == [
+               nil,
+               %{"kind" => "answer", "question" => 2},
+               %{"kind" => "rejection"}
+             ]
+    end
+
     test "POST /api/cards/:ref/comments responds with images: []", %{conn: conn, board: board, stage: stage} do
       card = insert(:card, stage: stage)
 

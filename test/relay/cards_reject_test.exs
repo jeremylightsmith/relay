@@ -185,4 +185,60 @@ defmodule Relay.CardsRejectTest do
       assert done.rejection == nil
     end
   end
+
+  describe "reject/4 with image_ids (RE428)" do
+    setup %{board: board, review: review} do
+      user = insert(:user)
+      insert(:membership, board: board, user: user, email: user.email)
+      card = insert(:card, stage: review)
+      {:ok, card} = Cards.set_status(card, %{status: :in_review})
+      %{card: card, user: user}
+    end
+
+    test "posts a :rejection image note before the changes-requested comment", %{card: card, user: user, code: code} do
+      a = insert(:attachment, card: card, filename: "a.png")
+      b = insert(:attachment, card: card, filename: "b.png")
+      note = "too tall: ![a.png](http://h/attachments/A)"
+
+      assert {:ok, %Card{} = rejected} = Cards.reject(card, note, {:user, user.id}, image_ids: [a.id, b.id])
+
+      assert rejected.stage_id == code.id
+      assert rejected.rejection.note == note
+
+      assert [image_note, changes] = Activity.list_conversation(card)
+      assert %Schemas.Comment{origin: :rejection, origin_question: nil, body: ""} = image_note
+      assert Enum.map(image_note.images, & &1.id) == [a.id, b.id]
+      assert %Schemas.Comment{kind: :changes_requested, body: ^note, origin: nil} = changes
+    end
+
+    test "a blank note is :missing_note and persists nothing", %{card: card, user: user} do
+      a = insert(:attachment, card: card, filename: "a.png")
+
+      assert {:error, :missing_note} = Cards.reject(card, "  ", {:user, user.id}, image_ids: [a.id])
+
+      assert Activity.list_conversation(card) == []
+      assert Repo.get!(Schemas.Attachment, a.id).comment_id == nil
+    end
+
+    test "outside a review stage is :not_in_review and persists nothing", %{code: code, user: user} do
+      card = insert(:card, stage: code)
+      a = insert(:attachment, card: card, filename: "a.png")
+
+      assert {:error, :not_in_review} = Cards.reject(card, "fix", {:user, user.id}, image_ids: [a.id])
+
+      assert Activity.list_conversation(card) == []
+      assert Repo.get!(Schemas.Attachment, a.id).comment_id == nil
+    end
+
+    test "too many images rolls back the whole reject", %{card: card, user: user, review: review} do
+      ids = for n <- 1..7, do: insert(:attachment, card: card, filename: "#{n}.png").id
+
+      assert {:error, %Ecto.Changeset{}} = Cards.reject(card, "fix", {:user, user.id}, image_ids: ids)
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.stage_id == review.id
+      assert reloaded.rejection == nil
+      assert Activity.list_conversation(card) == []
+    end
+  end
 end

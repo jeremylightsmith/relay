@@ -2141,6 +2141,30 @@ defmodule RelayWeb.CoreComponents do
   def image_query(id), do: "?image=#{id}"
 
   @doc """
+  An image note's origin tag (RE428), in the Notes row after the `<time>`: `FROM ANSWER · Q<n>` for
+  the images attached while answering question n, `FROM REJECTION` for those attached to Request
+  changes. An ordinary note (`origin` nil) renders nothing.
+  """
+  attr :id, :string, required: true
+  attr :origin, :atom, values: [nil | Schemas.Comment.origins()], default: nil
+  attr :question, :integer, default: nil, doc: "the 1-based question number of an `:answer` origin"
+
+  def note_origin_tag(assigns) do
+    ~H"""
+    <span
+      :if={@origin}
+      id={@id}
+      class="rounded bg-base-200 px-1.5 py-px font-mono text-[9.5px] font-semibold tracking-[0.04em] text-base-content/60"
+    >
+      {note_origin_label(@origin, @question)}
+    </span>
+    """
+  end
+
+  defp note_origin_label(:answer, question), do: "FROM ANSWER · Q#{question}"
+  defp note_origin_label(:rejection, _question), do: "FROM REJECTION"
+
+  @doc """
   A posted note's images (RE427): a wrapping row of 108px-tall thumbnails, each patching to the
   same-tab viewer (`image_href.(attachment.id)`). Renders nothing for a note without images. It sits
   OUTSIDE the note's `.md` body, so the RE322 markdown lightbox never claims its clicks.
@@ -2200,6 +2224,13 @@ defmodule RelayWeb.CoreComponents do
   attr :cancel_event, :string, default: "cancel_note_image"
   attr :remove_event, :string, default: "remove_note_image"
   attr :enabled, :boolean, default: true, doc: "false in the native embed: no drop target, no paste hook"
+
+  attr :link_target, :string,
+    default: nil,
+    doc:
+      "RE428: the DOM id of the textarea whose `![name](url)` links the hook maintains from the " <>
+        "server's `image_link_*` push events; nil (the Notes composer) = no link handling"
+
   attr :class, :any, default: nil, doc: "extra classes (Storybook forces `phx-drop-target-active`)"
   slot :inner_block, required: true
 
@@ -2212,6 +2243,7 @@ defmodule RelayWeb.CoreComponents do
       phx-drop-target={@enabled && @upload && @upload.ref}
       phx-hook=".ImagePaste"
       data-upload-name={@enabled && @upload && @upload.name}
+      data-link-target={@link_target}
       class={
         # A colocated hook's name is only rewritten when `phx-hook` is a literal, so the hook is
         # always attached; without `data-upload-name` (disabled) it does nothing. Enum.reject:
@@ -2274,12 +2306,74 @@ defmodule RelayWeb.CoreComponents do
             this.el.addEventListener("paste", this.onPaste)
             this.el.addEventListener("dragover", this.onDrag, true)
             this.el.addEventListener("drop", this.onDrag, true)
+            if (this.el.dataset.linkTarget) this.linkImages()
           },
+          // RE428 — a linked box keeps one `![name](url)` line per image in its textarea. The
+          // server pushes the edits (every payload names its box); the hook makes them and
+          // dispatches `input`, so the form's phx-change stores the text server-side — LiveView
+          // never overwrites a focused textarea, so the server could not do it itself.
+          linkImages() {
+            this.caret = null
+            // Only the human's own caret moves: the hook's synthetic `input` is not trusted.
+            this.onCaret = (e) => { if (e.isTrusted) this.caret = this.note().selectionEnd }
+            this.note().addEventListener("keyup", this.onCaret)
+            this.note().addEventListener("click", this.onCaret)
+            this.note().addEventListener("input", this.onCaret)
+            const mine = (handler) => (payload) => { if (payload.box === this.el.id) handler(payload) }
+            this.handleEvent("image_link_placeholder", mine(({ placeholder }) => this.insert(placeholder)))
+            this.handleEvent("image_link_done", mine(({ placeholder, markdown }) => this.replace(placeholder, markdown)))
+            this.handleEvent("image_link_failed", mine(({ placeholder }) => this.remove(placeholder)))
+            this.handleEvent("image_link_remove", mine(({ markdown }) => this.remove(markdown)))
+          },
+          note() { return document.getElementById(this.el.dataset.linkTarget) },
+          // On its own line at the last caret (the end if the note never had focus).
+          insert(text) {
+            const note = this.note()
+            const value = note.value
+            const at = this.caret == null ? value.length : Math.min(this.caret, value.length)
+            const before = at > 0 && value[at - 1] !== "\n" ? "\n" : ""
+            const after = at < value.length && value[at] !== "\n" ? "\n" : ""
+            note.value = value.slice(0, at) + before + text + after + value.slice(at)
+            this.caret = at + before.length + text.length
+            this.changed(note)
+          },
+          // The first occurrence only; nothing if the human deleted it.
+          replace(text, by) {
+            const note = this.note()
+            const at = note.value.indexOf(text)
+            if (at < 0) return
+            note.value = note.value.slice(0, at) + by + note.value.slice(at + text.length)
+            if (this.caret != null && this.caret > at) this.caret += by.length - text.length
+            this.changed(note)
+          },
+          // The first occurrence, and its line when that leaves the line blank.
+          remove(text) {
+            const note = this.note()
+            let value = note.value
+            const at = value.indexOf(text)
+            if (at < 0) return
+            value = value.slice(0, at) + value.slice(at + text.length)
+            const start = value.lastIndexOf("\n", at - 1) + 1
+            const newline = value.indexOf("\n", at)
+            const end = newline < 0 ? value.length : newline
+            if (value.slice(start, end).trim() === "") {
+              value = start > 0 ? value.slice(0, start - 1) + value.slice(end) : value.slice(Math.min(end + 1, value.length))
+            }
+            note.value = value
+            this.caret = null
+            this.changed(note)
+          },
+          changed(note) { note.dispatchEvent(new Event("input", { bubbles: true })) },
           destroyed() {
             if (!this.onPaste) return
             this.el.removeEventListener("paste", this.onPaste)
             this.el.removeEventListener("dragover", this.onDrag, true)
             this.el.removeEventListener("drop", this.onDrag, true)
+            const note = this.onCaret && this.note()
+            if (!note) return
+            note.removeEventListener("keyup", this.onCaret)
+            note.removeEventListener("click", this.onCaret)
+            note.removeEventListener("input", this.onCaret)
           }
         }
       </script>
@@ -2314,6 +2408,24 @@ defmodule RelayWeb.CoreComponents do
   """
   attr :upload, :any, required: true, doc: "the `Phoenix.LiveView.UploadConfig`"
   attr :id, :string, default: nil
+
+  attr :label, :string,
+    default: nil,
+    doc: "RE428: visible text after the icon (the reject note's attach bar); nil = the icon-only button"
+
+  def image_attach_button(%{label: label} = assigns) when is_binary(label) do
+    ~H"""
+    <label
+      id={@id}
+      title="Attach images (or paste / drop)"
+      class="btn btn-ghost btn-xs hidden gap-1 px-1 text-[11px] font-normal text-base-content/60 drawer:inline-flex"
+    >
+      <.icon name="hero-paper-clip" class="size-[15px]" />
+      <span>{@label}</span>
+      <.live_file_input upload={@upload} class="sr-only" />
+    </label>
+    """
+  end
 
   def image_attach_button(assigns) do
     ~H"""
@@ -4265,6 +4377,18 @@ defmodule RelayWeb.CoreComponents do
 
   attr :note_image_errors, :list, default: [], doc: "RE427: the Notes composer's refused-image sentences"
 
+  attr :reject_images_pending, :list,
+    default: [],
+    doc: "RE428: the Request-changes box's uploaded-but-unsent images, `[%{id, filename, src}]`"
+
+  attr :reject_image_errors, :list, default: [], doc: "RE428: the Request-changes box's refused-image sentences"
+
+  attr :answer_images_pending, :map,
+    default: %{},
+    doc: "RE428: the answer's uploaded-but-unsent images per 0-based question, `%{step => [%{id, filename, src}]}`"
+
+  attr :answer_image_errors, :list, default: [], doc: "RE428: the answer box's refused-image sentences"
+
   attr :attachment_types, :map,
     default: %{},
     doc:
@@ -4775,6 +4899,11 @@ defmodule RelayWeb.CoreComponents do
                   reject_form={@reject_form}
                   reject_error={@reject_error}
                   embed={@embed}
+                  uploads={@uploads}
+                  reject_images_pending={@reject_images_pending}
+                  reject_image_errors={@reject_image_errors}
+                  answer_images_pending={@answer_images_pending}
+                  answer_image_errors={@answer_image_errors}
                 />
                 <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
                   <.section_label accent="text-secondary">AI Result</.section_label>
@@ -5080,6 +5209,11 @@ defmodule RelayWeb.CoreComponents do
                             >
                               {TimeAgo.ago(comment.inserted_at)}
                             </time>
+                            <.note_origin_tag
+                              id={"#{dom_id}-origin"}
+                              origin={comment.origin}
+                              question={comment.origin_question}
+                            />
                             <span
                               :if={comment.kind in [:question, :changes_requested]}
                               class="font-mono"
@@ -5928,6 +6062,15 @@ defmodule RelayWeb.CoreComponents do
   attr :answer_form, :any, default: nil
   attr :body_loading, :boolean, default: false
 
+  attr :upload, :any,
+    default: nil,
+    doc:
+      "RE428: the `:answer_images` `Phoenix.LiveView.UploadConfig`; nil (the native embed, " <>
+        "Storybook without one) = no 📎, drop target or paste"
+
+  attr :images_pending, :list, default: [], doc: "RE428: the current question's uploaded images, `[%{id, filename, src}]`"
+  attr :image_errors, :list, default: [], doc: "RE428: the answer box's refused-image sentences"
+
   attr :park_kind, :atom,
     default: :question,
     values: [:question, :escalation, :infrastructure],
@@ -6117,30 +6260,40 @@ defmodule RelayWeb.CoreComponents do
           phx-submit="answer_commit"
         >
           <input type="hidden" name="answer[index]" value={@answer_step} />
-          <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. data-step/data-value let SubmitOnCmdEnter reset the (focused, reused) box when the step changes. --%>
-          <textarea
-            id="needs-input-text"
-            name="answer[text]"
-            rows="3"
-            autocomplete="off"
-            phx-hook="SubmitOnCmdEnter"
-            data-step={@answer_step}
-            data-value={
-              stepper_custom_text(@answer_values, @answer_step, @stepper_question["options"])
-            }
-            placeholder={
-              if(@stepper_question["options"] == [],
-                do: "Type your answer…",
-                else: "Or type your own…"
-              )
-            }
-            class="w-full resize-none rounded-[7px] p-[9px] text-[13px] leading-[1.45] outline-none"
-            style="border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
-          ><%= stepper_custom_text(
-            @answer_values,
-            @answer_step,
-            @stepper_question["options"]
-          ) %></textarea>
+          <%!-- RE428 — the answer sits in the shared image control, per question: each image
+          uploads at once and the box's hook keeps an absolute `![name](url)` line for it in the
+          text; Send posts each question's images as a FROM ANSWER · Q<n> note. --%>
+          <.answer_image_box
+            upload={@upload}
+            images_pending={@images_pending}
+            image_errors={@image_errors}
+            link_target="needs-input-text"
+          >
+            <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. data-step/data-value let SubmitOnCmdEnter reset the (focused, reused) box when the step changes. --%>
+            <textarea
+              id="needs-input-text"
+              name="answer[text]"
+              rows="3"
+              autocomplete="off"
+              phx-hook="SubmitOnCmdEnter"
+              data-step={@answer_step}
+              data-value={
+                stepper_custom_text(@answer_values, @answer_step, @stepper_question["options"])
+              }
+              placeholder={
+                if(@stepper_question["options"] == [],
+                  do: "Type your answer…",
+                  else: "Or type your own…"
+                )
+              }
+              class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[13px] leading-[1.45] outline-none"
+              style="color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+            ><%= stepper_custom_text(
+              @answer_values,
+              @answer_step,
+              @stepper_question["options"]
+            ) %></textarea>
+          </.answer_image_box>
         </form>
         <div class="flex items-center justify-between">
           <button
@@ -6148,6 +6301,7 @@ defmodule RelayWeb.CoreComponents do
             id="needs-input-back"
             type="button"
             phx-click="answer_back"
+            disabled={uploading?(@upload)}
             class="btn btn-sm btn-ghost rounded-[7px]"
           >
             ← Back
@@ -6158,7 +6312,7 @@ defmodule RelayWeb.CoreComponents do
             id="needs-input-next"
             type="button"
             phx-click="answer_next"
-            disabled={not Map.has_key?(@answer_values, @answer_step)}
+            disabled={not Map.has_key?(@answer_values, @answer_step) or uploading?(@upload)}
             class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
             style="background:var(--color-warning);"
           >
@@ -6169,7 +6323,7 @@ defmodule RelayWeb.CoreComponents do
             id="needs-input-send"
             type="button"
             phx-click="answer_submit"
-            disabled={not Map.has_key?(@answer_values, @answer_step)}
+            disabled={not Map.has_key?(@answer_values, @answer_step) or uploading?(@upload)}
             class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
             style="background:var(--color-warning);"
             pending="Sending…"
@@ -6198,24 +6352,31 @@ defmodule RelayWeb.CoreComponents do
           for={@answer_form}
           id="needs-input-form"
           class="flex flex-col items-start gap-[11px]"
+          phx-change="answer_change"
           phx-submit="answer_input"
         >
           <div class="w-full">
-            <.boxed_field
-              id="needs-input-answer"
-              commit={:form}
-              multiline
-              rows="3"
-              form={@answer_form}
-              field={:body}
-              input_class="w-full"
-              placeholder={answer_placeholder(@park_kind)}
-              phx-hook="SubmitOnCmdEnter"
-            />
+            <.answer_image_box
+              upload={@upload}
+              images_pending={@images_pending}
+              image_errors={@image_errors}
+              link_target="needs-input-answer"
+            >
+              <%!-- Borderless inside the box, like the reject note: the box is the field. --%>
+              <textarea
+                id="needs-input-answer"
+                name="answer[body]"
+                rows="3"
+                placeholder={answer_placeholder(@park_kind)}
+                phx-hook="SubmitOnCmdEnter"
+                class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[13px] leading-[1.45] text-base-content outline-none"
+              >{Phoenix.HTML.Form.normalize_value("textarea", @answer_form && @answer_form[:body].value)}</textarea>
+            </.answer_image_box>
           </div>
           <div class="flex items-center gap-2">
             <.button
               id="needs-input-send"
+              disabled={uploading?(@upload)}
               type="submit"
               class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
               style="background:var(--color-warning);"
@@ -6292,6 +6453,15 @@ defmodule RelayWeb.CoreComponents do
   attr :quote_caption, :string,
     default: nil,
     doc: "compact only: the current mockup's caption, offered as a one-click quote into the note"
+
+  attr :upload, :any,
+    default: nil,
+    doc:
+      "RE428: the `:reject_images` `Phoenix.LiveView.UploadConfig`; nil (the native embed, " <>
+        "Storybook without one) = no 📎, drop target or paste"
+
+  attr :images_pending, :list, default: [], doc: "RE428: uploaded reject images, `[%{id, filename, src}]`"
+  attr :image_errors, :list, default: [], doc: "RE428: the reject box's refused-image sentences"
 
   def card_review_panel(assigns) do
     ~H"""
@@ -6375,16 +6545,48 @@ defmodule RelayWeb.CoreComponents do
           window. `commit={:form}` renders a plain <.input>, which has no CommitField
           hook to honour `data-autofocus`, so the caret is moved the same way the
           Move-to filter does it. --%>
-          <.boxed_field
-            id="review-request-note"
-            commit={:form}
-            multiline
-            rows={if @compact, do: "8", else: "3"}
-            form={@reject_form}
-            field={:note}
-            placeholder="What needs to change? This note goes to the AI…"
-            phx-mounted={JS.focus()}
-            phx-hook="SubmitOnCmdEnter"
+          <%!-- RE428 — the note sits in the shared image control. Each image the human attaches
+          uploads at once and the box's hook keeps an absolute `![name](url)` line for it in the
+          note; Reject posts the images as a FROM REJECTION note. Borderless inside the box. --%>
+          <.image_attach_box
+            id="review-reject-images"
+            upload={@upload}
+            pending={@images_pending}
+            enabled={@upload != nil}
+            link_target="review-request-note"
+            cancel_event="cancel_reject_image"
+            remove_event="remove_reject_image"
+          >
+            <div class="flex min-w-0 flex-1 flex-col">
+              <textarea
+                id="review-request-note"
+                name={@reject_form[:note].name}
+                rows={if @compact, do: "8", else: "3"}
+                placeholder="What needs to change? This note goes to the AI…"
+                phx-mounted={JS.focus()}
+                phx-hook="SubmitOnCmdEnter"
+                class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
+              >{Phoenix.HTML.Form.normalize_value("textarea", @reject_form[:note].value)}</textarea>
+              <div
+                :if={@upload}
+                class="flex items-center gap-2 border-t border-base-300 px-[9px] py-1.5"
+              >
+                <.image_attach_button
+                  id="review-reject-images-attach"
+                  upload={@upload}
+                  label="Attach images"
+                />
+                <span class="flex-1"></span>
+                <span class="hidden font-mono text-[10px] text-base-content/45 drawer:inline">
+                  or paste / drop
+                </span>
+              </div>
+            </div>
+          </.image_attach_box>
+          <.image_attach_hint
+            id="review-reject-images-hint"
+            errors={@image_errors}
+            enabled={@upload != nil}
           />
           <button
             :if={@compact && @quote_caption}
@@ -6410,6 +6612,7 @@ defmodule RelayWeb.CoreComponents do
             <.button
               id="review-send-back"
               type="submit"
+              disabled={@upload != nil and @upload.entries != []}
               class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
               style="background:var(--color-warning);"
               pending="Sending back…"
@@ -6476,6 +6679,11 @@ defmodule RelayWeb.CoreComponents do
   attr :embed, :boolean, default: false
   attr :compact, :boolean, default: false
   attr :quote_caption, :string, default: nil
+  attr :uploads, :map, default: nil, doc: "RE428: the LiveView's `@uploads` (`:reject_images`, `:answer_images`)"
+  attr :reject_images_pending, :list, default: []
+  attr :reject_image_errors, :list, default: []
+  attr :answer_images_pending, :map, default: %{}, doc: "RE428: `%{step => [image]}`, the answer's pending images"
+  attr :answer_image_errors, :list, default: []
 
   def card_gate_panel(assigns) do
     assigns = assign_park_state(assigns)
@@ -6495,6 +6703,9 @@ defmodule RelayWeb.CoreComponents do
       attempt={@latest_detail && @latest_detail.parked_attempt}
       failure_detail={@latest_detail && @latest_detail.last_failure_detail}
       advance_available?={@panel_advance_available?}
+      upload={answer_upload(@uploads, @embed)}
+      images_pending={Map.get(@answer_images_pending, @answer_step, [])}
+      image_errors={@answer_image_errors}
     />
     <.card_review_panel
       :if={@card.status == :in_review and !@archived}
@@ -6505,9 +6716,60 @@ defmodule RelayWeb.CoreComponents do
       embed={@embed}
       compact={@compact}
       quote_caption={@quote_caption}
+      upload={reject_upload(@uploads, @embed)}
+      images_pending={@reject_images_pending}
+      image_errors={@reject_image_errors}
     />
     """
   end
+
+  # RE428 — in-flight answer images hold the stepper on its step and hold Send.
+  defp uploading?(%{entries: [_ | _]}), do: true
+  defp uploading?(_upload), do: false
+
+  attr :upload, :any, required: true, doc: "the `:answer_images` UploadConfig, or nil (no 📎, drop or paste)"
+  attr :images_pending, :list, required: true
+  attr :image_errors, :list, required: true
+  attr :link_target, :string, required: true, doc: "the answer textarea's DOM id"
+  slot :inner_block, required: true
+
+  # RE428 — the needs-input panel's answer textarea inside RE427's shared image control, with the
+  # attach bar under it (the reject note's layout). One box id for both faces: they never render
+  # together.
+  defp answer_image_box(assigns) do
+    ~H"""
+    <.image_attach_box
+      id="needs-input-images"
+      upload={@upload}
+      pending={@images_pending}
+      enabled={@upload != nil}
+      link_target={@link_target}
+      cancel_event="cancel_answer_image"
+      remove_event="remove_answer_image"
+    >
+      <div class="flex min-w-0 flex-1 flex-col">
+        {render_slot(@inner_block)}
+        <div :if={@upload} class="flex items-center gap-2 border-t border-base-300 px-[9px] py-1.5">
+          <.image_attach_button id="needs-input-images-attach" upload={@upload} label="Attach images" />
+          <span class="flex-1"></span>
+          <span class="hidden font-mono text-[10px] text-base-content/45 drawer:inline">
+            or paste / drop
+          </span>
+        </div>
+      </div>
+    </.image_attach_box>
+    <.image_attach_hint id="needs-input-images-hint" errors={@image_errors} enabled={@upload != nil} />
+    """
+  end
+
+  # RE428 — Request changes attaches images only on the web board, with the upload allowed
+  # (RE427's `note_attach_enabled?/1` rule).
+  defp reject_upload(%{reject_images: upload}, false = _embed), do: upload
+  defp reject_upload(_uploads, _embed), do: nil
+
+  # RE428 — the same rule for answering.
+  defp answer_upload(%{answer_images: upload}, false = _embed), do: upload
+  defp answer_upload(_uploads, _embed), do: nil
 
   # RE253/RE279/RE310 — the park facts every reader of the latest run shares, worked out ONCE:
   # `card_drawer/1` (blocked strip, Run tab) and `card_gate_panel/1` (the needs-input panel) both
