@@ -420,6 +420,40 @@ defmodule Relay.RunsTest do
       assert Repo.get!(Card, card.id).stage_id == w.id
     end
 
+    # RE430 — the pause is the scheduler's: a run already going when the board breaks around its
+    # flow finishes and lands exactly as slice A says, never cancelled.
+    test "RE430 13. a run in flight when its flow breaks (no downstream) finishes and stays put" do
+      {board, %{"Q" => q, "W" => w, "A" => a}} = hand_board([{"Q", :queue}, {"W", :work}, {"A", :queue}])
+      :ok = Runs.subscribe(board.id)
+      flow = one_node_flow(board, w)
+      card = ready_card(q)
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, %NodeJob{} = job}
+
+      {:ok, _} = Relay.Boards.delete_stage(a)
+
+      assert {:ok, %Run{status: :done}} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "ok"})
+      assert Repo.get!(Card, card.id).stage_id == w.id
+    end
+
+    test "RE430 14. a run in flight when a work stage lands before its flow still lands downstream" do
+      {board, %{"Q" => q, "W" => w, "A" => a}} = hand_board([{"Q", :queue}, {"W", :work}, {"A", :queue}])
+      :ok = Runs.subscribe(board.id)
+      flow = one_node_flow(board, w)
+      card = ready_card(q)
+
+      assert {:ok, _run} = Runs.start_run(card, flow)
+      assert_receive {:dispatched, %NodeJob{} = job}
+
+      {:ok, x} = Relay.Boards.create_stage(board, %{name: "X", type: :work, category: :in_progress})
+      {:ok, _} = Relay.Boards.place_stage(x, before: w)
+      assert Enum.map(Relay.Boards.list_stages(board), & &1.name) == ["Q", "X", "W", "A"]
+
+      assert {:ok, %Run{status: :done}} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "ok"})
+      assert Repo.get!(Card, card.id).stage_id == a.id
+    end
+
     test "22. queued_flow/5 reads the derived pulls-from of the flows passed in", %{board: board} do
       enabled_flow(board, "plan")
       flows = Relay.Flows.list_flows(board)

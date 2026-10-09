@@ -107,6 +107,10 @@ A **stage** (returned inside `GET /api/board`'s `stages` and by every `/api/stag
 Done lane of its main stage; its `name` is the composite `"<parent>:Review"` and its
 `display_name` the human `"<parent> · Review"` (a main stage's `display_name` is its `name`).
 
+Every `/api/stages` response (not `GET /api/board`'s `stages`) also carries a read-only
+`"problem"`: `null`, or — on the stage of an **enabled** flow paused by a broken board shape —
+the same problem object `GET /api/flows/:key` returns (see `GET /api/flows` below).
+
 ---
 
 ## Endpoints
@@ -275,7 +279,9 @@ refuses the same things with the same sentence. A stage refusal carries extra ke
 
 #### GET /api/stages
 
-The board's stages, each main stage followed by its substages (Review, then Done).
+The board's stages, each main stage followed by its substages (Review, then Done). A stage
+whose enabled flow is paused by a broken board shape carries that flow's `problem`; every other
+stage has `"problem": null`.
 
 ```json
 { "data": [ { "id": 1, "name": "Backlog", "…": "…" } ] }
@@ -328,6 +334,37 @@ Delete a main stage and its substages. **200** `{"data": stage}` (the deleted st
 in order, with `last_stage`, `not_empty` (with counts), `public_intake`. The flow on the stage,
 enabled or not, is deleted with it (its runs keep their `flow_key`); another stage's reject-to
 pointing here is cleared.
+
+### GET /api/flows
+
+`GET /api/flows` (every flow) and `GET /api/flows/:key` (one) return each flow as its canonical
+document, plus two read-only blocks: `derived` (`pulls_from` / `lands_on`, the stage names
+worked out from board order) and `problem`. `PUT /api/flows/:key` returns the same shape and
+accepts a pulled document back unchanged — both read-only keys are ignored on push.
+
+`problem` is `null` when the flow's board shape works. When it doesn't — nothing before the
+flow's stage, a Review column or another flow's working stage right before it, or nothing after
+it — it explains why, in words the API owns (render them verbatim):
+
+```json
+{
+  "flow_key": "deploy",
+  "kind": "upstream_working",
+  "what": "Flow **deploy** pulls from Code, which is flow **code**'s working stage.",
+  "why": "…",
+  "fixes": [
+    { "action": "enable_lane", "label": "Turn on Code · Done" },
+    { "action": "insert_queue_stage", "label": "Insert a queue stage between Code and Deploy" }
+  ],
+  "columns": [ { "stage_id": 8, "name": "Code", "type": "work", "mark": "offending" } ]
+}
+```
+
+`kind` is one of `no_upstream | upstream_review | upstream_working | no_downstream`; a fix's
+`action` one of `enable_lane | insert_queue_stage | add_stage_after`; a column's `mark` is
+`self`, `offending` or `null`. An **enabled** flow with a problem is *paused*: no new runs start
+until the board is fixed (runs already going finish and land). A disabled flow still reports its
+problem but is not paused.
 
 ### POST /api/cards/:ref/move
 
@@ -429,6 +466,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `dispatchable` | would dispatch on the scheduler's next tick |
 | `blocked_by_dependencies` | the card declares blockers that have not reached a top-level Done column; `evidence.blocked_by` names their refs |
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
+| `flow_paused` | the enabled flow that pulls from this card's stage is paused by a broken board shape; `evidence.problem` carries `what`, `why` and `fixes`. Runs already going finish and land; fix the board and the next reconcile un-pauses it |
 | `awaiting_capacity` | a flow would dispatch; no runner advertises a free slot of the needed class |
 | `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |
 | `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |

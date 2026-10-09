@@ -644,10 +644,8 @@ defmodule RelayWeb.FlowSettingsComponents do
   defp stages_row(flow, %{stages: :ok}),
     do: row(flow, "stages", true, "All three trigger stages still exist on this board.")
 
-  defp stages_row(flow, %{stages: {:missing, keys}}) do
-    names = Enum.map_join(keys, ", ", &String.replace(Atom.to_string(&1), "_", "-"))
-    row(flow, "stages", false, "Missing trigger stage: #{names}. The flow can't dispatch until it's set.")
-  end
+  # The shape problem's `what` is rendered verbatim — `Relay.Flows.Shape` owns the wording.
+  defp stages_row(flow, %{stages: {:problem, problem}}), do: row(flow, "stages", false, problem.what)
 
   defp runner_row(flow, %{runners: :none_connected}),
     do: row(flow, "runner", false, "No runner is connected. Cards will queue with nothing to pick them up.")

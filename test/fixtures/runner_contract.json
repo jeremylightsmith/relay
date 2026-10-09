@@ -85,9 +85,27 @@
     "running": []
   },
   "flows": {
+    "column_keys": [
+      "mark",
+      "name",
+      "stage_id",
+      "type"
+    ],
     "derived_keys": [
       "lands_on",
       "pulls_from"
+    ],
+    "fix_keys": [
+      "action",
+      "label"
+    ],
+    "problem_keys": [
+      "columns",
+      "fixes",
+      "flow_key",
+      "kind",
+      "what",
+      "why"
     ],
     "trigger_keys": [
       "stage"
@@ -239,6 +257,7 @@
       "name",
       "parent_id",
       "position",
+      "problem",
       "reject_to_stage_id",
       "type",
       "wip_limit"
@@ -382,7 +401,7 @@
       }
     }
   },
-  "version": 11,
+  "version": 12,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",
@@ -443,6 +462,17 @@
         "cancelled"
       ]
     },
+    "shape_fix_actions": [
+      "enable_lane",
+      "insert_queue_stage",
+      "add_stage_after"
+    ],
+    "shape_problem_kinds": [
+      "no_upstream",
+      "upstream_review",
+      "upstream_working",
+      "no_downstream"
+    ],
     "stage_categories": [
       "unstarted",
       "planning",

@@ -137,6 +137,19 @@ job belongs to. Board-specific facts (stages, prompts, per-node budgets) live en
 `Flow`/`Flow.Node`/`Flow.Edge` rows, seeded from
 [`docs/designs/flows/`](../designs/flows/README.md) and editable in Settings › Stages (each stage row's FLOW band).
 
+**A broken board shape pauses a flow (RE430).** `Relay.Flows.Shape.problems/2` is the one shape
+rule: the column before a flow's stage must be a `:queue` or `:done` column, and there must be a
+column after it. `Scheduler.Server.build_snapshot/2` reads every flow of the board (enabled and
+disabled, `Relay.Flows.list_flow_snapshots/1` — still one query), keeps the enabled ones as the
+snapshot's `flows`, and computes the snapshot's `problems` in memory from the same ordered
+stages and the full flow list (a disabled flow is still named as an upstream). An enabled flow
+with a problem is **paused**: `plan/1` starts no fresh run for it but still resumes its parked
+in-flight runs, and a run already going finishes and lands from board order exactly as
+before — nothing on the landing or resume path checks the shape, and `Relay.Runs.start_run/2`
+is not gated. The server subscribes to `{:stages_changed, board_id}` on the board topic and
+treats it like a card event (a full, debounced reconcile, never the quiescent skip), so fixing
+the board un-pauses the flow on the very next reconcile.
+
 **Shared-budget arbitration: rightmost flow wins ties.** `Relay.Runs.Capacity` keys free
 slots `runner_id => %{shared_clean: n, exclusive: n}` **per isolation class, not per
 flow** (`capacity.ex:5-7`), and `Relay.Runs.Scheduler.plan/1` threads one shared capacity
@@ -151,7 +164,7 @@ looks like the leftward flow is being starved. Pinned by
 The capacity **store** (`Relay.Runs.Capacity`, ETS) is keyed by runner id; each entry carries
 the runner's board id and is evicted by the reaper's reclaim sweep once the runner goes stale
 (RE402). The scheduler **snapshot** is assembled from five narrow reads (stages, the
-`Cards.list_scheduler_cards/2` projection, active runs, runners, enabled flows — RE402) and is
+`Cards.list_scheduler_cards/2` projection, active runs, runners, every flow — RE402, RE430) and is
 board-scoped: `Scheduler.Server.build_snapshot/2`
 keeps a capacity entry only for a runner of *this* board that `Relay.Runs.counting_runner?/1`
 accepts (not `:gone`) — an allow-list, so another board's runner or an orphaned ETS entry
@@ -213,6 +226,12 @@ never 403s):
   `Relay.Runs.Scheduler.explain/2`, which **replays** `Scheduler.plan/1`'s real dispatch
   decision — sharing its predicate functions — rather than reimplementing it, so the verdict
   cannot drift from what actually dispatches.
+  A card the pulling flow would take while that flow is paused by a broken board shape
+  diagnoses `flow_paused` (RE430): `detail` is `Relay.Flows.Shape.paused_detail/1` and
+  `evidence.problem` is `Relay.Flows.Shape.wire/1` of the problem (`flow_key`, `kind`, `what`,
+  `why`, `fixes`, `columns`); every other verdict carries `evidence.problem: null`. It is
+  checked after `no_enabled_flow` and before `blocked_by_dependencies`, so earlier reasons
+  (human-owned, needs input, a run in flight) still win.
 - `GET /api/cards/:ref/runs` (`RelayWeb.Api.RunController.index/2`) — the card's runs
   newest-first with `node_executions` preloaded, composing `Relay.Runs.list_runs_for_card/1`.
   `detail` and `failure_detail` are serialized **in full, never truncated** — the exact text
@@ -306,8 +325,13 @@ never 403s):
   the ordered `nodes`/`edges` arrays. Sparse — nil fields and schema defaults are omitted.
   Beside the document sits a read-only `"derived": {"pulls_from", "lands_on"}` block (RE429,
   `Relay.Flows.Document.derived/1`): the stage names worked out from current board order, `null`
-  at either end. `./relay flow` prints it as `pulls_from → stage → lands_on`; both key sets are
-  pinned in `test/fixtures/runner_contract.json` (`"flows"`). 404s an unknown key.
+  at either end. `./relay flow` prints it as `pulls_from → stage → lands_on`. A read-only
+  `"problem"` (RE430) sits beside it: `null`, or `Relay.Flows.Shape.wire/1` of the flow's broken
+  board shape — `flow_key`, `kind`, `what`, `why`, `fixes` (`action` + `label`) and `columns`
+  (`stage_id`, `name`, `type`, `mark`). `./relay flow` marks an enabled flow with a problem
+  `PAUSED` and `relay flow KEY` prints its What / Why / Fix verbatim. Every key set, plus
+  `Shape.kinds/0` / `Shape.fix_actions/0`, is pinned in `test/fixtures/runner_contract.json`
+  (`"flows"`, `vocabulary.shape_problem_kinds` / `shape_fix_actions`). 404s an unknown key.
 - `PUT /api/flows/:key` (`RelayWeb.Api.FlowController.update/2`) — upsert a flow from a document
   via `Relay.Flows.upsert_from_document/3`, in one transaction: `Schemas.Flow.changeset/2`'s
   graph validation, `save_definition/2`'s version-bump semantics (an unchanged push bumps

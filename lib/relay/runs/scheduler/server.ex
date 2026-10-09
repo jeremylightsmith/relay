@@ -11,12 +11,13 @@ defmodule Relay.Runs.Scheduler.Server do
   engine and marking by `Relay.Cards`.
 
   A reconcile is cheap by construction (RE402): the snapshot is five narrow reads (stages,
-  card projection, active runs, runners, enabled flows); `record_resume_refusals/4` decides
+  card projection, active runs, runners, flows); `record_resume_refusals/4` decides
   what to clear from the snapshot's runs instead of a SELECT; and marking loads a `%Card{}`
   only for a card whose status actually changes. A steady-state reconcile is ≤ 5 queries.
 
-  Reacts to the board's `Relay.Events` topic and the `Relay.Runs.Capacity`
-  capacity-changed topic, debouncing a burst into one reconcile, with a slow
+  Reacts to the board's `Relay.Events` topic (card moves, upserts and archives, and
+  `{:stages_changed, board_id}` — a board-shape change can pause or un-pause a flow, RE430) and
+  the `Relay.Runs.Capacity` capacity-changed topic, debouncing a burst into one reconcile, with a slow
   jittered (~60s) tick as backstop: the first tick lands uniformly in `[1, tick_ms]` and each
   later one in `tick_ms × [0.8, 1.2]` (`tick_delay/2`), so boards don't tick in lockstep.
   `reconcile_now/1` forces a synchronous reconcile.
@@ -24,7 +25,7 @@ defmodule Relay.Runs.Scheduler.Server do
   **Quiescent dormant boards are skipped (RE402).** A tick, or a debounced burst made only of
   capacity changes, issues zero queries when the board has no live capacity
   (`Relay.Runs.Capacity.live?/1`) AND its last full reconcile saw no active runs (`settled?`).
-  Card events, `reconcile_now/1` and the boot reconcile always run in full; a board holding an
+  Card events, stage changes, `reconcile_now/1` and the boot reconcile always run in full; a board holding an
   active (e.g. parked) run keeps reconciling every tick, so its RE297 refusal clock stays live.
   """
 
@@ -117,6 +118,9 @@ defmodule Relay.Runs.Scheduler.Server do
   def handle_info({:card_moved, _card, _from_stage_id}, state), do: {:noreply, mark_dirty(state, :card)}
   def handle_info({:card_upserted, _card}, state), do: {:noreply, mark_dirty(state, :card)}
   def handle_info({:card_archived, _card}, state), do: {:noreply, mark_dirty(state, :card)}
+  # RE430: a stage change can break or fix a flow's shape (pause / un-pause it). It takes the
+  # :card path — always a full reconcile, never the quiescent skip.
+  def handle_info({:stages_changed, _board_id}, state), do: {:noreply, mark_dirty(state, :card)}
   def handle_info(_msg, state), do: {:noreply, state}
 
   # Debounce a burst of events into one reconcile (one pending :flush). The burst's reason is
@@ -175,7 +179,9 @@ defmodule Relay.Runs.Scheduler.Server do
 
   Five narrow reads (RE402): `Boards.list_scheduler_stages/1`, `Cards.list_scheduler_cards/2`
   (the projection, with `blocked_by` from the same predicate as `Cards.unmet_dependencies/2`),
-  `engine.active_runs/1`, `Runs.list_board_runners/1` and `Flows.list_enabled_flow_snapshots/1`.
+  `engine.active_runs/1`, `Runs.list_board_runners/1` and `Flows.list_flow_snapshots/1`. The
+  last reads every flow, enabled or not: `flows` keeps the enabled ones, and `problems` is
+  `Relay.Flows.Shape.problems/2` over all of them and the same ordered stages, in memory (RE430).
 
   Public because `Relay.Runs.diagnose/3` (RLY-177) must diagnose against **byte-for-byte
   the snapshot this server plans from** — including the `reserve_active_runs/2` debit for
@@ -189,12 +195,14 @@ defmodule Relay.Runs.Scheduler.Server do
     cards = Cards.list_scheduler_cards(board_id, Boards.top_level_done_stage_ids(stages))
     runs = engine.active_runs(board_id)
     runners = runner_snap(board_id)
+    all_flows = Relay.Flows.list_flow_snapshots(board_id)
 
     snapshot = %Snapshot{
       stages: Enum.map(stages, &stage_snap/1),
       cards: cards,
-      flows: flow_snaps(board_id, stages),
+      flows: flow_snaps(all_flows, stages),
       runs: runs,
+      problems: Relay.Flows.Shape.problems(stages, all_flows),
       capacity: Capacity.snapshot() |> reserve_active_runs(runs) |> counting_capacity(runners),
       runners: runners
     }
@@ -298,10 +306,14 @@ defmodule Relay.Runs.Scheduler.Server do
 
   # Each enabled flow plus its derived pickup (RE429): the stage before it in the board order
   # `stages` is already in (`Boards.list_scheduler_stages/1` returns `order_stages/1` order).
-  defp flow_snaps(board_id, stages) do
-    for flow <- Relay.Flows.list_enabled_flow_snapshots(board_id) do
+  # `enabled` is dropped: `flows` is enabled-only by construction.
+  defp flow_snaps(all_flows, stages) do
+    for %{enabled: true} = flow <- all_flows do
       pulls_from = Relay.Flows.neighbours(flow.stage_id, stages).pulls_from
-      Map.put(flow, :pulls_from_stage_id, pulls_from && pulls_from.id)
+
+      flow
+      |> Map.delete(:enabled)
+      |> Map.put(:pulls_from_stage_id, pulls_from && pulls_from.id)
     end
   end
 

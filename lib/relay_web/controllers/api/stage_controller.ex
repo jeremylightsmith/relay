@@ -8,6 +8,10 @@ defmodule RelayWeb.Api.StageController do
 
   `ai_enabled` is read-only (RE409): every render derives it from `Relay.Flows.ai_stage_ids/1`,
   and a create/update body naming it — any value — is refused 422 before anything is written.
+
+  `problem` is read-only too (RE430): every render passes `stage_problems`, the wire problem of
+  each stage whose ENABLED flow sits on a broken board shape (`Relay.Flows.shape_problems/1`) —
+  a paused stage. A disabled flow's problem stays on its flow document only.
   """
   use RelayWeb, :controller
 
@@ -25,7 +29,12 @@ defmodule RelayWeb.Api.StageController do
 
   def index(conn, _params) do
     board = conn.assigns.current_board
-    render(conn, :index, stages: Boards.list_stages(board), ai_stage_ids: Flows.ai_stage_ids(board))
+
+    render(conn, :index,
+      stages: Boards.list_stages(board),
+      ai_stage_ids: Flows.ai_stage_ids(board),
+      stage_problems: stage_problems(board)
+    )
   end
 
   def create(conn, params) do
@@ -85,8 +94,17 @@ defmodule RelayWeb.Api.StageController do
     end
   end
 
-  defp render_stage(conn, stage),
-    do: render(conn, :show, stage: stage, ai_stage_ids: Flows.ai_stage_ids(conn.assigns.current_board))
+  defp render_stage(conn, stage) do
+    board = conn.assigns.current_board
+    render(conn, :show, stage: stage, ai_stage_ids: Flows.ai_stage_ids(board), stage_problems: stage_problems(board))
+  end
+
+  # stage_id => wire problem, for enabled flows only: "paused" applies to an enabled flow.
+  defp stage_problems(board) do
+    for %{enabled: true} = problem <- Flows.shape_problems(board),
+        into: %{},
+        do: {problem.stage_id, Flows.Shape.wire(problem)}
+  end
 
   # The key, not its value: `"ai_enabled": false` or `null` is refused too, so an old caller
   # never mistakes a silent no-op for a write.

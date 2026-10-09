@@ -44,9 +44,10 @@ defmodule Relay.Flows.Document do
   alias Schemas.NodeExecution
   alias Schemas.Stage
 
-  # `derived` is the API's read-only pickup / drop-off block (`derived/1`): a pulled file carries
-  # it, so a push accepts it and never reads it.
-  @top_level ~w(key version enabled isolation trigger nodes edges derived)
+  # `derived` is the API's read-only pickup / drop-off block (`derived/1`), and `problem` its
+  # read-only broken-shape block (`Relay.Flows.Shape.wire/1`, RE430): a pulled file carries
+  # them, so a push accepts them and never reads them.
+  @top_level ~w(key version enabled isolation trigger nodes edges derived problem)
   # `stage` is canonical; the other three are the legacy (pre-RE429) trigger, still accepted.
   @trigger_keys ~w(stage pulls_from works_in lands_on)
 

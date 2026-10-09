@@ -1107,8 +1107,9 @@ defmodule Relay.Runs do
   The enabled flow that will pick this card up, or nil. Queued (spec decision):
   an enabled flow pulls from the card's stage — its derived `pulls_from_stage`, so `flows` must
   come from `Relay.Flows.list_flows/1` (RE429) — the card is AI-ready (:ready +
-  baton with AI), no unmet dependency (RE93), and no active run exists. Pure —
-  no scheduler/NodeJob read.
+  baton with AI), no unmet dependency (RE93), and no active run exists. A flow whose `problem`
+  is set (a broken board shape, `Relay.Flows.Shape`, RE430) is paused and never queued; `nil`
+  is healthy. Pure — no scheduler/NodeJob read.
 
   `blocked_by` is the card's unmet-blocker id list (RE93) — passed in rather than queried so
   this stays a pure read over what the caller already loaded, and so the face chip and the real
@@ -1121,7 +1122,7 @@ defmodule Relay.Runs do
       Policy.pullable?(%{status: card.status, active_owner: active_owner, blocked_by: blocked_by})
 
     if pullable? and not active_run? do
-      Enum.find(flows, &(&1.enabled and stage_id(&1.pulls_from_stage) == card.stage_id))
+      Enum.find(flows, &(&1.enabled and is_nil(&1.problem) and stage_id(&1.pulls_from_stage) == card.stage_id))
     end
   end
 

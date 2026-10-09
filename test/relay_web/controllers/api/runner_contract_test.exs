@@ -18,6 +18,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
   """
   use RelayWeb.ConnCase, async: true
 
+  alias Relay.Flows.Shape
   alias Relay.Runs
   alias Relay.Runs.Audit
   alias Relay.Runs.FakeDispatcher
@@ -221,6 +222,26 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # set is recorded from the real route, never typed.
     [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
 
+    # RE430 — `./relay flow` / `stages` / `why` print a paused flow's What / Why / Fix verbatim
+    # off the read-only `problem` object. An enabled flow on Deploy pulls from the main Review
+    # stage (`:upstream_review`), a real paused flow — it never dispatches, so it cannot disturb
+    # the claims above. Its key sets come from the real route.
+    deploy = Enum.find(exclusive.board.stages, &(&1.name == "Deploy"))
+
+    {:ok, paused} =
+      Relay.Flows.create_flow(exclusive.board, %{
+        key: "contract-paused",
+        isolation: :shared_clean,
+        stage_id: deploy.id,
+        nodes: [agent_node()],
+        edges: [%{from: "start", to: "work"}, %{from: "work", to: "done", on: :succeeded}]
+      })
+
+    {:ok, _paused} = Relay.Flows.enable_flow(paused)
+
+    paused_problem =
+      exclusive.conn |> get(~p"/api/flows/contract-paused") |> json_response(200) |> get_in(["data", "problem"])
+
     # RE429 — `./relay flow` prints `pulls_from → stage → lands_on` from a flow document's
     # one-key trigger and its read-only `derived` block; both key sets come from the real route.
     flow_doc = exclusive.conn |> get(~p"/api/flows/contract") |> json_response(200) |> Map.fetch!("data")
@@ -256,7 +277,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
     [note_image_item] = note_entry["images"]
 
     document = %{
-      "version" => 11,
+      "version" => 12,
       "note_images" => %{
         "comment_entry" => note_entry |> Map.keys() |> Enum.sort(),
         "image" => note_image_item |> Map.keys() |> Enum.sort(),
@@ -307,12 +328,18 @@ defmodule RelayWeb.Api.RunnerContractTest do
         # RE384 — `./relay stage lane|add|set` validate against these before calling the API.
         "stage_lanes" => stringify(Schemas.Stage.sublane_types()),
         "stage_types" => stringify(Schemas.Stage.types()),
-        "stage_categories" => stringify(Schemas.Stage.categories())
+        "stage_categories" => stringify(Schemas.Stage.categories()),
+        # RE430 — the closed sets a `problem` object's `kind` and each fix's `action` draw from.
+        "shape_problem_kinds" => stringify(Shape.kinds()),
+        "shape_fix_actions" => stringify(Shape.fix_actions())
       },
       "stages" => %{"stage_keys" => stage_object |> Map.keys() |> Enum.sort()},
       "flows" => %{
         "trigger_keys" => flow_doc["trigger"] |> Map.keys() |> Enum.sort(),
-        "derived_keys" => flow_doc["derived"] |> Map.keys() |> Enum.sort()
+        "derived_keys" => flow_doc["derived"] |> Map.keys() |> Enum.sort(),
+        "problem_keys" => paused_problem |> Map.keys() |> Enum.sort(),
+        "fix_keys" => paused_problem["fixes"] |> hd() |> Map.keys() |> Enum.sort(),
+        "column_keys" => paused_problem["columns"] |> hd() |> Map.keys() |> Enum.sort()
       },
       "claim_request" => normalize(claim_body(%{"shared_clean" => 1})),
       "claim" => %{
@@ -353,8 +380,25 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert "origin" in document["note_images"]["comment_entry"]
     assert note_entry["origin"] == %{"kind" => "answer", "question" => 2}
     assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
-    assert document["version"] == 11
-    assert document["flows"] == %{"trigger_keys" => ["stage"], "derived_keys" => ["lands_on", "pulls_from"]}
+    assert document["version"] == 12
+
+    assert document["flows"] == %{
+             "trigger_keys" => ["stage"],
+             "derived_keys" => ["lands_on", "pulls_from"],
+             "problem_keys" => ["columns", "fixes", "flow_key", "kind", "what", "why"],
+             "fix_keys" => ["action", "label"],
+             "column_keys" => ["mark", "name", "stage_id", "type"]
+           }
+
+    assert document["vocabulary"]["shape_problem_kinds"] == [
+             "no_upstream",
+             "upstream_review",
+             "upstream_working",
+             "no_downstream"
+           ]
+
+    assert document["vocabulary"]["shape_fix_actions"] == ["enable_lane", "insert_queue_stage", "add_stage_after"]
+    assert "problem" in document["stages"]["stage_keys"]
 
     assert_matches_fixture!(document)
   end

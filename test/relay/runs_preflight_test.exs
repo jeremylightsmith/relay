@@ -123,12 +123,12 @@ defmodule Relay.RunsPreflightTest do
     refute result.ready?
   end
 
-  test "23. a flow on the board's first main stage has nowhere to pull from (RE429)", %{board: board} do
+  test "23. a flow on the board's first main stage has nowhere to pull from (RE429, RE430)", %{board: board} do
     spec_flow = Flows.get_flow!(board, "spec")
     connect(board, capabilities: %{"agents" => [], "skills" => ["brainstorm"]})
 
     result = Preflight.run(spec_flow)
-    assert result.stages == {:missing, [:pulls_from]}
+    assert {:problem, %{kind: :no_upstream, flow_key: "spec"}} = result.stages
     refute result.ready?
 
     {:ok, default_board} = Boards.create_board(insert(:user), %{name: "Preflight"})
@@ -142,6 +142,13 @@ defmodule Relay.RunsPreflightTest do
         nodes: [],
         edges: [%{from: "start", to: "done"}]
       })
+
+    # RE430: the default board puts the Review main stage right before Deploy, so `ship` starts
+    # on a broken shape; its first fix (Review · Done) makes it healthy.
+    assert {:problem, %{kind: :upstream_review, flow_key: "ship"}} = Preflight.run(ship).stages
+
+    review = Relay.Repo.get_by!(Schemas.Stage, board_id: default_board.id, name: "Review")
+    {:ok, _} = Boards.enable_lane(review, :done)
 
     assert Preflight.run(ship).stages == :ok
   end

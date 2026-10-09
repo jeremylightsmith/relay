@@ -17,14 +17,14 @@ exits non-zero.
 | `./relay update [--check]` | Install or refresh the six Relay-owned files from the board (`./relay`, the four `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. It also removes a leftover Relay-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `./relay board` | The board: stages with their cards |
 | `./relay card RLY-12` | One card: description, plan, branch, timeline |
-| `./relay stages` | The board's stages in board order — position, name, category, type, `ai:`, `wip:` and `substages:` per main stage, each substage indented beneath it. `--json` prints the list |
+| `./relay stages` | The board's stages in board order — position, name, category, type, `ai:`, `wip:` and `substages:` per main stage, each substage indented beneath it. A main stage whose enabled flow is paused by a broken board shape ends with `PAUSED (flow <key>)`. `--json` prints the list |
 | `./relay stage add "Triage" --after Spec` | **Add a main stage.** Exactly one of `--before STAGE` / `--after STAGE` (it adopts the anchor's category) or `--category C` (appended to that category's end). Optional `--type`, `--description`, `--wip N` |
 | `./relay stage set Code --wip 3` | **Change a main stage's settings**: `--name`, `--description`, `--type` (re-snaps its cards' statuses), `--wip N` or `none`, `--collapsed`/`--no-collapsed`, `--reject-to STAGE` or `none`. At least one option |
 | `./relay stage move Code --before Spec` | **Place a main stage** just before/after another; it adopts the anchor's category |
 | `./relay stage lane Code review on` | Turn a main stage's `review` or `done` substage `on` or `off` |
 | `./relay stage rm Triage` | **Remove a main stage** and its substages. Refused (409, nothing written) while the stage or a substage holds live or archived cards, an enabled flow uses it, it is the public intake stage, or it is the last stage. Stages are addressed by exact name or numeric id; an ambiguous name is refused with the ids |
 | `./relay search "words"` | **Find a card** by ref or title. A ref or bare number (`RLY-12`, `12`) is an exact hit ranked first; otherwise every whitespace-separated word must appear in the title, in any order. Done cards are included. `--archived` widens it to archived cards, `--limit N` caps it (default 20). No match prints a message and exits 0 |
-| `./relay why RLY-12` | **Why isn't this card moving?** One plain-language answer |
+| `./relay why RLY-12` | **Why isn't this card moving?** One plain-language answer. For a `flow_paused` verdict it also prints the broken shape's **What / Why / Fix** block verbatim |
 | `./relay runs RLY-12` | The card's runs and node executions (failure detail in full) |
 | `./relay runners` | Who is connected, their capacity, and the jobs they hold |
 | `./relay version` | The git SHA the deployed app was built from |
@@ -60,7 +60,7 @@ exits non-zero.
 | `./relay advance RLY-12` | The current task is already done — check it off and continue with the next one |
 | `./relay audit [FLOW]` | **Board health:** run-history findings plus CI parity. Advisory; always exits 0. `--window` |
 | `./relay flow-stats code` | Per-node metrics for a flow — duration, cost, attempts, verdicts. `--window` |
-| `./relay flow` / `flow code` | The board's flows, or one flow's definition. `--json` is the pull — see [Flows as data](#flows-as-data) |
+| `./relay flow` / `flow code` | The board's flows, or one flow's definition. A flow paused by a broken board shape is marked `PAUSED` (an enabled flow only) and `flow code` prints the server's **What / Why / Fix** block under its header — a disabled flow's problem prints too, without `PAUSED`. `--json` is the pull — see [Flows as data](#flows-as-data) |
 | `./relay flow-push code code.json` | Push an edited flow document back (`-` reads stdin) |
 
 ## The AI result blob

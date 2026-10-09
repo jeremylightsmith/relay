@@ -646,23 +646,20 @@ defmodule Relay.FlowsTest do
     end
   end
 
-  describe "list_enabled_flow_snapshots/1 (RE402)" do
-    test "projects only enabled flows, in key order, to %{key, stage_id, isolation}" do
+  describe "list_flow_snapshots/1 (RE402, RE430)" do
+    test "projects every flow, enabled or not, in key order, to %{key, stage_id, isolation, enabled}" do
       board = insert(:board)
       on = fn key, enabled -> insert(:flow, board: board, key: key, enabled: enabled) end
 
       b = on.("b", true)
       a = on.("a", true)
-      _off = on.("c", false)
-
-      snaps = Flows.list_enabled_flow_snapshots(board.id)
-
-      assert Enum.map(snaps, & &1.key) == board |> Flows.list_enabled_flows() |> Enum.map(& &1.key)
+      c = on.("c", false)
 
       assert [
-               %{key: "a", stage_id: a.stage_id, isolation: a.isolation},
-               %{key: "b", stage_id: b.stage_id, isolation: b.isolation}
-             ] == snaps
+               %{key: "a", stage_id: a.stage_id, isolation: a.isolation, enabled: true},
+               %{key: "b", stage_id: b.stage_id, isolation: b.isolation, enabled: true},
+               %{key: "c", stage_id: c.stage_id, isolation: c.isolation, enabled: false}
+             ] == Flows.list_flow_snapshots(board.id)
     end
   end
 
@@ -785,8 +782,8 @@ defmodule Relay.FlowsTest do
       code = ctx.stages["Code"]
       {:ok, code_flow} = Flows.enable_flow(ctx.code_flow)
 
-      assert Flows.list_enabled_flow_snapshots(ctx.board.id) == [
-               %{key: "code", stage_id: code.id, isolation: code_flow.isolation}
+      assert ctx.board.id |> Flows.list_flow_snapshots() |> Enum.filter(& &1.enabled) == [
+               %{key: "code", stage_id: code.id, isolation: code_flow.isolation, enabled: true}
              ]
 
       assert %Flow{key: "code"} = Flows.working_flow(%Schemas.Card{board_id: ctx.board.id, stage_id: code.id})
@@ -938,6 +935,49 @@ defmodule Relay.FlowsTest do
 
       assert {:error, {:invalid, cs}} = Flows.upsert_from_document(ctx.board, "ship", new_doc)
       assert "can't be blank" in errors_on(cs).stage_id
+    end
+  end
+
+  # RE430: a flow on a broken board shape carries its `problem`, worked out on every read.
+  describe "shape_problems/1 and the problem field (RE430)" do
+    setup do
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      deploy = insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
+      _review = insert(:stage, board: board, name: "Review", type: :review, position: 4)
+
+      for {key, stage} <- [{"code", code}, {"deploy", deploy}] do
+        {:ok, flow} = create_flow(board, valid_attrs(%{key: key, stage_id: stage.id}))
+        {:ok, _} = Flows.enable_flow(flow)
+      end
+
+      %{board: board, code: code}
+    end
+
+    defp problems_by_key(board), do: Map.new(Flows.list_flows(board), &{&1.key, &1.problem})
+
+    test "16. the deploy flow pulling from code's working stage carries the problem", %{board: board} do
+      assert [%{flow_key: "deploy", kind: :upstream_working}] = Flows.shape_problems(board)
+      assert [%{flow_key: "deploy"}] = Flows.shape_problems(board.id)
+
+      problems = problems_by_key(board)
+      assert problems["deploy"].kind == :upstream_working
+      assert problems["code"] == nil
+
+      assert Flows.get_flow_with_stages(board, "deploy").problem.what =~ "flow **code**"
+      assert Flows.get_flow_with_stages(board, "code").problem == nil
+    end
+
+    test "17. fixing the board clears the problem on the next read", %{board: board, code: code} do
+      {:ok, _} = Relay.Boards.enable_lane(code, :done)
+
+      assert problems_by_key(board)["deploy"] == nil
+      assert Flows.shape_problems(board) == []
+    end
+
+    test "a flow read any other way has no problem", %{board: board} do
+      assert Flows.get_flow!(board, "deploy").problem == nil
     end
   end
 end

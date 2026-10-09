@@ -589,4 +589,60 @@ defmodule Relay.Runs.SchedulerTest do
       end
     end
   end
+
+  # RE430 — a flow with a broken board shape is paused: no fresh pulls, but in-flight work resumes.
+  describe "paused flows (RE430)" do
+    defp problem(flow_key, opts \\ []) do
+      %{
+        flow_key: flow_key,
+        stage_id: Keyword.get(opts, :stage_id, 2),
+        enabled: Keyword.get(opts, :enabled, true),
+        kind: :no_downstream,
+        what: "W is the last column on the board, so there is no column after it.",
+        why: "When a run finishes it moves the card to the next column.",
+        fixes: [],
+        columns: []
+      }
+    end
+
+    defp paused_snap(problems, extra \\ []) do
+      snap(
+        [
+          stages: [stage(1, position: 1), stage(2, position: 2)],
+          cards: [card(10, 1)],
+          flows: [flow("f", 1, 2)],
+          capacity: cap([{"e1", slots(1, 0)}]),
+          problems: problems
+        ] ++ extra
+      )
+    end
+
+    test "1. a paused flow pulls nothing fresh and queues nothing" do
+      plan = Scheduler.plan(paused_snap([problem("f")]))
+
+      assert plan.dispatches == []
+      assert plan.to_queue == []
+    end
+
+    test "2. the same board un-paused dispatches" do
+      assert Scheduler.plan(paused_snap([])).dispatches == [{:start, 10, "f", "e1"}]
+    end
+
+    test "3. a paused flow still resumes its in-flight runs" do
+      s =
+        paused_snap([problem("f")],
+          cards: [card(10, 1), card(11, 2, status: :working)],
+          runs: [run(500, 11, flow_key: "f", parked_reason: :runner_gone)]
+        )
+
+      assert Scheduler.plan(s).dispatches == [{:resume, 500, "e1"}]
+    end
+
+    test "4. a problem on another flow does not pause this one" do
+      assert Scheduler.plan(paused_snap([problem("other")])).dispatches == [{:start, 10, "f", "e1"}]
+
+      assert Scheduler.plan(paused_snap([problem("other", enabled: false, stage_id: 99)])).dispatches ==
+               [{:start, 10, "f", "e1"}]
+    end
+  end
 end

@@ -5,7 +5,10 @@ defmodule Schemas.Flow do
   `NOT NULL` and unique (`flows_stage_id_index`), and deleting the stage deletes the flow.
   Where it picks cards up and drops them off is never stored — `pulls_from_stage` /
   `lands_on_stage` are virtual, filled from the board's current order by `Relay.Flows`'
-  readers (`Relay.Flows.neighbours/2`); they are nil on a flow read any other way. Nodes and edges
+  readers (`Relay.Flows.neighbours/2`); they are nil on a flow read any other way. So is the
+  virtual `problem` (RE430): the flow's `Relay.Flows.Shape.problem/0` on a broken board shape,
+  filled by `Relay.Flows.list_flows/1` / `get_flow_with_stages/2`, nil when healthy or read
+  any other way. Nodes and edges
   are embedded jsonb; `"start"`/`"done"`/`"needs_input"` are edge-endpoint
   sentinels, not nodes — `"needs_input"` (RLY-194) is `to`-only and parks
   the run. `board_id` and `enabled` are set programmatically by
@@ -29,6 +32,8 @@ defmodule Schemas.Flow do
     # Worked out from board order on read (RE429), never persisted.
     field :pulls_from_stage, :any, virtual: true
     field :lands_on_stage, :any, virtual: true
+    # The flow's broken-board-shape problem (`Relay.Flows.Shape`, RE430), nil when healthy.
+    field :problem, :any, virtual: true
 
     embeds_many :nodes, Schemas.Flow.Node, on_replace: :delete
     embeds_many :edges, Schemas.Flow.Edge, on_replace: :delete

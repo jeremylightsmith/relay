@@ -135,6 +135,15 @@ defmodule Schemas.Stage do
   end
 
   @doc """
+  The word a sub-lane of `type` adds to its main stage's name — `"Code · Done"`, `"Code:Done"`.
+  The one definition: `Relay.Boards`' display and composite names and `Relay.Flows.Shape`'s
+  column names all build on it.
+  """
+  @spec lane_word(:review | :done) :: String.t()
+  def lane_word(:review), do: "Review"
+  def lane_word(:done), do: "Done"
+
+  @doc """
   Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
   `position`, each immediately followed by its substages in `sublane_rank/1` order
   (Review before Done). Children whose parent is not in the list are appended at the end

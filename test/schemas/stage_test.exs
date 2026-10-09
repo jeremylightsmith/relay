@@ -111,6 +111,11 @@ defmodule Schemas.StageTest do
       assert Stage.sublane_types() == [:review, :done]
     end
 
+    test "lane_word/1 is the word a sub-lane's display name uses" do
+      assert Stage.lane_word(:review) == "Review"
+      assert Stage.lane_word(:done) == "Done"
+    end
+
     test "sublane_rank/1 orders review, done, then anything else" do
       assert Stage.sublane_rank(:review) == 0
       assert Stage.sublane_rank(:done) == 1

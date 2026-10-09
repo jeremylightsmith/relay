@@ -651,4 +651,94 @@ defmodule Relay.Runs.Scheduler.ServerTest do
       assert Enum.max(remaining) - Enum.min(remaining) > 10_000
     end
   end
+
+  # RE430 — a flow whose board shape is broken is paused: the scheduler starts no new runs for
+  # it until the board is fixed, and a stage change alone re-reconciles.
+  describe "paused flows (RE430)" do
+    # Backlog(queue) → Code(work, flow `code`) → Deploy(work, flow `deploy`) → Done(done).
+    # Deploy pulls from Code — a stage where the code flow is still working — so it is paused.
+    defp pipeline_board(code_enabled? \\ true) do
+      board = insert(:board)
+      backlog = insert(:stage, board: board, name: "Backlog", position: 1, type: :queue)
+      code = insert(:stage, board: board, name: "Code", position: 2, type: :work, category: :in_progress)
+      deploy = insert(:stage, board: board, name: "Deploy", position: 3, type: :work, category: :in_progress)
+      done = insert(:stage, board: board, name: "Done", position: 4, type: :done, category: :complete)
+      insert(:flow, board: board, key: "code", enabled: code_enabled?, stage_id: code.id)
+      insert(:flow, board: board, key: "deploy", enabled: true, stage_id: deploy.id)
+      card = insert(:card, stage: code, status: :ready)
+      runner = insert(:runner, board: board).id
+      :ok = Capacity.put(runner, board.id, %{shared_clean: 2, exclusive: 0})
+
+      %{board: board, backlog: backlog, code: code, deploy: deploy, done: done, card: card}
+    end
+
+    test "8. a flow pulling from another flow's working stage starts no runs" do
+      %{board: board} = pipeline_board()
+      start_engine([])
+      pid = start_server(board.id)
+
+      :ok = Server.reconcile_now(pid)
+
+      refute_received {:start_run, _card_id, "deploy", _runner}
+    end
+
+    test "9. fixing the board (Code · Done) un-pauses the flow on the next reconcile" do
+      %{board: board, code: code, card: card} = pipeline_board()
+      start_engine([])
+      pid = start_server(board.id)
+      :ok = Server.reconcile_now(pid)
+
+      {:ok, code_done} = Relay.Boards.enable_lane(code, :done)
+      card = Repo.get!(Card, card.id)
+      {:ok, moved} = Relay.Cards.move_card(card, code_done, 0, :agent)
+      {:ok, _} = Relay.Cards.set_status(moved, %{status: :ready})
+      :ok = Server.reconcile_now(pid)
+
+      assert_receive {:start_run, card_id, "deploy", _runner}, 1_000
+      assert card_id == card.id
+    end
+
+    test "10. a stage change alone (stages_changed) re-reconciles and un-pauses the flow" do
+      board = insert(:board)
+      insert(:stage, board: board, name: "Backlog", position: 1, type: :queue)
+      code = insert(:stage, board: board, name: "Code", position: 2, type: :work, category: :in_progress)
+      deploy = insert(:stage, board: board, name: "Deploy", position: 3, type: :work, category: :in_progress)
+      {:ok, code_done} = Relay.Boards.enable_lane(code, :done)
+      insert(:flow, board: board, key: "code", enabled: true, stage_id: code.id)
+      insert(:flow, board: board, key: "deploy", enabled: true, stage_id: deploy.id)
+      card = insert(:card, stage: code_done, status: :ready)
+      runner = insert(:runner, board: board).id
+      :ok = Capacity.put(runner, board.id, %{shared_clean: 2, exclusive: 0})
+      start_engine([])
+      pid = start_server(board.id)
+      # The boot reconcile has run once the server answers: it runs synchronously in
+      # handle_continue(:boot_reconcile) (server.ex), which completes before any queued call.
+      _state = :sys.get_state(pid)
+      refute_received {:start_run, _, "deploy", _}
+
+      {:ok, _deploy_done} = Relay.Boards.enable_lane(deploy, :done)
+
+      assert_receive {:start_run, card_id, "deploy", _runner}, 1_000
+      assert card_id == card.id
+    end
+
+    test "11. a healthy board's snapshot has no problems" do
+      %{board: board} = board_with_flow(:ready)
+
+      {snapshot, _cards_by_id} = Server.build_snapshot(board.id, NoopEngine)
+
+      assert snapshot.problems == []
+    end
+
+    test "12. a disabled flow stays out of flows but still names the upstream in problems" do
+      %{board: board, deploy: deploy} = pipeline_board(false)
+
+      {snapshot, _cards_by_id} = Server.build_snapshot(board.id, NoopEngine)
+
+      assert Enum.map(snapshot.flows, & &1.key) == ["deploy"]
+      assert [%{flow_key: "deploy", kind: :upstream_working, stage_id: stage_id, what: what}] = snapshot.problems
+      assert stage_id == deploy.id
+      assert what =~ "flow **code**"
+    end
+  end
 end

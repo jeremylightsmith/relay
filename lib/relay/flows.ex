@@ -13,13 +13,14 @@ defmodule Relay.Flows do
   `{:error, changeset}`.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas], exports: [Document]
+  use Boundary, deps: [Relay.Repo, Schemas], exports: [Document, Shape]
 
   import Ecto.Query
 
   alias Ecto.Changeset
   alias Relay.Flows.DefaultLibrary
   alias Relay.Flows.Document
+  alias Relay.Flows.Shape
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
@@ -32,7 +33,8 @@ defmodule Relay.Flows do
 
   @doc """
   The board's flows in stable `key` order, `:stage` preloaded and the virtual `pulls_from_stage` /
-  `lands_on_stage` worked out from the board's CURRENT order (`neighbours/2`).
+  `lands_on_stage` worked out from the board's CURRENT order (`neighbours/2`), plus each flow's
+  `problem` (`Relay.Flows.Shape`, RE430) — `nil` on a healthy shape.
   """
   def list_flows(%Board{id: board_id}) do
     from(f in Flow, where: f.board_id == ^board_id, order_by: f.key, preload: :stage)
@@ -44,22 +46,26 @@ defmodule Relay.Flows do
   def list_enabled_flows(%Board{id: board_id}), do: Repo.all(enabled_flows_query(board_id))
 
   @doc """
-  The board's **enabled** flows as `%{key, stage_id, isolation}` in `key` order — the same
-  predicate as `list_enabled_flows/1`; the lean read the scheduler snapshot builds on (RE402).
-  The scheduler adds each flow's derived `pulls_from_stage_id` itself, from the ordered stages
-  it already holds (`Relay.Runs.Scheduler.Server.build_snapshot/2`).
+  EVERY flow of the board — enabled and disabled — as `%{key, stage_id, isolation, enabled}` in
+  `key` order: the one lean read the scheduler snapshot builds on (RE402). One query. The
+  scheduler keeps only the `enabled` ones as its dispatch `flows` and adds each one's derived
+  `pulls_from_stage_id` itself, from the ordered stages it already holds; it hands ALL of them to
+  `Relay.Flows.Shape.problems/2`, so a disabled flow is still named as an upstream (RE430).
   """
-  @spec list_enabled_flow_snapshots(integer()) :: [
-          %{key: String.t(), stage_id: integer(), isolation: :shared_clean | :exclusive}
+  @spec list_flow_snapshots(integer()) :: [
+          %{key: String.t(), stage_id: integer(), isolation: :shared_clean | :exclusive, enabled: boolean()}
         ]
-  def list_enabled_flow_snapshots(board_id) do
-    board_id
-    |> enabled_flows_query()
-    |> select([f], %{key: f.key, stage_id: f.stage_id, isolation: f.isolation})
-    |> Repo.all()
+  def list_flow_snapshots(board_id) do
+    Repo.all(
+      from(f in Flow,
+        where: f.board_id == ^board_id,
+        order_by: f.key,
+        select: %{key: f.key, stage_id: f.stage_id, isolation: f.isolation, enabled: f.enabled}
+      )
+    )
   end
 
-  # The ONE "enabled flows of a board" predicate, shared by both readers above.
+  # The ONE "enabled flows of a board" predicate.
   defp enabled_flows_query(board_id) do
     from f in Flow, where: f.board_id == ^board_id and f.enabled == true, order_by: f.key
   end
@@ -223,13 +229,34 @@ defmodule Relay.Flows do
 
   @doc """
   The board's flow with `key`, `:stage` preloaded and its derived `pulls_from_stage` /
-  `lands_on_stage` filled — the shape `Relay.Flows.Document.encode/1` requires. nil when the
-  board has no such flow.
+  `lands_on_stage` and `problem` filled — the shape `Relay.Flows.Document.encode/1` requires.
+  The problem is worked out against ALL the board's flows, so an upstream flow can be named.
+  nil when the board has no such flow.
   """
   def get_flow_with_stages(%Board{id: board_id}, key) when is_binary(key) do
     from(f in Flow, where: f.board_id == ^board_id and f.key == ^key, preload: :stage)
     |> Repo.one()
     |> with_neighbours(board_id)
+  end
+
+  @doc """
+  Every broken flow's shape problem on the board (RE430) — the DB convenience over
+  `Relay.Flows.Shape.problems/2`: the board's ordered stages plus every flow, enabled or not.
+  """
+  @spec shape_problems(Board.t() | integer()) :: [Shape.problem()]
+  def shape_problems(%Board{id: board_id}), do: shape_problems(board_id)
+
+  def shape_problems(board_id) when is_integer(board_id),
+    do: Shape.problems(board_stages(board_id), shape_flows(board_id))
+
+  # The lean `%{key, stage_id, enabled}` read `Shape.problems/2` takes, in `key` order.
+  defp shape_flows(board_id) do
+    Repo.all(
+      from f in Flow,
+        where: f.board_id == ^board_id,
+        order_by: f.key,
+        select: %{key: f.key, stage_id: f.stage_id, enabled: f.enabled}
+    )
   end
 
   # The board's stages in `Schemas.Stage.order_stages/1` order — `Relay.Flows` may not call
@@ -238,17 +265,25 @@ defmodule Relay.Flows do
     Stage.order_stages(Repo.all(from s in Stage, where: s.board_id == ^board_id))
   end
 
-  # Fill the virtual neighbours from the board's CURRENT order (RE429) — computed on every read.
+  # Fill the virtual neighbours (RE429) and shape problem (RE430) from the board's CURRENT order —
+  # computed on every read, one stage read for the whole list. A problem is worked out against
+  # every flow on the board so it can name the upstream flow: for `list_flows/1` that is the list
+  # itself; a single flow reads the rest with one lean query.
   defp with_neighbours(nil, _board_id), do: nil
 
-  defp with_neighbours(%Flow{} = flow, board_id), do: hd(with_neighbours([flow], board_id))
+  defp with_neighbours(%Flow{} = flow, board_id), do: hd(with_neighbours([flow], board_id, shape_flows(board_id)))
 
-  defp with_neighbours(flows, board_id) when is_list(flows) do
-    stages = if flows == [], do: [], else: board_stages(board_id)
+  defp with_neighbours(flows, board_id) when is_list(flows), do: with_neighbours(flows, board_id, flows)
+
+  defp with_neighbours([], _board_id, _all_flows), do: []
+
+  defp with_neighbours(flows, board_id, all_flows) do
+    stages = board_stages(board_id)
+    problems = Map.new(Shape.problems(stages, all_flows), &{&1.flow_key, &1})
 
     Enum.map(flows, fn flow ->
       %{pulls_from: pulls_from, lands_on: lands_on} = neighbours(flow.stage_id, stages)
-      %{flow | pulls_from_stage: pulls_from, lands_on_stage: lands_on}
+      %{flow | pulls_from_stage: pulls_from, lands_on_stage: lands_on, problem: Map.get(problems, flow.key)}
     end)
   end
 

@@ -33,6 +33,10 @@ sharing behavior.
   and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
   The stage JSON's `ai_enabled` key is read-only, derived from `Flows.ai_stage_ids/1` (RE409);
   a create/update body naming `ai_enabled` (any value) is 422 `invalid_request` and writes nothing.
+  Every `/api/stages` response also carries a read-only `problem` (RE430): the
+  `Flows.Shape.wire/1` problem of the stage's flow when that flow is **enabled** and paused by a
+  broken board shape (`Flows.shape_problems/1`), `null` otherwise. `CardJSON.stage/3` — the
+  card and board responses — does not carry it.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).
@@ -68,7 +72,23 @@ sharing behavior.
   has one, else the next main stage), `nil` at either end. `neighbours/1` is the DB convenience
   the engine asks at the moment it needs the answer (drop-off is resolved when the run lands);
   `list_flows/1` / `get_flow_with_stages/2` fill the virtual `pulls_from_stage` /
-  `lands_on_stage` fields on every read. `stage_flow/1` is the stage's flow (or nil),
+  `lands_on_stage` fields on every read.
+  **The shape rule (RE430):** `Relay.Flows.Shape` is the ONE owner of whether a flow's board
+  shape can work and of every word explaining a broken one. `Shape.problems/2` (pure, over the
+  ordered stages and every flow, enabled or not) built on `neighbours/2` gives a broken flow
+  exactly one problem, of the first kind in `Shape.kinds/0` that applies — `:no_upstream`
+  (nothing before its stage), `:upstream_review` (a Review column right before it),
+  `:upstream_working` (a work/planning column right before it, naming that stage's flow when it
+  has one), `:no_downstream` (nothing after it) — carrying `what` / `why` / `fixes` (actions from
+  `Shape.fix_actions/0`) / `columns` (the stage two either side, marked `:self` / `:offending`).
+  `Shape.wire/1` is its one JSON projection and `Shape.paused_detail/1` the "paused" sentence;
+  consumers render the wording verbatim. Nothing is stored: `shape_problems/1` is the DB
+  convenience, and `list_flows/1` / `get_flow_with_stages/2` fill a virtual `problem` field
+  (`nil` when healthy; computed against all the board's flows, no extra query on the list
+  path). A flow with a `problem` is never `Relay.Runs.queued_flow/5`'s queued flow, and
+  `Relay.Runs.Preflight` reports it as `stages: {:problem, problem}` (the enable-preflight row
+  shows its `what`). `Schemas.Stage.lane_word/1` is the one sub-lane word (`"Code · Done"`),
+  shared with `Relay.Boards`. `stage_flow/1` is the stage's flow (or nil),
   `assignable_stages/2` the stages a flow may be put on, `copy_flow/2` copies a definition onto
   another empty stage (disabled, v1).
   `"start"`/ `"start"`/
@@ -118,8 +138,8 @@ sharing behavior.
   a legacy three-key trigger (`pulls_from` / `works_in` / `lands_on`) still decodes, reading only
   `works_in`. `Document.derived/1` is the read-only `{"pulls_from", "lands_on"}` name pair the
   API puts beside the document (`GET /api/flows[/:key]` and the `PUT` response:
-  `"derived"`); `encode/1` never emits it and `decode/1` accepts and ignores it, so a pulled
-  file pushes back unchanged.
+  `"derived"`); `encode/1` never emits it and `decode/1` accepts and ignores it — and likewise a
+  read-only `"problem"` key (RE430) — so a pulled file pushes back unchanged.
   `upsert_from_document/3` is the write path behind `PUT /api/flows/:key`: decode → key check →
   resolve the trigger's stage name → optional compare-and-swap on `version` → refuse a stage
   another key already holds (`{:stage_occupied, %{stage:, flow:}}`, API **422

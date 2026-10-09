@@ -5,7 +5,7 @@ defmodule RelayWeb.Api.StageControllerTest do
   alias Relay.Repo
 
   @stage_keys ~w(id name display_name category type ai_enabled position wip_limit parent_id
-                 description collapsed_by_default reject_to_stage_id)
+                 description collapsed_by_default reject_to_stage_id problem)
 
   setup %{conn: conn} do
     user = insert(:user)
@@ -73,6 +73,48 @@ defmodule RelayWeb.Api.StageControllerTest do
     # Scenario 2
     test "401 without an Authorization header", %{bare: bare} do
       assert bare |> get(~p"/api/stages") |> json_response(401)
+    end
+  end
+
+  # RE430: a stage whose ENABLED flow sits on a broken board shape is paused, and says why.
+  describe "GET /api/stages problem (RE430)" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = insert(:board, owner: user)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      deploy = insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
+      _done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 4)
+      enabled_flow(board, "code", code)
+      deploy_flow = enabled_flow(board, "deploy", deploy)
+
+      {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, user)
+      conn = conn |> recycle() |> put_req_header("authorization", "Bearer " <> token)
+      {:ok, conn: conn, deploy_flow: deploy_flow}
+    end
+
+    defp stages_by_name(conn),
+      do: conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data") |> Map.new(&{&1["name"], &1})
+
+    defp flow_problem(conn), do: conn |> get(~p"/api/flows/deploy") |> json_response(200) |> get_in(["data", "problem"])
+
+    test "4. the paused flow's stage carries its problem; every other stage has nil", %{conn: conn} do
+      stages = stages_by_name(conn)
+
+      assert stages["Deploy"]["problem"]["flow_key"] == "deploy"
+      assert stages["Deploy"]["problem"]["what"] == flow_problem(conn)["what"]
+
+      for {name, stage} <- stages, name != "Deploy" do
+        assert Map.has_key?(stage, "problem")
+        assert stage["problem"] == nil
+      end
+    end
+
+    test "5. a disabled flow on a broken shape does not pause its stage", %{conn: conn, deploy_flow: deploy_flow} do
+      deploy_flow |> Ecto.Changeset.change(enabled: false) |> Repo.update!()
+
+      assert stages_by_name(conn)["Deploy"]["problem"] == nil
+      assert flow_problem(conn)["kind"] == "upstream_working"
     end
   end
 

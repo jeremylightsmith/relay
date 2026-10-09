@@ -330,6 +330,19 @@ defmodule Relay.RunsReadSideTest do
       refute Runs.queued_flow(card, :ai, [ctx.flow], nil, [123])
       assert Runs.face_summary(card, :ai, [ctx.flow], %{}, [123]) == nil
     end
+
+    # RE430: a flow on a broken board shape is paused — never the card's queued flow.
+    test "a paused flow (non-nil problem) is never the queued flow", ctx do
+      card = insert(:card, stage: ctx.pulls_from, status: :ready)
+      paused = %{ctx.flow | problem: %{flow_key: "code", kind: :upstream_working}}
+
+      assert Runs.queued_flow(card, :ai, [paused], nil, []) == nil
+      assert Runs.face_summary(card, :ai, [paused], %{}, []) == nil
+
+      healthy = %{ctx.flow | problem: nil}
+      assert %Schemas.Flow{key: "code"} = Runs.queued_flow(card, :ai, [healthy], nil, [])
+      assert {:queued, %Schemas.Flow{key: "code"}} = Runs.face_summary(card, :ai, [healthy], %{}, [])
+    end
   end
 
   describe "face_summary/5" do

@@ -21,8 +21,15 @@ defmodule Relay.Runs.Scheduler do
   reassigned mid-run); a resume the capacity map cannot satisfy is REPORTED as a `refusals`
   entry rather than silently skipped (RE297), so a permanently-unplaceable run can be aged out
   instead of waiting forever.
+
+  **Paused flows (RE430).** A flow whose key has a problem in `snapshot.problems` (a broken
+  board shape — `Relay.Flows.Shape`) is paused: `plan/1` starts no fresh run for it, but still
+  resumes its in-flight runs, which finish and land as the board says. Nothing here re-derives
+  the shape rule — the snapshot carries the problems; `explain/2` names the pause
+  (`:flow_paused`).
   """
 
+  alias Relay.Flows.Shape
   alias Relay.Runs.Policy
   alias Relay.Runs.Scheduler.Plan
   alias Relay.Runs.Scheduler.Snapshot
@@ -34,6 +41,7 @@ defmodule Relay.Runs.Scheduler do
     cards_by_stage = Enum.group_by(snapshot.cards, & &1.stage_id)
     card_by_id = Map.new(snapshot.cards, &{&1.id, &1})
     run_by_card = Map.new(snapshot.runs, &{&1.card_id, &1})
+    paused = paused_flow_keys(snapshot)
 
     acc0 = %{
       capacity: snapshot.capacity,
@@ -48,9 +56,11 @@ defmodule Relay.Runs.Scheduler do
       snapshot.flows
       |> Enum.sort_by(&stage_position(&1, stage_by_id), :desc)
       |> Enum.reduce(acc0, fn flow, acc ->
-        acc
-        |> resume_runs(flow, snapshot.runs, children, card_by_id)
-        |> fresh_pulls(flow, stage_by_id, children, cards_by_stage, run_by_card)
+        acc = resume_runs(acc, flow, snapshot.runs, children, card_by_id)
+
+        if MapSet.member?(paused, flow.key),
+          do: acc,
+          else: fresh_pulls(acc, flow, stage_by_id, children, cards_by_stage, run_by_card)
       end)
 
     %Plan{
@@ -60,6 +70,9 @@ defmodule Relay.Runs.Scheduler do
       refusals: acc.refusals
     }
   end
+
+  # The keys of the flows a broken board shape pauses (RE430).
+  defp paused_flow_keys(snapshot), do: MapSet.new(snapshot.problems, & &1.flow_key)
 
   # --- flow ordering ---
 
@@ -328,6 +341,9 @@ defmodule Relay.Runs.Scheduler do
           evidence
         )
 
+      problem = flow_problem(snapshot, flow) ->
+        verdict(:flow_paused, Shape.paused_detail(problem), %{evidence | problem: Shape.wire(problem)})
+
       card.blocked_by != [] ->
         blocked_by_verdict(evidence)
 
@@ -519,9 +535,15 @@ defmodule Relay.Runs.Scheduler do
       # layered there for the same reason.
       current_node: nil,
       wip_limit: flow_stage && wip_limit(stage_by_id, flow_stage),
-      wip_used: flow_stage && used(children, cards_by_stage, flow_stage)
+      wip_used: flow_stage && used(children, cards_by_stage, flow_stage),
+      # RE430 — the pulling flow's broken-shape problem, on the wire (`Shape.wire/1`). Only the
+      # `:flow_paused` verdict fills it (fresh_card_verdict/4); every other verdict carries nil,
+      # so a non-nil problem always means "this card is paused".
+      problem: nil
     }
   end
+
+  defp flow_problem(snapshot, flow), do: Enum.find(snapshot.problems, &(&1.flow_key == flow.key))
 
   # The run's own isolation (from the LIVE flow row) when it has one, else the pulling flow's —
   # a run whose flow row was deleted reads nil here, which is itself the diagnosis (RE297).

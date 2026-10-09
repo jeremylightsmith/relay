@@ -58,8 +58,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 82
-RUNNER_FINGERPRINT = "7a6d142333d3ff926035814753616742440dafae772add8db7b11fd94d2f5153"
+RUNNER_VERSION = 84
+RUNNER_FINGERPRINT = "f1e09ac2310fdcbaa3e3fed48759ffbd403231dede406a77109e1fdadc127e8c"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -969,7 +969,10 @@ def print_why(d):
     """The prose answer to "why isn't this card moving?" — one or two sentences, never a
     JSON dump. `--json` is there for the full structure; this is what a human reads."""
     print(f'{d.get("verdict", "?")}: {d.get("detail", "")}'.rstrip())
-    last = (d.get("evidence") or {}).get("last_execution") or {}
+    evidence = d.get("evidence") or {}
+    if evidence.get("problem"):
+        print(format_problem(evidence["problem"]))
+    last = evidence.get("last_execution") or {}
     if last.get("detail"):
         print(f'\n--- {last.get("node_key", "?")} ({last.get("outcome", "?")}) ---')
         print(last["detail"])
@@ -1263,12 +1266,32 @@ def _trigger_chain(doc):
     return f"{derived.get('pulls_from') or '—'} → {stage} → {derived.get('lands_on') or '—'}"
 
 
+def format_problem(problem):
+    """A broken board shape's explanation (RE430), printed VERBATIM from the server's `problem`
+    object (`Relay.Flows.Shape` owns every word): What, Why, then the numbered fixes. The
+    labels are the only runner-owned text — never build a sentence from `kind`."""
+    lines = [f"What: {problem.get('what', '')}", f"Why:  {problem.get('why', '')}", "Fix:"]
+    lines += [f"  {i}. {fix.get('label', '')}" for i, fix in enumerate(problem.get("fixes") or [], 1)]
+    return "\n".join(lines)
+
+
+def _paused(doc):
+    """True for an ENABLED flow with a shape problem — a disabled one's problem is only reported."""
+    return bool(doc.get("enabled") and doc.get("problem"))
+
+
 def format_flow(doc):
     state = "enabled" if doc.get("enabled") else "disabled"
+    if _paused(doc):
+        state += "  PAUSED"
     nodes, edges = doc.get("nodes") or [], doc.get("edges") or []
     lines = [
         f"{doc['key']} flow — v{doc.get('version', '?')}  {state}  {doc.get('isolation', '—')}",
         f"  trigger: {_trigger_chain(doc)}",
+    ]
+    if doc.get("problem"):
+        lines.append(indent(format_problem(doc["problem"]), "  "))
+    lines += [
         f"  {len(nodes)} nodes / {len(edges)} edges",
         "",
         f"  {'NODE':<18} {'TYPE':<7} {'MODEL':<7} {'AGENT':<18} RUN",
@@ -1288,10 +1311,9 @@ def format_flow_list(docs):
     lines = [f"{'KEY':<16} {'ON':<4} {'VER':>4} {'ISOLATION':<14} TRIGGER"]
     for d in docs:
         on = "yes" if d.get("enabled") else "no"
-        lines.append(
-            f"{d['key']:<16} {on:<4} {d.get('version', '?'):>4} "
-            f"{d.get('isolation', '—'):<14} {_trigger_chain(d)}"
-        )
+        row = (f"{d['key']:<16} {on:<4} {d.get('version', '?'):>4} "
+               f"{d.get('isolation', '—'):<14} {_trigger_chain(d)}")
+        lines.append(f"{row}  PAUSED" if _paused(d) else row)
     return "\n".join(lines)
 
 
@@ -1612,7 +1634,8 @@ def _stage_row(s, stages):
     lanes = ",".join(sub["type"] for sub in stages if sub["parent_id"] == s["id"])
     return (f"{s['position']:>3}  {s['name']:<20}  {s['category']:<11}  {s['type']:<8}  "
             f"ai:{'yes' if s['ai_enabled'] else '-'}  wip:{s['wip_limit'] or '-'}  "
-            f"substages:{lanes or '-'}")
+            f"substages:{lanes or '-'}"
+            + (f"  PAUSED (flow {s['problem']['flow_key']})" if s.get("problem") else ""))
 
 
 def _stage_line(s):

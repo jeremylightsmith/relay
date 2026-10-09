@@ -238,6 +238,20 @@ defmodule Relay.Flows.DocumentTest do
     test "31. encode/1 never emits derived — it stays the canonical document" do
       refute Map.has_key?(encoded(library_board(), "code"), "derived")
     end
+
+    # RE430: the API puts the read-only `problem` beside the document too.
+    test "a pulled document carrying derived and problem decodes, dropping problem" do
+      doc = Map.put(encoded(library_board(), "code"), "derived", %{"pulls_from" => "A", "lands_on" => "B"})
+
+      for problem <- [nil, %{"kind" => "no_upstream"}] do
+        assert {:ok, attrs} = Document.decode(Map.put(doc, "problem", problem))
+        refute Map.has_key?(attrs, :problem)
+      end
+    end
+
+    test "encode/1 never emits problem" do
+      refute Map.has_key?(encoded(library_board(), "code"), "problem")
+    end
   end
 
   describe "the fixed point" do

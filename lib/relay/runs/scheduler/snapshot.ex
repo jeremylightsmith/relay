@@ -19,6 +19,13 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       `stage_id` is the flow's own (work) stage, `pulls_from_stage_id` the stage before it in
       board order (`Relay.Flows.neighbours/2`, nil when none — RE429), computed during assembly
       (`Server.build_snapshot/2`); `isolation` is `:shared_clean | :exclusive`.
+    * `problems` — every broken-shape problem on the board (RE430):
+      `[Relay.Flows.Shape.problem()]` from `Relay.Flows.Shape.problems/2`, computed during
+      assembly (`Server.build_snapshot/2`) over ALL the board's flows — a disabled flow's problem
+      is included, flagged `enabled: false`, so the upstream flow is named exactly as the API
+      names it. An enabled flow whose key has a problem is **paused**: `plan/1` starts no fresh
+      run for it (its in-flight runs still resume) and `explain/2` answers `:flow_paused`.
+      `plan/1` reads only each problem's `flow_key`. `[]` on a healthy board.
     * `runs` — **active** runs only (`status in Schemas.Run.active_statuses()`):
       `[%{id, card_id, status, flow_key, isolation, pinned_runner_id, parked_reason}]`.
       `parked_reason` is `nil | :needs_input | :claimed | :runner_gone` — only a
@@ -90,9 +97,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
           cards: [card()],
           flows: [flow()],
           runs: [run()],
+          problems: [Relay.Flows.Shape.problem()],
           capacity: capacity(),
           runners: %{optional(term()) => runner_status()}
         }
 
-  defstruct stages: [], cards: [], flows: [], runs: [], capacity: %{}, runners: %{}
+  defstruct stages: [], cards: [], flows: [], runs: [], problems: [], capacity: %{}, runners: %{}
 end

@@ -30,6 +30,7 @@ defmodule Relay.Runs.Preflight do
   import Ecto.Query
 
   alias Relay.Flows
+  alias Relay.Flows.Shape
   alias Relay.Repo
   alias Relay.Runs
   alias Relay.Runs.Capacity
@@ -47,7 +48,7 @@ defmodule Relay.Runs.Preflight do
 
   @type t :: %{
           ready?: boolean(),
-          stages: :ok | {:missing, [:pulls_from | :lands_on]},
+          stages: :ok | {:problem, Shape.problem()},
           requires: %{agents: [String.t()], skills: [String.t()]},
           runners: :none_connected | {:ok, String.t()} | {:no_candidate, [detail()]},
           unreported: [String.t()]
@@ -127,12 +128,13 @@ defmodule Relay.Runs.Preflight do
     capacity |> Map.get(runner_id, %{}) |> Map.get(isolation, 0)
   end
 
-  # A flow always has its stage (RE429); what it can lack is somewhere to pick cards up from or
-  # drop them off at — a flow on the board's first or last stage. Read fresh from board order.
-  defp stage_check(%Flow{} = flow) do
-    neighbours = Flows.neighbours(flow)
-    missing = for key <- [:pulls_from, :lands_on], is_nil(Map.fetch!(neighbours, key)), do: key
-
-    if missing == [], do: :ok, else: {:missing, missing}
+  # A flow always has its stage (RE429); what can be wrong is the board shape around it
+  # (`Relay.Flows.Shape`, RE430) — nothing before it, a Review or still-working column right
+  # before it, or nothing after it. Read fresh from the board.
+  defp stage_check(%Flow{board_id: board_id, key: key}) do
+    case Enum.find(Flows.shape_problems(board_id), &(&1.flow_key == key)) do
+      nil -> :ok
+      problem -> {:problem, problem}
+    end
   end
 end

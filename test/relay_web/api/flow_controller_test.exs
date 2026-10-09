@@ -356,6 +356,69 @@ defmodule RelayWeb.Api.FlowControllerTest do
     end
   end
 
+  # RE430: a flow on a broken board shape carries its `problem`, rendered from
+  # `Relay.Flows.Shape` verbatim; `nil` when the shape is fine.
+  describe "the problem field (RE430)" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = insert(:board, owner: user)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      deploy = insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
+      _done = insert(:stage, board: board, name: "Done", type: :done, category: :complete, position: 4)
+      insert(:flow, board: board, key: "code", enabled: true, stage_id: code.id)
+
+      insert(:flow,
+        board: board,
+        key: "deploy",
+        enabled: true,
+        stage_id: deploy.id,
+        edges: [%Schemas.Flow.Edge{from: "start", to: "done"}]
+      )
+
+      {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, user)
+      conn = conn |> recycle() |> put_req_header("authorization", "Bearer " <> token)
+      {:ok, conn: conn, board: board, code: code}
+    end
+
+    test "1. GET /api/flows/:key renders the flow's problem verbatim from Shape", %{conn: conn, board: board} do
+      problem = pull(conn, "deploy")["problem"]
+
+      assert problem["kind"] == "upstream_working"
+      assert problem["what"] == "Flow **deploy** pulls from Code, which is flow **code**'s working stage."
+
+      assert Enum.map(problem["fixes"], & &1["label"]) == [
+               "Turn on Code · Done",
+               "Insert a queue stage between Code and Deploy"
+             ]
+
+      for fix <- problem["fixes"], do: assert(fix |> Map.keys() |> Enum.sort() == ["action", "label"])
+      assert problem == Relay.Flows.Shape.wire(hd(Flows.shape_problems(board)))
+    end
+
+    test "2. GET /api/flows carries problem on every document; fixing the board clears it",
+         %{conn: conn, code: code} do
+      data = conn |> get(~p"/api/flows") |> json_response(200) |> Map.fetch!("data")
+      by_key = Map.new(data, &{&1["key"], &1})
+
+      assert Map.has_key?(by_key["code"], "problem")
+      assert by_key["code"]["problem"] == nil
+      assert by_key["deploy"]["problem"]["kind"] == "upstream_working"
+
+      {:ok, _code_done} = Boards.enable_lane(code, :done)
+
+      assert pull(conn, "deploy")["problem"] == nil
+    end
+
+    test "3. a pulled document carrying problem pushes back unchanged", %{conn: conn} do
+      doc = pull(conn, "deploy")
+      assert Map.has_key?(doc, "derived")
+      assert doc["problem"]
+
+      assert conn |> push_doc("deploy", doc) |> json_response(200)
+    end
+  end
+
   describe "after a stage rename (RE385)" do
     test "pulled flows name the renamed stage", %{conn: conn, board: board} do
       spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))

@@ -99,6 +99,27 @@ def capture_ret(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
+def shape_problem(**overrides):
+    """A flow's `problem` object (RE430) with exactly the server's keys — built from
+    CONTRACT["flows"]["problem_keys"], so a key renamed server-side breaks every test using it."""
+    problem = {
+        "flow_key": "deploy",
+        "kind": "upstream_working",
+        "what": "Flow **deploy** pulls from Code, which is flow **code**'s working stage.",
+        "why": "Cards in Code are still being worked; deploy would take them while the code flow is still working them.",
+        "fixes": [
+            {"action": "enable_lane", "label": "Turn on Code · Done"},
+            {"action": "insert_queue_stage", "label": "Insert a queue stage between Code and Deploy"},
+        ],
+        "columns": [],
+    }
+    problem.update(overrides)
+    assert sorted(problem) == CONTRACT["flows"]["problem_keys"], sorted(problem)
+    for fix in problem["fixes"]:
+        assert sorted(fix) == CONTRACT["flows"]["fix_keys"], sorted(fix)
+    return problem
+
+
 def rate_limit_event(five_hour=None, seven_day=None, resets_at=0, status="allowed",
                      window="five_hour"):
     """A `rate_limit_event` in the shape Claude Code 2.1.270 streams (fields nested under
@@ -8155,6 +8176,23 @@ class WhyCommandTest(unittest.TestCase):
         })
         self.assertIn(long_detail, out)
 
+    def test_a_paused_flow_prints_the_problem_after_the_verdict(self):
+        problem = shape_problem()
+        out = self.render({
+            "verdict": "flow_paused",
+            "detail": "Flow **deploy** is paused: no new runs start until the board is fixed. "
+                      "Runs already going will finish and land.",
+            "evidence": {"problem": problem},
+        })
+        self.assertTrue(out.startswith("flow_paused: Flow **deploy** is paused"))
+        what = next(line for line in relay.format_problem(problem).splitlines() if line.startswith("What:"))
+        self.assertIn(what, out)
+        self.assertIn("1. Turn on Code · Done", out)
+
+    def test_no_problem_prints_no_what_line(self):
+        out = self.render({"verdict": "awaiting_capacity", "detail": "No runner.", "evidence": {"problem": None}})
+        self.assertNotIn("What:", out)
+
     def test_the_cli_wires_why_to_a_ref(self):
         args = relay.build_parser().parse_args(["why", "RLY-12"])
         self.assertEqual(args.ref, "RLY-12")
@@ -8826,6 +8864,7 @@ class FlowPullPushTest(unittest.TestCase):
         "isolation": "exclusive",
         "trigger": {"stage": "Code"},
         "derived": {"pulls_from": "Plan:Done", "lands_on": "Code:Done"},
+        "problem": None,
         "nodes": [
             {"key": "branch", "type": "shell", "run": "{relay} git-fetch && git checkout -B {branch} origin/main"},
             {"key": "implement", "type": "agent", "model": "sonnet", "agent": "plan-implementer",
@@ -9020,6 +9059,54 @@ class FlowPullPushTest(unittest.TestCase):
         self.assertEqual(c.key, "code")
         self.assertEqual(c.file, "/tmp/code.json")
 
+
+
+class ShapeProblemRenderingTest(unittest.TestCase):
+    """RE430 — a paused flow's `problem` is rendered verbatim by ONE pure formatter, shared by
+    `relay flow`, `relay flow KEY`, `relay stages` and `relay why`. PAUSED and the What / Why /
+    Fix labels are the only runner-owned words."""
+
+    def doc(self, **overrides):
+        d = dict(FlowPullPushTest.DOC, key="deploy", enabled=True, problem=shape_problem())
+        d.update(overrides)
+        return d
+
+    def test_format_problem_prints_what_why_and_numbered_fixes_verbatim(self):
+        problem = shape_problem()
+        out = relay.format_problem(problem)
+        self.assertIn("What: Flow **deploy** pulls from Code, which is flow **code**'s working stage.", out)
+        why = next(line for line in out.splitlines() if line.startswith("Why:"))
+        self.assertIn(problem["why"], why)
+        first = out.index("1. Turn on Code · Done")
+        second = out.index("2. Insert a queue stage between Code and Deploy")
+        self.assertLess(first, second)
+        self.assertIn("Fix:", out)
+
+    def test_format_flow_marks_an_enabled_flow_with_a_problem_paused(self):
+        out = relay.format_flow(self.doc())
+        self.assertIn("PAUSED", out)
+        self.assertIn("What: Flow **deploy**", out)
+        self.assertIn("1. Turn on Code · Done", out)
+
+    def test_format_flow_without_a_problem_prints_neither(self):
+        out = relay.format_flow(self.doc(problem=None))
+        self.assertNotIn("PAUSED", out)
+        self.assertNotIn("What:", out)
+
+    def test_format_flow_explains_a_disabled_flows_problem_without_paused(self):
+        out = relay.format_flow(self.doc(enabled=False))
+        self.assertIn("What:", out)
+        self.assertNotIn("PAUSED", out)
+
+    def test_format_flow_list_marks_only_the_enabled_flow_with_a_problem(self):
+        out = relay.format_flow_list([
+            self.doc(key="deploy"),
+            self.doc(key="code", problem=None),
+            self.doc(key="audit", enabled=False),
+        ])
+        paused = [line for line in out.splitlines() if line.rstrip().endswith("PAUSED")]
+        self.assertEqual(len(paused), 1)
+        self.assertTrue(paused[0].startswith("deploy"))
 
 class TimelineTextRenderingTest(unittest.TestCase):
     def render(self, timeline):
@@ -10359,7 +10446,7 @@ class StageCommandsTest(unittest.TestCase):
         return {"id": id, "name": name, "display_name": display_name or name,
                 "category": category, "type": type, "ai_enabled": ai, "position": position,
                 "wip_limit": wip, "parent_id": parent, "description": None,
-                "collapsed_by_default": False, "reject_to_stage_id": None}
+                "collapsed_by_default": False, "reject_to_stage_id": None, "problem": None}
 
     def setUp(self):
         self._api = relay.api
@@ -10513,6 +10600,15 @@ class StageCommandsTest(unittest.TestCase):
         self.assertEqual(len(sub), 1)
         self.assertNotEqual(sub[0], code)
         self.assertEqual(len(out.splitlines()), len(self.stages))
+
+    def test_stages_marks_a_paused_flows_stage(self):
+        self.stages[3]["problem"] = shape_problem(flow_key="deploy")
+        for st in self.stages:
+            self.assertEqual(set(st), set(CONTRACT["stages"]["stage_keys"]))
+        out = self._run(["stages"])
+        code = next(line for line in out.splitlines() if " Code " in line)
+        self.assertTrue(code.endswith("PAUSED (flow deploy)"), code)
+        self.assertEqual([line for line in out.splitlines() if "PAUSED" in line], [code])
 
     def test_stages_json_prints_the_list(self):
         self.assertEqual(json.loads(self._run(["stages", "--json"])), self.stages)

@@ -91,6 +91,17 @@ the MMF design specs).
   reordering stages moves both. The API shows them read-only as `"derived": {"pulls_from",
   "lands_on"}` beside the document; a legacy `pulls_from` / `works_in` / `lands_on` trigger is
   still accepted, reading only `works_in`.
+- **Shape rule** — the column just before a flow's stage, in board order with substages included,
+  must be somewhere a card can rest (a `:queue` or `:done` column), and there must be a column
+  after it to land on (RE430). A flow that breaks it has exactly one problem, the first that
+  applies of: no column before (`:no_upstream`), a Review column before (`:upstream_review`), a
+  still-working column before (`:upstream_working`), no column after (`:no_downstream`).
+  `Relay.Flows.Shape` owns the rule and every word of its *what* / *why* / *fix* explanation;
+  it is worked out from the board on every read, never stored.
+- **Paused flow** — an **enabled** flow whose stage breaks the shape rule: no new runs start for
+  it and the card face never calls it "queued", until the board is fixed; runs already going
+  finish and land. A disabled flow on a broken shape still reports its problem but is not
+  "paused".
 - **Review gate** — the Approve / Request-changes decision shown for a card whose stage is
   `:review`-type (main or substage). **Approve advances the card to the next stage or substage;**
   **Request changes** sends it back to a derived destination.

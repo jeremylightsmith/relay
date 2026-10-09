@@ -9,6 +9,8 @@ defmodule RelayWeb.Api.DiagnosisControllerTest do
     {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
     queue = insert(:stage, board: board, name: "Plan:Done", position: 1, type: :queue)
     works = insert(:stage, board: board, name: "Code", position: 2, type: :work)
+    # RE430: a Done column after Code keeps the code flow's shape healthy (not paused).
+    insert(:stage, board: board, name: "Done", position: 3, type: :done, category: :complete)
     conn = put_req_header(conn, "authorization", "Bearer " <> token)
     {:ok, conn: conn, board: board, queue: queue, works: works}
   end

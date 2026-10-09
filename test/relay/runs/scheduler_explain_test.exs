@@ -1,6 +1,7 @@
 defmodule Relay.Runs.SchedulerExplainTest do
   use ExUnit.Case, async: true
 
+  alias Relay.Flows.Shape
   alias Relay.Runs
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Snapshot
@@ -440,6 +441,52 @@ defmodule Relay.Runs.SchedulerExplainTest do
       assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
       assert detail =~ "every connected runner is paused at its Claude usage limit (five_hour 95% / 90%)"
       assert detail =~ "resumes 3:40 PM UTC"
+    end
+  end
+
+  # RE430 — a broken board shape pauses the flow; the diagnosis names it and carries the problem.
+  describe "explain/2 — paused flows (RE430)" do
+    defp problem do
+      %{
+        flow_key: "f",
+        stage_id: 2,
+        enabled: true,
+        kind: :no_downstream,
+        what: "W is the last column on the board, so there is no column after it.",
+        why: "When a run finishes it moves the card to the next column.",
+        fixes: [%{action: :add_stage_after, stage_id: 2, label: "Add a stage after W"}],
+        columns: [%{stage_id: 2, name: "W", type: :work, mark: :self}]
+      }
+    end
+
+    defp paused(problems, card_opts \\ []) do
+      %{
+        base(cards: [card(10, 1, card_opts)], flows: [flow("f", 1, 2)], capacity: %{"e1" => slots(1, 0)})
+        | problems: problems
+      }
+    end
+
+    test "5. a card the paused flow would pull is :flow_paused with the problem as evidence" do
+      result = Scheduler.explain(paused([problem()]), 10)
+
+      assert result.verdict == :flow_paused
+      assert result.detail == Shape.paused_detail(problem())
+      assert result.evidence.problem == Shape.wire(problem())
+      assert result.evidence.problem["what"] == problem().what
+    end
+
+    test "6. a healthy board is :dispatchable with no problem in evidence" do
+      result = Scheduler.explain(paused([]), 10)
+
+      assert result.verdict == :dispatchable
+      assert result.evidence.problem == nil
+    end
+
+    test "7. a human-owned card is still :owned_by_human on a paused flow" do
+      result = Scheduler.explain(paused([problem()], active_owner: :human), 10)
+
+      assert result.verdict == :owned_by_human
+      assert result.evidence.problem == nil
     end
   end
 end

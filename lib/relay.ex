@@ -31,6 +31,7 @@ defmodule Relay do
       Events,
       Flows,
       Flows.Document,
+      Flows.Shape,
       Markdown,
       Members,
       Presence,

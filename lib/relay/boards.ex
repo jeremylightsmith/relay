@@ -294,8 +294,9 @@ defmodule Relay.Boards do
   end
 
   # The stage columns the scheduler snapshot reads — `top_level_done_stage_ids/1` matches
-  # `parent_id` + `category`, `order_stages/1` reads `position` + `type`.
-  @scheduler_stage_fields [:id, :board_id, :position, :parent_id, :wip_limit, :category, :type]
+  # `parent_id` + `category`, `order_stages/1` reads `position` + `type`, and
+  # `Relay.Flows.Shape.problems/2` words a broken shape with `name` (RE430).
+  @scheduler_stage_fields [:id, :board_id, :name, :position, :parent_id, :wip_limit, :category, :type]
 
   @doc """
   The board's stages as narrow `%Stage{}` structs (only #{inspect(@scheduler_stage_fields)}
@@ -843,7 +844,7 @@ defmodule Relay.Boards do
 
   def stage_display_name(%Stage{parent_id: nil} = stage, %Stage{}), do: stage.name
 
-  def stage_display_name(%Stage{type: type}, %Stage{} = top), do: "#{top.name} · #{lane_word(type)}"
+  def stage_display_name(%Stage{type: type}, %Stage{} = top), do: "#{top.name} · #{Stage.lane_word(type)}"
 
   defp get_sublane(%Stage{} = parent, lane) do
     Repo.get_by(Stage, parent_id: parent.id, type: lane)
@@ -983,10 +984,7 @@ defmodule Relay.Boards do
 
   # The one place a sub-lane's composite name is built (RE385) — enable_lane/2 and the
   # update_stage/2 rename cascade both go through it.
-  defp sublane_name(parent_name, lane), do: "#{parent_name}:#{lane_word(lane)}"
-
-  defp lane_word(:review), do: "Review"
-  defp lane_word(:done), do: "Done"
+  defp sublane_name(parent_name, lane), do: "#{parent_name}:#{Stage.lane_word(lane)}"
 
   defp next_position(board_id) do
     (Repo.one(from s in Stage, where: s.board_id == ^board_id, select: max(s.position)) || 0) + 1
