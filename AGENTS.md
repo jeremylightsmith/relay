@@ -86,14 +86,20 @@ use them.
 ## Project guidelines
 
 - Running `mix precommit` is REQUIRED on every development cycle and must pass before work is considered done. It runs compile (warnings as errors), `mix format` (with Styler), `mix credo --strict`, `mix sobelow`, `mix deps.audit`, and the full test suite (warnings as errors). Fix any failure before finishing — never commit work with a failing `mix precommit`.
-- **`./relay` carries `RUNNER_VERSION` — bump it on every change to that file.** A running
+- **`./relay` carries `RUNNER_VERSION` — bump it past `origin/main`'s on every change to that
+  file.** A running
   `relay start` holds the version it started with in memory, so an unbumped fix reaches
   nobody: the server compares the runner's declared version against
   `Relay.Runs.min_runner_version/0` and **refuses work** to anything below it (409
   `runner_outdated`), which is the only thing that turns "the fix was merged" into "the fix
-  is running". `bin/test_relay.py`'s `RunnerFingerprintGuardTest` enforces this — it hashes
-  `./relay` with the two constant lines masked and fails with the exact fingerprint to paste
-  into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/relay/runs.ex` only when
+  is running". `bin/test_relay.py`'s `RunnerVersionBumpGuardTest` (RE425) enforces this: when
+  `./relay`'s masked contents changed since the merge-base with `origin/main`, it requires
+  `RUNNER_VERSION` to be **strictly greater than `origin/main`'s** and names the minimum — so
+  two parallel branches bumping to the same number fail for whichever lands second (rebase and
+  bump again). It never fetches, and skips with a `WARNING:` on stderr when `origin/main` (or
+  a merge-base) isn't available, e.g. a shallow CI checkout. `RunnerFingerprintGuardTest`
+  hashes `./relay` with the two constant lines masked and fails with the exact fingerprint to
+  paste into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/relay/runs.ex` only when
   running the old runner is genuinely worse than a stopped one.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - **The current-state architecture lives in [`docs/architecture/`](docs/architecture/README.md)** and staying current is a gate: if your branch adds or changes a **context, PubSub topic, API endpoint, or supervised process**, update the matching `docs/architecture/` page in the same branch. The whole-branch final review treats a stale page as a blocking finding.

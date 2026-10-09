@@ -54,10 +54,12 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # So the runner DECLARES a version on every claim and heartbeat, the server declares the
 # minimum it will work with, and anything below that is refused work and visibly marked.
 #
-# Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
-# bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 79
-RUNNER_FINGERPRINT = "53ceaaeaa1626ab6a0af834ec006303f29b534e8fee64bad222a952b12affe03"
+# Bump RUNNER_VERSION on ANY change to this file — strictly past origin/main's RUNNER_VERSION,
+# not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
+# RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
+# the value to paste.
+RUNNER_VERSION = 80
+RUNNER_FINGERPRINT = "d40f6ce7eb74110e9b2325d694739575e88f37d9db94cd3b00d03cf86c8786d9"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is

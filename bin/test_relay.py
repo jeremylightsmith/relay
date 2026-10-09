@@ -7277,8 +7277,9 @@ class RunnerFingerprintGuardTest(unittest.TestCase):
         computed = relay.runner_fingerprint()
         self.assertEqual(
             computed, relay.RUNNER_FINGERPRINT,
-            "\n\n./relay changed but RUNNER_VERSION was not bumped. Increment "
-            f"RUNNER_VERSION and set RUNNER_FINGERPRINT to:\n\n    {computed}\n")
+            "\n\n./relay changed but RUNNER_FINGERPRINT was not refreshed. Set RUNNER_VERSION "
+            "above origin/main's (rebase first if main has moved; the RE425 version-bump guard "
+            f"names the minimum), then set RUNNER_FINGERPRINT to:\n\n    {computed}\n")
 
     def test_masking_makes_a_version_bump_fingerprint_stable(self):
         with open(RELAY_PATH, encoding="utf-8") as f:
@@ -7301,6 +7302,215 @@ class RunnerFingerprintGuardTest(unittest.TestCase):
             src = f.read()
         self.assertNotEqual(relay.runner_fingerprint(src + "\n# a trailing comment\n"),
                             relay.runner_fingerprint(src))
+
+
+def version_bump_problem(current_src, base_src, main_src, base_rev="the merge-base"):
+    """RE425: why ./relay's RUNNER_VERSION is not high enough, or None when it is.
+
+    Pure — no git, no I/O. "Changed" means the masked source (relay.runner_fingerprint) differs
+    from the merge-base's; "high enough" means strictly greater than origin/main's version.
+    """
+    if relay.runner_fingerprint(current_src) == relay.runner_fingerprint(base_src):
+        return None
+    current = relay.parse_runner_version(current_src)
+    main = relay.parse_runner_version(main_src) or 0
+    required = max(main + 1, 1)
+    if current is None:
+        return (f"\n\n./relay changed since {base_rev} but declares no RUNNER_VERSION. "
+                f"Set RUNNER_VERSION to at least {required}.\n")
+    if current > main:
+        return None
+    return (f"\n\n./relay changed since {base_rev} but RUNNER_VERSION is {current}; "
+            f"origin/main is at {main}. Set RUNNER_VERSION to at least {required} "
+            "(rebase onto origin/main first if main has moved), then paste the fingerprint "
+            "the fingerprint test prints.\n")
+
+
+class RunnerVersionBumpSkip(Exception):
+    """The git state the RE425 guard needs is unavailable; str(exc) is the human reason."""
+
+
+def read_version_bump_sources(repo_root):
+    """(base_src, main_src, base_short_sha) for ./relay at the merge-base and origin/main.
+
+    Never fetches: reads whatever origin/main the checkout already has. Any missing piece is a
+    RunnerVersionBumpSkip, never a CalledProcessError."""
+
+    def git(*args):
+        try:
+            return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True)
+        except OSError as e:
+            raise RunnerVersionBumpSkip(f"cannot run git: {e}") from e
+
+    if git("rev-parse", "--git-dir").returncode != 0:
+        raise RunnerVersionBumpSkip(f"{repo_root} is not a git checkout")
+    if git("rev-parse", "--verify", "--quiet", "origin/main").returncode != 0:
+        raise RunnerVersionBumpSkip("no origin/main ref in this checkout")
+    mb = git("merge-base", "HEAD", "origin/main")
+    if mb.returncode != 0 or not mb.stdout.strip():
+        raise RunnerVersionBumpSkip("no merge-base between HEAD and origin/main (shallow clone?)")
+    base_sha = mb.stdout.strip()
+
+    def show(rev):
+        out = git("show", f"{rev}:relay")
+        if out.returncode != 0:
+            raise RunnerVersionBumpSkip(f"cannot read relay at {rev}")
+        return out.stdout
+
+    return show(base_sha), show("origin/main"), base_sha[:12]
+
+
+class RunnerVersionBumpGuardTest(unittest.TestCase):
+    """RE425: a ./relay behaviour change must bump RUNNER_VERSION *past origin/main's*.
+
+    The fingerprint guard alone cannot tell "bumped" from "pasted the fingerprint and kept the
+    number", and two parallel branches that each bump 78 -> 79 both pass it. Comparing against
+    origin/main closes both holes: whichever branch lands second sees main already at 79 and is
+    told to go to 80. "Changed" is measured against the merge-base with the same mask the
+    fingerprint uses, so a branch that never touched ./relay is never asked to bump just because
+    main moved on.
+    """
+
+    V = relay.RUNNER_VERSION
+
+    @classmethod
+    def setUpClass(cls):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            cls.SRC = f.read()
+
+    @staticmethod
+    def changed(src, note="\n# a behaviour change\n"):
+        return src + note
+
+    def with_v(self, src, n):
+        out = src.replace(f"RUNNER_VERSION = {relay.RUNNER_VERSION}", f"RUNNER_VERSION = {n}", 1)
+        self.assertEqual(relay.parse_runner_version(out), n, "the version substitution failed")
+        return out
+
+    # -- version_bump_problem: the pure decision ------------------------------------------
+
+    def test_version_bump_missing_on_a_changed_relay_names_main_plus_one(self):
+        problem = version_bump_problem(self.changed(self.SRC), self.SRC, self.SRC, "abc123")
+        self.assertIsNotNone(problem)
+        self.assertIn("abc123", problem)
+        self.assertIn(f"RUNNER_VERSION is {self.V}", problem)
+        self.assertIn(f"origin/main is at {self.V}", problem)
+        self.assertIn(f"at least {self.V + 1}", problem)
+        self.assertIn(
+            f"./relay changed since abc123 but RUNNER_VERSION is {self.V}; "
+            f"origin/main is at {self.V}.", problem)
+        self.assertIn("(rebase onto origin/main first if main has moved), then paste the "
+                      "fingerprint the fingerprint test prints.", problem)
+
+    def test_version_bump_past_main_on_a_changed_relay_passes(self):
+        current = self.with_v(self.changed(self.SRC), self.V + 1)
+        self.assertIsNone(version_bump_problem(current, self.SRC, self.SRC, "abc123"))
+
+    def test_version_bump_only_constant_lines_differing_is_not_a_change(self):
+        current = self.with_v(self.SRC, self.V + 5).replace(
+            f'RUNNER_FINGERPRINT = "{relay.RUNNER_FINGERPRINT}"', 'RUNNER_FINGERPRINT = "0" * 64', 1)
+        self.assertNotIn(relay.RUNNER_FINGERPRINT, current)
+        self.assertIsNone(version_bump_problem(current, self.SRC, self.SRC, "abc123"))
+
+    def test_version_bump_identical_to_base_passes(self):
+        current = self.with_v(self.SRC, self.V)
+        self.assertIsNone(version_bump_problem(current, self.SRC, self.SRC, "abc123"))
+
+    def test_version_bump_not_required_when_branch_is_behind_main_and_untouched(self):
+        base = self.with_v(self.SRC, 78)
+        main = self.with_v(self.changed(self.SRC), 79)
+        self.assertIsNone(version_bump_problem(base, base, main, "abc123"))
+
+    def test_version_bump_parallel_collision_with_main_fails_for_the_second(self):
+        base = self.with_v(self.SRC, 78)
+        main = self.with_v(self.changed(self.SRC), 79)
+        current = self.with_v(self.changed(self.SRC, "\n# my other change\n"), 79)
+        problem = version_bump_problem(current, base, main, "abc123")
+        self.assertIsNotNone(problem)
+        self.assertIn("RUNNER_VERSION is 79", problem)
+        self.assertIn("origin/main is at 79", problem)
+        self.assertIn("at least 80", problem)
+
+    def test_version_bump_missing_version_line_is_reported(self):
+        current = re.sub(r"(?m)^RUNNER_VERSION\s*=.*\n", "", self.changed(self.SRC), count=1)
+        self.assertIsNone(relay.parse_runner_version(current))
+        problem = version_bump_problem(current, self.SRC, self.SRC, "abc123")
+        self.assertIsNotNone(problem)
+        self.assertIn("declares no RUNNER_VERSION", problem)
+
+    # -- read_version_bump_sources: the git reader -----------------------------------------
+
+    def _repo(self, relay_text="RUNNER_VERSION = 3\nprint('hi')\n", origin=True):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        _git(tmp, "init", "-q")
+        if relay_text is None:
+            _write(os.path.join(tmp, "other"), "x\n")
+            _git(tmp, "add", "other")
+        else:
+            _write(os.path.join(tmp, "relay"), relay_text)
+            _git(tmp, "add", "relay")
+        _git(tmp, "commit", "-q", "-m", "init")
+        if origin:
+            _git(tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+        return tmp
+
+    def test_version_bump_sources_are_read_from_merge_base_and_origin_main(self):
+        text = "RUNNER_VERSION = 3\nprint('hi')\n"
+        tmp = self._repo(text)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp, capture_output=True,
+                              text=True, check=True).stdout.strip()
+        base_src, main_src, sha = read_version_bump_sources(tmp)
+        self.assertEqual(base_src, text)
+        self.assertEqual(main_src, text)
+        self.assertTrue(sha)
+        self.assertTrue(head.startswith(sha), f"{sha!r} is not a prefix of {head!r}")
+
+    def test_version_bump_sources_skip_without_origin_main(self):
+        tmp = self._repo(origin=False)
+        with self.assertRaises(RunnerVersionBumpSkip) as cm:
+            read_version_bump_sources(tmp)
+        self.assertIn("origin/main", str(cm.exception))
+
+    def test_version_bump_sources_skip_outside_a_git_checkout(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with self.assertRaises(RunnerVersionBumpSkip):
+            read_version_bump_sources(tmp)
+
+    def test_version_bump_sources_skip_when_relay_is_absent_at_the_rev(self):
+        tmp = self._repo(relay_text=None)
+        with self.assertRaises(RunnerVersionBumpSkip) as cm:
+            read_version_bump_sources(tmp)
+        self.assertIn("relay", str(cm.exception))
+
+    # -- the live guard ---------------------------------------------------------------------
+
+    def test_relay_change_bumps_version_past_main(self):
+        try:
+            base_src, main_src, sha = read_version_bump_sources(os.path.dirname(RELAY_PATH))
+        except RunnerVersionBumpSkip as skip:
+            # buffer=True swallows sys.stderr for every non-failing test, skips included, so the
+            # warning goes to the real stream or nobody running `mix precommit` ever sees it.
+            print(f"WARNING: RE425 version-bump guard skipped: {skip}", file=sys.__stderr__)
+            self.skipTest(f"RE425 version-bump guard skipped: {skip}")
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            current = f.read()
+        problem = version_bump_problem(current, base_src, main_src, sha)
+        self.assertIsNone(problem, msg=problem)
+
+    def test_version_bump_guard_skip_is_visible(self):
+        err = io.StringIO()
+        result = unittest.TestResult()
+        with unittest.mock.patch(f"{__name__}.read_version_bump_sources",
+                                 side_effect=RunnerVersionBumpSkip("no origin/main ref")), \
+             unittest.mock.patch("sys.__stderr__", err):
+            RunnerVersionBumpGuardTest("test_relay_change_bumps_version_past_main").run(result)
+        self.assertEqual(len(result.skipped), 1, result.errors + result.failures)
+        self.assertEqual(result.skipped[0][1],
+                         "RE425 version-bump guard skipped: no origin/main ref")
+        self.assertIn("WARNING: RE425 version-bump guard skipped: no origin/main ref",
+                      err.getvalue())
 
 
 class RunnerVocabularyContractTest(unittest.TestCase):
