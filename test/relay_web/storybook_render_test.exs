@@ -47,6 +47,26 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ ~s(aria-current="true")
   end
 
+  test "GET the RE427 note image row story", %{conn: conn} do
+    doc = conn |> get("/storybook/core_components/note_image_row") |> html_response(200) |> LazyHTML.from_document()
+
+    assert doc |> LazyHTML.query("#note-image-row-single-two-images a img.h-\\[108px\\]") |> Enum.count() == 2
+    assert doc |> LazyHTML.query("#note-image-row-single-single-wide a img.max-w-\\[240px\\]") |> Enum.count() == 1
+  end
+
+  test "GET the RE427 image control story renders each state", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/image_attach_box") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    assert html =~ "Uploading…"
+    assert html =~ "Drop to attach"
+    assert html =~ "the most one note can carry"
+    assert html =~ "isn’t an image"
+    assert html =~ "the limit is 5 MB"
+    assert doc |> LazyHTML.query(".phx-drop-target-active") |> Enum.count() >= 1
+    assert doc |> LazyHTML.query("[id$='-pending'] img") |> Enum.count() >= 2
+  end
+
   test "GET the RE390 image tile, Screenshots section and media placeholder stories", %{conn: conn} do
     placeholder = conn |> get("/storybook/core_components/media_placeholder") |> html_response(200)
     assert placeholder |> LazyHTML.from_document() |> LazyHTML.query("span.border-dashed.size-20") |> Enum.count() >= 1

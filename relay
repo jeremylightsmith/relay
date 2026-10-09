@@ -56,8 +56,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 #
 # Bump RUNNER_VERSION on ANY change to this file and paste the new fingerprint below;
 # bin/test_relay.py's RunnerFingerprintGuardTest enforces it and prints the value to paste.
-RUNNER_VERSION = 78
-RUNNER_FINGERPRINT = "f050596404c380a316b3d9ca55ae53cfdb420b3a12c7dc494b71b5b803cbb0ee"
+RUNNER_VERSION = 79
+RUNNER_FINGERPRINT = "53ceaaeaa1626ab6a0af834ec006303f29b534e8fee64bad222a952b12affe03"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -791,12 +791,18 @@ def mockup_download_path(url):
     return ATTACHMENT_DOWNLOAD_PREFIX + attachment_id(url)
 
 
-def mockup_filename(index, caption, ext=".html"):
-    """`NN-<slug><ext>` for the 1-based `index`th mockup. The number keeps the card's order and
-    keeps names unique when captions repeat; the slug is the caption lowercased with every run of
-    non-alphanumerics collapsed to `-`, or `mockup` when nothing is left."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (caption or "").lower()).strip("-") or "mockup"
+def numbered_filename(index, name, ext, fallback_slug):
+    """`NN-<slug><ext>` for the 1-based `index`th download. The number keeps the card's order and
+    keeps names unique when names repeat; the slug is `name` lowercased with every run of
+    non-alphanumerics collapsed to `-`, or `fallback_slug` when nothing is left."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-") or fallback_slug
     return f"{index:02d}-{slug}{ext}"
+
+
+def mockup_filename(index, caption, ext=".html"):
+    """`NN-<slug><ext>` for the 1-based `index`th mockup, slugged from its caption (`mockup` when
+    the caption leaves nothing)."""
+    return numbered_filename(index, caption, ext, "mockup")
 
 
 def default_pull_dir(ref):
@@ -804,25 +810,59 @@ def default_pull_dir(ref):
     return os.path.join("tmp", ref, "mockups")
 
 
-def pull_mockups(ref, dest):
-    """Download every mockup on `ref` into `dest`, byte-for-byte, overwriting, each named with the
-    extension of its served content type (RE390, `mockup_ext`); returns [{caption, url, path}]. A card with none returns [] without creating `dest`. A failed
-    download dies naming the attachment id; files already written stay."""
-    mockups = get_card(ref).get("mockups") or []
-    if not mockups:
+def default_images_dir(ref):
+    """`tmp/<REF>/images/` under the cwd — where `relay images --pull` writes by default."""
+    return os.path.join("tmp", ref, "images")
+
+
+def download_numbered(entries, dest, noun, fallback_slug):
+    """The shared core of `mockups --pull` and `images --pull`: download each `(download_path,
+    name)` in `entries` into `dest`, byte-for-byte, overwriting, named `NN-<slug><ext>` with the
+    extension of its served content type (RE390, `mockup_ext`); returns the paths written, in
+    order. Nothing to pull returns [] without creating `dest`. A failed download dies naming the
+    `noun` and the attachment id; files already written stay."""
+    if not entries:
         return []
     os.makedirs(dest, exist_ok=True)
-    pulled = []
-    for i, m in enumerate(mockups, 1):
+    paths = []
+    for i, (download_path, name) in enumerate(entries, 1):
         try:
-            data, content_type = api_download(mockup_download_path(m["url"]))
+            data, content_type = api_download(download_path)
         except Died as e:
-            die(f"mockup {attachment_id(m['url'])} failed to download ({e.msg})")
-        path = os.path.join(dest, mockup_filename(i, m.get("caption"), mockup_ext(content_type)))
+            die(f"{noun} {attachment_id(download_path)} failed to download ({e.msg})")
+        path = os.path.join(dest, numbered_filename(i, name, mockup_ext(content_type),
+                                                    fallback_slug))
         with open(path, "wb") as f:
             f.write(data)
-        pulled.append({"caption": m.get("caption"), "url": m["url"], "path": path})
-    return pulled
+        paths.append(path)
+    return paths
+
+
+def pull_mockups(ref, dest):
+    """Download every mockup on `ref` into `dest` through `download_numbered`; returns
+    [{caption, url, path}] in card order, [] (and no `dest`) for a card with none."""
+    mockups = get_card(ref).get("mockups") or []
+    paths = download_numbered([(mockup_download_path(m["url"]), m.get("caption"))
+                               for m in mockups], dest, "mockup", "mockup")
+    return [{"caption": m.get("caption"), "url": m["url"], "path": path}
+            for m, path in zip(mockups, paths)]
+
+
+def note_images(card):
+    """Every image on `card`'s notes in viewer order — timeline order, then each note's own
+    order. Only comment entries carry `images`; an older server omits the key."""
+    return [img for e in card.get("timeline") or [] if e.get("kind") == "comment"
+            for img in e.get("images") or []]
+
+
+def pull_images(ref, dest):
+    """Download every note image on `ref` into `dest` through `download_numbered`, slugged from
+    the filename's stem; returns [{filename, url, path}], [] (and no `dest`) when there are none."""
+    images = note_images(get_card(ref))
+    paths = download_numbered([(img["download_path"], os.path.splitext(img["filename"])[0])
+                               for img in images], dest, "image", "image")
+    return [{"filename": img["filename"], "url": img["url"], "path": path}
+            for img, path in zip(images, paths)]
 
 
 def needs_input_body(question, questions_raw):
@@ -899,10 +939,14 @@ def print_card(c):
         print("\n--- mockups ---")
         for m in mockups:
             print(f'  {m.get("caption") or "-"}  {m.get("url", "")}')
+    base = env("RELAY_URL").rstrip("/") if note_images(c) else ""
     for e in c.get("timeline") or []:
         who = e.get("author", {}).get("name", "?")
         if e.get("kind") == "comment":
-            print(f"  - {who}: {e.get('body', '')}")
+            body = e.get("body")
+            print(f"  - {who}: {body}" if body else f"  - {who}:")
+            for img in e.get("images") or []:
+                print(f'    [image] {img["filename"]} {base}{img["download_path"]}')
         else:
             detail = e.get("text") or e.get("meta") or ""
             print(f"  * {who} {e.get('type', '')} {detail}".rstrip())
@@ -1671,6 +1715,24 @@ def cmd_mockups_pull(args):
     dest = args.pull if isinstance(args.pull, str) else default_pull_dir(args.ref)
     pulled = pull_mockups(args.ref, dest)
     emit(args, pulled, format_pulled(args.ref, dest, pulled))
+
+
+def format_images_pulled(ref, dest, pulled):
+    if not pulled:
+        return f"{ref}: no images"
+    noun = "image" if len(pulled) == 1 else "images"
+    names = ", ".join(p["filename"] for p in pulled)
+    return f"{ref}: {len(pulled)} {noun} → {dest.rstrip('/')}/ ({names})"
+
+
+def cmd_images(args):
+    """relay images REF --pull [DIR] (RE427): download the images attached to the card's notes
+    into DIR (default `tmp/<REF>/images/`), numbered in viewer order."""
+    if not args.pull:
+        die("pass --pull [DIR] to download the card's note images")
+    dest = args.pull if isinstance(args.pull, str) else default_images_dir(args.ref)
+    pulled = pull_images(args.ref, dest)
+    emit(args, pulled, format_images_pulled(args.ref, dest, pulled))
 
 
 def cmd_mockups(args):
@@ -5804,6 +5866,7 @@ COMMANDS = (
     ("Cards", "comment", "comment on a card"),
     ("Cards", "attach", "upload a file to a card and print its markdown"),
     ("Cards", "mockups", "attach HTML or image mockups to a card, replacing its list (--clear empties it, --pull downloads them)"),
+    ("Cards", "images", "download the images attached to a card's notes (--pull [DIR])"),
     ("Cards", "needs-input", "park a card on questions for a human"),
     ("Cards", "own", "take the baton on a card"),
     ("Cards", "release", "let go of a card's baton"),
@@ -6022,6 +6085,10 @@ def build_parser():
     mk.add_argument("--pull", nargs="?", const=True, metavar="DIR",
                     help="download the card's mockups into DIR instead "
                          "(default: tmp/<REF>/mockups/)")
+    im = add("images", cmd_images, "ref", json_flag=True)
+    im.add_argument("--pull", nargs="?", const=True, metavar="DIR",
+                    help="download the card's note images into DIR "
+                         "(default: tmp/<REF>/images/)")
     ni = add("needs-input", cmd_needs_input, "ref", json_flag=True)
     ni.add_argument("question", nargs="?", help='one question, "-" for stdin, or @path')
     ni.add_argument("--questions",

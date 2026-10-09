@@ -20,6 +20,17 @@ defmodule Schemas.AttachmentTest do
     end
   end
 
+  describe "max_bytes/0 and image_type_names/0 (RE427)" do
+    test "max_bytes/0 is the 5 MB cap" do
+      assert Attachment.max_bytes() == 5_242_880
+    end
+
+    test "image_type_names/0 names each image type in image_types/0 order" do
+      assert Attachment.image_type_names() == ["PNG", "JPEG", "WebP", "GIF"]
+      assert length(Attachment.image_type_names()) == length(Attachment.image_types())
+    end
+  end
+
   describe "path/1, id_from_path/1, path?/1 — the domain-side definition of the attachment url" do
     test "path/1 builds the served path and id_from_path/1 inverts it" do
       id = Ecto.UUID.generate()

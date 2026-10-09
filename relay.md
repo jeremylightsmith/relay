@@ -41,7 +41,7 @@ or `@path`.
 
 | Command | What it does |
 |---|---|
-| `./relay board` · `./relay card RLY-12` | The board · one card |
+| `./relay board` · `./relay card RLY-12` | The board · one card (each note image prints as an `[image] <filename> <url>` line under its note) |
 | `./relay search "words"` | Find a card by ref or title |
 | `./relay why RLY-12` | **Why isn't this card moving?** |
 | `./relay runs RLY-12` · `./relay runners` · `./relay version` | Run detail · connected runners · deployed SHA |
@@ -57,6 +57,7 @@ or `@path`.
 | `./relay branch` · `./relay pr` · `./relay result RLY-12 …` | Record branch / PR url / AI result |
 | `./relay attach RLY-12 shot.png` | Upload a file; `--field url` gives its `/attachments/…` path |
 | `./relay mockups RLY-12 a.html b.png` · `--pull` | Replace the card's mockups · download them |
+| `./relay images RLY-12 --pull [DIR]` | Download the images attached to the card's notes (default `tmp/<REF>/images/`) |
 | `./relay depends RLY-12 RLY-13` | Replace the card's blocker set |
 | `./relay comment RLY-12 "…"` · `./relay needs-input RLY-12 "…"` | Comment · ask a human (blocks) |
 | `./relay own` · `./relay release RLY-12` | Claim for the AI · hand back |

@@ -7,9 +7,13 @@ defmodule Schemas.Attachment do
   programmatically, never cast from input; only `filename` and `content_type` originate from
   the caller.
 
+  RE427 — an image may belong to a Note: `comment_id` + `position` link it to the comment that
+  carries it (set only by `Relay.Activity.add_comment/2`; nil while unlinked).
+
   This module is the ONE definition of the facts every layer needs: the HTML content type
   (`html_type/0`, `html?/1` — the controller's sandboxed serving branch asks here), the image
-  types (`image_types/0`), the mockup types (`mockup_types/0`, RE390 — what `Relay.Cards`'
+  types (`image_types/0`) and their display names (`image_type_names/0`, RE427), the size cap
+  (`max_bytes/0`, RE427), the mockup types (`mockup_types/0`, RE390 — what `Relay.Cards`'
   mockup validation accepts: HTML or an image; `./relay` mirrors it under
   `runner_contract.json`'s `mockups.content_types`), and where an attachment is served (`path/1`,
   `id_from_path/1`, `path?/1` — domain-side so `Relay.Cards` can parse a mockup url without
@@ -22,6 +26,7 @@ defmodule Schemas.Attachment do
   import Ecto.Changeset
 
   @image_types ~w(image/png image/jpeg image/webp image/gif)
+  @image_type_names ~w(PNG JPEG WebP GIF)
   @html_type "text/html"
   @mockup_types @image_types ++ [@html_type]
   @allowed_types @mockup_types
@@ -36,7 +41,12 @@ defmodule Schemas.Attachment do
     field :byte_size, :integer
     field :storage_key, :string
 
+    # RE427 — set when the attachment is a note image: the comment that carries it and its
+    # index within that note. Both nil for an unlinked upload or a mockup; never cast.
+    field :position, :integer
+
     belongs_to :card, Schemas.Card
+    belongs_to :comment, Schemas.Comment
 
     timestamps(type: :utc_datetime)
   end
@@ -61,6 +71,14 @@ defmodule Schemas.Attachment do
   @doc "The image content types an attachment may have (RE390)."
   @spec image_types() :: [String.t()]
   def image_types, do: @image_types
+
+  @doc "The display names of `image_types/0`, in the same order (RE427) — what the UI and its errors say."
+  @spec image_type_names() :: [String.t()]
+  def image_type_names, do: @image_type_names
+
+  @doc "The largest attachment, in bytes (RE427 — the one spelling of the 5 MB cap)."
+  @spec max_bytes() :: pos_integer()
+  def max_bytes, do: @max_bytes
 
   @doc "The content types a card mockup may be (RE390): an image or self-contained HTML."
   @spec mockup_types() :: [String.t()]

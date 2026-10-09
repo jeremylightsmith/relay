@@ -219,7 +219,7 @@ sharing behavior.
   Show more reveals only the Changes and is absent when there are none), and a tile patches to
   `screenshot=<n>` (1-based among the openable screenshots; an agent-local path is a placeholder
   tile, never a viewer item) on the same three hosts. BoardLive
-  holds one `viewer` assign, `nil | %{section: :mockups | :screenshots, key: _}`; the sheet shows
+  holds one `viewer` assign, `nil | %{section: :mockups | :screenshots | :images, key: _}`; the sheet shows
   only the section that was opened and ←/→ stay within it. `mockup` wins when both params are
   present; a malformed, out-of-range or stale `n` falls back to the drawer (a cold open waits for
   the async body fill, since the light card has no `ai_result`). Tiles and the viewer pick **HTML
@@ -227,6 +227,20 @@ sharing behavior.
   same-card `/attachments/<id>` HTML attachment is framed; everything else is an image, shown in
   the viewer at its natural size in an `overflow-auto` frame. Markdown images in descriptions,
   specs and comments keep the RE322 `image_lightbox`.
+  **Note images** (RE427) are the viewer's third section: each posted note renders its images
+  under the body as a wrapping row of 108px-tall thumbnails (`CoreComponents.note_image_row/1`,
+  outside the `.md` body so the lightbox never claims them; an image-only note has no body box),
+  live in every open drawer via `:timeline_appended`. A thumbnail patches to `image=<attachment id>`
+  on the same three hosts (`/board/:slug?card=<ref>&image=<id>`,
+  `/board/:slug/story-map?card=<ref>&image=<id>`, `/cards/:ref?board=<slug>&image=<id>`), giving
+  `%{section: :images, key: id}`. Its items are `RelayWeb.CardMedia.note_image_items/1` over
+  BoardLive's `@note_image_comments` (the notes with images, kept in lock-step with the
+  `:conversation` stream by `stream_notes/2` / `insert_note/2`): every note image on the card,
+  oldest note first, then upload order. The sheet reads `Images · N` with each filename under its
+  tile and a `From a note by <author> · <time ago>` byline; the header counts `Image n of N`.
+  Precedence is `mockup` > `screenshot` > `image`; a cold `?image=` waits for the async body fill
+  (the conversation), then an unknown or malformed id, an unlinked upload, a mockup, or another
+  card's note image falls back to the drawer.
   `/attachments/:id/view` (`RelayWeb.MockupViewerLive`, `RelayWeb.attachment_view_path/1`) is the
   legacy RE370 link: an authenticated, membership-scoped redirect to that viewer URL in the
   `:require_authenticated` live_session; it 404s for a non-member, an unknown id, or a non-HTML
@@ -313,6 +327,13 @@ sharing behavior.
   the display-name snapshots (RE146) — the names are for the timeline, the ids for
   `Relay.ValueStream`; the `BackfillActivityStageIds` migration stamped older rows and deleted
   those whose names no longer resolved to exactly one stage.
+  `add_comment/2` takes optional `image_ids` (RE427): ids of unlinked image attachments on the
+  card, linked to the new comment in the given order inside one transaction (≤
+  `Schemas.Comment.max_images/0`; with images the body may be blank; a foreign, non-image,
+  already-linked or malformed id is `"must be images uploaded to this card"` on `:images` and
+  nothing persists). Every comment it returns or broadcasts — and every comment from
+  `list_timeline/1` / `list_conversation/1` — has `:images` preloaded in position order; the
+  `{:timeline_appended, …}` broadcast is sent only after the comment and its links commit.
 - **AgentLog** — stateless live relay of runner feed lines to the board's log sheet
   (subscribe-only; no server buffer, no backfill — RLY-55).
 - **Events** — the realtime seam: contexts broadcast semantic domain events after each
@@ -332,7 +353,26 @@ sharing behavior.
   (`RelayWeb.Api.AttachmentController`, RE373; path `Schemas.Attachment.api_path/1`), scoped by
   `Relay.Attachments.get_attachment_for_board/2` to the key's board — 404 for anything off-board —
   sharing `AttachmentController.put_content_headers/2` and served `private` as a download. It is
-  how `./relay mockups REF --pull` hands mockups to the next agent on a card. Images are served under the app-wide CSP. **HTML** gets its own
+  how `./relay mockups REF --pull` hands mockups to the next agent on a card.
+  **Note images (RE427):** an image may belong to a Note — `attachments.comment_id` (nullable FK,
+  `on_delete: :nilify_all`) and `attachments.position` (its index in the note; upload timestamps
+  are second-precision, so they can't order it) link it to the comment, and `Schemas.Comment`
+  `has_many :images`. An image is uploaded unlinked the moment it lands and linked only by
+  `Relay.Activity.add_comment/2`; uploads whose note never posts stay unlinked (no cleanup yet).
+  The web composer is BoardLive's `:note_images` upload (`auto_upload`, `progress:` callback →
+  `Relay.Attachments.create_attachment/2` on the open card, appended to `@note_images_pending`);
+  `validate_comment` enforces the per-note cap against the pending ones (LiveView's `max_entries`
+  only counts entries in flight) and refuses bad files by name into `@note_image_errors`;
+  `post_comment` passes the pending ids as `image_ids` and refuses while an entry is in flight.
+  The control is `CoreComponents.image_attach_box/1` + `image_attach_button/1` +
+  `image_attach_hint/1` (drop target, ⌘V `.ImagePaste` hook) — desktop web only: below the
+  `drawer:` breakpoint and in the native embed the composer is view-only.
+  The policy values live once: `Schemas.Comment.max_images/0` (6), `Schemas.Attachment.max_bytes/0`
+  (the 5 MB cap) and `Schemas.Attachment.image_type_names/0` (display names of `image_types/0`,
+  same order). On the card API every comment timeline entry carries
+  `images: [%{filename, url, download_path}]` (`url` = `/attachments/<id>`, `download_path` =
+  `/api/attachments/<id>`; `[]` when none) — the key sets are pinned under
+  `runner_contract.json`'s `note_images`. Images are served under the app-wide CSP. **HTML** gets its own
   branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
   `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
   'unsafe-inline' https://fonts.googleapis.com; img-src data:; font-src data:
@@ -588,6 +628,7 @@ erDiagram
     Card ||--o{ Comment : timeline
     Card ||--o{ Activity : timeline
     Card ||--o{ Attachment : has
+    Comment ||--o{ Attachment : images
     Card ||--o| CardRejection : "embeds (CHANGES REQUESTED)"
     Card ||--o{ Run : "flow traversals"
     Flow |o--o{ Run : "live definition (nilified on delete)"

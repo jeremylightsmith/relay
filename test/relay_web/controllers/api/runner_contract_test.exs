@@ -221,8 +221,36 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # set is recorded from the real route, never typed.
     [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
 
+    # RE427 — `./relay card` prints each note image as an `[image]` line and `relay images --pull`
+    # downloads it; both read these keys off a real comment entry, so record them from the route.
+    {:ok, images_card} = Relay.Cards.create_card(exclusive.next_up, %{title: "Note images card"})
+    images_ref = Relay.Cards.ref(exclusive.board, images_card)
+
+    {:ok, note_image} =
+      Relay.Attachments.create_attachment(images_card, %{
+        filename: "shot.png",
+        content_type: "image/png",
+        bytes: "\x89PNG fixture"
+      })
+
+    {:ok, _note} =
+      Relay.Activity.add_comment(images_card, %{actor: {:user, user.id}, body: "see shot", image_ids: [note_image.id]})
+
+    note_entry =
+      exclusive.conn
+      |> get(~p"/api/cards/#{images_ref}")
+      |> json_response(200)
+      |> get_in(["data", "timeline"])
+      |> Enum.find(&(&1["kind"] == "comment" and &1["images"] != []))
+
+    [note_image_item] = note_entry["images"]
+
     document = %{
-      "version" => 9,
+      "version" => 10,
+      "note_images" => %{
+        "comment_entry" => note_entry |> Map.keys() |> Enum.sort(),
+        "image" => note_image_item |> Map.keys() |> Enum.sort()
+      },
       "mockups" => %{
         "download_path" => Schemas.Attachment.api_path("<attachment-id>"),
         # RE390 — what a mockup may be; `./relay`'s MOCKUP_TYPES values must equal it.
@@ -303,6 +331,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "delete_response" => task_placeholders(tasks_delete_response)
       }
     }
+
+    assert document["note_images"]["image"] == ["download_path", "filename", "url"]
+    assert "images" in document["note_images"]["comment_entry"]
+    assert document["version"] == 10
 
     assert_matches_fixture!(document)
   end

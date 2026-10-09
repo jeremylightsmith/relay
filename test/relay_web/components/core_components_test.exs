@@ -1419,9 +1419,14 @@ defmodule RelayWeb.CoreComponentsTest do
     test "the composer is the artboard's bordered row with an inline Add note button" do
       html = render_component(&CoreComponents.card_drawer/1, notes_attrs([]))
 
-      # artboard line 228: 7px radius, 7px/8px/7px/11px padding, 8px gap
-      assert html =~
-               "flex items-start gap-2 rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2"
+      # artboard line 228: 7px radius, 7px/8px/7px/11px padding, 8px gap — RE427 splits it into
+      # the image control's box and the row inside it (the pending thumbnails go under the row)
+      assert html =~ "relative rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2"
+
+      assert html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#card-drawer-note-images > div.flex.items-start.gap-2 > #card-drawer-comment-input")
+             |> Enum.count() == 1
 
       assert html =~ ~s(id="card-drawer-comment-input")
       assert html =~ ~s(phx-hook="SubmitOnCmdEnter")
@@ -5013,6 +5018,147 @@ defmodule RelayWeb.CoreComponentsTest do
     test "the arrows name the mockup by default" do
       assert attr_of(bar_doc(2), "#mockup-viewer-bar-prev", "aria-label") == ["Previous mockup"]
       assert attr_of(bar_doc(2), "#mockup-viewer-bar-next", "aria-label") == ["Next mockup"]
+    end
+  end
+
+  describe "note_image_row/1 (RE427)" do
+    defp note_image(name), do: %Schemas.Attachment{id: Ecto.UUID.generate(), filename: name}
+
+    defp row_doc(images) do
+      (&CoreComponents.note_image_row/1)
+      |> render_component(id: "note-1-images", images: images, image_href: &"?image=#{&1}")
+      |> LazyHTML.from_fragment()
+    end
+
+    test "one patch link per image, each a 108px thumbnail in a wrapping row" do
+      [a, b] = images = [note_image("overflow.png"), note_image("phone.png")]
+      doc = row_doc(images)
+
+      row = doc |> classes("#note-1-images") |> String.split()
+      for c <- ~w(mt-1.5 flex flex-wrap gap-2), do: assert(c in row, "row lacks #{c}: #{inspect(row)}")
+
+      assert count(doc, "#note-1-images > a") == 2
+      assert attr_of(doc, "#note-1-images-#{a.id}", "aria-label") == ["Open overflow.png"]
+      assert attr_of(doc, "#note-1-images-#{b.id}", "href") == ["?image=#{b.id}"]
+      assert attr_of(doc, "#note-1-images-#{a.id}", "data-phx-link") == ["patch"]
+
+      for {image, index} <- Enum.with_index(images) do
+        img = "#note-1-images-#{image.id} img"
+        assert attr_of(doc, img, "src") == ["/attachments/#{image.id}"]
+        assert attr_of(doc, img, "alt") == [Enum.at(~w(overflow.png phone.png), index)]
+
+        thumb = doc |> classes(img) |> String.split()
+
+        for c <- ~w(h-[108px] w-auto max-w-[240px] rounded-md border border-base-300 bg-base-200 object-cover),
+            do: assert(c in thumb, "thumbnail lacks #{c}: #{inspect(thumb)}")
+      end
+    end
+
+    test "renders nothing without images" do
+      assert (&CoreComponents.note_image_row/1)
+             |> render_component(id: "note-1-images", images: [], image_href: &"?image=#{&1}")
+             |> String.trim() == ""
+    end
+  end
+
+  describe "image_attach_hint/1 (RE427)" do
+    defp hint_doc(attrs) do
+      (&CoreComponents.image_attach_hint/1)
+      |> render_component(Map.merge(%{id: "h"}, attrs))
+      |> LazyHTML.from_fragment()
+    end
+
+    test "each error renders as a p.text-error before the hints" do
+      doc = hint_doc(%{errors: ["a", "b"]})
+
+      ps = LazyHTML.query(doc, "#h > p")
+      assert ps |> Enum.take(2) |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim())) == ["a", "b"]
+      assert doc |> LazyHTML.query("#h-error-0.text-error.text-xs") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#h-error-1.text-error.text-xs") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#h > p.text-error") |> Enum.count() == 2
+    end
+
+    test "the desktop hint is built from the source policy functions" do
+      doc = hint_doc(%{errors: []})
+      desktop = doc |> LazyHTML.query("#h p.hidden.drawer\\:block") |> LazyHTML.text()
+
+      assert desktop =~ "up to #{Schemas.Comment.max_images()} images"
+      assert desktop =~ Enum.join(Schemas.Attachment.image_type_names(), ", ")
+      assert desktop =~ "#{div(Schemas.Attachment.max_bytes(), 1_048_576)} MB each"
+
+      assert doc |> LazyHTML.query("#h p.drawer\\:hidden") |> LazyHTML.text() |> String.trim() ==
+               "Attach images from the web app."
+    end
+
+    test "disabled (embed) renders only the phone hint, always shown" do
+      doc = hint_doc(%{errors: [], enabled: false})
+
+      refute LazyHTML.to_html(doc) =~ "Paste, drop"
+      assert doc |> LazyHTML.query("#h p") |> LazyHTML.text() |> String.trim() == "Attach images from the web app."
+      assert doc |> LazyHTML.query("#h p.drawer\\:hidden") |> Enum.count() == 0
+    end
+  end
+
+  describe "mockup_viewer_header/1 count_noun (RE427)" do
+    test "the count reads '<noun> n of N' and no noun label renders" do
+      doc =
+        (&CoreComponents.mockup_viewer_header/1)
+        |> render_component(%{caption: "drawer.png", index: 2, total: 4, count_noun: "Image"})
+        |> LazyHTML.from_fragment()
+
+      assert text(doc, "#mockup-viewer-header-count") == "Image 2 of 4"
+      assert count(doc, "#mockup-viewer-header-noun") == 0
+    end
+  end
+
+  describe "card_mockup_viewer/1 images section (RE427)" do
+    defp images_viewer_doc(attrs) do
+      items = [
+        %{key: "i1", src: "/attachments/i1", caption: "overflow.png", kind: :image, byline: "From a note by J · 1m ago"},
+        %{key: "i2", src: "/attachments/i2", caption: "drawer.png", kind: :image, byline: "From a note by J · just now"}
+      ]
+
+      (&CoreComponents.card_mockup_viewer/1)
+      |> render_component(
+        Map.merge(
+          %{
+            ref: "RE1",
+            card: %{title: "T"},
+            stage_name: "Review",
+            stage_owner: :human,
+            items: items,
+            current_key: "i2",
+            back_patch: "/",
+            item_href: &"?image=#{&1}",
+            label: "Images · 2",
+            noun: "Image"
+          },
+          attrs
+        )
+      )
+      |> LazyHTML.from_fragment()
+    end
+
+    test "show_captions puts each filename under its tile, the current one highlighted" do
+      doc = images_viewer_doc(%{show_captions: true, count_noun: "Image", byline: "From a note by J · just now"})
+
+      captions = LazyHTML.query(doc, "#mockup-viewer-mockup-tiles .font-mono.text-\\[10px\\]")
+      assert Enum.map(captions, &(&1 |> LazyHTML.text() |> String.trim())) == ["overflow.png", "drawer.png"]
+
+      current = doc |> classes("#mockup-viewer-mockup-tiles .text-primary") |> String.split()
+      for c <- ~w(truncate font-mono text-[10px] text-primary font-semibold), do: assert(c in current)
+
+      assert text(doc, "#mockup-viewer-byline") == "From a note by J · just now"
+      byline = doc |> classes("#mockup-viewer-byline") |> String.split()
+      for c <- ~w(mt-3 text-[11px] leading-[1.45] text-base-content/50), do: assert(c in byline)
+      assert text(doc, "#mockup-viewer-header-count") == "Image 2 of 2"
+    end
+
+    test "without the new attrs no captions or byline render" do
+      doc = images_viewer_doc(%{})
+
+      assert count(doc, "#mockup-viewer-byline") == 0
+      assert count(doc, "#mockup-viewer-mockup-tiles .font-mono") == 0
     end
   end
 

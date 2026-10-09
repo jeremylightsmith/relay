@@ -15,30 +15,94 @@ defmodule Relay.Activity do
 
   alias Relay.Events
   alias Relay.Repo
+  alias Schemas.Attachment
   alias Schemas.Card
   alias Schemas.Comment
+
+  @images_not_on_card "must be images uploaded to this card"
 
   @doc """
   Posts a comment on `card` from `attrs` — `:actor`
   (`:agent | {:user, user_id}`, programmatic), `:body` (the only
-  user-supplied field), and an optional `:kind`
+  user-supplied text), an optional `:kind`
   (`:comment | :question | :changes_requested`, programmatic, defaults to
-  `:comment`) — returning `{:ok, comment}` with the author preloaded or
-  `{:error, changeset}`.
+  `:comment`), and (RE427) optional `:image_ids` — ids of image attachments
+  already uploaded to this card and not yet on a note, linked to the comment in
+  the given order (defaults to `[]`; with at least one the body may be blank).
+
+  Returns `{:ok, comment}` with the author and `:images` (position order, `[]`
+  when none) preloaded, or `{:error, changeset}`. Too many images
+  (`Schemas.Comment.max_images/0`) or any id that is not an unlinked image on
+  this card is an error on `:images`, and nothing is persisted. The comment is
+  broadcast only once it and its image links are committed.
   """
   def add_comment(%Card{} = card, %{actor: actor} = attrs) do
     {actor_type, user_id} = split_actor(actor)
+    image_ids = attrs |> Map.get(:image_ids, []) |> Enum.uniq()
 
-    %Comment{
-      card_id: card.id,
-      actor_type: actor_type,
-      user_id: user_id,
-      kind: Map.get(attrs, :kind, :comment)
-    }
-    |> Comment.changeset(Map.take(attrs, [:body]))
-    |> Repo.insert()
-    |> preload_user()
+    changeset =
+      Comment.changeset(
+        %Comment{card_id: card.id, actor_type: actor_type, user_id: user_id, kind: Map.get(attrs, :kind, :comment)},
+        Map.take(attrs, [:body]),
+        length(image_ids)
+      )
+
+    changeset
+    |> insert_with_images(card, image_ids)
     |> broadcast_appended(card)
+  end
+
+  # Validated before the transaction so an invalid comment never rolls back a caller's
+  # surrounding transaction; only a failed image link (which needs the inserted id) does.
+  defp insert_with_images(%Ecto.Changeset{valid?: false} = changeset, _card, _image_ids),
+    do: {:error, %{changeset | action: :insert}}
+
+  defp insert_with_images(changeset, card, image_ids) do
+    Repo.transaction(fn ->
+      with {:ok, comment} <- Repo.insert(changeset),
+           :ok <- link_images(comment, card, image_ids) do
+        Repo.preload(comment, [:user, :images])
+      else
+        {:error, %Ecto.Changeset{} = failed} -> Repo.rollback(failed)
+        :error -> Repo.rollback(Ecto.Changeset.add_error(changeset, :images, @images_not_on_card))
+      end
+    end)
+  end
+
+  defp link_images(_comment, _card, []), do: :ok
+
+  # One guarded update: only this card's unlinked images match, so a foreign, non-image,
+  # already-linked or unknown id leaves the count short and the caller rolls back. `position`
+  # is each id's index in the posted list.
+  defp link_images(comment, card, image_ids) do
+    with {:ok, uuids} <- cast_uuids(image_ids) do
+      {linked, _} =
+        Repo.update_all(
+          from(a in Attachment,
+            where:
+              a.id in ^uuids and a.card_id == ^card.id and is_nil(a.comment_id) and
+                a.content_type in ^Attachment.image_types(),
+            update: [
+              set: [
+                comment_id: ^comment.id,
+                position: fragment("array_position(?, ?) - 1", type(^uuids, {:array, Ecto.UUID}), a.id)
+              ]
+            ]
+          ),
+          []
+        )
+
+      if linked == length(uuids), do: :ok, else: :error
+    end
+  end
+
+  defp cast_uuids(ids) do
+    Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
+      case Ecto.UUID.cast(id) do
+        {:ok, uuid} -> {:cont, {:ok, acc ++ [uuid]}}
+        :error -> {:halt, :error}
+      end
+    end)
   end
 
   @doc """
@@ -93,7 +157,7 @@ defmodule Relay.Activity do
   into one list, ascending by `inserted_at` (comments sort before
   activity entries logged in the same second; within a source, ties
   break by id), each entry with its `:user` preloaded (`nil` for the
-  agent).
+  agent) and each comment with its `:images` (RE427, position order).
   """
   def list_timeline(%Card{id: card_id}) do
     comments =
@@ -101,7 +165,7 @@ defmodule Relay.Activity do
         from c in Comment,
           where: c.card_id == ^card_id,
           order_by: [asc: c.inserted_at, asc: c.id],
-          preload: :user
+          preload: [:user, :images]
       )
 
     activities =
@@ -119,14 +183,14 @@ defmodule Relay.Activity do
   The card's conversation: its comments only, ascending by `inserted_at`
   (ties break by id), so the newest sits at the bottom — chat convention,
   with the composer pinned below. Each comment has its `:user` preloaded
-  (`nil` for the agent).
+  (`nil` for the agent) and its `:images` (RE427, position order).
   """
   def list_conversation(%Card{id: card_id}) do
     Repo.all(
       from c in Comment,
         where: c.card_id == ^card_id,
         order_by: [asc: c.inserted_at, asc: c.id],
-        preload: :user
+        preload: [:user, :images]
     )
   end
 

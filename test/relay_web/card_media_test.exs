@@ -69,6 +69,44 @@ defmodule RelayWeb.CardMediaTest do
     end
   end
 
+  describe "note_image_items/1 (RE427)" do
+    defp attachment(filename), do: %Schemas.Attachment{id: Ecto.UUID.generate(), filename: filename}
+
+    defp comment(attrs) do
+      struct!(%Schemas.Comment{inserted_at: DateTime.utc_now(:second), images: []}, attrs)
+    end
+
+    test "every image of every note, oldest note first then each note's image order" do
+      jeremy = %Schemas.User{name: "Jeremy", email: "j@x.test"}
+      [a, b, c] = [attachment("overflow.png"), attachment("phone.png"), attachment("drawer.png")]
+
+      comments = [
+        comment(actor_type: :user, user: jeremy, images: [a, b]),
+        comment(actor_type: :user, user: jeremy, images: []),
+        comment(actor_type: :agent, user: nil, images: [c])
+      ]
+
+      items = CardMedia.note_image_items(comments)
+
+      assert Enum.map(items, & &1.key) == [a.id, b.id, c.id]
+      assert Enum.map(items, & &1.src) == Enum.map([a, b, c], &"/attachments/#{&1.id}")
+      assert Enum.map(items, & &1.caption) == ["overflow.png", "phone.png", "drawer.png"]
+      assert Enum.all?(items, &(&1.kind == :image))
+
+      assert [by_a, by_b, by_c] = Enum.map(items, & &1.byline)
+      assert String.starts_with?(by_a, "From a note by Jeremy · ")
+      assert String.starts_with?(by_b, "From a note by Jeremy · ")
+      assert String.starts_with?(by_c, "From a note by Relay AI · ")
+      assert by_a == "From a note by Jeremy · just now"
+    end
+
+    test "a note whose images are not loaded contributes nothing" do
+      not_loaded = %Ecto.Association.NotLoaded{__field__: :images, __owner__: Schemas.Comment, __cardinality__: :many}
+
+      assert CardMedia.note_image_items([comment(actor_type: :agent, images: not_loaded)]) == []
+    end
+  end
+
   describe "fetchable_url?/1 and ai_list/1" do
     test "fetchable_url? accepts what this browser can load and nothing else" do
       assert CardMedia.fetchable_url?("https://x.test/a.png")

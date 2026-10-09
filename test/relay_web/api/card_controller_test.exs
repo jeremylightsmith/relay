@@ -50,6 +50,49 @@ defmodule RelayWeb.Api.CardControllerTest do
     assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["author"]["name"] == "Relay AI"))
   end
 
+  describe "note images on the timeline (RE427)" do
+    test "GET /api/cards/:ref lists a note's images in order", %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      user = insert(:user)
+      a = insert(:attachment, card: card, filename: "a.png")
+      b = insert(:attachment, card: card, filename: "b.png")
+
+      {:ok, _} =
+        Activity.add_comment(card, %{actor: {:user, user.id}, body: "see screenshots", image_ids: [a.id, b.id]})
+
+      body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+      entry = Enum.find(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "see screenshots"))
+
+      assert entry["images"] == [
+               %{"filename" => "a.png", "url" => "/attachments/#{a.id}", "download_path" => "/api/attachments/#{a.id}"},
+               %{"filename" => "b.png", "url" => "/attachments/#{b.id}", "download_path" => "/api/attachments/#{b.id}"}
+             ]
+    end
+
+    test "GET /api/cards/:ref gives a text-only note images: []", %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+      {:ok, _} = Activity.add_comment(card, %{actor: :agent, body: "just text"})
+
+      body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+      entry = Enum.find(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "just text"))
+
+      assert entry["images"] == []
+    end
+
+    test "POST /api/cards/:ref/comments responds with images: []", %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+
+      data =
+        conn
+        |> post(~p"/api/cards/#{ref(board, card)}/comments", %{body: "hi"})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      assert data["body"] == "hi"
+      assert data["images"] == []
+    end
+  end
+
   test "unknown ref and another board's ref both 404", %{conn: conn, board: board} do
     other_card = insert(:card, stage: insert(:stage, board: insert(:board)))
 

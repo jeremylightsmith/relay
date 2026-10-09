@@ -2129,6 +2129,249 @@ defmodule RelayWeb.CoreComponents do
   # `card_drawer/1`'s `screenshot_href` default (an attr default must be a remote capture).
   def screenshot_query(n), do: "?screenshot=#{n}"
 
+  # RE427 — the Notes composer attaches images only on the web board, with uploads allowed.
+  defp note_attach_enabled?(%{embed: embed, uploads: uploads}),
+    do: not embed and is_map(uploads) and Map.has_key?(uploads, :note_images)
+
+  defp note_images_in_flight?(%{note_images: %{entries: [_ | _]}}), do: true
+  defp note_images_in_flight?(_uploads), do: false
+
+  @doc false
+  # `card_drawer/1`'s `image_href` default (RE427).
+  def image_query(id), do: "?image=#{id}"
+
+  @doc """
+  A posted note's images (RE427): a wrapping row of 108px-tall thumbnails, each patching to the
+  same-tab viewer (`image_href.(attachment.id)`). Renders nothing for a note without images. It sits
+  OUTSIDE the note's `.md` body, so the RE322 markdown lightbox never claims its clicks.
+
+  Ids: the row is `@id`, the link for attachment X is `\#{@id}-X`.
+  """
+  attr :id, :string, required: true
+  attr :images, :list, required: true, doc: "the note's `%Schemas.Attachment{}` images, in order"
+  attr :image_href, :any, required: true, doc: "attachment id -> the viewer URL its thumbnail patches to"
+
+  def note_image_row(assigns) do
+    ~H"""
+    <div :if={@images != []} id={@id} class="mt-1.5 flex flex-wrap gap-2">
+      <.link
+        :for={image <- @images}
+        id={"#{@id}-#{image.id}"}
+        patch={@image_href.(image.id)}
+        aria-label={"Open #{image.filename}"}
+        class="block"
+      >
+        <img
+          src={RelayWeb.attachment_path(image.id)}
+          alt={image.filename}
+          class="h-[108px] w-auto max-w-[240px] rounded-md border border-base-300 bg-base-200 object-cover"
+        />
+      </.link>
+    </div>
+    """
+  end
+
+  @doc """
+  The shared image control's box (RE427): the bordered composer box that takes images by drop
+  and ⌘V paste, with the composer's own row (`inner_block`: textarea, 📎, submit) on top and the
+  pending thumbnails under it. Slice 2 reuses it for answers and rejections, so nothing here is
+  Notes-specific beyond the event-name defaults.
+
+  `pending` are images already uploaded (`%{id, filename, src}`, an unlinked attachment each);
+  `upload`'s entries are the ones still in flight, drawn from `live_img_preview` under an
+  Uploading… overlay. Every thumbnail has a ✕ — `remove_event` (`phx-value-id`) for an uploaded
+  one, `cancel_event` (`phx-value-ref`) for one in flight.
+
+  Enabled, the box is the upload's `phx-drop-target` and carries the `.ImagePaste` hook; LiveView
+  adds `phx-drop-target-active` while a file is dragged over it, which draws the dashed primary
+  border and the "Drop to attach" overlay. Below the `drawer:` breakpoint the hook ignores pasted
+  images and swallows dropped files (mobile is view-only). Disabled (the native embed, or no
+  upload at all), it is just the box.
+
+  Ids: the pending row is `\#{@id}-pending`, each thumbnail `\#{@id}-pending-<attachment id or entry ref>`.
+  """
+  attr :id, :string, required: true
+
+  attr :upload, :any,
+    required: true,
+    doc: "the `Phoenix.LiveView.UploadConfig` (`@uploads.note_images`); unused when `enabled` is false"
+
+  attr :pending, :list, default: [], doc: "uploaded images, `[%{id, filename, src}]` in upload order"
+  attr :cancel_event, :string, default: "cancel_note_image"
+  attr :remove_event, :string, default: "remove_note_image"
+  attr :enabled, :boolean, default: true, doc: "false in the native embed: no drop target, no paste hook"
+  attr :class, :any, default: nil, doc: "extra classes (Storybook forces `phx-drop-target-active`)"
+  slot :inner_block, required: true
+
+  def image_attach_box(assigns) do
+    assigns = assign(assigns, :entries, if(assigns.enabled && assigns.upload, do: assigns.upload.entries, else: []))
+
+    ~H"""
+    <div
+      id={@id}
+      phx-drop-target={@enabled && @upload && @upload.ref}
+      phx-hook=".ImagePaste"
+      data-upload-name={@enabled && @upload && @upload.name}
+      class={
+        # A colocated hook's name is only rewritten when `phx-hook` is a literal, so the hook is
+        # always attached; without `data-upload-name` (disabled) it does nothing. Enum.reject:
+        # see RE277 — a nil tail would leave a stray trailing space.
+        [
+          "group/attach relative rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2",
+          "[&.phx-drop-target-active]:border-2 [&.phx-drop-target-active]:border-dashed [&.phx-drop-target-active]:border-primary",
+          @class
+        ]
+        |> Enum.reject(&is_nil/1)
+      }
+    >
+      <div
+        :if={@enabled}
+        class="absolute inset-0 z-10 hidden items-center justify-center gap-2 rounded-[7px] bg-primary/10 text-[12.5px] font-semibold text-primary group-[.phx-drop-target-active]/attach:flex"
+      >
+        <.icon name="hero-paper-clip" class="size-[15px]" /> Drop to attach
+      </div>
+      <div class="flex items-start gap-2">{render_slot(@inner_block)}</div>
+      <div
+        :if={@pending != [] or @entries != []}
+        id={"#{@id}-pending"}
+        class="flex flex-wrap gap-2 pb-1 pt-2"
+      >
+        <div :for={image <- @pending} id={"#{@id}-pending-#{image.id}"} class={attach_thumb_class()}>
+          <img src={image.src} alt={image.filename} class="h-full w-full object-cover" />
+          <.attach_remove event={@remove_event} value={[{"phx-value-id", image.id}]} />
+        </div>
+        <div :for={entry <- @entries} id={"#{@id}-pending-#{entry.ref}"} class={attach_thumb_class()}>
+          <.live_img_preview entry={entry} alt={entry.client_name} class="h-full w-full object-cover" />
+          <div class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-base-100/75">
+            <span class="loading loading-spinner loading-xs text-base-content/50"></span>
+            <span class="font-mono text-[9.5px] text-base-content/60">Uploading…</span>
+          </div>
+          <.attach_remove event={@cancel_event} value={[{"phx-value-ref", entry.ref}]} />
+        </div>
+      </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".ImagePaste">
+        // RE427 — ⌘V an image into the composer uploads it; text pastes are untouched. Below the
+        // drawer: breakpoint the composer is view-only: pasted images are ignored and dropped
+        // files are swallowed in the capture phase, before LiveView's drop handler sees them.
+        const hasFiles = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files")
+
+        export default {
+          mounted() {
+            if (!this.el.dataset.uploadName) return
+            this.desktop = window.matchMedia("(min-width: 45rem)")
+            this.onPaste = (e) => {
+              const files = Array.from((e.clipboardData && e.clipboardData.files) || [])
+                .filter((file) => file.type.startsWith("image/"))
+              if (files.length === 0) return
+              e.preventDefault()
+              if (this.desktop.matches) this.upload(this.el.dataset.uploadName, files)
+            }
+            this.onDrag = (e) => {
+              if (this.desktop.matches || !hasFiles(e)) return
+              e.preventDefault()
+              e.stopPropagation()
+            }
+            this.el.addEventListener("paste", this.onPaste)
+            this.el.addEventListener("dragover", this.onDrag, true)
+            this.el.addEventListener("drop", this.onDrag, true)
+          },
+          destroyed() {
+            if (!this.onPaste) return
+            this.el.removeEventListener("paste", this.onPaste)
+            this.el.removeEventListener("dragover", this.onDrag, true)
+            this.el.removeEventListener("drop", this.onDrag, true)
+          }
+        }
+      </script>
+    </div>
+    """
+  end
+
+  defp attach_thumb_class,
+    do: "relative h-[108px] w-[156px] shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-200"
+
+  attr :event, :string, required: true
+  attr :value, :list, required: true, doc: "the `phx-value-*` pair naming the thumbnail"
+
+  defp attach_remove(assigns) do
+    ~H"""
+    <button
+      type="button"
+      phx-click={@event}
+      title="Remove"
+      class="absolute right-1 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-base-content/70 text-[10px] leading-none text-base-100"
+      {@value}
+    >
+      ✕
+    </button>
+    """
+  end
+
+  @doc """
+  The shared image control's 📎 (RE427): a `<label>` styled as a ghost icon button wrapping a
+  visually hidden `live_file_input` (multiple, `accept` from the upload config). Hidden below the
+  `drawer:` breakpoint — phones are view-only. Render it inside the form that has `phx-change`.
+  """
+  attr :upload, :any, required: true, doc: "the `Phoenix.LiveView.UploadConfig`"
+  attr :id, :string, default: nil
+
+  def image_attach_button(assigns) do
+    ~H"""
+    <label
+      id={@id}
+      title="Attach images (or paste / drop)"
+      class="btn btn-ghost btn-xs hidden h-[27px] w-[27px] shrink-0 p-0 text-base-content/60 drawer:inline-flex"
+    >
+      <.icon name="hero-paper-clip" class="size-[15px]" />
+      <span class="sr-only">Attach images</span>
+      <.live_file_input upload={@upload} class="sr-only" />
+    </label>
+    """
+  end
+
+  @doc """
+  The shared image control's line under the box (RE427): each refused-image error, then the
+  limits hint — "Paste, drop, or 📎 …" from `drawer:` up, "Attach images from the web app." below
+  it. Disabled (the native embed) shows only the web-app line, at every width. The cap, the type
+  names and the size come from `Schemas.Comment` / `Schemas.Attachment`.
+
+  Ids: error N is `\#{@id}-error-N`.
+  """
+  attr :id, :string, required: true
+  attr :errors, :list, default: [], doc: "error sentences, in the order they happened"
+  attr :enabled, :boolean, default: true
+
+  def image_attach_hint(assigns) do
+    ~H"""
+    <div id={@id}>
+      <p
+        :for={{message, n} <- Enum.with_index(@errors)}
+        id={"#{@id}-error-#{n}"}
+        class={if(n == 0, do: "mt-1.5 text-xs text-error", else: "text-xs text-error")}
+      >
+        {message}
+      </p>
+      <p :if={@enabled} class="mt-1.5 hidden font-mono text-[10px] text-base-content/45 drawer:block">
+        {image_attach_limits()}
+      </p>
+      <p class={
+        if(@enabled,
+          do: "mt-1.5 font-mono text-[10px] text-base-content/45 drawer:hidden",
+          else: "mt-1.5 font-mono text-[10px] text-base-content/45"
+        )
+      }>
+        Attach images from the web app.
+      </p>
+    </div>
+    """
+  end
+
+  defp image_attach_limits do
+    "Paste, drop, or 📎 — up to #{Schemas.Comment.max_images()} images · " <>
+      "#{Enum.join(Schemas.Attachment.image_type_names(), ", ")} · " <>
+      "#{div(Schemas.Attachment.max_bytes(), 1_048_576)} MB each"
+  end
+
   @doc """
   A card's Mockups or Screenshots section (RE380, RE390): the section label and a wrapping row of
   tiles, one per `RelayWeb.CardMedia` item — a `mockup_preview/1` patching to
@@ -2151,6 +2394,10 @@ defmodule RelayWeb.CoreComponents do
   attr :show_label, :boolean, default: true
   attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
 
+  attr :show_captions, :boolean,
+    default: false,
+    doc: "RE427: each tile's caption under it (the current tile's highlighted)"
+
   def card_mockups_section(assigns) do
     ~H"""
     <section id={@id} class="space-y-2">
@@ -2166,7 +2413,7 @@ defmodule RelayWeb.CoreComponents do
             caption={item.caption}
           />
           <.mockup_preview
-            :if={item.kind != :placeholder}
+            :if={item.kind != :placeholder and !@show_captions}
             id={"#{@tile_id}-#{index}"}
             src={item.src}
             kind={item.kind}
@@ -2176,6 +2423,35 @@ defmodule RelayWeb.CoreComponents do
             current={@current && item.key == @current}
             replace={@replace}
           />
+          <div
+            :if={item.kind != :placeholder and @show_captions}
+            id={"#{@tile_id}-#{index}-column"}
+            class="flex min-w-0 flex-col gap-1"
+          >
+            <.mockup_preview
+              id={"#{@tile_id}-#{index}"}
+              src={item.src}
+              kind={item.kind}
+              noun={@noun}
+              view_href={@item_href.(item.key)}
+              caption={item.caption}
+              current={@current && item.key == @current}
+              replace={@replace}
+            />
+            <span
+              id={"#{@tile_id}-#{index}-filename"}
+              title={item.caption}
+              class={[
+                "truncate font-mono text-[10px]",
+                if(@current && item.key == @current,
+                  do: "text-primary font-semibold",
+                  else: "text-base-content/55"
+                )
+              ]}
+            >
+              {item.caption}
+            </span>
+          </div>
         <% end %>
       </div>
     </section>
@@ -2531,6 +2807,11 @@ defmodule RelayWeb.CoreComponents do
   attr :index, :integer, required: true, doc: "1-based position of the item on screen"
   attr :total, :integer, required: true
   attr :noun, :string, default: "Mockup"
+
+  attr :count_noun, :string,
+    default: nil,
+    doc: "RE427: when set the count reads `<count_noun> n of m` and the noun label is not rendered"
+
   attr :class, :any, default: nil, doc: "display classes; `flex` when nil"
 
   def mockup_viewer_header(assigns) do
@@ -2543,10 +2824,16 @@ defmodule RelayWeb.CoreComponents do
       ]}
     >
       <div class="flex min-w-0 flex-1 items-baseline gap-2">
-        <.section_label id={"#{@id}-noun"} class="shrink-0">{@noun}</.section_label>
+        <.section_label :if={!@count_noun} id={"#{@id}-noun"} class="shrink-0">
+          {@noun}
+        </.section_label>
         <span id={"#{@id}-caption"} class="truncate text-sm font-semibold">{@caption}</span>
         <span id={"#{@id}-count"} class="shrink-0 font-mono text-xs text-base-content/55">
-          {@index} of {@total}
+          <%= if @count_noun do %>
+            {@count_noun} {@index} of {@total}
+          <% else %>
+            {@index} of {@total}
+          <% end %>
         </span>
       </div>
       <%!-- The kbds sit on their own lines so the text reads "← → switch"; whitespace between flex items never renders. --%>
@@ -2595,6 +2882,9 @@ defmodule RelayWeb.CoreComponents do
   attr :label, :string, default: "Mockups", doc: "the sheet's section label"
   attr :noun, :string, default: "Mockup", doc: "names one item: caption fallback, frame title, arrow labels"
   attr :embed, :boolean, default: false, doc: "native host: no web top bar to sit under"
+  attr :count_noun, :string, default: nil, doc: "RE427: the header count's noun (`Image 3 of 3`)"
+  attr :show_captions, :boolean, default: false, doc: "RE427: filenames under the sheet's tiles"
+  attr :byline, :string, default: nil, doc: "RE427: a line under the sheet's section (`From a note by …`)"
 
   slot :gate, doc: "the card's gate panel (review or question), rendered at the top of the sheet"
 
@@ -2715,16 +3005,26 @@ defmodule RelayWeb.CoreComponents do
         </div>
         <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-4">
           {render_slot(@gate)}
-          <.card_mockups_section
-            id={"#{@id}-mockups"}
-            tile_id={"#{@id}-mockup"}
-            items={@items}
-            item_href={@item_href}
-            label={@label}
-            noun={@noun}
-            current={@current_key}
-            replace
-          />
+          <div>
+            <.card_mockups_section
+              id={"#{@id}-mockups"}
+              tile_id={"#{@id}-mockup"}
+              items={@items}
+              item_href={@item_href}
+              label={@label}
+              noun={@noun}
+              current={@current_key}
+              show_captions={@show_captions}
+              replace
+            />
+            <p
+              :if={@byline}
+              id={"#{@id}-byline"}
+              class="mt-3 text-[11px] leading-[1.45] text-base-content/50"
+            >
+              {@byline}
+            </p>
+          </div>
         </div>
       </aside>
       <main
@@ -2738,6 +3038,7 @@ defmodule RelayWeb.CoreComponents do
           index={@index}
           total={length(@items)}
           noun={@noun}
+          count_noun={@count_noun}
           class="hidden drawer:flex"
         />
         <div
@@ -3946,6 +4247,24 @@ defmodule RelayWeb.CoreComponents do
       "RE390: screenshot position (1-based) -> the URL an AI Result Screenshots tile patches to. " <>
         "BoardLive always passes its viewer-URL closure"
 
+  attr :image_href, :any,
+    default: &RelayWeb.CoreComponents.image_query/1,
+    doc:
+      "RE427: note image attachment id -> the URL its thumbnail patches to. BoardLive always passes " <>
+        "its viewer-URL closure"
+
+  attr :uploads, :map,
+    default: nil,
+    doc:
+      "RE427: the LiveView's `@uploads` (BoardLive allows `:note_images`); nil (Storybook, tests) " <>
+        "renders the Notes composer without the 📎, drop target or paste hook"
+
+  attr :note_images_pending, :list,
+    default: [],
+    doc: "RE427: the Notes composer's uploaded-but-unposted images, `[%{id, filename, src}]`"
+
+  attr :note_image_errors, :list, default: [], doc: "RE427: the Notes composer's refused-image sentences"
+
   attr :attachment_types, :map,
     default: %{},
     doc:
@@ -4706,7 +5025,9 @@ defmodule RelayWeb.CoreComponents do
                     </span>
                     <span class="flex-1"></span>
                     <%!-- True today: every flow node runs `relay card REF`, which prints the
-                          card's comment-kind timeline entries (see ./relay's card printer).
+                          card's comment-kind timeline entries (see ./relay's card printer) —
+                          a note's images print as `[image]` lines there, and an agent pulls
+                          their files with `relay images REF --pull`.
                           If that ever stops being true this chip is a lie — fix one or the other. --%>
                     <span class="rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success">
                       READ BY EVERY AGENT
@@ -4750,7 +5071,7 @@ defmodule RelayWeb.CoreComponents do
                         <div class="min-w-0 flex-1 space-y-[3px]">
                           <div class="flex items-center gap-2">
                             <span class="timeline-author text-[12px] font-semibold">
-                              {timeline_author(comment)}
+                              {CardMedia.author(comment)}
                             </span>
                             <time
                               class="timeline-time font-mono text-[10px] text-base-content/45"
@@ -4771,6 +5092,7 @@ defmodule RelayWeb.CoreComponents do
                                 base-content 85% prose (assets/css/app.css). Only the amber
                                 question / changes-requested treatment keeps a box. --%>
                           <div
+                            :if={String.trim(comment.body || "") != ""}
                             class={
                               # RE277 — a literal string head followed by a dynamic falsy tail in a
                               # HEEx `class={[...]}` leaves a stray trailing space (the compiler
@@ -4790,6 +5112,13 @@ defmodule RelayWeb.CoreComponents do
                           >
                             {Relay.Markdown.to_html(comment.body)}
                           </div>
+                          <%!-- RE427 — outside the `.md` body: the markdown lightbox must not
+                          claim a thumbnail click (it patches to the viewer instead). --%>
+                          <.note_image_row
+                            id={"#{dom_id}-images"}
+                            images={note_images(comment)}
+                            image_href={@image_href}
+                          />
                         </div>
                       </li>
                     </ol>
@@ -4801,7 +5130,15 @@ defmodule RelayWeb.CoreComponents do
                       phx-change="validate_comment"
                       phx-submit="post_comment"
                     >
-                      <div class="flex items-start gap-2 rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2">
+                      <%!-- RE427 — the shared image control. Attaching is desktop-web only: the
+                            native embed (and a host without uploads) gets no 📎, no drop
+                            target and no paste hook — only "Attach images from the web app." --%>
+                      <.image_attach_box
+                        id={"#{@id}-note-images"}
+                        upload={@uploads && @uploads[:note_images]}
+                        pending={@note_images_pending}
+                        enabled={note_attach_enabled?(assigns)}
+                      >
                         <textarea
                           id={"#{@id}-comment-input"}
                           name={@comment_form[:body].name}
@@ -4810,15 +5147,26 @@ defmodule RelayWeb.CoreComponents do
                           placeholder="What you did, what you found, what’s left…"
                           class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
                         >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
+                        <.image_attach_button
+                          :if={note_attach_enabled?(assigns)}
+                          id={"#{@id}-note-images-attach"}
+                          upload={@uploads[:note_images]}
+                        />
                         <.button
                           type="submit"
                           class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
                           pending="Adding…"
+                          disabled={note_images_in_flight?(@uploads)}
                         >
                           Add note
                         </.button>
-                      </div>
+                      </.image_attach_box>
                       <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
+                      <.image_attach_hint
+                        id={"#{@id}-note-images-hint"}
+                        errors={@note_image_errors}
+                        enabled={note_attach_enabled?(assigns)}
+                      />
                     </.form>
                   </div>
                   <p class="font-mono text-[10.5px] leading-[1.5] text-base-content/50">
@@ -6453,8 +6801,8 @@ defmodule RelayWeb.CoreComponents do
   defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
   defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
 
-  defp timeline_author(%{actor_type: :agent}), do: "Relay AI"
-  defp timeline_author(%{actor_type: :user, user: user}), do: user.name || user.email
+  defp note_images(%{images: images}) when is_list(images), do: images
+  defp note_images(_comment), do: []
 
   defp comment_tag_label(:question), do: "QUESTION"
   defp comment_tag_label(:changes_requested), do: "CHANGES REQUESTED"

@@ -50,6 +50,29 @@ defmodule RelayWeb.StorybookStoriesTest do
     assert read("_core_components.index.exs") =~ ~s|def entry("plan_tasks")|
   end
 
+  test "note_image_row story covers two images and a single wide image and is indexed (RE427)" do
+    src = read("note_image_row.story.exs")
+
+    for id <- ~w(:two_images :single_wide), do: assert(src =~ "id: #{id}", "note_image_row story is missing #{id}")
+
+    assert src =~ "&RelayWeb.CoreComponents.note_image_row/1"
+    assert read("_core_components.index.exs") =~ ~s|def entry("note_image_row")|
+  end
+
+  test "image_attach_box story covers every image-control state and is indexed (RE427)" do
+    src = read("image_attach_box.story.exs")
+
+    for id <- ~w(:empty :uploading :with_thumbnails :over_cap :wrong_type :too_large :drag_over) do
+      assert src =~ "id: #{id}", "image_attach_box story is missing variation #{id}"
+    end
+
+    assert src =~ "&RelayWeb.CoreComponents.image_attach_box/1"
+
+    for name <- ~w(image_attach_box image_attach_button image_attach_hint) do
+      assert read("_core_components.index.exs") =~ ~s|def entry("#{name}")|
+    end
+  end
+
   test "button story covers the RE394 pending and forced-pressed states" do
     src = read("button.story.exs")
     assert src =~ ~r/id: :pending,.*pending: "Approving…"/s

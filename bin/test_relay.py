@@ -430,6 +430,48 @@ class PrintCardTest(unittest.TestCase):
                 "owners": [], "mockups": []}
         self.assertNotIn("mockups", capture(relay.print_card, card))
 
+    def note_card(self, *comments):
+        return {"ref": "RLY-1", "title": "Do it", "status": "queued", "active_owner": None,
+                "owners": [], "timeline": [dict({"kind": "comment", "author": {"name": "Jeremy"}},
+                                                **c) for c in comments]}
+
+    def print_with_url(self, card, url="http://x/"):
+        with unittest.mock.patch.dict(os.environ, {"RELAY_URL": url}):
+            return capture(relay.print_card, card)
+
+    def test_print_card_lists_each_note_image_under_its_comment(self):
+        card = self.note_card({"body": "see screenshots", "images": [
+            {"filename": "overflow.png", "url": "/attachments/a1",
+             "download_path": "/api/attachments/a1"},
+            {"filename": "phone.png", "url": "/attachments/b2",
+             "download_path": "/api/attachments/b2"}]})
+        lines = self.print_with_url(card).splitlines()
+        i = lines.index("  - Jeremy: see screenshots")
+        self.assertEqual(lines[i:i + 3], ["  - Jeremy: see screenshots",
+                                          "    [image] overflow.png http://x/api/attachments/a1",
+                                          "    [image] phone.png http://x/api/attachments/b2"])
+
+    def test_print_card_shows_an_image_only_note_without_a_body(self):
+        card = self.note_card({"body": None, "images": [
+            {"filename": "drawer.png", "url": "/attachments/c3",
+             "download_path": "/api/attachments/c3"}]})
+        text = self.print_with_url(card)
+        lines = text.splitlines()
+        self.assertIn("  - Jeremy:", lines)
+        self.assertIn("    [image] drawer.png http://x/api/attachments/c3", lines)
+        self.assertNotIn("None", text)
+
+    def test_print_card_comments_without_images_print_as_before(self):
+        card = self.note_card({"body": "no pics", "images": []}, {"body": "old server"})
+        text = self.print_with_url(card)
+        self.assertNotIn("[image]", text)
+        self.assertIn("  - Jeremy: no pics\n  - Jeremy: old server\n", text)
+
+    def test_print_card_reads_the_contract_pinned_note_image_keys(self):
+        self.assertIn("images", CONTRACT["note_images"]["comment_entry"])
+        self.assertTrue({"filename", "download_path", "url"}
+                        <= set(CONTRACT["note_images"]["image"]))
+
 
 class SetTagTest(unittest.TestCase):
     """relay tag REF [VALUE] — PATCHes {"tag": value}, null when omitted/empty."""
@@ -1264,6 +1306,145 @@ class MockupsCommandTest(unittest.TestCase):
         self.assertEqual(set(body), set(CONTRACT["mockups"]["request"]))
         self.assertEqual(set(body["mockups"][0]), set(CONTRACT["mockups"]["request"]["mockups"][0]))
         self.assertEqual(set(CONTRACT["mockups"]["card_mockups"][0]), {"url", "caption"})
+
+
+class ImagesPullTest(unittest.TestCase):
+    """relay images REF --pull [DIR] (RE427) — downloads every note image on the card, in
+    timeline order then each note's order, into DIR as NN-<slug><ext>."""
+
+    BYTES = {"/api/attachments/i1": b"\x89PNG one", "/api/attachments/i2": b"\x89PNG two\x00",
+             "/api/attachments/i3": b"\x89PNG three"}
+
+    @staticmethod
+    def image(i, filename):
+        return {"filename": filename, "url": f"/attachments/i{i}",
+                "download_path": f"/api/attachments/i{i}"}
+
+    def setUp(self):
+        for name in ("api", "api_download"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.timeline = [
+            {"kind": "comment", "body": "two", "author": {"name": "J"},
+             "images": [self.image(1, "image.png"), self.image(2, "image.png")]},
+            {"kind": "activity", "type": "moved", "author": {"name": "J"}},
+            {"kind": "comment", "body": None, "author": {"name": "J"},
+             "images": [self.image(3, "Screen Shot.PNG")]},
+        ]
+        self.sent, self.fetched = [], []
+
+        def fake_api(method, path, body=None, **_kw):
+            self.sent.append((method, path, body))
+            return {"data": {"ref": "RLY-1", "timeline": self.timeline}}
+
+        def fake_download(path):
+            self.fetched.append(path)
+            return self.BYTES[path], "image/png"
+
+        relay.api, relay.api_download = fake_api, fake_download
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.dest = os.path.join(self.dir, "out")
+
+    def args(self, pull=True, json=False):
+        return argparse.Namespace(ref="RLY-1", pull=pull, json=json, field=None)
+
+    def read(self, name):
+        with open(os.path.join(self.dest, name), "rb") as f:
+            return f.read()
+
+    def test_writes_every_note_image_byte_for_byte_in_viewer_order(self):
+        out = capture(relay.cmd_images, self.args(pull=self.dest))
+
+        self.assertEqual(self.sent, [("GET", "/api/cards/RLY-1", None)])
+        paths = ["/api/attachments/i1", "/api/attachments/i2", "/api/attachments/i3"]
+        self.assertEqual(self.fetched, paths)
+        names = ["01-image.png", "02-image.png", "03-screen-shot.png"]
+        self.assertEqual(sorted(os.listdir(self.dest)), names)
+        for name, path in zip(names, paths):
+            self.assertEqual(self.read(name), self.BYTES[path])
+        self.assertEqual(out, f"RLY-1: 3 images → {self.dest}/ "
+                              "(image.png, image.png, Screen Shot.PNG)\n")
+
+    def test_one_image_is_singular(self):
+        self.timeline = [{"kind": "comment", "body": "x", "author": {"name": "J"},
+                          "images": [self.image(1, "image.png")]}]
+        out = capture(relay.cmd_images, self.args(pull=self.dest))
+        self.assertEqual(out, f"RLY-1: 1 image → {self.dest}/ (image.png)\n")
+
+    def test_a_trailing_slash_on_dir_is_printed_once(self):
+        self.timeline = self.timeline[:1]
+        out = capture(relay.cmd_images, self.args(pull=self.dest + "/"))
+        self.assertIn(f"→ {self.dest}/ (", out)
+
+    def test_no_images_prints_a_message_exits_zero_and_creates_nothing(self):
+        for timeline in ([{"kind": "comment", "body": "x", "author": {"name": "J"}, "images": []},
+                          {"kind": "comment", "body": "old", "author": {"name": "J"}},
+                          {"kind": "activity", "type": "moved"}], [], None):
+            self.timeline = timeline
+            self.assertEqual(capture(relay.cmd_images, self.args(pull=self.dest)),
+                             "RLY-1: no images\n")
+            self.assertEqual(capture(relay.cmd_images, self.args(pull=self.dest, json=True)),
+                             "[]\n")
+        self.assertFalse(os.path.exists(self.dest))
+        self.assertEqual(self.fetched, [])
+
+    def test_bare_pull_defaults_to_tmp_ref_images_under_the_cwd(self):
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.dir)
+
+        out = capture(relay.cmd_images, self.args(pull=True, json=True))
+
+        expected = os.path.join("tmp", "RLY-1", "images", "01-image.png")
+        self.assertEqual(json.loads(out)[0]["path"], expected)
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, expected)))
+
+    def test_a_failed_download_dies_naming_the_attachment_id_and_keeps_earlier_files(self):
+        def fake_download(path):
+            if path.endswith("/i2"):
+                raise relay.Died("HTTP 404")
+            return self.BYTES[path], "image/png"
+
+        relay.api_download = fake_download
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err), \
+                contextlib.redirect_stdout(io.StringIO()):
+            relay.cmd_images(self.args(pull=self.dest))
+        self.assertIn("image i2 failed to download (HTTP 404)", err.getvalue())
+        self.assertEqual(os.listdir(self.dest), ["01-image.png"])
+
+    def test_json_lists_filename_url_and_path(self):
+        out = capture(relay.cmd_images, self.args(pull=self.dest, json=True))
+        got = json.loads(out)
+        self.assertEqual(got[0], {"filename": "image.png", "url": "/attachments/i1",
+                                  "path": os.path.join(self.dest, "01-image.png")})
+        self.assertEqual(len(got), 3)
+
+    def test_without_pull_dies_before_any_request(self):
+        parse = relay.build_parser().parse_args
+        ns = parse(["images", "RLY-1"])
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            relay.cmd_images(ns)
+        self.assertIn("pass --pull [DIR] to download the card's note images", err.getvalue())
+        self.assertEqual(self.sent, [])
+
+    def test_parser_takes_an_optional_pull_dir(self):
+        parse = relay.build_parser().parse_args
+        self.assertEqual(parse(["images", "RLY-1", "--pull", "d"]).pull, "d")
+        self.assertIs(parse(["images", "RLY-1", "--pull"]).pull, True)
+        self.assertIs(parse(["images", "RLY-1", "--pull"]).func, relay.cmd_images)
+
+    def test_images_is_listed_under_cards_in_the_help_table(self):
+        self.assertIn(("Cards", "images",
+                       "download the images attached to a card's notes (--pull [DIR])"),
+                      relay.COMMANDS)
+
+    def test_image_files_are_named_through_the_shared_numbered_download_core(self):
+        self.assertEqual(relay.numbered_filename(2, "Screen Shot 1", ".png", "image"),
+                         "02-screen-shot-1.png")
+        self.assertEqual(relay.numbered_filename(1, "", ".png", "image"), "01-image.png")
+        self.assertEqual(relay.mockup_filename(3, ""), "03-mockup.html")
 
 
 class ApiBytesTest(unittest.TestCase):

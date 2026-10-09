@@ -124,8 +124,10 @@ defmodule RelayWeb.BoardLive do
   alias RelayWeb.StoryMapComponents
   alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
+  alias Schemas.Attachment
   alias Schemas.Board
   alias Schemas.Card
+  alias Schemas.Comment
   alias Schemas.Run
   alias Schemas.Stage
   alias Schemas.TalkEvent
@@ -563,6 +565,7 @@ defmodule RelayWeb.BoardLive do
         attachment_types={@attachment_types}
         mockup_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :mockups, &1)}
         screenshot_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :screenshots, &1)}
+        image_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :images, &1)}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage, @stage_flows)}
         stages={move_targets(@board, @selected_card)}
@@ -602,6 +605,9 @@ defmodule RelayWeb.BoardLive do
         note_count={MapSet.size(@note_ids)}
         activity={@streams.activity}
         comment_form={@comment_form}
+        uploads={@uploads}
+        note_images_pending={@note_images_pending}
+        note_image_errors={@note_image_errors}
         question={@question}
         answer_form={@answer_form}
         answer_questions={@answer_questions}
@@ -654,9 +660,9 @@ defmodule RelayWeb.BoardLive do
         current_key={@viewer.key}
         back_patch={viewer_back_path(assigns, Cards.ref(@board, @selected_card))}
         item_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), @viewer.section, &1)}
-        label={viewer_label(@viewer.section)}
         noun={viewer_noun(@viewer.section)}
         embed={@embed}
+        {viewer_section_attrs(assigns)}
       >
         <:gate>
           <.card_gate_panel
@@ -1209,6 +1215,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:run_flush_pending?, false)
       |> assign_run_diagnostics(board, run_summaries)
       |> assign(:note_ids, MapSet.new())
+      |> assign(:note_image_comments, [])
+      |> allow_note_images()
       |> stream_configure(:conversation, dom_id: &conversation_dom_id/1)
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
       |> stream_configure(:talk_events, dom_id: &"talk-event-#{&1.id}")
@@ -1274,9 +1282,10 @@ defmodule RelayWeb.BoardLive do
       (viewer != nil or socket.assigns.viewer != nil)
   end
 
-  # RE390 — the viewer a URL asks for: `mockup=<attachment id>` or `screenshot=<n>` (a decimal
-  # integer ≥ 1, parsed exactly). `mockup` wins when both are present; a malformed `n` is
-  # `:invalid`, which falls straight back to the drawer.
+  # RE390 / RE427 — the viewer a URL asks for: `mockup=<attachment id>`, `screenshot=<n>` (a
+  # decimal integer ≥ 1, parsed exactly) or `image=<attachment id>` (a note image). Precedence is
+  # mockup > screenshot > image; a malformed `n` is `:invalid`, which falls straight back to the
+  # drawer.
   defp requested_viewer(%{"mockup" => id}) when is_binary(id), do: %{section: :mockups, key: id}
 
   defp requested_viewer(%{"screenshot" => n}) when is_binary(n) do
@@ -1284,6 +1293,8 @@ defmodule RelayWeb.BoardLive do
       do: %{section: :screenshots, key: String.to_integer(n)},
       else: :invalid
   end
+
+  defp requested_viewer(%{"image" => id}) when is_binary(id), do: %{section: :images, key: id}
 
   defp requested_viewer(_params), do: nil
 
@@ -1324,7 +1335,10 @@ defmodule RelayWeb.BoardLive do
     if viewer_open?(socket.assigns) or viewer_pending?(socket.assigns), do: socket, else: viewer_fallback(socket)
   end
 
-  defp viewer_pending?(%{viewer: %{section: :screenshots}, body_loading?: true}), do: true
+  # RE427 — note images come from the conversation, which the async body load fills too.
+  defp viewer_pending?(%{viewer: %{section: section}, body_loading?: true}) when section in [:screenshots, :images],
+    do: true
+
   defp viewer_pending?(_assigns), do: false
 
   # RE390 — whether the viewer is showing: one is requested AND its key is among the open card's
@@ -1351,11 +1365,31 @@ defmodule RelayWeb.BoardLive do
   defp viewer_items(%{selected_card: card, attachment_types: types}, :screenshots),
     do: CardMedia.screenshot_items(card.ai_result, types)
 
+  defp viewer_items(%{note_image_comments: comments}, :images), do: CardMedia.note_image_items(comments)
+
   defp viewer_label(:mockups), do: "Mockups"
   defp viewer_label(:screenshots), do: "Screenshots"
+  defp viewer_label(:images), do: "Images"
 
   defp viewer_noun(:mockups), do: "Mockup"
   defp viewer_noun(:screenshots), do: "Screenshot"
+  defp viewer_noun(:images), do: "Image"
+
+  # RE427 — the images section's sheet and header: `Images · N`, filenames under the tiles,
+  # `Image n of N`, and the note's byline. Mockups and screenshots keep the plain label.
+  defp viewer_section_attrs(%{viewer: %{section: :images}} = assigns) do
+    items = viewer_items(assigns, :images)
+    current = viewer_item(assigns) || %{}
+
+    %{
+      label: "#{viewer_label(:images)} · #{length(items)}",
+      count_noun: viewer_noun(:images),
+      show_captions: true,
+      byline: Map.get(current, :byline)
+    }
+  end
+
+  defp viewer_section_attrs(%{viewer: %{section: section}}), do: %{label: viewer_label(section)}
 
   # Card mode selects from the path (/cards/:ref); board mode from ?card=<ref>. In card mode
   # the selection is never nil'd — there is no board behind the drawer to close back to.
@@ -2630,11 +2664,21 @@ defmodule RelayWeb.BoardLive do
   def handle_event("remove_owner", _params, socket), do: {:noreply, socket}
 
   def handle_event("validate_comment", %{"comment" => comment_params}, socket) do
-    {:noreply, assign(socket, :comment_form, to_form(comment_params, as: :comment))}
+    {:noreply,
+     socket
+     |> assign(:comment_form, to_form(comment_params, as: :comment))
+     |> check_new_note_images()}
   end
 
+  # RE427 — ⌘↩ submits through `form.requestSubmit()`, which ignores the disabled Add note
+  # button, so the server itself refuses to post while an image is still uploading.
+  def handle_event("post_comment", _params, %{assigns: %{uploads: %{note_images: %{entries: [_ | _]}}}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("post_comment", %{"comment" => comment_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
-    case Activity.add_comment(card, %{actor: current_actor(socket), body: comment_params["body"]}) do
+    image_ids = Enum.map(socket.assigns.note_images_pending, & &1.id)
+
+    case Activity.add_comment(card, %{actor: current_actor(socket), body: comment_params["body"], image_ids: image_ids}) do
       # `add_comment` broadcasts `:timeline_appended`, and this LiveView is subscribed to
       # its own board topic, so `handle_info/2` below inserts the note again for every
       # viewer, this one included. Insert it locally anyway: `Relay.Events.broadcast/2` is
@@ -2645,7 +2689,8 @@ defmodule RelayWeb.BoardLive do
         {:noreply,
          socket
          |> insert_note(comment)
-         |> assign(:comment_form, empty_comment_form())}
+         |> assign(:comment_form, empty_comment_form())
+         |> reset_note_images()}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :comment_form, to_form(changeset))}
@@ -2653,6 +2698,13 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
+
+  # RE427 — the ✕ on a thumbnail still uploading.
+  def handle_event("cancel_note_image", %{"ref" => ref}, socket), do: {:noreply, cancel_upload(socket, :note_images, ref)}
+
+  # RE427 — the ✕ on an uploaded thumbnail: it leaves the note; the attachment stays, unlinked.
+  def handle_event("remove_note_image", %{"id" => id}, socket),
+    do: {:noreply, update(socket, :note_images_pending, &Enum.reject(&1, fn image -> image.id == id end))}
 
   # MMF 14 — the drawer's amber panel submits the human's answer: log it,
   # return the baton (working on an AI-meant stage, queued otherwise), and
@@ -3277,7 +3329,7 @@ defmodule RelayWeb.BoardLive do
     {:noreply, socket}
   end
 
-  defp insert_timeline_entry(socket, %Schemas.Comment{} = comment) do
+  defp insert_timeline_entry(socket, %Comment{} = comment) do
     insert_note(socket, comment)
   end
 
@@ -5042,6 +5094,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:spec_form, nil)
           |> assign(:plan_form, nil)
           |> assign(:comment_form, empty_comment_form())
+          |> reset_note_images()
           |> assign(:answer_form, empty_answer_form())
           |> assign(:body_loading?, true)
           |> assign(:question, nil)
@@ -5110,6 +5163,7 @@ defmodule RelayWeb.BoardLive do
           body_loading?: false
         )
         |> reset_talk()
+        |> reset_note_images()
         |> stream_notes([])
         |> stream(:activity, [], reset: true)
     end
@@ -5219,6 +5273,7 @@ defmodule RelayWeb.BoardLive do
 
   defp viewer_param(:mockups, id), do: {:mockup, id}
   defp viewer_param(:screenshots, n), do: {:screenshot, n}
+  defp viewer_param(:images, id), do: {:image, id}
 
   # RE380 — the top bar's trail: the board's own, or in viewer mode `Boards / <board> / <card>`
   # whose card crumb patches back to the drawer.
@@ -5315,6 +5370,96 @@ defmodule RelayWeb.BoardLive do
 
   defp empty_comment_form, do: to_form(%{"body" => ""}, as: :comment)
 
+  # RE427 — a Note's images upload the moment they land (auto_upload), each into an unlinked
+  # attachment on the open card; Add note links them. LiveView's max_entries only counts entries
+  # still in flight, so check_new_note_images/1 enforces the per-note cap against the pending ones.
+  defp allow_note_images(socket) do
+    socket
+    |> allow_upload(:note_images,
+      accept: Attachment.image_types(),
+      max_entries: Comment.max_images(),
+      max_file_size: Attachment.max_bytes(),
+      auto_upload: true,
+      progress: &handle_note_image_progress/3
+    )
+    |> assign(note_images_pending: [], note_image_errors: [])
+  end
+
+  # A card switch, a close and a successful post all start the composer over. An entry still in
+  # flight belongs to the card being left, so it is cancelled rather than landing on the next one.
+  defp reset_note_images(socket) do
+    socket.assigns.uploads.note_images.entries
+    |> Enum.reduce(socket, &cancel_upload(&2, :note_images, &1.ref))
+    |> assign(note_images_pending: [], note_image_errors: [])
+  end
+
+  defp handle_note_image_progress(:note_images, entry, %{assigns: %{selected_card: %Card{} = card}} = socket) do
+    if entry.done? do
+      {:noreply, store_note_image(socket, card, entry)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp handle_note_image_progress(:note_images, entry, socket),
+    do: {:noreply, cancel_upload(socket, :note_images, entry.ref)}
+
+  defp store_note_image(socket, card, entry) do
+    bytes = consume_uploaded_entry(socket, entry, &read_upload/1)
+    attrs = %{filename: entry.client_name, content_type: entry.client_type, bytes: bytes}
+
+    case Attachments.create_attachment(card, attrs) do
+      {:ok, attachment} ->
+        image = %{id: attachment.id, filename: attachment.filename, src: Attachment.path(attachment.id)}
+        update(socket, :note_images_pending, &(&1 ++ [image]))
+
+      {:error, _changeset} ->
+        update(socket, :note_image_errors, &(&1 ++ ["#{entry.client_name} couldn’t be attached."]))
+    end
+  end
+
+  # The temp file LiveView wrote the chunks to; it is deleted once the consume callback returns.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_upload(%{path: path}), do: {:ok, File.read!(path)}
+
+  # Runs on the phx-change that announces newly chosen/dropped/pasted files (they are not yet
+  # preflighted): refuses each bad file by name and anything past the note's room, cancelling them
+  # so the rest of the batch still uploads. The typed text is untouched (it is the same change).
+  defp check_new_note_images(socket) do
+    conf = socket.assigns.uploads.note_images
+
+    if Enum.all?(conf.entries, & &1.preflighted?) do
+      socket
+    else
+      {bad, good} = Enum.split_with(conf.entries, &(upload_errors(conf, &1) != []))
+      room = max(Comment.max_images() - length(socket.assigns.note_images_pending), 0)
+      over = Enum.drop(good, room)
+
+      errors =
+        Enum.map(bad, &note_image_error(&1, upload_errors(conf, &1))) ++
+          if(over == [], do: [], else: [over_cap_error()])
+
+      (bad ++ over)
+      |> Enum.reduce(socket, &cancel_upload(&2, :note_images, &1.ref))
+      |> assign(:note_image_errors, errors)
+    end
+  end
+
+  @mb 1_048_576
+
+  defp note_image_error(entry, [:too_large | _]) do
+    size = :erlang.float_to_binary(entry.client_size / @mb, decimals: 1)
+    "#{entry.client_name} is #{size} MB — the limit is #{div(Attachment.max_bytes(), @mb)} MB."
+  end
+
+  defp note_image_error(entry, _not_accepted) do
+    {last, rest} = List.pop_at(Attachment.image_type_names(), -1)
+    "#{entry.client_name} isn’t an image (#{Enum.join(rest, ", ")} or #{last})."
+  end
+
+  defp over_cap_error,
+    do: "That’s #{Comment.max_images()} — the most one note can carry. Post this one and start another."
+
   defp empty_answer_form, do: to_form(%{"body" => ""}, as: :answer)
 
   # The panel shows the newest :needs_input question. A human-blocked card
@@ -5345,7 +5490,7 @@ defmodule RelayWeb.BoardLive do
 
   defp latest_questions(_card, _activity), do: nil
 
-  defp conversation_dom_id(%Schemas.Comment{id: id}), do: "timeline-comment-#{id}"
+  defp conversation_dom_id(%Comment{id: id}), do: "timeline-comment-#{id}"
   defp activity_dom_id(%Schemas.Activity{id: id}), do: "timeline-activity-#{id}"
 
   # RE277 — the Notes header shows a count, and LiveView streams cannot be counted.
@@ -5355,16 +5500,36 @@ defmodule RelayWeb.BoardLive do
   # idempotent per note id: re-applying an event (a duplicate broadcast, or a
   # drawer refresh that already recounted the note the following
   # :timeline_appended carries) can never inflate the header past the list.
+  #
+  # RE427 — @note_image_comments (the notes carrying images, oldest first) feeds the images
+  # viewer, and is kept here for the same reason: it can never drift from the Notes list.
   defp stream_notes(socket, comments) do
     socket
     |> stream(:conversation, comments, reset: true)
     |> assign(:note_ids, MapSet.new(comments, & &1.id))
+    |> assign(:note_image_comments, Enum.filter(comments, &note_images?/1))
   end
 
   defp insert_note(socket, comment) do
     socket
     |> stream_insert(:conversation, comment)
     |> update(:note_ids, &MapSet.put(&1, comment.id))
+    |> update(:note_image_comments, &put_note_image_comment(&1, comment))
+  end
+
+  defp note_images?(%Comment{images: [_ | _]}), do: true
+  defp note_images?(_comment), do: false
+
+  # Replace in place when the note is already listed (a duplicate broadcast), append otherwise.
+  defp put_note_image_comment(comments, comment) do
+    case Enum.find_index(comments, &(&1.id == comment.id)) do
+      nil -> if note_images?(comment), do: comments ++ [comment], else: comments
+      index when is_integer(index) -> replace_or_drop(comments, index, comment)
+    end
+  end
+
+  defp replace_or_drop(comments, index, comment) do
+    if note_images?(comment), do: List.replace_at(comments, index, comment), else: List.delete_at(comments, index)
   end
 
   defp category_label(:unstarted), do: "Unstarted"

@@ -2,6 +2,7 @@ defmodule Relay.ActivityTest do
   use Relay.DataCase, async: true
 
   alias Relay.Activity
+  alias Schemas.Attachment
   alias Schemas.Comment
 
   setup do
@@ -48,6 +49,122 @@ defmodule Relay.ActivityTest do
                Activity.add_comment(card, %{actor: :agent, body: "q?", kind: :question})
 
       assert tagged.kind == :question
+    end
+  end
+
+  describe "add_comment/2 with image_ids (RE427)" do
+    setup %{card: card} do
+      a = insert(:attachment, card: card, filename: "a.png")
+      b = insert(:attachment, card: card, filename: "b.png")
+      %{a: a, b: b}
+    end
+
+    test "links the images to the note in the given order with positions", %{card: card, user: user, a: a, b: b} do
+      assert {:ok, %Comment{} = comment} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "see screenshots", image_ids: [a.id, b.id]})
+
+      assert comment.body == "see screenshots"
+      assert Enum.map(comment.images, & &1.id) == [a.id, b.id]
+
+      assert %Attachment{comment_id: comment_id, position: 0} = Repo.get!(Attachment, a.id)
+      assert comment_id == comment.id
+      assert %Attachment{comment_id: ^comment_id, position: 1} = Repo.get!(Attachment, b.id)
+    end
+
+    test "orders images by the given list, not insert time", %{card: card, user: user, a: a, b: b} do
+      assert {:ok, comment} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "reversed", image_ids: [b.id, a.id]})
+
+      assert Enum.map(comment.images, & &1.id) == [b.id, a.id]
+    end
+
+    test "allows an image-only note with a blank body", %{card: card, user: user, a: a} do
+      assert {:ok, comment} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "", image_ids: [a.id]})
+
+      assert comment.body in [nil, ""]
+      assert Enum.map(comment.images, & &1.id) == [a.id]
+    end
+
+    test "rejects more than max_images and changes nothing", %{card: card, user: user, a: a, b: b} do
+      extra = for _ <- 1..(Comment.max_images() + 1 - 2), do: insert(:attachment, card: card)
+      ids = [a.id, b.id | Enum.map(extra, & &1.id)]
+      assert length(ids) == 7
+
+      assert {:error, changeset} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "many", image_ids: ids})
+
+      assert "can carry at most 6 images" in errors_on(changeset).images
+      assert Repo.aggregate(Comment, :count) == 0
+      assert Enum.all?(ids, &is_nil(Repo.get!(Attachment, &1).comment_id))
+    end
+
+    test "rejects an image on another card", %{card: card, user: user} do
+      foreign = insert(:attachment, card: insert(:card))
+
+      assert {:error, changeset} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "x", image_ids: [foreign.id]})
+
+      assert "must be images uploaded to this card" in errors_on(changeset).images
+      assert Repo.aggregate(Comment, :count) == 0
+      assert is_nil(Repo.get!(Attachment, foreign.id).comment_id)
+    end
+
+    test "rejects a non-image attachment on the same card", %{card: card, user: user} do
+      html = insert(:attachment, card: card, filename: "m.html", content_type: Attachment.html_type())
+
+      assert {:error, changeset} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "x", image_ids: [html.id]})
+
+      assert "must be images uploaded to this card" in errors_on(changeset).images
+      assert Repo.aggregate(Comment, :count) == 0
+    end
+
+    test "rejects an image already linked to an earlier comment", %{card: card, user: user, a: a} do
+      {:ok, earlier} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "first", image_ids: [a.id]})
+
+      assert {:error, changeset} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "again", image_ids: [a.id]})
+
+      assert "must be images uploaded to this card" in errors_on(changeset).images
+      assert Repo.get!(Attachment, a.id).comment_id == earlier.id
+      assert Repo.aggregate(Comment, :count) == 1
+    end
+
+    test "rejects a non-UUID id without raising", %{card: card, user: user} do
+      assert {:error, changeset} =
+               Activity.add_comment(card, %{actor: {:user, user.id}, body: "x", image_ids: ["not-a-uuid"]})
+
+      assert "must be images uploaded to this card" in errors_on(changeset).images
+      assert Repo.aggregate(Comment, :count) == 0
+    end
+
+    test "broadcasts the comment with its images preloaded", %{card: card, user: user, a: a} do
+      Relay.Events.subscribe(card.board_id)
+      card_id = card.id
+      a_id = a.id
+
+      {:ok, _comment} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "pic", image_ids: [a_id]})
+
+      assert_receive {:timeline_appended, ^card_id, %Comment{images: [%Attachment{id: ^a_id}]}}
+    end
+
+    test "a comment posted without image_ids has images preloaded as []", %{card: card} do
+      assert {:ok, comment} = Activity.add_comment(card, %{actor: :agent, body: "no pics"})
+      assert comment.images == []
+    end
+
+    test "list_conversation/1 and list_timeline/1 preload images in position order", %{
+      card: card,
+      user: user,
+      a: a,
+      b: b
+    } do
+      {:ok, with_images} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "pics", image_ids: [a.id, b.id]})
+      {:ok, plain} = Activity.add_comment(card, %{actor: :agent, body: "plain"})
+
+      for list <- [Activity.list_conversation(card), Activity.list_timeline(card)] do
+        comments = Enum.filter(list, &match?(%Comment{}, &1))
+        assert Enum.map(Enum.find(comments, &(&1.id == with_images.id)).images, & &1.id) == [a.id, b.id]
+        assert Enum.find(comments, &(&1.id == plain.id)).images == []
+      end
     end
   end
 

@@ -129,8 +129,17 @@ defmodule RelayWeb.Api.CardJSON do
     |> String.replace(")", "\\)")
   end
 
+  # RE427 — a note's images, in position order; [] when none. `./relay card` prints them as
+  # `[image]` lines and `relay images --pull` downloads `download_path` (pinned under
+  # runner_contract.json's `note_images`).
   defp entry(%Schemas.Comment{} = c) do
-    %{kind: "comment", body: c.body, author: author(c), inserted_at: c.inserted_at}
+    %{
+      kind: "comment",
+      body: c.body,
+      author: author(c),
+      inserted_at: c.inserted_at,
+      images: Enum.map(c.images, &note_image/1)
+    }
   end
 
   # `text` is the rendered line for :action rows (`Relay.Activity`'s :text doc,
@@ -140,6 +149,14 @@ defmodule RelayWeb.Api.CardJSON do
   # Fixing it in the serializer also fixes rows already stored.
   defp entry(%Schemas.Activity{} = a) do
     %{kind: "activity", type: a.type, text: a.text, meta: a.meta, author: author(a), inserted_at: a.inserted_at}
+  end
+
+  defp note_image(%Schemas.Attachment{} = image) do
+    %{
+      filename: image.filename,
+      url: RelayWeb.attachment_path(image.id),
+      download_path: Schemas.Attachment.api_path(image.id)
+    }
   end
 
   defp author(%{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}

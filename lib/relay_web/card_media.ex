@@ -14,10 +14,18 @@ defmodule RelayWeb.CardMedia do
   an image. So only same-origin uploaded HTML is ever framed.
   """
 
+  alias RelayWeb.TimeAgo
   alias Schemas.Attachment
   alias Schemas.Card
+  alias Schemas.Comment
 
-  @type item :: %{key: String.t() | pos_integer(), src: String.t(), caption: String.t() | nil, kind: :html | :image}
+  @type item :: %{
+          required(:key) => String.t() | pos_integer(),
+          required(:src) => String.t(),
+          required(:caption) => String.t() | nil,
+          required(:kind) => :html | :image,
+          optional(:byline) => String.t()
+        }
   @type placeholder :: %{key: nil, src: nil, caption: String.t(), kind: :placeholder}
 
   @doc "How an item at `src` is drawn, given the card's `%{attachment_id => content_type}` map."
@@ -39,6 +47,30 @@ defmodule RelayWeb.CardMedia do
       %{key: id, src: src, caption: caption, kind: kind(src, types)}
     end
   end
+
+  @doc """
+  RE427 — every image of every note as an item: comments in the given (oldest-first) order, then
+  each comment's `images` order. The byline names the note's author and its age. A comment whose
+  `images` is empty or not loaded contributes nothing.
+  """
+  @spec note_image_items([Comment.t()]) :: [item()]
+  def note_image_items(comments) do
+    for %Comment{images: images} = comment when is_list(images) <- comments,
+        %Attachment{id: id, filename: filename} <- images do
+      %{
+        key: id,
+        src: RelayWeb.attachment_path(id),
+        caption: filename,
+        kind: :image,
+        byline: "From a note by #{author(comment)} · #{TimeAgo.ago(comment.inserted_at)}"
+      }
+    end
+  end
+
+  @doc "How a note's author is named: \"Relay AI\" for the agent, else the user's name or email."
+  @spec author(Comment.t()) :: String.t()
+  def author(%Comment{actor_type: :agent}), do: "Relay AI"
+  def author(%Comment{actor_type: :user, user: user}), do: user.name || user.email
 
   @doc """
   The `ai_result`'s screenshots as items, with a placeholder wherever an entry can't be drawn.

@@ -147,6 +147,20 @@
       ]
     }
   },
+  "note_images": {
+    "comment_entry": [
+      "author",
+      "body",
+      "images",
+      "inserted_at",
+      "kind"
+    ],
+    "image": [
+      "download_path",
+      "filename",
+      "url"
+    ]
+  },
   "outcome": {
     "request": {
       "detail": "asked the human",
@@ -354,7 +368,7 @@
       }
     }
   },
-  "version": 9,
+  "version": 10,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",
