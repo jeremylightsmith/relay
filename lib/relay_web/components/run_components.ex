@@ -16,16 +16,18 @@ defmodule RelayWeb.RunComponents do
   fall back to a `:duration_s` key first so plain test/story maps can supply
   it directly (mirrors `test/support/factory.ex`'s `:duration_s`
   convenience). `run`/summary maps carry `:flow_version` (nil until RLY-152
-  ships versioning) — the version chip degrades gracefully when absent.
+  ships versioning) — `run_list` omits an entry's `vX` when it is absent.
   """
 
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
   alias Relay.Runs
   # RE394 — a remote call for `button/1`'s pending face only; never `import` (see moduledoc).
   alias RelayWeb.CoreComponents
   alias RelayWeb.RunStatus
   alias RelayWeb.TimeAgo
+  alias Schemas.Run
 
   # ---------- formatters (public: board_card and tests use them) ----------
 
@@ -43,90 +45,6 @@ defmodule RelayWeb.RunComponents do
   def run_cost(%Decimal{} = cost), do: "$" <> (cost |> Decimal.round(2) |> Decimal.to_string(:normal))
   def run_cost(cost) when is_number(cost), do: "$#{:erlang.float_to_binary(cost / 1, decimals: 2)}"
 
-  # ---------- run_status_strip ----------
-
-  attr :detail, :map, required: true
-  attr :baton, :string, required: true
-  attr :now, :any, default: nil
-
-  def run_status_strip(assigns) do
-    now = assigns.now || DateTime.utc_now()
-    detail = assigns.detail
-
-    assigns =
-      assigns
-      |> assign(:now, now)
-      |> assign(:styles, strip_styles(detail.status))
-      |> assign(:title, strip_title(detail))
-      |> assign(:elapsed, elapsed_label(detail, now))
-      |> assign(:version_chip, version_chip(detail))
-
-    ~H"""
-    <div
-      class="run-strip"
-      style={"display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 22px;background:#{@styles.wrap_bg};border-bottom:1px solid #{@styles.wrap_border};"}
-    >
-      <div style="display:flex;align-items:center;gap:12px;min-width:0;">
-        <span
-          class="run-strip-dot"
-          style={"display:inline-block;width:8px;height:8px;border-radius:50%;background:#{@styles.dot};#{if @styles.pulse?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"}
-        />
-        <span
-          class="run-strip-baton"
-          style={"font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;background:#{@styles.baton_bg};color:#{@styles.baton_c};padding:3px 8px;border-radius:5px;flex:0 0 auto;"}
-        >
-          {@baton}
-        </span>
-        <span
-          class="run-strip-title"
-          style={"font-size:14px;font-weight:600;color:#{@styles.title_c};"}
-        >
-          {@title}
-        </span>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;">
-        <span
-          class="run-strip-elapsed"
-          style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
-        >
-          {@elapsed}
-        </span>
-        <span
-          class="run-strip-version"
-          style={"font-family:var(--font-mono);font-size:10px;font-weight:600;background:#{@styles.ver_bg};color:#{@styles.ver_c};padding:3px 8px;border-radius:5px;"}
-        >
-          {@version_chip}
-        </span>
-      </div>
-    </div>
-    """
-  end
-
-  # RLY-207: the parked suffix is bespoke to the strip; every other status
-  # reads its label straight from the single status table. `cancelled` no
-  # longer claims "claimed by a human" on the strip — that cause is only
-  # data-backed on the drawer's :revoked banner (RunStatus.descriptor/1's
-  # `label` states only what the status guarantees).
-  defp strip_title(%{status: :parked}), do: RunStatus.descriptor(:parked).label <> " — waiting on your answer"
-  defp strip_title(%{status: status}), do: RunStatus.descriptor(status).label
-
-  defp version_chip(%{status: :running, flow_version: v}), do: version_label("running", v)
-  defp version_chip(%{status: :running}), do: "running"
-
-  defp version_chip(%{status: :parked, flow_key: k, flow_version: v}) do
-    prefix = String.capitalize(k)
-    if v, do: "#{prefix} · v#{v}", else: prefix
-  end
-
-  defp version_chip(%{status: :parked, flow_key: k}), do: String.capitalize(k)
-  defp version_chip(%{status: :done, flow_version: v}), do: version_label("ran on", v)
-  defp version_chip(%{status: :done}), do: "ran on"
-  defp version_chip(%{flow_version: v}), do: version_label("was on", v)
-  defp version_chip(_run), do: "was on"
-
-  defp version_label(prefix, nil), do: prefix
-  defp version_label(prefix, v), do: "#{prefix} v#{v}"
-
   defp elapsed_label(%{status: :running, started_at: at}, now), do: "elapsed #{clock(now, at)}"
   defp elapsed_label(%{status: :parked, started_at: at}, now), do: "parked #{clock(now, at)}"
   defp elapsed_label(%{status: :done, finished_at: at}, now), do: "finished #{TimeAgo.ago(now, at)}"
@@ -140,84 +58,244 @@ defmodule RelayWeb.RunComponents do
   defp times_label(1), do: "1 time"
   defp times_label(n), do: "#{n} times"
 
-  # wrap/baton/dot/version colors per status — the artboard's `strips` table. RE237: each
-  # tint/ink pair is re-expressed via the token mapping's Rule B (brand hues) — N for the
-  # tints, P for the ink, against that status's role's light-theme L.
-  # `:running`'s baton_bg is 5, not 10, because secondary is the darkest role (L 0.56), so
-  # N = round5(0.03/0.44*100) = 5 where the same source tint maps to 10 under the lighter roles
-  # below. The two other sites rendering that violet tint (the run-ref chip at `run_ref/1`, the
-  # queued face) already use 5.
-  defp strip_styles(:running),
+  # Run-list colors per status (RE426, card mockup "A — one list…"). `dot` / `pulse?` drive the
+  # status chip's dot; `chip_bg` / `chip_c` color that chip; `entry_border` / `entry_bg` tint the
+  # latest entry — role 35% / 4% over base-100, while `:cancelled` (no mockup state) keeps a
+  # primary 20% / 5% wash. RE237: each tint/ink pair is re-expressed via the token mapping's
+  # Rule B (brand hues) — N for the tints, P for the ink, against that status's role's
+  # light-theme L.
+  defp run_status_style(:running),
     do: %{
-      wrap_bg: "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))",
-      wrap_border: "color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
+      entry_border: "color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100))",
+      entry_bg: "color-mix(in oklab, var(--color-secondary) 4%, var(--color-base-100))",
+      chip_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
       dot: "var(--color-secondary)",
       pulse?: true,
-      title_c: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))",
-      ver_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))",
-      ver_c: "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))"
+      chip_bg: "color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100))"
     }
 
-  defp strip_styles(:parked),
+  defp run_status_style(:parked),
     do: %{
-      wrap_bg: "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
-      wrap_border: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
+      entry_border: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))",
+      entry_bg: "color-mix(in oklab, var(--color-warning) 4%, var(--color-base-100))",
+      chip_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
       dot: "var(--color-warning)",
       pulse?: false,
-      title_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
-      ver_bg: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))",
-      ver_c: "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"
+      chip_bg: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
     }
 
-  defp strip_styles(:failed),
+  defp run_status_style(:failed),
     do: %{
-      wrap_bg: "color-mix(in oklab, var(--color-error) 5%, var(--color-base-100))",
-      wrap_border: "color-mix(in oklab, var(--color-error) 25%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))",
+      entry_border: "color-mix(in oklab, var(--color-error) 35%, var(--color-base-100))",
+      entry_bg: "color-mix(in oklab, var(--color-error) 4%, var(--color-base-100))",
+      chip_c: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))",
       dot: "var(--color-error)",
       pulse?: false,
-      title_c: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))",
-      ver_bg: "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))",
-      ver_c: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
+      chip_bg: "color-mix(in oklab, var(--color-error) 10%, var(--color-base-100))"
     }
 
   # The dot has long used the accent (teal) token while the surrounding tint/ink were
   # blue-ish (hue 250, primary's range) literals — a pre-existing choice, unrelated to
-  # RE237. The faint tint backgrounds (5-10% over base-100) keep that blue wash via
-  # var(--color-primary), but `baton_c` / `title_c` were `oklch 0.44 0.06 250` — C 0.06 is a
-  # Rule-N near-neutral (see `delete_style/1` in story_map_components.ex), and Rule B ran
-  # `primary` to 55% to reach L 0.44, landing at C ~0.09 and reading as active Human-blue on a
-  # cancelled run. The ink goes neutral; the wash stays.
-  defp strip_styles(:cancelled),
+  # RE237. The faint tint backgrounds keep that blue wash via var(--color-primary), but the
+  # chip ink was `oklch 0.44 0.06 250` — C 0.06 is a Rule-N near-neutral (see `delete_style/1`
+  # in story_map_components.ex), and Rule B ran `primary` to 55% to reach L 0.44, landing at
+  # C ~0.09 and reading as active Human-blue on a cancelled run. The ink goes neutral; the
+  # wash stays.
+  defp run_status_style(:cancelled),
     do: %{
-      wrap_bg: "color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100))",
-      wrap_border: "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
+      entry_border: "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))",
+      entry_bg: "color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100))",
+      chip_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
       dot: "var(--color-accent)",
       pulse?: false,
-      title_c: "color-mix(in oklab, var(--color-base-content) 70%, transparent)",
-      ver_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))",
-      ver_c: "color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content))"
+      chip_bg: "color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100))"
     }
 
-  defp strip_styles(:done),
+  defp run_status_style(:done),
     do: %{
-      wrap_bg: "color-mix(in oklab, var(--color-success) 5%, var(--color-base-100))",
-      wrap_border: "color-mix(in oklab, var(--color-success) 20%, var(--color-base-100))",
-      baton_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
-      baton_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
+      entry_border: "color-mix(in oklab, var(--color-success) 35%, var(--color-base-100))",
+      entry_bg: "color-mix(in oklab, var(--color-success) 4%, var(--color-base-100))",
+      chip_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
       dot: "var(--color-success)",
       pulse?: false,
-      title_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))",
-      ver_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
-      ver_c: "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
+      chip_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
     }
+
+  # ---------- run_list (RE426) ----------
+
+  @doc """
+  Every run of a card as one collapsible entry in a single `RUNS · N` list (card mockup
+  "A — one list, latest run carries its own header"). `entries` is
+  `[%{detail: %Relay.Runs.RunDetail{}, number: n}]`, newest first and never empty: the head is
+  the latest run, open and tinted by its status, with `:latest_body` at the top of its body.
+  `open` is ignored across patches so a run update never undoes the user's toggle.
+  """
+  attr :entries, :list, required: true
+  attr :now, :any, default: nil
+  attr :task_progress, :map, default: nil
+  slot :latest_body
+
+  def run_list(assigns) do
+    now = assigns.now || DateTime.utc_now()
+
+    entries =
+      assigns.entries
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, index} -> Map.put(entry, :latest?, index == 0) end)
+
+    assigns = assign(assigns, now: now, entries: entries, count: length(entries))
+
+    ~H"""
+    <div id="run-list" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+        RUNS · {@count}
+      </div>
+      <details
+        :for={entry <- @entries}
+        id={"run-entry-#{entry.number}"}
+        class="run-entry"
+        open={entry.latest?}
+        phx-mounted={JS.ignore_attributes(["open"])}
+        style={"border-radius:10px;#{entry_tint(entry)}"}
+      >
+        <.run_entry_header entry={entry} now={@now} />
+        <div
+          class="pl-3 sm:pl-[30px]"
+          style="padding-top:4px;padding-right:14px;padding-bottom:14px;display:flex;flex-direction:column;gap:14px;"
+        >
+          <%= if entry.latest? do %>
+            {render_slot(@latest_body)}
+            <.run_entry_stats
+              :if={entry.detail.status in Run.terminal_statuses()}
+              detail={entry.detail}
+            />
+            <.run_node_timeline detail={entry.detail} task_progress={@task_progress} />
+          <% else %>
+            <.run_entry_stats detail={entry.detail} />
+            <.run_node_timeline detail={entry.detail} />
+          <% end %>
+        </div>
+      </details>
+    </div>
+    """
+  end
+
+  defp entry_tint(%{latest?: true, detail: %{status: status}}) do
+    styles = run_status_style(status)
+    "border:1px solid #{styles.entry_border};background:#{styles.entry_bg};"
+  end
+
+  defp entry_tint(_entry), do: "border:1px solid var(--color-base-300);background:var(--color-base-100);"
+
+  attr :entry, :map, required: true
+  attr :now, :any, required: true
+
+  defp run_entry_header(assigns) do
+    detail = assigns.entry.detail
+
+    assigns =
+      assign(assigns,
+        detail: detail,
+        styles: run_status_style(detail.status),
+        stage: stage_chip(detail),
+        meta: entry_meta(assigns.entry, assigns.now)
+      )
+
+    ~H"""
+    <summary style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;list-style:none;flex-wrap:wrap;row-gap:6px;">
+      <span
+        class="run-entry-chev"
+        style="color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-size:13px;width:12px;"
+      >
+        ▸
+      </span>
+      <span
+        :if={@stage}
+        class="run-entry-stage"
+        style="font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;border:1px solid var(--color-base-300);background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 85%, transparent);border-radius:5px;padding:2px 8px;flex:0 0 auto;"
+      >
+        {@stage}
+      </span>
+      <span
+        class="run-entry-title"
+        style="font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+      >
+        Run #{@entry.number}
+      </span>
+      <span
+        :if={@detail.flow_version}
+        class="run-entry-version"
+        style="font-family:var(--font-mono);font-size:10.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+      >
+        v{@detail.flow_version}
+      </span>
+      <span
+        class="run-entry-status"
+        style={"font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;display:inline-flex;align-items:center;gap:5px;background:#{@styles.chip_bg};color:#{@styles.chip_c};border-radius:4px;padding:2px 7px;"}
+      >
+        <span style={"display:inline-block;width:6px;height:6px;border-radius:50%;background:#{@styles.dot};#{if @styles.pulse?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
+        {RunStatus.descriptor(@detail.status).label}
+      </span>
+      <span
+        :if={@entry.latest?}
+        class="run-entry-latest"
+        style="font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+      >
+        LATEST
+      </span>
+      <span
+        class="run-entry-meta"
+        style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+      >
+        {@meta}
+      </span>
+    </summary>
+    """
+  end
+
+  # The one display fallback for a run's stage: the domain's work-stage name, else the flow key.
+  defp stage_chip(%{stage_name: nil, flow_key: nil}), do: nil
+  defp stage_chip(detail), do: String.upcase(detail.stage_name || detail.flow_key)
+
+  defp entry_meta(%{latest?: true, detail: detail}, now) do
+    finished? = detail.status in Run.terminal_statuses()
+
+    join_meta([
+      elapsed_label(detail, now),
+      if(finished?, do: run_duration(detail.totals.duration_s)),
+      meta_cost(detail.totals.cost)
+    ])
+  end
+
+  defp entry_meta(%{detail: detail}, now) do
+    join_meta([
+      run_duration(detail.totals.duration_s),
+      meta_cost(detail.totals.cost),
+      TimeAgo.ago(now, detail.finished_at)
+    ])
+  end
+
+  defp meta_cost(nil), do: nil
+  defp meta_cost(cost), do: run_cost(cost)
+
+  defp join_meta(parts), do: parts |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" · ")
+
+  attr :detail, :map, required: true
+
+  defp run_entry_stats(assigns) do
+    ~H"""
+    <div class="run-entry-stats" style="display:flex;gap:18px;flex-wrap:wrap;">
+      <.stat
+        label="DURATION"
+        value={run_duration(@detail.totals.duration_s)}
+        value_c={history_duration_color(@detail.status)}
+      />
+      <.stat label="NODES" value={"#{@detail.totals.nodes}"} />
+      <.stat label="ATTEMPTS" value={"#{@detail.totals.attempts}"} />
+      <.stat label="COST" value={run_cost(@detail.totals.cost)} />
+    </div>
+    """
+  end
 
   # ---------- run_mini_graph ----------
 
@@ -322,9 +400,9 @@ defmodule RelayWeb.RunComponents do
   defp timeline_node_row(assigns) do
     ~H"""
     <div class="run-timeline-row" style="display:flex;flex-direction:column;gap:4px;">
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
         <.timeline_icon state={@row.state} />
-        <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
+        <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           {@row.node_key}
         </span>
         <span :if={@row.type} class={type_tag_class(@row.type)} style={type_tag_style(@row.type)}>
@@ -333,7 +411,7 @@ defmodule RelayWeb.RunComponents do
         <span
           :if={@row.attempt > 1}
           class="run-attempt-chip"
-          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;white-space:nowrap;"
         >
           attempt {@row.attempt}
         </span>
@@ -350,7 +428,7 @@ defmodule RelayWeb.RunComponents do
         >
           partial
         </span>
-        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);white-space:nowrap;">
           {run_duration(@row.duration_s)}
         </span>
         <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
@@ -442,9 +520,9 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
-  defp type_tag_class(:agent), do: "run-type-tag run-type-tag-agent"
-  defp type_tag_class(:gate), do: "run-type-tag run-type-tag-gate"
-  defp type_tag_class(_type), do: "run-type-tag run-type-tag-shell"
+  defp type_tag_class(:agent), do: "run-type-tag run-type-tag-agent hidden sm:inline"
+  defp type_tag_class(:gate), do: "run-type-tag run-type-tag-gate hidden sm:inline"
+  defp type_tag_class(_type), do: "run-type-tag run-type-tag-shell hidden sm:inline"
 
   defp type_tag_style(:agent),
     do:
@@ -975,72 +1053,6 @@ defmodule RelayWeb.RunComponents do
     |> Enum.join()
     |> String.upcase()
   end
-
-  # ---------- run_history ----------
-
-  attr :runs, :list, required: true
-
-  def run_history(assigns) do
-    ~H"""
-    <div class="run-history">
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-bottom:8px;">
-        PRIOR RUNS · {length(@runs)}
-      </div>
-      <details
-        :for={entry <- @runs}
-        class="run-history-entry"
-        style="border:1px solid var(--color-base-300);border-radius:8px;margin-bottom:8px;"
-      >
-        <summary style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;list-style:none;">
-          <span
-            class={history_chip_class(entry.detail.status)}
-            style={history_chip_style(entry.detail.status)}
-          >
-            {RunStatus.descriptor(entry.detail.status).label}
-          </span>
-          <span style="font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
-            {history_title(entry)}
-          </span>
-          <span style="margin-left:auto;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
-            {TimeAgo.ago(DateTime.utc_now(), entry.detail.finished_at)}
-          </span>
-          <span style="color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
-            ⌄
-          </span>
-        </summary>
-        <div style="padding:0 12px 12px 12px;">
-          <div style="display:flex;gap:18px;margin-bottom:10px;">
-            <.stat
-              label="DURATION"
-              value={run_duration(entry.detail.totals.duration_s)}
-              value_c={history_duration_color(entry.detail.status)}
-            />
-            <.stat label="NODES" value={"#{entry.detail.totals.nodes}"} />
-            <.stat label="ATTEMPTS" value={"#{entry.detail.totals.attempts}"} />
-            <.stat label="COST" value={run_cost(entry.detail.totals.cost)} />
-          </div>
-          <.run_node_timeline detail={entry.detail} />
-        </div>
-      </details>
-    </div>
-    """
-  end
-
-  defp history_title(%{number: number, detail: %{flow_version: nil}}), do: "Run ##{number}"
-  defp history_title(%{number: number, detail: %{flow_version: v}}), do: "Run ##{number} · v#{v}"
-
-  defp history_chip_class(:done), do: "run-history-chip run-history-chip-done"
-  defp history_chip_class(_status), do: "run-history-chip run-history-chip-failed"
-
-  defp history_chip_style(:done),
-    do:
-      "font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;" <>
-        "background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));border-radius:4px;padding:2px 6px;"
-
-  defp history_chip_style(_status),
-    do:
-      "font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;" <>
-        "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));border-radius:4px;padding:2px 6px;"
 
   defp history_duration_color(:failed), do: "color-mix(in oklab, var(--color-error) 70%, var(--color-base-content))"
   defp history_duration_color(_status), do: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"

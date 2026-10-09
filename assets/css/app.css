@@ -469,6 +469,9 @@
   font-size: 14px; font-weight: 600;
 }
 .docs-menu-summary::-webkit-details-marker { display: none; }
+/* RE426: the run list's entries draw their own ▸ chevron, turned down when open. */
+details.run-entry > summary::-webkit-details-marker { display: none; }
+details.run-entry[open] > summary .run-entry-chev { display: inline-block; transform: rotate(90deg); }
 
 .docs-sidebar { align-self: start; position: sticky; top: 80px; }
 .docs-sidebar-section { margin-bottom: 20px; }

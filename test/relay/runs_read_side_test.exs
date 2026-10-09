@@ -44,6 +44,74 @@ defmodule Relay.RunsReadSideTest do
       assert Enum.map(got_new.node_executions, & &1.id) == [first.id, second.id]
       assert Runs.latest_run(card).id == new.id
     end
+
+    test "a run whose flow works in a stage exposes that stage's name on its detail" do
+      board = insert(:board)
+      stage = insert(:stage, board: board, name: "Spec")
+      flow = insert(:flow, board: board, key: "spec", works_in_stage_id: stage.id)
+      card = insert(:card, stage: stage)
+      insert(:run, card: card, flow_id: flow.id, flow_key: "spec")
+
+      assert [run] = Runs.list_runs_for_card(card)
+      detail = Runs.run_detail(run, nil)
+
+      assert detail.stage_name == "Spec"
+      assert detail.flow_key == "spec"
+    end
+
+    test "a run whose flow was deleted has a nil stage_name and keeps its flow_key" do
+      card = insert(:card)
+      insert(:run, card: card, flow_id: nil, flow_key: "code")
+
+      assert [run] = Runs.list_runs_for_card(card)
+      detail = Runs.run_detail(run, nil)
+
+      assert detail.stage_name == nil
+      assert detail.flow_key == "code"
+    end
+
+    test "a run whose flow has no work stage has a nil stage_name" do
+      board = insert(:board)
+      flow = insert(:flow, board: board, works_in_stage_id: nil)
+      card = insert(:card, stage: insert(:stage, board: board))
+      insert(:run, card: card, flow_id: flow.id, flow_key: flow.key)
+
+      assert [run] = Runs.list_runs_for_card(card)
+
+      assert Runs.run_detail(run, nil).stage_name == nil
+    end
+
+    test "lists runs with flow and stage in a constant 2 queries regardless of run count" do
+      board = insert(:board)
+      card_a = insert(:card, stage: insert(:stage, board: board))
+      card_b = insert(:card, stage: insert(:stage, board: board))
+
+      seed_run = fn card, name ->
+        stage = insert(:stage, board: board, name: name)
+        flow = insert(:flow, board: board, works_in_stage_id: stage.id)
+        run = insert(:run, card: card, flow_id: flow.id, flow_key: flow.key, status: :done)
+        insert(:node_execution, run: run, node: "branch")
+        insert(:node_execution, run: run, node: "implement")
+      end
+
+      seed_run.(card_a, "Design")
+      Enum.each(["Spec", "Code", "Deploy"], &seed_run.(card_b, &1))
+
+      {runs_a, count_a} = count_repo_queries(self(), fn -> Runs.list_runs_for_card(card_a) end)
+      {runs_b, count_b} = count_repo_queries(self(), fn -> Runs.list_runs_for_card(card_b) end)
+
+      assert length(runs_a) == 1
+      assert length(runs_b) == 3
+      assert count_a == 2
+      assert count_b == 2
+      assert runs_b |> Enum.map(&Runs.run_detail(&1, nil).stage_name) |> Enum.sort() == ["Code", "Deploy", "Spec"]
+    end
+
+    test "a plain map run with no :flow key builds a detail with a nil stage_name" do
+      run = %{status: :running, flow_key: "code", current_node: nil, node_executions: []}
+
+      assert Runs.run_detail(run, nil).stage_name == nil
+    end
   end
 
   describe "run_summaries_for_board/1" do

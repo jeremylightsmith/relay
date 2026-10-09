@@ -13,6 +13,8 @@ defmodule Relay.Runs.RunDetail do
 
   `run` fields are read by dot/`Map.get` access so both a `%Schemas.Run{}` and a
   plain test/story map work; `:node_executions` may be `nil` (treated as `[]`).
+  `stage_name` comes from the run's own `flow: %{works_in_stage: %{name: _}}` (RE426), nil
+  whenever that chain is missing or not loaded.
   """
 
   alias Schemas.Flow
@@ -24,6 +26,7 @@ defmodule Relay.Runs.RunDetail do
   defstruct [
     :status,
     :flow_key,
+    :stage_name,
     :flow_version,
     :current_node,
     :last_node,
@@ -46,6 +49,7 @@ defmodule Relay.Runs.RunDetail do
     %__MODULE__{
       status: run.status,
       flow_key: Map.get(run, :flow_key),
+      stage_name: stage_name(run),
       flow_version: Map.get(run, :flow_version),
       current_node: Map.get(run, :current_node),
       last_node: Relay.Runs.last_node(run, nes),
@@ -61,6 +65,14 @@ defmodule Relay.Runs.RunDetail do
       timeline: timeline(run, nes, flow)
     }
   end
+
+  # ---- stage_name (RE426): the run's own flow's work stage, never the `flow` argument ----
+
+  # Read from `run.flow` (join-preloaded by `Runs.list_runs_for_card/1`). An unloaded association,
+  # a deleted flow (nilified `flow_id`) or a flow with no work stage all yield nil; the web layer
+  # falls back to `flow_key`.
+  defp stage_name(%{flow: %{works_in_stage: %{name: name}}}) when is_binary(name), do: name
+  defp stage_name(_run), do: nil
 
   # ---- timeline (was RunComponents.timeline_rows/3) ----
 

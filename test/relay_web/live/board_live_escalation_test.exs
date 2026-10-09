@@ -104,7 +104,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     # the Run tab is one click away and keeps its status readout
     view |> element("#card-drawer-tab-run") |> render_click()
     refute has_element?(view, "#card-drawer-tab-panel-run.hidden")
-    assert has_element?(view, "#card-drawer-tab-panel-run", "Parked — waiting on your answer")
+    assert has_element?(view, "#card-drawer-tab-panel-run .run-entry-status", "Parked")
 
     refute has_element?(view, ".run-banner-parked")
     refute has_element?(view, "#run-needs-input-panel")

@@ -168,15 +168,21 @@ defmodule Relay.Runs do
   """
   def broadcast_run_changed(board_id, card_id), do: broadcast_runs(board_id, {:run_changed, card_id})
 
-  @doc "The card's runs newest-first, node executions preloaded chronologically."
+  @doc """
+  The card's runs newest-first, node executions preloaded chronologically. Each run's
+  `flow: :works_in_stage` is join-preloaded in the runs query itself (RE426, no per-run N+1):
+  `flow` is nil when the flow was deleted, `works_in_stage` nil when the flow has no work stage.
+  """
   def list_runs_for_card(%Card{id: card_id}) do
     node_executions = from ne in NodeExecution, order_by: [asc: ne.id]
 
     Repo.all(
       from r in Run,
+        left_join: f in assoc(r, :flow),
+        left_join: s in assoc(f, :works_in_stage),
         where: r.card_id == ^card_id,
         order_by: [desc: r.inserted_at, desc: r.id],
-        preload: [node_executions: ^node_executions]
+        preload: [flow: {f, works_in_stage: s}, node_executions: ^node_executions]
     )
   end
 

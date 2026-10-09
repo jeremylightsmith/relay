@@ -1,6 +1,7 @@
 defmodule RelayWeb.RunComponentsTest do
   use ExUnit.Case, async: true
 
+  import Phoenix.Component, only: [sigil_H: 2]
   import Phoenix.LiveViewTest
 
   alias Relay.Runs
@@ -60,49 +61,6 @@ defmodule RelayWeb.RunComponentsTest do
       assert RunComponents.run_duration(4020) == "1h 7m"
       assert RunComponents.run_cost(nil) == "—"
       assert RunComponents.run_cost(Decimal.new("0.9")) == "$0.90"
-    end
-  end
-
-  describe "run_status_strip/1" do
-    test "running: violet wrap, pulsing baton dot, running vN chip" do
-      html =
-        render_component(&RunComponents.run_status_strip/1, detail: detail(%{}, []), baton: "BATON · FLOW")
-
-      assert html =~ "color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100))"
-      assert html =~ "animation:relaypulse"
-      assert html =~ "BATON · FLOW"
-      assert html =~ "running v3"
-    end
-
-    test "parked and failed use the artboard copy" do
-      parked =
-        render_component(&RunComponents.run_status_strip/1,
-          detail: detail(%{status: :parked}, []),
-          baton: "BATON · YOU"
-        )
-
-      failed =
-        render_component(&RunComponents.run_status_strip/1,
-          detail: detail(%{status: :failed, finished_at: DateTime.utc_now()}, []),
-          baton: "BATON · STOPPED"
-        )
-
-      assert parked =~ "Parked — waiting on your answer"
-      assert parked =~ "color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100))"
-      assert failed =~ "Run failed"
-      refute failed =~ "circuit breaker"
-      assert failed =~ "was on v3"
-    end
-
-    test "gracefully omits the version number when flow_version is absent" do
-      html =
-        render_component(&RunComponents.run_status_strip/1,
-          detail: detail(%{flow_version: nil}, []),
-          baton: "BATON · FLOW"
-        )
-
-      assert html =~ "running"
-      refute html =~ "vnil"
     end
   end
 
@@ -188,6 +146,32 @@ defmodule RelayWeb.RunComponentsTest do
         )
 
       assert html =~ "—"
+    end
+
+    test "RE426: mobile tweaks — type tag hides below sm, attempt chip and duration never wrap" do
+      flow = %Schemas.Flow{nodes: [%Schemas.Flow.Node{key: "implement", type: :agent, run: "x"}], edges: []}
+
+      html =
+        render_component(&RunComponents.run_node_timeline/1,
+          detail: detail(%{}, [ne("implement", 1, :failed, %{detail: "no"}), ne("implement", 2, nil)], flow)
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      tag_class = doc |> LazyHTML.query(".run-type-tag") |> LazyHTML.attribute("class") |> hd()
+      assert tag_class =~ "hidden"
+      assert tag_class =~ "sm:inline"
+
+      assert doc |> LazyHTML.query(".run-attempt-chip") |> LazyHTML.attribute("style") |> hd() =~
+               "white-space:nowrap"
+
+      duration_styles =
+        doc
+        |> LazyHTML.query(".run-timeline-row span")
+        |> Enum.filter(&(&1 |> LazyHTML.text() |> String.trim() == "0:42"))
+        |> Enum.flat_map(&LazyHTML.attribute(&1, "style"))
+
+      assert duration_styles != []
+      assert Enum.all?(duration_styles, &(&1 =~ "white-space:nowrap"))
     end
   end
 
@@ -356,45 +340,6 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert html =~ "var(--color-warning)"
       refute html =~ "var(--color-error)"
-    end
-  end
-
-  describe "run_history/1" do
-    test "prior runs collapse to DURATION · NODES · ATTEMPTS · COST" do
-      html =
-        render_component(&RunComponents.run_history/1,
-          runs: [
-            %{
-              detail:
-                detail(%{status: :done, flow_version: 3, finished_at: DateTime.utc_now()}, [
-                  ne("implement", 1, :succeeded)
-                ]),
-              number: 3
-            }
-          ]
-        )
-
-      assert html =~ "PRIOR RUNS · 1"
-      assert html =~ "Run #3 · v3"
-      assert html =~ "ATTEMPTS"
-    end
-
-    test "omits the dangling '· v' when flow_version is nil (RLY-152 pending)" do
-      html =
-        render_component(&RunComponents.run_history/1,
-          runs: [
-            %{
-              detail:
-                detail(%{status: :done, flow_version: nil, finished_at: DateTime.utc_now()}, [
-                  ne("implement", 1, :succeeded)
-                ]),
-              number: 2
-            }
-          ]
-        )
-
-      assert html =~ "Run #2"
-      refute html =~ "Run #2 · v"
     end
   end
 
@@ -617,4 +562,250 @@ defmodule RelayWeb.RunComponentsTest do
   end
 
   defp text_at(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+
+  describe "run_list/1" do
+    @now ~U[2026-10-08 12:00:00Z]
+
+    defp stage(name), do: %{works_in_stage: %{name: name}}
+
+    defp ago_s(seconds), do: DateTime.add(@now, -seconds, :second)
+
+    defp three_entries do
+      [
+        %{
+          detail: detail(%{status: :running, flow: stage("Code"), started_at: ago_s(291)}, [ne("implement", 1, nil)]),
+          number: 3
+        },
+        %{
+          detail:
+            detail(%{status: :failed, flow: stage("Code"), finished_at: ago_s(7200)}, [
+              ne("implement", 1, :failed, %{detail: "boom"})
+            ]),
+          number: 2
+        },
+        %{
+          detail:
+            detail(%{status: :done, flow: stage("Spec"), flow_key: "spec", finished_at: ago_s(86_400)}, [
+              ne("brainstorm", 1, :succeeded)
+            ]),
+          number: 1
+        }
+      ]
+    end
+
+    defp render_list(entries, extra \\ []) do
+      html = render_component(&RunComponents.run_list/1, [entries: entries, now: @now] ++ extra)
+      {html, LazyHTML.from_fragment(html)}
+    end
+
+    defp texts(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.map(&String.trim(LazyHTML.text(&1)))
+    defp attrs(doc, selector, attr), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(attr)
+    defp count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
+
+    defp single(status, nes \\ [ne("implement", 1, :succeeded)], attrs \\ %{}) do
+      finished = if status in Schemas.Run.terminal_statuses(), do: ago_s(60)
+      [%{detail: detail(Map.merge(%{status: status, finished_at: finished}, attrs), nes), number: 1}]
+    end
+
+    test "1: label counts entries, one details per entry in order, only the head open" do
+      {_html, doc} = render_list(three_entries())
+
+      assert doc |> texts("#run-list") |> hd() =~ "RUNS · 3"
+      assert attrs(doc, "details.run-entry", "id") == ["run-entry-3", "run-entry-2", "run-entry-1"]
+      assert attrs(doc, "details.run-entry[open]", "id") == ["run-entry-3"]
+      assert texts(doc, ".run-entry-title") == ["Run #3", "Run #2", "Run #1"]
+    end
+
+    test "2: neutral stage chip names the run's work stage, uppercased" do
+      {_html, doc} = render_list(three_entries())
+
+      assert texts(doc, ".run-entry-stage") == ["CODE", "CODE", "SPEC"]
+
+      for style <- attrs(doc, ".run-entry-stage", "style") do
+        assert style =~ "background:var(--color-base-200)"
+        refute style =~ "--color-secondary"
+        refute style =~ "--color-error"
+        refute style =~ "--color-success"
+      end
+    end
+
+    test "3: stage chip falls back to the flow key when the stage is gone" do
+      {_html, doc} = render_list([%{detail: detail(%{flow_key: "design"}, []), number: 1}])
+
+      assert texts(doc, ".run-entry-stage") == ["DESIGN"]
+    end
+
+    test "4: exactly one LATEST tag, on the head" do
+      {_html, doc} = render_list(three_entries())
+
+      assert count(doc, ".run-entry-latest") == 1
+      assert texts(doc, "#run-entry-3 .run-entry-latest") == ["LATEST"]
+    end
+
+    test "5: status chips read RunStatus labels; only the running one pulses" do
+      {_html, doc} = render_list(three_entries())
+
+      assert texts(doc, ".run-entry-status") == ["Running", "Run failed", "Completed"]
+      assert LazyHTML.to_html(LazyHTML.query(doc, "#run-entry-3 .run-entry-status")) =~ "animation:relaypulse"
+      refute LazyHTML.to_html(LazyHTML.query(doc, "#run-entry-2 .run-entry-status")) =~ "animation:relaypulse"
+      refute LazyHTML.to_html(LazyHTML.query(doc, "#run-entry-1 .run-entry-status")) =~ "animation:relaypulse"
+    end
+
+    test "6: the head is tinted by status, earlier entries are untinted" do
+      {_html, doc} = render_list(three_entries())
+
+      [head] = attrs(doc, "#run-entry-3", "style")
+      assert head =~ "color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100))"
+      assert head =~ "color-mix(in oklab, var(--color-secondary) 4%, var(--color-base-100))"
+
+      for id <- ["#run-entry-2", "#run-entry-1"] do
+        [style] = attrs(doc, id, "style")
+        assert style =~ "border:1px solid var(--color-base-300)"
+        assert style =~ "background:var(--color-base-100)"
+        refute style =~ "35%"
+      end
+    end
+
+    test "7: parked, done and failed heads take their role's tint" do
+      for {status, token} <- [parked: "warning", done: "success", failed: "error"] do
+        entries = [%{detail: detail(%{status: status, finished_at: ago_s(60)}, []), number: 2}]
+        {_html, doc} = render_list(entries)
+        [style] = attrs(doc, "#run-entry-2", "style")
+        assert style =~ "var(--color-#{token}) 35%"
+      end
+    end
+
+    test "8: running latest meta is elapsed clock and cost" do
+      nes = [
+        ne("branch", 1, :succeeded, %{cost: Decimal.new("2.21")}),
+        ne("implement", 1, nil, %{cost: Decimal.new("2.21")})
+      ]
+
+      {_html, doc} = render_list(single(:running, nes, %{started_at: ago_s(291)}))
+
+      assert texts(doc, ".run-entry-meta") == ["elapsed 4:51 · $4.42"]
+    end
+
+    test "9: a nil cost drops out of the meta" do
+      {_html, doc} = render_list(single(:running, [ne("implement", 1, nil)], %{started_at: ago_s(291)}))
+
+      assert texts(doc, ".run-entry-meta") == ["elapsed 4:51"]
+    end
+
+    test "10: done latest meta is finished-ago and total duration" do
+      nes = [ne("implement", 1, :succeeded, %{duration_s: 300}), ne("merge", 1, :succeeded, %{duration_s: 91})]
+      {_html, doc} = render_list(single(:done, nes, %{finished_at: ago_s(240)}))
+
+      assert texts(doc, ".run-entry-meta") == ["finished 4m ago · 6:31"]
+    end
+
+    test "11: an earlier entry's meta is duration, cost and finished-ago" do
+      earlier =
+        detail(%{status: :done, finished_at: ago_s(7200)}, [
+          ne("implement", 1, :succeeded, %{duration_s: 400, cost: Decimal.new("1.00")}),
+          ne("merge", 1, :succeeded, %{duration_s: 200, cost: Decimal.new("0.37")})
+        ])
+
+      entries = [:running |> single() |> hd() |> Map.put(:number, 2), %{detail: earlier, number: 1}]
+      {_html, doc} = render_list(entries)
+
+      assert texts(doc, "#run-entry-1 .run-entry-meta") == ["10:00 · $1.37 · 2h ago"]
+    end
+
+    test "12: a done latest entry keeps its timeline and gets the stats row" do
+      {_html, doc} = render_list(single(:done, [ne("implement", 1, :succeeded), ne("merge", 1, :succeeded)]))
+
+      timeline = doc |> LazyHTML.query("#run-entry-1 .run-node-timeline") |> LazyHTML.text()
+      assert timeline =~ "implement"
+      assert timeline =~ "merge"
+
+      stats = doc |> LazyHTML.query("#run-entry-1 .run-entry-stats") |> LazyHTML.text()
+      for label <- ["DURATION", "NODES", "ATTEMPTS", "COST"], do: assert(stats =~ label)
+    end
+
+    test "13: a parked latest entry keeps its timeline and has no stats row" do
+      {_html, doc} = render_list(single(:parked, [ne("brainstorm", 1, :needs_input)], %{current_node: "brainstorm"}))
+
+      assert doc |> LazyHTML.query("#run-entry-1 .run-node-timeline") |> LazyHTML.text() =~ "brainstorm"
+      assert count(doc, "#run-entry-1 .run-entry-stats") == 0
+    end
+
+    test "14: a running latest entry has a timeline and no stats row" do
+      {_html, doc} = render_list(single(:running, [ne("implement", 1, nil)]))
+
+      assert count(doc, "#run-entry-1 .run-node-timeline") == 1
+      assert count(doc, "#run-entry-1 .run-entry-stats") == 0
+    end
+
+    test "15: earlier entries carry the stats row and the timeline" do
+      {_html, doc} = render_list(three_entries())
+
+      for id <- ["#run-entry-2", "#run-entry-1"] do
+        assert count(doc, "#{id} .run-entry-stats") == 1
+        assert count(doc, "#{id} .run-node-timeline") == 1
+      end
+    end
+
+    test "16: the latest_body slot renders at the top of the head only" do
+      assigns = %{entries: three_entries(), now: @now}
+
+      html =
+        rendered_to_string(~H"""
+        <RunComponents.run_list entries={@entries} now={@now}>
+          <:latest_body><span id="slot-probe">probe</span></:latest_body>
+        </RunComponents.run_list>
+        """)
+
+      doc = LazyHTML.from_fragment(html)
+      assert count(doc, "#run-entry-3 #slot-probe") == 1
+      assert count(doc, "#run-entry-2 #slot-probe") == 0
+      assert count(doc, "#run-entry-1 #slot-probe") == 0
+
+      head_html = doc |> LazyHTML.query("#run-entry-3") |> LazyHTML.to_html()
+      {probe_at, _} = :binary.match(head_html, "slot-probe")
+      {timeline_at, _} = :binary.match(head_html, "run-node-timeline")
+      assert probe_at < timeline_at
+    end
+
+    test "17: vX shows only when the run has a flow version" do
+      entries = [
+        %{detail: detail(%{flow_version: 3}, []), number: 2},
+        %{detail: detail(%{status: :done, flow_version: nil, finished_at: ago_s(60)}, []), number: 1}
+      ]
+
+      {html, doc} = render_list(entries)
+
+      assert texts(doc, "#run-entry-2 .run-entry-version") == ["v3"]
+      assert count(doc, "#run-entry-1 .run-entry-version") == 0
+      refute html =~ "vnil"
+    end
+
+    test "18: every entry ignores client-side open toggles across patches" do
+      {_html, doc} = render_list(three_entries())
+
+      mounted = attrs(doc, "details.run-entry", "phx-mounted")
+      assert length(mounted) == 3
+
+      for js <- mounted do
+        assert js =~ "ignore_attrs"
+        assert js =~ "open"
+      end
+    end
+
+    test "19: a single run is the open latest entry" do
+      {_html, doc} = render_list(single(:running, [ne("implement", 1, nil)]))
+
+      assert doc |> texts("#run-list") |> hd() =~ "RUNS · 1"
+      assert attrs(doc, "details.run-entry[open]", "id") == ["run-entry-1"]
+      assert count(doc, "#run-entry-1 .run-entry-latest") == 1
+    end
+
+    test "20: a cancelled head keeps the primary wash" do
+      {_html, doc} = render_list(single(:cancelled))
+
+      assert texts(doc, ".run-entry-status") == ["Cancelled"]
+      [style] = attrs(doc, "#run-entry-1", "style")
+      assert style =~ "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))"
+    end
+  end
 end

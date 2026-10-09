@@ -4,12 +4,11 @@ defmodule Storybook.RunComponents do
 
   def folder_open?, do: true
 
-  def entry("run_status_strip"), do: [icon: {:fa, "wave-pulse", :thin}]
   def entry("run_mini_graph"), do: [icon: {:fa, "chart-gantt", :thin}]
   def entry("run_node_timeline"), do: [icon: {:fa, "list-timeline", :thin}]
   def entry("run_state_banner"), do: [icon: {:fa, "flag", :thin}]
   def entry("stopped_work_banner"), do: [icon: {:fa, "triangle-exclamation", :thin}]
-  def entry("run_history"), do: [icon: {:fa, "clock-rotate-left", :thin}]
+  def entry("run_list"), do: [icon: {:fa, "list", :thin}]
   def entry("run_status"), do: [icon: {:fa, "table-list", :thin}]
   def entry("run_face"), do: [icon: {:fa, "id-card", :thin}]
   def entry("held_worktree_row"), do: [icon: {:fa, "folder-tree", :thin}]

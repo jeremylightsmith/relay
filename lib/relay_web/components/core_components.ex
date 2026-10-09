@@ -4829,74 +4829,69 @@ defmodule RelayWeb.CoreComponents do
 
               <div id="card-drawer-tab-panel-run" class={[@drawer_tab != :run && "hidden"]}>
                 <%= if @latest_run do %>
-                  <RunComponents.run_status_strip
-                    detail={@latest_detail}
-                    baton={baton_label(@latest_run, @card)}
-                  />
-                  <div style="padding:18px 22px 40px 22px;display:flex;flex-direction:column;gap:18px;">
-                    <div
-                      id="run-tab-links"
-                      style="display:flex;flex-wrap:wrap;gap:16px;align-self:flex-start;"
+                  <div style="padding:18px 22px 40px 22px;">
+                    <RunComponents.run_list
+                      entries={run_entries(@runs, @latest_detail)}
+                      task_progress={drawer_task_progress(@card)}
                     >
-                      <.link
-                        :if={@latest_detail.flow_key}
-                        id="run-view-in-flow-metrics"
-                        navigate={
-                          ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
-                        }
-                        style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
-                      >
-                        View in flow metrics →
-                      </.link>
-                      <.value_stream_link board_slug={@board_slug} ref={@ref} />
-                    </div>
-                    <RunComponents.run_state_banner
-                      :if={@rate_limited && @latest_detail.status == :running}
-                      variant={:rate_limited}
-                      rate_limited={@rate_limited}
-                    />
-                    <RunComponents.run_state_banner
-                      :if={@card.rejection && @latest_detail.status == :running}
-                      variant={:reentry}
-                      card={@card}
-                    />
-                    <RunComponents.run_state_banner
-                      :if={@latest_detail.status == :cancelled}
-                      variant={:revoked}
-                      detail={@latest_detail}
-                      card={@card}
-                      claimer={human_owner_name(@card)}
-                    />
-                    <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
-                          actually tripped; every other failure mode gets the neutral one. --%>
-                    <RunComponents.run_state_banner
-                      :if={@latest_detail.breaker_tripped?}
-                      variant={:circuit}
-                      detail={@latest_detail}
-                      advance_available?={@advance_available?}
-                    />
-                    <RunComponents.run_state_banner
-                      :if={@latest_detail.status == :failed and not @latest_detail.breaker_tripped?}
-                      variant={:failed}
-                      detail={@latest_detail}
-                      advance_available?={@advance_available?}
-                    />
-                    <RunComponents.run_mini_graph
-                      :if={@latest_detail.status == :running and @run_flow}
-                      path={Relay.Runs.happy_path(@run_flow)}
-                      run={@latest_detail}
-                      task_progress={drawer_task_progress(@card)}
-                    />
-                    <%!-- Display rule (RLY-203): show the node timeline for a run that is
-                          running or ended badly, but not parked and not cleanly done. This is an
-                          ad-hoc display predicate, NOT a domain partition — do not replace it
-                          with Schemas.Run.active_statuses/terminal_statuses. --%>
-                    <RunComponents.run_node_timeline
-                      :if={@latest_detail.status in [:running, :failed, :cancelled]}
-                      detail={@latest_detail}
-                      task_progress={drawer_task_progress(@card)}
-                    />
-                    <RunComponents.run_history :if={length(@runs) > 1} runs={history_entries(@runs)} />
+                      <:latest_body>
+                        <div
+                          id="run-tab-links"
+                          style="display:flex;flex-wrap:wrap;gap:16px;align-self:flex-start;"
+                        >
+                          <.link
+                            :if={@latest_detail.flow_key}
+                            id="run-view-in-flow-metrics"
+                            navigate={
+                              ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
+                            }
+                            style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
+                          >
+                            View in flow metrics →
+                          </.link>
+                          <.value_stream_link board_slug={@board_slug} ref={@ref} />
+                        </div>
+                        <RunComponents.run_state_banner
+                          :if={@rate_limited && @latest_detail.status == :running}
+                          variant={:rate_limited}
+                          rate_limited={@rate_limited}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={@card.rejection && @latest_detail.status == :running}
+                          variant={:reentry}
+                          card={@card}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={@latest_detail.status == :cancelled}
+                          variant={:revoked}
+                          detail={@latest_detail}
+                          card={@card}
+                          claimer={human_owner_name(@card)}
+                        />
+                        <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
+                              actually tripped; every other failure mode gets the neutral one. --%>
+                        <RunComponents.run_state_banner
+                          :if={@latest_detail.breaker_tripped?}
+                          variant={:circuit}
+                          detail={@latest_detail}
+                          advance_available?={@advance_available?}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={
+                            @latest_detail.status == :failed and not @latest_detail.breaker_tripped?
+                          }
+                          variant={:failed}
+                          detail={@latest_detail}
+                          advance_available?={@advance_available?}
+                        />
+                        <RunComponents.run_mini_graph
+                          :if={@latest_detail.status == :running and @run_flow}
+                          path={Relay.Runs.happy_path(@run_flow)}
+                          run={@latest_detail}
+                          task_progress={drawer_task_progress(@card)}
+                        />
+                      </:latest_body>
+                    </RunComponents.run_list>
                   </div>
                 <% else %>
                   <div
@@ -6221,9 +6216,6 @@ defmodule RelayWeb.CoreComponents do
 
   # ---------- RLY-137: Run tab helpers ----------
 
-  # RLY-207: prior runs are terminal, so a `nil` flow is behavior-neutral — the
-  # old history timeline passed no flow either, so no type tags and no pending
-  # tail render for history entries (same as before this read-model rewire).
   # RE347 — the card's own stream on the value stream map, beside "View in flow metrics →" and
   # shown whether or not the card has a run.
   attr :board_slug, :string, required: true
@@ -6241,22 +6233,19 @@ defmodule RelayWeb.CoreComponents do
     """
   end
 
-  defp history_entries([_latest | prior]) do
-    count = length(prior)
+  # RE426 — every run as a `run_list` entry, newest first. The head reuses `latest_detail` (built
+  # with the card's flow, so its type tags and pending tail survive); earlier runs are terminal,
+  # so a `nil` flow is behavior-neutral for them (RLY-207).
+  defp run_entries([_latest | earlier] = runs, latest_detail) do
+    total = length(runs)
 
-    prior
-    |> Enum.with_index()
-    |> Enum.map(fn {run, index} ->
-      %{detail: Relay.Runs.run_detail(run, nil), number: count - index}
-    end)
+    earlier_entries =
+      earlier
+      |> Enum.with_index(1)
+      |> Enum.map(fn {run, index} -> %{detail: Relay.Runs.run_detail(run, nil), number: total - index} end)
+
+    [%{detail: latest_detail, number: total} | earlier_entries]
   end
-
-  defp baton_label(%{status: :running}, _card), do: "BATON · FLOW"
-  defp baton_label(%{status: :parked}, _card), do: "BATON · YOU"
-  defp baton_label(%{status: :done}, _card), do: "BATON · DONE"
-  defp baton_label(%{status: :failed}, _card), do: "BATON · STOPPED"
-
-  defp baton_label(%{status: :cancelled}, card), do: "BATON · " <> String.upcase(human_owner_name(card) || "CLAIMED")
 
   defp human_owner_name(%{owners: owners}) when is_list(owners) do
     Enum.find_value(owners, fn
