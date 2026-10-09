@@ -671,4 +671,90 @@ defmodule Relay.BoardsStageConfigTest do
       refute_receive {:stages_changed, ^board_id}, 100
     end
   end
+
+  # RE432: one structured `Relay.Flows.Shape` fix, executed through the existing stage paths.
+  describe "apply_shape_fix/2 (RE432)" do
+    # RE430's fixture: Backlog, Code, Deploy, Review with enabled `code` / `deploy` flows —
+    # Deploy pulls from Code's working stage, so `deploy` is `:upstream_working`.
+    defp upstream_working_board do
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      deploy = insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
+      _review = insert(:stage, board: board, name: "Review", type: :review, position: 4)
+      insert_flow_working_in(code, key: "code", enabled: true)
+      insert_flow_working_in(deploy, key: "deploy", enabled: true)
+
+      assert [%{flow_key: "deploy", kind: :upstream_working}] = Flows.shape_problems(board)
+      %{board: board, code: code, deploy: deploy}
+    end
+
+    defp no_downstream_board do
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      retro = insert(:stage, board: board, name: "Retro", type: :work, category: :in_progress, position: 2)
+      insert_flow_working_in(retro, key: "retro", enabled: true)
+
+      assert [%{flow_key: "retro", kind: :no_downstream}] = Flows.shape_problems(board)
+      %{board: board, retro: retro}
+    end
+
+    defp stage_count, do: Repo.aggregate(Schemas.Stage, :count)
+
+    test "3. :enable_lane turns on the named stage's lane and clears the problem" do
+      %{board: board, code: code} = upstream_working_board()
+      code_id = code.id
+
+      assert {:ok, %Schemas.Stage{type: :done, parent_id: ^code_id}} =
+               Boards.apply_shape_fix(board, %{action: :enable_lane, stage_id: code.id, lane: :done, label: "x"})
+
+      assert Flows.shape_problems(board) == []
+    end
+
+    test "4. :insert_queue_stage inserts a named queue stage before the flow's stage" do
+      %{board: board, deploy: deploy} = upstream_working_board()
+
+      assert {:ok, %Schemas.Stage{name: "Ready for Deploy", type: :queue, category: :in_progress}} =
+               Boards.apply_shape_fix(board, %{
+                 action: :insert_queue_stage,
+                 before_stage_id: deploy.id,
+                 name: "Ready for Deploy",
+                 label: "x"
+               })
+
+      assert main_names(board) == ["Backlog", "Code", "Ready for Deploy", "Deploy", "Review"]
+      assert Flows.shape_problems(board) == []
+    end
+
+    test "5. :add_stage_after adds a \"New stage\" directly after the flow's stage" do
+      %{board: board, retro: retro} = no_downstream_board()
+
+      assert {:ok, %Schemas.Stage{name: "New stage"}} =
+               Boards.apply_shape_fix(board, %{action: :add_stage_after, stage_id: retro.id, label: "x"})
+
+      assert main_names(board) == ["Backlog", "Retro", "New stage"]
+      assert Flows.shape_problems(board) == []
+    end
+
+    test "6. a stage id that is not a main stage on this board is :invalid_anchor for every action" do
+      %{board: board} = upstream_working_board()
+      other = insert(:stage, board: insert(:board), name: "Elsewhere", type: :work, category: :in_progress)
+      deleted = insert(:stage, board: board, name: "Gone", type: :work, category: :in_progress, position: 9)
+      {:ok, _} = Boards.delete_stage(deleted)
+      before = stage_count()
+
+      for id <- [other.id, deleted.id] do
+        assert {:error, :invalid_anchor} =
+                 Boards.apply_shape_fix(board, %{action: :enable_lane, stage_id: id, lane: :done, label: "x"})
+
+        assert {:error, :invalid_anchor} =
+                 Boards.apply_shape_fix(board, %{action: :insert_queue_stage, before_stage_id: id, name: "Q", label: "x"})
+
+        assert {:error, :invalid_anchor} =
+                 Boards.apply_shape_fix(board, %{action: :add_stage_after, stage_id: id, label: "x"})
+      end
+
+      assert stage_count() == before
+    end
+  end
 end

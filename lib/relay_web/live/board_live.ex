@@ -119,6 +119,7 @@ defmodule RelayWeb.BoardLive do
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.CardMedia
   alias RelayWeb.ChangesetErrors
+  alias RelayWeb.FlowShapeComponents
   alias RelayWeb.NativeCardNav
   alias RelayWeb.RunComponents
   alias RelayWeb.StoryMapComponents
@@ -303,6 +304,15 @@ defmodule RelayWeb.BoardLive do
             verdict={@stopped_work}
             class="mx-4 mb-2 mt-2 sm:mx-5"
           />
+          <%!-- RE432 — one amber banner per flow paused by a broken board shape. --%>
+          <div :if={@paused_flows != []} class="mx-4 mb-2 mt-2 sm:mx-5">
+            <FlowShapeComponents.paused_flow_banners
+              id="paused-flow-banners"
+              flows={@paused_flows}
+              slug={@board.slug}
+              editor?={not @read_only?}
+            />
+          </div>
           <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
                 strip. Hidden at ≥45rem; the BoardPager hook owns the data-active
                 highlight and chip-tap scrolling (see assets/js/hooks/board_pager.js). --%>
@@ -424,6 +434,7 @@ defmodule RelayWeb.BoardLive do
                   name={stage.name}
                   type={stage.type}
                   flow={Map.get(@stage_flows, stage.id)}
+                  paused={MapSet.member?(@paused_stage_ids, stage.id)}
                   board_slug={@board.slug}
                   category={category}
                   stage_id={stage.id}
@@ -1199,6 +1210,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:search_result_limit, @search_result_limit)
       |> assign(:body_loading?, false)
       |> assign(:flows, flows)
+      |> assign_paused_flows()
       |> assign(:run_summaries, run_summaries)
       |> assign(:blocked_by, blocked_by)
       |> assign(:face_runs, face_runs(cards, flows, run_summaries, blocked_by))
@@ -4558,6 +4570,17 @@ defmodule RelayWeb.BoardLive do
   # refetch the board and rebuild every stage-derived assign and stream,
   # exactly like mount does. Streams reset from the DB, so this is
   # idempotent and safe to run on the acting session's own echo too.
+  # RE432 — the flows paused by a broken board shape (`Flows.paused?/1`), in board order, and
+  # the stages they belong to. Derived from `@flows`, so call it wherever `@flows` is assigned.
+  defp assign_paused_flows(%{assigns: %{flows: flows, board: board}} = socket) do
+    position = Map.new(board.stages, &{&1.id, &1.position})
+    paused = flows |> Enum.filter(&Flows.paused?/1) |> Enum.sort_by(&Map.get(position, &1.stage_id))
+
+    socket
+    |> assign(:paused_flows, paused)
+    |> assign(:paused_stage_ids, MapSet.new(paused, & &1.stage_id))
+  end
+
   defp reload_board(socket) do
     board = Boards.get_board!(socket.assigns.current_scope.user, socket.assigns.board.slug)
     cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
@@ -4571,6 +4594,7 @@ defmodule RelayWeb.BoardLive do
       # RE429 — pulls-from / lands-on are derived from board order at read time, so a reorder,
       # substage toggle or stage delete changes them (or drops a flow): re-read before the faces.
       |> assign(:flows, Flows.list_flows(board))
+      |> assign_paused_flows()
       |> assign(:stage_counts, stage_counts(board.stages, cards_by_stage))
       |> assign(:sublanes_by_parent, sublanes_by_parent(board.stages))
       |> assign_board_derivations(board)

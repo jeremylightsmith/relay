@@ -980,4 +980,41 @@ defmodule Relay.FlowsTest do
       assert Flows.get_flow!(board, "deploy").problem == nil
     end
   end
+
+  # RE432: "paused" is ONE definition — an enabled flow carrying a shape problem.
+  describe "paused?/1 (RE432)" do
+    setup do
+      board = insert(:board)
+      _backlog = insert(:stage, board: board, name: "Backlog", type: :queue, position: 1)
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 2)
+      deploy = insert(:stage, board: board, name: "Deploy", type: :work, category: :in_progress, position: 3)
+      _review = insert(:stage, board: board, name: "Review", type: :review, position: 4)
+
+      for {key, stage} <- [{"code", code}, {"deploy", deploy}] do
+        {:ok, flow} = create_flow(board, valid_attrs(%{key: key, stage_id: stage.id}))
+        {:ok, _} = Flows.enable_flow(flow)
+      end
+
+      %{board: board}
+    end
+
+    defp listed(board, key), do: Enum.find(Flows.list_flows(board), &(&1.key == key))
+
+    test "1. an enabled flow with a problem is paused; a healthy one is not", %{board: board} do
+      assert Flows.paused?(listed(board, "deploy")) == true
+      assert Flows.paused?(listed(board, "code")) == false
+    end
+
+    test "2. a disabled flow with a problem is not paused", %{board: board} do
+      {:ok, _} = Flows.disable_flow(Flows.get_flow!(board, "deploy"))
+
+      deploy = listed(board, "deploy")
+      assert deploy.problem
+      assert Flows.paused?(deploy) == false
+    end
+
+    test "2. a flow read without its problem filled is never paused", %{board: board} do
+      assert Flows.paused?(Flows.get_flow!(board, "deploy")) == false
+    end
+  end
 end

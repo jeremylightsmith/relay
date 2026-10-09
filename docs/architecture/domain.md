@@ -87,7 +87,17 @@ sharing behavior.
   (`nil` when healthy; computed against all the board's flows, no extra query on the list
   path). A flow with a `problem` is never `Relay.Runs.queued_flow/5`'s queued flow, and
   `Relay.Runs.Preflight` reports it as `stages: {:problem, problem}` (the enable-preflight row
-  shows its `what`). `Schemas.Stage.lane_word/1` is the one sub-lane word (`"Code · Done"`),
+  shows its `what`). `Relay.Flows.paused?/1` is the ONE "paused" predicate (enabled **and** a
+  non-nil `problem`) every consumer calls, and `Relay.Boards.apply_shape_fix/2` executes one of a
+  problem's structured fixes through the existing stage paths (so it broadcasts
+  `{:stages_changed, board_id}`). Two web surfaces render `Relay.Flows.Shape` problems verbatim
+  (RE432): the Board Settings › Stages **shape callout**
+  (`RelayWeb.FlowShapeComponents.shape_callout/1` — WHAT / WHY / BOARD ORDER / one-click FIX,
+  event `apply_shape_fix`) and the board's **paused-flow banners**
+  (`RelayWeb.FlowShapeComponents.paused_flow_banners/1` — one per paused flow, collapsing into
+  one summary banner at 3+, **Fix in Stages →** on non-archived boards) plus the "AI paused"
+  column chip (`stage_column/1`'s `paused`); both refresh on `{:stages_changed, board_id}`.
+  `Schemas.Stage.lane_word/1` is the one sub-lane word (`"Code · Done"`),
   shared with `Relay.Boards`. `stage_flow/1` is the stage's flow (or nil),
   `assignable_stages/2` the stages a flow may be put on, `copy_flow/2` copies a definition onto
   another empty stage (disabled, v1).
@@ -150,7 +160,8 @@ sharing behavior.
   `?section=flows` lands on Stages): each main-stage row owns its flow through a FLOW band
   (`RelayWeb.FlowSettingsComponents.flow_band/1` — chip, `v<n> · <m> nodes`, a direct On/Off
   toggle, a ⋯ menu) and a read-only PULLS FROM → WORKS IN → LANDS ON row worked out by
-  `neighbours/2`. The band is backed by `customized?/1`
+  `neighbours/2`. A paused row (RE432) carries the shape callout for its problem; the board
+  links each paused flow's banner here, anchored on `#stage-<id>-row`. The band is backed by `customized?/1`
   (normalized nodes/edges/isolation comparison against the library — stage wiring never
   counts), `default_key?/1`, `copy_flow/2` (a disabled `<key>-<stage>` copy on another empty
   stage — the band's **Copy to another stage…**, which replaces the old Duplicate; its picker

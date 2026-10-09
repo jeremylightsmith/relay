@@ -42,6 +42,23 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         }
       },
       %Variation{
+        id: :flow_paused,
+        description:
+          "RE432 — the stage's flow is paused by a broken board shape: the chip turns amber and " <>
+            "reads AI paused",
+        attributes: %{
+          id: "story-stage-flow-paused",
+          name: "Deploy",
+          type: :work,
+          category: :in_progress,
+          flow: %{key: "deploy", enabled: true},
+          paused: true,
+          board_slug: "acme",
+          stage_id: 26,
+          count: 0
+        }
+      },
+      %Variation{
         id: :flow_disabled,
         description: "RE409 — the stage's flow is off: grey, dashed, struck-through chip that still links",
         attributes: %{

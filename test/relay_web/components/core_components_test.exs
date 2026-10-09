@@ -780,6 +780,62 @@ defmodule RelayWeb.CoreComponentsTest do
       assert LazyHTML.text(chip) =~ "design flow"
       assert LazyHTML.attribute(chip, "data-tip") == []
     end
+
+    # RE432: a flow paused by a broken board shape turns its chip amber.
+    test "11. a paused header chip reads \"AI paused\" in amber" do
+      chip = fn paused ->
+        html =
+          render_component(&CoreComponents.flow_chip/1,
+            id: "c",
+            variant: :header,
+            flow: %{key: "deploy", enabled: true},
+            board_slug: "acme",
+            paused: paused
+          )
+
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#c")
+      end
+
+      paused = chip.(true)
+      assert paused |> LazyHTML.text() |> String.trim() == "AI paused"
+      assert LazyHTML.attribute(paused, "data-flow-paused") == ["true"]
+      assert [style] = LazyHTML.attribute(paused, "style")
+      assert style =~ "var(--color-warning)"
+      assert LazyHTML.attribute(paused, "aria-label") == ["Flow paused — see the banner"]
+
+      healthy = chip.(false)
+      assert healthy |> LazyHTML.text() |> String.trim() == "AI"
+      assert LazyHTML.attribute(healthy, "data-flow-paused") == ["false"]
+    end
+
+    test "11. a paused settings chip keeps its label; a read-only paused chip is amber too" do
+      settings =
+        render_component(&CoreComponents.flow_chip/1,
+          id: "c",
+          variant: :settings,
+          flow: %{key: "deploy", enabled: true},
+          board_slug: "acme",
+          paused: true
+        )
+
+      assert settings |> LazyHTML.from_fragment() |> LazyHTML.query("#c") |> LazyHTML.text() =~ "deploy flow"
+
+      read_only_html =
+        render_component(&CoreComponents.flow_chip/1,
+          id: "c",
+          flow: %{key: "deploy", enabled: true},
+          read_only: true,
+          paused: true
+        )
+
+      read_only = read_only_html |> LazyHTML.from_fragment() |> LazyHTML.query("#c")
+
+      assert read_only |> LazyHTML.text() |> String.trim() == "AI paused"
+      assert LazyHTML.attribute(read_only, "data-flow-paused") == ["true"]
+      assert [style] = LazyHTML.attribute(read_only, "style")
+      assert style =~ "var(--color-warning)"
+      refute style =~ "var(--color-secondary) 10%"
+    end
   end
 
   describe "compact_card_row/1 (RE377)" do

@@ -71,6 +71,48 @@ defmodule Storybook.Components.CoreComponents.FlowChip do
           board_slug: "acme",
           variant: :settings
         }
+      },
+      %Variation{
+        id: :header_paused,
+        description: "RE432 — paused by a broken board shape: amber, reads \"AI paused\"",
+        attributes: %{
+          id: "story-flow-chip-paused",
+          flow: %{key: "deploy", enabled: true},
+          board_slug: "acme",
+          paused: true
+        }
+      },
+      %Variation{
+        id: :mini_paused,
+        description: "RE432 — the collapsed strip's dot for a paused flow — amber",
+        attributes: %{
+          id: "story-flow-chip-mini-paused",
+          flow: %{key: "deploy", enabled: true},
+          board_slug: "acme",
+          variant: :mini,
+          paused: true
+        }
+      },
+      %Variation{
+        id: :settings_paused,
+        description: "RE432 — Board settings › Stages: a paused flow keeps `<key> flow`, in amber",
+        attributes: %{
+          id: "story-flow-chip-settings-paused",
+          flow: %{key: "deploy", enabled: true},
+          board_slug: "acme",
+          variant: :settings,
+          paused: true
+        }
+      },
+      %Variation{
+        id: :read_only_paused,
+        description: "RE432 — an archived board's paused flow: a plain amber \"AI paused\" label",
+        attributes: %{
+          id: "story-flow-chip-read-only-paused",
+          flow: %{key: "deploy", enabled: true},
+          read_only: true,
+          paused: true
+        }
       }
     ]
   end

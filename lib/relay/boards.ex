@@ -606,6 +606,10 @@ defmodule Relay.Boards do
     end
   end
 
+  # The default name of a stage the user adds without naming it — Settings "+ Add" and the
+  # "Add a stage after …" shape fix (RE432).
+  @new_stage_name "New stage"
+
   @doc """
   Creates a main stage.
 
@@ -624,7 +628,7 @@ defmodule Relay.Boards do
   Errors insert nothing and broadcast nothing; success broadcasts `{:stages_changed, board_id}`.
   """
   def create_stage(%Board{} = board, category) when category in @category_order do
-    create_stage(board, %{name: "New stage", category: category})
+    create_stage(board, %{name: @new_stage_name, category: category})
   end
 
   def create_stage(%Board{id: board_id}, attrs) when is_map(attrs) do
@@ -639,6 +643,34 @@ defmodule Relay.Boards do
         {:error, changeset}
       end
     end
+  end
+
+  @doc """
+  Applies one structured `Relay.Flows.Shape` fix to `board` (RE432) through the existing stage
+  paths, so success broadcasts `{:stages_changed, board_id}` like any other stage edit:
+
+    * `:enable_lane` — turns on `lane` of the main stage `stage_id` on this board (`enable_lane/2`);
+    * `:insert_queue_stage` — creates a `:queue` stage named `name` directly before `before_stage_id`;
+    * `:add_stage_after` — creates a "New stage" directly after `stage_id`.
+
+  A stage id that is not a main stage on this board is `{:error, :invalid_anchor}`; nothing is
+  written. Render a refusal with `stage_refusal_message/1`.
+  """
+  @spec apply_shape_fix(Board.t(), Relay.Flows.Shape.fix()) ::
+          {:ok, Stage.t()} | {:error, :invalid_anchor | :not_a_main_stage | Changeset.t()}
+  def apply_shape_fix(%Board{id: board_id}, %{action: :enable_lane, stage_id: stage_id, lane: lane}) do
+    case Repo.one(from s in Stage, where: s.id == ^stage_id and s.board_id == ^board_id and is_nil(s.parent_id)) do
+      nil -> {:error, :invalid_anchor}
+      stage -> enable_lane(stage, lane)
+    end
+  end
+
+  def apply_shape_fix(%Board{} = board, %{action: :insert_queue_stage, before_stage_id: stage_id, name: name}) do
+    create_stage(board, %{name: name, type: :queue, before: %Stage{id: stage_id}})
+  end
+
+  def apply_shape_fix(%Board{} = board, %{action: :add_stage_after, stage_id: stage_id}) do
+    create_stage(board, %{name: @new_stage_name, after: %Stage{id: stage_id}})
   end
 
   @new_stage_fields [:name, :category, :type, :description, :wip_limit, :collapsed_by_default]

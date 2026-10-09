@@ -8,7 +8,9 @@ defmodule RelayWeb.FlowSettingsComponents do
       `flow_chip/1` link to the editor, `flow_meta/1`, the customized badge, the On/Off toggle
       and the ⋯ menu), the dashed no-flow band with **+ Add flow** on one that doesn't, and the
       queue note on a queue stage. Review and done stages render nothing. The reset / delete
-      confirms and the RLY-182 readiness report open inside the band.
+      confirms and the RLY-182 readiness report open inside the band. A flow paused by a broken
+      board shape (RE432, `Relay.Flows.paused?/1`) adds a PAUSED badge and an amber chip, and
+      its offending neighbour chip turns dashed amber.
     * `copy_flow_panel/1` — the **Copy to another stage…** picker under a band: free work
       stages only, with the copy's key previewed.
     * `add_flow_panel/1` — the **+ Add flow** panel inside the no-flow band: a default-library
@@ -131,6 +133,7 @@ defmodule RelayWeb.FlowSettingsComponents do
       assigns
       |> assign(:flow, flow)
       |> assign(:missing?, is_nil(assigns.neighbours.pulls_from) or is_nil(assigns.neighbours.lands_on))
+      |> assign(:paused?, Flows.paused?(flow))
 
     ~H"""
     <div
@@ -148,9 +151,18 @@ defmodule RelayWeb.FlowSettingsComponents do
           flow={@flow}
           board_slug={@slug}
           variant={:settings}
+          paused={@paused?}
         />
         <span id={"flow-#{@flow.id}-meta"} class="font-mono text-[11px] text-base-content/55">
           {flow_meta(@flow)}
+        </span>
+        <span
+          :if={@paused?}
+          id={"stage-#{@stage.id}-paused-badge"}
+          class="badge badge-sm font-mono font-semibold"
+          style="background:color-mix(in oklab, var(--color-warning) 18%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 30%, var(--color-base-content));border-color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));"
+        >
+          PAUSED
         </span>
         <span
           :if={@row.customized?}
@@ -238,6 +250,7 @@ defmodule RelayWeb.FlowSettingsComponents do
         pulls_from={@neighbours.pulls_from}
         works_in={@stage.name}
         lands_on={@neighbours.lands_on}
+        offending={offending_side(@flow.problem)}
       />
       <.reset_confirm :if={@panel == :reset} flow={@flow} />
       <.delete_confirm :if={@panel == :delete_flow} flow={@flow} />
@@ -260,6 +273,15 @@ defmodule RelayWeb.FlowSettingsComponents do
       </div>
     </div>
     """
+  end
+
+  # The neighbour that breaks the shape rule, read off the problem's columns (RE432): the flow's
+  # stage first → nothing to pull from; last → nothing to land on; otherwise the pickup is wrong.
+  defp offending_side(nil), do: nil
+  defp offending_side(%{columns: [%{mark: :self} | _]}), do: :pulls_from
+
+  defp offending_side(%{columns: columns}) do
+    if match?(%{mark: :self}, List.last(columns)), do: :lands_on, else: :pulls_from
   end
 
   @doc """
@@ -519,12 +541,18 @@ defmodule RelayWeb.FlowSettingsComponents do
   @doc """
   The read-only PULLS FROM → WORKS IN → LANDS ON row for a stage's flow, labelled "worked out
   from board order". Names arrive resolved (sub-lanes as `"Plan · Done"`); a `nil` end — the
-  stage is first or last on the board — renders `none` in the warning chip style.
+  stage is first or last on the board — renders `none` in the warning chip style. `offending`
+  (RE432) names the side that breaks the board's shape rule; that chip renders dashed amber.
   """
   attr :id, :string, required: true
   attr :pulls_from, :string, default: nil
   attr :works_in, :string, required: true
   attr :lands_on, :string, default: nil
+
+  attr :offending, :atom,
+    values: [nil, :pulls_from, :lands_on],
+    default: nil,
+    doc: "the side that breaks the shape rule — its chip renders in the dashed-amber bad style"
 
   def stage_neighbours(assigns) do
     ~H"""
@@ -535,7 +563,12 @@ defmodule RelayWeb.FlowSettingsComponents do
       >
         PULLS FROM
       </span>
-      <.neighbour_chip id={"#{@id}-pulls-from"} name={@pulls_from} kind={:pulls} />
+      <.neighbour_chip
+        id={"#{@id}-pulls-from"}
+        name={@pulls_from}
+        kind={:pulls}
+        bad?={@offending == :pulls_from}
+      />
       <span class="text-[12px] text-base-content/40">→</span>
       <.neighbour_chip id={"#{@id}-works-in"} name={@works_in} kind={:works} />
       <span class="text-[12px] text-base-content/40">→</span>
@@ -545,7 +578,12 @@ defmodule RelayWeb.FlowSettingsComponents do
       >
         LANDS ON
       </span>
-      <.neighbour_chip id={"#{@id}-lands-on"} name={@lands_on} kind={:lands} />
+      <.neighbour_chip
+        id={"#{@id}-lands-on"}
+        name={@lands_on}
+        kind={:lands}
+        bad?={@offending == :lands_on}
+      />
       <span
         id={"#{@id}-hint"}
         class="ml-1 inline-flex items-center gap-1 text-[11px] text-base-content/50"
@@ -560,40 +598,52 @@ defmodule RelayWeb.FlowSettingsComponents do
   attr :id, :string, required: true
   attr :name, :string, default: nil
   attr :kind, :atom, required: true
+  attr :bad?, :boolean, default: false
 
   defp neighbour_chip(%{name: nil} = assigns) do
     ~H"""
-    <span id={@id} style={chip_style(:missing)}>none</span>
+    <span id={@id} style={chip_style(if(@bad?, do: :bad, else: :missing))}>none</span>
     """
   end
 
   defp neighbour_chip(assigns) do
     ~H"""
-    <span id={@id} style={chip_style(@kind)}>{@name}</span>
+    <span id={@id} style={chip_style(if(@bad?, do: :bad, else: @kind))}>{@name}</span>
     """
   end
 
   @chip_base "font-family:var(--font-mono);font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap;"
 
-  defp chip_style(:pulls),
+  @doc """
+  The ONE inline style of a board-order chip: `:pulls` (pickup), `:works` (the flow's stage,
+  violet), `:lands` (drop-off, blue), `:missing` (a board end) and `:bad` (RE432 — the column
+  that breaks the shape rule, dashed amber). Shared with `RelayWeb.FlowShapeComponents`.
+  """
+  @spec chip_style(:pulls | :works | :lands | :missing | :bad) :: String.t()
+  def chip_style(:pulls),
     do:
       @chip_base <>
         "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);background:var(--color-field-hover);border:1px solid var(--color-base-300);"
 
-  defp chip_style(:works),
+  def chip_style(:works),
     do:
       @chip_base <>
         "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 20%, var(--color-base-100));"
 
-  defp chip_style(:lands),
+  def chip_style(:lands),
     do:
       @chip_base <>
         "color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100));"
 
-  defp chip_style(:missing),
+  def chip_style(:missing),
     do:
       @chip_base <>
         "color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
+
+  def chip_style(:bad),
+    do:
+      @chip_base <>
+        "color:color-mix(in oklab, var(--color-warning) 40%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 12%, var(--color-base-100));border:1.5px dashed color-mix(in oklab, var(--color-warning) 70%, var(--color-base-100));"
 
   attr :flow, Flow, required: true
   attr :preflight, :map, required: true

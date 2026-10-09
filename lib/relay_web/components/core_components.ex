@@ -7165,6 +7165,9 @@ defmodule RelayWeb.CoreComponents do
     end
   end
 
+  # A paused chip's one tooltip / title / aria-label (RE432) — the board banner says why.
+  @flow_paused_tip "Flow paused — see the banner"
+
   @doc """
   RE409 — the violet AI chip: the link to the flow that works in a stage (a stage is
   AI-enabled iff a flow works in it — `Relay.Flows.stage_flows/1`). Card mockup "AI chip is the
@@ -7178,7 +7181,12 @@ defmodule RelayWeb.CoreComponents do
   `read_only` (an archived board) renders an enabled flow as a plain label — no link, no ↗ — and
   a disabled one as nothing at all.
 
-  Every chip carries `data-flow-key` and `data-flow-enabled`.
+  `paused` (RE432 — `Relay.Flows.paused?/1`: on, but stopped by a broken board shape) turns the
+  chip amber in every variant, read-only included; `:header` reads `AI paused`, `:settings` keeps
+  `<key> flow`, `:mini` keeps the dot alone, and the tooltip / `title` / `aria-label` becomes
+  "Flow paused — see the banner".
+
+  Every chip carries `data-flow-key`, `data-flow-enabled` and `data-flow-paused`.
 
   ## Examples
 
@@ -7190,6 +7198,10 @@ defmodule RelayWeb.CoreComponents do
   attr :read_only, :boolean, default: false
   attr :variant, :atom, values: [:header, :mini, :settings], default: :header
   attr :pager, :boolean, default: false
+
+  attr :paused, :boolean,
+    default: false,
+    doc: "the flow is paused by a broken board shape (`Relay.Flows.paused?/1`) — amber, \"AI paused\" on `:header`"
 
   def flow_chip(%{read_only: true, flow: %{enabled: false}} = assigns), do: ~H""
 
@@ -7203,10 +7215,10 @@ defmodule RelayWeb.CoreComponents do
       |> assign(:key, key)
       |> assign(:enabled, enabled)
       |> assign(:mini?, mini?)
-      |> assign(:tip, flow_chip_tip(key, enabled))
+      |> assign(:tip, if(assigns.paused, do: @flow_paused_tip, else: flow_chip_tip(key, enabled)))
       |> assign(:tooltip?, tooltip?)
-      |> assign(:label, if(assigns.variant == :settings, do: "#{key} flow", else: "AI"))
-      |> assign(:chip_style, flow_chip_style(enabled, mini?, assigns.pager))
+      |> assign(:label, flow_chip_label(assigns.variant, key, assigns.paused))
+      |> assign(:chip_style, flow_chip_style(enabled, mini?, assigns.pager, assigns.paused))
 
     ~H"""
     <.link
@@ -7216,7 +7228,7 @@ defmodule RelayWeb.CoreComponents do
       class={[
         "flow-chip group",
         @tooltip? && "tooltip tooltip-bottom",
-        @enabled &&
+        (@enabled and !@paused) &&
           "border border-transparent bg-[color-mix(in_oklab,var(--color-secondary)_10%,var(--color-base-100))] hover:bg-[color-mix(in_oklab,var(--color-secondary)_18%,var(--color-base-100))] hover:border-[color-mix(in_oklab,var(--color-secondary)_40%,transparent)]"
       ]}
       style={@chip_style}
@@ -7225,8 +7237,9 @@ defmodule RelayWeb.CoreComponents do
       aria-label={@tip}
       data-flow-key={@key}
       data-flow-enabled={to_string(@enabled)}
+      data-flow-paused={to_string(@paused)}
     >
-      <.flow_chip_dot enabled={@enabled} />
+      <.flow_chip_dot enabled={@enabled} paused={@paused} />
       <span :if={!@mini?} style={if(!@enabled, do: "text-decoration:line-through;")}>{@label}</span>
       <.icon
         :if={!@mini?}
@@ -7238,34 +7251,53 @@ defmodule RelayWeb.CoreComponents do
       :if={@read_only}
       id={@id}
       class="flow-chip"
-      style={"#{@chip_style}background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));"}
-      title="Relay AI works this stage"
+      style={
+        if(@paused,
+          do: @chip_style,
+          else:
+            "#{@chip_style}background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));"
+        )
+      }
+      title={if(@paused, do: @tip, else: "Relay AI works this stage")}
+      aria-label={@paused && @tip}
       data-flow-key={@key}
       data-flow-enabled={to_string(@enabled)}
+      data-flow-paused={to_string(@paused)}
     >
-      <.flow_chip_dot enabled={@enabled} />
+      <.flow_chip_dot enabled={@enabled} paused={@paused} />
       <span :if={!@mini?}>{@label}</span>
     </span>
     """
   end
 
   attr :enabled, :boolean, required: true
+  attr :paused, :boolean, default: false
 
   defp flow_chip_dot(assigns) do
+    assigns = assign(assigns, :fill, flow_chip_dot_fill(assigns.enabled, assigns.paused))
+
     ~H"""
-    <span style={"width:10px;height:10px;border-radius:50%;background:#{if(@enabled, do: "var(--color-secondary)", else: "color-mix(in oklab, var(--color-base-content) 30%, transparent)")};display:flex;align-items:center;justify-content:center;flex:0 0 auto;"}>
+    <span style={"width:10px;height:10px;border-radius:50%;background:#{@fill};display:flex;align-items:center;justify-content:center;flex:0 0 auto;"}>
       <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
       </span>
     </span>
     """
   end
 
+  defp flow_chip_dot_fill(_enabled, true), do: "var(--color-warning)"
+  defp flow_chip_dot_fill(true, false), do: "var(--color-secondary)"
+  defp flow_chip_dot_fill(false, false), do: "color-mix(in oklab, var(--color-base-content) 30%, transparent)"
+
   defp flow_chip_tip(key, true), do: "Edit the #{key} flow →"
   defp flow_chip_tip(key, false), do: "The #{key} flow is off — edit to turn it on →"
 
+  defp flow_chip_label(:settings, key, _paused), do: "#{key} flow"
+  defp flow_chip_label(:header, _key, true), do: "AI paused"
+  defp flow_chip_label(_variant, _key, _paused), do: "AI"
+
   # Shape shared by every variant; the enabled background/border live in classes (so hover can
-  # deepen them), the disabled look is fixed and inline.
-  defp flow_chip_style(enabled, mini?, pager?) do
+  # deepen them), the disabled look is fixed and inline. A paused chip (RE432) is amber, inline.
+  defp flow_chip_style(enabled, mini?, pager?, paused?) do
     spacing =
       cond do
         mini? -> "padding:3px;gap:0;"
@@ -7274,11 +7306,18 @@ defmodule RelayWeb.CoreComponents do
       end
 
     colors =
-      if enabled,
-        do: "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));",
-        else:
+      cond do
+        paused? ->
+          "color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));" <>
+            "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid transparent;"
+
+        enabled ->
+          "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+
+        true ->
           "background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);" <>
             "border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, transparent);"
+      end
 
     "display:inline-flex;align-items:center;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);" <>
       "border-radius:5px;flex:0 0 auto;text-decoration:none;" <> spacing <> colors
@@ -7333,6 +7372,11 @@ defmodule RelayWeb.CoreComponents do
     doc:
       "RE409 — the stage's `Relay.Flows.stage_flows/1` entry (`%{key:, enabled:}`) or nil; " <>
         "any flow makes the stage AI-enabled and renders the AI chip linking to it"
+
+  attr :paused, :boolean,
+    default: false,
+    doc:
+      "RE432 — the stage's flow is paused by a broken board shape (`Relay.Flows.paused?/1`): the chip reads \"AI paused\""
 
   attr :board_slug, :string, default: nil, doc: "the board's slug, for the AI chip's flow link"
   attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
@@ -7471,6 +7515,7 @@ defmodule RelayWeb.CoreComponents do
             :if={@show_flow_chip}
             id={"#{@id}-ai-listening"}
             flow={@flow}
+            paused={@paused}
             board_slug={@board_slug}
             read_only={@read_only}
             variant={:mini}
@@ -7512,6 +7557,7 @@ defmodule RelayWeb.CoreComponents do
               :if={@show_flow_chip}
               id={"#{@id}-ai-listening"}
               flow={@flow}
+              paused={@paused}
               board_slug={@board_slug}
               read_only={@read_only}
               pager={@pager}

@@ -240,6 +240,15 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  Whether `flow` is **paused** by a broken board shape (RE432) — the ONE definition: it is
+  enabled AND carries a shape `problem`. Only reads that fill the virtual `problem`
+  (`list_flows/1`, `get_flow_with_stages/2`) can say yes; a flow read any other way (e.g.
+  `get_flow!/2`) is never paused.
+  """
+  @spec paused?(Flow.t()) :: boolean()
+  def paused?(%Flow{enabled: enabled, problem: problem}), do: enabled and not is_nil(problem)
+
+  @doc """
   Every broken flow's shape problem on the board (RE430) — the DB convenience over
   `Relay.Flows.Shape.problems/2`: the board's ordered stages plus every flow, enabled or not.
   """

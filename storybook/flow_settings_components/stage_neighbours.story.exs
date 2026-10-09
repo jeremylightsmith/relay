@@ -16,6 +16,17 @@ defmodule Storybook.FlowSettingsComponents.StageNeighbours do
         id: :missing_end,
         description: "The board's first stage — the missing end reads none",
         attributes: %{id: "spec-neighbours", pulls_from: nil, works_in: "Spec", lands_on: "Spec · Review"}
+      },
+      %Variation{
+        id: :offending,
+        description: "RE432 — the pickup breaks the shape rule: PULLS FROM renders dashed amber",
+        attributes: %{
+          id: "plan-neighbours",
+          pulls_from: "Spec · Review",
+          works_in: "Plan",
+          lands_on: "Plan · Done",
+          offending: :pulls_from
+        }
       }
     ]
   end

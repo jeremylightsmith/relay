@@ -41,6 +41,16 @@ defmodule RelayWeb.BoardSettingsLive do
   `stage.reject_to_stage_id`; a review sub-lane always rejects back into its
   own parent stage and shows a fixed hint instead. When no `reject_to_stage_id`
   is set, the effective target falls back to `Boards.previous_main_stage/1`.
+
+  RE432: a flow on a broken board shape is loud and one-click fixable. A paused flow's row
+  (`Relay.Flows.paused?/1`) wears a thick amber border (`data-paused="true"`), a PAUSED badge, an
+  amber chip and a dashed offending neighbour; every flow with a `Relay.Flows.Shape` problem —
+  paused or merely disabled — gets `RelayWeb.FlowShapeComponents.shape_callout/1` under its row,
+  and an "N flows are paused" summary links to the first paused row. A FIX button sends
+  `"apply_shape_fix"` (`flow-key`, `index`, `action`); the handler re-reads the problem with
+  `Flows.shape_problems/1` and applies `Enum.at(fixes, index)` only when its action still
+  matches, so a stale page applies nothing. A refusal lands in `@shape_error ::
+  nil | {flow_key, message}` inside that flow's callout.
   """
 
   use RelayWeb, :live_view
@@ -56,7 +66,9 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Members
   alias Relay.Runs
   alias RelayWeb.BoardCrumbs
+  alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowSettingsComponents
+  alias RelayWeb.FlowShapeComponents
   alias Schemas.ApiKey
   alias Schemas.Board
   alias Schemas.Membership
@@ -410,6 +422,23 @@ defmodule RelayWeb.BoardSettingsLive do
                 column after it — reorder stages and the flow follows.
               </p>
 
+              <div
+                :if={@paused_stage_ids != []}
+                id="stages-paused-summary"
+                class="mb-2 mt-4 flex items-center gap-3 rounded-lg px-4 py-2.5 text-[13px]"
+                style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 30%, var(--color-base-content));"
+              >
+                <span class="font-bold">!</span>
+                <a
+                  id="stages-paused-summary-link"
+                  href={"#stage-#{hd(@paused_stage_ids)}-row"}
+                  class="flex-1"
+                >
+                  <b>{paused_count_label(length(@paused_stage_ids))}</b>
+                  because of how the board is laid out. Each highlighted stage below says what's wrong and how to fix it.
+                </a>
+              </div>
+
               <%!-- All four groups always render so an emptied category stays reachable. --%>
               <div
                 :for={{category, stages} <- @stage_groups}
@@ -435,7 +464,8 @@ defmodule RelayWeb.BoardSettingsLive do
                   <div
                     :for={stage <- stages}
                     id={"stage-#{stage.id}-row"}
-                    style="background:var(--color-base-100);border:1px solid var(--color-base-300);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
+                    data-paused={to_string(stage.id in @paused_stage_ids)}
+                    style={stage_row_style(stage.id in @paused_stage_ids)}
                   >
                     <div style="display:flex;align-items:center;gap:10px;">
                       <.stage_type_icon type={stage.type} />
@@ -750,6 +780,14 @@ defmodule RelayWeb.BoardSettingsLive do
                       form={@copy_form}
                       targets={@copy_targets}
                       copy_key={@copy_key}
+                    />
+                    <%!-- RE432 — the broken-shape callout: WHAT / WHY / BOARD ORDER / one-click FIX. --%>
+                    <FlowShapeComponents.shape_callout
+                      :if={problem = row_problem(@stage_rows, stage.id)}
+                      id={"stage-#{stage.id}-shape-callout"}
+                      problem={problem}
+                      error={shape_error_for(@shape_error, problem.flow_key)}
+                      read_only?={@read_only?}
                     />
                   </div>
                 </div>
@@ -1132,6 +1170,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:panel, nil)
      |> assign(:flow_preflight, nil)
      |> assign(:panel_error, nil)
+     |> assign(:shape_error, nil)
      |> assign(:copy_form, to_form(%{}, as: :copy))
      |> assign(:copy_key, nil)
      |> assign(:add_form, to_form(%{}, as: :add))
@@ -1153,6 +1192,7 @@ defmodule RelayWeb.BoardSettingsLive do
         toggle_collapsed_default invite_member remove_member flow_toggle
         flow_reset flow_confirm_reset flow_delete flow_confirm_delete
         flow_copy flow_copy_change flow_confirm_copy flow_add flow_add_change flow_confirm_add
+        apply_shape_fix
         save_public_settings new_key create_key rename_key
         regenerate_key revoke_key
       ) do
@@ -1468,6 +1508,27 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  # RE432 — a one-click shape fix. The problem is re-read fresh, and the fix applied only when the
+  # one at `index` still has the clicked `action`: the page may be stale (another tab already
+  # fixed it), so a fix is never rebuilt from client params. Nothing to apply just refreshes.
+  def handle_event("apply_shape_fix", %{"flow-key" => key, "index" => index, "action" => action}, socket) do
+    board = socket.assigns.board
+
+    case current_fix(board, key, index, action) do
+      nil ->
+        {:noreply, refresh_stages(socket)}
+
+      fix ->
+        shape_error =
+          case Boards.apply_shape_fix(board, fix) do
+            {:ok, _stage} -> nil
+            {:error, reason} -> {key, shape_refusal(reason)}
+          end
+
+        {:noreply, socket |> assign(:shape_error, shape_error) |> refresh_stages()}
+    end
+  end
+
   # RE431 — the band's toggle flips the flow directly (the RLY-142 cutover confirm is gone).
   # RLY-182's readiness preflight survives as a report AFTER turning a flow on: computed here, on
   # the off→on click only, and opened as `{stage_id, :preflight}` only when some check warns. It
@@ -1649,6 +1710,7 @@ defmodule RelayWeb.BoardSettingsLive do
   defp refresh_stages(socket) do
     board = socket.assigns.board
     all_stages = Boards.list_stages(board)
+    stage_rows = stage_rows(board)
     mains = Enum.filter(all_stages, &is_nil(&1.parent_id))
 
     groups =
@@ -1662,11 +1724,64 @@ defmodule RelayWeb.BoardSettingsLive do
     |> assign(:lane_map, lane_map(board))
     |> assign(:all_stages, all_stages)
     |> assign(:neighbours, Map.new(mains, &{&1.id, neighbour_names(&1.id, all_stages)}))
-    |> assign(:stage_rows, stage_rows(board))
+    |> assign(:stage_rows, stage_rows)
+    |> assign(:paused_stage_ids, paused_stage_ids(all_stages, stage_rows))
     |> assign(:copy_targets, Flows.assignable_stages(board, nil))
     |> assign(:addable_defaults, Flows.addable_defaults(board))
     |> drop_orphan_panel()
+    |> drop_cleared_shape_error()
   end
+
+  # The stages whose flow is paused (`Flows.paused?/1`), in board order — the summary links the first.
+  defp paused_stage_ids(all_stages, stage_rows) do
+    for %Stage{id: id} <- all_stages, row = stage_rows[id], Flows.paused?(row.flow), do: id
+  end
+
+  # A refusal stays only while its flow still has a problem (fixed elsewhere → it goes).
+  defp drop_cleared_shape_error(%{assigns: %{shape_error: {key, _message}, stage_rows: rows}} = socket) do
+    if Enum.any?(Map.values(rows), &(&1.flow.key == key and &1.flow.problem)),
+      do: socket,
+      else: assign(socket, :shape_error, nil)
+  end
+
+  defp drop_cleared_shape_error(socket), do: socket
+
+  defp current_fix(board, key, index, action) do
+    with %{fixes: fixes} <- Enum.find(Flows.shape_problems(board), &(&1.flow_key == key)),
+         {i, ""} when i >= 0 <- Integer.parse(index),
+         %{action: fix_action} = fix <- Enum.at(fixes, i),
+         true <- Atom.to_string(fix_action) == action do
+      fix
+    else
+      _stale -> nil
+    end
+  end
+
+  defp shape_refusal(%Ecto.Changeset{} = changeset), do: Enum.join(ChangesetErrors.leaf_messages(changeset), "; ")
+  defp shape_refusal(reason), do: Boards.stage_refusal_message(reason)
+
+  defp row_problem(stage_rows, stage_id) do
+    case stage_rows[stage_id] do
+      %{flow: %{problem: problem}} -> problem
+      nil -> nil
+    end
+  end
+
+  defp shape_error_for({key, message}, key), do: message
+  defp shape_error_for(_shape_error, _key), do: nil
+
+  defp paused_count_label(1), do: "1 flow is paused"
+  defp paused_count_label(n), do: "#{n} flows are paused"
+
+  @stage_row_base "background:var(--color-base-100);border-radius:13px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;"
+
+  defp stage_row_style(true),
+    do:
+      @stage_row_base <>
+        "border:2px solid color-mix(in oklab, var(--color-warning) 70%, var(--color-base-100));" <>
+        "box-shadow:0 0 0 4px color-mix(in oklab, var(--color-warning) 12%, transparent);"
+
+  defp stage_row_style(false), do: @stage_row_base <> "border:1px solid var(--color-base-300);"
 
   # A panel stays open across a refresh — unless its stage is gone (deleted in another tab).
   defp drop_orphan_panel(%{assigns: %{panel: {stage_id, _kind}, stages: stages}} = socket) do
