@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../widgets/headered_sheet.dart';
 import 'voice_controller.dart';
 import 'voice_transcriber.dart';
 import 'whisper_kit_transcriber.dart';
@@ -10,8 +11,6 @@ import 'whisper_kit_transcriber.dart';
 const _transcriptBorder = Color(0xFFD1CEE4); // oklch(0.86 0.03 292)
 const _transcriptText = Color(0xFF222933); // oklch(0.28 0.02 255)
 const _headingText = Color(0xFF1E252E); // oklch(0.26 0.02 255)
-const _cancelBg = Color(0xFFEFF2F6); // oklch(0.96 0.006 255)
-const _cancelBorder = Color(0xFFE2E5E9); // oklch(0.92 0.006 255)
 const _cancelText = Color(0xFF464E58); // oklch(0.42 0.02 255)
 
 /// The whole public surface of RLY-99 (spec U4): records, transcribes
@@ -24,6 +23,8 @@ Future<String?> showVoiceSheet(
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
+    // Caps a long review sheet below the status bar (HeaderedSheet, RE434).
+    useSafeArea: true,
     backgroundColor: Colors.transparent,
     // Stop and Cancel are the only exits (D8) — a stray swipe must not
     // half-dismiss a sheet holding a live mic.
@@ -95,55 +96,62 @@ class _VoiceSheetState extends State<VoiceSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // In review, HeaderedSheet supplies the paddings and the keyboard inset
+    // itself — applying them here too would double the inset.
+    final inReview = _controller.stage == VoiceStage.review;
+    final sheet = SafeArea(
+      top: false,
+      child: Container(
+        key: const Key('voice_sheet'),
+        width: double.infinity,
+        // Artboard: padding 20px 18px 22px; radius 22px top.
+        padding: inReview
+            ? EdgeInsets.zero
+            : const EdgeInsets.fromLTRB(18, 20, 18, 22),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: switch (_controller.stage) {
+          VoiceStage.starting || VoiceStage.dismissed => const SizedBox(
+            height: 96,
+            key: Key('voice_starting'),
+          ),
+          VoiceStage.priming => _Priming(
+            onAllow: _controller.allowMic,
+            onNotNow: _controller.cancel,
+          ),
+          VoiceStage.recording => _Recording(
+            elapsed: _controller.elapsed,
+            onStop: _controller.stopAndReview,
+            onCancel: _controller.cancel,
+          ),
+          VoiceStage.transcribing => _Transcribing(
+            onCancel: _controller.cancel,
+          ),
+          VoiceStage.review => _Review(
+            field: _transcriptField,
+            onCancel: _controller.cancel,
+            onUse: _useThis,
+          ),
+          VoiceStage.error => _ErrorState(
+            message: _controller.errorMessage ?? "Didn't catch that.",
+            showOpenSettings: _controller.showOpenSettings,
+            showTryAgain: _controller.showTryAgain,
+            onOpenSettings: _controller.openSettings,
+            onTryAgain: _tryAgain,
+            onTypeInstead: _controller.cancel,
+          ),
+        },
+      ),
+    );
+    if (inReview) return sheet;
     return Padding(
-      // The review TextField must clear the keyboard (isScrollControlled).
+      // The non-review stages must clear the keyboard (isScrollControlled).
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: SafeArea(
-        top: false,
-        child: Container(
-          key: const Key('voice_sheet'),
-          width: double.infinity,
-          // Artboard: padding 20px 18px 22px; radius 22px top.
-          padding: const EdgeInsets.fromLTRB(18, 20, 18, 22),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-          ),
-          child: switch (_controller.stage) {
-            VoiceStage.starting || VoiceStage.dismissed => const SizedBox(
-              height: 96,
-              key: Key('voice_starting'),
-            ),
-            VoiceStage.priming => _Priming(
-              onAllow: _controller.allowMic,
-              onNotNow: _controller.cancel,
-            ),
-            VoiceStage.recording => _Recording(
-              elapsed: _controller.elapsed,
-              onStop: _controller.stopAndReview,
-              onCancel: _controller.cancel,
-            ),
-            VoiceStage.transcribing => _Transcribing(
-              onCancel: _controller.cancel,
-            ),
-            VoiceStage.review => _Review(
-              field: _transcriptField,
-              onCancel: _controller.cancel,
-              onUse: _useThis,
-            ),
-            VoiceStage.error => _ErrorState(
-              message: _controller.errorMessage ?? "Didn't catch that.",
-              showOpenSettings: _controller.showOpenSettings,
-              showTryAgain: _controller.showTryAgain,
-              onOpenSettings: _controller.openSettings,
-              onTryAgain: _tryAgain,
-              onTypeInstead: _controller.cancel,
-            ),
-          },
-        ),
-      ),
+      child: sheet,
     );
   }
 }
@@ -379,7 +387,9 @@ class _Transcribing extends StatelessWidget {
   }
 }
 
-/// The one drawn state — matches the "Voice · Whisper" artboard exactly.
+/// Card mockup "B — primary action in the sheet header" (RE434): Cancel |
+/// mic + "You said" | Use this in a fixed header, and the provenance line and
+/// transcript scrolling beneath it, so a long dictation never hides Use this.
 class _Review extends StatelessWidget {
   const _Review({
     required this.field,
@@ -393,41 +403,53 @@ class _Review extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return HeaderedSheet(
       key: const Key('voice_review'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const _MicBadge(),
-            const SizedBox(width: 9),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'You said',
-                  key: Key('voice_you_said'),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _headingText,
-                  ),
-                ),
-                Text(
-                  'TRANSCRIBED · WHISPER · TAP TO EDIT',
-                  key: Key('voice_provenance'),
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontFamily: 'monospace',
-                    color: RelayTheme.relayVoiceTranscribed,
-                  ),
-                ),
-              ],
+      headerPadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      bodyPadding: const EdgeInsets.fromLTRB(18, 12, 18, 22),
+      leading: SheetHeaderCancel(
+        key: const Key('voice_review_cancel'),
+        onPressed: onCancel,
+      ),
+      title: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MicBadge(size: 24),
+          SizedBox(width: 8),
+          // Flexible: a narrow phone (or a wide font) ellipsizes the title
+          // rather than overflowing the header row.
+          Flexible(
+            child: Text(
+              'You said',
+              key: Key('voice_you_said'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: _headingText,
+              ),
             ),
-          ],
+          ),
+        ],
+      ),
+      // Blue, not violet: the AI transcribed, but the human is the one acting.
+      action: SheetHeaderAction(
+        key: const Key('voice_use'),
+        label: 'Use this',
+        onPressed: onUse,
+      ),
+      body: [
+        const Text(
+          'TRANSCRIBED · WHISPER · TAP TO EDIT',
+          key: Key('voice_provenance'),
+          style: TextStyle(
+            fontSize: 9.5,
+            fontFamily: 'monospace',
+            color: RelayTheme.relayVoiceTranscribed,
+          ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 8),
         Container(
           key: const Key('voice_transcript_box'),
           padding: const EdgeInsets.all(12),
@@ -448,55 +470,6 @@ class _Review extends StatelessWidget {
             ),
             decoration: const InputDecoration.collapsed(hintText: ''),
           ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              flex: 10, // artboard flex:1 (ints only — 10:13 ≡ 1:1.3)
-              child: FilledButton(
-                key: const Key('voice_review_cancel'),
-                onPressed: onCancel,
-                style: FilledButton.styleFrom(
-                  backgroundColor: _cancelBg,
-                  foregroundColor: _cancelText,
-                  side: const BorderSide(color: _cancelBorder),
-                  padding: const EdgeInsets.all(12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                child: const Text('Cancel'),
-              ),
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              flex: 13, // artboard flex:1.3
-              child: FilledButton(
-                key: const Key('voice_use'),
-                onPressed: onUse,
-                // Blue, not violet: the AI transcribed, but the human is the
-                // one acting (spec — "that is not an artboard slip").
-                style: FilledButton.styleFrom(
-                  backgroundColor: RelayTheme.relayHuman,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.all(12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                child: const Text('Use this'),
-              ),
-            ),
-          ],
         ),
       ],
     );

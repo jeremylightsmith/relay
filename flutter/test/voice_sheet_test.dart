@@ -10,6 +10,26 @@ final _sheet = find.byKey(const Key('voice_sheet'));
 final _stop = find.byKey(const Key('voice_stop'));
 final _use = find.byKey(const Key('voice_use'));
 final _transcript = find.byKey(const Key('voice_transcript'));
+final _reviewCancel = find.byKey(const Key('voice_review_cancel'));
+final _provenance = find.byKey(const Key('voice_provenance'));
+final _header = find.byKey(const Key('sheet_header'));
+final _body = find.byKey(const Key('sheet_body'));
+
+/// 7,999 chars — long enough to overflow any phone sheet.
+final _longTranscript = List.filled(800, 'dictation').join(' ');
+
+FakeVoiceTranscriber _longFake() =>
+    FakeVoiceTranscriber(transcript: _longTranscript);
+
+/// A 390×844 phone (status bar 47, home indicator 34) with a 300px keyboard
+/// up: the visible area is y ∈ [47, 544].
+void _phoneWithKeyboard(WidgetTester tester) {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(390, 844);
+  tester.view.padding = const FakeViewPadding(top: 47, bottom: 34);
+  tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+  addTearDown(tester.view.reset);
+}
 
 /// A host with a button that opens the sheet and records the returned value.
 class _Host extends StatelessWidget {
@@ -80,7 +100,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('the review sheet matches the Voice · Whisper artboard', (
+  testWidgets('the review sheet matches card mockup B (header action)', (
     tester,
   ) async {
     final fake = FakeVoiceTranscriber(
@@ -89,7 +109,7 @@ void main() {
     await _open(tester, fake, (_) {});
     await _stopAndReview(tester);
 
-    // Container: white, 22px top radius, padding 20/18/22.
+    // Container: white, 22px top radius; HeaderedSheet supplies the paddings.
     final sheet = tester.widget<Container>(_sheet);
     final deco = sheet.decoration! as BoxDecoration;
     expect(deco.color, Colors.white);
@@ -97,32 +117,36 @@ void main() {
       deco.borderRadius,
       const BorderRadius.vertical(top: Radius.circular(22)),
     );
-    expect(sheet.padding, const EdgeInsets.fromLTRB(18, 20, 18, 22));
+    expect(sheet.padding, EdgeInsets.zero);
 
-    // Header: 34px violet circle — found by its pinned size, not tree index.
+    // Header: 24px violet circle — found by its pinned size, not tree index.
     final badge = tester.widget<Container>(
       find.descendant(
-        of: _sheet,
+        of: _header,
         matching: find.byWidgetPredicate(
           (w) =>
               w is Container &&
-              w.constraints == BoxConstraints.tight(const Size(34, 34)),
+              w.constraints == BoxConstraints.tight(const Size(24, 24)),
         ),
       ),
     );
     expect((badge.decoration! as BoxDecoration).color, RelayTheme.relayAI);
     expect((badge.decoration! as BoxDecoration).shape, BoxShape.circle);
 
-    // "You said" — 13px w600 near-black.
-    final youSaid = tester.widget<Text>(
-      find.byKey(const Key('voice_you_said')),
+    // "You said" — in the header, 14px w600 near-black.
+    final youSaidFinder = find.descendant(
+      of: _header,
+      matching: find.byKey(const Key('voice_you_said')),
     );
-    expect(youSaid.style!.fontSize, 13);
+    final youSaid = tester.widget<Text>(youSaidFinder);
+    expect(youSaid.style!.fontSize, 14);
     expect(youSaid.style!.fontWeight, FontWeight.w600);
     expect(youSaid.style!.color, const Color(0xFF1E252E));
 
-    // Provenance — 9.5px monospace in the new darker-green token.
-    final prov = tester.widget<Text>(find.byKey(const Key('voice_provenance')));
+    // Provenance — in the scrolling body, not the header; style unchanged.
+    expect(find.descendant(of: _body, matching: _provenance), findsOneWidget);
+    expect(find.descendant(of: _header, matching: _provenance), findsNothing);
+    final prov = tester.widget<Text>(_provenance);
     expect(prov.data, 'TRANSCRIBED · WHISPER · TAP TO EDIT');
     expect(prov.style!.fontSize, 9.5);
     expect(prov.style!.fontFamily, 'monospace');
@@ -145,23 +169,115 @@ void main() {
     expect(field.cursorColor, RelayTheme.relayAI);
     expect(field.controller!.text, 'Yes, publish, but fix the second one.');
 
-    // Footer: Use this is BLUE (the human acts), flex 10:13 ≡ 1:1.3.
-    final useBtn = tester.widget<FilledButton>(_use);
-    expect(useBtn.style!.backgroundColor!.resolve({}), RelayTheme.relayHuman);
-    final flexes = [
-      tester.widget<Expanded>(
-        find.ancestor(
-          of: find.byKey(const Key('voice_review_cancel')),
-          matching: find.byType(Expanded),
-        ),
-      ),
-      tester.widget<Expanded>(
-        find.ancestor(of: _use, matching: find.byType(Expanded)),
-      ),
-    ].map((e) => e.flex);
-    expect(flexes, [10, 13]);
+    // Header action: Use this is BLUE (the human acts).
+    final useBtn = tester.widget<FilledButton>(
+      find.descendant(of: _use, matching: find.byType(FilledButton)),
+    );
+    final bg = useBtn.style!.backgroundColor!.resolve({});
+    expect(bg, RelayTheme.relayHuman);
 
-    await tester.tap(find.byKey(const Key('voice_review_cancel')));
+    // Cancel left | "You said" centre | Use this right.
+    final cancelX = tester.getCenter(_reviewCancel).dx;
+    final youSaidX = tester.getCenter(youSaidFinder).dx;
+    final useX = tester.getCenter(_use).dx;
+    expect(cancelX, lessThan(youSaidX));
+    expect(youSaidX, lessThan(useX));
+
+    // The flex 10:13 bottom row is gone.
+    expect(
+      find.ancestor(of: _use, matching: find.byType(Expanded)),
+      findsNothing,
+    );
+    expect(
+      find.ancestor(of: _reviewCancel, matching: find.byType(Expanded)),
+      findsNothing,
+    );
+
+    await tester.tap(_reviewCancel);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('the recording stage keeps its padding and full-width Stop', (
+    tester,
+  ) async {
+    await _open(tester, FakeVoiceTranscriber(), (_) {});
+
+    expect(
+      tester.widget<Container>(_sheet).padding,
+      const EdgeInsets.fromLTRB(18, 20, 18, 22),
+    );
+    expect(tester.widget(_stop), isA<FilledButton>());
+    final sheetRect = tester.getRect(_sheet);
+    expect(tester.getSize(_stop).width, sheetRect.width - 36);
+
+    await _stopAndReview(tester);
+    await tester.tap(_reviewCancel);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a long dictation can still be accepted with the keyboard up', (
+    tester,
+  ) async {
+    _phoneWithKeyboard(tester);
+    String? result = 'sentinel';
+    await _open(tester, _longFake(), (r) => result = r);
+    await _stopAndReview(tester);
+
+    expect(_use.hitTestable(), findsOneWidget);
+    final useRect = tester.getRect(_use);
+    expect(useRect.top, greaterThanOrEqualTo(47));
+    expect(useRect.bottom, lessThanOrEqualTo(544));
+
+    await tester.tap(_use);
+    await tester.pumpAndSettle();
+
+    expect(result, _longTranscript);
+    expect(result!.length, 7999);
+    expect(_sheet, findsNothing);
+  });
+
+  testWidgets('the body scrolls under a fixed header', (tester) async {
+    _phoneWithKeyboard(tester);
+    await _open(tester, _longFake(), (_) {});
+    await _stopAndReview(tester);
+
+    final provBefore = tester.getRect(_provenance);
+    final useBefore = tester.getRect(_use);
+
+    await tester.drag(_body, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+
+    expect(tester.getRect(_provenance).top, lessThan(provBefore.top));
+    expect(tester.getRect(_use), useBefore);
+
+    await tester.tap(_reviewCancel);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a long hand-edited transcript returns in full', (tester) async {
+    _phoneWithKeyboard(tester);
+    String? result = 'sentinel';
+    await _open(tester, _longFake(), (r) => result = r);
+    await _stopAndReview(tester);
+
+    final edited = 'edited by hand ' * 300;
+    await tester.enterText(_transcript, edited);
+    await tester.tap(_use);
+    await tester.pumpAndSettle();
+
+    expect(result, edited.trim());
+  });
+
+  testWidgets('a long review sheet stops below the top safe area', (
+    tester,
+  ) async {
+    _phoneWithKeyboard(tester);
+    await _open(tester, _longFake(), (_) {});
+    await _stopAndReview(tester);
+
+    expect(tester.getRect(_sheet).top, greaterThanOrEqualTo(47));
+
+    await tester.tap(_reviewCancel);
     await tester.pumpAndSettle();
   });
 
