@@ -10,6 +10,7 @@ defmodule Schemas do
     deps: [],
     exports: [
       Activity,
+      Agent,
       ApiKey,
       Attachment,
       Board,
@@ -25,6 +26,7 @@ defmodule Schemas do
       Flow.Edge,
       Flow.Node,
       FlowVersion,
+      Harness,
       Membership,
       NodeExecution,
       NodeJob,

@@ -57,7 +57,7 @@ defmodule Relay.FlowsSeedTest do
     :ok = Flows.seed_default_flows!(ctx.board)
 
     spec = Flows.get_flow(ctx.board, "spec")
-    assert [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1, model: nil}] = spec.nodes
+    assert [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}", max_retries: 1, llm: nil}] = spec.nodes
 
     assert [
              %{from: "start", to: "brainstorm", on: nil},
@@ -77,7 +77,7 @@ defmodule Relay.FlowsSeedTest do
     assert %{foreach: "card.tasks"} = Enum.find(code.nodes, &(&1.key == "implement"))
 
     implement = Enum.find(code.nodes, &(&1.key == "implement"))
-    assert %{type: :agent, model: "opus", effort: "high"} = implement
+    assert %{type: :agent, llm: "Claude Opus", effort: "high"} = implement
 
     assert %{type: :gate, run: "mix precommit"} = Enum.find(code.nodes, &(&1.key == "precommit"))
     assert %{type: :shell} = Enum.find(code.nodes, &(&1.key == "merge"))

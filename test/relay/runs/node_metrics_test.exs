@@ -34,7 +34,7 @@ defmodule Relay.Runs.NodeMetricsTest do
     insert(:flow,
       board: board,
       key: "code",
-      nodes: Enum.map(keys, &%Schemas.Flow.Node{key: &1, type: :agent, model: "sonnet"})
+      nodes: Enum.map(keys, &%Schemas.Flow.Node{key: &1, type: :agent, llm: "Claude Sonnet"})
     )
   end
 
@@ -45,7 +45,7 @@ defmodule Relay.Runs.NodeMetricsTest do
       key: "code",
       nodes:
         Enum.map(keyed_roles, fn {key, role} ->
-          %Schemas.Flow.Node{key: key, type: :agent, model: "sonnet", role: role}
+          %Schemas.Flow.Node{key: key, type: :agent, llm: "Claude Sonnet", role: role}
         end)
     )
   end

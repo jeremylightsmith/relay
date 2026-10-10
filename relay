@@ -19,6 +19,7 @@ import os
 import queue
 import random
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -58,8 +59,8 @@ USAGE_LIMITER = None   # the running `relay start`'s UsageLimiter (RE320); None 
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 84
-RUNNER_FINGERPRINT = "f1e09ac2310fdcbaa3e3fed48759ffbd403231dede406a77109e1fdadc127e8c"
+RUNNER_VERSION = 85
+RUNNER_FINGERPRINT = "7b7a7022349ae3249d99b05c5abcd19be50734091b027d6dd0e79c5df6e43ca2"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -353,6 +354,50 @@ def capabilities_hash(capabilities):
     return hashlib.sha256(blob).hexdigest()
 
 
+HARNESS_PROBE_TIMEOUT_S = 10     # each --version / signed-in check; run at start + on digest change
+
+
+def _probe(run, argv):
+    """One inventory subprocess; the CompletedProcess, or None when it could not run at all."""
+    try:
+        return run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                   timeout=HARNESS_PROBE_TIMEOUT_S)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _harness_entry(harness, which, run):
+    entry = {"key": harness.get("key"), "installed": False, "version": None, "signed_in": None}
+    try:
+        exe = shlex.split(harness.get("command") or "")[0]
+    except (ValueError, IndexError):
+        return entry
+    if not which(exe):
+        return entry
+    entry["installed"] = True
+    proc = _probe(run, [exe, "--version"])
+    if proc is not None and proc.returncode == 0:
+        entry["version"] = ((proc.stdout or "").strip().splitlines() or [None])[0]
+    check = harness.get("signed_in_check")
+    if check:
+        try:
+            proc = _probe(run, shlex.split(check))
+        except ValueError:
+            proc = None
+        entry["signed_in"] = proc is not None and proc.returncode == 0
+    return entry
+
+
+def harness_inventory(harnesses, which=shutil.which, run=subprocess.run):
+    """What this machine can run, per board harness (RE433): {key, installed, version,
+    signed_in}. `installed` = the template's executable is on PATH; `version` = the first line
+    of `<exe> --version`; `signed_in` = the harness's signed-in check exited 0 (None when the
+    harness defines no check, or the CLI is not installed). Never raises: a probe that times out
+    or cannot start degrades to None / False. The server only offers this runner jobs whose
+    harness it reports installed."""
+    return [_harness_entry(h, which, run) for h in harnesses if isinstance(h, dict)]
+
+
 class RunnerHeartbeat:
     """Per-runner heartbeat for `relay start`. POSTs
     {runner, capacity, running:[job-ids]} to /api/node-jobs/heartbeat every `interval`s and
@@ -377,6 +422,10 @@ class RunnerHeartbeat:
       * `rate_limit` (RE320) — the runner's own Claude usage pause, or null; sent on EVERY
         beat so the board sees a paused runner as paused (and a resumed one as not) within one
         interval.
+      * `harnesses` (RE433) — `harness_inventory` of the board's harnesses, sent on every beat
+        once known. Computed by `refresh_harnesses` (GET /api/harnesses) at startup and again
+        only when a reply's `harnesses_digest` differs from the one held — never per beat, since
+        it spawns subprocesses.
 
     Best-effort by construction: `_beat` swallows api()'s die() (`Died`, a SystemExit) and any
     other error, so a heartbeat can never stall or raise into a job, and every API call it makes
@@ -407,6 +456,10 @@ class RunnerHeartbeat:
         # send the key, a board whose scaffold was never built, or a beat that has not landed —
         # reads as "never auto-update", which is the safe answer.
         self.latest_version = None
+        # RE433: the inventory sent on every beat, and the digest of the definitions it was
+        # computed from. None ⇒ not fetched yet (the next differing reply digest fetches).
+        self.harnesses = None
+        self.harnesses_digest = None
         # RE336: a failing heartbeat must be visible, not silent. `last_ok` is the clock() of
         # the last beat that landed; `_failing_since` is the clock() of the first failure of
         # the current failing streak (None while beats land); `_fail_logged_at` throttles the
@@ -437,7 +490,8 @@ class RunnerHeartbeat:
             send = capabilities if digest != self._caps_hash else None
             resp = api("POST", "/api/node-jobs/heartbeat",
                        heartbeat_body(self.runner, self.capacity, self.running_fn(),
-                                      self.held_fn(), send, self.rate_limit_fn()),
+                                      self.held_fn(), send, self.rate_limit_fn(),
+                                      self.harnesses),
                        soft_404=True) or {}
         except (Exception, SystemExit) as e:      # api() die()s on HTTP/network error
             self._beat_failed(e)
@@ -454,6 +508,9 @@ class RunnerHeartbeat:
             if resp.get("want_capabilities"):
                 self._caps_hash = None
             self.latest_version = resp.get("latest_runner_version")
+            digest = resp.get("harnesses_digest")
+            if digest is not None and digest != self.harnesses_digest:
+                self.refresh_harnesses()
             for job_id in resp.get("revoked", []):
                 self.on_revoke(job_id)
             for item in resp.get("release_held", []):
@@ -464,6 +521,17 @@ class RunnerHeartbeat:
                     self.on_release_held(item.get("ref"), item.get("status"))
         except (Exception, SystemExit):
             pass
+
+    def refresh_harnesses(self):
+        """GET /api/harnesses and recompute the inventory (RE433). Never raises: a failed fetch
+        leaves the digest alone, so the next beat's reply retries it."""
+        try:
+            resp = api("GET", "/api/harnesses", timeout=API_TIMEOUT_S) or {}
+            self.harnesses = harness_inventory(resp.get("harnesses") or [])
+            self.harnesses_digest = resp.get("digest")
+        except (Exception, SystemExit) as e:
+            log(f"⚠ could not fetch harness definitions: {getattr(e, 'msg', None) or e}",
+                kind="error")
 
     def _beat_ok(self):
         now = self.clock()
@@ -3219,6 +3287,101 @@ def render(template, vars):
     return template
 
 
+# ---- Harness command templates (RE433) ---------------------------------------
+# A board's harness is an agent CLI's shell-style command template. The runner expands it
+# GENERICALLY: no harness key or name is special-cased in this file (bin/test_relay.py's
+# RunnerHarnessGuardTest), so a new CLI is a board setting, not a runner release.
+# Pinned to Schemas.Harness.placeholders/0 by the contract fixture's
+# `vocabulary.harness_placeholders`.
+HARNESS_PLACEHOLDERS = ("prompt", "model", "worktree", "ref", "effort", "subagent", "session")
+PLACEHOLDER_RE = re.compile(r"\{([A-Za-z0-9_]+)\}")
+
+
+class TemplateError(Exception):
+    """A harness command template that cannot be expanded with the values at hand."""
+
+
+def _template_names(token):
+    names = PLACEHOLDER_RE.findall(token)
+    for name in names:
+        if name not in HARNESS_PLACEHOLDERS:
+            raise TemplateError(f"unknown placeholder {{{name}}}")
+    return names
+
+
+def _fill(token, values):
+    # One pass: a substituted value is never re-scanned, so a prompt carrying `{model}` stays
+    # verbatim.
+    return PLACEHOLDER_RE.sub(lambda m: str(values[m.group(1)]), token)
+
+
+def _segments(tokens):
+    """Group shlex tokens into (optional?, [tokens]) runs. `[--effort {effort}]` splits into
+    `[--effort` and `{effort}]`: strip one leading `[` from the first token and one trailing
+    `]` from the last. Nesting does not exist (the server validates templates)."""
+    groups, i = [], 0
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.startswith("["):
+            groups.append((False, [token]))
+            i += 1
+            continue
+        segment, token = [], token[1:]
+        while not token.endswith("]"):
+            segment.append(token)
+            i += 1
+            if i >= len(tokens):
+                raise TemplateError("unclosed [ segment")
+            token = tokens[i]
+        segment.append(token[:-1])
+        groups.append((True, [t for t in segment if t != ""]))
+        i += 1
+    return groups
+
+
+def expand_command(template, values):
+    """Expand a harness command template into argv. Pure.
+
+    Split with shlex FIRST, then substitute inside each token, so each placeholder fills
+    exactly one argv element and the prompt never passes through a shell. A `[ … ]` segment
+    is dropped whole when any placeholder in it is None or ""; outside a segment such a
+    placeholder is an error, as is any name outside HARNESS_PLACEHOLDERS."""
+    def empty(name):
+        return values.get(name) in (None, "")
+
+    argv = []
+    for optional, tokens in _segments(shlex.split(template)):
+        names = [n for t in tokens for n in _template_names(t)]
+        if optional and any(empty(n) for n in names):
+            continue
+        for name in names:
+            if empty(name):
+                raise TemplateError(f"template placeholder {{{name}}} has no value")
+        argv.extend(_fill(t, values) for t in tokens)
+    return argv
+
+
+def select_command(harness, session_id):
+    """(template, session) for one agent run: resume only where the harness can. A harness with
+    no `resume_command` starts fresh even when the job carries a session to resume."""
+    resume = harness.get("resume_command")
+    if session_id and resume:
+        return resume, session_id
+    return harness["command"], None
+
+
+def read_path(event, path):
+    """Follow a dot path (`.a.b`) through nested dicts; a non-empty string, else None."""
+    if not path:
+        return None
+    value = event
+    for key in path.strip(".").split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value if isinstance(value, str) and value else None
+
+
 def _tool_brief(block):
     """The short 'target' text for a tool_use content block — its command/file_path/path/
     pattern/description, truncated to 140 chars. Shared by the console/board-log renderer
@@ -3754,7 +3917,8 @@ def claim_body(runner, capacity, running=(), held=()):
             "held": list(held)}
 
 
-def heartbeat_body(runner, capacity, running, held, capabilities=None, rate_limit=None):
+def heartbeat_body(runner, capacity, running, held, capabilities=None, rate_limit=None,
+                   harnesses=None):
     """The exact body POSTed to /api/node-jobs/heartbeat (RLY-164 / RE311).
 
     Pure for the same reason as outcome_body: it is pinned against the fixture's
@@ -3765,11 +3929,15 @@ def heartbeat_body(runner, capacity, running, held, capabilities=None, rate_limi
     old key could not name the case that leaked slots. `capabilities` is OPTIONAL and rides
     send-on-change (RLY-182): omitted on a beat where nothing changed. `rate_limit` (RE320) is
     ALWAYS sent: null while claiming, `UsageLimiter.wire()` while paused — the server clears the
-    pause on null, so omitting it would leave a resumed runner marked rate limited."""
+    pause on null, so omitting it would leave a resumed runner marked rate limited.
+    `harnesses` (RE433) is the `harness_inventory`, omitted until the runner has fetched the
+    board's harness definitions — the server reads a never-reported runner as Claude Code only."""
     body = {"runner": runner, "capacity": capacity, "running": running,
             "held": held, "rate_limit": rate_limit}
     if capabilities is not None:
         body["capabilities"] = capabilities
+    if harnesses is not None:
+        body["harnesses"] = harnesses
     return body
 
 
@@ -3815,7 +3983,7 @@ CLAUDE_FAILURE_DEFAULT_USAGE_REASON = "Claude usage limit reached"
 
 class ClaudeRunReport:
     """What one `claude -p` stream said about how it ended (RE308): fed every parsed event by
-    `_stream_claude_job`, read by `classify_claude_failure`. Total — an unexpected shape is
+    `_stream_agent_job`, read by `classify_claude_failure`. Total — an unexpected shape is
     ignored, never raised, because it runs inside the job's own stream loop.
 
     A rejected `rate_limit_event` is recorded from THIS job's stream, never read back from the
@@ -3948,41 +4116,33 @@ def classify_claude_failure(report):
     return {"kind": kind, "reason": reason}
 
 
-def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None,
-                      agent=None, partition=None, scratch=None, plan=None, on_event=None,
-                      mirror=True):
-    """Runner variant of _stream_claude. Runs `claude -p` (or `--resume <session_id>` on a
-    needs-input re-entry), streams events, captures the claude session id from the stream-json
-    events (init/result carry `session_id`), and sets $RELAY_NODE_OUTCOME so an agent node can
-    signal `partial`. `agent` selects a `.claude/agents/<name>.md` definition via --agent; an
-    unknown name makes the CLI fail loudly (verified against 2.1.214) rather than silently
-    degrade to the default agent, which is what makes this safe to depend on. `partition`, if
-    given, is exported as MIX_TEST_PARTITION (RLY-213) so a gate this agent runs sees its
-    slot's own test database. `scratch`, if given, is exported as RELAY_NODE_SCRATCH
-    (RLY-214) — the agent's own scratch file for this node, per `scratch_path(slot, ref,
-    node)`. `plan`, if given, is exported as RELAY_PLAN (RLY-223) — the per-ref materialized
-    plan the agent reads. `on_event`, if given, is called with each parsed stream-json event as
-    it arrives, so a talk turn can stream its transcript while the turn is still working.
-    `mirror`, if False, is passed through to `_print_claude_event` so a talk turn prints locally
-    without also forwarding to the ref-keyed board-log mirror (RE268).
+def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None,
+                      partition=None, scratch=None, plan=None, on_event=None, mirror=True):
+    """Run one agent CLI invocation — `argv`, already expanded from a harness command template
+    (RE433) — and stream its JSON events. The session id is read from each event at
+    `session_id_path` (a dot path, `.session_id` for Claude Code, `.thread_id` for a CLI that
+    names it so); the latest non-empty value wins, and no path captures nothing.
+    $RELAY_NODE_OUTCOME is set so an agent node can signal `partial`. `partition`, if given,
+    is exported as MIX_TEST_PARTITION (RLY-213) so a gate this agent runs sees its slot's own
+    test database. `scratch`, if given, is exported as RELAY_NODE_SCRATCH (RLY-214) — the
+    agent's own scratch file for this node, per `scratch_path(slot, ref, node)`. `plan`, if
+    given, is exported as RELAY_PLAN (RLY-223) — the per-ref materialized plan the agent reads.
+    `on_event`, if given, is called with each parsed event as it arrives, so a talk turn can
+    stream its transcript while the turn is still working. `mirror`, if False, is passed
+    through to `_print_claude_event` so a talk turn prints locally without also forwarding to
+    the ref-keyed board-log mirror (RE268).
+
+    stdin is DEVNULL: an agent CLI reading a non-TTY stdin (`codex exec` does) would otherwise
+    hang on, or append junk from, the runner's own stdin.
     Returns (ok, captured_session_id, report) — `report` is the job's ClaudeRunReport (RE308).
     `on_proc` receives the live Popen."""
-    # Auto mode, not --dangerously-skip-permissions: its classifier denies a risky action (an
-    # exfiltration, a deploy, a force-push) and -p carries on without it, where skipping
-    # permissions let every action through unchecked.
-    cmd = ["claude", "-p", prompt, "--permission-mode", "auto",
-           "--verbose", "--output-format", "stream-json"]
-    if session_id:
-        cmd[2:2] = ["--resume", session_id]     # claude -p --resume <session> <prompt>
-    if agent:
-        cmd += ["--agent", agent]
     child_env = dict(os.environ)
     # `claude -p` caps how long it waits for a background workflow at 10 minutes
     # by default (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, v2.1.182+). A long agent
     # node (implement, final_review) can run past that, and without lifting the cap
     # -p exits mid-run and the node reports a partial result as if it were done.
     # "0" = wait until the work finishes on its own. An explicit env override wins,
-    # hence setdefault rather than an unconditional assignment.
+    # hence setdefault rather than an unconditional assignment. Inert for any other CLI.
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         child_env["RELAY_NODE_OUTCOME"] = outcome_path
@@ -3990,9 +4150,9 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
     # Every caller is a runner node-job, which passes on_proc (a JobControl.register)
     # and so gets its own process group (start_new_session), since only a JobControl can
     # kill that group.
-    proc = subprocess.Popen(cmd, cwd=cwd, text=True, bufsize=1, env=child_env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=on_proc is not None)
+    proc = subprocess.Popen(argv, cwd=cwd, text=True, bufsize=1, env=child_env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, start_new_session=on_proc is not None)
     if on_proc:
         on_proc(proc)
     captured = None
@@ -4003,7 +4163,7 @@ def _stream_claude_job(prompt, cwd, tag="", session_id=None, outcome_path=None, 
             continue
         try:
             ev = json.loads(line)
-            captured = ev.get("session_id") or captured
+            captured = read_path(ev, session_id_path) or captured
             report.observe(ev)          # RE308: total; never raises
             _print_claude_event(ev, tag, mirror=mirror)
             if USAGE_LIMITER is not None:
@@ -4334,6 +4494,26 @@ def compose_node_prompt(job, cmd, vars):
     return cmd + findings_block(vars) + render(OUTCOME_CONTRACT, vars)
 
 
+NO_HARNESS_REFUSAL = "this job carries no harness — the server and runner disagree; update both"
+
+
+def agent_argv(job, slot_path, prompt, ref):
+    """(argv, session_id_path, refusal) for an agent node-job, from the harness the server
+    resolved at enqueue (RE433). Resume only where the harness can (`select_command`). A job
+    with no harness, or a template that cannot expand, is a refusal string and no argv — the
+    caller fails the node without spawning anything."""
+    harness = job.get("harness")
+    if not harness:
+        return None, None, NO_HARNESS_REFUSAL
+    template, session = select_command(harness, job.get("resume_session"))
+    values = {"prompt": prompt, "model": job.get("model"), "worktree": slot_path, "ref": ref,
+              "effort": job.get("effort"), "subagent": job.get("agent"), "session": session}
+    try:
+        return expand_command(template, values), harness.get("session_id_path"), None
+    except TemplateError as e:
+        return None, None, str(e)
+
+
 def run_node_job(job, slot_path, control, partition=None):
     """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id,
     no_changes, resume_at). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
@@ -4384,6 +4564,11 @@ def run_node_job(job, slot_path, control, partition=None):
 
     session_id = None
     if job.get("node_type") == "agent":
+        argv, session_path, refusal = agent_argv(job, slot_path, compose_node_prompt(job, cmd, vars),
+                                                 vars["ref"])
+        if refusal:
+            log(f"  ⚠ {ref}: {refusal}", ref=ref, kind="error")
+            return "failed", refusal, git_head_sha(slot_path), None, False, None
         # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any
         # non-empty `git status --porcelain`, so a file inside slot_path would make every
         # agent job leave a spurious "salvaging leftovers" stash for the next job on this
@@ -4391,10 +4576,9 @@ def run_node_job(job, slot_path, control, partition=None):
         outcome_dir = tempfile.mkdtemp(prefix="relay-node-outcome-")
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         try:
-            ok, session_id, report = _stream_claude_job(
-                compose_node_prompt(job, cmd, vars), cwd=slot_path, tag=tag,
-                session_id=job.get("resume_session"),
-                outcome_path=outcome_path, on_proc=control.register, agent=job.get("agent"),
+            ok, session_id, report = _stream_agent_job(
+                argv, cwd=slot_path, tag=tag, session_id_path=session_path,
+                outcome_path=outcome_path, on_proc=control.register,
                 partition=partition, scratch=scratch, plan=plan)
             outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path,
                                                                   report=report)
@@ -4439,6 +4623,15 @@ To learn what the card's runs actually did, use the Relay CLI rather than guessi
 In this step you must NOT change anything: do not edit files, do not commit, do not push, and do
 not modify the card. If you are asked to change something, say plainly that you cannot yet.
 """
+
+
+# Talk stays on `claude` (RE433 leaves it out of scope), expanded like any harness template.
+# Auto mode, not --dangerously-skip-permissions: its classifier denies a risky action (an
+# exfiltration, a deploy, a force-push) and -p carries on without it.
+TALK_COMMAND = "claude -p {prompt} --permission-mode auto --verbose --output-format stream-json"
+TALK_RESUME_COMMAND = ("claude -p --resume {session} {prompt} --permission-mode auto --verbose "
+                       "--output-format stream-json")
+TALK_SESSION_PATH = ".session_id"
 
 
 def talk_prompt(job):
@@ -4609,10 +4802,12 @@ def run_talk_job(job, slot_path, control, sender):
                 continue
             sender.enqueue(line["kind"], line["text"], line["dim"])
 
-    ok, session_id, _report = _stream_claude_job(
-        talk_prompt(job), cwd=slot_path, tag=tag,
-        session_id=job.get("resume_session"), on_proc=control.register,
-        on_event=on_event, mirror=False)
+    resume = job.get("resume_session")
+    argv = expand_command(TALK_RESUME_COMMAND if resume else TALK_COMMAND,
+                          {"prompt": talk_prompt(job), "session": resume})
+    ok, session_id, _report = _stream_agent_job(
+        argv, cwd=slot_path, tag=tag, session_id_path=TALK_SESSION_PATH,
+        on_proc=control.register, on_event=on_event, mirror=False)
 
     delivered = sender.flush()
     if control.cancelled():
@@ -5322,6 +5517,9 @@ def cmd_start(args):
         # Beat once up front: Relay.Runs.Capacity is empty on a fresh server (it is lost on
         # every restart by design), and until it is fed the scheduler plans zero dispatches.
         # Waiting a full interval here would make "start the runner" look broken.
+        # RE433: inventory the harnesses first, so this very beat already says what this
+        # machine can run — a runner that has another CLI is never read as Claude-only.
+        hb.refresh_harnesses()
         hb._beat()
         hb.start()
 

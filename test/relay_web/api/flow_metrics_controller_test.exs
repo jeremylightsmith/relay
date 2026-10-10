@@ -9,7 +9,12 @@ defmodule RelayWeb.Api.FlowMetricsControllerTest do
   end
 
   test "returns summary + nodes with cost null when blank", %{conn: conn, board: board} do
-    insert(:flow, board: board, key: "code", nodes: [%Schemas.Flow.Node{key: "implement", type: :agent, model: "sonnet"}])
+    insert(:flow,
+      board: board,
+      key: "code",
+      nodes: [%Schemas.Flow.Node{key: "implement", type: :agent, llm: "Claude Sonnet"}]
+    )
+
     card = insert(:card, board: board, stage: insert(:stage, board: board))
     run = insert(:run, card: card, flow_key: "code", status: :done)
     insert(:node_execution, run: run, node: "implement", duration_s: 60, cost: nil)
@@ -103,7 +108,7 @@ defmodule RelayWeb.Api.FlowMetricsControllerTest do
         insert(:flow,
           board: board,
           key: "code",
-          nodes: [%Schemas.Flow.Node{key: "implement", type: :agent, model: "sonnet"}]
+          nodes: [%Schemas.Flow.Node{key: "implement", type: :agent, llm: "Claude Sonnet"}]
         )
 
       stage = insert(:stage, board: board)
@@ -198,8 +203,8 @@ defmodule RelayWeb.Api.FlowMetricsControllerTest do
         board: board,
         key: "code",
         nodes: [
-          %Schemas.Flow.Node{key: "review", type: :agent, model: "sonnet"},
-          %Schemas.Flow.Node{key: "fix", type: :agent, model: "sonnet"}
+          %Schemas.Flow.Node{key: "review", type: :agent, llm: "Claude Sonnet"},
+          %Schemas.Flow.Node{key: "fix", type: :agent, llm: "Claude Sonnet"}
         ]
       )
 

@@ -13,7 +13,7 @@
     {
       "key": "implement",
       "type": "agent",
-      "model": "opus",
+      "llm": "Claude Opus",
       "effort": "high",
       "max_retries": 1,
       "expects_commits": true,
@@ -26,7 +26,7 @@
       "key": "spec_review",
       "type": "agent",
       "role": "check",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "agent": "spec-reviewer",
       "reads": ["tasks"],
       "run": "Review task {task_id} (\"{task}\"), just implemented, against its spec — the task's body, fetched with the relay task show command: `{relay} task show {ref} {task_id}`. Nothing missing, nothing extra."
@@ -35,7 +35,7 @@
       "key": "quality_review",
       "type": "agent",
       "role": "check",
-      "model": "opus",
+      "llm": "Claude Opus",
       "agent": "quality-reviewer",
       "reads": ["tasks"],
       "run": "Judge whether the change for task {task_id} (\"{task}\") is well-built: clean, conventional, meaningfully tested. Its spec is the task's body — fetch it with the relay task show command, `{relay} task show {ref} {task_id}`, when you need to know what the change was for."
@@ -43,7 +43,7 @@
     {
       "key": "fix_findings",
       "type": "agent",
-      "model": "opus",
+      "llm": "Claude Opus",
       "max_retries": 1,
       "agent": "final-fixer",
       "expects_commits": true,
@@ -58,7 +58,7 @@
     {
       "key": "sync_fix",
       "type": "agent",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "agent": "rebaser",
       "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
     },
@@ -68,14 +68,14 @@
       "key": "final_review",
       "type": "agent",
       "role": "check",
-      "model": "opus",
+      "llm": "Claude Opus",
       "agent": "final-reviewer",
       "run": "Whole-branch cross-cutting review — issues only visible across the whole diff. Includes the docs/architecture freshness check."
     },
     {
       "key": "final_fix",
       "type": "agent",
-      "model": "opus",
+      "llm": "Claude Opus",
       "agent": "final-fixer",
       "expects_commits": true,
       "run": "Fix everything in the message in one consolidated pass, then leave the branch green: `mix precommit`, plus `mix test.browser` when the browser gate, smoke or acceptance sent you here."
@@ -84,7 +84,7 @@
       "key": "smoke",
       "type": "agent",
       "role": "check",
-      "model": "opus",
+      "llm": "Claude Opus",
       "agent": "smoke-tester",
       "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard."
     },
@@ -92,7 +92,7 @@
       "key": "acceptance",
       "type": "agent",
       "role": "check",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "agent": "acceptance-tester",
       "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block)."
     },
@@ -104,7 +104,7 @@
     {
       "key": "resync_fix",
       "type": "agent",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "agent": "rebaser",
       "run": "Bring this branch onto current origin/main with both branch gates green — `mix precommit` and `mix test.browser`: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement."
     },
@@ -125,14 +125,14 @@
     {
       "key": "github_fix",
       "type": "agent",
-      "model": "opus",
+      "llm": "Claude Opus",
       "agent": "ci-fixer",
       "run": "The deploy node failed: card {ref}'s PR did not merge, or main's CI did not pass and deploy it. Its output is in the message. Work out which case it is, then leave the right commits on branch {branch}. The flow then goes back through resync, the gates and merge (which pushes and opens a PR if one is needed), and waits for the deploy again."
     },
     {
       "key": "post",
       "type": "agent",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Post the acceptance checklist and the smoke screenshots to card {ref} as one comment, then record the structured result with `{relay} result {ref} @<file>`.\n\nUpload every screenshot to the card first — `{relay} attach {ref} <path> --field url` prints the `/attachments/<uuid>` path the board serves. That path is what both the comment (`![caption](/attachments/<uuid>)`) and the result's `screens` use. A path on your machine (`tmp/smoke/01-door.png`) is not a URL: the browser cannot fetch it and the tile renders blank.\n\nThe file holds a JSON object with **only** these keys, each optional — `summary`, `changes`, `screens`. Anything else is refused with `422 invalid_ai_result`: there is no `deploy_url`, and a screen has no `image` / `shot` / `path` / `name`.\n\n- `summary` — a string, rendered as markdown: a bullet list, 3-5 bullets, 1-2 sentences each, for a busy product owner who knows the product but not what things are called in the code. Name the screen or flow a person clicks, never a module or function. Spend the bullets on what they should go look at — the biggest behavior changes, the technically riskiest part, and any UX you are least confident matches its docs/designs artboard — and skip the routine (tests green, criteria met: the comment already covers that).\n- `changes` — a list of **strings**, not objects: user-facing changes as short verb phrases, not sentences. Start with a verb, no trailing period, under about eight words — 'Adds a summary to the card drawer', not 'This change adds a summary section so that…'. A change with no user-visible effect belongs in `summary`, not `changes`.\n- `screens` — a list of objects with `url` (required — the `/attachments/<uuid>` path from `attach`) and `caption` (optional — one short line naming the screen and what to look at). Nothing else in the object. Omit `screens` entirely when the change has no UI.",
       "writes": ["ai_result"]
     }

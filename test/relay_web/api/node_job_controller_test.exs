@@ -1013,4 +1013,36 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-junk-rl").rate_limit == nil
     end
   end
+
+  describe "heartbeat harnesses (RE433)" do
+    # Task 2 · Scenario 11
+    test "stores the normalized inventory, replies the digest, and an absent key leaves it alone",
+         %{conn: conn, board: board} do
+      codex = %{"key" => "codex", "installed" => true, "version" => "codex-cli 0.160.0", "signed_in" => true}
+
+      response =
+        conn
+        |> post(~p"/api/node-jobs/heartbeat", %{
+          "runner" => %{"name" => "exec-h"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [],
+          "harnesses" => [codex, %{"key" => 7}, "junk"]
+        })
+        |> json_response(200)
+
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h")
+      assert runner.harnesses == [codex]
+      assert response["harnesses_digest"] == Relay.Agents.harnesses_digest(board)
+
+      conn
+      |> post(~p"/api/node-jobs/heartbeat", %{
+        "runner" => %{"name" => "exec-h"},
+        "capacity" => %{"shared_clean" => 1},
+        "running" => []
+      })
+      |> json_response(200)
+
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h").harnesses == [codex]
+    end
+  end
 end

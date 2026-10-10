@@ -59,6 +59,28 @@ sharing behavior.
   (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved
   membership). A muted member gets no APNs push for that board; browser notifications, badges
   and the needs-you counts are unaffected. Muting never moves a row in the display order.
+- **Agents** — a board's LLMs (RE433). **Harnesses** (`Schemas.Harness`, table `harnesses`):
+  an agent CLI's command template (`{placeholder}`s from `Schemas.Harness.placeholders/0`,
+  optional `[ … ]` segments), optional `resume_command` / `session_id_path` /
+  `signed_in_check`, and its closed `models` list; `key` is derived from the name once and never
+  changes. **Agents** (`Schemas.Agent`, table `agents`): a unique name, a harness and one of its
+  models. `boards.default_agent_id` (nilify on delete) is the agent a node with no `llm`
+  inherits. `ensure_seeded!/1` (idempotent; called by `Boards.create_board/2`,
+  `Flows.seed_default_flows!/1`, `seeds.exs`) gives a board the `seed_harnesses/0` (Claude Code,
+  Codex, Gemini CLI) and, when it has no agents, "Claude Opus" / "Claude Sonnet" / "Claude Haiku"
+  on `claude-code` with Opus the default; the `CreateHarnessesAndAgents` migration seeded every
+  existing board from a frozen copy. `red?/1` (the agent's model has left its harness's list) is
+  the one red-agent rule. A harness edit may drop a model in use (the agent turns red);
+  `delete_harness/1` refuses while agents use it, `delete_agent/1` refuses the default and an agent
+  a node names (`node_usage/1`). Renaming an agent rewrites `llm` on the board's flow nodes
+  without bumping their version. At run time `resolve/2` turns a node's `llm` into its agent
+  (`{:ok, _}` / `{:red, _}` / `{:error, {:unknown_agent, name}}`) for `Relay.Runs.build_payload/4`,
+  and `harness_wire/1` + `harnesses_digest/1` are the runner's view of the definitions
+  (`node_jobs.harness_key`, `runners.harnesses` and the claim filter are in
+  [runner.md](runner.md) "Harness routing"). Depends on `Repo` + `Schemas` only — it reads/writes
+  `Schemas.Flow` rows directly, because `Relay.Flows` depends on it. Humans edit both lists in
+  Board Settings → **Agents** (`?section=agents`, `RelayWeb.AgentsSettingsComponents` rendered by
+  `BoardSettingsLive`, which formats the structured delete refusals into copy).
 - **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, and the one stage the flow
   works in, `stage_id`) with the node/edge graph embedded as jsonb.
@@ -73,6 +95,13 @@ sharing behavior.
   the engine asks at the moment it needs the answer (drop-off is resolved when the run lands);
   `list_flows/1` / `get_flow_with_stages/2` fill the virtual `pulls_from_stage` /
   `lands_on_stage` fields on every read.
+  **Node LLM (RE433):** an agent node's `llm` names one of the board's agents (`Relay.Agents`),
+  nil = the board default. `create_flow/2`, `update_flow/2`, `upsert_from_document/3` and
+  `seed_default_flows!/1` refuse a name that is not an agent on the board
+  (`node "<key>" names LLM "<name>", which is not an agent on this board`). The pre-RE433 node
+  `model` is a legacy alias (`Schemas.Flow.Node.legacy_models/0`, `"opus"` → `"Claude Opus"`)
+  renamed by `normalize_legacy/1`; the `RenameNodeModelToLlm` migration rewrote stored `flows` and
+  `flow_versions`, raising on an unknown model.
   **The shape rule (RE430):** `Relay.Flows.Shape` is the ONE owner of whether a flow's board
   shape can work and of every word explaining a broken one. `Shape.problems/2` (pure, over the
   ordered stages and every flow, enabled or not) built on `neighbours/2` gives a broken flow
@@ -738,6 +767,10 @@ erDiagram
     Release |o--o{ Card : "release_id (nilified on delete)"
     User ||--o{ Membership : has
     Board ||--o{ ApiKey : "agent credentials"
+    Board ||--o{ Harness : "agent CLIs (RE433)"
+    Board ||--o{ Agent : "named LLMs (RE433)"
+    Harness ||--o{ Agent : "runs on"
+    Board |o--o| Agent : "default_agent_id"
     User ||--o{ UserApiToken : "mobile bearer"
     User ||--o{ DeviceToken : "push"
     Card ||--o{ Vote : upvotes
@@ -747,6 +780,10 @@ erDiagram
     TalkTurn ||--o{ TalkEvent : "transcript lines"
     TalkTurn |o--o| NodeJob : "kind: talk (no run)"
 ```
+
+A `Harness` is an agent CLI (command template + closed `models` list) and an `Agent` is a named
+harness + model; flow nodes name an agent in their `llm` and `boards.default_agent_id` is the
+fallback (RE433, `Relay.Agents`).
 
 A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_to_stage`
 (where a rejection sends the card). `Scope` (not shown) is the per-request authorization

@@ -76,6 +76,32 @@ with the verbs above so they travel on the card.
 If your node's work is already committed on the branch, don't fake a commit or escalate:
 `./relay outcome succeeded --no-changes`.
 
+### Adding a harness
+
+A board runs agent nodes on any agent CLI. A **harness** is a name, a **command template** and
+its closed list of **models**, plus three optional fields: a **resume command** (how to continue
+a session; without one a node re-entered after `needs_input` starts fresh), a **session id path**
+(a dot path such as `.session_id` into the CLI's JSON output naming that session) and a
+**signed-in check** (a command that exits 0 when the CLI is logged in). Add and edit them in
+**Settings › Agents**.
+
+A template is shell-style: the runner splits it like a shell would, then fills these
+placeholders — `{prompt}` (required), `{model}`, `{worktree}`, `{ref}`, `{effort}`, `{subagent}`
+(the node's `agent`) and `{session}` (resume command only). Each placeholder becomes exactly one
+argument, however many spaces or quotes its value holds, and nothing passes through a shell.
+Wrap an optional part in `[ … ]`: `[--effort {effort}]` is dropped whole when `{effort}` has no
+value. Outside brackets, a placeholder without a value fails the node.
+
+Worked example — the `pi` CLI:
+
+```
+pi -p {prompt} --model {model} --cwd {worktree}
+```
+
+A runner only claims nodes whose harness it has installed: it reports, per harness, whether the
+template's executable is on its `PATH`, its `--version`, and the signed-in check's result. API
+keys stay in the runner's environment (`.envrc.local`), never on the board.
+
 ### The `RELAY_NODE_SCRATCH` contract
 
 The runner sets `RELAY_NODE_SCRATCH` to a git-ignored file in the node's worktree, stable per

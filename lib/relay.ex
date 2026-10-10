@@ -22,6 +22,7 @@ defmodule Relay do
       Activity.LogSink,
       Activity.Pruner,
       AgentLog,
+      Agents,
       ApiKeys,
       Attachments,
       BoardWatch,

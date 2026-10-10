@@ -7,6 +7,7 @@ defmodule RelayWeb.Api.NodeJobController do
   """
   use RelayWeb, :controller
 
+  alias Relay.Agents
   alias Relay.Runs
   alias Relay.Runs.Capacity
   alias Relay.Talk
@@ -175,7 +176,10 @@ defmodule RelayWeb.Api.NodeJobController do
         # `RUNNER_VERSION` of the `./relay` this app serves at /api/scaffold (RE304), so it
         # cannot lie. `nil` when the scaffold has not been built, which the runner reads as
         # "never auto-update".
-        latest_runner_version: Runs.latest_runner_version()
+        latest_runner_version: Runs.latest_runner_version(),
+        # RE433: the runner refetches `GET /api/harnesses` when this moves, so a harness edit in
+        # Settings reaches the command templates it expands without a restart.
+        harnesses_digest: Agents.harnesses_digest(board)
       })
     end
   end
@@ -207,6 +211,8 @@ defmodule RelayWeb.Api.NodeJobController do
     exec_attrs
     |> Map.put("capacity", Map.get(params, "capacity"))
     |> Map.put("held", Map.get(params, "held"))
+    # RE433: the installed-harness inventory, absent-means-untouched like `held`.
+    |> Map.put("harnesses", Map.get(params, "harnesses"))
     |> Map.put("rate_limit", rate_limit_attr(Map.get(params, "rate_limit")))
   end
 
@@ -459,7 +465,12 @@ defmodule RelayWeb.Api.NodeJobController do
       run: payload["run"],
       isolation: payload["isolation"],
       resume_session: payload["resume_session"],
-      vars: payload["vars"] || %{}
+      vars: payload["vars"] || %{},
+      # RE433: resolved at enqueue — the command template the runner expands, its model and the
+      # node's effort. nil on shell/gate nodes. `refusal` is never sent: such a job is never claimed.
+      harness: payload["harness"],
+      model: payload["model"],
+      effort: payload["effort"]
     }
   end
 end

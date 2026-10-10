@@ -113,7 +113,7 @@ defmodule Relay.Runs.RunServer do
 
   def handle_continue({:dispatch, job_id}, state) do
     job = Repo.get!(NodeJob, job_id)
-    if job.state == :queued, do: Runs.dispatcher().dispatch(job)
+    if job.state == :queued, do: dispatch_job(job)
     {:noreply, state}
   end
 
@@ -169,7 +169,7 @@ defmodule Relay.Runs.RunServer do
 
   defp after_reenter({:enter, {execution, job}}, run, state) do
     Runs.broadcast_runs(Runs.board_id_of(run), {:node_started, run, execution})
-    Runs.dispatcher().dispatch(job)
+    dispatch_job(job)
     {:noreply, state}
   end
 
@@ -212,23 +212,51 @@ defmodule Relay.Runs.RunServer do
       "happened, then answer to resume it."
   end
 
+  # RE433: the ONE seam every dispatch goes through (start, re-entry, and a continuing outcome).
+  # A job whose payload carries `refusal` — its node names a red or unknown agent — is never
+  # announced to runners: it is recorded `:blocked` with that detail by `handle_info/2` below,
+  # after the current message, so the server never calls itself.
+  defp dispatch_job(%NodeJob{payload: %{"refusal" => _}} = job), do: send(self(), {:refuse_job, job.id})
+  defp dispatch_job(job), do: Runs.dispatcher().dispatch(job)
+
   @impl true
   def handle_call({:report_outcome, job_id, attrs}, _from, state) do
+    case report_outcome(Repo.get!(NodeJob, job_id), attrs, state) do
+      {:continue, reply} -> {:reply, reply, state}
+      {:stop, reply} -> {:stop, :normal, reply, state}
+    end
+  end
+
+  # A refused job's `:blocked` has no `resume_at`, so the Engine parks the run — no retry is
+  # spent and nothing is requeued — and `park_effects/2` blocks the card with the refusal.
+  @impl true
+  def handle_info({:refuse_job, job_id}, state) do
     job = Repo.get!(NodeJob, job_id)
+
+    case report_outcome(job, %{outcome: :blocked, detail: job.payload["refusal"]}, state) do
+      {:stop, _reply} -> {:stop, :normal, state}
+      {:continue, _reply} -> {:noreply, state}
+    end
+  end
+
+  # The body of an outcome report, shared by the runner's report (`handle_call/3`) and a refused
+  # job (`handle_info/2`) — the latter cannot go through `Runs.report_outcome/2`, which calls this
+  # same server. Returns `{:continue, reply}` or `{:stop, reply}`.
+  defp report_outcome(job, attrs, state) do
     run = Repo.get!(Run, state.run_id)
 
     cond do
       job.state not in NodeJob.active_states() or run.status != :running ->
-        {:reply, {:error, :job_not_active}, state}
+        {:continue, {:error, :job_not_active}}
 
       match?({:error, :no_flow}, Runs.load_flow(run)) ->
         {:ok, execution} = Repo.transaction(fn -> Runs.finalize_job!(job, attrs) end)
         fail_effects(run, execution, "no_flow")
-        {:stop, :normal, {:ok, Repo.get!(Run, run.id)}, state}
+        {:stop, {:ok, Repo.get!(Run, run.id)}}
 
       true ->
         {:ok, flow} = Runs.load_flow(run)
-        apply_outcome(run, flow, job, attrs, state)
+        apply_outcome(run, flow, job, attrs)
     end
   end
 
@@ -240,7 +268,7 @@ defmodule Relay.Runs.RunServer do
   # same connection), so check_off_sub_task/3 writes it directly and returns
   # the checked-off id; the broadcast for that write still waits until after
   # commit, alongside every other card effect below.
-  defp apply_outcome(run, flow, job, attrs, state) do
+  defp apply_outcome(run, flow, job, attrs) do
     attrs =
       run
       |> override_no_op_success(flow, job, attrs)
@@ -272,22 +300,22 @@ defmodule Relay.Runs.RunServer do
     case {decision, next} do
       {_continue, {next_execution, next_job}} ->
         Runs.broadcast_runs(board_id, {:node_started, run, next_execution})
-        Runs.dispatcher().dispatch(next_job)
-        {:reply, {:ok, run}, state}
+        dispatch_job(next_job)
+        {:continue, {:ok, run}}
 
       {{:park, _why}, nil} ->
         # :needs_input (a question / an escalation edge) and :blocked (RE308) park identically.
-        {:stop, :normal, {:ok, park_effects(run, execution)}, state}
+        {:stop, {:ok, park_effects(run, execution)}}
 
       {{:finish, :done}, nil} ->
         finish_effects(run, flow)
         Runs.broadcast_runs(board_id, {:run_finished, run})
-        {:stop, :normal, {:ok, run}, state}
+        {:stop, {:ok, run}}
 
       {{:fail, _reason}, nil} ->
         card_fail_effects(run, execution)
         Runs.broadcast_runs(board_id, {:run_finished, run})
-        {:stop, :normal, {:ok, run}, state}
+        {:stop, {:ok, run}}
     end
   end
 

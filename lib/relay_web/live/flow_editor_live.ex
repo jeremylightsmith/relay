@@ -13,6 +13,7 @@ defmodule RelayWeb.FlowEditorLive do
   """
   use RelayWeb, :live_view
 
+  alias Relay.Agents
   alias Relay.Boards
   alias Relay.Flows
   alias RelayWeb.BoardCrumbs
@@ -59,6 +60,7 @@ defmodule RelayWeb.FlowEditorLive do
 
     socket
     |> assign(:flow, flow)
+    |> load_agents()
     |> assign(:assignable_stages, Flows.assignable_stages(socket.assigns.board, flow))
     |> assign(:working, working)
     |> assign(:dirty?, false)
@@ -67,6 +69,24 @@ defmodule RelayWeb.FlowEditorLive do
     |> assign(:connecting, nil)
     |> assign(:diff, Flows.diff_from_default(flow))
     |> validate_working()
+  end
+
+  # The board's agents/harnesses/default for the LLM picker and the canvas subtitles (RE433).
+  # Read on mount and after every save (both go through load_flow/2) — an agent created in
+  # another tab shows up on the next mount; there's no PubSub for it.
+  defp load_agents(socket) do
+    board = socket.assigns.board
+    agents = Agents.list_agents(board)
+    default = Agents.default_agent(board)
+
+    socket
+    |> assign(:agents, agents)
+    |> assign(:harnesses, Agents.list_harnesses(board))
+    |> assign(:default_agent, default)
+    |> assign(:llm, %{
+      default: default && default.name,
+      red: for(a <- agents, Agents.red?(a), into: MapSet.new(), do: a.name)
+    })
   end
 
   # ---- working-copy plumbing (Task 4 mutates through apply_working/2) ----
@@ -173,7 +193,7 @@ defmodule RelayWeb.FlowEditorLive do
   end
 
   # low-level working-copy node-field edit (the inspector form/chips/steppers emit this).
-  # The inspector's textarea/input forms submit the new value under "value"; the model/effort
+  # The inspector's textarea/input forms submit the new value under "value"; the effort
   # chips and the max-retries stepper are plain buttons that submit it under phx-value-v
   # instead, since "value" collides with a <button>'s intrinsic DOM .value property (see the
   # phx-value-v comment in flow_editor_components.ex).
@@ -226,7 +246,7 @@ defmodule RelayWeb.FlowEditorLive do
       key: key,
       type: type,
       run: nil,
-      model: nil,
+      llm: nil,
       effort: nil,
       agent: nil,
       max_retries: nil,
@@ -472,6 +492,7 @@ defmodule RelayWeb.FlowEditorLive do
               interactive?={!@read_only?}
               lands_on={stage_label(neighbours(@working, @stages).lands_on)}
               connecting_target?={connecting_target?(@connecting)}
+              llm={@llm}
             />
           </div>
           <aside
@@ -484,6 +505,10 @@ defmodule RelayWeb.FlowEditorLive do
               edges={outgoing_edges(@working, @selected)}
               referenced_count={referenced_count(@working, elem(@selected, 1))}
               read_only?={@read_only?}
+              agents={@agents}
+              harnesses={@harnesses}
+              default_agent={@default_agent}
+              board_slug={@board.slug}
             />
             <FlowEditorComponents.edge_inspector
               :if={match?({:edge, _}, @selected)}

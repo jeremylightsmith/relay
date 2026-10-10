@@ -250,6 +250,70 @@ defmodule Relay.FlowsTest do
     end
   end
 
+  describe "a node's llm names an agent on the board (RE433)" do
+    @unknown_llm ~s(node "a" names LLM "Nope", which is not an agent on this board)
+
+    defp llm_attrs(llm) do
+      valid_attrs(%{
+        key: "llm-flow",
+        nodes: [%{key: "a", type: :agent, run: "/x {ref}", llm: llm}],
+        edges: [%{from: "start", to: "a"}, %{from: "a", to: "done", on: :succeeded}]
+      })
+    end
+
+    # Scenario 15
+    test "create_flow/2 refuses an llm that is not an agent on the board and saves a real one" do
+      board = insert(:board)
+      :ok = Relay.Agents.ensure_seeded!(board)
+
+      assert {:error, cs} = create_flow(board, llm_attrs("Nope"))
+      assert @unknown_llm in errors_on(cs).nodes
+
+      assert {:ok, flow} = create_flow(board, llm_attrs("Claude Haiku"))
+      assert [%{llm: "Claude Haiku"}] = flow.nodes
+    end
+
+    test "update_flow/2 refuses an unknown llm too" do
+      board = insert(:board)
+      :ok = Relay.Agents.ensure_seeded!(board)
+      {:ok, flow} = create_flow(board, llm_attrs(nil))
+
+      assert {:error, cs} = Flows.update_flow(flow, %{nodes: [%{key: "a", type: :agent, run: "/x", llm: "Nope"}]})
+      assert @unknown_llm in errors_on(cs).nodes
+    end
+
+    test "upsert_from_document/3 refuses an unknown llm" do
+      board = insert(:board)
+      :ok = Relay.Agents.ensure_seeded!(board)
+      insert(:stage, board: board, name: "Build", type: :work, category: :in_progress)
+
+      doc = %{
+        "key" => "llm-doc",
+        "isolation" => "shared_clean",
+        "trigger" => %{"stage" => "Build"},
+        "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}", "llm" => "Nope"}],
+        "edges" => [%{"from" => "start", "to" => "a"}, %{"from" => "a", "to" => "done", "on" => "succeeded"}]
+      }
+
+      assert {:error, {:invalid, cs}} = Flows.upsert_from_document(board, "llm-doc", doc)
+      assert @unknown_llm in errors_on(cs).nodes
+    end
+
+    # Scenario 16
+    test "llm on a shell node is a definition error" do
+      cs =
+        Flow.changeset(%Flow{board_id: 1}, %{
+          key: "s",
+          isolation: :shared_clean,
+          stage_id: 1,
+          nodes: [%{key: "a", type: :shell, run: "true", llm: "Claude Opus"}],
+          edges: [%{from: "start", to: "a"}, %{from: "a", to: "done", on: :succeeded}]
+        })
+
+      assert %{nodes: [%{llm: ["is only valid on an agent node"]}]} = errors_on(cs)
+    end
+  end
+
   describe "copy_flow/2 and save_definition/2 round-trip foreach/when (regression)" do
     defp free_stage(board), do: insert(:stage, board: board, type: :work, category: :in_progress)
 

@@ -48,6 +48,11 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => [],
       "held" => [],
+      # RE433: the per-harness inventory, sent on every beat once the runner has fetched
+      # /api/harnesses. Claude Code installed, so the claims below are still offered.
+      "harnesses" => [
+        %{"key" => "claude-code", "installed" => true, "version" => "2.1.296 (Claude Code)", "signed_in" => true}
+      ],
       # RE320: always sent — null while claiming, this shape while paused at a Claude usage
       # limit. A far-future reset (2100-01-01) so the fixture never churns.
       "rate_limit" => %{
@@ -222,6 +227,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # set is recorded from the real route, never typed.
     [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
 
+    # RE433 — `./relay` fetches the harness definitions it expands off this route, at start and
+    # whenever the heartbeat's `harnesses_digest` moves. Key sets recorded from the real route.
+    harnesses_response = shared.conn |> get(~p"/api/harnesses") |> json_response(200)
+
     # RE430 — `./relay flow` / `stages` / `why` print a paused flow's What / Why / Fix verbatim
     # off the read-only `problem` object. An enabled flow on Deploy pulls from the main Review
     # stage (`:upstream_review`), a real paused flow — it never dispatches, so it cannot disturb
@@ -292,6 +301,8 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"])
       },
       "vocabulary" => %{
+        # RE433 — `./relay`'s HARNESS_PLACEHOLDERS must equal Schemas.Harness.placeholders/0.
+        "harness_placeholders" => Schemas.Harness.placeholders(),
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
           "terminal" => stringify(Schemas.Run.terminal_statuses())
@@ -356,6 +367,11 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "request" => normalize(heartbeat_request),
         "response" => normalize(heartbeat_response)
       },
+      "harnesses" => %{
+        "path" => "/api/harnesses",
+        "response_keys" => harnesses_response |> Map.keys() |> Enum.sort(),
+        "harness_keys" => harnesses_response["harnesses"] |> hd() |> Map.keys() |> Enum.sort()
+      },
       "talk_claim" => %{"first_turn" => normalize(talk_job)},
       "talk_events" => %{"request" => normalize(talk_events_request), "response" => normalize(talk_events_response)},
       "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)},
@@ -399,6 +415,17 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     assert document["vocabulary"]["shape_fix_actions"] == ["enable_lane", "insert_queue_stage", "add_stage_after"]
     assert "problem" in document["stages"]["stage_keys"]
+
+    # RE433 — every node claim carries the harness it resolved to; a shell node carries none.
+    for {case_name, claim} <- document["claim"] do
+      assert Map.has_key?(claim, "harness") and Map.has_key?(claim, "model") and Map.has_key?(claim, "effort"),
+             case_name
+    end
+
+    assert document["claim"]["shared_clean_agent"]["harness"]["key"] == "claude-code"
+    assert document["claim"]["exclusive_shell"]["harness"] == nil
+    assert document["heartbeat"]["response"]["harnesses_digest"] == "<harnesses-digest>"
+    assert document["harnesses"]["response_keys"] == ["digest", "harnesses"]
 
     assert_matches_fixture!(document)
   end
@@ -485,7 +512,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
     # RE185: the VALUE moves on every deploy that changes `./relay`, but the contract is the
     # key and its presence — a literal would make this fixture churn (and fail) every time the
     # served scaffold's `RUNNER_VERSION` moves, which is not a transport change.
-    "latest_runner_version" => "<latest-runner-version>"
+    "latest_runner_version" => "<latest-runner-version>",
+    # RE433: the digest moves whenever a seeded harness definition does; the contract is the key.
+    "harnesses_digest" => "<harnesses-digest>"
   }
 
   defp normalize(map) when is_map(map) do

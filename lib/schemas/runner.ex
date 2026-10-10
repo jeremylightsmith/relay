@@ -49,6 +49,10 @@ defmodule Schemas.Runner do
     # can never overwrite each other.
     field :release_requests, {:array, :string}, default: []
     field :version, :integer
+    # RE433: the harness inventory the runner last reported on a heartbeat — see
+    # `normalize_harnesses/1`. No default: nil means "never reported", which claims read as
+    # "only the legacy harness" (`installed_harness_keys/1`).
+    field :harnesses, {:array, :map}
     field :last_heartbeat, :utc_datetime
 
     # RE320: nil = claiming normally (or a runner predating RE320). Heartbeat-written only; a
@@ -72,6 +76,7 @@ defmodule Schemas.Runner do
       :capacity,
       :capabilities,
       :held,
+      :harnesses,
       :version,
       :last_heartbeat
     ])
@@ -175,6 +180,36 @@ defmodule Schemas.Runner do
   end
 
   def normalize_held(_held), do: []
+
+  @doc """
+  The one normalizer for the heartbeat's `harnesses` wire field (RE433): a list of
+  `%{"key" => key, "installed" => boolean, "version" => string | nil, "signed_in" => boolean | nil}`.
+  An entry without a binary key and a boolean `installed` is DROPPED, and so is a malformed
+  optional value (degraded to nil). A non-list is nil — "this beat did not report".
+
+  Total by construction, like `normalize_held/1`: the heartbeat is the runner's liveness path.
+  """
+  @spec normalize_harnesses(term()) :: [map()] | nil
+  def normalize_harnesses(harnesses) when is_list(harnesses) do
+    for %{"key" => key, "installed" => installed} = entry <- harnesses, is_binary(key), is_boolean(installed) do
+      %{
+        "key" => key,
+        "installed" => installed,
+        "version" => if(is_binary(entry["version"]), do: entry["version"]),
+        "signed_in" => if(is_boolean(entry["signed_in"]), do: entry["signed_in"])
+      }
+    end
+  end
+
+  def normalize_harnesses(_harnesses), do: nil
+
+  @doc "The keys of the harnesses the runner reported installed, or nil when it never reported (RE433)."
+  @spec installed_harness_keys(t()) :: [String.t()] | nil
+  def installed_harness_keys(%__MODULE__{harnesses: nil}), do: nil
+
+  def installed_harness_keys(%__MODULE__{harnesses: harnesses}) do
+    for %{"key" => key, "installed" => true} <- harnesses, do: key
+  end
 
   @doc """
   The refs whose declared state occupies an exclusive partition — the refs whose worktree the

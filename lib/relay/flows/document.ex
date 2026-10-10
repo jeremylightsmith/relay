@@ -31,7 +31,9 @@ defmodule Relay.Flows.Document do
 
   `decode/1` also rewrites the pre-RE367 legacy spellings (`sub_tasks`, `card.sub_tasks`,
   `{sub_task}`, `{sub_task_id}`) to canonical via `Schemas.Flow.Node.normalize_legacy/1`, so
-  `encode/1` only ever emits the canonical `tasks` names.
+  `encode/1` only ever emits the canonical `tasks` names. Likewise a node's legacy `model`
+  (RE433) is renamed to `llm`, its value mapped to the agent name (`"opus"` → `"Claude Opus"`,
+  `Schemas.Flow.Node.legacy_models/0`), so `encode/1` never emits `model`.
 
   String→atom conversion is driven by the schemas' own source functions
   (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`, `Schemas.Flow.Node.roles/0`,

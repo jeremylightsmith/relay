@@ -73,6 +73,16 @@ defmodule RelayWeb.FlowGraphComponents do
     }
   }
 
+  # the node subtitle's type (its colour varies with the LLM state, RE433).
+  @subtitle_style "font-size:9.5px;font-family:ui-monospace,monospace;white-space:nowrap;"
+
+  # canvas LLM subtitle colour by state (RE433): inheriting stays the muted subtitle colour.
+  @llm_color %{
+    "default" => "color-mix(in oklab, var(--color-base-content) 55%, transparent)",
+    "override" => "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))",
+    "red" => "var(--color-error)"
+  }
+
   # edge stroke color by canonical outcome (start edge = nil → neutral "ok" grey).
   @edge_color %{
     nil => "color-mix(in oklab, var(--color-base-content) 45%, transparent)",
@@ -89,6 +99,13 @@ defmodule RelayWeb.FlowGraphComponents do
   attr :interactive?, :boolean, default: false
   attr :node_states, :map, default: %{}
   attr :lands_on, :string, default: nil
+
+  attr :llm, :map,
+    default: nil,
+    doc:
+      "the editor's LLM context, `%{default: name | nil, red: MapSet of red agent names}` (RE433). " <>
+        "When set, agent nodes subtitle their LLM (`default · <name>` / `◆ <name>` / " <>
+        "`◆ <name> · model removed`); nil keeps the `subagent · effort` label"
 
   attr :connecting_target?, :boolean,
     default: false,
@@ -112,7 +129,16 @@ defmodule RelayWeb.FlowGraphComponents do
     focus = focus(assigns.selected, adjacency)
 
     assigns =
-      assign(assigns, width: w, height: h, geos: geos, parked: parked, adjacency: adjacency, focus: focus)
+      assign(assigns,
+        width: w,
+        height: h,
+        geos: geos,
+        parked: parked,
+        adjacency: adjacency,
+        focus: focus,
+        subtitle_style: @subtitle_style,
+        subtitle_muted: @llm_color["default"]
+      )
 
     ~H"""
     <div
@@ -195,8 +221,18 @@ defmodule RelayWeb.FlowGraphComponents do
         <span style="font-size:12.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);text-align:center;line-height:1.15;padding:0 6px;">
           {humanize(node.key)}
         </span>
-        <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);white-space:nowrap;">
+        <span
+          :if={is_nil(@llm) or node.type != :agent}
+          style={"#{@subtitle_style}color:#{@subtitle_muted};"}
+        >
           {sub_label(node)}
+        </span>
+        <span
+          :if={@llm && node.type == :agent}
+          data-llm={llm_state(node, @llm)}
+          style={"#{@subtitle_style}color:#{llm_color(llm_state(node, @llm))};"}
+        >
+          {llm_label(node, @llm)}
         </span>
       </div>
 
@@ -237,7 +273,6 @@ defmodule RelayWeb.FlowGraphComponents do
   # defensive accessors — every shipped shape is dense (see the moduledoc), so these only
   # guard against a partial map from a future caller.
   defp edge_on(edge), do: Map.get(edge, :on)
-  defp node_model(node), do: Map.get(node, :model)
   defp node_effort(node), do: Map.get(node, :effort)
   defp node_run(node), do: Map.get(node, :run)
   defp node_agent(node), do: Map.get(node, :agent)
@@ -281,16 +316,36 @@ defmodule RelayWeb.FlowGraphComponents do
     "font-size:8px;font-weight:700;letter-spacing:0.07em;font-family:ui-monospace,monospace;color:#{meta.tag_c};" <> bg
   end
 
-  # Stack the whole agent binding: WHICH subagent it dispatches to (the thing the graph exists to
-  # make visible) then its model · effort tuning. Each part is dropped when absent, so a generic
-  # agent node reads `model · effort` and a bare one never renders an empty label.
+  # Stack the agent binding: WHICH subagent it dispatches to (the thing the graph exists to make
+  # visible) then its effort. Each part is dropped when absent, so a generic agent node reads
+  # `effort` and a bare one never renders an empty label. The node's LLM is not part of it.
   defp sub_label(%{type: :agent} = n) do
-    [node_agent(n), node_model(n), node_effort(n)]
+    [node_agent(n), node_effort(n)]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join(" · ")
   end
 
   defp sub_label(node), do: truncate(node_run(node))
+
+  # An agent node's LLM in the editor (RE433): nil inherits the board default; a named agent is
+  # an override, red when its model has left its harness. A name the board no longer has (renamed
+  # or deleted in another tab) still draws as an override — saving it fails loudly instead.
+  defp llm_state(node, %{red: red}) do
+    case Map.get(node, :llm) do
+      nil -> "default"
+      name -> if MapSet.member?(red, name), do: "red", else: "override"
+    end
+  end
+
+  defp llm_label(node, llm) do
+    case llm_state(node, llm) do
+      "default" -> Enum.join(["default" | List.wrap(llm.default)], " · ")
+      "override" -> "◆ #{node.llm}"
+      "red" -> "◆ #{node.llm} · model removed"
+    end
+  end
+
+  defp llm_color(state), do: Map.fetch!(@llm_color, state)
 
   defp truncate(nil), do: ""
   defp truncate(s) when byte_size(s) <= 22, do: s

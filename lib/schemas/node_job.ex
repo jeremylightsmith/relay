@@ -8,7 +8,8 @@ defmodule Schemas.NodeJob do
   `runner_name` stays a plain string until the Runner table (04).
   `payload` is the runner's whole contract:
   `%{"run" => raw run string, "node_type" => ..., "isolation" => ...,
-  "resume_session" => sid | nil, "vars" => %{...}}` — placeholder
+  "resume_session" => sid | nil, "vars" => %{...}, "harness" => ..., "model" => ...,
+  "effort" => ...}` (plus `"refusal"` for a red or unknown agent, RE433) — placeholder
   expansion stays runner-side (see `Schemas.Flow.Node`). `inserted_at`
   is queued-at. All fields programmatic, never cast.
 
@@ -30,6 +31,9 @@ defmodule Schemas.NodeJob do
     field :claimed_at, :utc_datetime
     field :finished_at, :utc_datetime
     field :kind, Ecto.Enum, values: [:node, :talk], default: :node
+    # RE433: the `Schemas.Harness` key an agent node runs on, derived from the payload by
+    # `Relay.Runs.insert_job!/3`. nil for shell/gate nodes and talk turns, which any runner takes.
+    field :harness_key, :string
 
     belongs_to :run, Schemas.Run
     belongs_to :node_execution, Schemas.NodeExecution

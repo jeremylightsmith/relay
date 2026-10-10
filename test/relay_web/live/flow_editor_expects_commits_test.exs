@@ -51,12 +51,12 @@ defmodule RelayWeb.FlowEditorExpectsCommitsTest do
   test "an unrelated definition edit still preserves expects_commits", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
 
-    render_hook(view, "edit_node_field", %{"key" => "post", "field" => "model", "value" => "opus"})
+    render_hook(view, "edit_node_field", %{"key" => "post", "field" => "llm", "value" => "Claude Haiku"})
     view |> element("#flow-editor-save") |> render_click()
     view |> element("#flow-save-confirm") |> render_click()
 
     code = Flows.get_flow!(board, "code")
-    assert Enum.find(code.nodes, &(&1.key == "post")).model == "opus"
+    assert Enum.find(code.nodes, &(&1.key == "post")).llm == "Claude Haiku"
 
     assert code.nodes |> Enum.filter(& &1.expects_commits) |> Enum.map(& &1.key) |> Enum.sort() ==
              ["final_fix", "fix_findings", "implement"]

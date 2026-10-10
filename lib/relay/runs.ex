@@ -19,6 +19,7 @@ defmodule Relay.Runs do
   use Boundary,
     deps: [
       Relay.Activity,
+      Relay.Agents,
       Relay.Boards,
       Relay.Cards,
       Relay.Config,
@@ -34,6 +35,7 @@ defmodule Relay.Runs do
 
   alias Ecto.Changeset
   alias Relay.Activity
+  alias Relay.Agents
   alias Relay.Cards
   alias Relay.Flows
   alias Relay.Repo
@@ -1613,7 +1615,11 @@ defmodule Relay.Runs do
   # server no longer reads and parses replies whose keys no longer exist, so it can do no correct
   # work at all: genuinely worse than a stopped one. `RelayWeb.Api.NodeJobController` answers it
   # with a legible 409 rather than a bare 422.
-  @min_runner_version 63
+  # RE433 raised this to 85: agent nodes now run whatever command their board harness defines
+  # (the claim's `harness`), and a pre-85 runner ignores it and runs every agent node on
+  # `claude -p` — a Codex or Gemini node would silently run on the wrong CLI and model, which is
+  # genuinely worse than a stopped runner.
+  @min_runner_version 85
 
   @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
@@ -1783,6 +1789,7 @@ defmodule Relay.Runs do
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, held)
+      |> put_reported(:harnesses, Runner.normalize_harnesses(attrs["harnesses"]))
       |> put_rate_limit(attrs)
 
     %Runner{}
@@ -1932,7 +1939,9 @@ defmodule Relay.Runs do
     # RE268 — a talk job is only visible to a runner that can actually run one
     # (`talk_capable?/1`); an older runner still sees the flow kinds it handles correctly.
     kinds = if talk_capable?(runner), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
-    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs) end)
+    # RE433: a runner that never reported its harnesses predates them — it can run Claude Code.
+    installed = Runner.installed_harness_keys(runner) || [Agents.default_harness_key()]
+    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) end)
   end
 
   # The isolation classes with room, as the STRINGS the payload stores. Accepts either shape:
@@ -1942,7 +1951,7 @@ defmodule Relay.Runs do
     for {class, n} <- capacity, is_integer(n) and n > 0, do: to_string(class)
   end
 
-  defp do_claim_next_job(board_id, name, allowed, kinds, held_refs) do
+  defp do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) do
     query =
       from j in NodeJob,
         join: c in Card,
@@ -1950,6 +1959,12 @@ defmodule Relay.Runs do
         where: c.board_id == ^board_id,
         where: j.state == :queued,
         where: j.kind in ^kinds,
+        # RE433, before the three ways in — so they bind pinned jobs too. Only a runner with the
+        # job's harness installed may take it (nil = shell/gate/talk, any runner), and a job
+        # carrying a `refusal` (a red or unknown agent) is never offered: `RunServer` records it
+        # `:blocked`, and this is the backstop for the window before it does.
+        where: is_nil(j.harness_key) or j.harness_key in ^installed,
+        where: not fragment("? \\? 'refusal'", j.payload),
         # Three ways in, and only three (RE311). A job PINNED to this runner bypasses the
         # capacity filter — the runner is already holding that run's slot. An unpinned job
         # for a card whose worktree this runner DECLARES it holds bypasses it for the same
@@ -4355,7 +4370,10 @@ defmodule Relay.Runs do
       node_key: execution.node_key,
       state: :queued,
       payload: payload,
-      runner_name: exclusive_holder(run, payload)
+      runner_name: exclusive_holder(run, payload),
+      # RE433: derived here, the one place every flow job row is built — so the RE267 requeue
+      # copy of a payload keeps its harness.
+      harness_key: get_in(payload, ["harness", "key"])
     }
     |> NodeJob.changeset()
     |> Repo.insert!()
@@ -4592,13 +4610,49 @@ defmodule Relay.Runs do
         "task_id" => opts[:sub_task_id]
       })
 
+    Map.merge(
+      %{
+        "run" => node.run,
+        "node_type" => Atom.to_string(node.type),
+        "agent" => node.agent,
+        "isolation" => Atom.to_string(flow.isolation),
+        "resume_session" => opts[:resume_session],
+        "vars" => vars
+      },
+      harness_fields(node, card.board_id)
+    )
+  end
+
+  # RE433: an agent node resolves its `llm` to a harness + model HERE, at enqueue, so the job
+  # carries the command template the runner expands and `insert_job!/3` can route claims by
+  # `harness_key`. A red or unknown agent still gets a job — carrying `refusal`, which the claim
+  # query never offers and `RunServer` records as `:blocked` instead of dispatching. Every other
+  # node type carries the three keys as nil.
+  defp harness_fields(%{type: :agent} = node, board_id) do
+    case Agents.resolve(board_id, node.llm) do
+      {:ok, agent} ->
+        agent_fields(agent, node)
+
+      {:red, agent} ->
+        Map.put(agent_fields(agent, node), "refusal", Agents.red_agent_detail(agent))
+
+      {:error, {:unknown_agent, name}} ->
+        %{
+          "harness" => nil,
+          "model" => nil,
+          "effort" => node.effort,
+          "refusal" => Agents.unknown_agent_detail(name, node.key)
+        }
+    end
+  end
+
+  defp harness_fields(_node, _board_id), do: %{"harness" => nil, "model" => nil, "effort" => nil}
+
+  defp agent_fields(agent, node) do
     %{
-      "run" => node.run,
-      "node_type" => Atom.to_string(node.type),
-      "agent" => node.agent,
-      "isolation" => Atom.to_string(flow.isolation),
-      "resume_session" => opts[:resume_session],
-      "vars" => vars
+      "harness" => Map.take(Agents.harness_wire(agent.harness), ["key", "command", "resume_command", "session_id_path"]),
+      "model" => agent.model,
+      "effort" => node.effort
     }
   end
 

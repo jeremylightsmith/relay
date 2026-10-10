@@ -184,7 +184,8 @@ double-booking (YAGNI: no multi-board reservation yet).
   running: [job-ids], held: [{ref, state}], rate_limit}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
-  required_version, latest_runner_version}`. It terminates each revoked job's live subprocess
+  required_version, latest_runner_version, harnesses_digest}` (the digest since RE433 — see
+  "Harness routing" below). It terminates each revoked job's live subprocess
   via its `JobControl` (see "Node-job transport" and "Runner mode" below). The advertised
   `capacity` is the runner's configured per-class total **and this route is its single writer
   (RE311)** — the claim's `capacity` is a live FREE count, passed to `Relay.Runs.claim_next_job/3`
@@ -483,6 +484,31 @@ that stays server-side.
   refused — and makes the engine requeue the node until that reset instead of parking it
   ([failures.md](failures.md) A11b). The node outcomes (including the runner-only `blocked`,
   RE308) and what each does to the run and the card are tabulated in the [state reference](state.md).
+- **Harness routing (RE433).** `Relay.Runs.build_payload/4` resolves every `agent` node's `llm`
+  (nil = the board default) to a board agent with `Relay.Agents.resolve/2`, and the job payload —
+  hence the node claim — carries top-level **`harness`** (`{key, command, resume_command,
+  session_id_path}`, the template the runner expands), **`model`** (the agent's model) and
+  **`effort`** (the node's raw value; the runner drops it for a template without `{effort}`).
+  All three are null on shell/gate nodes. `Relay.Runs.insert_job!/3` copies `harness.key` onto
+  `node_jobs.harness_key`, so the RE267 requeue copy keeps it. A **red** agent (`Relay.Agents.red?/1`)
+  or an `llm` naming no agent on the board still gets a job, but its payload carries **`refusal`**
+  (`Relay.Agents.red_agent_detail/1` / `unknown_agent_detail/2`): `RunServer`'s one dispatch seam
+  never announces it and records the attempt `:blocked` with that detail and no `resume_at`, so
+  the run parks, the card goes `needs_input` with the refusal on its timeline, and no retry is
+  spent. `refusal` is never sent on a claim. **The claim filter:** a job with a `harness_key` is
+  offered only to a runner whose reported `runners.harnesses` lists that key `installed: true`
+  (`Schemas.Runner.installed_harness_keys/1`; a runner that never reported is treated as having
+  only `Relay.Agents.default_harness_key/0`, `claude-code`), and a job whose payload has
+  `refusal` is offered to nobody — both apply to pinned jobs too. Shell/gate/talk jobs have no
+  `harness_key` and pass. **Inventory + definitions:** the heartbeat may carry top-level
+  `harnesses` — `[{key, installed, version, signed_in}]`, normalized by
+  `Schemas.Runner.normalize_harnesses/1` (malformed entries dropped) and absent-means-untouched
+  like `held` — and its reply always carries `harnesses_digest`
+  (`Relay.Agents.harnesses_digest/1`, SHA-256 of the board's definitions in wire shape, free of
+  ids and timestamps). `GET /api/harnesses` (`RelayWeb.Api.HarnessController`, board key)
+  returns `{harnesses: [Relay.Agents.harness_wire/1 …], digest}`; the runner refetches it when
+  the digest moves. The `AddHarnessRouting` migration pointed already-queued/claimed agent jobs
+  at a frozen Claude Code harness with model `opus`.
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
   runner can branch without a second endpoint. A `"talk"` claim carries exactly
@@ -804,7 +830,8 @@ nothing else — every board-specific fact lives server-side as flow data.
 Every iteration of the loop is the same three steps:
 
 1. **Claim** the next node-job from the server (a long-poll — cheap when idle).
-2. **Run** it — an agent node runs headless Claude; `shell`/`gate` nodes run shell.
+2. **Run** it — an agent node runs its harness's CLI headless (Claude Code, Codex, … — RE433);
+   `shell`/`gate` nodes run shell.
 3. **Report** the typed outcome back to the server, which advances the flow (moving the card to
    the next stage when the flow lands there).
 
@@ -1035,16 +1062,47 @@ silently billed to the paid API.
   sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.
   `RunnerPool.partition_for(slot)` (`./relay`) derives `MIX_TEST_PARTITION` from a
   free-list index held by the worktree's registry record at the single point where a node's
-  command launches (both `_stream_shell` and `_stream_claude_job`), so every step of a run —
+  command launches (both `_stream_shell` and `_stream_agent_job`), so every step of a run —
   including the `precommit` gate — sees the same database: each active per-card worktree
   (e.g. `exec-RLY-231`) holds its own index for the run's lifetime, recycled on teardown; the
   shared `exec-clean` is always partition `0`. `config/test.exs` already keys the database
   name off `MIX_TEST_PARTITION`.
+- **Harness command templates (RE433).** An agent node runs whatever command the claim's
+  `harness` defines; `./relay` names no harness (`RunnerHarnessGuardTest` greps it for the seeded
+  keys and names). `select_command(harness, resume_session)` picks `resume_command` only when the
+  job carries a session **and** the harness has one — otherwise `command` and a fresh start (a
+  harness that cannot resume never sees the old session). `expand_command(template, values)` is
+  pure: it `shlex.split`s the template **first**, then substitutes inside each token, so each
+  placeholder fills exactly one argv element, the prompt never passes through a shell, and a
+  substituted value is never re-scanned (a prompt containing `{model}` stays verbatim). The
+  placeholders are `HARNESS_PLACEHOLDERS` — `prompt model worktree ref effort subagent session`,
+  pinned to `Schemas.Harness.placeholders/0` by the fixture's `vocabulary.harness_placeholders`.
+  `[ … ]` marks an optional segment (`[--effort {effort}]` → tokens `[--effort` `{effort}]`): it is
+  dropped whole when any placeholder in it is null/empty; such a placeholder outside a segment, or
+  an unknown name, is a `TemplateError`, and `run_node_job` fails the node with that message
+  without spawning. So does an agent job with no `harness` (`this job carries no harness — the
+  server and runner disagree; update both`). The values are `prompt` (`compose_node_prompt`),
+  `model`/`effort` (the claim's), `worktree` (the slot path), `ref`, `subagent` (the node's
+  `agent`) and `session`. `_stream_agent_job(argv, cwd, …, session_id_path=…)` (formerly
+  `_stream_claude_job`) runs the argv with `stdin=subprocess.DEVNULL` (`codex exec` reads a
+  non-TTY stdin) and reads the session id from each JSON event at the harness's
+  `session_id_path` with `read_path` (`.session_id`, `.thread_id`; latest non-empty wins, no
+  path captures nothing). Talk is out of scope and stays on `claude`: `run_talk_job` expands the
+  fixed `TALK_COMMAND` / `TALK_RESUME_COMMAND` with session path `.session_id`.
+- **Harness inventory (RE433).** `harness_inventory(harnesses)` reports, per board harness,
+  `{key, installed, version, signed_in}`: `installed` = the template's executable is on `PATH`,
+  `version` = the first line of `<exe> --version`, `signed_in` = the harness's `signed_in_check`
+  exited 0 (null with no check or when not installed). Each probe has a 10 s timeout
+  (`HARNESS_PROBE_TIMEOUT_S`) and degrades instead of raising. `RunnerHeartbeat.refresh_harnesses`
+  fetches `GET /api/harnesses` and recomputes it — at startup **before** the first beat (so the
+  first beat already carries `harnesses` and the server never reads the runner as Claude-only),
+  then again only when a beat reply's `harnesses_digest` differs from the one held. Every later
+  beat carries the inventory; a failed fetch leaves the digest alone so the next beat retries.
 - **The claim/execute/report loop (`cmd_start`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
   "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
   free slots; the worker resets the slot if needed, runs the step (shell/gate via
-  `_stream_shell`, agent via `_stream_claude_job`), and POSTs the typed outcome to
+  `_stream_shell`, agent via `_stream_agent_job`), and POSTs the typed outcome to
   `/api/node-jobs/:id/outcome`. `--once` drains a single claim→execute→report cycle and exits;
   `--dry-run` claims and mutates nothing (it only logs the capacity it would advertise);
   `--interval` overrides the configured poll timeout; SIGINT stops claiming new work and waits
@@ -1131,7 +1189,7 @@ either usage window. It tells the board and resumes by itself.
 - **Usage source.** There are no extra calls in the normal path. Every `claude -p --verbose
   --output-format stream-json` run emits a `rate_limit_event` whose `rate_limit_info` carries
   `status`, `rateLimitType`, `resetsAt` and `unifiedWindows.{five_hour,seven_day}.{utilization,
-  resetsAt}`. `_stream_claude_job` feeds every parsed event from agent nodes and talk turns to the
+  resetsAt}`. `_stream_agent_job` feeds every parsed event from agent nodes and talk turns to the
   process's `UsageLimiter` (`USAGE_LIMITER`). The limiter parses defensively and never raises into
   a job. A new runner has no numbers until its first agent/talk job streams one, and until then it
   never pauses.
@@ -1272,7 +1330,7 @@ claim/execute/report loop, one more branch.
   pane, the read-only rule, and `./relay why`/`runs`/`card`) + the card's seed fields + the
   human's text, spliced in **verbatim and last** — never passed through `render()`, so a
   person's `{ref}`-shaped typing can never reach into the var namespace.
-- **Event mapping.** `_stream_claude_job` gained an `on_event=None` callback, invoked with each
+- **Event mapping.** `_stream_agent_job` (then `_stream_claude_job`) gained an `on_event=None` callback, invoked with each
   parsed stream-json event as it arrives — this is what lets a turn's transcript stream *while
   the turn is still working*, not all at once at the end. `talk_events_from(ev)` maps one event
   to the transcript lines it produces: assistant text → an `:out` line, a `tool_use` block → one
@@ -1282,7 +1340,7 @@ claim/execute/report loop, one more branch.
   truncated to 140 chars) is one shared `_tool_brief` helper, used by both this and the
   console/board-log renderer (`_print_claude_event`).
 
-  `_stream_claude_job` also gained `mirror=True`; a talk turn passes `mirror=False` so its
+  `_stream_agent_job` also gained `mirror=True`; a talk turn passes `mirror=False` so its
   events print locally but are never also forwarded to the ref-keyed board-log mirror. Two
   things make that necessary: the tag `run_talk_job` builds is ref-clean (`f"[{ref}] (talk) "`,
   "talk" outside the brackets — an earlier `f"[{ref} talk] "` made `_ref_from_tag` extract a ref
@@ -1428,9 +1486,12 @@ must never be able to reach into the var namespace. The static wrapper carries n
 
 A flow node of type `agent` may name an `agent` (e.g. `plan-implementer`). The server
 carries it in the job payload (`Relay.Runs.build_payload/4` → the claim response's
-`agent`), and `./relay`'s `_stream_claude_job` appends `--agent <name>` to the
-`claude -p` invocation: the agent file supplies the system prompt, the node's `run`
-string stays the user prompt. An unknown name makes the CLI fail loudly rather than
+`agent`), and `./relay` fills the harness template's `{subagent}` placeholder with it (RE433).
+The Claude Code harness carries it as an optional `[--agent {subagent}]` segment, so a node with
+an agent runs `claude -p … --agent <name>` and a node without one drops the segment: the agent
+file supplies the system prompt, the node's `run` string stays the user prompt. A harness whose
+template has no `{subagent}` simply ignores the node's agent (`.claude/agents` on non-Claude
+harnesses is out of RE433's scope). An unknown name makes the CLI fail loudly rather than
 silently fall back to the default agent (verified against CLI 2.1.214), which is the
 property that makes this safe to depend on. A node with no `agent` invokes exactly as
 it did before RLY-139.

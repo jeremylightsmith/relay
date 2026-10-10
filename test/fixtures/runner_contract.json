@@ -2,9 +2,12 @@
   "claim": {
     "exclusive_shell": {
       "agent": null,
+      "effort": null,
+      "harness": null,
       "id": "<node-job-id>",
       "isolation": "exclusive",
       "kind": "node",
+      "model": null,
       "node_id": "work",
       "node_type": "shell",
       "ref": "CB1",
@@ -22,9 +25,17 @@
     },
     "resumed_agent": {
       "agent": "plan-implementer",
+      "effort": null,
+      "harness": {
+        "command": "claude -p {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "key": "claude-code",
+        "resume_command": "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "session_id_path": ".session_id"
+      },
       "id": "<node-job-id>",
       "isolation": "shared_clean",
       "kind": "node",
+      "model": "opus",
       "node_id": "work",
       "node_type": "agent",
       "ref": "CA1",
@@ -42,9 +53,17 @@
     },
     "shared_clean_agent": {
       "agent": "plan-implementer",
+      "effort": null,
+      "harness": {
+        "command": "claude -p {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "key": "claude-code",
+        "resume_command": "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "session_id_path": ".session_id"
+      },
       "id": "<node-job-id>",
       "isolation": "shared_clean",
       "kind": "node",
+      "model": "opus",
       "node_id": "work",
       "node_type": "agent",
       "ref": "CA1",
@@ -80,7 +99,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 63
+      "version": 85
     },
     "running": []
   },
@@ -111,6 +130,22 @@
       "stage"
     ]
   },
+  "harnesses": {
+    "harness_keys": [
+      "command",
+      "key",
+      "models",
+      "name",
+      "resume_command",
+      "session_id_path",
+      "signed_in_check"
+    ],
+    "path": "/api/harnesses",
+    "response_keys": [
+      "digest",
+      "harnesses"
+    ]
+  },
   "heartbeat": {
     "request": {
       "capabilities": {
@@ -125,6 +160,14 @@
         "exclusive": 1,
         "shared_clean": 1
       },
+      "harnesses": [
+        {
+          "installed": true,
+          "key": "claude-code",
+          "signed_in": true,
+          "version": "2.1.296 (Claude Code)"
+        }
+      ],
       "held": [],
       "rate_limit": {
         "max": 0.9,
@@ -137,14 +180,15 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 63
+        "version": 85
       },
       "running": []
     },
     "response": {
+      "harnesses_digest": "<harnesses-digest>",
       "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 63,
+      "required_version": 85,
       "revoked": [],
       "runner_outdated": false,
       "want_capabilities": false
@@ -418,6 +462,15 @@
     "audit_severities": [
       "error",
       "warning"
+    ],
+    "harness_placeholders": [
+      "prompt",
+      "model",
+      "worktree",
+      "ref",
+      "effort",
+      "subagent",
+      "session"
     ],
     "holding_states": [
       "bound",

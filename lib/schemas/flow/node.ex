@@ -3,8 +3,9 @@ defmodule Schemas.Flow.Node do
   One node of a flow's embedded graph (ADR 0006). `type` is the closed
   behavior set; `run` is the node's command/prompt (skill invocation, shell
   line, or agent prompt — `{ref}`/`{branch}`/`{relay}` placeholders are the
-  runner's to expand). `model`/`effort` nil means inherit the runner
-  default. `human`/`parallel` carry no type-specific attrs yet (nothing
+  runner's to expand). `llm` (RE433) names one of the board's agents
+  (`Schemas.Agent`, a harness + model) and nil means inherit the board's
+  default agent; `effort` nil means inherit the harness default. `human`/`parallel` carry no type-specific attrs yet (nothing
   executes before card 02).
 
   `foreach` (nil = not a loop head) makes the node a `foreach` LOOP HEAD:
@@ -25,6 +26,11 @@ defmodule Schemas.Flow.Node do
   | `foreach` source | `card.tasks` | `card.sub_tasks` |
   | `run` placeholder: task title | `{task}` | `{sub_task}` |
   | `run` placeholder: task id | `{task_id}` | `{sub_task_id}` |
+  | the node's LLM (RE433) | `llm` (an agent name) | `model` (`legacy_models/0`) |
+
+  A legacy `model` **key** is renamed to `llm`, its value mapped through `legacy_models/0`
+  (`"opus"` → `"Claude Opus"`); a value outside the table is carried through verbatim so
+  `Relay.Flows` refuses it loudly as an unknown agent. An explicit `llm` always wins.
 
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
   runner appends `--agent <name>` to its `claude -p` call, so the file supplies
@@ -63,7 +69,7 @@ defmodule Schemas.Flow.Node do
     :key,
     :type,
     :run,
-    :model,
+    :llm,
     :effort,
     :max_retries,
     :timeout_minutes,
@@ -83,13 +89,15 @@ defmodule Schemas.Flow.Node do
   @legacy_contract_fields [sub_tasks: :tasks]
   @legacy_foreach_sources %{"card.sub_tasks" => "card.tasks"}
   @legacy_placeholders %{"{sub_task}" => "{task}", "{sub_task_id}" => "{task_id}"}
+  # RE433 — the pre-agents `model` value → the agent name every board is seeded with.
+  @legacy_models %{"opus" => "Claude Opus", "sonnet" => "Claude Sonnet", "haiku" => "Claude Haiku"}
 
   @primary_key false
   embedded_schema do
     field :key, :string
     field :type, Ecto.Enum, values: @types
     field :run, :string
-    field :model, :string
+    field :llm, :string
     field :effort, :string
     field :max_retries, :integer
     field :timeout_minutes, :integer
@@ -126,6 +134,13 @@ defmodule Schemas.Flow.Node do
   """
   def runnable_types, do: [:agent, :shell, :gate]
 
+  @doc """
+  RE433 — the legacy node `model` value → the board agent name it became, the ONE copy (the data
+  migration carries a frozen duplicate). `Relay.Agents.ensure_seeded!/1` seeds one agent per entry.
+  """
+  @spec legacy_models() :: %{String.t() => String.t()}
+  def legacy_models, do: @legacy_models
+
   @doc "The closed set of accepted `foreach` sources (RE367: `\"card.tasks\"`). Read by `changeset/2` and the docs."
   def foreach_sources, do: @foreach_sources
 
@@ -138,8 +153,23 @@ defmodule Schemas.Flow.Node do
   def normalize_legacy(%_{} = struct), do: struct
 
   def normalize_legacy(attrs) when is_map(attrs) do
-    Map.new(attrs, fn {key, value} -> {key, normalize_attr(to_string(key), value)} end)
+    attrs
+    |> rename_model_to_llm()
+    |> Map.new(fn {key, value} -> {key, normalize_attr(to_string(key), value)} end)
   end
+
+  # RE433: `model` → `llm`, keeping the attrs' key type. An explicit `llm` wins over `model`.
+  defp rename_model_to_llm(attrs) do
+    Enum.reduce([{"model", "llm"}, {:model, :llm}], attrs, fn {model_key, llm_key}, acc ->
+      case Map.pop(acc, model_key) do
+        {nil, ^acc} -> acc
+        {model, rest} -> Map.update(rest, llm_key, legacy_llm(model), &(&1 || legacy_llm(model)))
+      end
+    end)
+  end
+
+  defp legacy_llm(model) when is_binary(model), do: Map.get(@legacy_models, model, model)
+  defp legacy_llm(model), do: model
 
   defp normalize_attr(key, values) when key in ["reads", "writes"] and is_list(values),
     do: Enum.map(values, &canonical_contract_field/1)
@@ -173,6 +203,7 @@ defmodule Schemas.Flow.Node do
       message: "must be #{Enum.map_join(@foreach_sources, " or ", &inspect/1)}"
     )
     |> validate_agent_only_on_agent_nodes()
+    |> validate_llm_only_on_agent_nodes()
     |> validate_expects_commits_only_on_agent_nodes()
   end
 
@@ -182,6 +213,15 @@ defmodule Schemas.Flow.Node do
   defp validate_agent_only_on_agent_nodes(changeset) do
     if get_field(changeset, :agent) && get_field(changeset, :type) != :agent do
       add_error(changeset, :agent, "is only valid on an agent node")
+    else
+      changeset
+    end
+  end
+
+  # RE433: `llm` picks the agent an agent node runs on; nothing else runs an LLM.
+  defp validate_llm_only_on_agent_nodes(changeset) do
+    if get_field(changeset, :llm) && get_field(changeset, :type) != :agent do
+      add_error(changeset, :llm, "is only valid on an agent node")
     else
       changeset
     end

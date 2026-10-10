@@ -375,10 +375,33 @@ defmodule RelayWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
 
-      for section <- [:general, :stages, :public, :members, :keys, :runners] do
+      for section <- [:general, :stages, :agents, :public, :members, :keys, :runners] do
         label = BoardSettingsLive.section_label(section)
         assert has_element?(view, "#settings-nav-#{section}", label)
         assert has_element?(view, "#settings-tab-#{section}", label)
+      end
+    end
+
+    test "Agents sits between Stages and Public board in the rail and the tab strip",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=agents")
+
+      expected = ["General", "Stages", "Agents", "Public board", "Members", "API keys"]
+      assert BoardSettingsLive.section_label(:agents) == "Agents"
+      assert has_element?(view, "#settings-title", "Agents")
+
+      for nav <- ["#settings-rail", "#settings-tabs"] do
+        labels =
+          view
+          |> element(nav)
+          |> render()
+          |> LazyHTML.from_fragment()
+          |> LazyHTML.query("a")
+          |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+          |> Enum.take(6)
+
+        assert labels == expected
       end
     end
   end

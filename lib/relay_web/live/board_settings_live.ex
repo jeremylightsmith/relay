@@ -58,6 +58,7 @@ defmodule RelayWeb.BoardSettingsLive do
   import RelayWeb.CoreComponents, except: [section_label: 1]
 
   alias Phoenix.LiveView.JS
+  alias Relay.Agents
   alias Relay.ApiKeys
   alias Relay.Boards
   alias Relay.Cards
@@ -65,12 +66,15 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Flows
   alias Relay.Members
   alias Relay.Runs
+  alias RelayWeb.AgentsSettingsComponents
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowSettingsComponents
   alias RelayWeb.FlowShapeComponents
+  alias Schemas.Agent
   alias Schemas.ApiKey
   alias Schemas.Board
+  alias Schemas.Harness
   alias Schemas.Membership
   alias Schemas.Stage
   alias Schemas.User
@@ -129,6 +133,13 @@ defmodule RelayWeb.BoardSettingsLive do
             {section_label(:stages)}
           </.link>
           <.link
+            patch={~p"/board/#{@board.slug}/settings?section=agents"}
+            id="settings-tab-agents"
+            style={tab_style(@section == :agents)}
+          >
+            {section_label(:agents)}
+          </.link>
+          <.link
             patch={~p"/board/#{@board.slug}/settings?section=public"}
             id="settings-tab-public"
             style={tab_style(@section == :public)}
@@ -183,6 +194,13 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :stages)}
           >
             {section_label(:stages)}
+          </.link>
+          <.link
+            patch={~p"/board/#{@board.slug}/settings?section=agents"}
+            id="settings-nav-agents"
+            style={nav_style(@section == :agents)}
+          >
+            {section_label(:agents)}
           </.link>
           <.link
             patch={~p"/board/#{@board.slug}/settings?section=public"}
@@ -404,6 +422,22 @@ defmodule RelayWeb.BoardSettingsLive do
                   </.button>
                 </div>
               </div>
+            </section>
+
+            <section :if={@section == :agents} id="agents-pane">
+              <AgentsSettingsComponents.agents_pane
+                harnesses={@harnesses}
+                agents={@agents}
+                default_agent_id={@default_agent_id}
+                usage={@agent_usage}
+                agent_panel={@agent_panel}
+                agent_form={@agent_form}
+                agents_error={@agents_error}
+                harness_panel={@harness_panel}
+                harness_form={@harness_form}
+                harness_error={@harness_error}
+                read_only?={@read_only?}
+              />
             </section>
 
             <section :if={@section == :stages} id="stages-pane">
@@ -1175,6 +1209,9 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:copy_key, nil)
      |> assign(:add_form, to_form(%{}, as: :add))
      |> assign_members()
+     |> close_agent_panel()
+     |> close_harness_panel()
+     |> refresh_agents()
      |> refresh_stages()}
   end
 
@@ -1193,6 +1230,9 @@ defmodule RelayWeb.BoardSettingsLive do
         flow_reset flow_confirm_reset flow_delete flow_confirm_delete
         flow_copy flow_copy_change flow_confirm_copy flow_add flow_add_change flow_confirm_add
         apply_shape_fix
+        agent_new agent_edit agent_cancel agent_pick_harness agent_validate agent_save
+        agent_make_default agent_delete
+        harness_new harness_edit harness_cancel harness_validate harness_save harness_delete
         save_public_settings new_key create_key rename_key
         regenerate_key revoke_key
       ) do
@@ -1662,6 +1702,113 @@ defmodule RelayWeb.BoardSettingsLive do
     end
   end
 
+  # ---------------------------------------------------------------- RE433: agents & harnesses
+
+  def handle_event("agent_new", _params, socket) do
+    case socket.assigns.harnesses do
+      [harness | _] -> {:noreply, open_new_agent(socket, harness, "")}
+      [] -> {:noreply, put_flash(socket, :error, "Add a harness first.")}
+    end
+  end
+
+  def handle_event("agent_pick_harness", %{"id" => id}, socket) do
+    harness = Agents.get_harness!(socket.assigns.board, id)
+    {:noreply, open_new_agent(socket, harness, socket.assigns.agent_form[:name].value || "")}
+  end
+
+  def handle_event("agent_edit", %{"id" => id}, socket) do
+    agent = Agents.get_agent!(socket.assigns.board, id)
+
+    {:noreply,
+     socket
+     |> assign(:agent_panel, {:edit, agent})
+     |> assign(:agent_form, to_form(Agents.change_agent(agent)))
+     |> assign(:agents_error, nil)}
+  end
+
+  def handle_event("agent_cancel", _params, socket), do: {:noreply, close_agent_panel(socket)}
+
+  def handle_event("agent_validate", %{"agent" => params}, socket) do
+    changeset =
+      case socket.assigns.agent_panel do
+        {:new, harness} -> Agents.change_agent(new_agent(socket), agent_params(params, harness))
+        {:edit, agent} -> Agents.change_agent(agent, Map.delete(params, "harness_id"))
+      end
+
+    {:noreply, assign(socket, :agent_form, to_form(changeset, action: :validate))}
+  end
+
+  def handle_event("agent_save", %{"agent" => params}, socket) do
+    result =
+      case socket.assigns.agent_panel do
+        {:new, harness} -> Agents.create_agent(socket.assigns.board, agent_params(params, harness))
+        {:edit, agent} -> Agents.update_agent(agent, Map.delete(params, "harness_id"))
+      end
+
+    case result do
+      {:ok, _agent} -> {:noreply, socket |> close_agent_panel() |> refresh_agents()}
+      {:error, changeset} -> {:noreply, assign(socket, :agent_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("agent_make_default", %{"id" => id}, socket) do
+    board = socket.assigns.board
+    {:ok, board} = Agents.set_default_agent(board, Agents.get_agent!(board, id))
+    {:noreply, socket |> assign(:board, board) |> refresh_agents()}
+  end
+
+  def handle_event("agent_delete", _params, %{assigns: %{agent_panel: {:edit, agent}}} = socket) do
+    case Agents.delete_agent(agent) do
+      {:ok, _agent} -> {:noreply, socket |> close_agent_panel() |> refresh_agents()}
+      {:error, reason} -> {:noreply, assign(socket, :agents_error, agent_refusal(agent, reason))}
+    end
+  end
+
+  def handle_event("harness_new", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:harness_panel, :new)
+     |> assign(:harness_form, to_form(Agents.change_harness(%Harness{})))
+     |> assign(:harness_error, nil)}
+  end
+
+  def handle_event("harness_edit", %{"id" => id}, socket) do
+    harness = Agents.get_harness!(socket.assigns.board, id)
+
+    {:noreply,
+     socket
+     |> assign(:harness_panel, {:edit, harness})
+     |> assign(:harness_form, to_form(Agents.change_harness(harness)))
+     |> assign(:harness_error, nil)}
+  end
+
+  def handle_event("harness_cancel", _params, socket), do: {:noreply, close_harness_panel(socket)}
+
+  def handle_event("harness_validate", %{"harness" => params}, socket) do
+    changeset = Agents.change_harness(editing_harness(socket), params)
+    {:noreply, assign(socket, :harness_form, to_form(changeset, action: :validate))}
+  end
+
+  def handle_event("harness_save", %{"harness" => params}, socket) do
+    result =
+      case socket.assigns.harness_panel do
+        {:edit, harness} -> Agents.update_harness(harness, params)
+        _new -> Agents.create_harness(socket.assigns.board, params)
+      end
+
+    case result do
+      {:ok, _harness} -> {:noreply, socket |> close_harness_panel() |> refresh_agents()}
+      {:error, changeset} -> {:noreply, assign(socket, :harness_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("harness_delete", _params, %{assigns: %{harness_panel: {:edit, harness}}} = socket) do
+    case Agents.delete_harness(harness) do
+      {:ok, _harness} -> {:noreply, socket |> close_harness_panel() |> refresh_agents()}
+      {:error, {:in_use, names}} -> {:noreply, assign(socket, :harness_error, harness_refusal(harness, names))}
+    end
+  end
+
   @impl true
   def handle_info({:member_removed, user_id}, socket) do
     if socket.assigns.current_scope.user.id == user_id do
@@ -1689,6 +1836,7 @@ defmodule RelayWeb.BoardSettingsLive do
   """
   def section_label(:general), do: "General"
   def section_label(:stages), do: "Stages"
+  def section_label(:agents), do: "Agents"
   def section_label(:public), do: "Public board"
   def section_label(:members), do: "Members"
   def section_label(:keys), do: "API keys"
@@ -1696,11 +1844,75 @@ defmodule RelayWeb.BoardSettingsLive do
 
   defp section(%{"section" => "public"}), do: :public
   defp section(%{"section" => "stages"}), do: :stages
+  defp section(%{"section" => "agents"}), do: :agents
   # RE431 — the Flows tab is gone; its old links land on Stages, where each row owns its flow.
   defp section(%{"section" => "flows"}), do: :stages
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
   defp section(_params), do: :general
+
+  # RE433 — the one reload point for the Agents pane, run after every agent/harness mutation.
+  defp refresh_agents(socket) do
+    board = socket.assigns.board
+
+    socket
+    |> assign(:harnesses, Agents.list_harnesses(board))
+    |> assign(:agents, Agents.list_agents(board))
+    |> assign(:agent_usage, Agents.node_usage(board))
+    |> assign(:default_agent_id, default_agent_id(board))
+  end
+
+  defp default_agent_id(board) do
+    case Agents.default_agent(board) do
+      %Agent{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  defp open_new_agent(socket, harness, name) do
+    params = %{"harness_id" => harness.id, "model" => List.first(harness.models), "name" => name}
+
+    socket
+    |> assign(:agent_panel, {:new, harness})
+    |> assign(:agent_form, to_form(Agents.change_agent(new_agent(socket), params)))
+    |> assign(:agents_error, nil)
+  end
+
+  defp new_agent(socket), do: %Agent{board_id: socket.assigns.board.id}
+
+  # The picked harness is server state — the form never chooses it.
+  defp agent_params(params, harness), do: Map.put(params, "harness_id", harness.id)
+
+  defp close_agent_panel(socket) do
+    socket
+    |> assign(:agent_panel, nil)
+    |> assign(:agent_form, nil)
+    |> assign(:agents_error, nil)
+  end
+
+  defp editing_harness(%{assigns: %{harness_panel: {:edit, harness}}}), do: harness
+  defp editing_harness(_socket), do: %Harness{}
+
+  defp close_harness_panel(socket) do
+    socket
+    |> assign(:harness_panel, nil)
+    |> assign(:harness_form, nil)
+    |> assign(:harness_error, nil)
+  end
+
+  defp agent_refusal(agent, :default), do: "#{agent.name} is the board default. Make another agent the default first."
+
+  defp agent_refusal(agent, {:in_use, pairs}) do
+    uses =
+      pairs
+      |> Enum.chunk_by(&elem(&1, 0))
+      |> Enum.map_join("; ", fn [{flow, _} | _] = chunk -> "#{flow}: " <> Enum.map_join(chunk, ", ", &elem(&1, 1)) end)
+
+    "#{agent.name} is used by #{uses}. Point those nodes at another LLM first."
+  end
+
+  defp harness_refusal(harness, names),
+    do: "#{harness.name} is used by #{Enum.join(names, ", ")}. Delete or move those agents first."
 
   # Reloads the main stages, lane map and every row's flow from the DB after any mutation, and
   # groups them for the pane. All four categories always render so an emptied category keeps its

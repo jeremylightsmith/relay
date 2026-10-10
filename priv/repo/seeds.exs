@@ -208,6 +208,9 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
     |> Board.changeset(%{name: name, slug: slug, key: key})
     |> Repo.insert!()
 
+  # RE433: the board's harnesses + agents, before any flow whose nodes name them in `llm`.
+  :ok = Relay.Agents.ensure_seeded!(board)
+
   stages =
     for {{sname, category, type, _flow_works_here, wip}, pos} <- Enum.with_index(stage_specs, 1) do
       %Stage{board_id: board.id}

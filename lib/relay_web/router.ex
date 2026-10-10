@@ -226,6 +226,7 @@ defmodule RelayWeb.Router do
     get "/cards/:ref/diagnosis", DiagnosisController, :show
     get "/cards/:ref/runs", RunController, :index
     get "/runners", RunnerController, :index
+    get "/harnesses", HarnessController, :index
     get "/flows", FlowController, :index
     get "/flows/:key", FlowController, :show
     get "/flows/:key/metrics", FlowMetricsController, :metrics

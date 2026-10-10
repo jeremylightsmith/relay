@@ -33,7 +33,6 @@ defmodule RelayWeb.FlowEditorComponents do
     {:human, "Human", "var(--color-primary)"}
   ]
 
-  @models ["inherit", "haiku", "sonnet", "opus"]
   @efforts ["low", "medium", "high"]
   @outcomes ["succeeded", "failed", "partial", "needs_input"]
 
@@ -115,8 +114,16 @@ defmodule RelayWeb.FlowEditorComponents do
   attr :referenced_count, :integer, required: true
   attr :read_only?, :boolean, default: false
 
+  attr :agents, :list,
+    default: [],
+    doc: "the board's agents (`Relay.Agents.list_agents/1`, harness preloaded) — the LLM picker's rows"
+
+  attr :harnesses, :list, default: [], doc: "the board's harnesses in board order — the LLM picker's groups"
+  attr :default_agent, :any, default: nil, doc: "the board's default `Schemas.Agent`, or nil"
+  attr :board_slug, :string, required: true
+
   def node_inspector(assigns) do
-    assigns = assign(assigns, models: @models, efforts: @efforts)
+    assigns = assign(assigns, efforts: @efforts, llm_groups: llm_groups(assigns.harnesses, assigns.agents))
 
     ~H"""
     <div>
@@ -181,7 +188,7 @@ defmodule RelayWeb.FlowEditorComponents do
         default agent runs the inline prompt. Empty submit clears it back to nil (cast_node_value). --%>
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:7px;">
           <.meta_label>
-            AGENT
+            SUBAGENT
           </.meta_label>
           <form id="inspector-node-agent-form" phx-change="edit_node_field">
             <input type="hidden" name="key" value={@node.key} />
@@ -199,35 +206,108 @@ defmodule RelayWeb.FlowEditorComponents do
           </form>
         </div>
 
+        <%!-- RE433: the node's LLM is one of the board's agents (Settings → Agents), never a
+        free-text model. nil inherits the board default. Rows are buttons using phx-value-v (see
+        the EFFORT note below); the payload is the agent's NAME (nodes store names) and "" for the
+        default row, which cast_node_value/2 turns into nil. Ids use the agent's id — names can
+        carry spaces. --%>
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:8px;">
-          <.meta_label>
-            MODEL
-          </.meta_label>
-          <%!-- phx-value-v, not phx-value-value: "value" collides with the button's intrinsic
-          DOM .value property (empty for a value-less <button>), which wins over the
-          phx-value-* attribute when a real browser serializes the click — silently sending ""
-          instead of the picked model. See board_live.ex's answer_select for the same fix. --%>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <div class="flex items-center gap-2">
+            <.meta_label>LLM</.meta_label>
+            <span class="flex-1"></span>
+            <.link
+              id="inspector-llm-manage"
+              navigate={~p"/board/#{@board_slug}/settings?section=agents"}
+              class="link link-hover text-base-content/65"
+              style="font-size:11.5px;"
+            >
+              Manage in Settings → Agents
+            </.link>
+          </div>
+          <div
+            id="inspector-llm"
+            role="listbox"
+            class="border border-base-300 rounded-lg overflow-hidden"
+          >
             <button
-              :for={model <- @models}
-              id={"inspector-model-#{model}"}
+              id="inspector-llm-default"
               type="button"
+              role="option"
+              aria-selected={to_string(is_nil(@node.llm))}
+              data-selected={to_string(is_nil(@node.llm))}
               phx-click="edit_node_field"
               phx-value-key={@node.key}
-              phx-value-field="model"
-              phx-value-v={if model == "inherit", do: "", else: model}
+              phx-value-field="llm"
+              phx-value-v=""
               disabled={@read_only?}
-              style={chip_style(model_selected?(@node, model))}
+              class="flex items-center gap-2 w-full text-left"
+              style={llm_row_style(is_nil(@node.llm), "8px 11px")}
             >
-              {model}
+              <.llm_marker selected?={is_nil(@node.llm)} />
+              <span>Board default</span>
+              <span
+                :if={@default_agent}
+                class={["font-mono", !is_nil(@node.llm) && "text-base-content/65"]}
+                style="font-size:11.5px;"
+              >
+                · {@default_agent.name}
+              </span>
             </button>
+            <%= for {harness, agents} <- @llm_groups do %>
+              <div
+                id={"inspector-llm-group-#{harness.key}"}
+                class="bg-base-200 border-y border-base-300"
+                style="padding:5px 11px;"
+              >
+                <.meta_label>{String.upcase(harness.name)}</.meta_label>
+              </div>
+              <button
+                :for={agent <- agents}
+                id={"inspector-llm-#{agent.id}"}
+                type="button"
+                role="option"
+                aria-selected={to_string(@node.llm == agent.name)}
+                data-selected={to_string(@node.llm == agent.name)}
+                phx-click="edit_node_field"
+                phx-value-key={@node.key}
+                phx-value-field="llm"
+                phx-value-v={agent.name}
+                disabled={@read_only?}
+                class="flex items-center gap-2 w-full text-left"
+                style={llm_row_style(@node.llm == agent.name, "7px 11px")}
+              >
+                <.llm_marker selected?={@node.llm == agent.name} />
+                <span>{agent.name}</span>
+                <span
+                  :if={Relay.Agents.red?(agent)}
+                  id={"inspector-llm-#{agent.id}-removed"}
+                  class="badge badge-sm badge-error badge-soft font-mono"
+                >
+                  MODEL REMOVED
+                </span>
+                <span class="flex-1"></span>
+                <span
+                  class={["font-mono", @node.llm != agent.name && "text-base-content/65"]}
+                  style="font-size:11px;"
+                >
+                  {agent.model}
+                </span>
+              </button>
+            <% end %>
           </div>
+          <span class="text-base-content/65" style="font-size:11.5px;line-height:1.45;">
+            Only the board's agents are offered — no free-text model here. Inherit follows the board default when it changes.
+          </span>
         </div>
 
         <div :if={@node.type == :agent} style="display:flex;flex-direction:column;gap:8px;">
           <.meta_label>
             EFFORT
           </.meta_label>
+          <%!-- phx-value-v, not phx-value-value: "value" collides with the button's intrinsic
+          DOM .value property (empty for a value-less <button>), which wins over the
+          phx-value-* attribute when a real browser serializes the click — silently sending ""
+          instead of the picked value. See board_live.ex's answer_select for the same fix. --%>
           <div style="display:inline-flex;background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;align-self:flex-start;">
             <button
               :for={effort <- @efforts}
@@ -243,6 +323,9 @@ defmodule RelayWeb.FlowEditorComponents do
               {effort}
             </button>
           </div>
+          <span id="inspector-effort-hint" class="text-base-content/65" style="font-size:11.5px;">
+            Passed to harnesses that take one; ignored by the rest.
+          </span>
         </div>
 
         <div style="display:flex;gap:16px;">
@@ -668,17 +751,27 @@ defmodule RelayWeb.FlowEditorComponents do
   # Omitted entirely when the node declares neither, so today's undeclared flows look unchanged.
   defp contract?(node), do: node.reads != [] or node.writes != []
 
-  defp model_selected?(%{model: nil}, "inherit"), do: true
-  defp model_selected?(%{model: model}, model), do: true
-  defp model_selected?(_, _), do: false
+  attr :selected?, :boolean, required: true
 
-  defp chip_style(true),
-    do:
-      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid var(--color-secondary);background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));font-family:ui-monospace,monospace;"
+  defp llm_marker(assigns) do
+    ~H"""
+    <span data-marker class={!@selected? && "text-base-content/65"} style="width:14px;">
+      {if @selected?, do: "●", else: "○"}
+    </span>
+    """
+  end
 
-  defp chip_style(false),
+  # Harnesses in board order, each with its agents (list order), dropping a harness with none.
+  defp llm_groups(harnesses, agents) do
+    by_harness = Enum.group_by(agents, & &1.harness_id)
+    for h <- harnesses, group = Map.get(by_harness, h.id, []), group != [], do: {h, group}
+  end
+
+  defp llm_row_style(true, padding),
     do:
-      "font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid var(--color-field-border);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-family:ui-monospace,monospace;"
+      "padding:#{padding};font-size:13px;font-weight:600;background:color-mix(in oklab, var(--color-secondary) 8%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-content));"
+
+  defp llm_row_style(false, padding), do: "padding:#{padding};font-size:13px;"
 
   defp segment_style(true),
     do:

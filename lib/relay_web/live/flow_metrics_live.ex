@@ -126,7 +126,6 @@ defmodule RelayWeb.FlowMetricsLive do
       Map.merge(m, %{
         name: humanize(m.node_key),
         type: node && node.type,
-        model: node && node.model,
         verdict: collapse_verdict(m.verdict_split)
       })
     end)
@@ -391,13 +390,6 @@ defmodule RelayWeb.FlowMetricsLive do
                       style={"font-family:var(--font-mono);font-size:8.5px;font-weight:700;letter-spacing:0.06em;padding:2px 6px;border-radius:4px;#{type_tag_style(row.type)}"}
                     >
                       {row.type}
-                    </span>
-                    <span
-                      :if={row.model}
-                      id={"node-model-#{row.node_key}"}
-                      style="font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));padding:2px 7px;border-radius:4px;"
-                    >
-                      {row.model}
                     </span>
                   </div>
                 </div>

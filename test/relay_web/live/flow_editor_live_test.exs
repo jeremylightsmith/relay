@@ -217,23 +217,6 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-editor-unsaved-bar")
   end
 
-  test "clicking a model chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
-    conn: conn,
-    board: board
-  } do
-    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
-    view |> element(~s([data-node="implement"])) |> render_click()
-
-    view |> element("#inspector-model-sonnet") |> render_click()
-    assert has_element?(view, "#flow-editor-unsaved-bar")
-
-    view |> element("#flow-editor-save") |> render_click()
-    view |> element("#flow-save-confirm") |> render_click()
-
-    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
-    assert Enum.any?(nodes, &(&1.key == "implement" and &1.model == "sonnet"))
-  end
-
   test "clicking an effort chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
     conn: conn,
     board: board
@@ -662,5 +645,143 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#trigger-stage option[selected]", "Specify")
     assert has_element?(view, "#trigger-derived-lands-on", "Specify:Review")
     refute html =~ "Spec:Review"
+  end
+
+  describe "LLM picker and canvas subtitles (RE433)" do
+    alias Relay.Agents
+
+    defp agent_named(board, name), do: Enum.find(Agents.list_agents(board), &(&1.name == name))
+    defp harness_keyed(board, key), do: Enum.find(Agents.list_harnesses(board), &(&1.key == key))
+
+    defp add_agent!(board, harness_key, name, model) do
+      harness = harness_keyed(board, harness_key)
+      {:ok, agent} = Agents.create_agent(board, %{"name" => name, "harness_id" => harness.id, "model" => model})
+      agent
+    end
+
+    defp canvas_llm(view, key, state) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-node="#{key}"] [data-llm="#{state}"]))
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp save!(view) do
+      view |> element("#flow-editor-save") |> render_click()
+      view |> element("#flow-save-confirm") |> render_click()
+    end
+
+    defp saved_node(board, key) do
+      %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+      Enum.find(nodes, &(&1.key == key))
+    end
+
+    test "1. the inspector lists the board's agents under their harness, with the board default first",
+         %{conn: conn, board: board} do
+      sonnet = agent_named(board, "Claude Sonnet")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+
+      assert has_element?(view, "#inspector-llm-default", "Board default")
+      assert has_element?(view, "#inspector-llm-default", "Claude Opus")
+      assert has_element?(view, "#inspector-llm-group-claude-code", "CLAUDE CODE")
+      assert has_element?(view, ~s(#inspector-llm-#{sonnet.id}[data-selected="true"]))
+      refute has_element?(view, "#inspector-model-sonnet")
+      refute has_element?(view, "#inspector-llm input")
+
+      assert has_element?(
+               view,
+               ~s(#inspector-llm-manage[href="/board/#{board.slug}/settings?section=agents"])
+             )
+    end
+
+    test "2. picking a board agent saves it as the node's llm and shows the override on the canvas",
+         %{conn: conn, board: board} do
+      codex_fast = add_agent!(board, "codex", "Codex Fast", "gpt-6-sol")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+
+      assert has_element?(view, "#inspector-llm-group-codex")
+      view |> element("#inspector-llm-#{codex_fast.id}") |> render_click()
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+      save!(view)
+
+      assert saved_node(board, "spec_review").llm == "Codex Fast"
+      assert canvas_llm(view, "spec_review", "override") == "◆ Codex Fast"
+    end
+
+    test "3. picking Board default clears the node's llm and the canvas reads the default",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      # the shipped code.json names "Claude Opus" on implement, so inheriting is a real edit
+      view |> element(~s([data-node="implement"])) |> render_click()
+      view |> element("#inspector-llm-default") |> render_click()
+      assert has_element?(view, ~s(#inspector-llm-default[data-selected="true"]))
+      save!(view)
+
+      assert saved_node(board, "implement").llm == nil
+      assert canvas_llm(view, "implement", "default") == "default · Claude Opus"
+    end
+
+    test "4. a pushed node carrying a legacy model selects the matching agent",
+         %{conn: conn, board: board} do
+      sonnet = agent_named(board, "Claude Sonnet")
+
+      doc = %{
+        "key" => "legacy",
+        "isolation" => "shared_clean",
+        "trigger" => %{"stage" => "Deploy"},
+        "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}", "model" => "sonnet"}],
+        "edges" => [%{"from" => "start", "to" => "a"}, %{"from" => "a", "to" => "done", "on" => "succeeded"}]
+      }
+
+      assert {:ok, :created, _} = Flows.upsert_from_document(board, "legacy", doc)
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/legacy")
+      view |> element(~s([data-node="a"])) |> render_click()
+      assert has_element?(view, ~s(#inspector-llm-#{sonnet.id}[data-selected="true"]))
+    end
+
+    test "5. a red agent reads `model removed` on the canvas and MODEL REMOVED in the picker",
+         %{conn: conn, board: board} do
+      gemini_pro = add_agent!(board, "gemini-cli", "Gemini Pro", "gemini-2.5-pro")
+      flow = Flows.get_flow!(board, "code")
+
+      nodes =
+        Enum.map(flow.nodes, fn n ->
+          n = Map.take(n, Schemas.Flow.Node.fields())
+          if n.key == "spec_review", do: %{n | llm: "Gemini Pro"}, else: n
+        end)
+
+      edges = Enum.map(flow.edges, &Map.take(&1, Schemas.Flow.Edge.fields()))
+      {:ok, _} = Flows.save_definition(flow, %{nodes: nodes, edges: edges})
+
+      {:ok, _} = Agents.update_harness(harness_keyed(board, "gemini-cli"), %{"models" => "gemini-2.5-flash"})
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      assert canvas_llm(view, "spec_review", "red") == "◆ Gemini Pro · model removed"
+
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+      assert has_element?(view, "#inspector-llm-#{gemini_pro.id}-removed", "MODEL REMOVED")
+
+      assert has_element?(
+               view,
+               "#inspector-llm-group-gemini-cli + #inspector-llm-#{gemini_pro.id}"
+             )
+    end
+
+    test "6. shell nodes get no LLM picker; agent nodes say SUBAGENT and carry the EFFORT hint",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="precommit"])) |> render_click()
+      refute has_element?(view, "#inspector-llm")
+
+      view |> element(~s([data-node="implement"])) |> render_click()
+      assert has_element?(view, "#flow-inspector", "SUBAGENT")
+      refute has_element?(view, "#flow-inspector span.font-mono", ~r/^\s*AGENT\s*$/)
+      assert has_element?(view, "#inspector-effort-hint", "Passed to harnesses that take one; ignored by the rest.")
+    end
   end
 end

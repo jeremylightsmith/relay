@@ -12,6 +12,7 @@ defmodule Schemas.Board do
   `story_map_view` (RE257) is the board-wide shared story-map view state, written only via
   `story_map_view_changeset/2` and keyed by `Relay.StoryMap.view_defaults/0` — the single
   source of truth for which keys the view holds.
+  `default_agent_id` (RE433) is the board's default LLM, written only by `Relay.Agents`.
   """
 
   use Ecto.Schema
@@ -29,10 +30,15 @@ defmodule Schemas.Board do
 
     belongs_to :owner, Schemas.User
     belongs_to :public_intake_stage, Schemas.Stage
+    # RE433: the agent a flow node with no `llm` runs on. Written only by
+    # `Relay.Agents.set_default_agent/2`, never cast by `changeset/2`.
+    belongs_to :default_agent, Schemas.Agent
     has_many :stages, Schemas.Stage
 
     timestamps(type: :utc_datetime)
   end
+
+  @type t :: %__MODULE__{}
 
   @doc "Changeset for board attributes. `owner_id` must already be set on the struct."
   def changeset(board, attrs) do

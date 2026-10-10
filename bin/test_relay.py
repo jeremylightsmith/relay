@@ -148,7 +148,7 @@ FAR_RESET = 4_102_444_800   # 2100-01-01
 
 
 def claude_report(*events):
-    """A ClaudeRunReport fed `events` in order, exactly as _stream_claude_job feeds it."""
+    """A ClaudeRunReport fed `events` in order, exactly as _stream_agent_job feeds it."""
     report = relay.ClaudeRunReport()
     for ev in events:
         report.observe(ev)
@@ -193,7 +193,7 @@ class ClaimContractKeysTest(unittest.TestCase):
     """
 
     TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
-                 "isolation", "resume_session", "vars"}
+                 "isolation", "resume_session", "vars", "harness", "model", "effort"}
     VARS = {"ref", "branch", "prior_detail", "findings", "task", "task_id"}
 
     def test_every_claim_case_has_exactly_the_keys_the_runner_reads(self):
@@ -321,8 +321,12 @@ class ReverseContractTest(unittest.TestCase):
         self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
         # A beat that DOES carry the inventory matches the fixture's key set exactly.
         full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
-                                    {"agents": [], "skills": []})
+                                    {"agents": [], "skills": []},
+                                    harnesses=[{"key": "k", "installed": True, "version": None,
+                                                "signed_in": None}])
         self.assertEqual(set(full), set(CONTRACT["heartbeat"]["request"]))
+        # RE433: each inventory entry carries exactly the fixture's keys.
+        self.assertEqual(set(full["harnesses"][0]), set(CONTRACT["heartbeat"]["request"]["harnesses"][0]))
         self.assertIn("want_capabilities", CONTRACT["heartbeat"]["response"])
 
     def test_the_outcome_response_carries_the_run_state_the_runner_reads(self):
@@ -3832,18 +3836,150 @@ class ApiDefaultTimeoutTest(unittest.TestCase):
         self.assertIn("timed out", cm.exception.msg)
 
 
-class StreamClaudeJobTest(unittest.TestCase):
+# Argv a test hands _stream_agent_job: what TALK_COMMAND / a Claude Code harness expands to.
+CLAUDE_ARGV = ["claude", "-p", "p", "--verbose", "--output-format", "stream-json"]
+
+
+class ExpandCommandTest(unittest.TestCase):
+    """RE433: a harness command template → argv. Split FIRST, then substitute per token, so a
+    placeholder fills exactly one argv element and its value is never re-scanned."""
+
+    CLAUDE = "claude -p {prompt} --model {model} [--effort {effort}] [--agent {subagent}]"
+    CODEX = ("codex exec --json --model {model} --cd {worktree} "
+             "[-c model_reasoning_effort={effort}] {prompt}")
+
+    def test_the_prompt_is_one_verbatim_element_and_an_empty_segment_is_dropped(self):
+        values = {"prompt": 'say "hi" {model} {x}', "model": "opus", "effort": None,
+                  "subagent": "spec-reviewer"}
+        self.assertEqual(relay.expand_command(self.CLAUDE, values),
+                         ["claude", "-p", 'say "hi" {model} {x}', "--model", "opus",
+                          "--agent", "spec-reviewer"])
+
+    def test_a_filled_segment_keeps_its_tokens_and_a_spaced_value_stays_one_element(self):
+        argv = relay.expand_command(self.CODEX, {"prompt": "go", "model": "gpt-6-sol",
+                                                 "worktree": "/w/a b", "effort": "high"})
+        i = argv.index("-c")
+        self.assertEqual(argv[i:i + 2], ["-c", "model_reasoning_effort=high"])
+        j = argv.index("--cd")
+        self.assertEqual(argv[j:j + 2], ["--cd", "/w/a b"])
+        self.assertEqual(argv[-1], "go")
+
+    def test_an_empty_effort_drops_the_whole_segment(self):
+        for empty in (None, ""):
+            argv = relay.expand_command(self.CODEX, {"prompt": "go", "model": "m",
+                                                     "worktree": "/w/a b", "effort": empty})
+            self.assertNotIn("-c", argv)
+            self.assertFalse(any("model_reasoning_effort" in a for a in argv))
+            self.assertEqual(argv, ["codex", "exec", "--json", "--model", "m", "--cd", "/w/a b", "go"])
+
+    def test_a_required_placeholder_without_a_value_raises(self):
+        with self.assertRaises(relay.TemplateError) as cm:
+            relay.expand_command("gemini -p {prompt} --model {model}",
+                                 {"prompt": "p", "model": None})
+        self.assertEqual(str(cm.exception), "template placeholder {model} has no value")
+
+    def test_an_unknown_placeholder_raises(self):
+        with self.assertRaises(relay.TemplateError) as cm:
+            relay.expand_command("x {bogus}", {})
+        self.assertEqual(str(cm.exception), "unknown placeholder {bogus}")
+
+    def test_an_unknown_placeholder_inside_a_segment_raises_too(self):
+        with self.assertRaises(relay.TemplateError) as cm:
+            relay.expand_command("x [--y {bogus}]", {})
+        self.assertEqual(str(cm.exception), "unknown placeholder {bogus}")
+
+
+class SelectCommandTest(unittest.TestCase):
+    """RE433: resume only where the harness can; otherwise the node starts fresh."""
+
+    CLAUDE = {"command": "claude -p {prompt}", "resume_command": "claude -p --resume {session} {prompt}"}
+    GEMINI = {"command": "gemini -p {prompt}", "resume_command": None}
+
+    def test_a_session_and_a_resume_command_resume(self):
+        self.assertEqual(relay.select_command(self.CLAUDE, "s-1"),
+                         ("claude -p --resume {session} {prompt}", "s-1"))
+
+    def test_a_harness_that_cannot_resume_starts_fresh(self):
+        self.assertEqual(relay.select_command(self.GEMINI, "s-1"), ("gemini -p {prompt}", None))
+
+    def test_no_session_starts_fresh(self):
+        self.assertEqual(relay.select_command(self.CLAUDE, None), ("claude -p {prompt}", None))
+
+
+class ReadPathTest(unittest.TestCase):
+    def test_reads_a_top_level_key(self):
+        self.assertEqual(relay.read_path({"thread_id": "t-9"}, ".thread_id"), "t-9")
+
+    def test_reads_a_nested_key(self):
+        self.assertEqual(relay.read_path({"a": {"b": "x"}}, ".a.b"), "x")
+
+    def test_a_non_string_value_is_none(self):
+        self.assertIsNone(relay.read_path({"a": 1}, ".a"))
+
+    def test_a_missing_key_is_none(self):
+        self.assertIsNone(relay.read_path({}, ".session_id"))
+
+    def test_a_none_path_is_none(self):
+        self.assertIsNone(relay.read_path({"session_id": "s"}, None))
+
+    def test_a_non_dict_event_is_none(self):
+        self.assertIsNone(relay.read_path("not a dict", ".a"))
+
+    def test_an_empty_string_is_none(self):
+        self.assertIsNone(relay.read_path({"session_id": ""}, ".session_id"))
+
+
+class StreamAgentJobTest(unittest.TestCase):
     def setUp(self):
         self._popen = relay.subprocess.Popen
         self.addCleanup(setattr, relay.subprocess, "Popen", self._popen)
 
+    def test_runs_the_argv_it_is_given_and_captures_the_session_by_path(self):
+        """RE433: a Codex stream names its session `thread_id`; stdin is closed because
+        `codex exec` reads a non-TTY stdin and would hang on the runner's."""
+        seen = {}
+        lines = [json.dumps({"type": "thread.started", "thread_id": "t-1"}), "not json",
+                 json.dumps({"type": "turn.completed"})]
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"], seen["kwargs"] = cmd, k
+            return _FakePopen(lines, code=0)
+
+        relay.subprocess.Popen = fake_popen
+        argv = ["codex", "exec", "--json", "go"]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ok, session, report = relay._stream_agent_job(argv, cwd="/tmp/wt",
+                                                          session_id_path=".thread_id")
+        self.assertEqual((ok, session), (True, "t-1"))
+        self.assertIsInstance(report, relay.ClaudeRunReport)
+        self.assertEqual(seen["cmd"], argv)
+        self.assertIs(seen["kwargs"]["stdin"], subprocess.DEVNULL)
+        self.assertEqual(seen["kwargs"]["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "0")
+        self.assertIn("not json", out.getvalue())
+
+    def test_the_latest_non_empty_session_id_wins(self):
+        lines = [json.dumps({"session_id": "s-1"}), json.dumps({"session_id": ""}),
+                 json.dumps({"session_id": "s-2"}), json.dumps({"type": "x"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        _ok, session, _r = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                       session_id_path=".session_id")
+        self.assertEqual(session, "s-2")
+
+    def test_no_session_path_captures_no_session(self):
+        lines = [json.dumps({"session_id": "s-1"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        _ok, session, _r = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
+        self.assertIsNone(session)
+
     def test_the_report_records_how_an_auth_failure_ended(self):
-        """RE308: `_stream_claude_job` used to keep only the session id, so the auth error that
+        """RE308: the stream used to keep only the session id, so the auth error that
         was in the stream the whole time never reached the outcome."""
         lines = [json.dumps({"type": "system", "subtype": "init", "session_id": "sess-1"}),
                  json.dumps(AUTH_ASSISTANT_EVENT), json.dumps(AUTH_RESULT_EVENT)]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
-        ok, session, report = capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        ok, session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                          session_id_path=".session_id")
         self.assertFalse(ok)
         self.assertEqual(session, "sess-1")
         self.assertEqual(report.error_tag, "authentication_failed")
@@ -3855,7 +3991,8 @@ class StreamClaudeJobTest(unittest.TestCase):
     def test_the_report_records_a_rejected_rate_limit_event_from_this_stream(self):
         lines = [json.dumps(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
-        _ok, _session, report = capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        _ok, _session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                            session_id_path=".session_id")
         self.assertTrue(report.rejected)
         self.assertEqual(report.rejected_window, "five_hour")
         self.assertEqual(report.rejected_resets_at, FAR_RESET)
@@ -3881,60 +4018,19 @@ class StreamClaudeJobTest(unittest.TestCase):
             json.dumps({"type": "result", "session_id": "sess-77", "num_turns": 2}),
         ]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
-        ok, session, report = capture_ret(relay._stream_claude_job, "do it", cwd="/tmp/wt")
+        ok, session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                          session_id_path=".session_id")
         self.assertTrue(ok)
         self.assertEqual(session, "sess-77")
         self.assertIsInstance(report, relay.ClaudeRunReport)
 
-    def test_resume_inserts_the_prior_session_into_argv(self):
-        seen = {}
-
-        def fake_popen(cmd, *a, **k):
-            seen["cmd"] = cmd
-            seen["env"] = k.get("env", {})
-            return _FakePopen([], code=0)
-
-        relay.subprocess.Popen = fake_popen
-        capture_ret(relay._stream_claude_job, "resume prompt", cwd="/tmp/wt",
-                    session_id="sess-5", outcome_path="/tmp/wt/out.json")
-        self.assertIn("--resume", seen["cmd"])
-        self.assertEqual(seen["cmd"][seen["cmd"].index("--resume") + 1], "sess-5")
-        self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
-
-    def test_agent_appends_the_dash_dash_agent_flag(self):
-        seen = {}
-
-        def fake_popen(cmd, *a, **k):
-            seen["cmd"] = cmd
-            return _FakePopen([], code=0)
-
-        relay.subprocess.Popen = fake_popen
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", agent="plan-implementer")
-        self.assertIn("--agent", seen["cmd"])
-        self.assertEqual(seen["cmd"][seen["cmd"].index("--agent") + 1], "plan-implementer")
-
-    def test_no_agent_appends_no_dash_dash_agent_flag(self):
-        seen = {}
-
-        def fake_popen(cmd, *a, **k):
-            seen["cmd"] = cmd
-            return _FakePopen([], code=0)
-
-        relay.subprocess.Popen = fake_popen
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
-        self.assertNotIn("--agent", seen["cmd"])
-
-    def test_runs_in_auto_mode_rather_than_skipping_permission_checks(self):
-        """An agent node runs under auto mode's classifier, which denies a risky action (an
-        exfiltration, a deploy, a force-push) and lets the run carry on, instead of
-        --dangerously-skip-permissions, which lets every action through unchecked."""
+    def test_exports_the_outcome_path(self):
         seen = {}
         relay.subprocess.Popen = lambda cmd, *a, **k: (
-            seen.update(cmd=cmd) or _FakePopen([], code=0))
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
-        self.assertIn("--permission-mode", seen["cmd"])
-        self.assertEqual(seen["cmd"][seen["cmd"].index("--permission-mode") + 1], "auto")
-        self.assertNotIn("--dangerously-skip-permissions", seen["cmd"])
+            seen.update(env=k.get("env", {})) or _FakePopen([], code=0))
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                    outcome_path="/tmp/wt/out.json")
+        self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
 
     def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
         """claude -p caps a background workflow's wait at 10 minutes by default; a long agent
@@ -3943,7 +4039,7 @@ class StreamClaudeJobTest(unittest.TestCase):
         seen = {}
         relay.subprocess.Popen = lambda cmd, *a, **k: (
             seen.update(env=k.get("env", {})) or _FakePopen([], code=0))
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "0")
 
     def test_an_explicit_wait_ceiling_override_wins(self):
@@ -3954,48 +4050,39 @@ class StreamClaudeJobTest(unittest.TestCase):
             return _FakePopen([], code=0)
 
         relay.subprocess.Popen = fake_popen
-        self._env = dict(os.environ)
         os.environ["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "5000"
         self.addCleanup(os.environ.pop, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", None)
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertEqual(seen["env"].get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), "5000")
 
     def test_registers_the_live_subprocess_for_cancellation(self):
         proc = _FakePopen([], code=0)
         relay.subprocess.Popen = lambda *a, **k: proc
         registered = []
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt",
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
                     on_proc=registered.append)
         self.assertEqual(registered, [proc])
 
     def test_runs_its_own_process_group_so_a_cancel_group_kill_never_hits_the_runner(self):
-        """JobControl.cancel() now kills the whole process group of the registered proc
-        (see JobControlTest). If this Popen shared the runner's own process group (the
-        default unless start_new_session=True), that group-kill would SIGTERM the runner
-        itself instead of just the claude subprocess. Runner node-jobs always pass
-        on_proc (a JobControl.register), which is what should trigger the detach."""
+        """JobControl.cancel() kills the whole process group of the registered proc. If this
+        Popen shared the runner's own process group, that group-kill would SIGTERM the runner
+        itself instead of just the agent subprocess."""
         seen = {}
         relay.subprocess.Popen = lambda *a, **k: (
             seen.update(kwargs=k) or _FakePopen([], code=0))
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", on_proc=lambda proc: None)
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", on_proc=lambda proc: None)
         self.assertTrue(seen["kwargs"].get("start_new_session"))
 
     def test_without_on_proc_does_not_detach_so_ctrl_c_still_reaches_the_child(self):
-        """The plain `relay run` runner mode (_stream_claude, run_step) calls this with no
-        on_proc and holds no JobControl to kill a detached group — if it detached anyway,
-        a Ctrl-C at the tty would no longer reach the running `claude -p` (it's no longer
-        in the terminal's foreground process group), hanging the runner until the child
-        exits on its own."""
         seen = {}
         relay.subprocess.Popen = lambda *a, **k: (
             seen.update(kwargs=k) or _FakePopen([], code=0))
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertFalse(seen["kwargs"].get("start_new_session"))
 
     def test_a_render_error_falls_back_to_the_raw_line_and_keeps_streaming(self):
-        """Mirrors the old _stream_claude behavior: the try wraps BOTH json.loads and
-        _print_claude_event, so a rendering bug prints the raw line instead of killing
-        the stream loop mid-job."""
+        """The try wraps BOTH json.loads and _print_claude_event, so a rendering bug prints the
+        raw line instead of killing the stream loop mid-job."""
         bad = json.dumps({"type": "assistant",
                           "message": {"content": [{"type": "text", "text": "x"}]}})
         good = json.dumps({"type": "result", "session_id": "sess-2"})
@@ -4009,7 +4096,7 @@ class StreamClaudeJobTest(unittest.TestCase):
 
         relay._print_claude_event = flaky
         self.addCleanup(setattr, relay, "_print_claude_event", orig)
-        out = capture(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        out = capture(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertIn(bad[:200], out)          # fell back to the raw line
         self.assertIn("claude finished", out)  # ...and kept streaming the next event
 
@@ -4021,8 +4108,24 @@ class StreamClaudeJobTest(unittest.TestCase):
         lines = [json.dumps(rate_limit_event(five_hour=0.95, resets_at=4_102_444_800)),
                  json.dumps({"type": "result", "session_id": "s"})]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
-        capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertEqual(relay.USAGE_LIMITER.paused(1_800_000_000)["window"], "five_hour")
+
+
+class TalkCommandTest(unittest.TestCase):
+    """Talk stays on `claude` (RE433 out of scope), but goes through the same expansion."""
+
+    def test_a_fresh_talk_turn_runs_claude_in_auto_mode(self):
+        argv = relay.expand_command(relay.TALK_COMMAND, {"prompt": "why?"})
+        self.assertEqual(argv[:3], ["claude", "-p", "why?"])
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+        self.assertIn("stream-json", argv)
+
+    def test_a_resumed_talk_turn_names_its_session(self):
+        argv = relay.expand_command(relay.TALK_RESUME_COMMAND, {"prompt": "why?", "session": "s-5"})
+        self.assertEqual(argv[argv.index("--resume") + 1], "s-5")
+        self.assertIn("why?", argv)
 
 
 class ClaudeFailureClassificationTest(unittest.TestCase):
@@ -4491,7 +4594,7 @@ class AdvanceCommandTest(unittest.TestCase):
 class RunNodeJobTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
-                       ("_stream_shell", "_stream_claude_job", "determine_agent_outcome",
+                       ("_stream_shell", "_stream_agent_job", "determine_agent_outcome",
                         "get_card")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self._run = relay.subprocess.run                      # restore the attr, not the module
@@ -4501,19 +4604,19 @@ class RunNodeJobTest(unittest.TestCase):
         self.control = relay.JobControl()
 
     def test_agent_job_hands_the_stream_report_to_the_outcome_contract(self):
-        """RE308: the report _stream_claude_job collected must reach determine_agent_outcome, and a
+        """RE308: the report _stream_agent_job collected must reach determine_agent_outcome, and a
         `blocked` verdict must reach the caller unchanged."""
         report = relay.ClaudeRunReport()
         seen = {}
 
-        def fake_stream(prompt, cwd, **kwargs):
+        def fake_stream(argv, cwd, **kwargs):
             return False, "sess-9", report
 
         def fake_determine(job, ok, path, cwd=None, report=None):
             seen["report"] = report
             return relay.NODE_OUTCOME_BLOCKED, "agent could not run: x", False
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = fake_determine
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
         outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
@@ -4525,7 +4628,7 @@ class RunNodeJobTest(unittest.TestCase):
         forward to report_outcome."""
         report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
                                errored_result_event("Claude AI usage limit reached"))
-        relay._stream_claude_job = lambda prompt, cwd, **kwargs: (False, "sess-9", report)
+        relay._stream_agent_job = lambda argv, cwd, **kwargs: (False, "sess-9", report)
         relay.get_card = lambda ref: {"status": "working"}
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
         outcome, _detail, _sha, _session, _no_changes, resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
@@ -4622,8 +4725,8 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertIn("boom line", detail)
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
-        relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+        relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4633,63 +4736,51 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_carries_the_no_changes_assertion_through_to_the_return(self):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
-        relay._stream_claude_job = lambda prompt, cwd, tag="", session_id=None, \
-            outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+        relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
         result = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertIs(result[4], True)
 
-    def test_agent_job_passes_the_agent_flag_through_to_stream_claude_job(self):
+    def _argv_for(self, j):
+        seen = {}
+
+        def fake_stream(argv, cwd, **kwargs):
+            seen["argv"], seen["kwargs"] = argv, kwargs
+            return True, "sess-9", relay.ClaudeRunReport()
+
+        relay._stream_agent_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
+        relay.run_node_job(j, "/tmp/wt", self.control)
+        return seen
+
+    def test_agent_job_fills_the_subagent_placeholder_from_the_agent_field(self):
         """A flow node's `agent` (e.g. "plan-implementer") rides the claim payload as
-        job["agent"]; run_node_job must forward it to _stream_claude_job so --agent
-        <name> reaches `claude -p` (RLY-139 / W13 Task 4)."""
-        seen = {}
+        job["agent"]; the Claude Code harness's `[--agent {subagent}]` segment carries it to
+        `claude -p` (RLY-139; RE433 moved it from a hard-coded flag into the template)."""
+        argv = self._argv_for(job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
+                                  agent="plan-implementer", vars={"ref": "RLY-2"}))["argv"]
+        self.assertEqual(argv[argv.index("--agent") + 1], "plan-implementer")
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["agent"] = agent
-            return True, "sess-9", relay.ClaudeRunReport()
+    def test_agent_job_with_no_agent_field_drops_the_agent_segment(self):
+        argv = self._argv_for(job(node_type="agent", run="/brainstorm {ref}", id="nj-2",
+                                  run_id="r1", agent=None, vars={"ref": "RLY-2"}))["argv"]
+        self.assertNotIn("--agent", argv)
 
-        relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
-        j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
-                agent="plan-implementer", vars={"ref": "RLY-2"})
-        relay.run_node_job(j, "/tmp/wt", self.control)
-        self.assertEqual(seen["agent"], "plan-implementer")
-
-    def test_agent_job_with_no_agent_field_passes_none(self):
-        """A node with no `agent` (today's plain agent nodes) must invoke exactly as
-        before: agent=None, so _stream_claude_job appends no --agent flag."""
-        seen = {}
-
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["agent"] = agent
-            return True, "sess-9", relay.ClaudeRunReport()
-
-        relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
-        j = job(node_type="agent", run="/brainstorm {ref}", id="nj-2", run_id="r1",
-                agent=None, vars={"ref": "RLY-2"})
-        relay.run_node_job(j, "/tmp/wt", self.control)
-        self.assertIsNone(seen["agent"])
+    def test_agent_job_passes_the_model_and_the_harness_session_path(self):
+        seen = self._argv_for(job(node_type="agent", run="x", vars={"ref": "RLY-2"}))
+        self.assertEqual(seen["argv"][seen["argv"].index("--model") + 1], "opus")
+        self.assertEqual(seen["kwargs"]["session_id_path"], ".session_id")
 
     def test_needs_input_reentry_resumes_the_prior_session(self):
         """The claim payload's server field is `resume_session` (NodeJobController.claim_payload/1),
         not `session_id` (that's the outcome-report field name) — a needs-input re-entry must
         read the former or the agent loses its prior conversation and restarts cold."""
-        seen = {}
-
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["session_id"] = session_id
-            return True, "sess-9", relay.ClaudeRunReport()
-
-        relay._stream_claude_job = fake_stream
-        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
-        j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
-                resume_session="sess-prior", vars={"ref": "RLY-2"})
-        relay.run_node_job(j, "/tmp/wt", self.control)
-        self.assertEqual(seen["session_id"], "sess-prior")
+        argv = self._argv_for(job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
+                                  resume_session="sess-prior", vars={"ref": "RLY-2"}))["argv"]
+        self.assertEqual(argv[argv.index("--resume") + 1], "sess-prior")
 
     def test_agent_job_writes_the_outcome_file_outside_the_worktree_and_cleans_it_up(self):
         """The outcome file must never land inside slot_path: reset_worktree() treats any
@@ -4697,7 +4788,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9", relay.ClaudeRunReport()
@@ -4707,7 +4798,7 @@ class RunNodeJobTest(unittest.TestCase):
             seen["determine_cwd"] = cwd
             return "succeeded", "", False
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = fake_determine
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4770,11 +4861,11 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["prompt"] = prompt
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+            seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="/brainstorm {ref}", id="nj-8", run_id="r1",
                 vars={"ref": "RLY-8"})
@@ -4788,15 +4879,15 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["prompt"] = prompt
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+            seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
         def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None, scratch=None, plan=None):
             seen["cmd"] = cmd
             return True
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay._stream_shell = fake_shell
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
 
@@ -4825,11 +4916,11 @@ class RunNodeJobTest(unittest.TestCase):
         """The composition helper is only worth anything if run_node_job actually uses it."""
         seen = {}
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None, on_proc=None, agent=None, partition=None, scratch=None, plan=None):
-            seen["prompt"] = prompt
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+            seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
 
         j = job(node_type="agent", run="implement {ref}", id="nj-251", run_id="r1",
@@ -4840,6 +4931,124 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertIn("THIS IS A LOOP-BACK", seen["prompt"])
         self.assertIn("assert on CSV bytes", seen["prompt"])
         self.assertIn("outcome succeeded --detail", seen["prompt"])
+
+
+CODEX_HARNESS = {"key": "codex",
+                 "command": "codex exec --json --model {model} --cd {worktree} {prompt}",
+                 "resume_command": None, "session_id_path": ".thread_id"}
+
+
+class RunNodeJobHarnessTest(unittest.TestCase):
+    """RE433: run_node_job builds the agent argv from the job's own harness — no CLI name is
+    special-cased in runner code."""
+
+    NO_HARNESS = "this job carries no harness — the server and runner disagree; update both"
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in ("_stream_agent_job", "determine_agent_outcome")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self._run = relay.subprocess.run
+        self.addCleanup(setattr, relay.subprocess, "run", self._run)
+        relay.subprocess.run = lambda *a, **k: type(
+            "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
+        self.streamed = []
+
+        def fake_stream(argv, cwd, **kwargs):
+            self.streamed.append((argv, kwargs))
+            return True, "t-new", relay.ClaudeRunReport()
+
+        relay._stream_agent_job = fake_stream
+        relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
+
+    def test_a_codex_job_runs_codex_and_starts_fresh_when_it_cannot_resume(self):
+        j = job("shared_clean_agent", harness=CODEX_HARNESS, model="gpt-6-sol",
+                resume_session="s-old")
+        relay.run_node_job(j, "/tmp/wt", relay.JobControl())
+        (argv, kwargs), = self.streamed
+        self.assertEqual(argv[:7], ["codex", "exec", "--json", "--model", "gpt-6-sol", "--cd", "/tmp/wt"])
+        self.assertNotIn("s-old", argv)
+        self.assertEqual(kwargs["session_id_path"], ".thread_id")
+
+    def test_a_resumed_claude_job_uses_the_resume_command(self):
+        relay.run_node_job(job("resumed_agent"), "/tmp/wt", relay.JobControl())
+        (argv, _kwargs), = self.streamed
+        self.assertEqual(argv[:4], ["claude", "-p", "--resume", "<session-id>"])
+
+    def test_an_agent_job_without_a_harness_fails_without_spawning(self):
+        outcome, detail, *_rest = capture_ret(relay.run_node_job, job(harness=None), "/tmp/wt",
+                                              relay.JobControl())
+        self.assertEqual((outcome, detail), ("failed", self.NO_HARNESS))
+        self.assertEqual(self.streamed, [])
+
+    def test_a_template_error_fails_without_spawning(self):
+        bad = dict(CODEX_HARNESS, command="codex exec {bogus} {prompt}")
+        outcome, detail, *_rest = capture_ret(relay.run_node_job, job(harness=bad), "/tmp/wt",
+                                              relay.JobControl())
+        self.assertEqual((outcome, detail), ("failed", "unknown placeholder {bogus}"))
+        self.assertEqual(self.streamed, [])
+
+
+class HarnessInventoryTest(unittest.TestCase):
+    """RE433: per harness — is its CLI on PATH, what version, is it signed in."""
+
+    HARNESSES = [
+        {"key": "claude-code", "command": "claude -p {prompt}", "signed_in_check": "claude auth status"},
+        {"key": "gemini-cli", "command": "gemini -p {prompt}", "signed_in_check": None},
+    ]
+
+    def _run(self, check_code=0, raises=None):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            if raises:
+                raise raises
+            if argv == ["claude", "--version"]:
+                return subprocess.CompletedProcess(argv, 0, stdout="2.1.296 (Claude Code)\nmore", stderr="")
+            return subprocess.CompletedProcess(argv, check_code, stdout="", stderr="")
+
+        run.calls = calls
+        return run
+
+    def _which(self, exe):
+        return "/usr/bin/claude" if exe == "claude" else None
+
+    def test_reports_installed_version_and_signed_in_per_harness(self):
+        run = self._run()
+        self.assertEqual(relay.harness_inventory(self.HARNESSES, which=self._which, run=run),
+                         [{"key": "claude-code", "installed": True, "version": "2.1.296 (Claude Code)",
+                           "signed_in": True},
+                          {"key": "gemini-cli", "installed": False, "version": None, "signed_in": None}])
+        self.assertIn((["claude", "auth", "status"]), [argv for argv, _ in run.calls])
+        self.assertTrue(all(k.get("timeout") == 10 for _, k in run.calls))
+
+    def test_a_failing_check_is_signed_out(self):
+        inv = relay.harness_inventory(self.HARNESSES[:1], which=self._which, run=self._run(check_code=1))
+        self.assertIs(inv[0]["signed_in"], False)
+
+    def test_a_timeout_degrades_without_raising(self):
+        run = self._run(raises=subprocess.TimeoutExpired(["claude"], 10))
+        inv = relay.harness_inventory(self.HARNESSES[:1], which=self._which, run=run)
+        self.assertEqual(inv, [{"key": "claude-code", "installed": True, "version": None,
+                                "signed_in": False}])
+
+    def test_an_installed_harness_without_a_check_reports_signed_in_none(self):
+        inv = relay.harness_inventory(self.HARNESSES[1:], which=lambda exe: "/bin/" + exe,
+                                      run=lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="0.9\n"))
+        self.assertEqual(inv, [{"key": "gemini-cli", "installed": True, "version": "0.9",
+                                "signed_in": None}])
+
+
+class RunnerHarnessGuardTest(unittest.TestCase):
+    """RE433: no harness key or display name may be special-cased in runner code — the runner
+    expands whatever template the board sends."""
+
+    def test_the_runner_names_no_harness(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            source = f.read()
+        for name in ("claude-code", "codex", "gemini-cli", "Claude Code", "Gemini CLI"):
+            for quote in ('"', "'"):
+                self.assertNotIn(f"{quote}{name}{quote}", source)
 
 
 class FindingsContractTest(unittest.TestCase):
@@ -5118,6 +5327,63 @@ class RunnerHeartbeatTest(unittest.TestCase):
         finally:
             relay.api = orig
         return calls, revoked
+
+    def _digest_api(self, replies):
+        """api() stub: each heartbeat POST pops the next reply; GET /api/harnesses serves d2."""
+        calls = []
+
+        def api(method, path, body=None, **kwargs):
+            calls.append((method, path, body))
+            if path == "/api/harnesses":
+                return {"harnesses": [{"key": "x-cli", "command": "x {prompt}"}], "digest": "d2"}
+            return replies.pop(0)
+
+        self.addCleanup(setattr, relay, "api", relay.api)
+        self.addCleanup(setattr, relay, "harness_inventory", relay.harness_inventory)
+        relay.api = api
+        relay.harness_inventory = lambda harnesses, **k: [
+            {"key": h["key"], "installed": True, "version": "1", "signed_in": None} for h in harnesses]
+        return calls
+
+    def test_a_new_harnesses_digest_refetches_the_definitions_once(self):
+        """RE433: a harness edit on the board moves the digest; the runner refetches and reports
+        the new inventory on the next beat, and a repeated digest costs nothing."""
+        calls = self._digest_api([{"harnesses_digest": "d2"}, {"harnesses_digest": "d2"},
+                                  {"harnesses_digest": "d2"}])
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15)
+        hb.harnesses_digest = "d1"
+        hb._beat()
+        self.assertEqual([c for c in calls if c[1] == "/api/harnesses"], [("GET", "/api/harnesses", None)])
+        hb._beat()
+        posts = [c for c in calls if c[1] == "/api/node-jobs/heartbeat"]
+        self.assertEqual(posts[-1][2]["harnesses"],
+                         [{"key": "x-cli", "installed": True, "version": "1", "signed_in": None}])
+        hb._beat()
+        self.assertEqual(len([c for c in calls if c[1] == "/api/harnesses"]), 1)
+
+    def test_refresh_harnesses_fetches_the_inventory_before_any_beat(self):
+        """RE433: cmd_start calls this before the first beat, so the first beat already reports
+        what this machine can run."""
+        calls = self._digest_api([{}])
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15)
+        hb.refresh_harnesses()
+        self.assertEqual(hb.harnesses_digest, "d2")
+        hb._beat()
+        post = [c for c in calls if c[1] == "/api/node-jobs/heartbeat"][0]
+        self.assertEqual(post[2]["harnesses"][0]["key"], "x-cli")
+
+    def test_a_failing_harnesses_fetch_never_raises_out_of_a_beat(self):
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15)
+
+        def api(method, path, body=None, **kwargs):
+            if path == "/api/harnesses":
+                raise relay.Died("boom")
+            return {"harnesses_digest": "d9"}
+
+        self.addCleanup(setattr, relay, "api", relay.api)
+        relay.api = api
+        hb._beat()                      # must not raise (RE336)
+        self.assertIsNone(hb.harnesses_digest)   # retried on the next beat
 
     def test_beat_posts_running_and_signals_each_revoked_job(self):
         hb = relay.RunnerHeartbeat({"name": "box", "host": "h"},
@@ -5959,7 +6225,7 @@ class ExecuteTalkTest(unittest.TestCase):
 
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
-                       ("_stream_claude_job", "report_talk_outcome", "worktree_path", "DRY", "api")}
+                       ("_stream_agent_job", "report_talk_outcome", "worktree_path", "DRY", "api")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.worktree_path = lambda name: "/tmp/" + name
@@ -5982,13 +6248,13 @@ class ExecuteTalkTest(unittest.TestCase):
         return j
 
     def _stub_stream(self, ok, session_id="sess-1", events=()):
-        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
             for ev in events:
                 if on_event:
                     on_event(ev)
             return ok, fake.session_id, relay.ClaudeRunReport()
         fake.session_id = session_id
-        relay._stream_claude_job = fake
+        relay._stream_agent_job = fake
         return fake
 
     def test_a_clean_turn_reports_done(self):
@@ -6027,11 +6293,11 @@ class ExecuteTalkTest(unittest.TestCase):
     def test_a_revoked_turn_reports_stopped_not_failed(self):
         control = relay.JobControl()
 
-        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
             control.cancel()
             return True, "sess-2", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake
+        relay._stream_agent_job = fake
         pool = self._Pool()
         relay.execute_talk(self._job(), "exec-DE3", False, control, pool)
         self.assertEqual(self.reported[0][:2], (7, "stopped"))
@@ -6071,7 +6337,7 @@ class ExecuteTalkTest(unittest.TestCase):
 
     def test_a_failing_prepare_hook_reports_failed_without_running_the_turn(self):
         called = []
-        relay._stream_claude_job = lambda *a, **k: called.append(True) or (True, None)
+        relay._stream_agent_job = lambda *a, **k: called.append(True) or (True, None)
         pool = self._Pool(hook_err="prepare blew up")
         relay.execute_talk(self._job(), "exec-DE3", True, relay.JobControl(), pool)
         self.assertEqual(called, [])
@@ -6084,7 +6350,7 @@ class ExecuteTalkTest(unittest.TestCase):
         def boom(*a, **k):
             raise RuntimeError("kaboom")
 
-        relay._stream_claude_job = boom
+        relay._stream_agent_job = boom
         pool = self._Pool()
         relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
         self.assertEqual(self.reported[0][:2], (7, "failed"))
@@ -6095,10 +6361,10 @@ class ExecuteTalkTest(unittest.TestCase):
     def test_a_crash_after_the_session_started_keeps_the_session_id(self):
         """RE268: the crash path used to POST session_id=None. If only the FIRST outcome POST
         failed transiently, that threw away session continuity for every later turn on the card."""
-        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
             return True, "sess-live", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake
+        relay._stream_agent_job = fake
         boom = [RuntimeError("report blew up")]
 
         def flaky(tid, status, sid, detail):
@@ -6111,6 +6377,22 @@ class ExecuteTalkTest(unittest.TestCase):
         relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), self._Pool())
         self.assertEqual(self.reported[1][:3], (7, "failed", "sess-live"))
 
+    def test_a_resumed_turn_expands_the_talk_resume_command(self):
+        """RE433: talk goes through the same template expansion as a node, on its own fixed
+        `claude` commands, and captures its session at `.session_id`."""
+        captured = {}
+
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
+            captured.update(argv=argv, path=session_id_path)
+            return True, "sess-1", relay.ClaudeRunReport()
+
+        relay._stream_agent_job = fake
+        relay.execute_talk(self._job(resume_session="sess-0"), "exec-DE3", False,
+                           relay.JobControl(), self._Pool())
+        self.assertEqual(captured["argv"][0], "claude")
+        self.assertEqual(captured["argv"][captured["argv"].index("--resume") + 1], "sess-0")
+        self.assertEqual(captured["path"], ".session_id")
+
     def test_the_tag_is_ref_clean_so_board_log_forwarding_is_not_misattributed(self):
         """RE268: the old tag `f"[{ref} talk] "` made `_ref_from_tag` extract 'DE3 talk' — a ref
         that doesn't exist — so every forwarded line spammed the board-log endpoint under a
@@ -6118,12 +6400,12 @@ class ExecuteTalkTest(unittest.TestCase):
         talk transcript already has its own delivery channel."""
         captured = {}
 
-        def fake(prompt, cwd, tag="", session_id=None, on_proc=None, on_event=None, mirror=True):
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
             captured["tag"] = tag
             captured["mirror"] = mirror
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake
+        relay._stream_agent_job = fake
         pool = self._Pool()
         relay.execute_talk(self._job(), "exec-DE3", False, relay.JobControl(), pool)
         self.assertEqual(relay._ref_from_tag(captured["tag"]), "DE3")
@@ -7569,6 +7851,10 @@ class RunnerVocabularyContractTest(unittest.TestCase):
     def setUp(self):
         self.vocab = CONTRACT["vocabulary"]
 
+    def test_harness_placeholders_match_the_fixture(self):
+        # RE433: the one copy is Schemas.Harness.placeholders/0.
+        self.assertEqual(relay.HARNESS_PLACEHOLDERS, tuple(self.vocab["harness_placeholders"]))
+
     def test_node_outcomes_match_the_fixture(self):
         # RE308: NODE_OUTCOMES is what an AGENT may declare — the fixture's `agent_outcomes`.
         self.assertEqual(relay.NODE_OUTCOMES, tuple(self.vocab["agent_outcomes"]))
@@ -7738,7 +8024,11 @@ class FakeHeartbeat:
         self.on_release_held = on_release_held
         self.rate_limit_fn = rate_limit_fn
         self.beats = []
+        self.events = []
         FakeHeartbeat.instances.append(self)
+
+    def refresh_harnesses(self):
+        self.events.append("refresh_harnesses")
 
     def start(self):
         pass
@@ -7747,6 +8037,7 @@ class FakeHeartbeat:
         pass
 
     def _beat(self):
+        self.events.append("beat")
         self.beats.append(dict(self.capacity))
 
 
@@ -7830,6 +8121,14 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         # the callbacks are the pool's own bound methods
         self.assertEqual(hb.held_fn.__name__, "holdings")
         self.assertEqual(hb.on_release_held.__name__, "release_held")
+
+    def test_the_harness_inventory_is_fetched_before_the_first_beat(self):
+        """RE433: the first beat already carries `harnesses`, so the server never reads a runner
+        that has another CLI as Claude-only."""
+        relay.claim_node_job = lambda *a, **k: None
+        self._interrupt_after(0.2)
+        relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+        self.assertEqual(FakeHeartbeat.instances[-1].events[:2], ["refresh_harnesses", "beat"])
 
     def test_it_logs_once_naming_both_versions_and_the_remedy(self):
         relay.claim_node_job = lambda *a, **k: relay.outdated_refusal(9)
@@ -9623,7 +9922,7 @@ class TestPartitionTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", partition="3")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", partition="3")
         finally:
             relay.subprocess.Popen = _popen
         self.assertEqual(seen["env"].get("MIX_TEST_PARTITION"), "3")
@@ -9656,7 +9955,7 @@ class TestPartitionTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         finally:
             relay.subprocess.Popen = _popen
         self.assertNotIn("MIX_TEST_PARTITION", seen["env"])
@@ -9681,15 +9980,15 @@ class TestPartitionTest(unittest.TestCase):
     def test_run_node_job_threads_the_partition_into_an_agent_step(self):
         seen = {}
         _saved = {k: getattr(relay, k) for k in
-                  ("_stream_claude_job", "determine_agent_outcome")}
+                  ("_stream_agent_job", "determine_agent_outcome")}
         _run = relay.subprocess.run
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
-                        on_proc=None, agent=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
+                        on_proc=None, partition=None, scratch=None, plan=None):
             seen["partition"] = partition
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -9782,7 +10081,7 @@ class ScratchPathTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", scratch="/wt/tmp/X/n.md")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", scratch="/wt/tmp/X/n.md")
         finally:
             relay.subprocess.Popen = _popen
         self.assertEqual(seen["env"].get("RELAY_NODE_SCRATCH"), "/wt/tmp/X/n.md")
@@ -9797,7 +10096,7 @@ class ScratchPathTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         finally:
             relay.subprocess.Popen = _popen
         self.assertNotIn("RELAY_NODE_SCRATCH", seen["env"])
@@ -9858,15 +10157,15 @@ class ScratchPathTest(unittest.TestCase):
     def test_run_node_job_threads_the_scratch_path_into_an_agent_step(self):
         seen = {}
         _saved = {k: getattr(relay, k) for k in
-                  ("_stream_claude_job", "determine_agent_outcome")}
+                  ("_stream_agent_job", "determine_agent_outcome")}
         _run = relay.subprocess.run
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
-                        on_proc=None, agent=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
+                        on_proc=None, partition=None, scratch=None, plan=None):
             seen["scratch"] = scratch
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -9933,7 +10232,7 @@ class PlanPathTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt", plan="/wt/tmp/X/plan.md")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", plan="/wt/tmp/X/plan.md")
         finally:
             relay.subprocess.Popen = _popen
         self.assertEqual(seen["env"].get("RELAY_PLAN"), "/wt/tmp/X/plan.md")
@@ -9948,7 +10247,7 @@ class PlanPathTest(unittest.TestCase):
         _popen = relay.subprocess.Popen
         relay.subprocess.Popen = fake_popen
         try:
-            capture_ret(relay._stream_claude_job, "p", cwd="/tmp/wt")
+            capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         finally:
             relay.subprocess.Popen = _popen
         self.assertNotIn("RELAY_PLAN", seen["env"])
@@ -9975,15 +10274,15 @@ class PlanPathTest(unittest.TestCase):
     def test_run_node_job_threads_the_plan_path_into_an_agent_step(self):
         seen = {}
         _saved = {k: getattr(relay, k) for k in
-                  ("_stream_claude_job", "determine_agent_outcome")}
+                  ("_stream_agent_job", "determine_agent_outcome")}
         _run = relay.subprocess.run
 
-        def fake_stream(prompt, cwd, tag="", session_id=None, outcome_path=None,
-                        on_proc=None, agent=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
+                        on_proc=None, partition=None, scratch=None, plan=None):
             seen["plan"] = plan
             return True, "sess-1", relay.ClaudeRunReport()
 
-        relay._stream_claude_job = fake_stream
+        relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()

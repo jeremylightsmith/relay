@@ -74,6 +74,16 @@ the MMF design specs).
   them (`./relay start`; `Schemas.Runner`, one row per machine per board; the Runners view at
   `/board/:slug/runners`). Formerly *executor* — renamed in RE319; older mockups still use that word.
   Not the legacy board-runner (`relay watch`), which is deleted.
+- **Harness** — an agent CLI a board can run flow nodes on (`Schemas.Harness`, RE433): a command
+  template with `{placeholder}`s and optional `[ … ]` segments, plus the CLI's closed list of
+  models. Every board is seeded with Claude Code, Codex and Gemini CLI.
+- **Agent (board LLM)** — a board's named LLM (`Schemas.Agent`, RE433): a harness plus one of its
+  models, e.g. "Claude Opus" = Claude Code + `opus`. An agent flow node names one in `llm`, or
+  inherits the board's **default agent**. An agent is **red** when its model has left its
+  harness's list (`Relay.Agents.red?/1`); a red agent refuses to run.
+- **Subagent** — a `.claude/agents/<name>.md` definition an agent node dispatches to (the node's
+  `agent` field, e.g. `plan-implementer`). Not the same thing as an *Agent (board LLM)*: the
+  subagent supplies the system prompt, the board LLM picks the CLI and model.
 - **Do / Check / Fix (node role)** — every flow node's place in the value stream (RE346): **Do**
   changes the work (`implement`, `merge`), **Check** inspects it without changing it (the
   reviewers, the `precommit`/`browser` gates, `smoke`, `acceptance`, `deploy`), and **Fix** exists

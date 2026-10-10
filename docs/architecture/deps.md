@@ -35,9 +35,11 @@ flowchart LR
     Activity --> Events
     Activity --> Repo
     AgentLog --> Activity
+    Agents --> Repo
     ApiKeys --> Repo
     Attachments --> Boards
     Attachments --> Repo
+    Boards --> Agents
     Boards --> Events
     Boards --> Flows
     Boards --> Repo
@@ -51,12 +53,14 @@ flowchart LR
     Cards --> Votes
     Events --> BoardWatch
     Events --> Repo
+    Flows --> Agents
     Flows --> Repo
     Members --> Events
     Members --> Repo
     Push --> Members
     Push --> Repo
     Runs --> Activity
+    Runs --> Agents
     Runs --> Boards
     Runs --> Cards
     Runs --> Config

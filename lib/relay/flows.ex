@@ -13,7 +13,7 @@ defmodule Relay.Flows do
   `{:error, changeset}`.
   """
 
-  use Boundary, deps: [Relay.Repo, Schemas], exports: [Document, Shape]
+  use Boundary, deps: [Relay.Agents, Relay.Repo, Schemas], exports: [Document, Shape]
 
   import Ecto.Query
 
@@ -313,6 +313,7 @@ defmodule Relay.Flows do
       %Flow{board_id: board.id}
       |> Flow.changeset(attrs)
       |> validate_stage()
+      |> validate_llms()
 
     case Repo.insert(changeset) do
       {:ok, flow} -> snapshot!(flow)
@@ -328,6 +329,7 @@ defmodule Relay.Flows do
     flow
     |> Flow.changeset(attrs)
     |> validate_stage()
+    |> validate_llms()
     |> Repo.update()
   end
 
@@ -368,6 +370,9 @@ defmodule Relay.Flows do
   validates) — otherwise it is skipped. A stageless flow never exists (RE429).
   """
   def seed_default_flows!(%Board{id: board_id} = board) do
+    # RE433: the library's nodes name the seeded agents in `llm`; without them `validate_llms/1`
+    # would fail every default and the `valid?` check below would skip it silently.
+    :ok = Relay.Agents.ensure_seeded!(board)
     existing = MapSet.new(Repo.all(from f in Flow, where: f.board_id == ^board_id, select: f.key))
     stage_ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
 
@@ -379,6 +384,7 @@ defmodule Relay.Flows do
         %Flow{board_id: board.id}
         |> Flow.changeset(default |> Map.delete(:trigger) |> Map.put(:stage_id, stage_id))
         |> validate_stage()
+        |> validate_llms()
 
       if changeset.valid?, do: changeset |> Repo.insert!() |> snapshot!()
     end
@@ -868,6 +874,26 @@ defmodule Relay.Flows do
     case Changeset.get_field(changeset, :stage_id) do
       nil -> changeset
       stage_id -> stage_error(changeset, Repo.get(Stage, stage_id))
+    end
+  end
+
+  # RE433: a node's `llm` must name an agent on the flow's board (nil inherits the board default).
+  # Like `stage_error/2`, the board comes from the changeset.
+  defp validate_llms(changeset) do
+    named = for %{llm: llm, key: key} <- Changeset.get_field(changeset, :nodes) || [], is_binary(llm), do: {key, llm}
+
+    case named do
+      [] ->
+        changeset
+
+      named ->
+        agents = Relay.Agents.agent_names(Changeset.get_field(changeset, :board_id))
+
+        named
+        |> Enum.reject(fn {_key, llm} -> MapSet.member?(agents, llm) end)
+        |> Enum.reduce(changeset, fn {key, llm}, cs ->
+          Changeset.add_error(cs, :nodes, ~s(node "#{key}" names LLM "#{llm}", which is not an agent on this board))
+        end)
     end
   end
 

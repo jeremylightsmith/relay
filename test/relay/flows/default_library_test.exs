@@ -1,5 +1,5 @@
 defmodule Relay.Flows.DefaultLibraryTest do
-  use ExUnit.Case, async: true
+  use Relay.DataCase, async: true
 
   alias Relay.Flows.DefaultLibrary
 
@@ -23,6 +23,21 @@ defmodule Relay.Flows.DefaultLibraryTest do
 
     assert length(resources) == 3
     assert Enum.any?(resources, &String.ends_with?(to_string(&1), "docs/designs/flows/code.json"))
+  end
+
+  # Scenario 20 (RE433): the library names board agents via `llm`, keeping the explicit names.
+  test "the code library's implement node names the Claude Opus agent" do
+    code = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    implement = Enum.find(code.nodes, &(&1.key == "implement"))
+
+    assert implement.llm == "Claude Opus"
+    refute Map.has_key?(implement, :model)
+  end
+
+  test "a freshly seeded code flow is not customized" do
+    {:ok, board} = Relay.Boards.create_board(insert(:user), %{name: "Library board"})
+
+    refute Relay.Flows.customized?(Relay.Flows.get_flow!(board, "code"))
   end
 
   # RE429: the library files carry the one-stage trigger, not the legacy three-key one.
@@ -172,14 +187,14 @@ defmodule Relay.Flows.DefaultLibraryTest do
       end
     end
 
-    test "sync_fix / resync_fix are :agent nodes running the rebaser on sonnet" do
+    test "sync_fix / resync_fix are :agent nodes running the rebaser on Claude Sonnet" do
       flow = code_flow()
 
       for key <- ~w(sync_fix resync_fix) do
         n = cf_node(flow, key)
         assert n.type == :agent
         assert n.agent == "rebaser"
-        assert n.model == "sonnet"
+        assert n.llm == "Claude Sonnet"
       end
     end
 

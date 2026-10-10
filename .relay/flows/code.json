@@ -266,21 +266,21 @@
       "foreach": "card.tasks",
       "key": "implement",
       "max_retries": 1,
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "Implement the task named {task} from the card's plan with strict red/green TDD. One task only — do not start the next one. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing.",
       "type": "agent"
     },
     {
       "agent": "spec-reviewer",
       "key": "spec_review",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Review the just-implemented task against its spec in the plan: nothing missing, nothing extra.",
       "type": "agent"
     },
     {
       "agent": "quality-reviewer",
       "key": "quality_review",
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "Judge whether the change is well-built: clean, conventional, meaningfully tested.",
       "type": "agent"
     },
@@ -289,7 +289,7 @@
       "expects_commits": true,
       "key": "fix_findings",
       "max_retries": 1,
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "A reviewer rejected the task you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from the plan, and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure.",
       "type": "agent"
     },
@@ -301,7 +301,7 @@
     {
       "agent": "rebaser",
       "key": "sync_fix",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
       "type": "agent"
     },
@@ -323,7 +323,7 @@
     {
       "agent": "final-reviewer",
       "key": "final_review",
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "Whole-branch cross-cutting review — issues only visible across the whole diff. Includes the docs/architecture freshness check.",
       "type": "agent"
     },
@@ -331,21 +331,21 @@
       "agent": "final-fixer",
       "expects_commits": true,
       "key": "final_fix",
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "Fix everything in the message in one consolidated pass, then leave the branch green: `mix precommit`, plus `bin/flutter_gate.sh` when the flutter gate sent you here, plus `mix test.browser` when the browser gate, smoke or acceptance sent you here.",
       "type": "agent"
     },
     {
       "agent": "smoke-tester",
       "key": "smoke",
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "Drive the new behavior end-to-end through the running app; screenshot each new/changed state against its docs/designs artboard.",
       "type": "agent"
     },
     {
       "agent": "acceptance-tester",
       "key": "acceptance",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Run the card's acceptance criteria verbatim; return a per-criterion verdict (human-verify criteria don't block).",
       "type": "agent"
     },
@@ -357,7 +357,7 @@
     {
       "agent": "rebaser",
       "key": "resync_fix",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Bring this branch onto current origin/main with both branch gates green — `mix precommit` and `mix test.browser`: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
       "type": "agent"
     },
@@ -384,13 +384,13 @@
     {
       "agent": "ci-fixer",
       "key": "github_fix",
-      "model": "opus",
+      "llm": "Claude Opus",
       "run": "The await_ci node failed: main's CI did not pass on the commit card {ref} just shipped (bin/ship_to_main.sh pushed it straight to main; there is no PR). Its output is in the message; the decisive line reads `await_main_ci: FAILED: <reason>`. Work out which case it is, then leave the right commits on branch {branch}, starting from origin/main. The flow then goes back through resync, the gates and merge (which ships your fix to main as a new commit) and waits for CI again.",
       "type": "agent"
     },
     {
       "key": "post",
-      "model": "sonnet",
+      "llm": "Claude Sonnet",
       "run": "Post the acceptance checklist and the smoke screenshots to card {ref} as one comment, then record the structured result with `{relay} result {ref} @<file>`.\n\nUpload every screenshot to the card first — `{relay} attach {ref} <path> --field url` prints the `/attachments/<uuid>` path the board serves. That path is what both the comment (`![caption](/attachments/<uuid>)`) and the result's `screens` use. A path on your machine (`tmp/smoke/01-door.png`) is not a URL: the browser cannot fetch it and the tile renders blank.\n\nThe file holds a JSON object with **only** these keys, each optional — `summary`, `changes`, `screens`. Anything else is refused with `422 invalid_ai_result`: there is no `deploy_url`, and a screen has no `image` / `shot` / `path` / `name`.\n\n- `summary` — a string, rendered as markdown: a bullet list, 3-5 bullets, 1-2 sentences each, for a busy product owner who knows the product but not what things are called in the code. Name the screen or flow a person clicks, never a module or function. Spend the bullets on what they should go look at — the biggest behavior changes, the technically riskiest part, and any UX you are least confident matches its docs/designs artboard — and skip the routine (tests green, criteria met: the comment already covers that).\n- `changes` — a list of **strings**, not objects: user-facing changes as short verb phrases, not sentences. Start with a verb, no trailing period, under about eight words — 'Adds a summary to the card drawer', not 'This change adds a summary section so that…'. A change with no user-visible effect belongs in `summary`, not `changes`.\n- `screens` — a list of objects with `url` (required — the `/attachments/<uuid>` path from `attach`) and `caption` (optional — one short line naming the screen and what to look at). Nothing else in the object. Omit `screens` entirely when the change has no UI.",
       "type": "agent",
       "writes": [

@@ -29,7 +29,7 @@ defmodule RelayWeb.FlowEditorComponentsTest do
         key: "n",
         type: :agent,
         run: "go",
-        model: nil,
+        llm: nil,
         effort: "high",
         max_retries: nil,
         timeout_minutes: nil,
@@ -43,7 +43,7 @@ defmodule RelayWeb.FlowEditorComponentsTest do
   defp inspector(node, opts \\ []) do
     assigns =
       Map.merge(
-        %{node: node, edges: [], referenced_count: 0, read_only?: false},
+        %{node: node, edges: [], referenced_count: 0, read_only?: false, board_slug: "b"},
         Map.new(opts)
       )
 
@@ -128,6 +128,69 @@ defmodule RelayWeb.FlowEditorComponentsTest do
 
       assert html =~
                "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+    end
+  end
+
+  describe "LLM picker (RE433)" do
+    defp harnesses do
+      [
+        %Schemas.Harness{id: 1, key: "claude-code", name: "Claude Code", models: ["opus", "sonnet"]},
+        %Schemas.Harness{id: 2, key: "codex", name: "Codex", models: ["gpt-6-sol"]}
+      ]
+    end
+
+    defp agents do
+      [cc, codex] = harnesses()
+
+      [
+        %Schemas.Agent{id: 11, name: "Claude Opus", model: "opus", harness_id: 1, harness: cc},
+        %Schemas.Agent{id: 12, name: "Claude Sonnet", model: "sonnet", harness_id: 1, harness: cc},
+        %Schemas.Agent{id: 13, name: "Codex Fast", model: "gpt-6-sol", harness_id: 2, harness: codex}
+      ]
+    end
+
+    defp picker(node, opts \\ []) do
+      [opus | _] = agents()
+
+      node
+      |> inspector([agents: agents(), harnesses: harnesses(), default_agent: opus] ++ opts)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp q(doc, sel), do: LazyHTML.query(doc, sel)
+    defp text(el), do: el |> LazyHTML.text() |> String.trim()
+    defp attr(el, name), do: el |> LazyHTML.attribute(name) |> List.first()
+
+    test "8. the selected row is violet-tinted with a ● marker; the others show ○" do
+      doc = picker(agent_node(%{llm: "Claude Sonnet"}))
+
+      selected = q(doc, "#inspector-llm-12")
+      assert attr(selected, "data-selected") == "true"
+      assert attr(selected, "style") =~ "color-mix(in oklab, var(--color-secondary) 8%, var(--color-base-100))"
+      assert selected |> q("[data-marker]") |> text() == "●"
+
+      for id <- ["#inspector-llm-default", "#inspector-llm-11", "#inspector-llm-13"] do
+        row = q(doc, id)
+        refute attr(row, "data-selected") == "true"
+        assert row |> q("[data-marker]") |> text() == "○"
+      end
+    end
+
+    test "8. group headers carry bg-base-200 border-y border-base-300" do
+      doc = picker(agent_node(%{llm: nil}))
+
+      for key <- ["claude-code", "codex"] do
+        class = doc |> q("#inspector-llm-group-#{key}") |> attr("class")
+        assert class =~ "bg-base-200 border-y border-base-300"
+      end
+    end
+
+    test "8. read-only disables every LLM row button" do
+      doc = picker(agent_node(%{llm: nil}), read_only?: true)
+      buttons = q(doc, "#inspector-llm button")
+
+      assert Enum.count(buttons) == 4
+      assert Enum.all?(buttons, &(attr(&1, "disabled") != nil))
     end
   end
 end

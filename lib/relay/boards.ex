@@ -4,7 +4,7 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Events, Relay.Flows, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Agents, Relay.Events, Relay.Flows, Relay.Repo, Schemas]
 
   import Ecto.Query
 
@@ -257,6 +257,8 @@ defmodule Relay.Boards do
         {:ok, board} ->
           seed_stages!(board)
           seed_releases!(board)
+          # RE433: the agents exist before the default flows, whose nodes name them in `llm`.
+          :ok = Relay.Agents.ensure_seeded!(board)
           seed_lanes_and_flows!(board)
           insert_owner_membership!(board, user)
 

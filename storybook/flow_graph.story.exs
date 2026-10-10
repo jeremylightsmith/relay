@@ -23,9 +23,9 @@ defmodule Storybook.FlowGraph do
     # RE333: the shape the old two-column layout could not draw.
     branchy_nodes = [
       %{key: "triage", type: :gate, run: "mix triage"},
-      %{key: "fix", type: :agent, agent: "plan-implementer", model: "sonnet", effort: "high"},
+      %{key: "fix", type: :agent, agent: "plan-implementer", llm: "Claude Sonnet", effort: "high"},
       %{key: "ship", type: :shell, run: "mix release"},
-      %{key: "write_docs", type: :agent, model: "haiku", effort: "low"},
+      %{key: "write_docs", type: :agent, llm: "Claude Haiku", effort: "low"},
       %{key: "publish", type: :shell, run: "mix docs.publish"},
       %{key: "escalate", type: :human, run: "ask a maintainer"}
     ]
@@ -42,6 +42,20 @@ defmodule Storybook.FlowGraph do
       %{from: "write_docs", to: "escalate", on: :failed}
     ]
 
+    # RE433: one agent node per editor LLM state.
+    llm_nodes = [
+      %{key: "implement", type: :agent, agent: "plan-implementer", llm: nil, effort: "high"},
+      %{key: "spec_review", type: :agent, agent: "spec-reviewer", llm: "Codex Fast", effort: "medium"},
+      %{key: "write_docs", type: :agent, llm: "Gemini Pro", effort: "low"}
+    ]
+
+    llm_edges = [
+      %{from: "start", to: "implement", on: nil},
+      %{from: "implement", to: "spec_review", on: :succeeded},
+      %{from: "spec_review", to: "write_docs", on: :succeeded},
+      %{from: "write_docs", to: "done", on: :succeeded}
+    ]
+
     [
       %Variation{
         id: :default_code_flow,
@@ -51,9 +65,9 @@ defmodule Storybook.FlowGraph do
             "reserved for it, clear of nodes and of other labels. Failed edges are dashed and " <>
             "carry max-N loop badges. Every node that can park on a human (an edge into " <>
             "needs_input) carries a warning pause badge at its top-right corner instead of a " <>
-            "drawn edge. Agent nodes stack their binding — subagent · model · effort (e.g. " <>
-            "plan-implementer · sonnet · high); a generic agent node with no subagent reads just " <>
-            "model · effort.",
+            "drawn edge. Agent nodes stack their binding — subagent · effort (e.g. " <>
+            "plan-implementer · high); a generic agent node with no subagent reads just " <>
+            "its effort.",
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
@@ -94,10 +108,27 @@ defmodule Storybook.FlowGraph do
         }
       },
       %Variation{
+        id: :llm,
+        description:
+          "The flow editor's LLM subtitles (RE433, `llm` attr set): an agent node inheriting " <>
+            "the board default reads muted `default · Claude Opus`; one naming another agent " <>
+            "reads violet `◆ Codex Fast`; one whose agent's model left its harness (a red " <>
+            "agent) reads `◆ Gemini Pro · model removed` in the error colour. Without `llm` " <>
+            "(the run panel) agent nodes keep `subagent · effort`.",
+        attributes: %{
+          nodes: llm_nodes,
+          edges: llm_edges,
+          layout: RelayWeb.FlowLayout.layout(llm_nodes, llm_edges),
+          lands_on: "Review",
+          interactive?: false,
+          llm: %{default: "Claude Opus", red: MapSet.new(["Gemini Pro"])}
+        }
+      },
+      %Variation{
         id: :minimal,
         description: "A one-node flow — start → work → done.",
         attributes: %{
-          nodes: [%{key: "work", type: :agent, run: "go", model: "sonnet", effort: "high"}],
+          nodes: [%{key: "work", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high"}],
           edges: [%{from: "start", to: "work", on: nil}, %{from: "work", to: "done", on: :succeeded}],
           layout:
             RelayWeb.FlowLayout.layout(

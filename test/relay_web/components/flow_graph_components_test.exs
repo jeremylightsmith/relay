@@ -25,7 +25,7 @@ defmodule RelayWeb.FlowGraphComponentsTest do
   end
 
   defp one_node(type) do
-    nodes = [%{key: "n", type: type, run: "go", model: nil, effort: nil}]
+    nodes = [%{key: "n", type: type, run: "go", llm: nil, effort: nil}]
     edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
     graph(nodes, edges, [])
   end
@@ -106,18 +106,21 @@ defmodule RelayWeb.FlowGraphComponentsTest do
   end
 
   describe "agent node label surfaces the bound subagent" do
-    test "an agent node stacks agent · model · effort in the sub-label" do
-      nodes = [%{key: "n", type: :agent, run: "go", model: "opus", effort: "high", agent: "plan-implementer"}]
+    # Scenario 19 (RE433): the LLM is the canvas subtitle's job, not the sub-label's.
+    test "an agent node's sub-label is subagent · effort, without the llm" do
+      nodes = [%{key: "n", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high", agent: "plan-implementer"}]
       edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
       html = graph(nodes, edges, [])
-      assert html =~ "plan-implementer · opus · high"
+      assert html =~ "plan-implementer · high"
+      refute html =~ "Claude Sonnet"
     end
 
-    test "a generic agent node (no `agent` field) still shows model · effort" do
-      nodes = [%{key: "n", type: :agent, run: "go", model: "sonnet", effort: "high"}]
+    test "a generic agent node (no `agent` field) still shows its effort" do
+      nodes = [%{key: "n", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high"}]
       edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
       html = graph(nodes, edges, [])
-      assert html =~ "sonnet · high"
+      assert html =~ "high"
+      refute html =~ "Claude Sonnet"
     end
   end
 
@@ -168,8 +171,8 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     # layout's done_point so it lands below the last spine node, clear of every node.
     test "end pill is anchored below done_point, not a fixed coordinate" do
       nodes = [
-        %{key: "a", type: :agent, run: "one", model: nil, effort: nil},
-        %{key: "b", type: :agent, run: "two", model: nil, effort: nil}
+        %{key: "a", type: :agent, run: "one", llm: nil, effort: nil},
+        %{key: "b", type: :agent, run: "two", llm: nil, effort: nil}
       ]
 
       edges = [
@@ -384,6 +387,65 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       html = graph(nodes, edges, selected: {:edge, 1})
       refute html =~ "data-dim"
       refute html =~ "data-hot"
+    end
+  end
+
+  describe "LLM subtitles (RE433)" do
+    defp llm_nodes do
+      nodes = [
+        %{key: "a", type: :agent, run: "x", llm: nil, effort: "high"},
+        %{key: "b", type: :agent, run: "y", llm: "Claude Haiku", effort: "low"}
+      ]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      {nodes, edges}
+    end
+
+    defp subtitle(html, key) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-node="#{key}"] [data-llm]))
+    end
+
+    defp text(el), do: el |> LazyHTML.text() |> String.trim()
+    defp attr(el, name), do: el |> LazyHTML.attribute(name) |> List.first()
+
+    test "7. inheriting reads `default · <name>`; an override reads `◆ <name>` in violet" do
+      {nodes, edges} = llm_nodes()
+      html = graph(nodes, edges, llm: %{default: "Claude Opus", red: MapSet.new()})
+
+      a = subtitle(html, "a")
+      assert text(a) == "default · Claude Opus"
+      assert attr(a, "data-llm") == "default"
+
+      b = subtitle(html, "b")
+      assert text(b) == "◆ Claude Haiku"
+      assert attr(b, "data-llm") == "override"
+      assert attr(b, "style") =~ "var(--color-secondary) 60%"
+    end
+
+    test "7. a red agent reads `◆ <name> · model removed` in the error colour" do
+      {nodes, edges} = llm_nodes()
+      html = graph(nodes, edges, llm: %{default: "Claude Opus", red: MapSet.new(["Claude Haiku"])})
+
+      b = subtitle(html, "b")
+      assert text(b) == "◆ Claude Haiku · model removed"
+      assert attr(b, "data-llm") == "red"
+      assert attr(b, "style") =~ "color:var(--color-error)"
+    end
+
+    test "7. without the llm attr an agent node keeps `subagent · effort`" do
+      nodes = [%{key: "n", type: :agent, run: "go", agent: "plan-implementer", llm: nil, effort: "high"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+
+      assert html =~ "plan-implementer · high"
+      refute html =~ "data-llm"
     end
   end
 end

@@ -80,7 +80,8 @@ defmodule Relay.Flows.DocumentTest do
       [node] = attrs.nodes
       assert Enum.sort(Map.keys(node)) == Enum.sort(Flow.Node.fields())
       assert node.expects_commits == false
-      assert node.model == nil
+      assert node.llm == nil
+      refute Map.has_key?(node, :model)
       assert node.max_retries == nil
 
       assert Enum.all?(attrs.edges, &(Enum.sort(Map.keys(&1)) == Enum.sort(Flow.Edge.fields())))
@@ -454,6 +455,37 @@ defmodule Relay.Flows.DocumentTest do
                encoded["nodes"]
 
       assert run == "work {task} ({task_id})"
+    end
+  end
+
+  describe "legacy node model → llm (RE433)" do
+    defp decoded_node(node) do
+      {:ok, attrs} = Document.decode(put_in(@minimal, ["nodes"], [node]))
+      hd(attrs.nodes)
+    end
+
+    # Scenario 13
+    test "a pushed model is renamed to llm through the legacy table" do
+      node = decoded_node(%{"key" => "a", "type" => "agent", "model" => "sonnet"})
+
+      assert node.llm == "Claude Sonnet"
+      refute Map.has_key?(node, :model)
+    end
+
+    test "encode emits llm and never model" do
+      nodes = encoded(library_board(), "code")["nodes"]
+
+      assert Enum.find(nodes, &(&1["key"] == "implement"))["llm"] == "Claude Opus"
+      refute Enum.any?(nodes, &Map.has_key?(&1, "model"))
+    end
+
+    # Scenario 14
+    test "an explicit llm wins over a legacy model" do
+      assert decoded_node(%{"key" => "a", "type" => "agent", "model" => "opus", "llm" => "Codex GPT"}).llm == "Codex GPT"
+    end
+
+    test "a model outside the table is carried through verbatim, for validation to refuse" do
+      assert decoded_node(%{"key" => "a", "type" => "agent", "model" => "gpt-4"}).llm == "gpt-4"
     end
   end
 end
