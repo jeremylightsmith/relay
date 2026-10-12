@@ -75,7 +75,9 @@ sharing behavior.
   a node names (`node_usage/1`). Renaming an agent rewrites `llm` on the board's flow nodes
   without bumping their version. At run time `resolve/2` turns a node's `llm` into its agent
   (`{:ok, _}` / `{:red, _}` / `{:error, {:unknown_agent, name}}`) for `Relay.Runs.build_payload/4`,
-  and `harness_wire/1` + `harnesses_digest/1` are the runner's view of the definitions
+  and `harness_wire/1` + `harnesses_digest/1` are the runner's view of the definitions —
+  including each harness's embedded usage rule (`Schemas.HarnessUsage`, RE436, evaluated by
+  `Schemas.HarnessUsage.Rule`), seeded per harness in `seed_harnesses/0`
   (`node_jobs.harness_key`, `runners.harnesses` and the claim filter are in
   [runner.md](runner.md) "Harness routing"). Depends on `Repo` + `Schemas` only — it reads/writes
   `Schemas.Flow` rows directly, because `Relay.Flows` depends on it. Humans edit both lists in

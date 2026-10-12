@@ -47,8 +47,10 @@ defmodule Relay.Runs.Scheduler.Snapshot do
       `Relay.Runs.runner_freshness/2` (not a second computation). `plan/1` ignores this
       field; only `explain/2` / `capacity_diagnosis/1` read it, so the plan/explain agreement
       property is unaffected.
-      `rate_limit` is `Relay.Runs.active_rate_limit/2` — the runner's live Claude usage pause
-      as a plain map, or nil (RE320); all entries are built by `Relay.Runs.runner_snapshot_entry/2`.
+      `rate_limit` is `Relay.Runs.active_rate_limit/2` — set only while every installed harness
+      on the runner is paused (RE436), as the plain map
+      `%{harness, window, used_pct, pause_at, resets_at, reason}` of the pause that lifts
+      first, or nil (RE320); all entries are built by `Relay.Runs.runner_snapshot_entry/2`.
   """
 
   @type stage :: %{

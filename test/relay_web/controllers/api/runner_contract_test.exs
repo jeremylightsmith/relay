@@ -50,18 +50,30 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "held" => [],
       # RE433: the per-harness inventory, sent on every beat once the runner has fetched
       # /api/harnesses. Claude Code installed, so the claims below are still offered.
+      # RE436: each entry carries that harness's `usage` — its latest reading per window and
+      # its pause, if any (here paused at 95% of a 90% 5h window). The top-level RE320
+      # `rate_limit` is retired. Far-future epochs (2100-01-01) so the fixture never churns;
+      # the server ignores `usage` until it stores per-harness readings.
       "harnesses" => [
-        %{"key" => "claude-code", "installed" => true, "version" => "2.1.296 (Claude Code)", "signed_in" => true}
-      ],
-      # RE320: always sent — null while claiming, this shape while paused at a Claude usage
-      # limit. A far-future reset (2100-01-01) so the fixture never churns.
-      "rate_limit" => %{
-        "window" => "five_hour",
-        "utilization" => 0.95,
-        "max" => 0.9,
-        "resets_at" => 4_102_444_800,
-        "reason" => "limit"
-      }
+        %{
+          "key" => "claude-code",
+          "installed" => true,
+          "version" => "2.1.296 (Claude Code)",
+          "signed_in" => true,
+          "usage" => %{
+            "source" => "output",
+            "read_at" => 4_102_444_000,
+            "windows" => [%{"label" => "5h", "used_pct" => 95.0, "resets_at" => 4_102_444_800}],
+            "paused" => %{
+              "label" => "5h",
+              "used_pct" => 95.0,
+              "pause_at" => 90,
+              "resets_at" => 4_102_444_800,
+              "reason" => "limit"
+            }
+          }
+        }
+      ]
     }
 
     heartbeat_response =
@@ -286,7 +298,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
     [note_image_item] = note_entry["images"]
 
     document = %{
-      "version" => 12,
+      "version" => 14,
+      # RE436 — the shared path/condition/reading cases both usage-rule evaluators must pass:
+      # ExUnit runs them in test/relay/usage_rule_cases_test.exs, Python reads them from here.
+      "usage_rule_cases" => Relay.UsageRuleCases.cases(),
       "note_images" => %{
         "comment_entry" => note_entry |> Map.keys() |> Enum.sort(),
         "image" => note_image_item |> Map.keys() |> Enum.sort(),
@@ -303,6 +318,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "vocabulary" => %{
         # RE433 — `./relay`'s HARNESS_PLACEHOLDERS must equal Schemas.Harness.placeholders/0.
         "harness_placeholders" => Schemas.Harness.placeholders(),
+        # RE436 — `./relay`'s USAGE_SOURCES / USAGE_USED_UNITS / USAGE_RESETS_UNITS mirror these.
+        "usage_sources" => Schemas.HarnessUsage.sources(),
+        "usage_used_units" => Schemas.HarnessUsage.used_units(),
+        "usage_resets_units" => Schemas.HarnessUsage.resets_units(),
         "run_states" => %{
           "active" => stringify(Schemas.Run.active_statuses()),
           "terminal" => stringify(Schemas.Run.terminal_statuses())
@@ -332,9 +351,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
         # Already strings on both sides (the field only ever exists on the wire), so no
         # `stringify/1`.
         "holding_states" => Schemas.Runner.holding_states(),
-        # RE320 — `./relay` mirrors both as RATE_LIMIT_WINDOWS / RATE_LIMIT_REASONS; the server
-        # stores nil for any value outside them, so a drift would silently erase the pause.
-        "rate_limit_windows" => Schemas.Runner.rate_limit_windows(),
+        # RE320 → RE436 — `./relay` mirrors this as USAGE_PAUSE_REASONS; the server stores nil
+        # for any value outside it, so a drift would silently erase the pause. Windows are
+        # per-harness labels now, so no window vocabulary is mirrored.
         "rate_limit_reasons" => Schemas.Runner.rate_limit_reasons(),
         # RE384 — `./relay stage lane|add|set` validate against these before calling the API.
         "stage_lanes" => stringify(Schemas.Stage.sublane_types()),
@@ -370,7 +389,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "harnesses" => %{
         "path" => "/api/harnesses",
         "response_keys" => harnesses_response |> Map.keys() |> Enum.sort(),
-        "harness_keys" => harnesses_response["harnesses"] |> hd() |> Map.keys() |> Enum.sort()
+        "harness_keys" => harnesses_response["harnesses"] |> hd() |> Map.keys() |> Enum.sort(),
+        # RE436 — the usage rule the runner applies per harness.
+        "usage_keys" => harnesses_response["harnesses"] |> hd() |> Map.fetch!("usage") |> Map.keys() |> Enum.sort()
       },
       "talk_claim" => %{"first_turn" => normalize(talk_job)},
       "talk_events" => %{"request" => normalize(talk_events_request), "response" => normalize(talk_events_response)},
@@ -396,7 +417,14 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert "origin" in document["note_images"]["comment_entry"]
     assert note_entry["origin"] == %{"kind" => "answer", "question" => 2}
     assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
-    assert document["version"] == 12
+    assert document["version"] == 14
+    assert document["usage_rule_cases"] == Relay.UsageRuleCases.cases()
+    assert "usage" in document["harnesses"]["harness_keys"]
+
+    assert document["harnesses"]["usage_keys"] ==
+             ["command", "interval_min", "match", "pause_now", "recheck", "resets_unit", "source", "used_unit", "windows"]
+
+    assert document["vocabulary"]["usage_sources"] == ["output", "command", "none"]
 
     assert document["flows"] == %{
              "trigger_keys" => ["stage"],
@@ -427,6 +455,12 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert document["heartbeat"]["response"]["harnesses_digest"] == "<harnesses-digest>"
     assert document["harnesses"]["response_keys"] == ["digest", "harnesses"]
 
+    # RE436 — the per-harness usage wire replaces the runner-wide `rate_limit`.
+    refute Map.has_key?(document["heartbeat"]["request"], "rate_limit")
+    assert hd(document["heartbeat"]["request"]["harnesses"])["usage"]["paused"]["reason"] == "limit"
+    assert document["claim_request"]["harnesses"] == ["claude-code"]
+    refute Map.has_key?(document["vocabulary"], "rate_limit_windows")
+
     assert_matches_fixture!(document)
   end
 
@@ -442,7 +476,16 @@ defmodule RelayWeb.Api.RunnerContractTest do
   # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.
   # `held` (RE311) is what lets a job for a card this runner already holds the worktree for be
   # offered at zero free capacity.
-  defp claim_body(capacity), do: %{"runner" => runner_ident(), "capacity" => capacity, "running" => [], "held" => []}
+  # `harnesses` (RE436) is the installed harnesses minus the ones paused at a usage limit; the
+  # server ignores it until it filters claims by it.
+  defp claim_body(capacity),
+    do: %{
+      "runner" => runner_ident(),
+      "capacity" => capacity,
+      "running" => [],
+      "held" => [],
+      "harnesses" => ["claude-code"]
+    }
 
   defp stringify(atoms), do: Enum.map(atoms, &Atom.to_string/1)
 

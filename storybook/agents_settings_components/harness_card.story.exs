@@ -5,8 +5,8 @@ defmodule Storybook.AgentsSettingsComponents.HarnessCard do
   def function, do: &RelayWeb.AgentsSettingsComponents.harness_card/1
   def render_source, do: :function
 
-  # A harness card (RE433, card mockup 01): COMMAND, MODELS chips, and the red line when an agent
-  # on it uses a model the list no longer offers.
+  # A harness card (RE433, card mockup 01): COMMAND, MODELS chips, the red line when an agent
+  # on it uses a model the list no longer offers, and the USAGE summary (RE436).
   @codex %Schemas.Harness{
     id: 2,
     name: "Codex",
@@ -20,8 +20,29 @@ defmodule Storybook.AgentsSettingsComponents.HarnessCard do
     models: ["gemini-2.5-flash"]
   }
 
+  # RE436 — each seed harness carries one USAGE source: output, command, none.
+  defp seed(key, id) do
+    seed = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == key))
+    struct(Schemas.Harness, Map.put(seed, :id, id))
+  end
+
   def variations do
     [
+      %Variation{
+        id: :usage_output,
+        description: "USAGE read from its output (Claude Code)",
+        attributes: %{harness: seed("claude-code", 11)}
+      },
+      %Variation{
+        id: :usage_command,
+        description: "USAGE read from a command (Codex)",
+        attributes: %{harness: seed("codex", 12)}
+      },
+      %Variation{
+        id: :usage_none,
+        description: "USAGE not reported (Gemini CLI)",
+        attributes: %{harness: seed("gemini-cli", 13)}
+      },
       %Variation{
         id: :default,
         description: "A harness used by one agent",

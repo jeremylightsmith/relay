@@ -66,4 +66,29 @@ defmodule RelayWeb.AgentsSettingsComponentsTest do
       assert length(chips) == 7
     end
   end
+
+  describe "7. harness_form/1 USAGE block (RE436)" do
+    defp claude_form_html do
+      claude = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == "claude-code"))
+      harness = struct(Harness, Map.put(claude, :id, 1))
+      form = harness |> Relay.Agents.change_harness() |> Phoenix.Component.to_form()
+      render_component(&AgentsSettingsComponents.harness_form/1, form: form, harness: harness, agent_count: 3)
+    end
+
+    test "the source switch is a three-button join with only the selected one primary" do
+      buttons = q(claude_form_html(), "#harness-form-usage .join .join-item")
+
+      assert Enum.map(buttons, &(&1 |> LazyHTML.text() |> String.trim())) ==
+               ["From its output", "From a command", "Not reported"]
+
+      primary = Enum.map(buttons, &(&1 |> LazyHTML.attribute("class") |> List.first() =~ "btn-primary"))
+      assert primary == [true, false, false]
+      assert attr(claude_form_html(), "#harness-form-usage-source-output", "class") =~ "btn btn-xs join-item"
+    end
+
+    test "the window rows use the mockup grid" do
+      style = attr(claude_form_html(), "#harness-form-usage-window-0", "style")
+      assert style =~ "grid-template-columns:64px 1fr 1fr 78px"
+    end
+  end
 end

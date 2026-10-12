@@ -96,4 +96,28 @@ defmodule Relay.Runs.HarnessClaimTest do
     assert pinned.runner_name == runner.name
     assert {:ok, nil} = Runs.claim_next_job(runner)
   end
+
+  # RE436 Scenario 7 — the claim's harness set narrows what is offered: the runner names the
+  # installed harnesses it will run now, leaving out the ones paused at a usage limit.
+  test "a claim narrowed to claude-code leaves a codex job queued", ctx do
+    claude = queued_job!(ctx, "claude-code")
+    codex = queued_job!(ctx, "codex")
+    runner = runner!(ctx, [runner_harness("claude-code"), runner_harness("codex")])
+
+    assert {:ok, %NodeJob{id: id}} = Runs.claim_next_job(runner, nil, [], ["claude-code"])
+    assert id == claude.id
+    assert {:ok, nil} = Runs.claim_next_job(runner, nil, [], ["claude-code"])
+    assert Repo.get!(NodeJob, codex.id).state == :queued
+
+    codex_id = codex.id
+    assert {:ok, %NodeJob{id: ^codex_id}} = Runs.claim_next_job(runner, nil, [], nil)
+  end
+
+  test "the claim's harness set never widens past what the runner installed", ctx do
+    codex = queued_job!(ctx, "codex")
+    runner = runner!(ctx, [runner_harness("claude-code"), runner_harness("codex", installed: false)])
+
+    assert {:ok, nil} = Runs.claim_next_job(runner, nil, [], ["codex"])
+    assert Repo.get!(NodeJob, codex.id).state == :queued
+  end
 end

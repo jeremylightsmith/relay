@@ -1574,7 +1574,7 @@ defmodule RelayWeb.CoreComponents do
 
   attr :rate_limited, :map,
     default: nil,
-    doc: "RE320 %{resumes_at} when the run's queued job waits on a roster paused at its Claude usage limit"
+    doc: "RE320 %{resumes_at} when the run's queued job waits on a roster paused at its usage limits"
 
   attr :vote_count, :integer,
     default: 0,
@@ -4281,7 +4281,7 @@ defmodule RelayWeb.CoreComponents do
   attr :rate_limited, :map,
     default: nil,
     doc:
-      "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its Claude usage limit — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
+      "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its usage limits — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
 
   attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
 
@@ -5440,7 +5440,7 @@ defmodule RelayWeb.CoreComponents do
                       class="text-[11.5px]"
                       style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
                     >
-                      <%!-- RE320: a quiet card whose runners are paused at their Claude usage
+                      <%!-- RE320: a quiet card whose runners are paused at their usage
                             limit is waiting on purpose, not gone quiet. --%>
                       {if @rate_limited && @health == :stale,
                         do: RunComponents.rate_limited_label(@rate_limited),

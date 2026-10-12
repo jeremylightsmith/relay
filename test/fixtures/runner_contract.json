@@ -94,12 +94,15 @@
     "capacity": {
       "shared_clean": 1
     },
+    "harnesses": [
+      "claude-code"
+    ],
     "held": [],
     "runner": {
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 85
+      "version": 86
     },
     "running": []
   },
@@ -138,12 +141,24 @@
       "name",
       "resume_command",
       "session_id_path",
-      "signed_in_check"
+      "signed_in_check",
+      "usage"
     ],
     "path": "/api/harnesses",
     "response_keys": [
       "digest",
       "harnesses"
+    ],
+    "usage_keys": [
+      "command",
+      "interval_min",
+      "match",
+      "pause_now",
+      "recheck",
+      "resets_unit",
+      "source",
+      "used_unit",
+      "windows"
     ]
   },
   "heartbeat": {
@@ -165,22 +180,33 @@
           "installed": true,
           "key": "claude-code",
           "signed_in": true,
+          "usage": {
+            "paused": {
+              "label": "5h",
+              "pause_at": 90,
+              "reason": "limit",
+              "resets_at": 4102444800,
+              "used_pct": 95.0
+            },
+            "read_at": 4102444000,
+            "source": "output",
+            "windows": [
+              {
+                "label": "5h",
+                "resets_at": 4102444800,
+                "used_pct": 95.0
+              }
+            ]
+          },
           "version": "2.1.296 (Claude Code)"
         }
       ],
       "held": [],
-      "rate_limit": {
-        "max": 0.9,
-        "reason": "limit",
-        "resets_at": 4102444800,
-        "utilization": 0.95,
-        "window": "five_hour"
-      },
       "runner": {
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 85
+        "version": 86
       },
       "running": []
     },
@@ -188,7 +214,7 @@
       "harnesses_digest": "<harnesses-digest>",
       "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 85,
+      "required_version": 86,
       "revoked": [],
       "runner_outdated": false,
       "want_capabilities": false
@@ -445,7 +471,1285 @@
       }
     }
   },
-  "version": 12,
+  "usage_rule_cases": {
+    "conditions": [
+      {
+        "condition": ".type == \"x\"",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".type != \"x\"",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".n == 1.0",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".n == 1e0",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".n == -1",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".f == 1",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".f == true",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".f != false",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".missing == null",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".z != null",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".z == false",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".n == \"1\"",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".type == \"x\" and .n == 2",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": false
+      },
+      {
+        "condition": ".type == \"x\" and .n == 1",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".type == \"x\"   and   .n == 1  ",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".type==\"x\"",
+        "event": {
+          "f": true,
+          "n": 1,
+          "type": "x",
+          "z": null
+        },
+        "holds": true
+      },
+      {
+        "condition": ".s == \"a and b\"",
+        "event": {
+          "s": "a and b"
+        },
+        "holds": true
+      },
+      {
+        "condition": ".s == \"say \\\"hi\\\"\"",
+        "event": {
+          "s": "say \"hi\""
+        },
+        "holds": true
+      },
+      {
+        "condition": ".a[1].b == \"c\"",
+        "event": {
+          "a": [
+            1,
+            {
+              "b": "c"
+            }
+          ]
+        },
+        "holds": true
+      },
+      {
+        "condition": ".o == 1",
+        "event": {
+          "o": {
+            "k": 1
+          }
+        },
+        "holds": false
+      },
+      {
+        "condition": ".o != null",
+        "event": {
+          "o": {
+            "k": 1
+          }
+        },
+        "holds": true
+      },
+      {
+        "condition": ".a == null",
+        "event": "not an object",
+        "holds": true
+      },
+      {
+        "condition": ".rate_limit_info.status == \"rejected\"",
+        "event": {
+          "rate_limit_info": {
+            "resetsAt": 1791700000,
+            "status": "rejected",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 1.0
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "holds": true
+      },
+      {
+        "condition": ".payload.type == \"token_count\"",
+        "event": {
+          "payload": {
+            "rate_limits": {
+              "primary": {
+                "resets_at": 1791623773,
+                "used_percent": 0.0,
+                "window_minutes": 300
+              },
+              "secondary": {
+                "resets_at": 1792000000,
+                "used_percent": 3.0,
+                "window_minutes": 10080
+              }
+            },
+            "type": "token_count"
+          },
+          "type": "event_msg"
+        },
+        "holds": true
+      }
+    ],
+    "invalid_conditions": [
+      ".a = 1",
+      ".a == ",
+      ".a == foo",
+      ".a == 1 or .b == 2",
+      "",
+      ".a",
+      "a == 1",
+      ".a == 1 and",
+      ".a == 1 and and .b == 1",
+      ".a == \"unterminated",
+      ".a == 01",
+      ".a === 1",
+      ".a == True",
+      ".a == 1e400",
+      ".a == 1and .b == 1",
+      ".a == \"x\"and .b == 1",
+      ".a == \"bad \\q escape\""
+    ],
+    "invalid_paths": [
+      "a.b",
+      ".a[",
+      ".a[-1]",
+      "",
+      ".a..b",
+      ".a b",
+      ".",
+      "..a",
+      ".a.",
+      ".a[1",
+      ".a]",
+      ".a[1.5]",
+      ".a[x]",
+      ".[0]",
+      " .a"
+    ],
+    "paths": [
+      {
+        "event": {
+          "a": [
+            {
+              "b": 7
+            }
+          ]
+        },
+        "path": ".a[0].b",
+        "segments": [
+          "a",
+          0,
+          "b"
+        ],
+        "value": 7
+      },
+      {
+        "event": {
+          "a": 1
+        },
+        "path": ".x.y",
+        "segments": [
+          "x",
+          "y"
+        ],
+        "value": null
+      },
+      {
+        "event": "str",
+        "path": ".a",
+        "segments": [
+          "a"
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": [
+            1
+          ]
+        },
+        "path": ".a[3]",
+        "segments": [
+          "a",
+          3
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": true
+        },
+        "path": ".a.b",
+        "segments": [
+          "a",
+          "b"
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": {
+            "0": 1
+          }
+        },
+        "path": ".a[0]",
+        "segments": [
+          "a",
+          0
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": [
+            5
+          ]
+        },
+        "path": ".a.b",
+        "segments": [
+          "a",
+          "b"
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": {
+            "b": [
+              [
+                1,
+                2
+              ],
+              [
+                3,
+                {
+                  "c": "d"
+                }
+              ]
+            ]
+          }
+        },
+        "path": ".a.b[1][1].c",
+        "segments": [
+          "a",
+          "b",
+          1,
+          1,
+          "c"
+        ],
+        "value": "d"
+      },
+      {
+        "event": {
+          "a": {
+            "b": null
+          }
+        },
+        "path": ".a.b",
+        "segments": [
+          "a",
+          "b"
+        ],
+        "value": null
+      },
+      {
+        "event": {
+          "a": {
+            "b": false
+          }
+        },
+        "path": ".a.b",
+        "segments": [
+          "a",
+          "b"
+        ],
+        "value": false
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 0.42
+              },
+              "seven_day": {
+                "resetsAt": 1792000000,
+                "utilization": 0.18
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "path": ".rate_limit_info.unifiedWindows.five_hour.utilization",
+        "segments": [
+          "rate_limit_info",
+          "unifiedWindows",
+          "five_hour",
+          "utilization"
+        ],
+        "value": 0.42
+      }
+    ],
+    "readings": [
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 0.42
+              },
+              "seven_day": {
+                "resetsAt": 1792000000,
+                "utilization": 0.18
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": [
+            {
+              "label": "5h",
+              "resets_at": 1791651000,
+              "used_pct": 42.0
+            },
+            {
+              "label": "7d",
+              "resets_at": 1792000000,
+              "used_pct": 18.0
+            }
+          ]
+        },
+        "name": "claude-code allowed rate_limit_event (AC2)",
+        "now": 1791600000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "resetsAt": 1791700000,
+            "status": "rejected",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 1.0
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": {
+          "refused_resets_at": 1791700000,
+          "windows": [
+            {
+              "label": "5h",
+              "resets_at": 1791651000,
+              "used_pct": 100.0
+            }
+          ]
+        },
+        "name": "claude-code rejected line pauses until its resetsAt",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "rejected",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 1.0
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": {
+          "refused_resets_at": 1791651000,
+          "windows": [
+            {
+              "label": "5h",
+              "resets_at": 1791651000,
+              "used_pct": 100.0
+            }
+          ]
+        },
+        "name": "claude-code rejected line without resetsAt pauses until the latest window",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "resetsAt": 5,
+            "status": "rejected"
+          }
+        },
+        "expect": {
+          "refused_resets_at": 5,
+          "windows": []
+        },
+        "name": "pause_now alone (match fails) reads no windows",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "rejected"
+          }
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "pause_now alone with no reset anywhere",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "unifiedWindows": {
+              "seven_day": {
+                "resetsAt": 1792000000.7,
+                "utilization": 1
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": [
+            {
+              "label": "7d",
+              "resets_at": 1792000000,
+              "used_pct": 100.0
+            }
+          ]
+        },
+        "name": "an integer fraction and a fractional unix reset",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "payload": {
+            "rate_limits": {
+              "primary": {
+                "resets_at": 1791623773,
+                "used_percent": 0.0,
+                "window_minutes": 300
+              },
+              "secondary": {
+                "resets_at": 1792000000,
+                "used_percent": 3.0,
+                "window_minutes": 10080
+              }
+            },
+            "type": "token_count"
+          },
+          "type": "event_msg"
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": [
+            {
+              "label": "5h",
+              "resets_at": 1791623773,
+              "used_pct": 0.0
+            },
+            {
+              "label": "wk",
+              "resets_at": 1792000000,
+              "used_pct": 3.0
+            }
+          ]
+        },
+        "name": "the real codex-cli 0.160.0 token_count line",
+        "now": 0,
+        "usage": {
+          "command": "sh -c 'f=$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -1) && grep -h \"\\\"token_count\\\"\" \"$f\" | tail -1'",
+          "interval_min": 5,
+          "match": ".payload.type == \"token_count\"",
+          "pause_now": null,
+          "recheck": {
+            "interval_min": 15,
+            "model": "gpt-5.6-luna"
+          },
+          "resets_unit": "unix",
+          "source": "command",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".payload.rate_limits.primary.resets_at",
+              "used_path": ".payload.rate_limits.primary.used_percent"
+            },
+            {
+              "label": "wk",
+              "pause_at": 90,
+              "resets_path": ".payload.rate_limits.secondary.resets_at",
+              "used_path": ".payload.rate_limits.secondary.used_percent"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 600,
+          "t": 1,
+          "u": 12.5
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": [
+            {
+              "label": "d",
+              "resets_at": 1600,
+              "used_pct": 12.5
+            }
+          ]
+        },
+        "name": "percent and seconds_from_now",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 0,
+          "t": 1,
+          "u": 0
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": [
+            {
+              "label": "d",
+              "resets_at": 1000,
+              "used_pct": 0.0
+            }
+          ]
+        },
+        "name": "seconds_from_now of zero",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 600,
+          "t": 1,
+          "u": true
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a boolean used is not a number",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 600,
+          "t": 1,
+          "u": "12"
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a string used is not a number",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 600,
+          "t": 1,
+          "u": -1
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a negative used",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "t": 1,
+          "u": 12.5
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a missing reset",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": -5,
+          "t": 1,
+          "u": 12.5
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a negative seconds_from_now",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": true,
+          "t": 1,
+          "u": 12.5
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a boolean reset is not a number",
+        "now": 1000,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 0,
+                "utilization": 0.5
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": {
+          "refused_resets_at": null,
+          "windows": []
+        },
+        "name": "a zero unix reset is invalid",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "type": "assistant"
+        },
+        "expect": null,
+        "name": "a line the rule does not match",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".type == \"rate_limit_event\"",
+          "pause_now": {
+            "resets_path": ".rate_limit_info.resetsAt",
+            "when": ".rate_limit_info.status == \"rejected\""
+          },
+          "recheck": {
+            "interval_min": 15,
+            "model": "haiku"
+          },
+          "resets_unit": "unix",
+          "source": "output",
+          "used_unit": "fraction",
+          "windows": [
+            {
+              "label": "5h",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.five_hour.utilization"
+            },
+            {
+              "label": "7d",
+              "pause_at": 90,
+              "resets_path": ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+              "used_path": ".rate_limit_info.unifiedWindows.seven_day.utilization"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "r": 1,
+          "t": true,
+          "u": 1
+        },
+        "expect": null,
+        "name": "a match on true is not a match on 1",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": ".t == 1",
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "seconds_from_now",
+          "source": "output",
+          "used_unit": "percent",
+          "windows": [
+            {
+              "label": "d",
+              "pause_at": 50,
+              "resets_path": ".r",
+              "used_path": ".u"
+            }
+          ]
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 0.42
+              },
+              "seven_day": {
+                "resetsAt": 1792000000,
+                "utilization": 0.18
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": null,
+        "name": "source none never reads",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": null,
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "unix",
+          "source": "none",
+          "used_unit": "fraction",
+          "windows": []
+        }
+      },
+      {
+        "event": {
+          "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+              "five_hour": {
+                "resetsAt": 1791651000,
+                "utilization": 0.42
+              },
+              "seven_day": {
+                "resetsAt": 1792000000,
+                "utilization": 0.18
+              }
+            }
+          },
+          "type": "rate_limit_event"
+        },
+        "expect": null,
+        "name": "the gemini-cli seed never reads",
+        "now": 0,
+        "usage": {
+          "command": null,
+          "interval_min": null,
+          "match": null,
+          "pause_now": null,
+          "recheck": null,
+          "resets_unit": "unix",
+          "source": "none",
+          "used_unit": "fraction",
+          "windows": []
+        }
+      }
+    ]
+  },
+  "version": 14,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",
@@ -499,10 +1803,6 @@
     "rate_limit_reasons": [
       "limit",
       "rejected"
-    ],
-    "rate_limit_windows": [
-      "five_hour",
-      "seven_day"
     ],
     "run_states": {
       "active": [
@@ -559,6 +1859,19 @@
         "stopped",
         "failed"
       ]
-    }
+    },
+    "usage_resets_units": [
+      "unix",
+      "seconds_from_now"
+    ],
+    "usage_sources": [
+      "output",
+      "command",
+      "none"
+    ],
+    "usage_used_units": [
+      "fraction",
+      "percent"
+    ]
   }
 }

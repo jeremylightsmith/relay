@@ -181,14 +181,14 @@ double-booking (YAGNI: no multi-board reservation yet).
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
-  running: [job-ids], held: [{ref, state}], rate_limit}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}], harnesses}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
   required_version, latest_runner_version, harnesses_digest}` (the digest since RE433 — see
   "Harness routing" below). It terminates each revoked job's live subprocess
   via its `JobControl` (see "Node-job transport" and "Runner mode" below). The advertised
   `capacity` is the runner's configured per-class total **and this route is its single writer
-  (RE311)** — the claim's `capacity` is a live FREE count, passed to `Relay.Runs.claim_next_job/3`
+  (RE311)** — the claim's `capacity` is a live FREE count, passed to `Relay.Runs.claim_next_job/4`
   as an argument and never persisted, because one column carrying both meanings made the roster
   flip-flop between the total and the free count while the board sat deadlocked. `running` is the
   jobs the runner believes it holds, so the server can name the ones it no longer considers
@@ -207,10 +207,10 @@ double-booking (YAGNI: no multi-board reservation yet).
   `./relay` the app itself serves — `Relay.Runs.latest_runner_version/0`, delegating to
   `Relay.Scaffold.runner_version/0`, read from `priv/scaffold/relay` at runtime. Truthful
   by construction. It is a **target**, distinct from `required_version`'s **floor**; a runner
-  with `auto_update` on updates itself against it. `rate_limit` (RE320) is always sent — null
-  while claiming, `{window, utilization, max, resets_at, reason}` while the runner has paused
-  itself at a Claude usage limit — and stored on `Schemas.Runner.rate_limit` (see Usage limits
-  below).
+  with `auto_update` on updates itself against it. Each `harnesses[]` inventory entry carries
+  that harness's `usage` (RE436) — `{source, read_at, windows, paused}`, its latest readings and
+  its pause if any — read fresh on every beat (see Usage limits below). RE320's top-level
+  `rate_limit` is no longer sent.
 - **Run ids**: each runner worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -243,8 +243,11 @@ never 403s):
   `stale?` is the `freshness != :fresh` convenience flag), `version`/`outdated`
   (`Relay.Runs.runner_outdated?/1` — orthogonal to freshness, since a refused runner can
   still be beating normally), `display_state` (`:gone > :stale > :outdated > :rate_limited >
-  :fresh`), `rate_limit` (`Relay.Runs.active_rate_limit/2` — the runner's live Claude usage
-  pause, nil once `resets_at` passes, RE320), and the jobs each runner currently holds.
+  :fresh`), `rate_limit` (`Relay.Runs.active_rate_limit/2` — set only while every installed
+  harness on the runner is paused, as the pause that lifts first:
+  `{harness, window, used_pct, pause_at, resets_at, reason}`, nil once it resets; RE320, per
+  harness since RE436), `harnesses` (the stored per-harness inventory and usage readings,
+  `[]` for a runner that never reported), and the jobs each runner currently holds.
 - **Web: the Runners view** (`/board/:slug/runners`, `RelayWeb.BoardRunnersLive`) — the same
   `Relay.Runs.list_runner_status/2` roster rendered one panel per machine, plus (RE307) the
   board-wide **active queue** from `Relay.Runs.list_queue/2`: every `queued` or `claimed` node
@@ -254,22 +257,41 @@ never 403s):
   when a stacked queue matters. Read-only and deliberately **no** new endpoint and **no** new CLI
   verb: `POST /api/node-jobs/claim` stays the only path a job is handed out on, and
   `list_queue/2` is the function a future `relay queue` would render.
-- **Rate-limited roster (RE320).** `Relay.Runs.runner_rate_limited?/2` is the one predicate: a
-  stored `Schemas.Runner.rate_limit` whose `resets_at` is still ahead. `Scheduler.capacity_diagnosis/1`
+  Each runner panel's **HARNESSES** section (RE436) joins `list_runner_status/2`'s `harnesses`
+  with the board's harness definitions and agents (`Relay.Runs.runner_harness_rows/4`, read once
+  per refresh): one row per board harness the runner reported, with its version, signed-in state,
+  one usage bar per window the harness's USAGE setting defines and its own paused line. A harness
+  removed from the board stops showing, and a harness the runner has not reported yet is not shown.
+- **Rate-limited roster (RE320, per harness since RE436).** A runner pauses per harness, and the
+  server derives "rate limited" from the readings stored in `runners.harnesses`.
+  `Relay.Runs.harness_pause/2` reads one entry's live pause: the entry is `installed`, its
+  `usage.paused` is set, and that pause's `resets_at` is still ahead. A stored pause past its
+  reset reads as not paused before the next beat clears it. `Relay.Runs.runner_rate_limited?/2`
+  is the one predicate: the runner reported at least one installed harness and **every**
+  installed one is paused (a nil or `[]` inventory is not rate limited). A partly paused runner
+  is not rate limited: it still counts as connected and claims its other harnesses' work, and
+  the claim's `harnesses` keeps the paused one's jobs away from it (see Harness routing).
+  `Relay.Runs.active_rate_limit/2` returns the pause that lifts first, as
+  `%{harness, window, used_pct, pause_at, resets_at, reason}`, since that is when the runner
+  can claim again; `list_board_runners/1` selects `harnesses` for it. RE436 retired the
+  runner-wide `runners.rate_limit` column, `Schemas.RunnerRateLimit` and the heartbeat's
+  top-level `rate_limit`. `Scheduler.capacity_diagnosis/1`
   returns `:runner_rate_limited` when the roster has live runners, not all of them are outdated,
   and every live, current runner is paused. Its evidence carries `resumes_at` (the earliest reset)
   and `rate_limited_runners`. The roster-blaming reasons live once in
   `Scheduler.roster_blocking_reasons/0`. `Relay.Runs.stopped_work/2` returns the new reason for the
   board and Runners-page banner (warning tint). `Relay.Runs.diagnose/3` (`relay why`,
   `GET /api/cards/:ref/diagnosis`) returns verdict `:runner_rate_limited` for a live run whose job
-  is queued behind that roster; its sentence is `Relay.Runs.rate_limited_run_detail/1`. Paused runners are also excluded from `:job_awaiting_slot`'s
+  is queued behind that roster; its sentence is `Relay.Runs.rate_limited_run_detail/1` ("… every
+  connected runner is paused at its usage limits"). Rate-limited runners are also excluded from `:job_awaiting_slot`'s
   "connected runners". The card face reads `Relay.Runs.roster_rate_limit/2` (one runners query
   through the same diagnosis) intersected with `Relay.Runs.queued_run_ids/1` on BoardLive's
   health tick, and shows `Rate limited · resumes …` without the 5-minute stall threshold. The card
   drawer does not call `diagnose/3` (a full snapshot per render); it reads the same per-card
   `:run_face_meta` entry, rendering `rate_limited_run_detail/1` as a Run-tab banner and swapping
   the Activity tab's "gone quiet" chip for the rate-limited label. Copy
-  comes from `Relay.Runs.rate_limit_phrase/1` and `resume_time_label/1`. No new PubSub topic.
+  comes from `Relay.Runs.rate_limit_phrase/1` (`codex 5h 93% / 90%`, or `claude-code refused
+  (5h)` for a refusal) and `resume_time_label/1`. No new PubSub topic.
 - `GET /api/version` (`RelayWeb.Api.VersionController.show/2`) — the git SHA the running app
   was built from, baked in at image build time (`Dockerfile`'s `final` stage, fed by
   `bin/deploy_fly.sh`'s `flyctl deploy --build-arg` in the RE board's Deploy flow; for a manual or
@@ -501,13 +523,28 @@ that stays server-side.
   only `Relay.Agents.default_harness_key/0`, `claude-code`), and a job whose payload has
   `refusal` is offered to nobody — both apply to pinned jobs too. Shell/gate/talk jobs have no
   `harness_key` and pass. **Inventory + definitions:** the heartbeat may carry top-level
-  `harnesses` — `[{key, installed, version, signed_in}]`, normalized by
-  `Schemas.Runner.normalize_harnesses/1` (malformed entries dropped) and absent-means-untouched
-  like `held` — and its reply always carries `harnesses_digest`
+  `harnesses` — `[{key, installed, version, signed_in, usage}]`, normalized by
+  `Schemas.Runner.normalize_harnesses/1` (malformed entries dropped; a malformed `usage` degrades
+  to nil, see Usage limits) and absent-means-untouched like `held` — and its reply always carries
+  `harnesses_digest`
   (`Relay.Agents.harnesses_digest/1`, SHA-256 of the board's definitions in wire shape, free of
   ids and timestamps). `GET /api/harnesses` (`RelayWeb.Api.HarnessController`, board key)
   returns `{harnesses: [Relay.Agents.harness_wire/1 …], digest}`; the runner refetches it when
-  the digest moves. The `AddHarnessRouting` migration pointed already-queued/claimed agent jobs
+  the digest moves. **The claim's harness set (RE436):** a claim may carry `harnesses`, the keys
+  the runner will run now (installed minus paused at a usage limit), normalized by
+  `Schemas.Runner.normalize_claim_harnesses/1` and passed to `Relay.Runs.claim_next_job/4`, which
+  narrows the installed keys to that intersection. Like the claim's `held` it is request-scoped
+  and never written to the row; an absent one leaves the claim unnarrowed. Each harness carries
+  its **usage rule** (RE436) as `usage` —
+  `Schemas.HarnessUsage.wire/1`: `{source, match, command, interval_min, used_unit, resets_unit,
+  windows: [{label, used_path, resets_path, pause_at}], pause_now: {when, resets_path} | null,
+  recheck: {model, interval_min} | null}`, `source` one of `Schemas.HarnessUsage.sources/0`
+  (`output` / `command` / `none`). Paths and conditions are a jq subset evaluated by
+  `Schemas.HarnessUsage.Rule` and, line for line, by `./relay`'s `usage_reading` and friends; both
+  pass the contract fixture's `usage_rule_cases`. Seeds: Claude Code reads its stream's
+  `rate_limit_event` (5h / 7d), Codex polls its newest rollout file's `token_count` line (5h /
+  wk), Gemini CLI is `none`; the `AddUsageToHarnesses` migration backfilled existing boards'
+  seeded harnesses from a frozen copy. The `AddHarnessRouting` migration pointed already-queued/claimed agent jobs
   at a frozen Claude Code harness with model `opus`.
 - **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
@@ -887,7 +924,8 @@ silently billed to the paid API.
   supported, and a string value containing `//` is never altered. `./relay update` creates the
   file if missing (RE383, `ensure_runner_config`): `namespace` = the sanitized checkout-dir
   name (fallback `project`), `cache_dir` = `~/.cache/relay/<namespace>`, starter capacity
-  `shared_clean` 3 / `exclusive` 2, limits 0.9 / 0.9, the `worktrees` block commented out, and
+  `shared_clean` 3 / `exclusive` 2, the `worktrees` block commented out (PAUSE AT is per
+  harness, set in Settings → Agents, so there is no `limits` key — RE436), and
   **no `name` key** (a tracked name would recreate the RE305 identity collision). The startup
   line names `namespace <ns>`.
 
@@ -1100,7 +1138,9 @@ silently billed to the paid API.
   beat carries the inventory; a failed fetch leaves the digest alone so the next beat retries.
 - **The claim/execute/report loop (`cmd_start`).** Each iteration: advertise current free
   capacity per isolation class on a long-poll `POST /api/node-jobs/claim` (a read timeout is
-  "no work", not an error); on a claim, hand the job to a worker thread bounded by the pool's
+  "no work", not an error) — the claim body is `{runner, capacity, running, held, harnesses}`,
+  `harnesses` (RE436) being the installed harness keys minus those paused at a usage limit,
+  omitted before the definitions are first fetched (see Usage limits); on a claim, hand the job to a worker thread bounded by the pool's
   free slots; the worker resets the slot if needed, runs the step (shell/gate via
   `_stream_shell`, agent via `_stream_agent_job`), and POSTs the typed outcome to
   `/api/node-jobs/:id/outcome`. `--once` drains a single claim→execute→report cycle and exits;
@@ -1114,7 +1154,7 @@ silently billed to the paid API.
   POST. Anything else fails the call, since the server may already have processed it. Before
   this change a bare `urlopen` blocked forever on a half-open connection. One heartbeat POST
   caught that way by a server restart silently killed the runner's heartbeat for days, and with
-  it `release_held`, revoke, capability refresh, `rate_limit`, auto-update and capacity
+  it `release_held`, revoke, capability refresh, usage reporting, auto-update and capacity
   advertisement. The roster still showed the runner fresh, because claims also stamp
   `last_heartbeat`. `RunnerHeartbeat._beat` now guards everything it does (capability scan,
   `held_fn`, the POST, the reply handlers), and `_run` guards the loop body as well. A failing
@@ -1175,51 +1215,74 @@ silently billed to the paid API.
   disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
   disable it the same way. Opt out with `"auto_update": false`.
 
-### Usage limits (RE320)
+### Usage limits (RE320 → RE436)
 
-`relay start` stops **claiming** once Claude subscription usage passes a configured fraction of
-either usage window. It tells the board and resumes by itself.
+`relay start` stops claiming work **for one harness** once that harness's usage passes the PAUSE
+AT its board rule sets, and resumes by itself. RE320 did this for Claude Code alone, from
+hard-coded event shapes and per-runner `.relay/runner.json` `limits`; RE436 made it generic.
+Reading usage, and deciding when to pause, is now each harness's `usage` rule (Settings → Agents
+→ Harnesses, served by `GET /api/harnesses` — see "Harness routing" above). `./relay` names no
+CLI, event or window in executable code (`bin/test_relay.py` `RunnerHarnessGuardTest`).
 
-- **Config.** `.relay/runner.json` → `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}`
-  (this repo and `/relay-onboard`'s authored file both use 0.9/0.9). A missing block or key means
-  no limit for that window. `validate_limits` refuses to start on an unknown key inside `limits`
-  or a value that is not a number in 0–1, and names the key. The window names live once in
-  `./relay` (`RATE_LIMIT_WINDOWS`, `limit_key/1`) and are pinned to
-  `Schemas.Runner.rate_limit_windows/0` by the runner contract fixture.
-- **Usage source.** There are no extra calls in the normal path. Every `claude -p --verbose
-  --output-format stream-json` run emits a `rate_limit_event` whose `rate_limit_info` carries
-  `status`, `rateLimitType`, `resetsAt` and `unifiedWindows.{five_hour,seven_day}.{utilization,
-  resetsAt}`. `_stream_agent_job` feeds every parsed event from agent nodes and talk turns to the
-  process's `UsageLimiter` (`USAGE_LIMITER`). The limiter parses defensively and never raises into
-  a job. A new runner has no numbers until its first agent/talk job streams one, and until then it
-  never pauses.
-  **Spike finding (Claude Code 2.1.270, 2026-09-14):** the event is emitted on *every* call, not
-  only above a warning threshold. A probe at 2% five-hour usage returned `status: "allowed"` with
-  both windows populated. So a probe that yields no event is not evidence, and the runner keeps
-  waiting for `resetsAt`. `overageStatus` can read `"rejected"` on an account with no overage
-  credits. It is not `status`, and the limiter ignores it.
-- **Pause.** A window trips at `utilization >= max`. A `status: "rejected"` event trips the window
-  named by `rateLimitType` even with no limit configured; the node that received it fails exactly
-  as before. When several windows trip, the latest `resets_at` is reported. Before each claim the
-  loop checks `UsageLimiter.paused(now)`. While paused it calls nothing on `/api/node-jobs/claim`,
-  for node, gate and talk work alike, and sleeps in `RATE_LIMIT_PAUSE_SLICE_S` slices. Jobs already
-  running finish, and a claim already in flight when the limit trips is honoured. The runner logs
-  one `⏸ rate limited: …` line on entering a pause and one
-  `▶ Claude usage back under limits — claiming again` on leaving it.
-- **Resume.** A tripped window clears at `resets_at`, and its stored reading is discarded then so
-  stale numbers cannot re-trip it. While paused, if nothing has produced a reading for
-  `RATE_LIMIT_PROBE_INTERVAL_S` (900s, not configurable), the loop runs `probe_claude_usage`:
-  `claude -p ok --model haiku --max-turns 1` from the system temp dir, with its event fed to the
-  limiter. If the probe shows usage back under the limits, claiming resumes early; for a refusal,
-  `status` must also no longer be `rejected`. A failed probe is logged once per pause and changes
-  nothing.
-- **Heartbeat.** `heartbeat_body` always carries `rate_limit`. It is `null`, or `{window,
-  utilization, max, resets_at, reason}` with `reason` in `Schemas.Runner.rate_limit_reasons/0`
-  (`limit` | `rejected`) and `max` null for a refusal with no limit. Beats continue while paused,
-  so the runner stays `fresh`. `POST /api/node-jobs/heartbeat` normalizes the value with
-  `Schemas.Runner.normalize_rate_limit/1`, storing nil and logging anything unrecognised. The
-  heartbeat is the only writer of `Schemas.Runner.rate_limit`, and a claim never touches it.
-  `@min_runner_version` was not raised: an older runner simply never pauses.
+- **Config.** PAUSE AT lives only on the harness (`windows[].pause_at`). There is no per-runner
+  override. `.relay/runner.json` `limits` is retired: `load_runner_config` drops it and logs
+  `LIMITS_IGNORED_LINE` once; it never refuses to start. The starter config no longer writes it.
+- **The book.** `cmd_start` keeps a `HarnessUsageBook` (the global `USAGE`): one `UsageLimiter`
+  per harness key. `RunnerHeartbeat.refresh_harnesses` hands each successful fetch's raw
+  definitions to `on_definitions`, which calls `HarnessUsageBook.rebuild`. A limiter whose `usage`
+  rule is unchanged is kept, so its readings survive a digest move caused by an unrelated edit; a
+  changed rule starts afresh; a harness gone from the board is dropped.
+- **Usage sources.** A limiter is fed three ways, all through `usage_reading` (the rule
+  evaluator):
+  - **`output`** — the job's own stream. `run_node_job` passes the claimed job's harness limiter
+    (`job["harness"]["key"]`) to `_stream_agent_job(usage=…)`, which feeds every parsed event to
+    it. There are no extra calls in the normal path. Claude Code's seed reads the
+    `rate_limit_event` its `stream-json` emits on every call. **Talk turns feed no limiter**: they
+    are out of RE436's scope, and the old shared limiter they fed is gone.
+  - **`command`** — `UsagePoller`, a daemon thread ticking every `USAGE_SLICE_S` (5s), runs the
+    rule's `command` through `sh -c` from the system temp dir every `interval_min`
+    (`run_usage_command`). Each stdout line that parses as JSON is observed; the last readable one
+    wins. Codex's seed reads the `token_count` line of its newest rollout file.
+  - **re-check** — while a harness is paused and has no job in flight (the loop's `in_flight`
+    entries record each job's harness key), the poller runs `recheck_harness` when
+    `recheck.interval_min` has passed since its last reading or re-check. That expands the
+    harness's own `command` template with prompt `ok`, the rule's `recheck.model` and the temp
+    dir as `{worktree}`, runs it from the temp dir, and reads its stdout (`output`) or then runs
+    the usage command (`command`). It returns a reason rather than raising (a template needing
+    `{ref}`, a timeout, a CLI that refuses a non-git cwd), never un-pauses anything by itself, and
+    a failure is logged once per pause per harness. Every usage command and re-check times out at
+    `USAGE_COMMAND_TIMEOUT_S` (60s).
+- **Pause.** A window trips at `used_pct >= pause_at`. A line meeting the rule's `pause_now.when`
+  is a refusal and trips regardless, until its reset (`reason: "rejected"`); a later readable line
+  that is not a refusal ends it early. With several trips, `UsageLimiter.paused` reports the
+  latest reset (a refusal wins a tie). Each reading and refusal is discarded at its reset. Before
+  each claim the loop takes `installed` (the inventory's installed keys, None before the first
+  fetch) and `paused = USAGE.paused_keys(now)`:
+  - with every installed harness paused, it claims **nothing** — node, gate or talk — and sleeps
+    in `USAGE_SLICE_S` slices; jobs already running finish (RE320's contract, now for the
+    all-paused case only);
+  - otherwise it claims with `harnesses = sorted(installed - paused)` (omitted before the first
+    fetch). The server ignores the claim's `harnesses` until it filters by it.
+
+  It logs `⏸ <name> paused: <label> <used>% ≥ <pause_at>% · resumes HH:MM · re-checking every
+  <N>m` (or `refused a call`) once when a harness enters a pause and
+  `▶ <name> usage back under its pause-at — claiming its nodes again` once when it leaves.
+- **RE267 resume-at.** When `_stream_agent_job`'s limiter reads a refusal with a reset from the
+  job's own stream, it sets `report.rejected` / `report.rejected_resets_at`; `blocked_resume_at`
+  sends that as the outcome's `resume_at`. `ClaudeRunReport` no longer parses any usage event
+  itself.
+- **Heartbeat.** Each `harnesses[]` entry carries `usage`: `UsageLimiter.wire(now)` —
+  `{source, read_at, windows: [{label, used_pct, resets_at}], paused: {label, used_pct, pause_at,
+  resets_at, reason} | null}` with `reason` in `Schemas.Runner.rate_limit_reasons/0` (`limit` |
+  `rejected`, mirrored as `USAGE_PAUSE_REASONS`) — or `{source: "none", read_at: null, windows:
+  [], paused: null}` for a harness the book does not know. The top-level `rate_limit` is no longer
+  sent. Beats continue while paused, so the runner stays `fresh`. The server stores each reading
+  on its `runners.harnesses` entry via `Schemas.Runner.normalize_harnesses/1`. That normalizer is
+  total: an unknown `source` drops the whole `usage` and keeps the entry; a malformed window is
+  dropped, and at most 20 are kept; a malformed `paused` (unknown `reason`, non-positive
+  `resets_at`) becomes nil. The next beat's `paused: null` clears a pause; a beat without
+  `harnesses` leaves the stored readings alone. The roster derives "rate limited" from these
+  readings (see the Rate-limited roster bullet).
 
 ### Talk turns (RE268, ADR 0009)
 

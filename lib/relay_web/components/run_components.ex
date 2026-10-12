@@ -644,7 +644,7 @@ defmodule RelayWeb.RunComponents do
   # The honest banner for every failure mode that ISN'T a tripped breaker. Same red
   # frame, no invented cause: it leads with `runs.failure_detail` — the engine's
   # human-first sentence, which the Run tab surfaced nowhere before RLY-179.
-  # RE320 — a live run whose queued job waits on a roster paused at its Claude usage limit. The
+  # RE320 — a live run whose queued job waits on a roster paused at its usage limits. The
   # sentence is `Relay.Runs.rate_limited_run_detail/1`, the same copy `relay why` prints; the
   # warning tokens match the run face's "Rate limited" chip (no artboard covers rate limiting).
   def run_state_banner(%{variant: :rate_limited} = assigns) do
@@ -752,7 +752,7 @@ defmodule RelayWeb.RunComponents do
   @doc ~S"""
   `Relay.Runs.stopped_work/2`'s board-level verdict as one line. ONE copy of the
   reason→severity mapping — `:runner_outdated` and `:runner_rate_limited` are the warning tint
-  (the machines are there and beating, they are just refused or paused at their Claude usage
+  (the machines are there and beating, they are just refused or paused at their usage
   limit), every other reason is the error tint (nothing is going to pick the work up at all) —
   so the board and the Runners view can never drift.
 
@@ -793,8 +793,8 @@ defmodule RelayWeb.RunComponents do
   # ---------- rate_limit_note ----------
 
   @doc ~S"""
-  A runner's Claude usage pause as one amber line (RE320): `five_hour 95% / 90% · resumes 3:40 PM
-  UTC`, or `Claude refused (five_hour) · resumes …`. Takes the plain map
+  A runner's usage pause as one amber line (RE320, per harness since RE436): `codex 5h 95% / 90% ·
+  resumes 3:40 PM UTC`, or `claude-code refused (5h) · resumes …`. Takes the plain map
   `Relay.Runs.active_rate_limit/2` returns; the copy is `Relay.Runs.rate_limit_phrase/1` and
   `Relay.Runs.resume_time_label/1`, never re-derived here. No artboard covers rate limiting, so it
   borrows the stalled run face's warning tokens.

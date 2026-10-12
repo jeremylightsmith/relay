@@ -8,4 +8,5 @@ defmodule Storybook.AgentsSettingsComponents do
   def entry("agent_form"), do: [icon: {:fa, "pen-to-square", :thin}]
   def entry("harness_card"), do: [icon: {:fa, "terminal", :thin}]
   def entry("harness_form"), do: [icon: {:fa, "sliders", :thin}]
+  def entry("usage_test_result"), do: [icon: {:fa, "vial", :thin}]
 end

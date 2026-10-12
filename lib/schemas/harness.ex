@@ -10,7 +10,8 @@ defmodule Schemas.Harness do
   no value. `command` must carry `{prompt}`; `resume_command` (nil = the CLI cannot resume) must
   carry `{prompt}` and `{session}`. `session_id_path` is a dot path (`.session_id`) into the
   CLI's JSON events naming the session to resume. `signed_in_check` is a command whose exit
-  status says the CLI is signed in.
+  status says the CLI is signed in. `usage` (`Schemas.HarnessUsage`, RE436) is how the runner
+  reads the CLI's usage and when it pauses the harness.
   """
 
   use Ecto.Schema
@@ -27,6 +28,10 @@ defmodule Schemas.Harness do
     field :resume_command, :string
     field :session_id_path, :string
     field :signed_in_check, :string
+
+    # RE436 — how the runner reads this CLI's usage and when it pauses it. Never nil: a harness
+    # saved before RE436 (or built bare) reads `source "none"`.
+    embeds_one :usage, Schemas.HarnessUsage, on_replace: :update, defaults_to_struct: true
 
     belongs_to :board, Schemas.Board
 
@@ -49,11 +54,18 @@ defmodule Schemas.Harness do
     |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :command])
     |> validate_models()
+    |> cast_usage()
     |> validate_template(:command, ["prompt"])
     |> validate_template(:resume_command, ["prompt", "session"])
     |> validate_format(:session_id_path, ~r/\A(\.[A-Za-z0-9_]+)+\z/, message: "must be a dot path like .session_id")
     |> unique_constraint(:name, name: :harnesses_board_id_name_index, message: "is already used on this board")
     |> unique_constraint(:key, name: :harnesses_board_id_key_index)
+  end
+
+  # Cast after `models`, so `recheck.model` is checked against the list this same edit leaves.
+  defp cast_usage(changeset) do
+    models = get_field(changeset, :models) || []
+    cast_embed(changeset, :usage, with: &Schemas.HarnessUsage.changeset(&1, &2, models))
   end
 
   defp normalize_models(attrs) do

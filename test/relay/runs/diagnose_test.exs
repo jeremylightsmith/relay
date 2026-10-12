@@ -79,7 +79,10 @@ defmodule Relay.Runs.DiagnoseTest do
       board: board,
       name: "paused",
       last_heartbeat: now,
-      rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+      harnesses: [
+        runner_harness("claude-code", usage: paused_usage(resets_at)),
+        runner_harness("codex", usage: paused_usage(DateTime.add(resets_at, 600, :second)))
+      ]
     )
 
     card = insert(:card, stage: works, status: :working)
@@ -90,7 +93,7 @@ defmodule Relay.Runs.DiagnoseTest do
     assert %{verdict: :runner_rate_limited, detail: detail, evidence: evidence} = Runs.diagnose(board, card, now)
 
     assert detail ==
-             "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
+             "This run's node-job is queued — every connected runner is paused at its usage limits. " <>
                "Resumes #{Runs.resume_time_label(resets_at)}."
 
     assert evidence.resumes_at == resets_at
@@ -358,10 +361,31 @@ defmodule Relay.Runs.DiagnoseTest do
         last_heartbeat: now,
         capacity: %{"exclusive" => 1},
         held: [%{"ref" => "TH1", "state" => "bound"}],
-        rate_limit: build(:runner_rate_limit)
+        harnesses: [runner_harness("claude-code", usage: paused_usage(DateTime.add(now, 3600, :second)))]
       )
 
       assert %{verdict: :runner_rate_limited} = Runs.diagnose(board, card, now)
+    end
+
+    test "RE436: a full roster with only one of its runner's harnesses paused is :job_awaiting_slot",
+         %{board: board, works: works} do
+      # The unpaused harness can still take work when a slot frees, so the roster is not to blame.
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      {card, _job} = awaiting_card(board, works, now, 5_460)
+
+      insert(:runner,
+        board: board,
+        name: "half-paused",
+        last_heartbeat: now,
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => "TH1", "state" => "bound"}],
+        harnesses: [
+          runner_harness("claude-code", usage: paused_usage(DateTime.add(now, 3600, :second))),
+          runner_harness("codex")
+        ]
+      )
+
+      assert %{verdict: :job_awaiting_slot} = Runs.diagnose(board, card, now)
     end
 
     test "a parked run keeps its own specific verdict, even behind an old queued job and a full roster",

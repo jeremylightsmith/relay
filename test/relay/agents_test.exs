@@ -292,4 +292,111 @@ defmodule Relay.AgentsTest do
 
     refute Agents.harnesses_digest(board) == digest
   end
+
+  describe "harness usage rules (RE436)" do
+    # Scenario 11
+    test "a freshly seeded board carries each seed's usage rule" do
+      board = seeded_board()
+
+      claude = harness(board, "claude-code")
+      assert claude.usage.source == "output"
+      assert Enum.map(claude.usage.windows, & &1.label) == ["5h", "7d"]
+      assert Enum.all?(claude.usage.windows, &(&1.pause_at == 90))
+      assert claude.usage.recheck.model == "haiku"
+      assert claude.usage.recheck.interval_min == 15
+
+      codex = harness(board, "codex")
+      assert codex.usage.source == "command"
+      assert codex.usage.interval_min == 5
+      assert Enum.map(codex.usage.windows, & &1.label) == ["5h", "wk"]
+      assert codex.usage.recheck.model == "gpt-5.6-luna"
+
+      assert harness(board, "gemini-cli").usage.source == "none"
+    end
+
+    test "harness_wire/1 carries usage with four-key string windows" do
+      board = seeded_board()
+      windows = Agents.harness_wire(harness(board, "claude-code"))["usage"]["windows"]
+
+      assert length(windows) == 2
+
+      for window <- windows do
+        assert window |> Map.keys() |> Enum.sort() == ["label", "pause_at", "resets_path", "used_path"]
+      end
+    end
+
+    test "every seed rule passes its own changeset" do
+      for %{usage: usage, models: models} = seed <- Agents.seed_harnesses() do
+        params = Schemas.HarnessUsage.wire(usage)
+        assert Schemas.HarnessUsage.changeset(%Schemas.HarnessUsage{}, params, models).valid?, seed.key
+      end
+    end
+
+    # Scenario 12
+    test "editing a harness's usage moves harnesses_digest/1" do
+      board = seeded_board()
+      digest = Agents.harnesses_digest(board)
+      codex = harness(board, "codex")
+
+      usage =
+        codex.usage
+        |> Schemas.HarnessUsage.wire()
+        |> update_in(["windows"], fn windows -> Enum.map(windows, &Map.put(&1, "pause_at", 50)) end)
+
+      {:ok, updated} = Agents.update_harness(codex, %{"usage" => usage})
+
+      assert Enum.all?(updated.usage.windows, &(&1.pause_at == 50))
+      refute Agents.harnesses_digest(board) == digest
+    end
+  end
+
+  describe "try_usage_line/3 (RE436 Settings → Agents TEST box)" do
+    @now ~U[2026-10-10 00:00:00Z]
+    @allowed ~s({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":1791651000},"seven_day":{"utilization":0.18,"resetsAt":1792000000}}}})
+    @rejected ~s({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1791700000,"unifiedWindows":{"five_hour":{"utilization":1.0,"resetsAt":1791651000}}}})
+
+    defp seed_usage(key), do: Enum.find(Agents.seed_harnesses(), &(&1.key == key)).usage
+
+    # Scenario 8
+    test "an allowed line reads each window, none over its pause at" do
+      assert Agents.try_usage_line(seed_usage("claude-code"), @allowed, @now) ==
+               {:ok,
+                %{
+                  windows: [
+                    %{label: "5h", used_pct: 42.0, resets_at: ~U[2026-10-10 16:50:00Z], pause_at: 90, over?: false},
+                    %{label: "7d", used_pct: 18.0, resets_at: ~U[2026-10-14 17:46:40Z], pause_at: 90, over?: false}
+                  ],
+                  paused: nil
+                }}
+    end
+
+    test "a window at or over its pause at would pause on that window's limit" do
+      line = String.replace(@allowed, ~s("utilization":0.42), ~s("utilization":0.95))
+
+      assert {:ok, %{windows: [five_hour, _seven_day], paused: %{label: "5h", reason: "limit"}}} =
+               Agents.try_usage_line(seed_usage("claude-code"), line, @now)
+
+      assert five_hour.over?
+    end
+
+    test "a refused line would pause as rejected" do
+      assert {:ok, %{paused: %{label: nil, reason: "rejected"}}} =
+               Agents.try_usage_line(seed_usage("claude-code"), @rejected, @now)
+    end
+
+    test "a line that is not a JSON object is not valid JSON" do
+      assert Agents.try_usage_line(seed_usage("claude-code"), "[1]", @now) == {:error, "not valid JSON"}
+      assert Agents.try_usage_line(seed_usage("claude-code"), "not json", @now) == {:error, "not valid JSON"}
+    end
+
+    test "a JSON object the rule doesn't match is not a reading, naming the match" do
+      assert Agents.try_usage_line(seed_usage("claude-code"), ~s({"type":"assistant"}), @now) ==
+               {:error, ~s(not a reading — .type == "rate_limit_event" does not hold)}
+    end
+
+    test "a rule that reports no usage says so" do
+      assert Agents.try_usage_line(seed_usage("gemini-cli"), @allowed, @now) ==
+               {:error, "this harness's usage is not reported"}
+    end
+  end
 end

@@ -264,16 +264,34 @@ defmodule Relay.Factory do
     runner |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
-  # RE320: a runner's Claude usage pause, one hour out —
-  # `insert(:runner, rate_limit: build(:runner_rate_limit))`. Override `resets_at` to exercise
-  # an expired pause.
-  def runner_rate_limit_factory do
-    %Schemas.RunnerRateLimit{
-      window: "five_hour",
-      utilization: 0.95,
-      max: 0.9,
-      reason: "limit",
-      resets_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(3600, :second)
+  # RE436: one harness entry exactly as `Schemas.Runner.normalize_harnesses/1` stores it —
+  # `insert(:runner, harnesses: [runner_harness("codex", usage: paused_usage(at))])`. Installed,
+  # signed in, and reading usage from its own output with no windows and no pause unless
+  # `:usage` says otherwise; `installed: false` for an entry the runner reported missing.
+  def runner_harness(key, opts \\ []) do
+    %{
+      "key" => key,
+      "installed" => Keyword.get(opts, :installed, true),
+      "version" => "1.0",
+      "signed_in" => true,
+      "usage" => Keyword.get(opts, :usage, %{"source" => "output", "read_at" => nil, "windows" => [], "paused" => nil})
+    }
+  end
+
+  # RE436: a normalized usage reading paused until `resets_at` — 95% of a 5h window against a
+  # PAUSE AT of 90. `label: nil` / `reason: "rejected"` for a refusal.
+  def paused_usage(%DateTime{} = resets_at, opts \\ []) do
+    %{
+      "source" => "output",
+      "read_at" => nil,
+      "windows" => [],
+      "paused" => %{
+        "label" => Keyword.get(opts, :label, "5h"),
+        "used_pct" => 95.0,
+        "pause_at" => 90,
+        "resets_at" => DateTime.to_unix(resets_at),
+        "reason" => opts[:reason] || "limit"
+      }
     }
   end
 

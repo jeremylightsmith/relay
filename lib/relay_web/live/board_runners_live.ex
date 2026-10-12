@@ -14,8 +14,9 @@ defmodule RelayWeb.BoardRunnersLive do
   version surface beyond the artboard; RLY-191 promotes it to a fourth freshness state) — filed
   back to the Design project as a follow-up, not blocking here.
 
-  RE320: `RATE LIMITED` (amber, `badge-warning`) is a beating runner paused at its Claude usage
-  limit; the row names the window, usage and resume time via `RunComponents.rate_limit_note/1`.
+  RE320: `RATE LIMITED` (amber, `badge-warning`) is a beating runner paused at its usage limits —
+  every installed harness paused, since RE436; the row names the window, usage and resume time via
+  `RunComponents.rate_limit_note/1`.
 
   RE307 adds a board-wide QUEUE section above the runner panels: every `queued` or `claimed`
   node job on the board from `Relay.Runs.list_queue/2`, both kinds (`:node` and `:talk`),
@@ -32,6 +33,14 @@ defmodule RelayWeb.BoardRunnersLive do
   (`Relay.Runs.cancel_run/2`) actions, and an amber starvation banner above the queue
   (`Relay.Runs.starvation/2`). Like the queue, no artboard covers these; they reuse the WORKING
   NOW row frame (`RunComponents.runner_row_style/0`).
+
+  RE436 adds a HARNESSES section per runner, after CAPACITY (card mockup "Runners: per-harness rows
+  draw whatever usage windows the harness defines"): `RunnerHarnessComponents.runner_harnesses/1`
+  over `Relay.Runs.runner_harness_rows/4` — the runner's reported `harnesses` joined with the
+  board's harness definitions and agents, read once per refresh. Each row shows the harness's
+  version, signed-in state and one usage bar per window its USAGE setting defines; a paused harness
+  gets its own amber row while the pill stays FRESH, since RATE LIMITED means every installed
+  harness is paused.
 
   `Relay.Runs.stopped_work/2` on the 10s tick is deliberate and cheap: it returns `nil` after one
   aggregate (`queued_jobs_summary/1`) whenever nothing is queued, and builds a scheduler snapshot
@@ -61,12 +70,14 @@ defmodule RelayWeb.BoardRunnersLive do
   use RelayWeb, :live_view
 
   alias Relay.AgentLog
+  alias Relay.Agents
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Runs
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.BoardSettingsLive
   alias RelayWeb.RunComponents
+  alias RelayWeb.RunnerHarnessComponents
 
   @tick_every to_timeout(second: 10)
   @log_cap 30
@@ -403,6 +414,14 @@ defmodule RelayWeb.BoardRunnersLive do
                         </div>
                       </div>
                     </div>
+                    <%!-- HARNESSES (RE436) — card mockup "Runners: per-harness rows draw
+                         whatever usage windows the harness defines". --%>
+                    <RunnerHarnessComponents.runner_harnesses
+                      :if={runner.harness_rows != []}
+                      id={"runner-#{dom_id(runner)}"}
+                      rows={runner.harness_rows}
+                      now={@now}
+                    />
                     <%!-- HELD WORKTREES (RE337) — every per-card worktree this runner declares
                          it holds (`runners.held`), promoted from the exclusive chip's tooltip. No
                          artboard covers it; rows reuse the WORKING NOW frame. --%>
@@ -627,7 +646,14 @@ defmodule RelayWeb.BoardRunnersLive do
   defp assign_runners(socket) do
     now = DateTime.utc_now()
     board = socket.assigns.board
-    runners = Runs.list_runner_status(board, now)
+    # RE436: the board's harness definitions and agents, read ONCE per pass (not per runner).
+    harnesses = Agents.list_harnesses(board)
+    agents = Agents.list_agents(board)
+
+    runners =
+      board
+      |> Runs.list_runner_status(now)
+      |> Enum.map(&Map.put(&1, :harness_rows, Runs.runner_harness_rows(&1.harnesses, harnesses, agents, now)))
 
     counts = Enum.frequencies_by(runners, & &1.display_state)
     names = Enum.map(runners, & &1.name)

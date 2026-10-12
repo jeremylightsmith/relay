@@ -72,25 +72,54 @@ defmodule Relay.Runs.StoppedWorkTest do
     assert %{reason: :runner_gone} = Runs.stopped_work(board)
   end
 
-  test ":runner_rate_limited when every connected runner is paused at its usage limit", %{board: board, works: works} do
+  test ":runner_rate_limited when every connected runner is paused at its usage limits", %{board: board, works: works} do
     queued_job(works, 600)
     resets_at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
-    insert(:runner, board: board, name: "paused", rate_limit: build(:runner_rate_limit, resets_at: resets_at))
+
+    insert(:runner,
+      board: board,
+      name: "paused",
+      harnesses: [
+        runner_harness("claude-code", usage: paused_usage(resets_at)),
+        runner_harness("codex", usage: paused_usage(DateTime.add(resets_at, 600, :second)))
+      ]
+    )
 
     assert %{reason: :runner_rate_limited, detail: detail, evidence: evidence} = Runs.stopped_work(board)
     assert detail =~ "No jobs claimed in 10m"
-    assert detail =~ "every connected runner is paused at its Claude usage limit (five_hour 95% / 90%)"
+    assert detail =~ "every connected runner is paused at its usage limits (claude-code 5h 95% / 90%)"
     assert detail =~ "resumes #{Runs.resume_time_label(resets_at)}."
     assert evidence.resumes_at == resets_at
   end
 
   test "nil when a paused runner has a connected, unpaused peer", %{board: board, works: works} do
     queued_job(works, 600)
-    insert(:runner, board: board, name: "paused", rate_limit: build(:runner_rate_limit))
+
+    insert(:runner,
+      board: board,
+      name: "paused",
+      harnesses: [runner_harness("claude-code", usage: paused_usage(in_an_hour()))]
+    )
+
     insert(:runner, board: board, name: "free")
 
     assert Runs.stopped_work(board) == nil
   end
+
+  test "RE436: nil when the only runner still has one unpaused harness", %{board: board, works: works} do
+    # Not rate limited, so the roster reads :awaiting_capacity — which never stops work.
+    queued_job(works, 600)
+
+    insert(:runner,
+      board: board,
+      name: "half-paused",
+      harnesses: [runner_harness("claude-code", usage: paused_usage(in_an_hour())), runner_harness("codex")]
+    )
+
+    assert Runs.stopped_work(board) == nil
+  end
+
+  defp in_an_hour, do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
 
   test "nil when the oldest queued job is younger than the threshold", %{board: board, works: works} do
     queued_job(works, 30)

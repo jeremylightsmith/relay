@@ -17,8 +17,22 @@ defmodule RelayWeb.Api.HarnessControllerTest do
 
     for harness <- body["harnesses"] do
       assert harness |> Map.keys() |> Enum.sort() ==
-               Enum.sort(["key", "name", "command", "models", "resume_command", "session_id_path", "signed_in_check"])
+               Enum.sort([
+                 "key",
+                 "name",
+                 "command",
+                 "models",
+                 "resume_command",
+                 "session_id_path",
+                 "signed_in_check",
+                 "usage"
+               ])
     end
+
+    # RE436 — each harness carries its usage rule in `Schemas.HarnessUsage.wire/1` shape.
+    claude = Enum.find(body["harnesses"], &(&1["key"] == "claude-code"))
+    assert claude["usage"]["source"] == "output"
+    assert Enum.map(claude["usage"]["windows"], & &1["label"]) == ["5h", "7d"]
 
     assert body["digest"] == Relay.Agents.harnesses_digest(board)
   end

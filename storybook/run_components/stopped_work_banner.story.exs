@@ -49,8 +49,8 @@ defmodule Storybook.RunComponents.StoppedWorkBanner do
           verdict: %{
             reason: :runner_rate_limited,
             detail:
-              "No jobs claimed in 12m · every connected runner is paused at its Claude usage limit " <>
-                "(five_hour 92% / 90%) · resumes 3:40 PM UTC."
+              "No jobs claimed in 12m · every connected runner is paused at its usage limits " <>
+                "(codex 5h 92% / 90%) · resumes 3:40 PM UTC."
           }
         }
       }

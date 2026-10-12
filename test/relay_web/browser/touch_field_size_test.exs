@@ -61,6 +61,7 @@ defmodule RelayWeb.Browser.TouchFieldSizeTest do
       conn
       |> login()
       |> visit("/board/#{board.slug}?card=#{ref}")
+      |> assert_has("body .phx-connected")
       |> click("#card-drawer-description-display")
       |> assert_has("#card-drawer-description-input")
 
@@ -75,6 +76,7 @@ defmodule RelayWeb.Browser.TouchFieldSizeTest do
       conn
       |> login()
       |> visit("/board/#{board.slug}?card=#{ref}")
+      |> assert_has("body .phx-connected")
       |> click("#card-drawer-title-display")
       |> assert_has("#card-drawer-title-input")
 

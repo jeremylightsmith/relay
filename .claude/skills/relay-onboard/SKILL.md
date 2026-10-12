@@ -126,10 +126,8 @@ Show the **whole** plan before mutating anything, and get sign-off on it as a un
   with the human as part of the shown plan: its `capacity`, its `base`, and uncommenting the
   `worktrees` block when the plan adds `.relay/prepare-worktree.sh` (the file is inside this
   skill's declared blast radius, so those edits are yours to propose). If it is somehow
-  missing, run `./relay update` to create it — **never hand-write it**. The generated file
-  sets `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` — `relay start` then stops
-  claiming new work once Claude usage passes 90% of the five-hour or seven-day window and
-  resumes on its own when the window resets;
+  missing, run `./relay update` to create it — **never hand-write it**. It carries no usage
+  limits: PAUSE AT is set per harness in Settings → Agents;
 - flow changes as a **node-level** diff (node key → what changes);
 - the **verify command**, asked here, once.
 

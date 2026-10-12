@@ -83,7 +83,7 @@ defmodule RelayWeb.BoardSettingsAgentsTest do
       h = harness(board, name)
       assert has_element?(view, "#harnesses #harness-card-#{h.id}", name)
 
-      assert view |> element("#harness-card-#{h.id} code") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() ==
+      assert view |> element("#harness-card-#{h.id}-command") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() ==
                h.command
 
       for model <- h.models do
@@ -278,6 +278,179 @@ defmodule RelayWeb.BoardSettingsAgentsTest do
 
     view |> element("#agent-add") |> render_click()
     assert has_element?(view, "#agent-form-harness-#{pi.id}", "pi")
+  end
+
+  describe "harness USAGE (RE436)" do
+    @allowed ~s({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":1791651000},"seven_day":{"utilization":0.18,"resetsAt":1792000000}}}})
+
+    defp usage_chips(view, harness) do
+      view
+      |> render()
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("#harness-card-#{harness.id}-usage [data-usage-window-chip]")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> squish()))
+    end
+
+    defp edit(view, harness), do: view |> element("#harness-card-#{harness.id}-edit") |> render_click()
+
+    defp try_line(view, line) do
+      view |> form("#harness-form") |> render_change(%{"usage_test_line" => line})
+      view |> element("#harness-form-usage-try") |> render_click()
+      text(view, "#harness-form-usage-test-result")
+    end
+
+    test "1. each collapsed harness card summarizes its USAGE", %{conn: conn, board: board} do
+      view = open(conn, board)
+      claude = harness(board, "Claude Code")
+      codex = harness(board, "Codex")
+      gemini = harness(board, "Gemini CLI")
+
+      assert text(view, "#harness-card-#{claude.id}-usage") =~
+               ~s(From its output · reading when .type == "rate_limit_event")
+
+      assert usage_chips(view, claude) == [
+               "5h · .rate_limit_info.unifiedWindows.five_hour.utilization · pause at 90%",
+               "7d · .rate_limit_info.unifiedWindows.seven_day.utilization · pause at 90%"
+             ]
+
+      codex_text = text(view, "#harness-card-#{codex.id}-usage")
+      assert codex_text =~ "From a command ·"
+      assert codex_text =~ "every 5 min"
+      assert [five_hour, week] = usage_chips(view, codex)
+      assert String.starts_with?(five_hour, "5h ·")
+      assert String.starts_with?(week, "wk ·")
+      assert String.ends_with?(five_hour, "pause at 90%")
+      assert String.ends_with?(week, "pause at 90%")
+
+      assert text(view, "#harness-card-#{gemini.id}-usage") ==
+               "Not reported — runners show “—” and never pause Gemini CLI for usage."
+    end
+
+    test "2. TEST reads an allowed line's windows and says it would not pause", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+
+      result = try_line(view, @allowed)
+
+      assert result =~ "✓ reading"
+      assert result =~ "5h 42% · resets "
+      assert result =~ "7d 18% · resets "
+      assert result =~ "not paused"
+    end
+
+    test "3. TEST says why a line is not a reading", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+
+      result = try_line(view, ~s({"type":"assistant"}))
+      assert result =~ "✗"
+      assert result =~ "not a reading"
+
+      assert try_line(view, "not json") =~ "✗ not valid JSON"
+    end
+
+    test "3b. Try it never submits the harness form", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+
+      assert view |> element("#harness-form-usage-try") |> render() =~ ~s(type="button")
+      try_line(view, @allowed)
+      assert has_element?(view, "#harness-form")
+    end
+
+    test "4. a Codex window's pause at is edited and a window added", %{conn: conn, board: board} do
+      view = open(conn, board)
+      codex = harness(board, "Codex")
+      edit(view, codex)
+
+      view
+      |> form("#harness-form", harness: %{usage: %{windows_sort: ["0", "1", "new"]}})
+      |> render_change()
+
+      assert has_element?(view, "#harness-form-usage-window-2")
+
+      view
+      |> form("#harness-form",
+        harness: %{
+          usage: %{
+            windows: %{
+              "0" => %{pause_at: "50"},
+              "2" => %{
+                label: "day",
+                used_path: ".payload.d.used_percent",
+                resets_path: ".payload.d.resets_at",
+                pause_at: "80"
+              }
+            }
+          }
+        }
+      )
+      |> render_submit()
+
+      refute has_element?(view, "#harness-form")
+      chips = usage_chips(view, codex)
+      assert "5h · .payload.rate_limits.primary.used_percent · pause at 50%" in chips
+      assert "day · .payload.d.used_percent · pause at 80%" in chips
+      saved = harness(board, "Codex").usage
+      assert length(saved.windows) == 3
+      assert saved.pause_now == nil
+      assert saved.recheck.model == "gpt-5.6-luna"
+    end
+
+    test "5. the source switch shows only what that source needs", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+
+      assert has_element?(view, "#harness-form-usage-match")
+      refute has_element?(view, "#harness-form-usage-command")
+
+      view |> form("#harness-form", harness: %{usage: %{source: "none"}}) |> render_change()
+      refute has_element?(view, "#harness-form-usage-match")
+      refute has_element?(view, "#harness-form-usage-try")
+
+      view |> form("#harness-form", harness: %{usage: %{source: "command"}}) |> render_change()
+      assert has_element?(view, "#harness-form-usage-command")
+      assert has_element?(view, "#harness-form-usage-interval")
+    end
+
+    test "6. an invalid match or re-check model keeps the form open with the error", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+
+      view |> form("#harness-form", harness: %{usage: %{match: ".a = 1"}}) |> render_submit()
+      assert has_element?(view, "#harness-form")
+      assert has_element?(view, "#harness-form", ~s(is not a condition like .type == "x"))
+
+      view
+      |> form("#harness-form", harness: %{usage: %{match: ~s(.type == "rate_limit_event")}})
+      |> render_submit(%{"harness" => %{"usage" => %{"recheck" => %{"model" => "gpt"}}}})
+
+      assert has_element?(view, "#harness-form")
+      assert has_element?(view, "#harness-form", "is not one of this harness's models")
+    end
+
+    test "editing another harness starts with an empty TEST box", %{conn: conn, board: board} do
+      view = open(conn, board)
+      edit(view, harness(board, "Claude Code"))
+      try_line(view, @allowed)
+
+      edit(view, harness(board, "Codex"))
+
+      refute has_element?(view, "#harness-form-usage-test-result")
+    end
+
+    test "closing the panel resets the TEST box", %{conn: conn, board: board} do
+      view = open(conn, board)
+      claude = harness(board, "Claude Code")
+      edit(view, claude)
+      try_line(view, @allowed)
+
+      view |> element("#harness-form button", "Cancel") |> render_click()
+      edit(view, claude)
+
+      refute has_element?(view, "#harness-form-usage-test-result", "reading")
+      assert view |> element("#harness-form-usage-test-line") |> render() =~ ~r{<textarea[^>]*>\s*</textarea>}
+    end
   end
 
   test "10. an agent name already on the board is refused", %{conn: conn, board: board} do

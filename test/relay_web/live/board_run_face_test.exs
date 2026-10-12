@@ -221,7 +221,7 @@ defmodule RelayWeb.BoardRunFaceTest do
         board: board,
         name: "paused",
         last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+        harnesses: [runner_harness("claude-code", usage: paused_usage(resets_at))]
       )
 
       card = queued_run_card(works, now, 900)
@@ -238,7 +238,7 @@ defmodule RelayWeb.BoardRunFaceTest do
                "Rate limited · resumes #{Runs.resume_time_label(resets_at)}"
              )
 
-      assert has_element?(view, "#stopped-work-banner", "paused at its Claude usage limit")
+      assert has_element?(view, "#stopped-work-banner", "paused at its usage limits")
     end
 
     test "the drawer's Run tab carries the rate-limited diagnosis",
@@ -249,7 +249,7 @@ defmodule RelayWeb.BoardRunFaceTest do
         board: board,
         name: "paused",
         last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+        harnesses: [runner_harness("claude-code", usage: paused_usage(resets_at))]
       )
 
       card = queued_run_card(works, now, 900)
@@ -261,7 +261,7 @@ defmodule RelayWeb.BoardRunFaceTest do
       assert has_element?(
                view,
                "#card-drawer-tab-panel-run #run-banner-rate-limited",
-               "every connected runner is paused at its Claude usage limit. " <>
+               "every connected runner is paused at its usage limits. " <>
                  "Resumes #{Runs.resume_time_label(resets_at)}."
              )
     end
@@ -274,7 +274,7 @@ defmodule RelayWeb.BoardRunFaceTest do
         board: board,
         name: "paused",
         last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+        harnesses: [runner_harness("claude-code", usage: paused_usage(resets_at))]
       )
 
       {:ok, card} = works |> queued_run_card(now, 900) |> Cards.assign_ai()
@@ -300,7 +300,13 @@ defmodule RelayWeb.BoardRunFaceTest do
 
     test "the drawer shows no rate-limited diagnosis when another runner is free",
          %{conn: conn, board: board, works: works, now: now} do
-      insert(:runner, board: board, name: "paused", last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        harnesses: [runner_harness("claude-code", usage: paused_usage(DateTime.add(now, 3600, :second)))]
+      )
+
       insert(:runner, board: board, name: "free", last_heartbeat: now)
       card = queued_run_card(works, now, 900)
       ref = face_ref(board, card)
@@ -314,7 +320,13 @@ defmodule RelayWeb.BoardRunFaceTest do
 
     test "nothing is flagged when another connected runner is free",
          %{conn: conn, board: board, works: works, now: now} do
-      insert(:runner, board: board, name: "paused", last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+      insert(:runner,
+        board: board,
+        name: "paused",
+        last_heartbeat: now,
+        harnesses: [runner_harness("claude-code", usage: paused_usage(DateTime.add(now, 3600, :second)))]
+      )
+
       insert(:runner, board: board, name: "free", last_heartbeat: now)
       card = queued_run_card(works, now, 900)
       ref = face_ref(board, card)

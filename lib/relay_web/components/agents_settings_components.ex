@@ -25,9 +25,12 @@ defmodule RelayWeb.AgentsSettingsComponents do
 
   use RelayWeb, :html
 
+  alias Phoenix.HTML.FormField
   alias Relay.Agents
+  alias Relay.Runs
   alias Schemas.Agent
   alias Schemas.Harness
+  alias Schemas.HarnessUsage
 
   @grid "grid-template-columns:1.3fr 1fr 1.1fr 90px 120px;"
   @panel_style "border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));background:color-mix(in oklab, var(--color-primary) 3%, var(--color-base-100));padding:16px 18px;"
@@ -36,6 +39,8 @@ defmodule RelayWeb.AgentsSettingsComponents do
   @red_ink "color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));"
   @red_row "box-shadow:inset 3px 0 0 var(--color-error);background:color-mix(in oklab, var(--color-error) 8%, var(--color-base-100));"
   @delete_ink "color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));"
+  @success_ink "color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
+  @window_grid "grid-template-columns:64px 1fr 1fr 78px;gap:8px;"
 
   # ------------------------------------------------------------------ pane
 
@@ -53,6 +58,8 @@ defmodule RelayWeb.AgentsSettingsComponents do
   attr :harness_panel, :any, default: nil
   attr :harness_form, :any, default: nil
   attr :harness_error, :string, default: nil
+  attr :usage_test, :any, default: nil
+  attr :usage_test_line, :string, default: nil
   attr :read_only?, :boolean, default: false
 
   def agents_pane(assigns) do
@@ -106,6 +113,8 @@ defmodule RelayWeb.AgentsSettingsComponents do
               harness={harness}
               agent_count={Enum.count(@agents, &(&1.harness_id == harness.id))}
               error={@harness_error}
+              usage_test={@usage_test}
+              usage_test_line={@usage_test_line}
             />
           <% else %>
             <.harness_card
@@ -121,6 +130,8 @@ defmodule RelayWeb.AgentsSettingsComponents do
           harness={nil}
           agent_count={0}
           error={@harness_error}
+          usage_test={@usage_test}
+          usage_test_line={@usage_test_line}
         />
       </div>
       <div class="flex items-center gap-3 mt-3 flex-wrap">
@@ -394,6 +405,7 @@ defmodule RelayWeb.AgentsSettingsComponents do
     assigns =
       assign(assigns,
         red: Enum.filter(assigns.agents, &Agents.red?/1),
+        usage: assigns.harness.usage || %HarnessUsage{},
         chip_style: @chip_style,
         red_ink: @red_ink
       )
@@ -427,6 +439,7 @@ defmodule RelayWeb.AgentsSettingsComponents do
           <%!-- The command is interpolated as a value (its `{…}` placeholders are data, not HEEx);
                phx-no-format keeps white-space:pre free of template indentation. --%>
           <code
+            id={"harness-card-#{@harness.id}-command"}
             class="block font-mono rounded-lg bg-base-200 border border-base-300"
             style="font-size:12.5px;padding:9px 11px;overflow-x:auto;white-space:pre;"
             phx-no-format
@@ -451,6 +464,35 @@ defmodule RelayWeb.AgentsSettingsComponents do
           }>{if i > 0, do: ", "}<b>{agent.name}</b> (<span class="font-mono">{agent.model}</span>)</span>.
         </span>
       </div>
+      <div class="flex items-start gap-3 mt-3 pt-3 border-t border-base-300 flex-wrap">
+        <.meta_label style="padding-top:3px;width:56px;">USAGE</.meta_label>
+        <div id={"harness-card-#{@harness.id}-usage"} class="flex-1 min-w-0 flex flex-col gap-1.5">
+          <%= case @usage.source do %>
+            <% "output" -> %>
+              <span style="font-size:12.5px;">
+                From its output · reading when <code style={@chip_style}>{@usage.match}</code>
+              </span>
+            <% "command" -> %>
+              <span style="font-size:12.5px;">
+                From a command · <code style={@chip_style}>{@usage.command}</code>
+                every {@usage.interval_min} min
+              </span>
+            <% _none -> %>
+              <span class="text-base-content/65" style="font-size:12.5px;">
+                Not reported — runners show “—” and never pause {@harness.name} for usage.
+              </span>
+          <% end %>
+          <div :if={@usage.source != "none"} class="flex gap-1 flex-wrap">
+            <span
+              :for={window <- @usage.windows}
+              data-usage-window-chip
+              style={@chip_style <> "white-space:normal;word-break:break-all;"}
+            >
+              {window.label} · {window.used_path} · pause at {window.pause_at}%
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
     """
   end
@@ -472,12 +514,15 @@ defmodule RelayWeb.AgentsSettingsComponents do
   attr :harness, :any, default: nil, doc: "the harness being edited, nil when adding"
   attr :agent_count, :integer, default: 0
   attr :error, :string, default: nil
+  attr :usage_test, :any, default: nil, doc: "the TEST box's last `Relay.Agents.try_usage_line/3` result"
+  attr :usage_test_line, :string, default: nil, doc: "the line pasted into the TEST box"
 
   def harness_form(assigns) do
     assigns =
       assign(assigns,
         placeholders: Harness.placeholders(),
         models_value: models_value(assigns.form[:models].value),
+        model_choices: model_choices(assigns.form[:models].value),
         panel_style: @panel_style,
         chip_style: @chip_style,
         delete_ink: @delete_ink,
@@ -568,6 +613,15 @@ defmodule RelayWeb.AgentsSettingsComponents do
             </div>
           </div>
         </details>
+        <.inputs_for :let={usage} field={@form[:usage]}>
+          <.usage_block
+            usage={usage}
+            harness_name={harness_label(@harness, @form)}
+            model_choices={@model_choices}
+            usage_test={@usage_test}
+            usage_test_line={@usage_test_line}
+          />
+        </.inputs_for>
         <p
           :if={@error}
           id="harness-error"
@@ -594,6 +648,382 @@ defmodule RelayWeb.AgentsSettingsComponents do
 
   defp models_value(models) when is_list(models), do: Enum.join(models, ", ")
   defp models_value(models), do: models
+
+  # The MODELS field mid-edit may be the comma-string the human is typing.
+  defp model_choices(models) when is_list(models), do: models
+
+  defp model_choices(models) when is_binary(models) do
+    models |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
+
+  defp model_choices(_models), do: []
+
+  # ------------------------------------------------------------------ usage block
+
+  # The harness form's USAGE block (RE436): the source switch, then — unless the source is
+  # `none` — the match, the command, the windows, PAUSE NOW WHEN, the re-check and the TEST box.
+  attr :usage, Phoenix.HTML.Form, required: true, doc: "the `inputs_for` form of the harness's usage"
+  attr :harness_name, :string, required: true
+  attr :model_choices, :list, required: true
+  attr :usage_test, :any, default: nil
+  attr :usage_test_line, :string, default: nil
+
+  defp usage_block(assigns) do
+    usage = assigns.usage
+
+    assigns =
+      assign(assigns,
+        source: usage[:source].value,
+        sources: HarnessUsage.sources(),
+        pause_now: one_form(usage, :pause_now),
+        recheck: one_form(usage, :recheck),
+        window_errors: field_errors(usage[:windows]),
+        window_grid: @window_grid,
+        red_ink: @red_ink
+      )
+
+    ~H"""
+    <div id="harness-form-usage" class="mt-4 pt-4 border-t border-base-300 flex flex-col gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <.meta_label>USAGE</.meta_label>
+        <span class="flex-1"></span>
+        <div class="join">
+          <label
+            :for={source <- @sources}
+            id={"harness-form-usage-source-#{source}"}
+            class={["btn btn-xs join-item", source == @source && "btn-primary"]}
+          >
+            <input
+              type="radio"
+              name={@usage[:source].name}
+              value={source}
+              checked={source == @source}
+              class="sr-only"
+            />{source_label(source)}
+          </label>
+        </div>
+      </div>
+      <p class="text-base-content/65" style="font-size:12px;line-height:1.5;margin:0;">
+        How a runner learns this harness's usage. <b>From its output:</b>
+        the runner checks every JSON line the command prints while it works; a line that matches becomes a reading.
+        <b>From a command:</b>
+        the runner runs a separate command on a timer and reads its JSON the same way, for a CLI that doesn't print usage while it works. Readings show on the Runners page, and a window over its
+        <b>pause at</b>
+        stops this harness's nodes until it resets.
+      </p>
+      <%= if @source != "none" do %>
+        <div class="flex flex-col gap-1.5">
+          <.meta_label>A LINE IS A READING WHEN</.meta_label>
+          <.usage_input field={@usage[:match]} id="harness-form-usage-match" />
+        </div>
+        <div :if={@source == "command"} class="flex flex-col gap-1.5">
+          <.meta_label>COMMAND</.meta_label>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 min-w-0">
+              <.usage_input field={@usage[:command]} id="harness-form-usage-command" />
+            </div>
+            <span class="text-base-content/65" style="font-size:12px;">every</span>
+            <.usage_number
+              field={@usage[:interval_min]}
+              id="harness-form-usage-interval"
+              suffix="min"
+              style="width:86px;font-size:12px;"
+            />
+          </div>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <div class="hidden sm:flex items-center gap-2">
+            <div class="grid flex-1 min-w-0" style={@window_grid}>
+              <.meta_label>WINDOW</.meta_label>
+              <.meta_label>USED</.meta_label>
+              <.meta_label>RESETS AT</.meta_label>
+              <.meta_label>PAUSE AT</.meta_label>
+            </div>
+            <span style="width:24px;"></span>
+          </div>
+          <.inputs_for :let={window} field={@usage[:windows]}>
+            <div class="flex items-center gap-2">
+              <input type="hidden" name={@usage.name <> "[windows_sort][]"} value={window.index} />
+              <div
+                id={"harness-form-usage-window-#{window.index}"}
+                class="grid items-center flex-1 min-w-0"
+                style={@window_grid}
+              >
+                <.usage_input
+                  field={window[:label]}
+                  id={"harness-form-usage-window-#{window.index}-label"}
+                />
+                <.usage_input
+                  field={window[:used_path]}
+                  id={"harness-form-usage-window-#{window.index}-used-path"}
+                />
+                <.usage_input
+                  field={window[:resets_path]}
+                  id={"harness-form-usage-window-#{window.index}-resets-path"}
+                />
+                <.usage_number
+                  field={window[:pause_at]}
+                  id={"harness-form-usage-window-#{window.index}-pause-at"}
+                  suffix="%"
+                  style="font-size:12px;"
+                />
+              </div>
+              <label
+                class="btn btn-ghost btn-xs btn-square"
+                title="Remove window"
+                style="width:24px;"
+              >
+                <input
+                  type="checkbox"
+                  name={@usage.name <> "[windows_drop][]"}
+                  value={window.index}
+                  class="sr-only"
+                />×
+              </label>
+            </div>
+          </.inputs_for>
+          <input type="hidden" name={@usage.name <> "[windows_drop][]"} />
+          <p :for={msg <- @window_errors} style={"font-size:12px;" <> @red_ink}>{msg}</p>
+          <div class="flex items-center gap-3 flex-wrap">
+            <label id="harness-form-usage-add-window" class="btn btn-ghost btn-xs">
+              <input
+                type="checkbox"
+                name={@usage.name <> "[windows_sort][]"}
+                value="new"
+                class="sr-only"
+              />+ Add window
+            </label>
+            <span class="text-base-content/65" style="font-size:11.5px;">
+              USED is a
+              <select
+                id="harness-form-usage-used-unit"
+                name={@usage[:used_unit].name}
+                class="select select-xs font-mono"
+                style="width:auto;"
+              >
+                {Phoenix.HTML.Form.options_for_select(
+                  Enum.map(HarnessUsage.used_units(), &{unit_label(&1), &1}),
+                  @usage[:used_unit].value
+                )}
+              </select>
+              &nbsp;RESETS AT is a
+              <select
+                id="harness-form-usage-resets-unit"
+                name={@usage[:resets_unit].name}
+                class="select select-xs font-mono"
+                style="width:auto;"
+              >
+                {Phoenix.HTML.Form.options_for_select(
+                  Enum.map(HarnessUsage.resets_units(), &{unit_label(&1), &1}),
+                  @usage[:resets_unit].value
+                )}
+              </select>
+            </span>
+          </div>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <div class="flex flex-col gap-1.5">
+            <.meta_label>PAUSE NOW WHEN <span style="font-weight:400;">(optional)</span></.meta_label>
+            <.usage_input field={@pause_now[:when]} id="harness-form-usage-pause-now-when" />
+            <input
+              type="hidden"
+              name={@pause_now[:resets_path].name}
+              value={@pause_now[:resets_path].value}
+            />
+            <span class="text-base-content/65" style="font-size:11.5px;">
+              The harness refused a call. Pauses until that window's reset, whatever it reads.
+            </span>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <.meta_label>WHILE PAUSED, RE-CHECK WITH</.meta_label>
+            <div class="flex items-center gap-2">
+              <select
+                id="harness-form-usage-recheck-model"
+                name={@recheck[:model].name}
+                class="select select-sm font-mono"
+                style="width:auto;font-size:12px;"
+              >
+                {Phoenix.HTML.Form.options_for_select(
+                  recheck_choices(@model_choices, @recheck[:model].value),
+                  @recheck[:model].value
+                )}
+              </select>
+              <span class="text-base-content/65" style="font-size:12px;">every</span>
+              <.usage_number
+                field={@recheck[:interval_min]}
+                id="harness-form-usage-recheck-interval"
+                suffix="min"
+                style="width:86px;font-size:12px;"
+              />
+            </div>
+            <p
+              :for={msg <- field_errors(@usage[:recheck]) ++ field_errors(@recheck[:model])}
+              style={"font-size:12px;" <> @red_ink}
+            >
+              {msg}
+            </p>
+            <span class="text-base-content/65" style="font-size:11.5px;">
+              A one-word prompt on the cheapest model, only to get a fresh line once no nodes are running.
+            </span>
+          </div>
+        </div>
+        <div
+          class="rounded-lg border border-base-300 bg-base-100 flex flex-col gap-2"
+          style="padding:10px 12px;"
+        >
+          <div class="flex items-center gap-2">
+            <.meta_label>TEST</.meta_label>
+            <span class="text-base-content/65" style="font-size:11.5px;">
+              Paste a line of this harness's output.
+            </span>
+            <span class="flex-1"></span>
+            <button
+              type="button"
+              id="harness-form-usage-try"
+              class="btn btn-ghost btn-xs"
+              phx-click="harness_try_usage"
+            >
+              Try it
+            </button>
+          </div>
+          <textarea
+            id="harness-form-usage-test-line"
+            name="usage_test_line"
+            rows="2"
+            class="textarea textarea-sm w-full font-mono"
+            style="font-size:11px;"
+            phx-no-format
+          >{@usage_test_line}</textarea>
+          <.usage_test_result :if={@usage_test} result={@usage_test} />
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # A text input in the USAGE block, mockup-sized, with its changeset errors under it.
+  attr :field, FormField, required: true
+  attr :id, :string, required: true
+
+  defp usage_input(assigns) do
+    assigns = assign(assigns, errors: field_errors(assigns.field), red_ink: @red_ink)
+
+    ~H"""
+    <div class="flex flex-col gap-1 min-w-0">
+      <input
+        type="text"
+        id={@id}
+        name={@field.name}
+        value={Phoenix.HTML.Form.normalize_value("text", @field.value)}
+        class={["input input-sm w-full font-mono", @errors != [] && "input-error"]}
+        style="font-size:12px;"
+      />
+      <span :for={msg <- @errors} style={"font-size:11.5px;" <> @red_ink}>{msg}</span>
+    </div>
+    """
+  end
+
+  # A number with a unit suffix (`%`, `min`) inside one `label.input`, as the mockup draws it.
+  attr :field, FormField, required: true
+  attr :id, :string, required: true
+  attr :suffix, :string, required: true
+  attr :style, :string, default: nil
+
+  defp usage_number(assigns) do
+    assigns = assign(assigns, errors: field_errors(assigns.field), red_ink: @red_ink)
+
+    ~H"""
+    <div class="flex flex-col gap-1 min-w-0">
+      <label
+        class={["input input-sm w-full font-mono", @errors != [] && "input-error"]}
+        style={@style}
+      >
+        <input
+          type="text"
+          inputmode="numeric"
+          id={@id}
+          name={@field.name}
+          value={Phoenix.HTML.Form.normalize_value("text", @field.value)}
+          style="width:28px;"
+        />{@suffix}
+      </label>
+      <span :for={msg <- @errors} style={"font-size:11.5px;" <> @red_ink}>{msg}</span>
+    </div>
+    """
+  end
+
+  # The form of an `embeds_one` (`pause_now`, `recheck`). A nil embed still renders — empty,
+  # from the params the human last sent — so blanking PAUSE NOW WHEN never makes it vanish.
+  defp one_form(usage, field) do
+    case Phoenix.HTML.FormData.to_form(usage.source, usage, field, []) do
+      [form] ->
+        form
+
+      [] ->
+        key = Atom.to_string(field)
+        to_form(usage.params[key] || %{}, as: "#{usage.name}[#{key}]", id: "#{usage.id}_#{key}")
+    end
+  end
+
+  defp field_errors(%FormField{} = field) do
+    if Phoenix.Component.used_input?(field), do: Enum.map(field.errors, &translate_error/1), else: []
+  end
+
+  # A re-check model the list no longer offers stays visible, so its error reads against it.
+  defp recheck_choices(models, current) do
+    if current in [nil, ""] or current in models, do: models, else: models ++ [current]
+  end
+
+  defp source_label("output"), do: "From its output"
+  defp source_label("command"), do: "From a command"
+  defp source_label("none"), do: "Not reported"
+
+  defp unit_label("fraction"), do: "fraction 0–1"
+  defp unit_label("percent"), do: "percent 0–100"
+  defp unit_label("unix"), do: "unix time"
+  defp unit_label("seconds_from_now"), do: "seconds from now"
+
+  # ------------------------------------------------------------------ usage test result
+
+  @doc """
+  The TEST box's result row (RE436): `✓ reading`, one chip per window (`5h 42% · resets 3:10 PM
+  UTC`) and whether the line would pause the harness — or `✗` and the reason the line is not a
+  reading. `result` is a `Relay.Agents.try_usage_line/3` return.
+  """
+  attr :result, :any, required: true
+  attr :id, :string, default: "harness-form-usage-test-result"
+
+  def usage_test_result(assigns) do
+    assigns = assign(assigns, chip_style: @chip_style, red_ink: @red_ink, success_ink: @success_ink)
+
+    ~H"""
+    <div id={@id} class="flex items-center gap-2 flex-wrap" style="font-size:12px;">
+      <%= case @result do %>
+        <% {:ok, %{windows: windows, paused: paused}} -> %>
+          <span style={@success_ink}>✓ reading</span>
+          <span :for={window <- windows} data-usage-test-chip style={@chip_style}>
+            {window.label} {pct(window.used_pct)}% · resets {Runs.resume_time_label(window.resets_at)}
+          </span>
+          <span class="text-base-content/65">{pause_verdict(paused, windows)}</span>
+        <% {:error, reason} -> %>
+          <span style={@red_ink}>✗ {reason}</span>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp pct(used_pct) do
+    rounded = Float.round(used_pct / 1, 1)
+    if rounded == Float.round(rounded), do: Integer.to_string(trunc(rounded)), else: Float.to_string(rounded)
+  end
+
+  defp pause_verdict(nil, _windows), do: "not paused"
+  defp pause_verdict(%{reason: "rejected"}, _windows), do: "would pause — refused a call"
+
+  defp pause_verdict(%{label: label}, windows) do
+    %{pause_at: pause_at} = Enum.find(windows, &(&1.label == label))
+    "would pause — #{label} over #{pause_at}%"
+  end
 
   defp harness_label(%Harness{name: name}, _form), do: name
 

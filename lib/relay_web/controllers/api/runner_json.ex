@@ -15,8 +15,10 @@ defmodule RelayWeb.Api.RunnerJSON do
   `Runs.min_runner_version/0`, in which case the server refuses it work (409
   `runner_outdated`) even though nothing here would flag it as unreachable.
 
-  `rate_limit` (RE320) is the runner's live Claude usage pause from `Runs.active_rate_limit/2` —
-  beating and fresh, but claiming nothing until `resets_at`.
+  `rate_limit` (RE320) is the runner's live usage pause from `Runs.active_rate_limit/2` — beating
+  and fresh, but claiming nothing until `resets_at`. Since RE436 it is set only while EVERY
+  installed harness on the runner is paused, and is the pause that lifts first:
+  `%{harness, window, used_pct, pause_at, resets_at, reason}`.
   """
 
   def index(%{runners: runners}), do: %{data: Enum.map(runners, &runner/1)}

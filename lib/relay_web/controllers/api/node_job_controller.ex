@@ -13,8 +13,6 @@ defmodule RelayWeb.Api.NodeJobController do
   alias Relay.Talk
   alias Schemas.Runner
 
-  require Logger
-
   action_fallback RelayWeb.Api.FallbackController
 
   # ~25s sits safely under Fly's proxy idle timeout.
@@ -32,9 +30,11 @@ defmodule RelayWeb.Api.NodeJobController do
   claimable; `?wait=0` degrades to short-poll (immediate 204).
 
   RE311 — the claim's `capacity` is the runner's LIVE FREE count and its `held` is the set of
-  per-card worktrees it is holding right now. Both are request-scoped: they are normalized
-  through the domain's one normalizer and passed to `Relay.Runs.claim_next_job/3` as arguments,
-  and NEITHER is written to the runner row. The heartbeat owns the durable roster state.
+  per-card worktrees it is holding right now. RE436 — its `harnesses` is the harness keys the
+  runner will run now (installed minus paused at a usage limit). All three are request-scoped:
+  they are normalized through the domain's one normalizer and passed to
+  `Relay.Runs.claim_next_job/4` as arguments, and NONE is written to the runner row. The
+  heartbeat owns the durable roster state.
   """
   def claim(conn, params) do
     case pre_rename(params) do
@@ -48,22 +48,30 @@ defmodule RelayWeb.Api.NodeJobController do
 
     with {:ok, exec_attrs} <- runner_attrs(params),
          {:ok, runner} <- Runs.upsert_runner(board, exec_attrs) do
-      free = Capacity.normalize(Map.get(params, "capacity"))
-      held = Runner.normalize_held(Map.get(params, "held"))
-      claim_for(conn, board, runner, params, free, held)
+      inputs = %{
+        free: Capacity.normalize(Map.get(params, "capacity")),
+        held: Runner.normalize_held(Map.get(params, "held")),
+        harnesses: Runner.normalize_claim_harnesses(Map.get(params, "harnesses"))
+      }
+
+      claim_for(conn, board, runner, params, inputs)
     end
   end
 
-  defp claim_for(conn, board, runner, params, free, held) do
+  defp claim_for(conn, board, runner, params, inputs) do
     if Runs.runner_outdated?(runner) do
       refuse_outdated(conn, runner)
     else
-      case Runs.claim_next_job(runner, free, held) do
-        {:ok, nil} -> maybe_wait(conn, board, runner, params, free, held)
+      case claim_with(runner, inputs) do
+        {:ok, nil} -> maybe_wait(conn, board, runner, params, inputs)
         {:ok, job} -> json(conn, granted(job))
       end
     end
   end
+
+  # The request-scoped claim inputs, normalized once in `claim_current/2`.
+  defp claim_with(runner, %{free: free, held: held, harnesses: harnesses}),
+    do: Runs.claim_next_job(runner, free, held, harnesses)
 
   # RE268 — a claim is where a talk turn becomes `:claimed`. It happens here rather than in
   # `Relay.Runs.claim_next_job/1` so the run lifecycle keeps no Talk knowledge: it claims a job,
@@ -190,45 +198,25 @@ defmodule RelayWeb.Api.NodeJobController do
   # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
   # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
   # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
-  # RE320: `rate_limit` is dropped here too, whatever the client's `runner` object carries —
-  # `exec_attrs` feeds the claim's `Runs.upsert_runner/2` call directly (no `heartbeat_attrs/2`
-  # in between), so a client-supplied "rate_limit" key would otherwise reach the roster write
-  # unnormalized. Only `heartbeat_attrs/2` puts the (normalized) key back, from the top-level
-  # `rate_limit`, never from this nested one.
   defp runner_attrs(params) do
     case Map.get(params, "runner", %{}) do
       runner when is_map(runner) ->
-        {:ok, runner |> Map.delete("rate_limit") |> Map.put("capabilities", Map.get(params, "capabilities"))}
+        {:ok, Map.put(runner, "capabilities", Map.get(params, "capabilities"))}
 
       _ ->
         {:error, :invalid_runner}
     end
   end
 
-  # The heartbeat is the ONE writer of the durable roster state (RE311). RE320: `rate_limit` is
-  # always put — a JSON null (or a pre-RE320 runner that never sends the key) CLEARS the pause.
+  # The heartbeat is the ONE writer of the durable roster state (RE311). RE436: each harness's
+  # usage reading — and its pause — rides its `harnesses` entry; the retired top-level
+  # `rate_limit` is ignored.
   defp heartbeat_attrs(params, exec_attrs) do
     exec_attrs
     |> Map.put("capacity", Map.get(params, "capacity"))
     |> Map.put("held", Map.get(params, "held"))
     # RE433: the installed-harness inventory, absent-means-untouched like `held`.
     |> Map.put("harnesses", Map.get(params, "harnesses"))
-    |> Map.put("rate_limit", rate_limit_attr(Map.get(params, "rate_limit")))
-  end
-
-  # A value the schema cannot normalize is dropped to nil and logged rather than refusing the
-  # beat — the heartbeat is the runner's liveness path.
-  defp rate_limit_attr(nil), do: nil
-
-  defp rate_limit_attr(wire) do
-    case Runner.normalize_rate_limit(wire) do
-      nil ->
-        Logger.warning("heartbeat: dropping unrecognised runner rate_limit #{inspect(wire)}")
-        nil
-
-      rate_limit ->
-        rate_limit
-    end
   end
 
   # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
@@ -361,7 +349,7 @@ defmodule RelayWeb.Api.NodeJobController do
 
   defp parse_outcome(_value), do: {:error, :unknown_outcome}
 
-  defp maybe_wait(conn, board, runner, params, free, held) do
+  defp maybe_wait(conn, board, runner, params, %{free: free, held: held} = inputs) do
     running = List.wrap(params["running"])
 
     cond do
@@ -377,7 +365,7 @@ defmodule RelayWeb.Api.NodeJobController do
 
       true ->
         Runs.subscribe(board.id)
-        wait_loop(conn, board, runner, running, free, held, System.monotonic_time(:millisecond) + @long_poll_ms)
+        wait_loop(conn, board, runner, running, inputs, System.monotonic_time(:millisecond) + @long_poll_ms)
     end
   end
 
@@ -403,7 +391,7 @@ defmodule RelayWeb.Api.NodeJobController do
 
   # Retry the atomic claim whenever a run event fires; anything else in the
   # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
-  defp wait_loop(conn, board, runner, running, free, held, deadline) do
+  defp wait_loop(conn, board, runner, running, inputs, deadline) do
     timeout = deadline - System.monotonic_time(:millisecond)
 
     if timeout <= 0 do
@@ -411,13 +399,13 @@ defmodule RelayWeb.Api.NodeJobController do
     else
       receive do
         run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
-          case Runs.claim_next_job(runner, free, held) do
+          case claim_with(runner, inputs) do
             # Woken with nothing to grant is the Stop case: `Talk.stop_turn/1` broadcasts a run
             # event precisely so this loop re-checks. Return as soon as something is revoked,
             # rather than sitting out the rest of the 25s with a kill order in hand.
             {:ok, nil} ->
               case Runs.revoked_among(board, running) do
-                [] -> wait_loop(conn, board, runner, running, free, held, deadline)
+                [] -> wait_loop(conn, board, runner, running, inputs, deadline)
                 revoked -> json(conn, %{revoked: revoked})
               end
 

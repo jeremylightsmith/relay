@@ -102,6 +102,16 @@ A runner only claims nodes whose harness it has installed: it reports, per harne
 template's executable is on its `PATH`, its `--version`, and the signed-in check's result. API
 keys stay in the runner's environment (`.envrc.local`), never on the board.
 
+### Usage limits
+
+Each harness's **USAGE** block in **Settings › Agents** tells the runner how to read that CLI's
+usage — off its own output, or from a usage command run every few minutes — and its **PAUSE AT**
+per window. When a harness passes a PAUSE AT, `./relay start` stops claiming nodes for that
+harness only, re-checks it while it is idle, and claims its nodes again once usage is back under
+(or the window resets). Only when every installed harness is paused does the runner claim
+nothing at all. PAUSE AT is set on the harness, not per runner: a `limits` block in
+`.relay/runner.json` is ignored, with one line in the runner's log.
+
 ### The `RELAY_NODE_SCRATCH` contract
 
 The runner sets `RELAY_NODE_SCRATCH` to a git-ignored file in the node's worktree, stable per

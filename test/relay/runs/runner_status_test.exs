@@ -262,36 +262,75 @@ defmodule Relay.Runs.RunnerStatusTest do
     end
   end
 
-  describe "rate limits (RE320)" do
+  describe "rate limits (RE320, per harness since RE436)" do
     setup %{board: board}, do: {:ok, board: board, now: DateTime.truncate(DateTime.utc_now(), :second)}
 
-    test "runner_rate_limited?/2 is true only until the window resets", %{now: now} do
-      paused = %Schemas.Runner{rate_limit: build(:runner_rate_limit, resets_at: DateTime.add(now, 60, :second))}
-      reset = %Schemas.Runner{rate_limit: build(:runner_rate_limit, resets_at: now)}
+    defp paused(key, at, opts \\ []), do: runner_harness(key, Keyword.put(opts, :usage, paused_usage(at)))
+    defp harnessed(harnesses), do: %Schemas.Runner{harnesses: harnesses}
 
-      assert Runs.runner_rate_limited?(paused, now)
-      refute Runs.runner_rate_limited?(reset, now)
-      refute Runs.runner_rate_limited?(%Schemas.Runner{rate_limit: nil}, now)
+    # Scenario 4
+    test "runner_rate_limited?/2 is true only while every installed harness is paused", %{now: now} do
+      soon = DateTime.add(now, 60, :second)
+      later = DateTime.add(now, 120, :second)
+
+      refute Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), runner_harness("codex")]), now)
+      assert Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), paused("codex", later)]), now)
+      refute Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), paused("codex", now)]), now)
+
+      refute Runs.runner_rate_limited?(
+               harnessed([paused("codex", soon, installed: false), runner_harness("claude-code")]),
+               now
+             )
+
+      refute Runs.runner_rate_limited?(harnessed([paused("codex", soon, installed: false)]), now)
+      refute Runs.runner_rate_limited?(harnessed(nil), now)
+      refute Runs.runner_rate_limited?(harnessed([]), now)
     end
 
-    test "a fresh, current, paused runner is :rate_limited and carries its pause", %{board: board, now: now} do
-      resets_at = DateTime.add(now, 3600, :second)
+    test "harness_pause/2 reads one installed entry's live pause", %{now: now} do
+      at = DateTime.add(now, 60, :second)
+
+      assert Runs.harness_pause(paused("codex", at), now) ==
+               %{harness: "codex", window: "5h", used_pct: 95.0, pause_at: 90, resets_at: at, reason: "limit"}
+
+      assert Runs.harness_pause(paused("codex", now), now) == nil
+      assert Runs.harness_pause(paused("codex", at, installed: false), now) == nil
+      assert Runs.harness_pause(runner_harness("codex"), now) == nil
+      assert Runs.harness_pause(runner_harness("codex", usage: nil), now) == nil
+    end
+
+    # Scenario 5
+    test "active_rate_limit/2 is the pause that lifts first", %{board: board, now: now} do
+      early = DateTime.add(now, 60, :second)
+      both = [paused("claude-code", DateTime.add(now, 600, :second)), paused("codex", early)]
+
+      assert Runs.active_rate_limit(harnessed(both), now) ==
+               %{harness: "codex", window: "5h", used_pct: 95.0, pause_at: 90, resets_at: early, reason: "limit"}
+
+      insert(:runner, board: board, name: "a", last_heartbeat: now, harnesses: both)
 
       insert(:runner,
         board: board,
-        name: "a",
+        name: "b",
         last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
+        harnesses: [runner_harness("claude-code"), paused("codex", early)]
       )
 
-      assert [%{display_state: :rate_limited, freshness: :fresh, rate_limit: rate_limit}] =
-               Runs.list_runner_status(board, now)
+      statuses = Map.new(Runs.list_runner_status(board, now), &{&1.name, &1})
 
-      assert rate_limit == %{window: "five_hour", utilization: 0.95, max: 0.9, resets_at: resets_at, reason: "limit"}
+      assert %{display_state: :rate_limited, rate_limit: %{harness: "codex", resets_at: ^early}} = statuses["a"]
+      assert %{display_state: :fresh, rate_limit: nil} = statuses["b"]
+      assert statuses["a"].harnesses == both
+    end
+
+    test "list_runner_status/2 carries [] harnesses for a runner that never reported", %{board: board, now: now} do
+      insert(:runner, board: board, name: "a", last_heartbeat: now, harnesses: nil)
+      assert [%{harnesses: []}] = Runs.list_runner_status(board, now)
     end
 
     test "outdatedness outranks the pause", %{board: board, now: now} do
-      insert(:runner, board: board, name: "a", version: 0, last_heartbeat: now, rate_limit: build(:runner_rate_limit))
+      at = DateTime.add(now, 3600, :second)
+      insert(:runner, board: board, name: "a", version: 0, last_heartbeat: now, harnesses: [paused("codex", at)])
 
       assert [%{display_state: :outdated}] = Runs.list_runner_status(board, now)
     end
@@ -302,7 +341,7 @@ defmodule Relay.Runs.RunnerStatusTest do
         board: board,
         name: "a",
         last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: DateTime.add(now, -1, :second))
+        harnesses: [paused("codex", DateTime.add(now, -1, :second))]
       )
 
       assert [%{display_state: :fresh, rate_limit: nil}] = Runs.list_runner_status(board, now)
@@ -312,12 +351,7 @@ defmodule Relay.Runs.RunnerStatusTest do
          %{board: board, now: now} do
       resets_at = DateTime.add(now, 3600, :second)
 
-      insert(:runner,
-        board: board,
-        name: "paused",
-        last_heartbeat: now,
-        rate_limit: build(:runner_rate_limit, resets_at: resets_at)
-      )
+      insert(:runner, board: board, name: "paused", last_heartbeat: now, harnesses: [paused("codex", resets_at)])
 
       assert Runs.roster_rate_limit(board, now) == %{resumes_at: resets_at}
 
@@ -326,14 +360,30 @@ defmodule Relay.Runs.RunnerStatusTest do
       assert Runs.roster_rate_limit(board, now) == nil
     end
 
+    # Scenario 6
     test "the phrases the board prints" do
       assert Runs.resume_time_label(~U[2026-09-14 15:40:00Z]) == "3:40 PM UTC"
 
-      assert Runs.rate_limit_phrase(%{window: "five_hour", utilization: 0.95, max: 0.9, reason: "limit"}) ==
-               "five_hour 95% / 90%"
+      assert Runs.rate_limit_phrase(%{harness: "codex", window: "5h", used_pct: 93.0, pause_at: 90, reason: "limit"}) ==
+               "codex 5h 93% / 90%"
 
-      assert Runs.rate_limit_phrase(%{window: "seven_day", utilization: nil, max: nil, reason: "rejected"}) ==
-               "Claude refused (seven_day)"
+      assert Runs.rate_limit_phrase(%{
+               harness: "claude-code",
+               window: nil,
+               used_pct: nil,
+               pause_at: nil,
+               reason: "rejected"
+             }) ==
+               "claude-code refused"
+
+      assert Runs.rate_limit_phrase(%{
+               harness: "claude-code",
+               window: "5h",
+               used_pct: nil,
+               pause_at: nil,
+               reason: "rejected"
+             }) ==
+               "claude-code refused (5h)"
     end
   end
 

@@ -419,7 +419,7 @@ defmodule Relay.Runs.Scheduler do
       :runner_rate_limited ->
         verdict(
           :runner_rate_limited,
-          "every connected runner is paused at its Claude usage limit " <>
+          "every connected runner is paused at its usage limits " <>
             "(#{Relay.Runs.roster_rate_limit_phrase(bits)}) — resumes " <>
             "#{Relay.Runs.resume_time_label(bits.resumes_at)}.",
           evidence
@@ -570,9 +570,11 @@ defmodule Relay.Runs.Scheduler do
     * `:runner_gone` — the roster is non-empty but every runner has gone silent.
     * `:runner_outdated` — every live (non-`:gone`) runner is running refused old code.
     * `:runner_rate_limited` — at least one live runner is current, and every live, current
-      runner has paused itself at its Claude usage limit (RE320). The evidence adds `resumes_at`
-      (the EARLIEST `resets_at` among them — when the first one claims again) and
-      `rate_limited_runners`, one `%{name, window, utilization, max, resets_at, reason}` each.
+      runner has paused itself at its usage limits (RE320) — since RE436, every one of its
+      installed harnesses is paused. The evidence adds `resumes_at` (the EARLIEST `resets_at`
+      among them — when the first one claims again) and `rate_limited_runners`, one
+      `%{name, harness, window, used_pct, pause_at, resets_at, reason}` each: the runner's
+      earliest-lifting harness pause (`Relay.Runs.active_rate_limit/2`).
     * `:awaiting_capacity` — at least one live, current, unpaused runner exists; it is simply out
       of free slots.
 

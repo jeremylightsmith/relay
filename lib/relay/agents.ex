@@ -26,6 +26,10 @@ defmodule Relay.Agents do
   alias Schemas.Board
   alias Schemas.Flow
   alias Schemas.Harness
+  alias Schemas.HarnessUsage
+  alias Schemas.HarnessUsage.PauseNow
+  alias Schemas.HarnessUsage.Recheck
+  alias Schemas.HarnessUsage.Window
 
   @default_harness_key "claude-code"
 
@@ -39,7 +43,30 @@ defmodule Relay.Agents do
       resume_command:
         "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
       session_id_path: ".session_id",
-      signed_in_check: "claude auth status"
+      signed_in_check: "claude auth status",
+      # RE436 — Claude Code's stream-json carries a `rate_limit_event` per window it tracks.
+      usage: %HarnessUsage{
+        source: "output",
+        match: ~s(.type == "rate_limit_event"),
+        used_unit: "fraction",
+        resets_unit: "unix",
+        windows: [
+          %Window{
+            label: "5h",
+            used_path: ".rate_limit_info.unifiedWindows.five_hour.utilization",
+            resets_path: ".rate_limit_info.unifiedWindows.five_hour.resetsAt",
+            pause_at: 90
+          },
+          %Window{
+            label: "7d",
+            used_path: ".rate_limit_info.unifiedWindows.seven_day.utilization",
+            resets_path: ".rate_limit_info.unifiedWindows.seven_day.resetsAt",
+            pause_at: 90
+          }
+        ],
+        pause_now: %PauseNow{when: ~s(.rate_limit_info.status == "rejected"), resets_path: ".rate_limit_info.resetsAt"},
+        recheck: %Recheck{model: "haiku", interval_min: 15}
+      }
     },
     %{
       key: "codex",
@@ -49,7 +76,35 @@ defmodule Relay.Agents do
       models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
       resume_command: "codex exec resume --json --model {model} {session} {prompt}",
       session_id_path: ".thread_id",
-      signed_in_check: "codex login status"
+      signed_in_check: "codex login status",
+      # RE436 — `codex exec --json` prints no usage, but every session's rollout file logs a
+      # `token_count` event carrying both rate-limit windows; the command reads the newest one.
+      usage: %HarnessUsage{
+        source: "command",
+        command:
+          ~S{sh -c 'f=$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -1) && grep -h "\"token_count\"" "$f" | tail -1'},
+        interval_min: 5,
+        match: ~s(.payload.type == "token_count"),
+        used_unit: "percent",
+        resets_unit: "unix",
+        windows: [
+          %Window{
+            label: "5h",
+            used_path: ".payload.rate_limits.primary.used_percent",
+            resets_path: ".payload.rate_limits.primary.resets_at",
+            pause_at: 90
+          },
+          %Window{
+            label: "wk",
+            used_path: ".payload.rate_limits.secondary.used_percent",
+            resets_path: ".payload.rate_limits.secondary.resets_at",
+            pause_at: 90
+          }
+        ],
+        pause_now: nil,
+        # The cheapest seeded Codex model.
+        recheck: %Recheck{model: "gpt-5.6-luna", interval_min: 15}
+      }
     },
     %{
       key: "gemini-cli",
@@ -58,7 +113,8 @@ defmodule Relay.Agents do
       models: ["gemini-2.5-pro", "gemini-2.5-flash"],
       resume_command: nil,
       session_id_path: nil,
-      signed_in_check: nil
+      signed_in_check: nil,
+      usage: %HarnessUsage{source: "none"}
     }
   ]
 
@@ -224,7 +280,8 @@ defmodule Relay.Agents do
       "models" => h.models,
       "resume_command" => h.resume_command,
       "session_id_path" => h.session_id_path,
-      "signed_in_check" => h.signed_in_check
+      "signed_in_check" => h.signed_in_check,
+      "usage" => HarnessUsage.wire(h.usage)
     }
   end
 
@@ -237,6 +294,66 @@ defmodule Relay.Agents do
   def harnesses_digest(board) do
     wire = for h <- list_harnesses(board), do: h |> harness_wire() |> Enum.sort() |> Jason.OrderedObject.new()
     :sha256 |> :crypto.hash(Jason.encode!(wire)) |> Base.encode16(case: :lower)
+  end
+
+  @typedoc "One window of a `try_usage_line/3` reading."
+  @type tried_window :: %{
+          label: String.t(),
+          used_pct: float(),
+          resets_at: DateTime.t(),
+          pause_at: pos_integer(),
+          over?: boolean()
+        }
+
+  @doc """
+  What `usage` makes of one pasted output `line` at `now` — the Settings → Agents **TEST** box
+  (RE436). On a reading, each window carries its used %, its reset as a `DateTime`, its `pause_at`
+  and `over?` (`used_pct >= pause_at`); `paused` is `%{label: nil, reason: "rejected"}` when the
+  line meets `pause_now`, else the first over window's `%{label, reason: "limit"}`, else nil.
+  Otherwise an `{:error, reason}` a human can read.
+  """
+  @spec try_usage_line(HarnessUsage.t(), String.t(), DateTime.t()) ::
+          {:ok, %{windows: [tried_window()], paused: %{label: String.t() | nil, reason: String.t()} | nil}}
+          | {:error, String.t()}
+  def try_usage_line(%HarnessUsage{source: "none"}, _line, _now), do: {:error, "this harness's usage is not reported"}
+
+  def try_usage_line(%HarnessUsage{} = usage, line, %DateTime{} = now) do
+    with {:ok, %{} = event} <- decode_line(line),
+         %{} = reading <- HarnessUsage.Rule.reading(HarnessUsage.wire(usage), event, DateTime.to_unix(now)) do
+      pause_at = Map.new(usage.windows, &{&1.label, &1.pause_at})
+      windows = Enum.map(reading.windows, &tried_window(&1, pause_at[&1.label]))
+      {:ok, %{windows: windows, paused: tried_pause(reading, windows)}}
+    else
+      :error -> {:error, "not valid JSON"}
+      nil -> {:error, "not a reading — #{usage.match} does not hold"}
+    end
+  end
+
+  defp decode_line(line) do
+    case Jason.decode(line) do
+      {:ok, %{} = event} -> {:ok, event}
+      _not_an_object -> :error
+    end
+  end
+
+  defp tried_window(%{label: label, used_pct: used_pct, resets_at: resets_at}, pause_at) do
+    %{
+      label: label,
+      used_pct: used_pct,
+      resets_at: DateTime.from_unix!(resets_at),
+      pause_at: pause_at,
+      over?: is_integer(pause_at) and used_pct >= pause_at
+    }
+  end
+
+  defp tried_pause(%{refused_resets_at: refused}, _windows) when not is_nil(refused),
+    do: %{label: nil, reason: "rejected"}
+
+  defp tried_pause(_reading, windows) do
+    case Enum.find(windows, & &1.over?) do
+      %{label: label} -> %{label: label, reason: "limit"}
+      nil -> nil
+    end
   end
 
   # ---------------------------------------------------------------- harnesses

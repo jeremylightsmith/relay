@@ -335,7 +335,7 @@ defmodule RelayWeb.RunComponentsTest do
       html =
         render_component(&RunComponents.stopped_work_banner/1,
           id: "b3",
-          verdict: %{reason: :runner_rate_limited, detail: "every connected runner is paused at its Claude usage limit."}
+          verdict: %{reason: :runner_rate_limited, detail: "every connected runner is paused at its usage limits."}
         )
 
       assert html =~ "var(--color-warning)"
@@ -521,39 +521,42 @@ defmodule RelayWeb.RunComponentsTest do
     end
   end
 
-  describe "rate_limit_note/1 (RE320)" do
-    test "a configured limit names the window, usage, max and resume time" do
+  describe "rate_limit_note/1 (RE320, per harness since RE436)" do
+    # Scenario 13
+    test "a limit names the harness, window, usage, PAUSE AT and resume time" do
       html =
         render_component(&RunComponents.rate_limit_note/1,
           id: "note",
           rate_limit: %{
-            window: "five_hour",
-            utilization: 0.95,
-            max: 0.9,
+            harness: "codex",
+            window: "5h",
+            used_pct: 95.0,
+            pause_at: 90,
             reason: "limit",
             resets_at: ~U[2026-09-14 15:40:00Z]
           }
         )
 
       assert html =~ ~s(id="note")
-      assert html =~ "five_hour 95% / 90% · resumes 3:40 PM UTC"
+      assert html =~ "codex 5h 95% / 90% · resumes 3:40 PM UTC"
       assert html =~ "var(--color-warning)"
     end
 
-    test "a refusal says Claude refused" do
+    test "a refusal says the harness refused" do
       html =
         render_component(&RunComponents.rate_limit_note/1,
           id: "note",
           rate_limit: %{
-            window: "five_hour",
-            utilization: nil,
-            max: nil,
+            harness: "claude-code",
+            window: nil,
+            used_pct: nil,
+            pause_at: nil,
             reason: "rejected",
             resets_at: ~U[2026-09-14 15:40:00Z]
           }
         )
 
-      assert html =~ "Claude refused (five_hour) · resumes 3:40 PM UTC"
+      assert html =~ "claude-code refused · resumes 3:40 PM UTC"
     end
   end
 

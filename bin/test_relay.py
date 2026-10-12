@@ -8,6 +8,7 @@ path as a module and exercise it directly.
 Run: python3 bin/test_relay.py
 """
 import argparse
+import ast
 import contextlib
 import copy
 import hashlib
@@ -24,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+import tokenize
 import unittest
 import unittest.mock
 import urllib.error
@@ -135,6 +137,56 @@ def rate_limit_event(five_hour=None, seven_day=None, resets_at=0, status="allowe
                                 "overageStatus": "rejected", "isUsingOverage": False}}
 
 
+def _seed_case(name):
+    """The fixture's `usage_rule_cases` reading named `name` (RE436) — the seeds' wire rules
+    and the real CLI lines are taken from there, so they cannot drift from the server's."""
+    case, = [c for c in CONTRACT["usage_rule_cases"]["readings"] if c["name"] == name]
+    return copy.deepcopy(case)
+
+
+def claude_seed_usage(**pause_at):
+    """The Claude Code seed's `usage` wire rule; `pause_at` overrides by window label
+    (`claude_seed_usage(**{"7d": 100})`)."""
+    return _with_pause_at(_seed_case("claude-code allowed rate_limit_event (AC2)")["usage"], pause_at)
+
+
+def codex_seed_usage(**pause_at):
+    """The Codex seed's `usage` wire rule (source `command`)."""
+    return _with_pause_at(_seed_case("the real codex-cli 0.160.0 token_count line")["usage"], pause_at)
+
+
+def _with_pause_at(usage, pause_at):
+    for window in usage["windows"]:
+        if window["label"] in pause_at:
+            window["pause_at"] = pause_at[window["label"]]
+    return usage
+
+
+def codex_token_count(primary=0.0, primary_resets=1_791_623_773, secondary=3.0,
+                      secondary_resets=1_792_000_000):
+    """The real codex-cli 0.160.0 token_count line, with its two readings overridable."""
+    event = _seed_case("the real codex-cli 0.160.0 token_count line")["event"]
+    limits = event["payload"]["rate_limits"]
+    limits["primary"].update(used_percent=primary, resets_at=primary_resets)
+    limits["secondary"].update(used_percent=secondary, resets_at=secondary_resets)
+    return event
+
+
+def harness_definition(key, name, usage, command=None):
+    """One GET /api/harnesses entry, in the fixture's `harness_keys` shape."""
+    return {"key": key, "name": name, "command": command or f"{key} -p {{prompt}}",
+            "resume_command": None, "session_id_path": None, "signed_in_check": None,
+            "models": [], "usage": usage}
+
+
+def claude_limiter(**pause_at):
+    return relay.UsageLimiter("claude-code", "Claude Code", claude_seed_usage(**pause_at))
+
+
+def codex_limiter(**pause_at):
+    return relay.UsageLimiter("codex", "Codex", codex_seed_usage(**pause_at))
+
+
 # RE308 — the stream shape verified against Claude Code 2.1.281 with a bad credential: an assistant
 # event carrying a TOP-LEVEL `error` tag and the reason as text, then an errored `result` with
 # `api_error_status` (its `subtype` reads "success", so it is useless), and exit 1.
@@ -152,6 +204,15 @@ def claude_report(*events):
     report = relay.ClaudeRunReport()
     for ev in events:
         report.observe(ev)
+    return report
+
+
+def refused_report(*events, resets_at=FAR_RESET):
+    """A ClaudeRunReport whose stream carried a refusal the job's harness usage rule read
+    (`pause_now`), as _stream_agent_job records it (RE436): `rejected` with its reset."""
+    report = claude_report(*events)
+    report.rejected = True
+    report.rejected_resets_at = resets_at
     return report
 
 
@@ -320,14 +381,35 @@ class ReverseContractTest(unittest.TestCase):
         body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
         self.assertTrue(set(body) <= set(CONTRACT["heartbeat"]["request"]))
         # A beat that DOES carry the inventory matches the fixture's key set exactly.
-        full = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
-                                    {"agents": [], "skills": []},
-                                    harnesses=[{"key": "k", "installed": True, "version": None,
-                                                "signed_in": None}])
+        full = self._full_beat()
         self.assertEqual(set(full), set(CONTRACT["heartbeat"]["request"]))
-        # RE433: each inventory entry carries exactly the fixture's keys.
+        self.assertNotIn("rate_limit", full)
+        # RE433: each inventory entry carries exactly the fixture's keys — RE436: `usage` too.
         self.assertEqual(set(full["harnesses"][0]), set(CONTRACT["heartbeat"]["request"]["harnesses"][0]))
+        self.assertEqual(set(full["harnesses"][0]["usage"]), {"source", "read_at", "windows", "paused"})
         self.assertIn("want_capabilities", CONTRACT["heartbeat"]["response"])
+
+    def _full_beat(self):
+        limiter = claude_limiter()
+        limiter.observe(rate_limit_event(five_hour=0.95, resets_at=FAR_RESET), FAR_RESET - 800)
+        entry = {"key": "claude-code", "installed": True, "version": None, "signed_in": None,
+                 "usage": limiter.wire(FAR_RESET - 800)}
+        return relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
+                                    {"agents": [], "skills": []}, harnesses=[entry])
+
+    def test_the_heartbeat_no_longer_carries_a_runner_wide_rate_limit(self):
+        # RE436: the pause is per harness now, inside `harnesses[].usage`.
+        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
+        self.assertNotIn("rate_limit", body)
+        self.assertNotIn("rate_limit", CONTRACT["heartbeat"]["request"])
+
+    def test_a_paused_harness_usage_wire_matches_the_fixture(self):
+        usage = self._full_beat()["harnesses"][0]["usage"]
+        fixture = CONTRACT["heartbeat"]["request"]["harnesses"][0]["usage"]
+        self.assertEqual(set(usage), set(fixture))
+        self.assertEqual(set(usage["windows"][0]), set(fixture["windows"][0]))
+        self.assertEqual(set(usage["paused"]), set(fixture["paused"]))
+        self.assertEqual(usage["paused"]["reason"], "limit")
 
     def test_the_outcome_response_carries_the_run_state_the_runner_reads(self):
         # report_outcome() returns resp["run_state"]; RunnerPool.release() branches on it.
@@ -356,7 +438,7 @@ class ReverseContractTest(unittest.TestCase):
         self.assertIn("held", CONTRACT["claim_request"])
         self.assertEqual(
             set(relay.claim_body({"name": "x"}, {"shared_clean": 1}, [7, 9],
-                                 [{"ref": "A1", "state": "bound"}])),
+                                 [{"ref": "A1", "state": "bound"}], harnesses=["k"])),
             set(CONTRACT["claim_request"]),
         )
         self.assertEqual(relay.claim_body({"name": "x"}, {}, [7, 9])["running"], [7, 9])
@@ -383,20 +465,13 @@ class ReverseContractTest(unittest.TestCase):
         (the floor below which work is refused)."""
         self.assertIn("latest_runner_version", CONTRACT["heartbeat"]["response"])
 
-    def test_the_heartbeat_body_always_carries_rate_limit(self):
-        # RE320: null while claiming, never omitted — the server CLEARS the pause on null.
-        body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [])
-        self.assertIn("rate_limit", body)
-        self.assertIsNone(body["rate_limit"])
-        self.assertIn("rate_limit", CONTRACT["heartbeat"]["request"])
-
-    def test_a_paused_limiter_wire_matches_the_fixture_key_set(self):
-        limiter = relay.UsageLimiter({"max_five_hour": 0.9})
-        limiter.observe(rate_limit_event(five_hour=0.95, resets_at=2_000), 1_000)
-        self.assertEqual(set(limiter.wire(1_000)),
-                         set(CONTRACT["heartbeat"]["request"]["rate_limit"]))
-        body = relay.heartbeat_body({"name": "box"}, {}, [], [], rate_limit=limiter.wire(1_000))
-        self.assertEqual(body["rate_limit"]["reason"], "limit")
+    def test_the_claim_request_carries_the_claimable_harnesses(self):
+        """RE436: the installed harnesses minus the paused ones; omitted before the runner has
+        fetched the board's definitions, so the server keeps its inventory-only filter."""
+        self.assertEqual(CONTRACT["claim_request"]["harnesses"], ["claude-code"])
+        self.assertEqual(relay.claim_body({"name": "x"}, {}, harnesses=["codex"])["harnesses"], ["codex"])
+        self.assertEqual(relay.claim_body({"name": "x"}, {}, harnesses=[])["harnesses"], [])
+        self.assertNotIn("harnesses", relay.claim_body({"name": "x"}, {}))
 
 
 class PrintCardTest(unittest.TestCase):
@@ -2308,41 +2383,29 @@ class RunnerConfigTest(unittest.TestCase):
         self._write({"base": "origin/master"})
         self.assertEqual(relay.load_runner_config()["base"], "origin/master")
 
-    def _dies(self, limits):
-        self._write({"limits": limits})
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
-            relay.load_runner_config()
-        self.assertNotEqual(cm.exception.code, 0)
-        return err.getvalue()
+    def test_a_limits_block_is_ignored_with_one_log_line(self):
+        """RE436 (AC7): PAUSE AT lives on each harness in Settings → Agents now. A runner.json
+        still carrying the RE320 `limits` block starts, drops it and says so once — never dies."""
+        self._write({"limits": {"max_five_hour": 0.01}})
+        lines = []
+        self.addCleanup(setattr, relay, "log", relay.log)
+        relay.log = lambda msg, **k: lines.append(msg)
+        cfg = relay.load_runner_config()
+        self.assertNotIn("limits", cfg)
+        self.assertEqual(lines, [relay.LIMITS_IGNORED_LINE])
+        self.assertEqual(relay.LIMITS_IGNORED_LINE,
+                         '.relay/runner.json: "limits" is ignored — PAUSE AT now lives on each '
+                         'harness in Settings → Agents')
 
-    def test_limits_default_to_no_limit(self):
+    def test_no_limits_block_logs_nothing(self):
         relay.RUNNER_CONFIG_PATH = "/nope/does/not/exist.json"
-        self.assertEqual(relay.load_runner_config()["limits"], {})
-
-    def test_valid_limits_load_as_floats_and_a_missing_key_is_no_limit(self):
-        self._write({"limits": {"max_five_hour": 0.9}})
-        self.assertEqual(relay.load_runner_config()["limits"], {"max_five_hour": 0.9})
-        self._write({"limits": {"max_five_hour": 1, "max_seven_day": 0}})
-        self.assertEqual(relay.load_runner_config()["limits"],
-                         {"max_five_hour": 1.0, "max_seven_day": 0.0})
-
-    def test_an_out_of_range_limit_refuses_to_start_naming_the_key_and_range(self):
-        msg = self._dies({"max_five_hour": 1.5})
-        self.assertIn("max_five_hour", msg)
-        self.assertIn("0–1", msg)
-
-    def test_a_non_numeric_or_boolean_limit_refuses_to_start(self):
-        self.assertIn("max_seven_day", self._dies({"max_seven_day": "high"}))
-        self.assertIn("max_seven_day", self._dies({"max_seven_day": True}))
-
-    def test_an_unknown_limits_key_refuses_to_start_naming_it(self):
-        msg = self._dies({"max_5_hour": 0.9})
-        self.assertIn("max_5_hour", msg)
-        self.assertIn("max_five_hour", msg)
-
-    def test_a_limits_value_that_is_not_an_object_refuses_to_start(self):
-        self.assertIn("limits", self._dies([0.9]))
+        lines = []
+        self.addCleanup(setattr, relay, "log", relay.log)
+        relay.log = lambda msg, **k: lines.append(msg)
+        self.assertNotIn("limits", relay.load_runner_config())
+        self._write({"capacity": {"exclusive": 1}})
+        self.assertNotIn("limits", relay.load_runner_config())
+        self.assertEqual(lines, [])
 
 
 class RunnerConfigTemplateTest(unittest.TestCase):
@@ -2350,7 +2413,7 @@ class RunnerConfigTemplateTest(unittest.TestCase):
 
     TOP_LEVEL_KEYS = ("namespace", "capacity", "base", "cache_dir", "max_retained_failed",
                       "poll_timeout", "heartbeat_interval", "auto_update",
-                      "auto_update_min_interval", "limits")
+                      "auto_update_min_interval")
 
     def setUp(self):
         self.addCleanup(setattr, relay, "RUNNER_CONFIG_PATH", relay.RUNNER_CONFIG_PATH)
@@ -2369,7 +2432,8 @@ class RunnerConfigTemplateTest(unittest.TestCase):
 
         self.assertEqual(cfg["namespace"], "acme-app")
         self.assertEqual(cfg["capacity"], {"shared_clean": 3, "exclusive": 2})
-        self.assertEqual(cfg["limits"], {"max_five_hour": 0.9, "max_seven_day": 0.9})
+        self.assertNotIn("limits", cfg)
+        self.assertNotIn('"limits"', text)
         self.assertEqual(cfg["worktrees"], {})
         self.assertEqual(cfg["cache_dir"], "~/.cache/relay/acme-app")
         self.assertEqual(cfg["base"], relay.DEFAULT_BASE)
@@ -3535,15 +3599,15 @@ class RunnerConfigCommittedFileTest(unittest.TestCase):
             cfg = json.load(f)
         self.assertEqual(cfg["base"], "origin/main")
 
-    def test_committed_runner_json_sets_the_default_usage_limits(self):
-        """RE320: this repo's runners pause at 90% of either Claude usage window."""
+    def test_committed_runner_json_has_no_usage_limits(self):
+        """RE436: PAUSE AT lives on each harness in Settings → Agents; RE320's `limits` is gone."""
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             ".relay", "runner.json",
         )
         with open(path) as f:
             cfg = json.load(f)
-        self.assertEqual(cfg["limits"], {"max_five_hour": 0.9, "max_seven_day": 0.9})
+        self.assertNotIn("limits", cfg)
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3988,18 +4052,16 @@ class StreamAgentJobTest(unittest.TestCase):
         self.assertEqual(report.result_text, OAUTH_EXPIRED)
         self.assertEqual(report.assistant_text, OAUTH_EXPIRED)
 
-    def test_the_report_records_a_rejected_rate_limit_event_from_this_stream(self):
+    def test_without_a_usage_limiter_a_rejected_line_is_not_a_refusal(self):
+        """RE436: refusal is read by the job's harness usage rule (`pause_now`), never by a
+        hard-coded event shape — a stream with no limiter records none."""
         lines = [json.dumps(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))]
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
         _ok, _session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
                                             session_id_path=".session_id")
-        self.assertTrue(report.rejected)
-        self.assertEqual(report.rejected_window, "five_hour")
-        self.assertEqual(report.rejected_resets_at, FAR_RESET)
-
-    def test_an_allowed_rate_limit_event_is_not_a_rejection(self):
-        report = claude_report(rate_limit_event(five_hour=0.2, resets_at=FAR_RESET))
         self.assertFalse(report.rejected)
+        self.assertIsNone(report.rejected_resets_at)
+        self.assertFalse(hasattr(report, "rejected_window"))
 
     def test_the_report_survives_garbage_events(self):
         report = claude_report("nope", {"type": "assistant", "message": "not-a-dict"},
@@ -4100,16 +4162,50 @@ class StreamAgentJobTest(unittest.TestCase):
         self.assertIn(bad[:200], out)          # fell back to the raw line
         self.assertIn("claude finished", out)  # ...and kept streaming the next event
 
-    def test_every_stream_event_feeds_the_runner_usage_limiter(self):
-        """RE320: agent nodes and talk turns both stream through here, so usage is tracked from
-        work the runner already does — no extra call in the normal path."""
-        self.addCleanup(setattr, relay, "USAGE_LIMITER", relay.USAGE_LIMITER)
-        relay.USAGE_LIMITER = relay.UsageLimiter({"max_five_hour": 0.9})
-        lines = [json.dumps(rate_limit_event(five_hour=0.95, resets_at=4_102_444_800)),
+
+
+class StreamUsageTest(unittest.TestCase):
+    """RE436: a job's stream feeds ITS harness's limiter, read by that harness's board rule."""
+
+    def setUp(self):
+        self._popen = relay.subprocess.Popen
+        self.addCleanup(setattr, relay.subprocess, "Popen", self._popen)
+        self.addCleanup(setattr, relay, "USAGE", relay.USAGE)
+        self.addCleanup(setattr, relay, "usage_clock", relay.usage_clock)
+        relay.usage_clock = lambda: FAR_RESET - 3600
+        relay.USAGE = relay.HarnessUsageBook()
+        relay.USAGE.rebuild([harness_definition("claude-code", "Claude Code", claude_seed_usage())])
+
+    def _stream(self, lines, usage):
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=1)
+        return capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                           session_id_path=".session_id", usage=usage)
+
+    def test_a_refused_line_records_its_reset_on_the_report_and_pauses_the_harness(self):
+        j = job(vars={"ref": "RLY-1"})
+        self.assertEqual(j["harness"]["key"], "claude-code")
+        limiter = relay.USAGE.for_key(j["harness"]["key"])
+        lines = [json.dumps(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected")),
+                 json.dumps(errored_result_event("Claude AI usage limit reached"))]
+        _ok, _session, report = self._stream(lines, limiter)
+        self.assertTrue(report.rejected)
+        self.assertEqual(report.rejected_resets_at, FAR_RESET)
+        self.assertEqual(relay.blocked_resume_at("blocked", report), FAR_RESET)
+        self.assertEqual(relay.USAGE.paused_keys(FAR_RESET - 3600), {"claude-code"})
+
+    def test_an_over_limit_reading_pauses_the_harness(self):
+        lines = [json.dumps(rate_limit_event(five_hour=0.95, resets_at=FAR_RESET)),
                  json.dumps({"type": "result", "session_id": "s"})]
-        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
-        capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
-        self.assertEqual(relay.USAGE_LIMITER.paused(1_800_000_000)["window"], "five_hour")
+        _ok, _session, report = self._stream(lines, relay.USAGE.for_key("claude-code"))
+        self.assertFalse(report.rejected)
+        self.assertEqual(relay.USAGE.for_key("claude-code").paused(FAR_RESET - 3600)["label"], "5h")
+
+    def test_a_talk_stream_with_no_limiter_leaves_the_book_untouched(self):
+        lines = [json.dumps(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))]
+        _ok, _session, report = self._stream(lines, None)
+        self.assertFalse(report.rejected)
+        self.assertEqual(relay.USAGE.paused_keys(FAR_RESET - 3600), set())
+        self.assertIsNone(relay.USAGE.wire_for("claude-code", FAR_RESET - 3600)["read_at"])
 
 
 class TalkCommandTest(unittest.TestCase):
@@ -4146,17 +4242,16 @@ class ClaudeFailureClassificationTest(unittest.TestCase):
         self.assertEqual(relay.classify_claude_failure(report), {"kind": "auth", "reason": OAUTH_EXPIRED})
 
     def test_a_rejected_rate_limit_event_is_a_usage_limit_naming_its_reset(self):
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
-                               errored_result_event("Claude AI usage limit reached"))
+        report = refused_report(errored_result_event("Claude AI usage limit reached"))
         failure = relay.classify_claude_failure(report)
         self.assertEqual(failure["kind"], "usage_limit")
         self.assertEqual(failure["reason"],
                          "Claude AI usage limit reached · resets " + relay.local_clock(FAR_RESET))
 
     def test_a_usage_limit_with_no_text_still_names_the_limit(self):
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))
+        report = refused_report()
         self.assertEqual(relay.classify_claude_failure(report)["reason"],
-                         "Claude usage limit reached (five_hour) · resets " + relay.local_clock(FAR_RESET))
+                         "Claude usage limit reached · resets " + relay.local_clock(FAR_RESET))
 
     def test_the_usage_limit_phrase_fallback(self):
         report = claude_report(errored_result_event("You've hit your limit · resets 3pm"))
@@ -4177,10 +4272,11 @@ class ClaudeFailureClassificationTest(unittest.TestCase):
         self.assertLessEqual(len(reason), relay.CLAUDE_FAILURE_TEXT_MAX)
         self.assertNotIn("\n", reason)
 
-    def test_the_rate_limit_pause_line_uses_the_same_clock(self):
-        pause = {"window": "five_hour", "utilization": 1.0, "max": 0.9,
-                 "resets_at": FAR_RESET, "reason": relay.RATE_LIMIT_REASON_REJECTED}
-        self.assertIn("resumes " + relay.local_clock(FAR_RESET), relay.rate_limit_pause_line(pause))
+    def test_the_usage_pause_line_uses_the_same_clock(self):
+        pause = {"label": None, "used_pct": None, "pause_at": None,
+                 "resets_at": FAR_RESET, "reason": relay.USAGE_REASON_REJECTED}
+        self.assertIn("resumes " + relay.local_clock(FAR_RESET),
+                      relay.usage_pause_line("Claude Code", pause, 15))
 
 
 class AgentOutcomeContractTest(unittest.TestCase):
@@ -4233,8 +4329,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
 
     def test_a_usage_limit_is_blocked_and_names_the_reset(self):
         relay.get_card = lambda ref: {"status": "working"}
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
-                               errored_result_event("Claude AI usage limit reached"))
+        report = refused_report(errored_result_event("Claude AI usage limit reached"))
         outcome, detail, _no_changes = relay.determine_agent_outcome(
             {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
         self.assertEqual(outcome, "blocked")
@@ -4246,8 +4341,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
 
     def test_a_rejected_rate_limit_event_gives_the_blocked_outcome_its_reset(self):
         relay.get_card = lambda ref: {"status": "working"}
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
-                               errored_result_event("Claude AI usage limit reached"))
+        report = refused_report(errored_result_event("Claude AI usage limit reached"))
         outcome, detail, _no_changes = relay.determine_agent_outcome(
             {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
         self.assertEqual(outcome, "blocked")
@@ -4255,10 +4349,11 @@ class AgentOutcomeContractTest(unittest.TestCase):
         body = relay.outcome_body(outcome, detail, "sha", None, False, relay.blocked_resume_at(outcome, report))
         self.assertEqual(body["resume_at"], "2100-01-01T00:00:00Z")
 
-    def test_the_same_rejected_stream_pauses_the_usage_limiter_until_the_reset(self):
-        """The whole RE267 design leans on RE320: the runner that was refused has already paused
-        its own claiming until `resetsAt`, so the requeued job is not re-claimed straight away."""
-        limiter = relay.UsageLimiter()
+    def test_the_same_rejected_line_pauses_the_harness_until_the_reset(self):
+        """The whole RE267 design leans on RE320 → RE436: the harness that was refused has
+        already paused its own claiming until `resetsAt`, so the requeued job is not re-claimed
+        straight away by this runner."""
+        limiter = claude_limiter()
         limiter.observe(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
                         FAR_RESET - 3600)
         paused = limiter.paused(FAR_RESET - 3600)
@@ -4290,15 +4385,14 @@ class AgentOutcomeContractTest(unittest.TestCase):
         relay.get_card = lambda ref: {"status": "working"}
         billing = {"type": "assistant", "error": "billing_error",
                    "message": {"content": [{"type": "text", "text": "Credit balance is too low"}]}}
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
-                               billing, errored_result_event("Credit balance is too low"))
+        report = refused_report(billing, errored_result_event("Credit balance is too low"))
         outcome, _detail, _no_changes = relay.determine_agent_outcome(
             {"vars": {"ref": "RLY-1"}}, False, "/nope.json", report=report)
         self.assertEqual(outcome, "blocked")
         self.assertIsNone(relay.blocked_resume_at(outcome, report))
 
     def test_only_a_blocked_outcome_carries_a_resume_time(self):
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"))
+        report = refused_report()
         for outcome in ("failed", "succeeded", "needs_input", "partial"):
             self.assertIsNone(relay.blocked_resume_at(outcome, report), outcome)
         self.assertIsNone(relay.blocked_resume_at("blocked", None))
@@ -4626,8 +4720,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_a_usage_limit_with_a_known_reset_rides_out_as_resume_at(self):
         """RE267: run_node_job's 6th element is the reset the stream reported, for execute_one to
         forward to report_outcome."""
-        report = claude_report(rate_limit_event(five_hour=1.0, resets_at=FAR_RESET, status="rejected"),
-                               errored_result_event("Claude AI usage limit reached"))
+        report = refused_report(errored_result_event("Claude AI usage limit reached"))
         relay._stream_agent_job = lambda argv, cwd, **kwargs: (False, "sess-9", report)
         relay.get_card = lambda ref: {"status": "working"}
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
@@ -4726,7 +4819,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4737,7 +4830,7 @@ class RunNodeJobTest(unittest.TestCase):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4788,7 +4881,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9", relay.ClaudeRunReport()
@@ -4861,7 +4954,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -4879,7 +4972,7 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -4916,7 +5009,7 @@ class RunNodeJobTest(unittest.TestCase):
         """The composition helper is only worth anything if run_node_job actually uses it."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -4973,6 +5066,23 @@ class RunNodeJobHarnessTest(unittest.TestCase):
         relay.run_node_job(job("resumed_agent"), "/tmp/wt", relay.JobControl())
         (argv, _kwargs), = self.streamed
         self.assertEqual(argv[:4], ["claude", "-p", "--resume", "<session-id>"])
+
+    def test_the_stream_feeds_the_limiter_of_the_job_s_own_harness(self):
+        """RE436: each job's stream is read by its own harness's usage rule."""
+        self.addCleanup(setattr, relay, "USAGE", relay.USAGE)
+        relay.USAGE = relay.HarnessUsageBook()
+        relay.USAGE.rebuild([harness_definition("claude-code", "Claude Code", claude_seed_usage()),
+                             harness_definition("codex", "Codex", codex_seed_usage())])
+        relay.run_node_job(job(harness=CODEX_HARNESS, model="m"), "/tmp/wt", relay.JobControl())
+        relay.run_node_job(job(), "/tmp/wt", relay.JobControl())
+        self.assertIs(self.streamed[0][1]["usage"], relay.USAGE.for_key("codex"))
+        self.assertIs(self.streamed[1][1]["usage"], relay.USAGE.for_key("claude-code"))
+
+    def test_outside_relay_start_no_limiter_is_fed(self):
+        self.addCleanup(setattr, relay, "USAGE", relay.USAGE)
+        relay.USAGE = None
+        relay.run_node_job(job(), "/tmp/wt", relay.JobControl())
+        self.assertIsNone(self.streamed[0][1]["usage"])
 
     def test_an_agent_job_without_a_harness_fails_without_spawning(self):
         outcome, detail, *_rest = capture_ret(relay.run_node_job, job(harness=None), "/tmp/wt",
@@ -5039,6 +5149,19 @@ class HarnessInventoryTest(unittest.TestCase):
                                 "signed_in": None}])
 
 
+def executable_source(path):
+    """`path`'s Python source with every comment and docstring removed (RE436's AC8 guard):
+    the tokens of everything that executes, joined by spaces."""
+    with open(path, encoding="utf-8") as f:
+        source = f.read()
+    docstrings = {(node.value.lineno, node.value.col_offset) for node in ast.walk(ast.parse(source))
+                  if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                  and isinstance(node.value.value, str)}
+    return " ".join(tok.string for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if tok.type != tokenize.COMMENT
+                    and not (tok.type == tokenize.STRING and tok.start in docstrings))
+
+
 class RunnerHarnessGuardTest(unittest.TestCase):
     """RE433: no harness key or display name may be special-cased in runner code — the runner
     expands whatever template the board sends."""
@@ -5049,6 +5172,25 @@ class RunnerHarnessGuardTest(unittest.TestCase):
         for name in ("claude-code", "codex", "gemini-cli", "Claude Code", "Gemini CLI"):
             for quote in ('"', "'"):
                 self.assertNotIn(f"{quote}{name}{quote}", source)
+
+    def test_no_usage_shape_is_named_in_executable_runner_code(self):
+        """RE436 (AC8): how a harness reports usage is board data (its `usage` rule), so no
+        CLI's event name or window key appears outside a comment or docstring."""
+        code = executable_source(RELAY_PATH)
+        for word in ("five_hour", "seven_day", "rate_limit_event", "claude-code", "token_count"):
+            self.assertFalse(word in code, f"{word!r} appears in executable ./relay code")
+
+    def test_the_stripper_keeps_code_and_drops_comments_and_docstrings(self):
+        fd, path = tempfile.mkstemp(suffix=".py")
+        self.addCleanup(os.remove, path)
+        with os.fdopen(fd, "w") as f:
+            f.write('def f():\n    """doc five_hour"""\n    x = "#k"  # seven_day\n'
+                    '    return "token_count"\n')
+        code = executable_source(path)
+        self.assertNotIn("five_hour", code)
+        self.assertNotIn("seven_day", code)
+        self.assertIn("#k", code)
+        self.assertIn("token_count", code)
 
 
 class FindingsContractTest(unittest.TestCase):
@@ -5357,7 +5499,9 @@ class RunnerHeartbeatTest(unittest.TestCase):
         hb._beat()
         posts = [c for c in calls if c[1] == "/api/node-jobs/heartbeat"]
         self.assertEqual(posts[-1][2]["harnesses"],
-                         [{"key": "x-cli", "installed": True, "version": "1", "signed_in": None}])
+                         [{"key": "x-cli", "installed": True, "version": "1", "signed_in": None,
+                           "usage": {"source": "none", "read_at": None, "windows": [],
+                                     "paused": None}}])
         hb._beat()
         self.assertEqual(len([c for c in calls if c[1] == "/api/harnesses"]), 1)
 
@@ -5454,21 +5598,56 @@ class RunnerHeartbeatTest(unittest.TestCase):
             relay.api = orig
         self.assertIsNone(hb.latest_version)
 
-    def test_a_beat_carries_the_runner_rate_limit(self):
-        paused = {"window": "five_hour", "utilization": 0.95, "max": 0.9,
-                  "resets_at": 4_102_444_800, "reason": "limit"}
-        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: [], lambda jid: None,
-                                   interval=15, rate_limit_fn=lambda: paused)
-        calls, _revoked = self._capture(hb)
-        (_method, _path, body), = calls
-        self.assertEqual(body["rate_limit"], paused)
+    NO_USAGE = {"source": "none", "read_at": None, "windows": [], "paused": None}
 
-    def test_a_beat_without_a_limiter_sends_null(self):
-        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: [], lambda jid: None,
-                                   interval=15)
-        calls, _revoked = self._capture(hb)
-        (_method, _path, body), = calls
-        self.assertIsNone(body["rate_limit"])
+    def test_each_inventory_entry_carries_its_harness_usage(self):
+        """RE436: `harnesses[].usage` replaces the runner-wide `rate_limit`; a harness the book
+        does not know reads as source none."""
+        paused = {"source": "command", "read_at": 1, "windows": [],
+                  "paused": {"label": "5h", "used_pct": 95.0, "pause_at": 90,
+                             "resets_at": FAR_RESET, "reason": "limit"}}
+        calls = self._digest_api([{}])
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15,
+                                   usage_fn=lambda key: paused if key == "x-cli" else None)
+        hb.refresh_harnesses()
+        hb.harnesses.append({"key": "y-cli", "installed": False, "version": None, "signed_in": None})
+        hb._beat()
+        body = [c for c in calls if c[1] == "/api/node-jobs/heartbeat"][0][2]
+        self.assertNotIn("rate_limit", body)
+        self.assertEqual(body["harnesses"][0]["usage"], paused)
+        self.assertEqual(body["harnesses"][1]["usage"], self.NO_USAGE)
+        self.assertNotIn("usage", hb.harnesses[0])     # the inventory itself is left alone
+
+    def test_a_beat_without_a_usage_fn_sends_source_none(self):
+        calls = self._digest_api([{}])
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15)
+        hb.refresh_harnesses()
+        hb._beat()
+        body = [c for c in calls if c[1] == "/api/node-jobs/heartbeat"][0][2]
+        self.assertEqual(body["harnesses"][0]["usage"], self.NO_USAGE)
+
+    def test_a_definitions_fetch_hands_the_raw_definitions_on(self):
+        seen = []
+        self._digest_api([])
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15,
+                                   on_definitions=seen.append)
+        hb.refresh_harnesses()
+        self.assertEqual(seen, [[{"key": "x-cli", "command": "x {prompt}"}]])
+
+    def test_a_failed_fetch_hands_nothing_on(self):
+        seen = []
+        self.addCleanup(setattr, relay, "api", relay.api)
+        self.addCleanup(setattr, relay, "log", relay.log)
+        relay.log = lambda *a, **k: None
+
+        def api(method, path, body=None, **kwargs):
+            raise relay.Died("boom")
+
+        relay.api = api
+        hb = relay.RunnerHeartbeat({"name": "b"}, lambda: [], lambda jid: None, interval=15,
+                                   on_definitions=seen.append)
+        hb.refresh_harnesses()
+        self.assertEqual(seen, [])
 
 
 def isolate_relay_state(test):
@@ -6524,160 +6703,379 @@ class ClaimLineTest(unittest.TestCase):
 
 
 class UsageLimiterTest(unittest.TestCase):
-    """RE320: pure but for the injected `now` — no sleeps, no I/O."""
+    """RE436: one harness's usage state, read by its board-defined rule — pure but for the
+    injected `now` (no sleeps, no I/O)."""
 
     NOW = 1_800_000_000
 
-    def limiter(self, **limits):
-        return relay.UsageLimiter(limits)
+    def test_a_new_limiter_with_no_readings_is_never_paused(self):
+        self.assertIsNone(claude_limiter(**{"5h": 0}).paused(self.NOW))
 
-    def test_a_new_runner_with_no_readings_is_never_paused(self):
-        self.assertIsNone(self.limiter(max_five_hour=0.0).paused(self.NOW))
+    def test_a_window_at_or_over_its_pause_at_trips(self):
+        lim = claude_limiter()
+        reading = lim.observe(rate_limit_event(five_hour=0.9, resets_at=self.NOW + 600), self.NOW)
+        self.assertEqual(reading["windows"][0]["label"], "5h")
+        self.assertEqual(lim.paused(self.NOW), {"label": "5h", "used_pct": 90.0, "pause_at": 90,
+                                                "resets_at": self.NOW + 600, "reason": "limit"})
 
-    def test_a_window_at_or_over_its_max_trips(self):
-        lim = self.limiter(max_five_hour=0.9)
-        self.assertTrue(lim.observe(rate_limit_event(five_hour=0.9, resets_at=self.NOW + 600), self.NOW))
-        self.assertEqual(lim.paused(self.NOW), {"window": "five_hour", "utilization": 0.9,
-                                                "max": 0.9, "resets_at": self.NOW + 600,
-                                                "reason": "limit"})
+    def test_the_real_usage_clock_records_a_reading_and_pauses(self):
+        # Smoke regression: usage_clock() returned a float and usage_reading rejects a non-int
+        # `now`, so the live runner never recorded a reading. Use the REAL clock here.
+        now = relay.usage_clock()
+        self.assertIsInstance(now, int)
+        lim = claude_limiter()
+        reading = lim.observe(rate_limit_event(five_hour=0.95, resets_at=now + 3600),
+                              relay.usage_clock())
+        self.assertIsNotNone(reading)
+        self.assertEqual(lim.paused(relay.usage_clock())["reason"], "limit")
 
-    def test_under_the_max_and_with_no_limit_configured_nothing_trips(self):
-        lim = self.limiter(max_five_hour=0.9)
+    def test_under_the_pause_at_nothing_trips(self):
+        lim = claude_limiter(**{"7d": 100})
         lim.observe(rate_limit_event(five_hour=0.89, seven_day=0.99, resets_at=self.NOW + 600), self.NOW)
-        self.assertIsNone(lim.paused(self.NOW))   # seven_day has no limit configured
+        self.assertIsNone(lim.paused(self.NOW))
 
     def test_several_tripped_windows_report_the_latest_reset(self):
-        lim = self.limiter(max_five_hour=0.5, max_seven_day=0.5)
+        lim = claude_limiter(**{"5h": 50, "7d": 50})
         ev = rate_limit_event()
         ev["rate_limit_info"]["unifiedWindows"] = {
             "five_hour": {"utilization": 0.9, "resetsAt": self.NOW + 600},
             "seven_day": {"utilization": 0.6, "resetsAt": self.NOW + 86_400},
         }
         lim.observe(ev, self.NOW)
-        self.assertEqual(lim.paused(self.NOW)["window"], "seven_day")
+        self.assertEqual(lim.paused(self.NOW)["label"], "7d")
 
     def test_a_tripped_window_clears_at_its_reset_and_its_stale_reading_is_discarded(self):
-        lim = self.limiter(max_five_hour=0.9)
+        lim = claude_limiter()
         lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
         self.assertIsNotNone(lim.paused(self.NOW + 599))
         self.assertIsNone(lim.paused(self.NOW + 600))
         # A later event without a five_hour reading must not resurrect the old 0.95.
         lim.observe(rate_limit_event(seven_day=0.1, resets_at=self.NOW + 90_000), self.NOW + 601)
         self.assertIsNone(lim.paused(self.NOW + 601))
+        self.assertEqual([w["label"] for w in lim.wire(self.NOW + 601)["windows"]], ["7d"])
 
-    def test_a_rejection_pauses_even_with_no_limits_until_its_reset(self):
-        lim = self.limiter()
-        lim.observe(rate_limit_event(status="rejected", window="five_hour",
-                                     resets_at=self.NOW + 600), self.NOW)
-        self.assertEqual(lim.paused(self.NOW), {"window": "five_hour", "utilization": None,
-                                                "max": None, "resets_at": self.NOW + 600,
-                                                "reason": "rejected"})
+    def test_a_refusal_pauses_until_its_reset(self):
+        lim = claude_limiter()
+        ev = rate_limit_event(status="rejected", resets_at=self.NOW + 600)
+        self.assertEqual(lim.observe(ev, self.NOW)["refused_resets_at"], self.NOW + 600)
+        self.assertEqual(lim.paused(self.NOW), {"label": None, "used_pct": None, "pause_at": None,
+                                                "resets_at": self.NOW + 600, "reason": "rejected"})
         self.assertIsNone(lim.paused(self.NOW + 600))
 
-    def test_a_later_allowed_event_under_the_limits_ends_a_rejection_early(self):
-        lim = self.limiter(max_five_hour=0.9)
+    def test_a_refusal_wins_a_tie_on_reset(self):
+        lim = claude_limiter()
+        lim.observe(rate_limit_event(five_hour=1.0, status="rejected", resets_at=self.NOW + 600), self.NOW)
+        self.assertEqual(lim.paused(self.NOW)["reason"], "rejected")
+
+    def test_a_later_reading_under_the_pause_at_ends_a_refusal_early(self):
+        lim = claude_limiter()
         lim.observe(rate_limit_event(status="rejected", resets_at=self.NOW + 3600), self.NOW)
         lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 3600), self.NOW + 10)
-        self.assertEqual(lim.paused(self.NOW + 10)["reason"], "limit")   # still over its max
+        self.assertEqual(lim.paused(self.NOW + 10)["reason"], "limit")   # still over its pause-at
         lim.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 3600), self.NOW + 20)
         self.assertIsNone(lim.paused(self.NOW + 20))
 
     def test_overage_status_rejected_is_not_a_refusal(self):
         # The 2.1.270 spike: an `allowed` call on an account with no overage credits carries
-        # `overageStatus: "rejected"`. Only `status` means Claude refused the call.
-        lim = self.limiter()
+        # `overageStatus: "rejected"`. Only `status` means the call was refused.
+        lim = claude_limiter()
         lim.observe(rate_limit_event(five_hour=0.02, resets_at=self.NOW + 600), self.NOW)
         self.assertIsNone(lim.paused(self.NOW))
 
-    def test_the_top_level_shape_is_accepted_too(self):
-        lim = self.limiter(max_five_hour=0.9)
-        ev = rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600)
-        flat = dict(ev["rate_limit_info"], type="rate_limit_event")
-        self.assertTrue(lim.observe(flat, self.NOW))
-        self.assertIsNotNone(lim.paused(self.NOW))
-
     def test_junk_events_are_ignored_and_never_raise(self):
-        lim = self.limiter(max_five_hour=0.9)
+        lim = claude_limiter()
         for junk in (None, "x", [], {"type": "assistant"},
                      {"type": "rate_limit_event", "rate_limit_info": "junk"},
                      {"type": "rate_limit_event",
                       "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": "high",
-                                                                           "resetsAt": 5}}}},
-                     {"type": "rate_limit_event",
-                      "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": True,
                                                                            "resetsAt": self.NOW + 9}}}},
                      {"type": "rate_limit_event",
-                      "rate_limit_info": {"status": "rejected", "rateLimitType": ["five_hour"]}}):
+                      "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": True,
+                                                                           "resetsAt": self.NOW + 9}}}}):
             lim.observe(junk, self.NOW)     # must not raise
         self.assertIsNone(lim.paused(self.NOW))
-        self.assertFalse(lim.observe({"type": "assistant"}, self.NOW))
+        self.assertIsNone(lim.observe({"type": "assistant"}, self.NOW))
 
-    def test_a_probe_is_due_only_after_the_interval_since_the_last_event_or_probe(self):
-        lim = self.limiter(max_five_hour=0.9)
+    def test_a_limiter_with_no_usable_rule_never_raises_or_pauses(self):
+        for usage in (None, {"source": "none"}, {"source": "output", "match": 5}):
+            lim = relay.UsageLimiter("k", "K", usage)
+            self.assertIsNone(lim.observe(rate_limit_event(five_hour=1.0, resets_at=self.NOW + 9), self.NOW))
+            self.assertIsNone(lim.paused(self.NOW))
+            self.assertFalse(lim.recheck_due(self.NOW))
+            self.assertFalse(lim.command_due(self.NOW))
+        self.assertEqual(relay.UsageLimiter("k", "K", None).wire(self.NOW),
+                         {"source": "none", "read_at": None, "windows": [], "paused": None})
+
+    def test_the_codex_token_count_line_reads_through_its_rule(self):
+        lim = codex_limiter()
+        lim.observe(codex_token_count(), 1_791_600_000)
+        self.assertEqual(lim.wire(1_791_600_000), {
+            "source": "command", "read_at": 1_791_600_000,
+            "windows": [{"label": "5h", "used_pct": 0.0, "resets_at": 1_791_623_773},
+                        {"label": "wk", "used_pct": 3.0, "resets_at": 1_792_000_000}],
+            "paused": None})
+        tight = codex_limiter(**{"5h": 1})
+        tight.observe(codex_token_count(primary=2.0), 1_791_600_000)
+        self.assertEqual(tight.paused(1_791_600_000)["label"], "5h")
+
+    def test_a_recheck_is_due_only_after_its_interval_since_the_last_reading_or_recheck(self):
+        lim = claude_limiter()
+        self.assertTrue(lim.recheck_due(self.NOW))       # never heard from: due
         lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200), self.NOW)
-        self.assertFalse(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S - 1))
-        self.assertTrue(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S))
-        lim.mark_probed(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S)
-        self.assertFalse(lim.probe_due(self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S + 1))
+        self.assertFalse(lim.recheck_due(self.NOW + 899))
+        self.assertTrue(lim.recheck_due(self.NOW + 900))
+        lim.mark_rechecked(self.NOW + 900)
+        self.assertFalse(lim.recheck_due(self.NOW + 901))
 
-    def test_a_probe_reading_under_the_limit_resumes_before_the_reset(self):
-        """AC5: paused at 95%, a probe 15 minutes later reports 20% — claiming may resume."""
-        lim = self.limiter(max_five_hour=0.9)
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200), self.NOW)
-        later = self.NOW + relay.RATE_LIMIT_PROBE_INTERVAL_S
-        self.assertTrue(lim.probe_due(later))
-        lim.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 7200), later)
-        self.assertIsNone(lim.paused(later))
+    def test_the_usage_command_is_due_every_interval_min(self):
+        lim = codex_limiter()
+        self.assertTrue(lim.command_due(self.NOW))       # never run: due
+        lim.mark_command_run(self.NOW)
+        self.assertFalse(lim.command_due(self.NOW + 299))
+        self.assertTrue(lim.command_due(self.NOW + 300))
+        self.assertFalse(claude_limiter().command_due(self.NOW))   # source output: never
 
-    def test_the_pause_line_names_window_usage_limit_reset_and_probe_cadence(self):
-        pause = {"window": "five_hour", "utilization": 0.95, "max": 0.9,
-                 "resets_at": self.NOW, "reason": "limit"}
-        line = relay.rate_limit_pause_line(pause)
-        self.assertTrue(line.startswith("⏸ rate limited: five_hour 95% ≥ 90% limit · resumes "))
-        self.assertTrue(line.endswith(" · probing every 15m"))
-        refused = relay.rate_limit_pause_line(dict(pause, reason="rejected", max=None))
-        self.assertIn("Claude refused (five_hour)", refused)
+    def test_the_pause_line_names_harness_window_usage_reset_and_recheck_cadence(self):
+        pause = {"label": "5h", "used_pct": 95.0, "pause_at": 90, "resets_at": self.NOW,
+                 "reason": "limit"}
+        line = relay.usage_pause_line("Codex", pause, 15)
+        self.assertEqual(line, f"⏸ Codex paused: 5h 95% ≥ 90% · resumes "
+                               f"{relay.local_clock(self.NOW)} · re-checking every 15m")
+        refused = relay.usage_pause_line("Claude Code", dict(pause, label=None, used_pct=None,
+                                                             pause_at=None, reason="rejected"), 15)
+        self.assertEqual(refused, f"⏸ Claude Code paused: refused a call · resumes "
+                                  f"{relay.local_clock(self.NOW)} · re-checking every 15m")
+
+    def test_the_resume_line_names_the_harness(self):
+        self.assertEqual(relay.usage_resume_line("Codex"),
+                         "▶ Codex usage back under its pause-at — claiming its nodes again")
 
 
-class ProbeClaudeUsageTest(unittest.TestCase):
+class HarnessUsageBookTest(unittest.TestCase):
+    """RE436: one limiter per harness key, rebuilt when the harness definitions move."""
+
+    NOW = 1_791_600_000
+
+    def _defs(self, claude_command=None, **codex_pause_at):
+        return [harness_definition("claude-code", "Claude Code", claude_seed_usage(),
+                                   command=claude_command),
+                harness_definition("codex", "Codex", codex_seed_usage(**codex_pause_at))]
+
+    def test_readings_survive_a_rebuild_that_leaves_the_usage_rule_alone(self):
+        book = relay.HarnessUsageBook()
+        book.rebuild(self._defs())
+        book.for_key("codex").observe(codex_token_count(primary=95.0), self.NOW)
+        self.assertEqual(book.paused_keys(self.NOW), {"codex"})
+
+        book.rebuild(self._defs(claude_command="claude -p {prompt} --verbose"))
+        self.assertEqual(book.paused_keys(self.NOW), {"codex"})
+
+    def test_a_changed_usage_rule_replaces_the_limiter_and_its_readings(self):
+        book = relay.HarnessUsageBook()
+        book.rebuild(self._defs())
+        book.for_key("codex").observe(codex_token_count(primary=95.0), self.NOW)
+
+        book.rebuild(self._defs(**{"5h": 99}))
+        self.assertEqual(book.paused_keys(self.NOW), set())
+        self.assertIsNone(book.wire_for("codex", self.NOW)["read_at"])
+
+    def test_lookups_by_key(self):
+        book = relay.HarnessUsageBook()
+        book.rebuild(self._defs())
+        self.assertEqual(book.for_key("codex").name, "Codex")
+        self.assertIsNone(book.for_key("nope"))
+        self.assertIsNone(book.wire_for("nope", self.NOW))
+        self.assertEqual(book.wire_for("claude-code", self.NOW)["source"], "output")
+        self.assertEqual(sorted(k for k, _l in book.items()), ["claude-code", "codex"])
+
+    def test_a_harness_dropped_from_the_board_is_forgotten(self):
+        book = relay.HarnessUsageBook()
+        book.rebuild(self._defs())
+        book.rebuild(self._defs()[:1] + [None, {"name": "no key"}])
+        self.assertEqual([k for k, _l in book.items()], ["claude-code"])
+
+
+class RecheckHarnessTest(unittest.TestCase):
+    """RE436: while a harness is paused and idle, the runner asks it for a fresh reading — the
+    cheapest call its own template can make, from a neutral cwd. It returns a reason, never
+    un-pauses anything by itself."""
+
+    NOW = 1_800_000_000
+    HARNESS = {"key": "fake", "name": "Fake",
+               "command": "fake-cli -p {prompt} --model {model} --cd {worktree}"}
+
     def setUp(self):
         self.addCleanup(setattr, relay.subprocess, "run", relay.subprocess.run)
+        self.addCleanup(setattr, relay, "usage_clock", relay.usage_clock)
+        relay.usage_clock = lambda: self.NOW
+        self.calls = []
 
-    def test_the_probe_is_a_cheap_single_turn_call_outside_any_worktree_fed_to_the_limiter(self):
-        seen = {}
-        out = "\n".join([json.dumps({"type": "system", "subtype": "init"}),
-                         json.dumps(rate_limit_event(five_hour=0.2, resets_at=4_102_444_800)),
-                         json.dumps({"type": "result"})])
-
-        def fake_run(cmd, **kw):
-            seen.update(cmd=cmd, kw=kw)
-            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
-
+    def _run(self, stdout="", raises=None, outputs=None):
+        def fake_run(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            if raises:
+                raise raises
+            out = outputs.pop(0) if outputs else stdout
+            return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
         relay.subprocess.run = fake_run
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        self.assertIsNone(relay.probe_claude_usage(lim))
-        cmd = seen["cmd"]
-        self.assertEqual(cmd[:3], ["claude", "-p", "ok"])
-        self.assertEqual(cmd[cmd.index("--model") + 1], relay.RATE_LIMIT_PROBE_MODEL)
-        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "1")
-        self.assertIn("stream-json", cmd)
-        self.assertNotIn(relay.WORKTREES_DIR, seen["kw"]["cwd"])
-        self.assertEqual(seen["kw"]["timeout"], relay.RATE_LIMIT_PROBE_TIMEOUT_S)
 
-    def test_a_missing_binary_is_a_reason_not_a_crash(self):
-        def boom(cmd, **kw):
-            raise FileNotFoundError("claude")
+    def _limiter(self):
+        usage = claude_seed_usage()
+        usage["recheck"]["model"] = "m1"
+        return relay.UsageLimiter("fake", "Fake", usage)
 
+    def test_the_recheck_runs_the_harness_template_with_its_recheck_model_from_the_temp_dir(self):
+        self._run(stdout="\n".join([json.dumps({"type": "system"}),
+                                    json.dumps(rate_limit_event(five_hour=0.2, resets_at=FAR_RESET))]))
+        lim = self._limiter()
+        self.assertIsNone(relay.recheck_harness(lim, self.HARNESS))
+        (argv, kwargs), = self.calls
+        self.assertEqual(argv, ["fake-cli", "-p", "ok", "--model", "m1", "--cd", tempfile.gettempdir()])
+        self.assertEqual(kwargs["cwd"], tempfile.gettempdir())
+        self.assertEqual(kwargs["timeout"], relay.USAGE_COMMAND_TIMEOUT_S)
+        self.assertEqual(relay.USAGE_COMMAND_TIMEOUT_S, 60)
+        self.assertEqual(lim.wire(self.NOW)["windows"][0]["used_pct"], 20.0)
+
+    def test_a_recheck_with_no_matching_line_is_a_reason(self):
+        self._run(stdout="oops\n" + json.dumps({"type": "result"}))
+        lim = self._limiter()
+        lim.observe(rate_limit_event(five_hour=0.95, resets_at=FAR_RESET), self.NOW)
+        self.assertIn("no usage reading", relay.recheck_harness(lim, self.HARNESS))
+        self.assertIsNotNone(lim.paused(self.NOW + 1))
+
+    def test_a_timeout_or_missing_binary_is_a_reason_not_a_crash(self):
+        for error in (subprocess.TimeoutExpired(["fake-cli"], 60), FileNotFoundError("fake-cli")):
+            self._run(raises=error)
+            self.assertIsInstance(relay.recheck_harness(self._limiter(), self.HARNESS), str)
+
+    def test_a_template_needing_a_ref_is_a_reason_not_a_crash(self):
+        self._run(stdout="")
+        harness = dict(self.HARNESS, command="fake-cli -p {prompt} --tag {ref}")
+        self.assertIsInstance(relay.recheck_harness(self._limiter(), harness), str)
+        self.assertEqual(self.calls, [])
+
+    def test_a_command_sourced_harness_reads_its_usage_command_after_the_recheck(self):
+        line = json.dumps(codex_token_count(primary=10.0))
+        self._run(outputs=["{\"type\": \"turn.completed\"}", line])
+        lim = relay.UsageLimiter("codex", "Codex", codex_seed_usage())
+        self.assertIsNone(relay.recheck_harness(lim, dict(self.HARNESS, key="codex")))
+        self.assertEqual(self.calls[0][0][:3], ["fake-cli", "-p", "ok"])
+        self.assertEqual(self.calls[1][0][:2], ["sh", "-c"])
+        self.assertEqual(lim.wire(1_791_600_000)["windows"][0]["used_pct"], 10.0)
+
+
+class RunUsageCommandTest(unittest.TestCase):
+    """RE436: a `command`-sourced harness's usage is read by running its board-authored command
+    through `sh -c`, from a neutral cwd."""
+
+    NOW = 1_791_600_000
+
+    def setUp(self):
+        self.addCleanup(setattr, relay.subprocess, "run", relay.subprocess.run)
+        self.addCleanup(setattr, relay, "usage_clock", relay.usage_clock)
+        relay.usage_clock = lambda: self.NOW
+        self.calls = []
+
+    def _usage(self):
+        usage = codex_seed_usage()
+        usage["command"] = "printf '%s' usage"
+        return usage
+
+    def test_the_last_matching_line_wins(self):
+        out = "\n".join([json.dumps(codex_token_count(primary=2.0)), "not json",
+                         json.dumps(codex_token_count(primary=5.0))])
+
+        def fake_run(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+        relay.subprocess.run = fake_run
+        lim = relay.UsageLimiter("codex", "Codex", self._usage())
+        self.assertIsNone(relay.run_usage_command(lim))
+        (argv, kwargs), = self.calls
+        self.assertEqual(argv, ["sh", "-c", "printf '%s' usage"])
+        self.assertEqual(kwargs["cwd"], tempfile.gettempdir())
+        self.assertEqual(kwargs["timeout"], relay.USAGE_COMMAND_TIMEOUT_S)
+        self.assertEqual(lim.wire(self.NOW)["windows"][0]["used_pct"], 5.0)
+
+    def test_no_matching_line_or_a_failure_is_a_reason(self):
+        relay.subprocess.run = lambda argv, **k: subprocess.CompletedProcess(argv, 1, stdout="", stderr="x")
+        lim = relay.UsageLimiter("codex", "Codex", self._usage())
+        self.assertIn("no usage reading", relay.run_usage_command(lim))
+
+        def boom(argv, **k):
+            raise subprocess.TimeoutExpired(argv, 60)
         relay.subprocess.run = boom
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        self.assertIn("claude", relay.probe_claude_usage(lim))
+        self.assertIsInstance(relay.run_usage_command(lim), str)
 
-    def test_a_probe_with_no_event_is_not_evidence(self):
-        relay.subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="oops", stderr="")
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=4_102_444_800), 1_000)
-        self.assertIn("no rate_limit_event", relay.probe_claude_usage(lim))
-        self.assertIsNotNone(lim.paused(1_001))
+
+class UsagePollerTest(unittest.TestCase):
+    """RE436: the background thread that runs usage commands on their interval and re-checks a
+    paused, idle harness."""
+
+    NOW = 1_791_600_000
+
+    def setUp(self):
+        for name in ("usage_clock", "recheck_harness", "run_usage_command", "log"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.now = self.NOW
+        relay.usage_clock = lambda: self.now
+        self.rechecks, self.commands, self.lines = [], [], []
+        relay.recheck_harness = lambda limiter, harness: (self.rechecks.append(harness["key"])
+                                                          or self.recheck_result)
+        relay.run_usage_command = lambda limiter: self.commands.append(limiter.key)
+        relay.log = lambda msg, **k: self.lines.append(msg)
+        self.recheck_result = None
+        self.defs = {"claude-code": harness_definition("claude-code", "Claude Code", claude_seed_usage()),
+                     "codex": harness_definition("codex", "Codex", codex_seed_usage())}
+        self.book = relay.HarnessUsageBook()
+        self.book.rebuild(list(self.defs.values()))
+        # Paused Codex, last heard from a full re-check interval ago.
+        self.book.for_key("codex").observe(codex_token_count(primary=95.0), self.NOW - 900)
+        self.book.for_key("codex").mark_command_run(self.NOW)
+        self.busy = set()
+
+    def _poller(self):
+        return relay.UsagePoller(self.book, lambda: self.defs, lambda: self.busy)
+
+    def test_a_busy_paused_harness_is_not_rechecked(self):
+        self.busy = {"codex"}
+        self._poller().tick()
+        self.assertEqual(self.rechecks, [])
+
+    def test_an_idle_paused_harness_is_rechecked_once_per_interval(self):
+        poller = self._poller()
+        poller.tick()
+        poller.tick()
+        self.assertEqual(self.rechecks, ["codex"])
+
+    def test_a_command_source_runs_its_usage_command_once_per_due_interval(self):
+        poller = self._poller()
+        self.now = self.NOW + 299
+        poller.tick()
+        self.assertEqual(self.commands, [])
+        self.now = self.NOW + 300
+        poller.tick()
+        poller.tick()
+        self.assertEqual(self.commands, ["codex"])
+
+    def test_a_failed_recheck_is_logged_once_per_pause(self):
+        self.recheck_result = "fake-cli exited 1"
+        poller = self._poller()
+        poller.tick()
+        self.now += 900
+        poller.tick()
+        self.assertEqual(self.rechecks, ["codex", "codex"])
+        self.assertEqual(self.lines, ["usage re-check for Codex failed (fake-cli exited 1) — "
+                                      "waiting for the reset"])
+
+    def test_a_tick_never_raises(self):
+        def boom(limiter, harness):
+            raise RuntimeError("bad")
+        relay.recheck_harness = boom
+        self._poller().tick()            # must not raise: it runs on a daemon thread
+
+    def test_the_slice_is_five_seconds(self):
+        self.assertEqual(relay.USAGE_SLICE_S, 5)
 
 
 class ExecuteLoopTest(unittest.TestCase):
@@ -6915,7 +7313,7 @@ class ExecuteLoopTest(unittest.TestCase):
         hashes cfg["name"] into the identity lock path, so a later override would lock
         under one name and advertise another."""
         seen = {}
-        relay.claim_node_job = lambda runner, cap, timeout, running, held=(): (
+        relay.claim_node_job = lambda runner, cap, timeout, running, held=(), harnesses=None: (
             seen.update(runner=runner) or None)
         relay.report_outcome = lambda *a: "done"
 
@@ -7103,139 +7501,184 @@ class ExecuteLoopTest(unittest.TestCase):
 
 
 class RateLimitLoopTest(unittest.TestCase):
-    """RE320: the claim loop's pause/probe/resume branch, on a fake usage clock."""
+    """RE320 → RE436: the claim loop's per-harness pause/re-check/resume, on a fake usage clock.
+    A paused harness drops out of the claim's `harnesses`; only when every installed harness is
+    paused does the runner claim nothing at all."""
 
-    NOW = 1_800_000_000
+    NOW = 1_791_600_000
 
     def setUp(self):
         ExecuteLoopTest.setUp(self)
-        for name in ("UsageLimiter", "usage_clock", "probe_claude_usage", "USAGE_LIMITER",
-                     "RATE_LIMIT_PAUSE_SLICE_S", "maybe_auto_update"):
+        for name in ("HarnessUsageBook", "USAGE", "usage_clock", "recheck_harness",
+                     "run_usage_command", "USAGE_SLICE_S", "maybe_auto_update", "api",
+                     "harness_inventory"):
             self.addCleanup(setattr, relay, name, getattr(relay, name))
         relay.usage_clock = lambda: self.NOW
-        relay.RATE_LIMIT_PAUSE_SLICE_S = 0.01
+        relay.USAGE_SLICE_S = 0.01
         relay.maybe_auto_update = lambda *a, **k: False
         self.lines = []
         relay.log = lambda msg, **k: self.lines.append(msg)
         self.claims = []
         self.reports = []
         relay.report_outcome = lambda *a: (self.reports.append(a) or "done")
+        self.defs = [harness_definition("claude-code", "Claude Code", claude_seed_usage()),
+                     harness_definition("codex", "Codex", codex_seed_usage())]
+        self.installed = {"claude-code", "codex"}
+        self.beats = []
 
-    def _limits(self, **limits):
-        base = relay.load_runner_config()
-        relay.load_runner_config = lambda: dict(base, limits=limits)
+        def api(method, path, body=None, **kwargs):
+            if path == "/api/harnesses":
+                return {"harnesses": self.defs, "digest": "d1"}
+            if path == "/api/node-jobs/heartbeat":
+                self.beats.append(body)
+            return {}
 
-    def _use(self, limiter):
-        relay.UsageLimiter = lambda limits: limiter
+        relay.api = api
+        relay.harness_inventory = lambda harnesses, **k: [
+            {"key": h["key"], "installed": h["key"] in self.installed, "version": "1",
+             "signed_in": None} for h in harnesses]
+        self.book = relay.HarnessUsageBook()
+        self.book.rebuild(self.defs)
+        relay.HarnessUsageBook = lambda: self.book
+        self.rechecks = []
+        relay.recheck_harness = lambda limiter, harness: self.rechecks.append(harness["key"]) or "no"
+        relay.run_usage_command = lambda limiter: "not run in tests"
+
+    def _pause(self, key, at=None):
+        at = self.NOW if at is None else at
+        if key == "codex":
+            self.book.for_key(key).observe(codex_token_count(primary=95.0), at)
+        else:
+            self.book.for_key(key).observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), at)
 
     def _claim_nothing(self):
-        relay.claim_node_job = lambda *a, **k: (self.claims.append(a) or None)
+        relay.claim_node_job = lambda *a, **k: (self.claims.append(k.get("harnesses")) or None)
 
     def _start(self, once=True):
         relay.cmd_start(argparse.Namespace(once=once, dry_run=False, interval=None, name=None))
 
-    def test_a_paused_runner_claims_nothing_and_says_so_once(self):
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
-        self._use(lim)
-        self._claim_nothing()
-
-        self._start()
-
-        self.assertEqual(self.claims, [])
-        paused = [line for line in self.lines if line.startswith("⏸ rate limited")]
-        self.assertEqual(len(paused), 1)
-        self.assertIn("five_hour 95% ≥ 90% limit", paused[0])
-
-    def test_with_no_limits_an_over_limit_reading_still_claims(self):
-        """AC3."""
-        lim = relay.UsageLimiter({})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
-        self._use(lim)
-        self._claim_nothing()
-
-        self._start()
-
-        self.assertEqual(len(self.claims), 1)
-        self.assertFalse(any(line.startswith("⏸") for line in self.lines))
-
-    def test_the_node_that_crosses_the_limit_finishes_and_nothing_more_is_claimed(self):
-        """AC2 in miniature: capacity 1, the first job's stream crosses the limit mid-run."""
-        self._limits(max_five_hour=0.9, max_seven_day=0.9)
-        j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-
-        def claim(*a, **k):
-            self.claims.append(a)
-            return j if len(self.claims) == 1 else None
-
-        def run_node_job(job, path, control, partition=None):
-            relay.USAGE_LIMITER.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600),
-                                        self.NOW)
-            return ("succeeded", "", "sha", None, False, None)
-
-        relay.claim_node_job = claim
-        relay.run_node_job = run_node_job
-        watchdog = threading.Timer(2, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+    def _watchdog(self, seconds=5):
+        watchdog = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
         watchdog.daemon = True
         self.addCleanup(watchdog.cancel)
         watchdog.start()
 
-        self._start(once=False)
-
-        self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
-        self.assertEqual(len(self.claims), 1)
-        self.assertEqual(sum(1 for line in self.lines if line.startswith("⏸ rate limited")), 1)
-
-    def test_a_probe_under_the_limits_resumes_claiming_before_the_reset(self):
-        """AC5: the loop half — the probe's reading is what un-pauses, then it claims."""
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200),
-                    self.NOW - relay.RATE_LIMIT_PROBE_INTERVAL_S)
-        self._use(lim)
-        probes = []
-
-        def probe(limiter):
-            probes.append(limiter)
-            limiter.observe(rate_limit_event(five_hour=0.2, resets_at=self.NOW + 7200), self.NOW)
-            return None
-
-        relay.probe_claude_usage = probe
+    def test_a_paused_harness_is_left_out_of_the_claim_and_said_so_once(self):
+        self._pause("codex")
         self._claim_nothing()
 
         self._start()
 
-        self.assertEqual(probes, [lim])
-        self.assertIn(relay.RATE_LIMIT_RESUME_LINE, self.lines)
-        self.assertEqual(len(self.claims), 1)
+        self.assertEqual(self.claims, [["claude-code"]])
+        paused = [line for line in self.lines if line.startswith("⏸ Codex paused: 5h")]
+        self.assertEqual(len(paused), 1)
+        self.assertIn("5h 95% ≥ 90%", paused[0])
 
-    def test_a_failed_probe_logs_once_and_keeps_waiting(self):
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 7200),
-                    self.NOW - relay.RATE_LIMIT_PROBE_INTERVAL_S)
-        self._use(lim)
-        relay.probe_claude_usage = lambda limiter: "claude exited 1 with no rate_limit_event"
+    def test_when_every_installed_harness_is_paused_nothing_is_claimed(self):
+        self._pause("codex")
+        self._pause("claude-code")
         self._claim_nothing()
 
         self._start()
 
         self.assertEqual(self.claims, [])
-        self.assertEqual(sum(1 for line in self.lines if "probe failed" in line), 1)
-        self.assertNotIn(relay.RATE_LIMIT_RESUME_LINE, self.lines)
+        self.assertEqual(sum(1 for line in self.lines if line.startswith("⏸ ")), 2)
 
-    def test_the_heartbeat_reports_the_pause(self):
-        lim = relay.UsageLimiter({"max_five_hour": 0.9})
-        lim.observe(rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
-        self._use(lim)
+    def test_a_paused_harness_that_is_not_installed_does_not_stop_claiming(self):
+        self.installed = {"claude-code"}
+        self._pause("codex")
         self._claim_nothing()
-        bodies = []
-        self.addCleanup(setattr, relay, "api", relay.api)
-        relay.api = lambda method, path, body=None, **k: (
-            bodies.append(body) if path == "/api/node-jobs/heartbeat" else None) or {}
 
         self._start()
 
-        self.assertEqual(bodies[0]["rate_limit"]["window"], "five_hour")
-        self.assertEqual(bodies[0]["rate_limit"]["reason"], "limit")
+        self.assertEqual(self.claims, [["claude-code"]])
+
+    def test_before_the_definitions_are_fetched_the_claim_names_no_harnesses(self):
+        def api(method, path, body=None, **kwargs):
+            if path == "/api/harnesses":
+                raise relay.Died("board down")
+            return {}
+
+        relay.api = api
+        self._claim_nothing()
+
+        self._start()
+
+        self.assertEqual(self.claims, [None])
+
+    def test_a_recheck_under_the_pause_at_puts_the_harness_back_in_the_claim(self):
+        """AC5, per harness: the poller's re-check reading is what un-pauses Codex."""
+        self._pause("codex", at=self.NOW - 900)
+
+        def recheck(limiter, harness):
+            self.rechecks.append(harness["key"])
+            limiter.observe(codex_token_count(primary=10.0), self.NOW)
+            return None
+
+        def claim(*a, **k):
+            self.claims.append(k.get("harnesses"))
+            if "codex" in (k.get("harnesses") or []):
+                relay.signal.getsignal(relay.signal.SIGINT)(None, None)
+            time.sleep(0.005)
+
+        relay.recheck_harness = recheck
+        relay.claim_node_job = claim
+        self._watchdog()
+
+        self._start(once=False)
+
+        self.assertEqual(self.rechecks, ["codex"])
+        self.assertEqual(self.claims[0], ["claude-code"])
+        self.assertEqual(self.claims[-1], ["claude-code", "codex"])
+        self.assertEqual(sum(1 for line in self.lines
+                             if line.startswith("▶ Codex usage back under its pause-at")), 1)
+
+    def test_the_node_that_crosses_the_limit_finishes_and_nothing_more_is_claimed(self):
+        """AC2 in miniature: capacity 1, the only installed harness crosses its pause-at
+        mid-run."""
+        self.installed = {"claude-code"}
+        j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+
+        def claim(*a, **k):
+            self.claims.append(k.get("harnesses"))
+            return j if len(self.claims) == 1 else None
+
+        def run_node_job(job, path, control, partition=None):
+            relay.USAGE.for_key("claude-code").observe(
+                rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
+            return ("succeeded", "", "sha", None, False, None)
+
+        relay.claim_node_job = claim
+        relay.run_node_job = run_node_job
+        self._watchdog(1)
+
+        self._start(once=False)
+
+        self.assertEqual(self.reports[0][:2], ("nj-1", "succeeded"))
+        self.assertEqual(self.claims, [["claude-code"]])
+        self.assertEqual(sum(1 for line in self.lines if line.startswith("⏸ Claude Code paused")), 1)
+
+    def test_the_heartbeat_reports_each_harness_usage(self):
+        self._pause("codex")
+        self._claim_nothing()
+
+        self._start()
+
+        entry, = [h for h in self.beats[0]["harnesses"] if h["key"] == "codex"]
+        self.assertEqual(entry["usage"]["paused"]["label"], "5h")
+        self.assertEqual(entry["usage"]["paused"]["reason"], "limit")
+        self.assertNotIn("rate_limit", self.beats[0])
+
+    def test_dry_run_starts_no_usage_poller(self):
+        started = []
+        self.addCleanup(setattr, relay, "UsagePoller", relay.UsagePoller)
+        relay.UsagePoller = lambda *a, **k: type("P", (), {
+            "start": lambda self: started.append(1), "stop": lambda self: None})()
+        self._claim_nothing()
+
+        relay.cmd_start(argparse.Namespace(once=True, dry_run=True, interval=None, name=None))
+
+        self.assertEqual(started, [])
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
@@ -7905,13 +8348,21 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         # this whole card is about.
         self.assertEqual(set(relay.HOLDING_STATES), set(self.vocab["holding_states"]))
 
-    def test_rate_limit_vocabularies_match_the_fixture(self):
-        # RE320: the server stores nil for a window/reason it does not know, so a drift here would
-        # silently erase every pause from the board.
-        self.assertEqual(relay.RATE_LIMIT_WINDOWS, tuple(self.vocab["rate_limit_windows"]))
-        self.assertEqual(relay.RATE_LIMIT_REASONS, tuple(self.vocab["rate_limit_reasons"]))
-        self.assertEqual((relay.RATE_LIMIT_REASON_LIMIT, relay.RATE_LIMIT_REASON_REJECTED),
-                         relay.RATE_LIMIT_REASONS)
+    def test_usage_pause_reasons_match_the_fixture(self):
+        # RE320 → RE436: the server stores nil for a reason it does not know, so a drift here
+        # would silently erase every pause from the board. Windows are per-harness labels now,
+        # so there is no window vocabulary left to pin.
+        self.assertEqual(relay.USAGE_PAUSE_REASONS, tuple(self.vocab["rate_limit_reasons"]))
+        self.assertEqual((relay.USAGE_REASON_LIMIT, relay.USAGE_REASON_REJECTED),
+                         relay.USAGE_PAUSE_REASONS)
+        self.assertNotIn("rate_limit_windows", self.vocab)
+
+    def test_usage_vocabularies_match_the_fixture(self):
+        # RE436: a harness's usage rule names its source and units from these closed sets
+        # (Schemas.HarnessUsage); a drift would make the runner ignore a rule the board accepts.
+        self.assertEqual(relay.USAGE_SOURCES, tuple(self.vocab["usage_sources"]))
+        self.assertEqual(relay.USAGE_USED_UNITS, tuple(self.vocab["usage_used_units"]))
+        self.assertEqual(relay.USAGE_RESETS_UNITS, tuple(self.vocab["usage_resets_units"]))
 
     def test_stage_vocabularies_match_the_fixture(self):
         # RE384: `./relay stage` offers these as argparse choices; a drift would let the CLI
@@ -7919,6 +8370,62 @@ class RunnerVocabularyContractTest(unittest.TestCase):
         self.assertEqual(relay.STAGE_LANES, tuple(self.vocab["stage_lanes"]))
         self.assertEqual(relay.STAGE_TYPES, tuple(self.vocab["stage_types"]))
         self.assertEqual(relay.STAGE_CATEGORIES, tuple(self.vocab["stage_categories"]))
+
+
+class UsageRuleContractTest(unittest.TestCase):
+    """RE436: the runner's usage-rule evaluator mirrors Schemas.HarnessUsage.Rule. Both run the
+    same hand-authored cases (Relay.UsageRuleCases, copied into the contract fixture as
+    `usage_rule_cases`), so the two cannot drift without one suite going red."""
+
+    def setUp(self):
+        self.cases = CONTRACT["usage_rule_cases"]
+
+    def test_every_path_reads_its_value(self):
+        for case in self.cases["paths"]:
+            with self.subTest(path=case["path"]):
+                self.assertEqual(relay.parse_rule_path(case["path"]), case["segments"])
+                value = relay.read_rule_path(case["event"], case["path"])
+                self.assertEqual(value, case["value"])
+                self.assertIs(type(value), type(case["value"]))
+
+    def test_every_invalid_path_is_refused(self):
+        for path in self.cases["invalid_paths"]:
+            with self.subTest(path=path):
+                self.assertIsNone(relay.parse_rule_path(path))
+                self.assertIsNone(relay.read_rule_path({"a": {"b": 1}}, path))
+
+    def test_every_condition_holds_as_expected(self):
+        for case in self.cases["conditions"]:
+            with self.subTest(condition=case["condition"]):
+                self.assertIsNotNone(relay.parse_rule_condition(case["condition"]))
+                self.assertIs(relay.rule_holds(case["event"], case["condition"]), case["holds"])
+
+    def test_every_invalid_condition_is_refused(self):
+        for condition in self.cases["invalid_conditions"]:
+            with self.subTest(condition=condition):
+                self.assertIsNone(relay.parse_rule_condition(condition))
+                self.assertIs(relay.rule_holds({}, condition), False)
+
+    def test_every_reading_equals_its_expectation(self):
+        for case in self.cases["readings"]:
+            with self.subTest(name=case["name"]):
+                got = relay.usage_reading(case["usage"], case["event"], case["now"])
+                self.assertEqual(got, case["expect"])
+                if got is not None:
+                    for window in got["windows"]:
+                        self.assertIs(type(window["used_pct"]), float)
+                        self.assertIs(type(window["resets_at"]), int)
+
+    def test_garbage_never_raises(self):
+        for usage in (None, 5, "x", {"source": "output", "match": 5, "windows": "x"},
+                      {"source": "output", "match": ".a == 1", "windows": [None, 3, {}],
+                       "pause_now": "x"}):
+            for event in (None, {"a": 1}, [1], "s"):
+                with self.subTest(usage=usage, event=event):
+                    relay.usage_reading(usage, event, 0)
+        self.assertIsNone(relay.parse_rule_path(None))
+        self.assertIsNone(relay.parse_rule_condition(7))
+        self.assertIs(relay.rule_holds({}, None), False)
 
 
 class RunnerIdentTest(unittest.TestCase):
@@ -8017,12 +8524,14 @@ class FakeHeartbeat:
     instances = []
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None, rate_limit_fn=None):
+                 held_fn=None, on_release_held=None, usage_fn=None, on_definitions=None):
         self.runner = runner
         self.capacity = capacity or {}
         self.held_fn = held_fn
         self.on_release_held = on_release_held
-        self.rate_limit_fn = rate_limit_fn
+        self.usage_fn = usage_fn
+        self.on_definitions = on_definitions
+        self.harnesses = None
         self.beats = []
         self.events = []
         FakeHeartbeat.instances.append(self)
@@ -9095,12 +9604,17 @@ class RunsAndRunnersRenderingTest(unittest.TestCase):
         self.assertIn("no runners", relay.format_runners([]))
 
     def test_runners_render_flags_a_rate_limited_runner(self):
-        paused = [dict(self.RUNNERS[0], rate_limit={"window": "five_hour", "utilization": 0.95,
-                                                     "max": 0.9, "reason": "limit",
+        paused = [dict(self.RUNNERS[0], rate_limit={"harness": "codex", "window": "5h",
+                                                     "used_pct": 95.0, "pause_at": 90,
+                                                     "reason": "limit",
                                                      "resets_at": "2026-09-14T15:40:00Z"})]
         out = relay.format_runners(paused)
-        self.assertIn("RATE LIMITED (five_hour, resumes 2026-09-14T15:40:00Z)", out)
+        self.assertIn("RATE LIMITED (codex 5h, resumes 2026-09-14T15:40:00Z)", out)
         self.assertNotIn("RATE LIMITED", relay.format_runners(self.RUNNERS))
+
+    def test_a_rate_limit_missing_its_harness_or_window_renders_a_placeholder(self):
+        paused = [dict(self.RUNNERS[0], rate_limit={"resets_at": "2026-09-14T15:40:00Z"})]
+        self.assertIn("RATE LIMITED (? ?, resumes 2026-09-14T15:40:00Z)", relay.format_runners(paused))
 
     def test_the_cli_wires_runs_and_runners(self):
         parser = relay.build_parser()
@@ -9984,7 +10498,7 @@ class TestPartitionTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["partition"] = partition
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -10161,7 +10675,7 @@ class ScratchPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["scratch"] = scratch
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -10278,7 +10792,7 @@ class PlanPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
             seen["plan"] = plan
             return True, "sess-1", relay.ClaudeRunReport()
 

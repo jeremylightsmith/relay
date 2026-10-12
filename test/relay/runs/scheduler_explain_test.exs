@@ -386,11 +386,16 @@ defmodule Relay.Runs.SchedulerExplainTest do
     end
   end
 
-  describe "capacity_diagnosis/1 — rate limits (RE320)" do
+  describe "capacity_diagnosis/1 — rate limits (RE320, per harness since RE436)" do
+    # `Relay.Runs.active_rate_limit/2`'s map: the runner's earliest-lifting harness pause.
     defp paused_at(resets_at, overrides \\ %{}) do
-      Map.merge(%{window: "five_hour", utilization: 0.95, max: 0.9, resets_at: resets_at, reason: "limit"}, overrides)
+      Map.merge(
+        %{harness: "claude-code", window: "5h", used_pct: 95.0, pause_at: 90, resets_at: resets_at, reason: "limit"},
+        overrides
+      )
     end
 
+    # Scenario 9
     test "every live current runner paused is :runner_rate_limited, resuming at the earliest reset" do
       early = ~U[2026-09-14 15:40:00Z]
       late = ~U[2026-09-14 18:00:00Z]
@@ -398,14 +403,23 @@ defmodule Relay.Runs.SchedulerExplainTest do
       execs =
         Map.new([
           exec(1, rate_limit: paused_at(late)),
-          exec(2, rate_limit: paused_at(early, %{reason: "rejected", max: nil}))
+          exec(2,
+            rate_limit:
+              paused_at(early, %{harness: "codex", reason: "rejected", window: nil, used_pct: nil, pause_at: nil})
+          )
         ])
 
       assert {:runner_rate_limited, evidence} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
       assert evidence.resumes_at == early
 
-      assert [%{name: "e1", window: "five_hour", reason: "limit"}, %{name: "e2", reason: "rejected"}] =
-               Enum.sort_by(evidence.rate_limited_runners, & &1.name)
+      assert [
+               %{name: "e1", harness: "claude-code", window: "5h", reason: "limit"},
+               %{name: "e2", harness: "codex", reason: "rejected"}
+             ] = Enum.sort_by(evidence.rate_limited_runners, & &1.name)
+
+      assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "codex refused"
+      assert detail =~ "claude-code 5h 95% / 90%"
     end
 
     test "one live current runner that is not paused keeps it :awaiting_capacity" do
@@ -439,7 +453,7 @@ defmodule Relay.Runs.SchedulerExplainTest do
       execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
 
       assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
-      assert detail =~ "every connected runner is paused at its Claude usage limit (five_hour 95% / 90%)"
+      assert detail =~ "every connected runner is paused at its usage limits (claude-code 5h 95% / 90%)"
       assert detail =~ "resumes 3:40 PM UTC"
     end
   end

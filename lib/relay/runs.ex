@@ -52,14 +52,16 @@ defmodule Relay.Runs do
   alias Relay.Runs.Scheduler.Snapshot
   alias Relay.Runs.SchedulerSupervisor
   alias Relay.Runs.Transitions
+  alias Schemas.Agent
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Flow
+  alias Schemas.Harness
+  alias Schemas.HarnessUsage
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
   alias Schemas.Runner
-  alias Schemas.RunnerRateLimit
   alias Schemas.Stage
   alias Schemas.SubTask
 
@@ -1619,14 +1621,20 @@ defmodule Relay.Runs do
   # (the claim's `harness`), and a pre-85 runner ignores it and runs every agent node on
   # `claude -p` — a Codex or Gemini node would silently run on the wrong CLI and model, which is
   # genuinely worse than a stopped runner.
-  @min_runner_version 85
+  # RE436 raised this to 86: a harness's usage rule — how to read its usage and when to pause it —
+  # now lives on the board, and the runner pauses each harness on its own and tells the server
+  # through `harnesses[].usage` and the claim's `harnesses`. A pre-86 runner still pauses as a
+  # whole on its local `runner.json` limits, reports the retired top-level `rate_limit` this
+  # server ignores, and never pauses Codex at all: the board would show it claiming normally while
+  # it sits paused, and hand it a paused harness's work. Genuinely worse than a stopped runner.
+  @min_runner_version 86
 
   @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
 
   @doc """
   Whether this runner is new enough to RUN a talk turn, not merely new enough to claim
-  flow work (RE268). `claim_next_job/3` narrows a runner below `min_runner_version/0` to
+  flow work (RE268). `claim_next_job/4` narrows a runner below `min_runner_version/0` to
   `NodeJob.flow_kinds/0`.
 
   A talk job is unpinned on a card's first turn and deliberately bypasses the capacity filter,
@@ -1672,26 +1680,129 @@ defmodule Relay.Runs do
   def runner_outdated?(%Runner{}), do: true
 
   @doc """
-  Whether `runner` is paused at its Claude usage limit at `now` (RE320): it reported a
-  `rate_limit` on its last heartbeat and that window has not reset. A stored value whose
-  `resets_at` has passed reads as NOT rate limited even before the next beat clears it — the
-  runner resumes claiming at that moment, so the board must stop saying otherwise. The single
-  home of that predicate.
-  """
-  @spec runner_rate_limited?(Runner.t(), DateTime.t()) :: boolean()
-  def runner_rate_limited?(%Runner{rate_limit: %RunnerRateLimit{resets_at: %DateTime{} = at}}, %DateTime{} = now),
-    do: DateTime.after?(at, now)
+  One harness's live usage pause at `now` (RE436), from one `Schemas.Runner.normalize_harnesses/1`
+  entry: `%{harness, window, used_pct, pause_at, resets_at, reason}` when the entry is
+  `installed`, its last reading carries a `paused`, and that pause resets after `now` — else nil.
 
-  def runner_rate_limited?(%Runner{}, _now), do: false
+  A stored pause whose `resets_at` has passed reads as NOT paused even before the next beat clears
+  it: the runner resumes that harness at that moment, so the board must stop saying otherwise.
+  Plain so the scheduler snapshot, the roster view and the JSON API carry no Ecto struct.
+  """
+  @spec harness_pause(map(), DateTime.t()) :: map() | nil
+  def harness_pause(
+        %{"key" => key, "installed" => true, "usage" => %{"paused" => %{"resets_at" => resets_at} = paused}},
+        %DateTime{} = now
+      )
+      when is_integer(resets_at) do
+    with {:ok, at} <- DateTime.from_unix(resets_at),
+         true <- DateTime.after?(at, now) do
+      %{
+        harness: key,
+        window: paused["label"],
+        used_pct: paused["used_pct"],
+        pause_at: paused["pause_at"],
+        resets_at: at,
+        reason: paused["reason"]
+      }
+    else
+      _not_paused -> nil
+    end
+  end
+
+  def harness_pause(_entry, _now), do: nil
 
   @doc """
-  The runner's live usage pause at `now` as a plain map — `%{window, utilization, max,
-  resets_at, reason}` — or nil when `runner_rate_limited?/2` is false. Plain so the scheduler
-  snapshot, the roster view and the JSON API carry no Ecto struct.
+  One runner's HARNESSES rows for the Runners page (RE436): its reported `harnesses` entries
+  (`list_runner_status/2`'s `harnesses`) joined with the board's harness definitions and agents.
+
+  Rows come in board harness order, one per board harness whose key the runner reported — a
+  reported key no longer on the board, and a board harness the runner has not reported, get none.
+  Each row draws one bar per window the harness's USAGE setting **defines** (its reading matched by
+  label, `used_pct` nil when there is none); `paused` is `harness_pause/2`'s live pause; `others`
+  names the other installed, unpaused rows (the harnesses whose nodes still claim); `agents` names
+  the board agents on that harness, sorted.
   """
-  def active_rate_limit(%Runner{} = runner, %DateTime{} = now) do
-    if runner_rate_limited?(runner, now), do: Map.from_struct(runner.rate_limit)
+  @spec runner_harness_rows([map()], [Harness.t()], [Agent.t()], DateTime.t()) :: [map()]
+  def runner_harness_rows(entries, harnesses, agents, %DateTime{} = now) do
+    reported = Map.new(entries, &{&1["key"], &1})
+
+    rows =
+      for %Harness{} = harness <- harnesses, {:ok, entry} <- [Map.fetch(reported, harness.key)] do
+        harness_row(harness, entry, agents, now)
+      end
+
+    claiming = for %{installed: true, paused: nil} = row <- rows, do: row
+
+    Enum.map(rows, fn row -> %{row | others: for(other <- claiming, other.key != row.key, do: other.name)} end)
   end
+
+  defp harness_row(%Harness{} = harness, entry, agents, now) do
+    usage = harness.usage || %HarnessUsage{}
+    reading = entry["usage"] || %{}
+    readings = Map.new(reading["windows"] || [], &{&1["label"], &1["used_pct"]})
+
+    %{
+      key: harness.key,
+      name: harness.name,
+      installed: entry["installed"] == true,
+      version: entry["version"],
+      signed_in: signed_in(entry),
+      source: usage.source,
+      command: usage.command,
+      bars:
+        for %{label: label, pause_at: pause_at} <- usage.windows || [] do
+          used_pct = readings[label]
+          %{label: label, used_pct: used_pct, pause_at: pause_at, over?: is_number(used_pct) and used_pct >= pause_at}
+        end,
+      read_at: if(is_integer(reading["read_at"]), do: DateTime.from_unix!(reading["read_at"])),
+      paused:
+        with(
+          %{} = pause <- harness_pause(entry, now),
+          do: Map.take(pause, [:window, :used_pct, :pause_at, :resets_at, :reason])
+        ),
+      others: [],
+      agents: agents |> Enum.filter(&(&1.harness_id == harness.id)) |> Enum.map(& &1.name) |> Enum.sort()
+    }
+  end
+
+  defp signed_in(%{"installed" => installed}) when installed != true, do: :not_installed
+  defp signed_in(%{"signed_in" => true}), do: :yes
+  defp signed_in(%{"signed_in" => false}), do: :no
+  defp signed_in(_entry), do: :na
+
+  @doc """
+  Whether `runner` is rate limited at `now` (RE320, per harness since RE436): it reported at least
+  one installed harness on its last heartbeat and EVERY installed one has a live
+  `harness_pause/2`. A runner with one harness still running claims that harness's work, so it is
+  not rate limited. A runner that never reported (`harnesses` nil) or reported none is not. The
+  single home of that predicate.
+  """
+  @spec runner_rate_limited?(Runner.t(), DateTime.t()) :: boolean()
+  def runner_rate_limited?(%Runner{} = runner, %DateTime{} = now), do: installed_pauses(runner, now) != nil
+
+  @doc """
+  The runner's live usage pause at `now` — the `harness_pause/2` map that lifts EARLIEST, since that
+  is when the runner can claim again — or nil when `runner_rate_limited?/2` is false. Every
+  consumer reads `.resets_at` from it.
+  """
+  @spec active_rate_limit(Runner.t(), DateTime.t()) :: map() | nil
+  def active_rate_limit(%Runner{} = runner, %DateTime{} = now) do
+    case installed_pauses(runner, now) do
+      nil -> nil
+      pauses -> Enum.min_by(pauses, & &1.resets_at, DateTime)
+    end
+  end
+
+  # Every installed harness's live pause, or nil unless there is at least one installed harness
+  # and each of them is paused.
+  defp installed_pauses(%Runner{harnesses: harnesses}, now) when is_list(harnesses) do
+    installed = Enum.filter(harnesses, &match?(%{"installed" => true}, &1))
+    pauses = Enum.map(installed, &harness_pause(&1, now))
+
+    if installed != [] and Enum.all?(pauses), do: pauses
+  end
+
+  defp installed_pauses(%Runner{}, _now), do: nil
 
   @doc """
   One runner as `Scheduler.Snapshot.runners` carries it. Built here, once, for both
@@ -1710,7 +1821,8 @@ defmodule Relay.Runs do
 
   @doc """
   `%{resumes_at: DateTime}` when the board's roster diagnosis at `now` is `:runner_rate_limited`
-  — every live, current runner is paused at its Claude usage limit — else nil. One runners query
+  — every live, current runner is paused at its usage limits (every installed harness paused,
+  RE436) — else nil. One runners query
   through the same `Scheduler.capacity_diagnosis/1` every other surface reads, without the
   card/stage/flow reads a full snapshot costs: BoardLive calls this once per health tick.
   """
@@ -1725,14 +1837,17 @@ defmodule Relay.Runs do
   end
 
   @doc ~S"""
-  One runner's usage pause as the board prints it: `five_hour 95% / 90%` for a configured limit,
-  `Claude refused (five_hour)` for a refusal. The ONE rendering — the stopped-work banner, the
-  run diagnosis and the Runners page all call it.
+  One runner's usage pause as the board prints it — `active_rate_limit/2`'s map: `codex 5h 93% /
+  90%` for a harness at its PAUSE AT, `claude-code refused (5h)` (or `claude-code refused` with no
+  window) for a refusal. The ONE rendering — the stopped-work banner, the run diagnosis and the
+  Runners page all call it.
   """
-  def rate_limit_phrase(%{window: window} = rate_limit) do
-    if Runner.rejected_rate_limit?(rate_limit),
-      do: "Claude refused (#{window})",
-      else: "#{window} #{usage_percent(rate_limit.utilization)} / #{usage_percent(rate_limit.max)}"
+  def rate_limit_phrase(%{harness: harness, window: window} = rate_limit) do
+    cond do
+      Runner.rejected_rate_limit?(rate_limit) and is_nil(window) -> "#{harness} refused"
+      Runner.rejected_rate_limit?(rate_limit) -> "#{harness} refused (#{window})"
+      true -> "#{harness} #{window} #{usage_percent(rate_limit.used_pct)} / #{usage_percent(rate_limit.pause_at)}"
+    end
   end
 
   @doc "Every paused runner in `capacity_diagnosis/1`'s `:runner_rate_limited` evidence, phrased and de-duplicated."
@@ -1740,7 +1855,7 @@ defmodule Relay.Runs do
     do: paused |> Enum.map(&rate_limit_phrase/1) |> Enum.uniq() |> Enum.join(", ")
 
   defp usage_percent(nil), do: "?"
-  defp usage_percent(fraction), do: "#{round(fraction * 100)}%"
+  defp usage_percent(pct), do: "#{round(pct)}%"
 
   @doc """
   The `:runner_rate_limited` run diagnosis sentence — ONE copy for `diagnose/3` (`relay why`, the
@@ -1749,7 +1864,7 @@ defmodule Relay.Runs do
   """
   @spec rate_limited_run_detail(DateTime.t()) :: String.t()
   def rate_limited_run_detail(%DateTime{} = resumes_at) do
-    "This run's node-job is queued — every connected runner is paused at its Claude usage limit. " <>
+    "This run's node-job is queued — every connected runner is paused at its usage limits. " <>
       "Resumes #{resume_time_label(resumes_at)}."
   end
 
@@ -1761,7 +1876,8 @@ defmodule Relay.Runs do
   interval, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
   STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
-  `"capacity"` / `"capabilities"` / `"held"` / `"rate_limit"`).
+  `"capacity"` / `"capabilities"` / `"held"` / `"harnesses"`). RE436: a runner's usage pauses ride
+  its `harnesses` entries — a beat whose harness reports `usage.paused: null` clears that pause.
 
   **Optional fields are absent-means-untouched.** `capabilities` rides send-on-change
   (RLY-182) and `capacity` now rides the HEARTBEAT ONLY (RE311) — the claim's `capacity` is a
@@ -1790,7 +1906,6 @@ defmodule Relay.Runs do
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, held)
       |> put_reported(:harnesses, Runner.normalize_harnesses(attrs["harnesses"]))
-      |> put_rate_limit(attrs)
 
     %Runner{}
     |> Runner.changeset(params)
@@ -1843,22 +1958,6 @@ defmodule Relay.Runs do
   # column untouched. The one place that discipline is expressed, for every optional field.
   defp put_reported({params, replace}, _field, nil), do: {params, replace}
   defp put_reported({params, replace}, field, value), do: {Map.put(params, field, value), [field | replace]}
-
-  # RE320: unlike the optional fields above, `rate_limit` has a meaningful nil — "not paused" — so
-  # the presence of the KEY decides whether the column is written. Only the heartbeat puts the
-  # key (already normalized by `Schemas.Runner.normalize_rate_limit/1`); `runner_attrs/1` strips
-  # it from a claim before it ever reaches here. This still only trusts a value that is ALREADY
-  # the normalized shape — an already-normalized struct or nil — and drops (leaves untouched)
-  # anything else, so a caller that slips past that boundary degrades instead of crashing
-  # `put_embed/3` or clearing a real pause.
-  defp put_rate_limit({params, replace}, attrs) do
-    case Map.fetch(attrs, "rate_limit") do
-      {:ok, %RunnerRateLimit{} = rate_limit} -> {Map.put(params, :rate_limit, rate_limit), [:rate_limit | replace]}
-      {:ok, nil} -> {Map.put(params, :rate_limit, nil), [:rate_limit | replace]}
-      {:ok, _other} -> {params, replace}
-      :error -> {params, replace}
-    end
-  end
 
   defp normalize_interval(i) when is_integer(i) and i > 0, do: i
   defp normalize_interval(_i), do: 30
@@ -1923,6 +2022,12 @@ defmodule Relay.Runs do
   consuming the very slot the unpinned job needs to be offered through — and nothing ever
   reaches `assign()`'s reuse branch. The escape hatch was keyed on the wrong fact.
 
+  `claimable` (RE436) is the claim's harness set — the installed harnesses the runner will run
+  right now, i.e. minus the ones paused at a usage limit — normalized by
+  `Schemas.Runner.normalize_claim_harnesses/1`. A list narrows the installed harnesses to that
+  intersection; `nil` (every in-process caller) leaves them unnarrowed. Request-scoped like
+  `held`: never written to the row.
+
   `free_capacity` is the request's LIVE FREE count, passed as an argument and never persisted:
   the row's `capacity` is the runner's configured total (see `Schemas.Runner`). It defaults
   to `nil`, which falls back to the row — the in-process caller's "assume every configured slot
@@ -1931,9 +2036,10 @@ defmodule Relay.Runs do
   `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two runners never grab the same
   job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches.
   """
-  def claim_next_job(runner, free_capacity \\ nil, held \\ [])
+  @spec claim_next_job(Runner.t(), map() | nil, list(), [String.t()] | nil) :: {:ok, NodeJob.t() | nil}
+  def claim_next_job(runner, free_capacity \\ nil, held \\ [], claimable \\ nil)
 
-  def claim_next_job(%Runner{board_id: board_id, name: name, capacity: capacity} = runner, free_capacity, held) do
+  def claim_next_job(%Runner{board_id: board_id, name: name, capacity: capacity} = runner, free_capacity, held, claimable) do
     allowed = allowed_classes(free_capacity || capacity)
     held_refs = Runner.active_held_refs(held)
     # RE268 — a talk job is only visible to a runner that can actually run one
@@ -1941,6 +2047,10 @@ defmodule Relay.Runs do
     kinds = if talk_capable?(runner), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
     # RE433: a runner that never reported its harnesses predates them — it can run Claude Code.
     installed = Runner.installed_harness_keys(runner) || [Agents.default_harness_key()]
+    # RE436: the claim names the harnesses it will run NOW (installed minus paused at a usage
+    # limit); nil = not narrowed. Only ever narrows — a key the runner never reported installed
+    # stays unclaimable.
+    installed = if is_list(claimable), do: Enum.filter(installed, &(&1 in claimable)), else: installed
     Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) end)
   end
 
@@ -2439,8 +2549,12 @@ defmodule Relay.Runs do
         # Orthogonal to `freshness` on purpose (RLY-184): a refused runner is perfectly
         # healthy and beating normally — it is just running old code.
         outdated: outdated,
-        # RE320: the live usage pause, nil once it resets
+        # RE320: the live usage pause, nil once it resets. RE436: set only while EVERY installed
+        # harness is paused — the earliest-lifting harness pause (`active_rate_limit/2`).
         rate_limit: rate_limit,
+        # RE436: the per-harness inventory and usage readings the last beat reported, as
+        # `Schemas.Runner.normalize_harnesses/1` stored them ([] for a runner that never reported).
+        harnesses: runner.harnesses || [],
         # RLY-191: the single presentation state the runners view renders from. Precedence
         # :gone > :stale > :outdated > :rate_limited > :fresh — a silent runner's silence is the
         # more urgent fact than its version. Derived, never stored; `freshness` keeps heartbeat
@@ -2536,8 +2650,10 @@ defmodule Relay.Runs do
     end)
   end
 
-  # The runner columns `runner_snapshot_entry/2` and `working_run_ids/2` read (RE402).
-  @board_runner_fields [:id, :board_id, :name, :version, :last_heartbeat, :interval, :rate_limit]
+  # The runner columns `runner_snapshot_entry/2` and `working_run_ids/2` read (RE402). RE436:
+  # `harnesses` is what `active_rate_limit/2` derives the pause from — without it every snapshot
+  # would read every runner as unpaused and the `:runner_rate_limited` diagnosis would vanish.
+  @board_runner_fields [:id, :board_id, :name, :version, :last_heartbeat, :interval, :harnesses]
 
   @doc """
   The board's `Runner` rows, narrowed to #{inspect(@board_runner_fields)} — the lean read
@@ -2802,7 +2918,7 @@ defmodule Relay.Runs do
   end
 
   defp stopped_work_detail(:runner_rate_limited, bits, age) do
-    "No jobs claimed in #{div(age, 60)}m · every connected runner is paused at its Claude usage limit " <>
+    "No jobs claimed in #{div(age, 60)}m · every connected runner is paused at its usage limits " <>
       "(#{roster_rate_limit_phrase(bits)}) · resumes #{resume_time_label(bits.resumes_at)}."
   end
 
@@ -3170,8 +3286,10 @@ defmodule Relay.Runs do
   # OUTDATED rows are excluded: a refused runner claims nothing whatever its free slots say,
   # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
   # the more specific `:runner_outdated` from roster_blocked?/5 keeps winning. RE320: paused
-  # runners are excluded for the same reason — a runner paused at its usage limit claims nothing
-  # when a slot frees, so an all-paused roster falls through to `:runner_rate_limited`.
+  # runners are excluded for the same reason — a runner paused at its usage limits claims nothing
+  # when a slot frees, so an all-paused roster falls through to `:runner_rate_limited`. RE436:
+  # `rate_limit` is set only when EVERY installed harness is paused, so a partly paused runner
+  # still counts here — it can still take its other harnesses' work.
   defp connected_runners(board, now) do
     board
     |> list_runner_status(now)

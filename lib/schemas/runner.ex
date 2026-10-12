@@ -25,7 +25,7 @@ defmodule Schemas.Runner do
 
   import Ecto.Changeset
 
-  alias Schemas.RunnerRateLimit
+  alias Schemas.HarnessUsage
 
   @type t :: %__MODULE__{}
 
@@ -51,14 +51,12 @@ defmodule Schemas.Runner do
     field :version, :integer
     # RE433: the harness inventory the runner last reported on a heartbeat — see
     # `normalize_harnesses/1`. No default: nil means "never reported", which claims read as
-    # "only the legacy harness" (`installed_harness_keys/1`).
+    # "only the legacy harness" (`installed_harness_keys/1`). RE436: each entry carries that
+    # harness's last usage reading; `Relay.Runs.runner_rate_limited?/2` reads the runner as rate
+    # limited only when every installed harness is paused, and a pause whose `resets_at` has
+    # passed reads as not paused before the next beat clears it.
     field :harnesses, {:array, :map}
     field :last_heartbeat, :utc_datetime
-
-    # RE320: nil = claiming normally (or a runner predating RE320). Heartbeat-written only; a
-    # value whose `resets_at` has passed is treated as not paused by
-    # `Relay.Runs.runner_rate_limited?/2` before the next beat clears it.
-    embeds_one :rate_limit, RunnerRateLimit, on_replace: :delete
 
     belongs_to :board, Schemas.Board
 
@@ -80,17 +78,10 @@ defmodule Schemas.Runner do
       :version,
       :last_heartbeat
     ])
-    |> put_rate_limit(attrs)
     |> validate_required([:board_id, :name, :last_heartbeat])
     |> foreign_key_constraint(:board_id)
     |> unique_constraint([:board_id, :name], name: :runners_board_id_name_index)
   end
-
-  # RE320: an embed cannot go through `cast/3`, and it is never user input —
-  # `Relay.Runs.upsert_runner/2` passes an already-normalized `%Schemas.RunnerRateLimit{}` or nil.
-  # An absent key leaves the embed untouched.
-  defp put_rate_limit(changeset, %{rate_limit: rate_limit}), do: put_embed(changeset, :rate_limit, rate_limit)
-  defp put_rate_limit(changeset, _attrs), do: changeset
 
   # RE311 — the closed set of per-card worktree states a runner can declare it HOLDS,
   # defined exactly once on this side and mirrored in `./relay`'s HOLDING_STATES, which the
@@ -181,11 +172,48 @@ defmodule Schemas.Runner do
 
   def normalize_held(_held), do: []
 
+  # RE320 — the closed set of reasons a harness pauses on a usage limit, defined once here and
+  # mirrored in `./relay`'s USAGE_PAUSE_REASONS, which the runner contract fixture
+  # (`vocabulary.rate_limit_reasons`) pins to this function. Strings for the same reason as
+  # `@holding_states`: wire-only values. (RE436 retired the Claude-only window vocabulary — a
+  # harness's usage rule names its own windows.)
+  @rate_limit_reason_limit "limit"
+  @rate_limit_reason_rejected "rejected"
+  @rate_limit_reasons [@rate_limit_reason_limit, @rate_limit_reason_rejected]
+
+  # RE436 — the most usage windows one harness reading may carry, and the most harness keys one
+  # claim may narrow to. A harness defines a handful of windows and a board a handful of
+  # harnesses; these only bound what a malformed or hostile request can make the hot path carry.
+  @usage_window_limit 20
+  @claim_harness_limit 50
+
+  @doc """
+  Why a harness paused: `limit` (a window reached its harness's PAUSE AT) or `rejected` (the
+  harness refused a call outright, which pauses it even below PAUSE AT).
+  """
+  def rate_limit_reasons, do: @rate_limit_reasons
+
+  @doc "Whether a pause came from the harness refusing a call rather than reaching PAUSE AT."
+  def rejected_rate_limit?(%{reason: reason}), do: reason == @rate_limit_reason_rejected
+
   @doc """
   The one normalizer for the heartbeat's `harnesses` wire field (RE433): a list of
-  `%{"key" => key, "installed" => boolean, "version" => string | nil, "signed_in" => boolean | nil}`.
-  An entry without a binary key and a boolean `installed` is DROPPED, and so is a malformed
-  optional value (degraded to nil). A non-list is nil — "this beat did not report".
+  `%{"key" => key, "installed" => boolean, "version" => string | nil, "signed_in" => boolean | nil,
+  "usage" => usage | nil}`. An entry without a binary key and a boolean `installed` is DROPPED,
+  and so is a malformed optional value (degraded to nil). A non-list is nil — "this beat did not
+  report".
+
+  RE436: `usage` is the harness's last usage reading, as the runner's per-harness limiter reports
+  it:
+
+      %{"source" => source, "read_at" => unix | nil,
+        "windows" => [%{"label" => binary, "used_pct" => float, "resets_at" => unix}],
+        "paused" => %{"label" => binary | nil, "used_pct" => float | nil, "pause_at" => 1..100 | nil,
+                      "resets_at" => unix, "reason" => reason} | nil}
+
+  `source` must be in `Schemas.HarnessUsage.sources/0`, else the whole reading is nil; a malformed
+  window is dropped and at most #{@usage_window_limit} are kept; a malformed `paused` is nil, and
+  its `reason` must be in `rate_limit_reasons/0`. The entry is kept either way.
 
   Total by construction, like `normalize_held/1`: the heartbeat is the runner's liveness path.
   """
@@ -196,12 +224,79 @@ defmodule Schemas.Runner do
         "key" => key,
         "installed" => installed,
         "version" => if(is_binary(entry["version"]), do: entry["version"]),
-        "signed_in" => if(is_boolean(entry["signed_in"]), do: entry["signed_in"])
+        "signed_in" => if(is_boolean(entry["signed_in"]), do: entry["signed_in"]),
+        "usage" => normalize_usage(entry["usage"])
       }
     end
   end
 
   def normalize_harnesses(_harnesses), do: nil
+
+  defp normalize_usage(%{"source" => source} = usage) when is_binary(source) do
+    if source in HarnessUsage.sources() do
+      %{
+        "source" => source,
+        "read_at" => unix_or_nil(usage["read_at"]),
+        "windows" => normalize_usage_windows(usage["windows"]),
+        "paused" => normalize_usage_paused(usage["paused"])
+      }
+    end
+  end
+
+  defp normalize_usage(_usage), do: nil
+
+  defp normalize_usage_windows(windows) when is_list(windows) do
+    windows
+    |> Enum.flat_map(fn
+      %{"label" => label, "used_pct" => used_pct, "resets_at" => resets_at}
+      when is_binary(label) and is_number(used_pct) and is_integer(resets_at) and resets_at > 0 ->
+        [%{"label" => label, "used_pct" => used_pct / 1, "resets_at" => resets_at}]
+
+      _malformed ->
+        []
+    end)
+    |> Enum.take(@usage_window_limit)
+  end
+
+  defp normalize_usage_windows(_windows), do: []
+
+  defp normalize_usage_paused(%{"resets_at" => resets_at, "reason" => reason} = paused)
+       when is_integer(resets_at) and resets_at > 0 and reason in @rate_limit_reasons do
+    with {:ok, label} <- optional(paused["label"], &is_binary/1),
+         {:ok, used_pct} <- optional(paused["used_pct"], &is_number/1),
+         {:ok, pause_at} <- optional(paused["pause_at"], &(is_integer(&1) and &1 in 1..100)) do
+      %{
+        "label" => label,
+        "used_pct" => used_pct && used_pct / 1,
+        "pause_at" => pause_at,
+        "resets_at" => resets_at,
+        "reason" => reason
+      }
+    else
+      :error -> nil
+    end
+  end
+
+  defp normalize_usage_paused(_paused), do: nil
+
+  defp optional(nil, _valid?), do: {:ok, nil}
+  defp optional(value, valid?), do: if(valid?.(value), do: {:ok, value}, else: :error)
+
+  defp unix_or_nil(at) when is_integer(at) and at > 0, do: at
+  defp unix_or_nil(_at), do: nil
+
+  @doc """
+  The one normalizer for the claim's `harnesses` field (RE436): the harness keys the runner will
+  run right now — its installed ones minus those paused at a usage limit. A list of binaries
+  (anything else dropped), capped at #{@claim_harness_limit}; a non-list is nil, meaning "not
+  narrowed". Request-scoped, like the claim's `held`: passed to `Relay.Runs.claim_next_job/4`,
+  never written to the row.
+  """
+  @spec normalize_claim_harnesses(term()) :: [String.t()] | nil
+  def normalize_claim_harnesses(keys) when is_list(keys),
+    do: keys |> Enum.filter(&is_binary/1) |> Enum.take(@claim_harness_limit)
+
+  def normalize_claim_harnesses(_keys), do: nil
 
   @doc "The keys of the harnesses the runner reported installed, or nil when it never reported (RE433)."
   @spec installed_harness_keys(t()) :: [String.t()] | nil
@@ -221,52 +316,4 @@ defmodule Schemas.Runner do
   end
 
   def active_held_refs(_held), do: []
-
-  # RE320 — the closed sets on a runner's self-reported usage pause, defined once here and
-  # mirrored in `./relay`'s RATE_LIMIT_WINDOWS / RATE_LIMIT_REASONS, which the runner contract
-  # fixture (`vocabulary.rate_limit_windows` / `vocabulary.rate_limit_reasons`) pins to these
-  # functions. Strings for the same reason as `@holding_states`: wire-only values.
-  @rate_limit_windows ["five_hour", "seven_day"]
-  @rate_limit_reason_limit "limit"
-  @rate_limit_reason_rejected "rejected"
-  @rate_limit_reasons [@rate_limit_reason_limit, @rate_limit_reason_rejected]
-
-  @doc "The Claude usage windows a runner can pause on."
-  def rate_limit_windows, do: @rate_limit_windows
-
-  @doc """
-  Why a runner paused: `limit` (a window reached its configured max) or `rejected` (Claude
-  refused a call outright, which pauses a runner even with no limit configured).
-  """
-  def rate_limit_reasons, do: @rate_limit_reasons
-
-  @doc "Whether a rate limit came from Claude refusing a call rather than a configured limit."
-  def rejected_rate_limit?(%{reason: reason}), do: reason == @rate_limit_reason_rejected
-
-  @doc """
-  The one normalizer for the heartbeat's `rate_limit` wire field:
-  `%{"window", "utilization", "max", "resets_at" (unix seconds), "reason"}` →
-  `%Schemas.RunnerRateLimit{}`, or `nil` for anything it does not recognise (including a
-  JSON null).
-
-  Total by construction, like `normalize_held/1`: the heartbeat is the runner's liveness path,
-  so an unknown window or reason from a newer runner degrades to "not paused" rather than 500ing.
-  """
-  def normalize_rate_limit(%{"window" => window, "reason" => reason, "resets_at" => resets_at} = wire)
-      when window in @rate_limit_windows and reason in @rate_limit_reasons do
-    with true <- is_integer(resets_at) and resets_at > 0,
-         {:ok, at} <- DateTime.from_unix(resets_at),
-         {:ok, utilization} <- fraction(Map.get(wire, "utilization")),
-         {:ok, max} <- fraction(Map.get(wire, "max")) do
-      %RunnerRateLimit{window: window, utilization: utilization, max: max, resets_at: at, reason: reason}
-    else
-      _invalid -> nil
-    end
-  end
-
-  def normalize_rate_limit(_wire), do: nil
-
-  defp fraction(nil), do: {:ok, nil}
-  defp fraction(value) when is_number(value) and value >= 0, do: {:ok, value / 1}
-  defp fraction(_value), do: :error
 end

@@ -436,6 +436,8 @@ defmodule RelayWeb.BoardSettingsLive do
                 harness_panel={@harness_panel}
                 harness_form={@harness_form}
                 harness_error={@harness_error}
+                usage_test={@usage_test}
+                usage_test_line={@usage_test_line}
                 read_only?={@read_only?}
               />
             </section>
@@ -1232,7 +1234,7 @@ defmodule RelayWeb.BoardSettingsLive do
         apply_shape_fix
         agent_new agent_edit agent_cancel agent_pick_harness agent_validate agent_save
         agent_make_default agent_delete
-        harness_new harness_edit harness_cancel harness_validate harness_save harness_delete
+        harness_new harness_edit harness_cancel harness_validate harness_save harness_delete harness_try_usage
         save_public_settings new_key create_key rename_key
         regenerate_key revoke_key
       ) do
@@ -1767,9 +1769,9 @@ defmodule RelayWeb.BoardSettingsLive do
   def handle_event("harness_new", _params, socket) do
     {:noreply,
      socket
+     |> close_harness_panel()
      |> assign(:harness_panel, :new)
-     |> assign(:harness_form, to_form(Agents.change_harness(%Harness{})))
-     |> assign(:harness_error, nil)}
+     |> assign(:harness_form, to_form(Agents.change_harness(%Harness{})))}
   end
 
   def handle_event("harness_edit", %{"id" => id}, socket) do
@@ -1777,16 +1779,29 @@ defmodule RelayWeb.BoardSettingsLive do
 
     {:noreply,
      socket
+     |> close_harness_panel()
      |> assign(:harness_panel, {:edit, harness})
-     |> assign(:harness_form, to_form(Agents.change_harness(harness)))
-     |> assign(:harness_error, nil)}
+     |> assign(:harness_form, to_form(Agents.change_harness(harness)))}
   end
 
   def handle_event("harness_cancel", _params, socket), do: {:noreply, close_harness_panel(socket)}
 
-  def handle_event("harness_validate", %{"harness" => params}, socket) do
+  # The TEST box's `usage_test_line` rides the same change event, outside `"harness"`, so it
+  # never reaches the changeset.
+  def handle_event("harness_validate", %{"harness" => params} = all, socket) do
     changeset = Agents.change_harness(editing_harness(socket), params)
-    {:noreply, assign(socket, :harness_form, to_form(changeset, action: :validate))}
+
+    {:noreply,
+     socket
+     |> assign(:harness_form, to_form(changeset, action: :validate))
+     |> assign(:usage_test_line, Map.get(all, "usage_test_line", socket.assigns.usage_test_line))}
+  end
+
+  # RE436 — TEST evaluates the pasted line against the rule as the form currently has it.
+  def handle_event("harness_try_usage", _params, %{assigns: %{harness_form: %{source: changeset}}} = socket) do
+    usage = Ecto.Changeset.apply_changes(changeset).usage
+    result = Agents.try_usage_line(usage, socket.assigns.usage_test_line || "", DateTime.utc_now())
+    {:noreply, assign(socket, :usage_test, result)}
   end
 
   def handle_event("harness_save", %{"harness" => params}, socket) do
@@ -1898,6 +1913,8 @@ defmodule RelayWeb.BoardSettingsLive do
     |> assign(:harness_panel, nil)
     |> assign(:harness_form, nil)
     |> assign(:harness_error, nil)
+    |> assign(:usage_test, nil)
+    |> assign(:usage_test_line, nil)
   end
 
   defp agent_refusal(agent, :default), do: "#{agent.name} is the board default. Make another agent the default first."

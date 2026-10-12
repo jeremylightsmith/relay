@@ -78,6 +78,24 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     {run, Runs.active_job(run)}
   end
 
+  # RE436: a queued, unpinned shared_clean agent job on `harness_key`, inserted directly — the
+  # claim filter reads only the job row.
+  defp queued_harness_job!(board, harness_key) do
+    stage = Enum.find(board.stages, &(&1.name == "Next up"))
+    card = insert(:card, board: board, stage: stage)
+    run = insert(:run, card: card)
+    execution = insert(:node_execution, run: run, outcome: nil, finished_at: nil)
+
+    insert(:node_job,
+      node_execution: execution,
+      state: :queued,
+      runner_name: nil,
+      claimed_at: nil,
+      payload: %{"isolation" => "shared_clean", "harness" => %{"key" => harness_key}, "vars" => %{"ref" => "RL-1"}},
+      harness_key: harness_key
+    )
+  end
+
   defp claim(conn, capacity \\ %{"shared_clean" => 1, "exclusive" => 1}, running \\ []) do
     post(
       conn,
@@ -340,79 +358,47 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert runner.held == []
     end
 
-    test "RE320: a claim carrying a null rate_limit never un-pauses the stored roster row",
+    # RE436 Scenario 8 — the claim's `harnesses` is request-scoped, like `held`: it narrows what is
+    # offered and is never written to the row.
+    test "RE436: a claim narrowed to claude-code is not handed a queued codex job, and leaves the row's harnesses",
          %{conn: conn, board: board} do
-      post(conn, ~p"/api/node-jobs/heartbeat", %{
+      inventory = [
+        %{"key" => "claude-code", "installed" => true},
+        %{"key" => "codex", "installed" => true}
+      ]
+
+      conn
+      |> post(~p"/api/node-jobs/heartbeat", %{
         "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30},
         "capacity" => %{"shared_clean" => 1},
         "running" => [],
-        "rate_limit" => %{
-          "window" => "five_hour",
-          "utilization" => 0.95,
-          "max" => 0.9,
-          "resets_at" => 4_102_444_800,
-          "reason" => "limit"
-        }
+        "harnesses" => inventory
       })
+      |> json_response(200)
 
-      post(
-        conn,
-        ~p"/api/node-jobs/claim",
-        Jason.encode!(%{
-          "runner" => %{
-            "name" => "fake",
-            "host" => "fake",
-            "interval" => 30,
-            "version" => Runs.min_runner_version(),
-            "rate_limit" => nil
-          },
-          "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
-          "running" => [],
-          "wait" => "0"
-        })
-      )
+      stored = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").harnesses
+      codex = queued_harness_job!(board, "codex")
 
-      assert %Schemas.RunnerRateLimit{} =
-               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").rate_limit
-    end
-
-    test "RE320: a claim carrying a garbage rate_limit shape never 500s and never touches the roster row",
-         %{conn: conn, board: board} do
-      post(conn, ~p"/api/node-jobs/heartbeat", %{
-        "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30},
-        "capacity" => %{"shared_clean" => 1},
-        "running" => [],
-        "rate_limit" => %{
-          "window" => "five_hour",
-          "utilization" => 0.95,
-          "max" => 0.9,
-          "resets_at" => 4_102_444_800,
-          "reason" => "limit"
-        }
-      })
-
-      conn =
+      narrowed = fn harnesses ->
         post(
           conn,
           ~p"/api/node-jobs/claim",
           Jason.encode!(%{
-            "runner" => %{
-              "name" => "fake",
-              "host" => "fake",
-              "interval" => 30,
-              "version" => Runs.min_runner_version(),
-              "rate_limit" => %{"window" => "five_hour"}
-            },
+            "runner" => %{"name" => "fake", "host" => "fake", "interval" => 30, "version" => Runs.min_runner_version()},
             "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
             "running" => [],
+            "harnesses" => harnesses,
             "wait" => "0"
           })
         )
+      end
 
-      refute conn.status == 500
+      assert narrowed.(["claude-code"]).status == 204
+      assert Relay.Repo.get!(Schemas.NodeJob, codex.id).state == :queued
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").harnesses == stored
 
-      assert %Schemas.RunnerRateLimit{} =
-               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "fake").rate_limit
+      codex_id = codex.id
+      assert %{"id" => ^codex_id} = ["claude-code", "codex"] |> narrowed.() |> json_response(200)
     end
 
     test "a held ref makes an unpinned exclusive job claimable at zero free capacity",
@@ -951,66 +937,82 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Relay.Repo.get!(Schemas.Card, run.card_id).agent_heartbeat_at == nil
     end
 
-    @rate_limit_wire %{
-      "window" => "five_hour",
-      "utilization" => 0.95,
-      "max" => 0.9,
-      "resets_at" => 4_102_444_800,
-      "reason" => "limit"
-    }
+    # RE436 Scenario 8 — each harness's usage reading rides its `harnesses[]` entry; the retired
+    # top-level `rate_limit` is ignored.
+    test "RE436: stores each harness's normalized usage and ignores a top-level rate_limit",
+         %{conn: conn, board: board} do
+      usage = %{
+        "source" => "output",
+        "read_at" => 4_102_444_000,
+        "windows" => [%{"label" => "5h", "used_pct" => 95, "resets_at" => 4_102_444_800}],
+        "paused" => %{
+          "label" => "5h",
+          "used_pct" => 95,
+          "pause_at" => 90,
+          "resets_at" => 4_102_444_800,
+          "reason" => "limit"
+        }
+      }
 
-    defp beat_rate_limit(conn, name, extra) do
-      post(
-        conn,
-        ~p"/api/node-jobs/heartbeat",
-        Map.merge(%{"runner" => %{"name" => name}, "capacity" => %{"shared_clean" => 1}, "running" => []}, extra)
-      )
+      conn
+      |> post(~p"/api/node-jobs/heartbeat", %{
+        "runner" => %{"name" => "exec-usage"},
+        "capacity" => %{"shared_clean" => 1},
+        "running" => [],
+        "harnesses" => [%{"key" => "codex", "installed" => true, "usage" => usage}],
+        "rate_limit" => %{"window" => "five_hour", "reason" => "limit", "resets_at" => 4_102_444_800}
+      })
+      |> json_response(200)
+
+      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-usage")
+
+      assert [%{"key" => "codex", "usage" => stored}] = runner.harnesses
+
+      assert stored == %{
+               "source" => "output",
+               "read_at" => 4_102_444_000,
+               "windows" => [%{"label" => "5h", "used_pct" => 95.0, "resets_at" => 4_102_444_800}],
+               "paused" => %{
+                 "label" => "5h",
+                 "used_pct" => 95.0,
+                 "pause_at" => 90,
+                 "resets_at" => 4_102_444_800,
+                 "reason" => "limit"
+               }
+             }
+
+      refute Map.has_key?(Map.from_struct(runner), :rate_limit)
+      assert Runs.runner_rate_limited?(runner, DateTime.utc_now())
     end
 
-    test "RE320: stores the beat's rate_limit, and a null rate_limit clears it", %{conn: conn, board: board} do
-      assert %{"revoked" => []} =
-               conn |> beat_rate_limit("exec-rl", %{"rate_limit" => @rate_limit_wire}) |> json_response(200)
+    test "RE436: the next beat's paused: null clears the pause", %{conn: conn, board: board} do
+      beat = fn paused ->
+        usage = %{"source" => "output", "windows" => [], "paused" => paused}
 
-      runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl")
+        conn
+        |> post(~p"/api/node-jobs/heartbeat", %{
+          "runner" => %{"name" => "exec-clear"},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [],
+          "harnesses" => [%{"key" => "codex", "installed" => true, "usage" => usage}]
+        })
+        |> json_response(200)
 
-      assert %Schemas.RunnerRateLimit{
-               window: "five_hour",
-               utilization: 0.95,
-               max: 0.9,
-               reason: "limit",
-               resets_at: ~U[2100-01-01 00:00:00Z]
-             } = runner.rate_limit
+        Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-clear")
+      end
 
-      conn |> beat_rate_limit("exec-rl", %{"rate_limit" => nil}) |> json_response(200)
+      assert Runs.runner_rate_limited?(
+               beat.(%{
+                 "label" => "5h",
+                 "used_pct" => 95,
+                 "pause_at" => 90,
+                 "resets_at" => 4_102_444_800,
+                 "reason" => "limit"
+               }),
+               DateTime.utc_now()
+             )
 
-      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl").rate_limit == nil
-    end
-
-    test "RE320: a beat from an older runner (no rate_limit key) stores nil", %{conn: conn, board: board} do
-      conn |> beat_rate_limit("exec-old", %{}) |> json_response(200)
-
-      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-old").rate_limit == nil
-    end
-
-    test "RE320: a claim never touches the stored rate_limit", %{conn: conn, board: board} do
-      conn |> beat_rate_limit("exec-rl", %{"rate_limit" => @rate_limit_wire}) |> json_response(200)
-
-      {:ok, _runner} = Runs.upsert_runner(board, %{"name" => "exec-rl", "capacity" => %{"shared_clean" => 1}})
-
-      assert %Schemas.RunnerRateLimit{} =
-               Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-rl").rate_limit
-    end
-
-    test "RE320: an unrecognised rate_limit degrades to nil and is logged, never a 4xx/500", %{conn: conn, board: board} do
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          conn
-          |> beat_rate_limit("exec-junk-rl", %{"rate_limit" => %{@rate_limit_wire | "window" => "one_hour"}})
-          |> json_response(200)
-        end)
-
-      assert log =~ "rate_limit"
-      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-junk-rl").rate_limit == nil
+      refute Runs.runner_rate_limited?(beat.(nil), DateTime.utc_now())
     end
   end
 
@@ -1031,7 +1033,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
         |> json_response(200)
 
       runner = Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h")
-      assert runner.harnesses == [codex]
+      assert runner.harnesses == [Map.put(codex, "usage", nil)]
       assert response["harnesses_digest"] == Relay.Agents.harnesses_digest(board)
 
       conn
@@ -1042,7 +1044,9 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       })
       |> json_response(200)
 
-      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h").harnesses == [codex]
+      assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h").harnesses == [
+               Map.put(codex, "usage", nil)
+             ]
     end
   end
 end

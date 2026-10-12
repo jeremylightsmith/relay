@@ -522,11 +522,21 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     end
   end
 
-  describe "a rate-limited runner (RE320)" do
+  describe "a rate-limited runner (RE320, per harness since RE436)" do
+    defp in_an_hour, do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
+
+    defp all_paused(at, opts \\ []) do
+      [
+        runner_harness("claude-code", usage: paused_usage(DateTime.add(at, 600, :second))),
+        runner_harness("codex", usage: paused_usage(at, opts))
+      ]
+    end
+
+    # Scenario 12
     test "renders the amber RATE LIMITED pill with its usage and resume time, and a summary count",
          %{conn: conn, board: board} do
-      resets_at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
-      runner(board, "paused", rate_limit: build(:runner_rate_limit, resets_at: resets_at))
+      resets_at = in_an_hour()
+      runner(board, "paused", harnesses: all_paused(resets_at))
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
@@ -536,23 +546,35 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       assert has_element?(
                view,
                "#runner-paused-rate-limit",
-               "five_hour 95% / 90% · resumes #{Relay.Runs.resume_time_label(resets_at)}"
+               "codex 5h 95% / 90% · resumes #{Relay.Runs.resume_time_label(resets_at)}"
              )
 
       assert has_element?(view, "#summary-rate-limited", "1 rate limited")
     end
 
-    test "a refusal reads Claude refused", %{conn: conn, board: board} do
-      runner(board, "refused", rate_limit: build(:runner_rate_limit, reason: "rejected", max: nil))
+    test "a runner with one of two harnesses paused is FRESH and uncounted", %{conn: conn, board: board} do
+      runner(board, "half",
+        harnesses: [runner_harness("claude-code"), runner_harness("codex", usage: paused_usage(in_an_hour()))]
+      )
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
-      assert has_element?(view, "#runner-refused-rate-limit", "Claude refused (five_hour)")
+      assert has_element?(view, "#runner-half .badge-success", "FRESH")
+      refute has_element?(view, "#runner-half .badge-warning", "RATE LIMITED")
+      refute has_element?(view, "#summary-rate-limited")
+    end
+
+    test "a refusal reads <harness> refused", %{conn: conn, board: board} do
+      runner(board, "refused", harnesses: all_paused(in_an_hour(), reason: "rejected"))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-refused-rate-limit", "codex refused (5h)")
     end
 
     test "the paused row still shows while a free peer keeps the banner away",
          %{conn: conn, board: board, stage: stage} do
-      runner(board, "paused", rate_limit: build(:runner_rate_limit))
+      runner(board, "paused", harnesses: all_paused(in_an_hour()))
       runner(board, "free")
       queued_job(stage, age_s: 600)
 
@@ -561,6 +583,124 @@ defmodule RelayWeb.BoardRunnersLiveTest do
       assert has_element?(view, "#runner-paused .badge-warning", "RATE LIMITED")
       assert has_element?(view, "#runner-free .badge-success", "FRESH")
       refute has_element?(view, "#queue-diagnosis")
+    end
+  end
+
+  describe "HARNESSES (RE436)" do
+    defp harness_text(view, selector),
+      do: view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() |> squish()
+
+    defp squish(text), do: text |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    defp usage_reading(windows, paused) do
+      %{
+        "source" => "output",
+        "read_at" => DateTime.to_unix(DateTime.utc_now()) - 120,
+        "windows" => for({label, pct} <- windows, do: %{"label" => label, "used_pct" => pct, "resets_at" => 1}),
+        "paused" => paused
+      }
+    end
+
+    defp pause_reading(label, used_pct, resets_at) do
+      %{
+        "label" => label,
+        "used_pct" => used_pct,
+        "pause_at" => 90,
+        "resets_at" => DateTime.to_unix(resets_at),
+        "reason" => "limit"
+      }
+    end
+
+    # Scenario 1's report: Claude reading 5h 42 / 7d 18, Codex paused at 5h 93, Gemini missing.
+    defp reported_harnesses(opts \\ []) do
+      resets_at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
+      claude_paused = if opts[:claude_paused], do: pause_reading("7d", 95.0, resets_at)
+
+      [
+        runner_harness("claude-code", usage: usage_reading([{"5h", 42.0}, {"7d", 18.0}], claude_paused)),
+        runner_harness("codex",
+          usage:
+            Keyword.get(
+              opts,
+              :codex_usage,
+              usage_reading([{"5h", 93.0}, {"wk", 31.0}], pause_reading("5h", 93.0, resets_at))
+            )
+        ),
+        "gemini-cli" |> runner_harness(installed: false) |> Map.merge(%{"version" => nil, "signed_in" => nil})
+      ]
+    end
+
+    setup %{board: board} do
+      gemini = Enum.find(Relay.Agents.list_harnesses(board), &(&1.key == "gemini-cli"))
+
+      {:ok, _agent} =
+        Relay.Agents.create_agent(board, %{"name" => "Gemini Pro", "harness_id" => gemini.id, "model" => "gemini-2.5-pro"})
+
+      :ok
+    end
+
+    # Scenario 4 (AC4, AC5)
+    test "each reported board harness gets a row: bars, signed-in state, its own pause and the missing one",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses())
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini-harnesses", "HARNESSES · 3")
+
+      claude = "#runner-mac-mini-harness-claude-code"
+      assert has_element?(view, claude, "✓ signed in")
+      assert has_element?(view, ~s(#{claude} progress.progress-secondary[data-usage-bar="5h"][value="42"]))
+      assert has_element?(view, ~s(#{claude} progress.progress-secondary[data-usage-bar="7d"][value="18"]))
+      assert harness_text(view, claude) =~ "from its output ·"
+
+      paused = harness_text(view, "#runner-mac-mini-harness-codex-paused")
+      assert String.starts_with?(paused, "⏸ Paused — 5h at 93%, over Codex's 90% pause-at; resets ")
+      assert paused =~ "Codex nodes wait; Claude Code nodes still claim."
+      assert has_element?(view, ~s(#runner-mac-mini-harness-codex progress.progress-warning[data-usage-bar="5h"]))
+
+      gemini = "#runner-mac-mini-harness-gemini-cli"
+      assert has_element?(view, gemini, "✗ not installed")
+      assert harness_text(view, gemini) =~ "Won't claim nodes that use “Gemini Pro”"
+
+      assert has_element?(view, "#runner-mac-mini .badge-success", "FRESH")
+      refute has_element?(view, "#runner-mac-mini .badge-warning", "RATE LIMITED")
+    end
+
+    # Scenario 5 (AC6)
+    test "with every installed harness paused the pill reads RATE LIMITED and each row keeps its paused line",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses(claude_paused: true))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini .badge-warning", "RATE LIMITED")
+      assert has_element?(view, "#runner-mac-mini-harness-claude-code-paused", "⏸ Paused — 7d at 95%")
+      assert has_element?(view, "#runner-mac-mini-harness-codex-paused", "⏸ Paused — 5h at 93%")
+    end
+
+    # Scenario 6
+    test "a harness with no reading yet shows — and no bars, and a harness removed from the board drops",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses(codex_usage: nil))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert harness_text(view, "#runner-mac-mini-harness-codex-usage") == "—"
+      refute has_element?(view, "#runner-mac-mini-harness-codex [data-usage-bar]")
+
+      codex = Enum.find(Relay.Agents.list_harnesses(board), &(&1.key == "codex"))
+
+      for agent <- Relay.Agents.list_agents(board),
+          agent.harness_id == codex.id,
+          do: {:ok, _} = Relay.Agents.delete_agent(agent)
+
+      {:ok, _deleted} = Relay.Agents.delete_harness(codex)
+
+      send(view.pid, :tick)
+
+      refute has_element?(view, "#runner-mac-mini-harness-codex")
+      assert has_element?(view, "#runner-mac-mini-harnesses", "HARNESSES · 2")
     end
   end
 
