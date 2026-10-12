@@ -3,6 +3,7 @@ defmodule RelayWeb.BoardRunFaceTest do
 
   import Ecto.Query
   import Phoenix.LiveViewTest
+  import Relay.FanOutFixtures, only: [region_flow: 2, seed_region_run: 2]
 
   alias Relay.Boards
   alias Relay.Cards
@@ -119,6 +120,51 @@ defmodule RelayWeb.BoardRunFaceTest do
 
     refute has_element?(view, "#card-#{ref}-run-face")
   end
+
+  describe "an open fan-out region (RE440)" do
+    setup %{board: board, code: code} do
+      region_flow(board, insert(:stage, board: board, type: :work, category: :in_progress, position: 100))
+      card = ai_card(code, "Fanned out", :working)
+      {_run, branches} = seed_region_run(card, [{"a", :ended, :succeeded}, {"b1", :running, nil}, {"c", :queued, nil}])
+
+      %{card: card, ref: Cards.ref(board, card), branches: branches}
+    end
+
+    test "the face counts the branches and splits the fan_out's segment (scenario 9)",
+         %{conn: conn, board: board, ref: ref} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      render_async(view)
+
+      face = view |> element("#card-#{ref}-run-face") |> render() |> LazyHTML.from_fragment()
+
+      assert face |> LazyHTML.query(".run-face-branches") |> LazyHTML.text() |> squish() ==
+               "· 1/3 branches · 1 queued"
+
+      assert face |> LazyHTML.query(".run-branch-segment .run-branch-bar") |> LazyHTML.attribute("class") == [
+               "run-branch-bar run-branch-bar-succeeded",
+               "run-branch-bar run-branch-bar-running",
+               "run-branch-bar run-branch-bar-queued"
+             ]
+    end
+
+    test "the branch count leaves the face once every branch has ended (scenario 10)",
+         %{conn: conn, board: board, card: card, ref: ref, branches: branches} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      render_async(view)
+      assert has_element?(view, "#card-#{ref}-run-face .run-face-branches")
+
+      for branch <- branches, do: branch |> Ecto.Changeset.change(state: :ended) |> Relay.Repo.update!()
+
+      board_id = board.id
+      attach_run_flush_telemetry()
+      Runs.broadcast_run_changed(board.id, card.id)
+      assert_receive {:run_flush, %{card_count: 1}, %{board_id: ^board_id}}, 500
+
+      refute has_element?(view, "#card-#{ref}-run-face .run-face-branches")
+    end
+  end
+
+  defp squish(text), do: text |> String.split() |> Enum.join(" ")
 
   # RLY-191: the run face ages visibly and escalates to the amber stalled treatment. A
   # fresh board (rather than the default board reused above) — explicit stage positions

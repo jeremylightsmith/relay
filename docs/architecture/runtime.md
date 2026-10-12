@@ -199,11 +199,20 @@ sequenceDiagram
 - **Cancel and close.** `cancel_run/2` and `close_run!/3` end every open row
   (`Runs.end_open_branches!/1`), so a terminal run never leaves a branch `queued` or `running`.
 
-The card drawer timeline renders the region flat until RE440 groups it: every in-flight branch
-node is an active row, even while a sibling parks the run (`Relay.Runs.RunDetail`, which reads
-the `run_branches` that `Runs.list_runs_for_card/1` preloads), and `Runs.happy_path/1` steps from
-the `fan_out` straight to its `fan_in`, so a card face reads "node N of M" against the
-`fan_out` while the region is open. The full engine rules are in
+The card drawer timeline groups each region entry (RE440). `Relay.Runs.RunDetail` reads the
+`run_branches` that `Runs.list_runs_for_card/1` preloads and turns each `fan_out` execution that
+opened an entry into one `:region` row: the `fan_out` as its header, a tally
+(`RunDetail.branch_tally/1`), and one lane per branch in `position` order — never start order —
+with loop rows computed within the lane. A branch held back by `max_parallel` shows a `:queued`
+placeholder; an in-flight branch node stays active even while a sibling parks the run. An open
+region is followed by a synthetic `:waiting` `fan_in` row; a joined one annotates the real
+`fan_in` with `join` (total / failed) and the row after it with `joined_from`. A region entered
+twice renders twice, one group per `fan_out` execution. `RunDetail.branch_bars` gives each
+`fan_out` key its latest entry's per-branch bars (`RunDetail.branch_bar/1`, closed set
+`bar_states/0`), and the card-face summary carries `branches` — the open entry's tally plus its
+bars, nil once it joins (`Runs.open_region/1`'s rule, read for the whole board in one query).
+`Runs.happy_path/1` still steps from the `fan_out` straight to its `fan_in`, so a card face
+reads "node N of M" against the `fan_out` while the region is open. The full engine rules are in
 [runner.md](runner.md#fan-out-regions-re437); the runner side — concurrent node jobs in one
 worktree — is in [runner.md's worktree pool](runner.md#runner-mode-relay-start-rly-135-adr-0006-card-05).
 

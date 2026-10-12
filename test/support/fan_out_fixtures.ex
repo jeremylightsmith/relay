@@ -88,6 +88,77 @@ defmodule Relay.FanOutFixtures do
     ]
   end
 
+  @doc """
+  The read-side tests' `region` flow's nodes (RE437 task 5, scenario 1):
+  `prep` → `fo` ⇉ {`a`, `b1` ⇄ `b2`} → `fi` → `after` → `done`.
+  """
+  def region_nodes do
+    [
+      %{key: "prep", type: :shell, run: "true"},
+      %{key: "fo", type: :fan_out},
+      %{key: "a", type: :shell, run: "true"},
+      %{key: "b1", type: :agent, run: "b1"},
+      %{key: "b2", type: :agent, run: "b2"},
+      %{key: "fi", type: :fan_in},
+      %{key: "after", type: :shell, run: "true"}
+    ]
+  end
+
+  @doc "The `region` flow's edges, in edge order."
+  def region_edges do
+    [
+      %{from: "start", to: "prep"},
+      %{from: "prep", to: "fo", on: :succeeded},
+      %{from: "fo", to: "a"},
+      %{from: "fo", to: "b1"},
+      %{from: "a", to: "fi", on: :succeeded},
+      %{from: "b1", to: "b2", on: :failed},
+      %{from: "b2", to: "b1", on: :succeeded},
+      %{from: "b1", to: "fi", on: :succeeded},
+      %{from: "fi", to: "after", on: :succeeded},
+      %{from: "after", to: "done", on: :succeeded}
+    ]
+  end
+
+  @doc "Creates the `region` flow on `board`, owned by `stage`."
+  def region_flow(board, stage) do
+    {:ok, flow} =
+      Relay.Flows.create_flow(board, %{
+        key: "region",
+        isolation: :shared_clean,
+        stage_id: stage.id,
+        nodes: region_nodes(),
+        edges: region_edges()
+      })
+
+    flow
+  end
+
+  @doc """
+  A running run on `card`'s `region` flow sitting on `fo`, with one `run_branch` row per
+  `{branch, state, outcome}` in `specs`, at positions 0, 1, …. Returns `{run, branches}`.
+  """
+  def seed_region_run(card, specs) do
+    run = Relay.Factory.insert(:run, card: card, flow_key: "region", status: :running, current_node: "fo")
+    fan_out = Relay.Factory.insert(:node_execution, run: run, node: "fo")
+
+    branches =
+      specs
+      |> Enum.with_index()
+      |> Enum.map(fn {{key, state, outcome}, position} ->
+        Relay.Factory.insert(:run_branch,
+          run: run,
+          fan_out_execution: fan_out,
+          branch: key,
+          position: position,
+          state: state,
+          outcome: outcome
+        )
+      end)
+
+    {run, branches}
+  end
+
   @doc "Create attrs for the panel flow (no `stage_id`)."
   def panel_attrs(overrides \\ %{}) do
     Map.merge(%{key: "panel", isolation: :shared_clean, nodes: panel_nodes(), edges: panel_edges()}, overrides)

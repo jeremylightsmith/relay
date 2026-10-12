@@ -46,6 +46,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.PlanTasks
   alias Relay.Runs.Policy
   alias Relay.Runs.Preflight
+  alias Relay.Runs.RunDetail
   alias Relay.Runs.RunServer
   alias Relay.Runs.Scheduler
   alias Relay.Runs.Scheduler.Server, as: SchedulerServer
@@ -179,16 +180,28 @@ defmodule Relay.Runs do
   entered a region (RE437).
   """
   @spec open_region(Run.t()) :: [RunBranch.t()]
-  def open_region(%Run{id: run_id}) do
-    latest = from b in RunBranch, where: b.run_id == ^run_id, select: max(b.fan_out_execution_id)
+  def open_region(%Run{id: run_id}), do: Map.get(open_regions([run_id]), run_id, [])
 
-    rows =
-      case Repo.one(latest) do
-        nil -> []
-        entry -> Repo.all(from b in RunBranch, where: b.fan_out_execution_id == ^entry, order_by: [asc: b.position])
-      end
+  # The one "latest entry, only while open" rule, batched over runs in ONE query (RE440):
+  # %{run_id => branch rows by position} — a run whose latest entry has joined, or that never
+  # entered a region, is absent.
+  defp open_regions([]), do: %{}
 
-    if Enum.any?(rows, &(&1.state in RunBranch.open_states())), do: rows, else: []
+  defp open_regions(run_ids) do
+    latest =
+      from b in RunBranch,
+        where: b.run_id in ^run_ids,
+        group_by: b.run_id,
+        select: %{run_id: b.run_id, entry: max(b.fan_out_execution_id)}
+
+    from(b in RunBranch,
+      join: l in subquery(latest),
+      on: l.run_id == b.run_id and l.entry == b.fan_out_execution_id,
+      order_by: [asc: b.run_id, asc: b.position]
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.run_id)
+    |> Map.filter(fn {_run_id, rows} -> Enum.any?(rows, &(&1.state in RunBranch.open_states())) end)
   end
 
   @doc "Every branch row of the run, ordered by region entry (`fan_out_execution_id`), then `position` (RE437)."
@@ -252,12 +265,15 @@ defmodule Relay.Runs do
 
   @doc """
   The board's card faces in one pass: %{card_id => summary} for every card
-  whose latest run exists. Three queries (latest run per card, node-execution
-  aggregates, flows for happy paths) — no per-card N+1. `duration_s` sums the
+  whose latest run exists. Four queries (latest run per card, node-execution
+  aggregates, flows for happy paths, open region branches) — no per-card N+1. `duration_s` sums the
   `finished_at - started_at` gap of each execution (the schema stores no
   duration column); an in-flight execution (`finished_at: nil`) contributes
   nothing to the sum. `flow_version` is nil — the run points at the live flow
-  row and carries no version column yet (RLY-152).
+  row and carries no version column yet (RLY-152). `branches` (RE440) is the
+  open region entry's `RunDetail.branch_tally/1` plus its `bars`
+  (`RunDetail.branch_bar/1`, by position) — nil unless a region is open
+  (`open_region/1`'s rule); all runs' branches come from one batched query.
   """
   # The zero totals a run with no node executions contributes — the fallback for a run id absent
   # from node_totals/1. Named once so both summary readers share it (AGENTS.md "a fact defined once").
@@ -274,7 +290,9 @@ defmodule Relay.Runs do
           order_by: [asc: r.card_id, desc: r.inserted_at, desc: r.id]
       )
 
-    totals = node_totals(Enum.map(latest, & &1.id))
+    run_ids = Enum.map(latest, & &1.id)
+    totals = node_totals(run_ids)
+    regions = open_regions(run_ids)
 
     paths =
       from(f in Flow, where: f.board_id == ^board_id)
@@ -284,7 +302,7 @@ defmodule Relay.Runs do
     Map.new(latest, fn run ->
       path = Map.get(paths, run.flow_key, [])
       tot = Map.get(totals, run.id, @empty_totals)
-      {run.card_id, build_summary(run, path, tot)}
+      {run.card_id, build_summary(run, path, tot, Map.get(regions, run.id, []))}
     end)
   end
 
@@ -293,7 +311,7 @@ defmodule Relay.Runs do
   no run — the one-card variant of `run_summaries_for_board/1` (RLY-204). BoardLive
   calls this to refetch only the card a run event names, instead of re-aggregating
   every run on the board. Both functions build each run's summary through the shared
-  private `build_summary/3`, so the summary map shape is defined exactly once.
+  private `build_summary/4`, so the summary map shape is defined exactly once.
   """
   def run_summary_for_card(%Card{} = card) do
     case latest_run(card) do
@@ -302,7 +320,7 @@ defmodule Relay.Runs do
 
       run ->
         totals = Map.get(node_totals([run.id]), run.id, @empty_totals)
-        build_summary(run, happy_path_for(card, run), totals)
+        build_summary(run, happy_path_for(card, run), totals, open_region(run))
     end
   end
 
@@ -953,8 +971,9 @@ defmodule Relay.Runs do
   # The one per-run summary map — built identically by run_summaries_for_board/1 (over the
   # whole board) and run_summary_for_card/1 (one card), so the shape lives in exactly one
   # place. `path` is the flow's happy path (drives node_index/node_count); `totals` is this
-  # run's node-execution aggregate, or @empty_totals when it has no executions yet.
-  defp build_summary(%Run{} = run, path, totals) do
+  # run's node-execution aggregate, or @empty_totals when it has no executions yet; `branches`
+  # is the run's open region entry (`open_regions/1`), `[]` when none is open (RE440).
+  defp build_summary(%Run{} = run, path, totals, branches) do
     index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
 
     %{
@@ -973,9 +992,15 @@ defmodule Relay.Runs do
       duration_s: totals.duration_s,
       cost: totals.cost,
       nodes: totals.nodes,
-      attempts: totals.attempts
+      attempts: totals.attempts,
+      branches: branch_summary(branches)
     }
   end
+
+  defp branch_summary([]), do: nil
+
+  defp branch_summary(rows),
+    do: rows |> RunDetail.branch_tally() |> Map.put(:bars, Enum.map(rows, &RunDetail.branch_bar/1))
 
   # The single-flow analog of run_summaries_for_board/1's `paths` map: the happy path of the
   # flow this run points at (matched by key within the card's board, exactly as the board
@@ -1009,7 +1034,7 @@ defmodule Relay.Runs do
   purely from `run` (with `node_executions` preloaded) plus its `flow` (or nil).
   The web layer renders this instead of re-folding raw executions (RLY-207).
   """
-  def run_detail(run, flow), do: Relay.Runs.RunDetail.build(run, flow)
+  def run_detail(run, flow), do: RunDetail.build(run, flow)
 
   # A live run whose node-job is stuck (queued/unclaimed, or held by a silent runner) this long
   # has stopped moving. It never applies to a job a live runner is holding: working_run_ids/2

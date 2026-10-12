@@ -6,6 +6,7 @@ defmodule RelayWeb.BoardLiveRunTabTest do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Flows
+  alias Relay.Repo
 
   setup :register_and_log_in_user
 
@@ -298,7 +299,7 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     # RE323 — on a single-question batch the option click itself sends the answer
     view |> element("#needs-input-option-0") |> render_click()
 
-    card = Relay.Repo.reload!(card)
+    card = Repo.reload!(card)
     assert card.status == :working
     assert_patch(view, ~p"/board/#{ctx.board.slug}")
   end
@@ -329,5 +330,122 @@ defmodule RelayWeb.BoardLiveRunTabTest do
     refute has_element?(view, "#card-drawer-tab-panel-run", "PRIOR")
     assert has_element?(view, "#run-entry-1", "old failure")
     refute has_element?(view, "#run-entry-1[open]")
+  end
+
+  describe "the drawer's fan-out region group (RE440)" do
+    # The card mockup's region on a fresh work stage (a stage with a flow can't take another).
+    defp region_flow!(board) do
+      position = board.stages |> Enum.map(& &1.position) |> Enum.max() |> Kernel.+(1)
+      stage = insert(:stage, board: board, type: :work, category: :in_progress, position: position)
+
+      {:ok, flow} =
+        Flows.create_flow(board, %{
+          key: "review",
+          isolation: :shared_clean,
+          stage_id: stage.id,
+          nodes: [
+            %{key: "prep", type: :shell, run: "true"},
+            %{key: "fo", type: :fan_out, max_parallel: 2},
+            %{key: "review_security", type: :agent, run: "a"},
+            %{key: "review_correctness", type: :agent, run: "b"},
+            %{key: "review_conventions", type: :agent, run: "c"},
+            %{key: "review_join", type: :fan_in},
+            %{key: "fix_findings", type: :agent, run: "d"}
+          ],
+          edges: [
+            %{from: "start", to: "prep"},
+            %{from: "prep", to: "fo", on: :succeeded},
+            %{from: "fo", to: "review_security"},
+            %{from: "fo", to: "review_correctness"},
+            %{from: "fo", to: "review_conventions"},
+            %{from: "review_security", to: "review_join", on: :succeeded},
+            %{from: "review_correctness", to: "review_join", on: :succeeded},
+            %{from: "review_conventions", to: "review_join", on: :succeeded},
+            %{from: "review_join", to: "fix_findings", on: :succeeded},
+            %{from: "fix_findings", to: "done", on: :succeeded}
+          ]
+        })
+
+      flow
+    end
+
+    # Scenario 7's run: on `fo`, two branches in flight and the third queued under max_parallel 2.
+    defp seed_region_run!(ctx) do
+      region_flow!(ctx.board)
+      card = ai_card(ctx.code, "Fan-out review")
+      run = insert(:run, card: card, flow_key: "review", status: :running, current_node: "fo")
+      insert(:node_execution, run: run, node: "prep")
+      fan_out = insert(:node_execution, run: run, node: "fo")
+
+      branches =
+        [{"review_security", :running}, {"review_correctness", :running}, {"review_conventions", :queued}]
+        |> Enum.with_index()
+        |> Enum.map(fn {{key, state}, position} ->
+          insert(:run_branch, run: run, fan_out_execution: fan_out, branch: key, position: position, state: state)
+        end)
+
+      executions =
+        for branch <- Enum.filter(branches, &(&1.state == :running)) do
+          insert(:node_execution,
+            run: run,
+            node: branch.branch,
+            outcome: nil,
+            duration_s: nil,
+            run_branch_id: branch.id
+          )
+        end
+
+      %{card: card, run: run, fan_out: fan_out, branches: branches, executions: executions}
+    end
+
+    defp panel_doc(view), do: view |> element("#card-drawer-tab-panel-run") |> render() |> LazyHTML.from_fragment()
+
+    defp panel_text(view, selector),
+      do: view |> panel_doc() |> LazyHTML.query(selector) |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+
+    test "the Run tab groups the open region under a live chip, its lanes in position order (scenario 7)", ctx do
+      %{card: card, fan_out: fan_out} = seed_region_run!(ctx)
+
+      view = open(ctx.conn, ctx.board, Cards.ref(ctx.board, card))
+
+      assert panel_text(view, ".run-region-chip") == "2 running · 1 queued · max 2"
+
+      assert view |> panel_doc() |> LazyHTML.query(".run-region-lane") |> LazyHTML.attribute("id") == [
+               "run-region-#{fan_out.id}-lane-review_security",
+               "run-region-#{fan_out.id}-lane-review_correctness",
+               "run-region-#{fan_out.id}-lane-review_conventions"
+             ]
+
+      assert has_element?(view, "#run-region-#{fan_out.id}-lane-review_conventions .run-queued-chip")
+    end
+
+    test "a branch starting and another ending re-render the group on the run broadcast (scenario 8)", ctx do
+      %{card: card, run: run, branches: [first, _second, queued], executions: [first_execution | _]} =
+        seed_region_run!(ctx)
+
+      view = open(ctx.conn, ctx.board, Cards.ref(ctx.board, card))
+      assert count(view, ".run-queued-chip") == 1
+
+      Repo.update!(Ecto.Changeset.change(queued, state: :running))
+
+      started =
+        insert(:node_execution, run: run, node: queued.branch, outcome: nil, duration_s: nil, run_branch_id: queued.id)
+
+      Repo.update!(Ecto.Changeset.change(first, state: :ended, outcome: :succeeded))
+
+      Repo.update!(
+        Ecto.Changeset.change(first_execution,
+          outcome: :succeeded,
+          finished_at: DateTime.truncate(DateTime.utc_now(), :second)
+        )
+      )
+
+      Relay.Runs.broadcast_runs(ctx.board.id, {:node_started, run, started})
+      send(view.pid, :flush_run_changes)
+      render(view)
+
+      assert panel_text(view, ".run-region-chip") == "2 of 3 running"
+      assert count(view, ".run-queued-chip") == 0
+    end
   end
 end

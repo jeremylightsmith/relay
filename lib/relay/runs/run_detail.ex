@@ -17,19 +17,32 @@ defmodule Relay.Runs.RunDetail do
   plain test/story map work; `:node_executions` may be `nil` (treated as `[]`), and so may
   `:run_branches` (RE437 — nil, absent or not loaded is treated as `[]`).
 
-  Fan-out regions (RE437) render flat until RE440 groups them: an in-flight execution whose
-  `run_branch_id` names a `:running` branch stays `:active` while a sibling branch parks the run,
-  and a control-node `current_node` (`Schemas.Flow.Node.control_types/0`) never gets a
-  synthetic active row — it has no job of its own.
+  Fan-out regions (RE437) are grouped (RE440): when `run_branches` is a list, each `fan_out`
+  execution that opened a region entry becomes one `:region` timeline row — the `fan_out`'s node
+  row as `header`, a `branch_tally/1` `tally`, and one lane per branch in `position` order (never
+  start order), each holding that branch's executions with loop rows computed within the lane. A
+  `:queued` branch with no execution gets a `state: :queued` placeholder row. A joined region
+  annotates its `fan_in` row with `join` and the row after it with `joined_from`; an open one is
+  followed by a synthetic `state: :waiting` `fan_in` row (only when the flow is known). Any other
+  `run_branches` value keeps the flat timeline. An in-flight execution whose `run_branch_id` names
+  a `:running` branch stays `:active` while a sibling branch parks the run, and a control-node
+  `current_node` (`Schemas.Flow.Node.control_types/0`) never gets a synthetic active row — it has
+  no job of its own. `branch_bars` maps each `fan_out` key to its latest entry's `branch_bar/1`s.
   `stage_name` comes from the run's own `flow: %{stage: %{name: _}}` (RE426), nil
   whenever that chain is missing or not loaded.
   """
 
   alias Schemas.Flow
   alias Schemas.NodeExecution
+  alias Schemas.RunBranch
 
   @type row :: map()
   @type t :: %__MODULE__{}
+
+  @typedoc "How one branch draws in the progress bar (RE440)."
+  @type bar() :: :succeeded | :failed | :running | :parked | :queued | :cancelled
+
+  @bar_states [:succeeded, :failed, :running, :parked, :queued, :cancelled]
 
   defstruct [
     :status,
@@ -47,7 +60,8 @@ defmodule Relay.Runs.RunDetail do
     :last_failure_detail,
     :parked_attempt,
     :totals,
-    :timeline
+    :timeline,
+    branch_bars: %{}
   ]
 
   @doc "Builds the read model from a run (node_executions preloaded) and its flow (or nil)."
@@ -70,8 +84,71 @@ defmodule Relay.Runs.RunDetail do
       last_failure_detail: last_failure_detail(nes),
       parked_attempt: parked_attempt(run, nes),
       totals: totals(nes),
-      timeline: timeline(run, nes, flow)
+      timeline: timeline(run, nes, flow),
+      branch_bars: branch_bars(run, nes)
     }
+  end
+
+  # ---- branch bars and tallies (RE440): the one partition of branch rows ----
+
+  @doc "The closed set of per-branch progress-bar states, in display order."
+  @spec bar_states() :: [bar()]
+  def bar_states, do: @bar_states
+
+  @doc """
+  How one branch row draws: an open branch by its state, an ended one by its outcome —
+  `:cancelled` when a cancel or close ended it with no outcome.
+  """
+  @spec branch_bar(%{state: atom(), outcome: atom() | nil}) :: bar()
+  def branch_bar(%{state: :ended, outcome: nil}), do: :cancelled
+  def branch_bar(%{state: :ended, outcome: outcome}), do: outcome
+  def branch_bar(%{state: state}), do: state
+
+  @doc """
+  Counts branch rows per state (`Schemas.RunBranch.states/0`), plus the ended rows per outcome
+  (`succeeded` / `failed`) and the `total`.
+  """
+  @spec branch_tally([%{state: atom(), outcome: atom() | nil}]) :: %{
+          total: non_neg_integer(),
+          running: non_neg_integer(),
+          queued: non_neg_integer(),
+          parked: non_neg_integer(),
+          ended: non_neg_integer(),
+          succeeded: non_neg_integer(),
+          failed: non_neg_integer()
+        }
+  def branch_tally(rows) do
+    states = Map.new(RunBranch.states(), fn state -> {state, Enum.count(rows, &(&1.state == state))} end)
+
+    outcomes =
+      Map.new(RunBranch.outcomes(), fn outcome ->
+        {outcome, Enum.count(rows, &(&1.state == :ended and &1.outcome == outcome))}
+      end)
+
+    states |> Map.merge(outcomes) |> Map.put(:total, length(rows))
+  end
+
+  # Each fan_out key → the bars of its latest entry (highest fan_out_execution_id), by position.
+  defp branch_bars(run, nes) do
+    key_of = Map.new(nes, &{&1.id, &1.node_key})
+
+    run
+    |> branch_rows()
+    |> Enum.group_by(& &1.fan_out_execution_id)
+    |> Enum.filter(fn {fan_out_id, _rows} -> Map.has_key?(key_of, fan_out_id) end)
+    |> Enum.group_by(fn {fan_out_id, _rows} -> Map.fetch!(key_of, fan_out_id) end)
+    |> Map.new(fn {key, entries} ->
+      {_latest, rows} = Enum.max_by(entries, &elem(&1, 0))
+      {key, rows |> Enum.sort_by(& &1.position) |> Enum.map(&branch_bar/1)}
+    end)
+  end
+
+  # The run's loaded branch rows; nil, absent or not loaded is `[]`.
+  defp branch_rows(run) do
+    case Map.get(run, :run_branches) do
+      branches when is_list(branches) -> branches
+      _nil_or_not_loaded -> []
+    end
   end
 
   # ---- stage_name (RE426): the run's own flow's work stage, never the `flow` argument ----
@@ -82,52 +159,206 @@ defmodule Relay.Runs.RunDetail do
   defp stage_name(%{flow: %{stage: %{name: name}}}) when is_binary(name), do: name
   defp stage_name(_run), do: nil
 
-  # ---- timeline (was RunComponents.timeline_rows/3) ----
+  # ---- timeline (was RunComponents.timeline_rows/3; region grouping RE440) ----
 
+  # Executions whose `run_branch_id` names a loaded branch row are lane executions; the rest form
+  # the main sequence. Loop rows are computed per sequence (main, then each lane) — over the
+  # interleaved whole a branch's loop-back would follow a sibling's execution and lose its chip.
   defp timeline(run, nes, flow) do
-    running = running_branch_ids(run)
+    branches = branch_rows(run)
+    by_id = Map.new(branches, &{&1.id, &1})
+    {lane_nes, main} = Enum.split_with(nes, &Map.has_key?(by_id, Map.get(&1, :run_branch_id)))
 
-    node_rows =
-      nes
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {ne, index} ->
-        prev = if index > 0, do: Enum.at(nes, index - 1)
+    ctx = %{
+      run: run,
+      nes: nes,
+      flow: flow,
+      running: running_branch_ids(run),
+      entries: Enum.group_by(branches, & &1.fan_out_execution_id),
+      lanes: Enum.group_by(lane_nes, &Map.get(&1, :run_branch_id))
+    }
 
-        loop_row =
-          if ne.attempt > 1 and prev != nil and prev.outcome == :failed do
-            [
-              %{
-                kind: :loop,
-                from_node: prev.node_key,
-                to_node: ne.node_key,
-                attempt: spent_attempt(ne, nes),
-                max_loops: max_loops(prev, flow)
-              }
-            ]
-          else
-            []
-          end
+    rows = main_rows(main, ctx)
+    waiting = for %{kind: :node, state: :waiting, node_key: key} <- rows, do: key
 
-        loop_row ++ [node_row(ne, run, nes, flow, running)]
-      end)
-
-    node_rows ++ synthetic_active(run, nes, flow) ++ pending_tail(run, nes, flow)
+    rows ++ synthetic_active(run, nes, flow) ++ pending_tail(run, nes, flow, waiting)
   end
 
-  defp node_row(ne, run, nes, flow, running) do
+  defp main_rows(main, ctx) do
+    regions = region_entries(main, ctx)
+    annotations = join_annotations(regions)
+
+    with_loop_rows(main, ctx, fn ne, index ->
+      row = Map.merge(node_row(ne, ctx), Map.get(annotations, index, %{}))
+
+      case Map.fetch(regions, index) do
+        {:ok, region} -> [region_row(row, ne, region, ctx) | waiting_fan_in(region)]
+        :error -> [row]
+      end
+    end)
+  end
+
+  # Each main-sequence index whose execution opened a region entry → that entry's facts: its
+  # branch rows by position, tally, the flow's region (nil without a flow) and the matched
+  # `fan_in` execution (rule 7), if any.
+  defp region_entries(main, ctx) do
+    main
+    |> Enum.zip(Enum.drop(main, 1) ++ [nil])
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{ne, next}, index} ->
+      case Map.get(ctx.entries, ne.id) do
+        nil -> []
+        rows -> [{index, region_entry(ne, rows, next, ctx.flow)}]
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp region_entry(fan_out, rows, next, flow) do
+    branches = Enum.sort_by(rows, & &1.position)
+    open? = Enum.any?(branches, &(&1.state in RunBranch.open_states()))
+    flow_region = flow_region(flow, fan_out.node_key)
+    fan_in = if open?, do: nil, else: matched_fan_in(next, flow, flow_region)
+
+    %{branches: branches, open?: open?, tally: branch_tally(branches), region: flow_region, fan_in: fan_in}
+  end
+
+  # A joined region's `fan_in` is the next main-sequence execution — when the flow is known, only
+  # if its key is the region's `fan_in`.
+  defp matched_fan_in(nil, _flow, _region), do: nil
+  defp matched_fan_in(next, nil, _region), do: next
+  defp matched_fan_in(next, _flow, %{fan_in: fan_in}) when next.node_key == fan_in, do: next
+  defp matched_fan_in(_next, _flow, _region), do: nil
+
+  # index → the `join` / `joined_from` keys to merge onto that main-sequence row: the matched
+  # `fan_in` sits right after its region's `fan_out`, and the row after it is what joined.
+  defp join_annotations(regions) do
+    Enum.reduce(regions, %{}, fn
+      {index, %{fan_in: %{}, tally: tally}}, acc ->
+        acc
+        |> Map.update(index + 1, %{join: join(tally)}, &Map.put(&1, :join, join(tally)))
+        |> Map.update(index + 2, %{joined_from: tally.total}, &Map.put(&1, :joined_from, tally.total))
+
+      _entry, acc ->
+        acc
+    end)
+  end
+
+  defp join(tally), do: %{total: tally.total, failed: tally.failed}
+
+  defp region_row(header, fan_out, region, ctx) do
+    lane_nes = Enum.flat_map(region.branches, &Map.get(ctx.lanes, &1.id, []))
+
+    %{
+      kind: :region,
+      fan_out_execution_id: fan_out.id,
+      header: header,
+      open?: region.open?,
+      tally: region.tally,
+      max_parallel: region.region && region.region.max_parallel,
+      duration_s: region_duration_s(fan_out, region.fan_in, lane_nes),
+      cost: sum_costs(Enum.map(lane_nes, &Map.get(&1, :cost))),
+      lanes: Enum.map(region.branches, &lane(&1, ctx))
+    }
+  end
+
+  # From the `fan_out`'s start to the matched `fan_in`'s finish, else the latest lane finish.
+  defp region_duration_s(fan_out, fan_in, lane_nes) do
+    lane_end =
+      lane_nes |> Enum.map(&Map.get(&1, :finished_at)) |> Enum.reject(&is_nil/1) |> Enum.max(DateTime, fn -> nil end)
+
+    finish = (fan_in && Map.get(fan_in, :finished_at)) || lane_end
+    started = Map.get(fan_out, :started_at)
+
+    if started && finish, do: DateTime.diff(finish, started)
+  end
+
+  defp lane(branch, ctx) do
+    rows =
+      case Map.get(ctx.lanes, branch.id, []) do
+        [] when branch.state == :queued ->
+          [synthetic_row(branch.branch, :queued, type_tag(branch.branch, ctx.flow))]
+
+        nes ->
+          with_loop_rows(nes, ctx, fn ne, _index -> [node_row(ne, ctx)] end)
+      end
+
+    %{branch: branch.branch, position: branch.position, state: branch.state, outcome: branch.outcome, rows: rows}
+  end
+
+  # An open region whose flow names its `fan_in` is followed by that `fan_in`, waiting.
+  defp waiting_fan_in(%{open?: true, region: %{fan_in: fan_in}, tally: tally}) when is_binary(fan_in),
+    do: [synthetic_row(fan_in, :waiting, :fan_in, %{join: join(tally)})]
+
+  defp waiting_fan_in(_region), do: []
+
+  # One sequence's rows: each execution's rows (from `fun`), preceded by a `:loop` row when it
+  # re-enters after the sequence's previous execution failed.
+  defp with_loop_rows(seq, ctx, fun) do
+    seq
+    |> Enum.zip([nil | seq])
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{ne, prev}, index} -> loop_row(ne, prev, ctx) ++ fun.(ne, index) end)
+  end
+
+  defp loop_row(ne, prev, ctx) do
+    if ne.attempt > 1 and prev != nil and prev.outcome == :failed do
+      [
+        %{
+          kind: :loop,
+          from_node: prev.node_key,
+          to_node: ne.node_key,
+          attempt: spent_attempt(ne, ctx.nes),
+          max_loops: max_loops(prev, ctx.flow)
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  defp flow_region(%Flow{} = flow, key), do: Flow.region(flow, key)
+  defp flow_region(_flow, _key), do: nil
+
+  defp node_row(ne, ctx) do
     %{
       kind: :node,
       node_key: ne.node_key,
-      attempt: spent_attempt(ne, nes),
-      state: branch_row_state(ne, run, running),
-      resumed?: resumed?(ne, nes),
+      attempt: spent_attempt(ne, ctx.nes),
+      state: branch_row_state(ne, ctx.run, ctx.running),
+      resumed?: resumed?(ne, ctx.nes),
       steered?: ne.outcome == :steered,
       partial?: ne.outcome == :partial,
-      type: type_tag(ne.node_key, flow),
+      type: type_tag(ne.node_key, ctx.flow),
       detail: Map.get(ne, :detail),
       cost: Map.get(ne, :cost),
-      duration_s: ne_duration_s(ne)
+      duration_s: ne_duration_s(ne),
+      join: nil,
+      joined_from: nil
     }
+  end
+
+  # A node row no execution backs: the between-nodes active row, a queued branch's placeholder,
+  # an open region's waiting `fan_in`.
+  defp synthetic_row(node_key, state, type, extra \\ %{}) do
+    Map.merge(
+      %{
+        kind: :node,
+        node_key: node_key,
+        attempt: 1,
+        state: state,
+        resumed?: false,
+        steered?: false,
+        partial?: false,
+        type: type,
+        detail: nil,
+        cost: nil,
+        duration_s: nil,
+        join: nil,
+        joined_from: nil
+      },
+      extra
+    )
   end
 
   # RE267: the attempt number a human reads. A `:blocked` attempt spent no retry — RE308 parks it,
@@ -215,21 +446,7 @@ defmodule Relay.Runs.RunDetail do
     if Enum.any?(nes, &is_nil(&1.outcome)) or type_tag(node_key, flow) in Flow.Node.control_types() do
       []
     else
-      [
-        %{
-          kind: :node,
-          node_key: node_key,
-          attempt: 1,
-          state: :active,
-          resumed?: false,
-          steered?: false,
-          partial?: false,
-          type: nil,
-          detail: nil,
-          cost: nil,
-          duration_s: nil
-        }
-      ]
+      [synthetic_row(node_key, :active, nil)]
     end
   end
 
@@ -237,14 +454,15 @@ defmodule Relay.Runs.RunDetail do
 
   # ---- pending_tail (was RunComponents.pending_tail/3), returns node keys ----
 
-  defp pending_tail(%{status: status} = run, nes, %Flow{} = flow) do
+  # `waiting` are the keys already rendered as a synthetic `:waiting` `fan_in` row (RE440).
+  defp pending_tail(%{status: status} = run, nes, %Flow{} = flow, waiting) do
     if status in Schemas.Run.active_statuses() do
-      executed = MapSet.new(nes, & &1.node_key)
+      shown = MapSet.new(Enum.map(nes, & &1.node_key) ++ waiting)
 
       remaining =
         flow
         |> Relay.Runs.happy_path()
-        |> Enum.reject(&(MapSet.member?(executed, &1) or &1 == Map.get(run, :current_node)))
+        |> Enum.reject(&(MapSet.member?(shown, &1) or &1 == Map.get(run, :current_node)))
 
       if remaining == [], do: [], else: [%{kind: :pending, nodes: remaining}]
     else
@@ -252,7 +470,7 @@ defmodule Relay.Runs.RunDetail do
     end
   end
 
-  defp pending_tail(_run, _nes, _flow), do: []
+  defp pending_tail(_run, _nes, _flow, _waiting), do: []
 
   # ---- totals (was CoreComponents.run_totals/1) ----
 

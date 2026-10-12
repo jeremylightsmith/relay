@@ -1,7 +1,10 @@
 defmodule Relay.RunDetailTest do
   use ExUnit.Case, async: true
 
+  alias Ecto.Association.NotLoaded
+  alias Relay.FanOutFixtures
   alias Relay.Runs
+  alias Relay.Runs.RunDetail
   alias Schemas.Flow
 
   # id + started_at are needed by Runs.last_node/2 for terminal runs (current_node nil).
@@ -52,34 +55,26 @@ defmodule Relay.RunDetailTest do
     }
   end
 
-  # RE437 task 5's region flow: prep → fo ⇉ {a, b1 ⇄ b2} → fi → after → done.
+  # Relay.FanOutFixtures' region flow (prep → fo ⇉ {a, b1 ⇄ b2} → fi → after → done), every edge
+  # carrying `on` and `max_loops` so a variant can update them in place.
   defp region_flow do
     %Flow{
-      nodes: [
-        %{key: "prep", type: :shell},
-        %{key: "fo", type: :fan_out},
-        %{key: "a", type: :shell},
-        %{key: "b1", type: :agent},
-        %{key: "b2", type: :agent},
-        %{key: "fi", type: :fan_in},
-        %{key: "after", type: :shell}
-      ],
-      edges: [
-        %{from: "start", on: nil, to: "prep", max_loops: nil},
-        %{from: "prep", on: :succeeded, to: "fo", max_loops: nil},
-        %{from: "fo", on: nil, to: "a", max_loops: nil},
-        %{from: "fo", on: nil, to: "b1", max_loops: nil},
-        %{from: "a", on: :succeeded, to: "fi", max_loops: nil},
-        %{from: "b1", on: :failed, to: "b2", max_loops: nil},
-        %{from: "b2", on: :succeeded, to: "b1", max_loops: nil},
-        %{from: "b1", on: :succeeded, to: "fi", max_loops: nil},
-        %{from: "fi", on: :succeeded, to: "after", max_loops: nil},
-        %{from: "after", on: :succeeded, to: "done", max_loops: nil}
-      ]
+      nodes: FanOutFixtures.region_nodes(),
+      edges: Enum.map(FanOutFixtures.region_edges(), &Map.merge(%{on: nil, max_loops: nil}, &1))
     }
   end
 
-  # A run with an open region: `fo` fanned out to `a` (branch 1) and `b1` (branch 2), both in flight.
+  # region_flow/0 with each node / edge passed through `node_fun` / `edge_fun` and `extra` appended.
+  defp region_flow_variant(node_fun, edge_fun, extra_nodes \\ [], extra_edges \\ []) do
+    flow = region_flow()
+    %{flow | nodes: Enum.map(flow.nodes, node_fun) ++ extra_nodes, edges: Enum.map(flow.edges, edge_fun) ++ extra_edges}
+  end
+
+  defp branch(id, fan_out_id, key, position, state, outcome \\ nil),
+    do: %{id: id, fan_out_execution_id: fan_out_id, branch: key, position: position, state: state, outcome: outcome}
+
+  # A run with an open region: `fo` (id 100) fanned out to `a` (branch 1) and `b1` (branch 2),
+  # both in flight.
   defp region_run(attrs \\ %{}) do
     run(
       Map.merge(
@@ -87,12 +82,12 @@ defmodule Relay.RunDetailTest do
           status: :running,
           flow_key: "region",
           current_node: "fo",
-          run_branches: [%{id: 1, state: :running}, %{id: 2, state: :running}],
+          run_branches: [branch(1, 100, "a", 0, :running), branch(2, 100, "b1", 1, :running)],
           node_executions: [
-            ne("prep", 1, :succeeded),
-            ne("fo", 1, :succeeded),
-            ne("a", 1, nil, %{run_branch_id: 1, duration_s: nil}),
-            ne("b1", 1, nil, %{run_branch_id: 2, duration_s: nil})
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100}),
+            ne("a", 1, nil, %{id: 101, run_branch_id: 1, duration_s: nil}),
+            ne("b1", 1, nil, %{id: 102, run_branch_id: 2, duration_s: nil})
           ]
         },
         attrs
@@ -100,64 +95,226 @@ defmodule Relay.RunDetailTest do
     )
   end
 
+  # A run whose region joined with a failure (scenario 6): `a` ✓, `b1` ✕, `fi` failed, `after` in flight.
+  defp joined_run do
+    region_run(%{
+      current_node: "after",
+      run_branches: [branch(1, 100, "a", 0, :ended, :succeeded), branch(2, 100, "b1", 1, :ended, :failed)],
+      node_executions: [
+        ne("prep", 1, :succeeded, %{id: 10}),
+        ne("fo", 1, :succeeded, %{id: 100, started_at: ~U[2026-07-20 00:00:00Z], duration_s: 0}),
+        ne("a", 1, :succeeded, %{id: 101, run_branch_id: 1, cost: Decimal.new("0.31")}),
+        ne("b1", 1, :failed, %{
+          id: 102,
+          run_branch_id: 2,
+          detail: "Loop budget spent",
+          cost: Decimal.new("0.44"),
+          started_at: ~U[2026-07-20 00:01:00Z],
+          duration_s: 360
+        }),
+        ne("fi", 1, :failed, %{id: 103, started_at: ~U[2026-07-20 00:07:00Z], duration_s: 41}),
+        ne("after", 1, nil, %{id: 104, duration_s: nil})
+      ]
+    })
+  end
+
   defp node_rows(detail), do: Enum.filter(detail.timeline, &(&1.kind == :node))
 
   defp node_row(detail, key), do: Enum.find(node_rows(detail), &(&1.node_key == key))
 
-  describe "run_detail/2 with an open fan-out region (RE437)" do
-    test "every in-flight branch node is an active row, in execution order" do
+  defp regions(detail), do: Enum.filter(detail.timeline, &(&1.kind == :region))
+
+  defp region(detail), do: detail |> regions() |> hd()
+
+  defp lane(region, branch), do: Enum.find(region.lanes, &(&1.branch == branch))
+
+  # Every :node row, top-level and inside every lane.
+  defp all_node_rows(detail) do
+    Enum.flat_map(detail.timeline, fn
+      %{kind: :node} = row ->
+        [row]
+
+      %{kind: :region} = region ->
+        [region.header | Enum.flat_map(region.lanes, &Enum.filter(&1.rows, fn r -> r.kind == :node end))]
+
+      _other ->
+        []
+    end)
+  end
+
+  describe "run_detail/2 with an open fan-out region (RE437, grouped by RE440)" do
+    test "the region groups under its fan_out header, its waiting fan_in and the pending tail follow (scenario 1)" do
       detail = Runs.run_detail(region_run(), region_flow())
 
-      assert Enum.map(node_rows(detail), & &1.node_key) == ["prep", "fo", "a", "b1"]
-      assert node_row(detail, "a").state == :active
-      assert node_row(detail, "b1").state == :active
+      assert Enum.map(detail.timeline, & &1.kind) == [:node, :region, :node, :pending]
+      assert Enum.map(node_rows(detail), & &1.node_key) == ["prep", "fi"]
+
+      region = region(detail)
+      assert region.header.node_key == "fo"
+      assert region.header.type == :fan_out
+      assert region.open? == true
+      assert region.fan_out_execution_id == 100
+      assert region.tally == %{total: 2, running: 2, queued: 0, parked: 0, ended: 0, succeeded: 0, failed: 0}
+      assert region.max_parallel == 2
+
+      assert [%{branch: "a", position: 0} = lane_a, %{branch: "b1", position: 1} = lane_b1] = region.lanes
+      assert [%{kind: :node, node_key: "a", state: :active}] = lane_a.rows
+      assert [%{kind: :node, node_key: "b1", state: :active}] = lane_b1.rows
     end
 
-    test "no synthetic active row is added for the fan_out the run's current_node names" do
-      detail = Runs.run_detail(region_run(), region_flow())
-
-      assert length(node_rows(detail)) == 4
-      assert Enum.count(node_rows(detail), &(&1.node_key == "fo")) == 1
-    end
-
-    test "no synthetic active row for a control-node current_node even when every execution has settled" do
-      for {current, nes} <- [
-            {"fo", [ne("prep", 1, :succeeded), ne("fo", 1, :succeeded)]},
-            {"fi", [ne("prep", 1, :succeeded), ne("fo", 1, :succeeded), ne("a", 1, :succeeded), ne("b1", 1, :succeeded)]}
-          ] do
-        detail = Runs.run_detail(region_run(%{current_node: current, node_executions: nes}), region_flow())
-
-        assert Enum.map(node_rows(detail), & &1.node_key) == Enum.map(nes, & &1.node_key)
-      end
-    end
-
-    test "control-node rows carry their type tag" do
-      detail = Runs.run_detail(region_run(), region_flow())
-
-      assert node_row(detail, "fo").type == :fan_out
-    end
-
-    test "a branch waiting on a human is paused while its running sibling stays active on a parked run" do
+    test "lanes follow branch position, not start time (scenario 2)" do
       r =
         region_run(%{
-          status: :parked,
-          run_branches: [%{id: 1, state: :parked}, %{id: 2, state: :running}],
           node_executions: [
-            ne("prep", 1, :succeeded),
-            ne("fo", 1, :succeeded),
-            ne("a", 1, :needs_input, %{run_branch_id: 1}),
-            ne("b1", 1, nil, %{run_branch_id: 2, duration_s: nil})
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100}),
+            ne("b1", 1, nil, %{id: 101, run_branch_id: 2, duration_s: nil}),
+            ne("a", 1, nil, %{id: 102, run_branch_id: 1, duration_s: nil})
           ]
         })
 
       detail = Runs.run_detail(r, region_flow())
 
-      assert node_row(detail, "a").state == :paused
-      assert node_row(detail, "b1").state == :active
+      assert Enum.map(region(detail).lanes, & &1.branch) == ["a", "b1"]
+    end
+
+    test "an open region is followed by a waiting fan_in, which the pending tail does not repeat (scenario 3)" do
+      detail = Runs.run_detail(region_run(), region_flow())
+
+      [_prep, _region, waiting, pending] = detail.timeline
+      assert %{kind: :node, node_key: "fi", state: :waiting, type: :fan_in, join: %{total: 2, failed: 0}} = waiting
+      assert %{attempt: 1, duration_s: nil, cost: nil, joined_from: nil} = waiting
+      assert pending == %{kind: :pending, nodes: ["after"]}
+    end
+
+    test "loop rows are computed within a lane, not over interleaved executions (scenario 4)" do
+      flow =
+        region_flow_variant(& &1, fn
+          %{from: "b1", on: :failed} = edge -> %{edge | max_loops: 2}
+          edge -> edge
+        end)
+
+      r =
+        region_run(%{
+          run_branches: [branch(1, 100, "a", 0, :ended, :succeeded), branch(2, 100, "b1", 1, :running)],
+          node_executions: [
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100}),
+            ne("b1", 1, :failed, %{id: 101, run_branch_id: 2}),
+            ne("a", 1, :succeeded, %{id: 102, run_branch_id: 1}),
+            ne("b2", 2, nil, %{id: 103, run_branch_id: 2, duration_s: nil})
+          ]
+        })
+
+      detail = Runs.run_detail(r, flow)
+      region = region(detail)
+
+      assert [
+               %{kind: :node, node_key: "b1", state: :failed},
+               %{kind: :loop, from_node: "b1", to_node: "b2", attempt: 2, max_loops: 2},
+               %{kind: :node, node_key: "b2", attempt: 2, state: :active}
+             ] = lane(region, "b1").rows
+
+      assert [%{kind: :node, node_key: "a", state: :done}] = lane(region, "a").rows
+      refute Enum.any?(detail.timeline, &(&1.kind == :loop))
+    end
+
+    test "a branch held back by max_parallel is a queued placeholder lane (scenario 5)" do
+      flow =
+        region_flow_variant(
+          fn
+            %{key: "fo"} = node -> Map.put(node, :max_parallel, 2)
+            node -> node
+          end,
+          & &1,
+          [%{key: "c", type: :shell}],
+          [%{from: "fo", on: nil, to: "c", max_loops: nil}, %{from: "c", on: :succeeded, to: "fi", max_loops: nil}]
+        )
+
+      r =
+        region_run(%{
+          run_branches: [
+            branch(1, 100, "a", 0, :running),
+            branch(2, 100, "b1", 1, :running),
+            branch(3, 100, "c", 2, :queued)
+          ]
+        })
+
+      region = region(Runs.run_detail(r, flow))
+
+      assert region.tally == %{total: 3, running: 2, queued: 1, parked: 0, ended: 0, succeeded: 0, failed: 0}
+      assert region.max_parallel == 2
+
+      assert [%{kind: :node, node_key: "c", state: :queued, attempt: 1, join: nil, joined_from: nil} = placeholder] =
+               lane(region, "c").rows
+
+      assert %{type: :shell, detail: nil, cost: nil, duration_s: nil} = placeholder
+    end
+
+    test "a region that joined with a failure annotates its fan_in and the row after it (scenario 6)" do
+      detail = Runs.run_detail(joined_run(), region_flow())
+      region = region(detail)
+
+      assert region.open? == false
+      assert region.tally.failed == 1
+      assert region.tally.succeeded == 1
+      assert region.duration_s == 461
+      assert Decimal.equal?(region.cost, Decimal.new("0.75"))
+
+      assert [_prep, ^region, fi, after_row] = detail.timeline
+      assert %{kind: :node, node_key: "fi", state: :failed, join: %{total: 2, failed: 1}} = fi
+      assert %{kind: :node, node_key: "after", joined_from: 2} = after_row
+      refute Enum.any?(all_node_rows(detail), &(&1.state == :waiting))
+    end
+
+    test "a region entered twice renders one group per entry (scenario 7)" do
+      r =
+        region_run(%{
+          current_node: "after",
+          run_branches: [
+            branch(1, 100, "a", 0, :ended, :succeeded),
+            branch(2, 100, "b1", 1, :ended, :succeeded),
+            branch(3, 200, "a", 0, :ended, :succeeded),
+            branch(4, 200, "b1", 1, :ended, :succeeded)
+          ],
+          node_executions: [
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100, visit: 1}),
+            ne("a", 1, :succeeded, %{id: 101, run_branch_id: 1}),
+            ne("b1", 1, :succeeded, %{id: 102, run_branch_id: 2}),
+            ne("fi", 1, :succeeded, %{id: 103, visit: 1}),
+            ne("fo", 1, :succeeded, %{id: 200, visit: 2}),
+            ne("a", 1, :succeeded, %{id: 201, run_branch_id: 3}),
+            ne("b1", 1, :succeeded, %{id: 202, run_branch_id: 4}),
+            ne("fi", 1, :succeeded, %{id: 203, visit: 2})
+          ]
+        })
+
+      detail = Runs.run_detail(r, region_flow())
+
+      assert [first, second] = regions(detail)
+      assert first.fan_out_execution_id == 100
+      assert second.fan_out_execution_id == 200
+      assert Enum.map(first.lanes, &(hd(&1.rows).node_key <> "@" <> Integer.to_string(&1.position))) == ["a@0", "b1@1"]
+      assert Enum.map(first.lanes, &length(&1.rows)) == [1, 1]
+      assert Enum.map(second.lanes, &length(&1.rows)) == [1, 1]
+      assert Enum.map(second.lanes, & &1.branch) == ["a", "b1"]
+    end
+
+    test "with no run_branches loaded the timeline stays flat (scenario 8)" do
+      for branches <- [:absent, nil, %NotLoaded{}] do
+        base = region_run()
+        r = if branches == :absent, do: Map.delete(base, :run_branches), else: %{base | run_branches: branches}
+
+        detail = Runs.run_detail(r, region_flow())
+
+        assert regions(detail) == []
+        assert Enum.map(node_rows(detail), & &1.node_key) == ["prep", "fo", "a", "b1"]
+      end
     end
 
     test "a parked run with no run_branches loaded keeps today's paused rows" do
-      for branches <- [:absent, nil, %Ecto.Association.NotLoaded{}] do
+      for branches <- [:absent, nil, %NotLoaded{}] do
         base = region_run(%{status: :parked})
         r = if branches == :absent, do: Map.delete(base, :run_branches), else: %{base | run_branches: branches}
 
@@ -168,10 +325,156 @@ defmodule Relay.RunDetailTest do
       end
     end
 
-    test "the pending tail lists the fan_in and what follows, never the fan_out or branch nodes" do
+    test "a branch waiting on a human is paused while its running sibling's lane stays active (scenario 9)" do
+      r =
+        region_run(%{
+          status: :parked,
+          run_branches: [branch(1, 100, "a", 0, :parked), branch(2, 100, "b1", 1, :running)],
+          node_executions: [
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100}),
+            ne("a", 1, :needs_input, %{id: 101, run_branch_id: 1}),
+            ne("b1", 1, nil, %{id: 102, run_branch_id: 2, duration_s: nil})
+          ]
+        })
+
+      region = region(Runs.run_detail(r, region_flow()))
+
+      assert [%{node_key: "a", state: :paused}] = lane(region, "a").rows
+      assert [%{node_key: "b1", state: :active}] = lane(region, "b1").rows
+    end
+
+    test "with no flow the region still groups and joins, without max_parallel or a waiting row (scenario 10)" do
+      detail = Runs.run_detail(joined_run(), nil)
+      region = region(detail)
+
+      assert region.max_parallel == nil
+      assert %{kind: :node, node_key: "fi", join: %{total: 2, failed: 1}} = Enum.at(detail.timeline, 2)
+      refute Enum.any?(all_node_rows(detail), &(&1.state == :waiting))
+
+      open = Runs.run_detail(region_run(), nil)
+      assert length(regions(open)) == 1
+      refute Enum.any?(all_node_rows(open), &(&1.state == :waiting))
+    end
+
+    test "no synthetic active row is added for the fan_out the run's current_node names" do
       detail = Runs.run_detail(region_run(), region_flow())
 
-      assert %{kind: :pending, nodes: ["fi", "after"]} in detail.timeline
+      refute Enum.any?(node_rows(detail), &(&1.node_key == "fo"))
+      assert Enum.count(all_node_rows(detail), &(&1.node_key == "fo")) == 1
+    end
+
+    test "no synthetic active row for a control-node current_node even when every execution has settled" do
+      settled = [branch(1, 100, "a", 0, :ended, :succeeded), branch(2, 100, "b1", 1, :ended, :succeeded)]
+
+      for {current, branches, nes} <- [
+            {"fo", [branch(1, 100, "a", 0, :queued), branch(2, 100, "b1", 1, :queued)],
+             [ne("prep", 1, :succeeded, %{id: 10}), ne("fo", 1, :succeeded, %{id: 100})]},
+            {"fi", settled,
+             [
+               ne("prep", 1, :succeeded, %{id: 10}),
+               ne("fo", 1, :succeeded, %{id: 100}),
+               ne("a", 1, :succeeded, %{id: 101, run_branch_id: 1}),
+               ne("b1", 1, :succeeded, %{id: 102, run_branch_id: 2})
+             ]}
+          ] do
+        r = region_run(%{current_node: current, run_branches: branches, node_executions: nes})
+        detail = Runs.run_detail(r, region_flow())
+
+        refute Enum.any?(all_node_rows(detail), &(&1.node_key == current and &1.state == :active))
+      end
+    end
+  end
+
+  describe "fan-out region groups (RE440)" do
+    test "branch_bars holds the latest entry's bars per fan_out key (scenario 11)" do
+      r =
+        region_run(%{
+          run_branches: [
+            branch(1, 100, "a", 0, :ended, :succeeded),
+            branch(2, 100, "b1", 1, :ended, :succeeded),
+            branch(3, 200, "a", 0, :running),
+            branch(4, 200, "b1", 1, :queued)
+          ],
+          node_executions: [
+            ne("prep", 1, :succeeded, %{id: 10}),
+            ne("fo", 1, :succeeded, %{id: 100, visit: 1}),
+            ne("a", 1, :succeeded, %{id: 101, run_branch_id: 1}),
+            ne("b1", 1, :succeeded, %{id: 102, run_branch_id: 2}),
+            ne("fi", 1, :succeeded, %{id: 103, visit: 1}),
+            ne("fo", 1, :succeeded, %{id: 200, visit: 2}),
+            ne("a", 1, nil, %{id: 201, run_branch_id: 3, duration_s: nil})
+          ]
+        })
+
+      assert Runs.run_detail(r, region_flow()).branch_bars == %{"fo" => [:running, :queued]}
+    end
+
+    test "branch_bars is empty for a run with no branches (scenario 11)" do
+      for branches <- [:absent, nil, %NotLoaded{}, []] do
+        base = region_run()
+        r = if branches == :absent, do: Map.delete(base, :run_branches), else: %{base | run_branches: branches}
+
+        assert Runs.run_detail(r, region_flow()).branch_bars == %{}
+      end
+    end
+
+    test "branch_bar/1 maps every branch state × outcome onto the closed bar set (scenario 12)" do
+      cases = [
+        {%{state: :queued, outcome: nil}, :queued},
+        {%{state: :running, outcome: nil}, :running},
+        {%{state: :parked, outcome: nil}, :parked},
+        {%{state: :ended, outcome: :succeeded}, :succeeded},
+        {%{state: :ended, outcome: :failed}, :failed},
+        {%{state: :ended, outcome: nil}, :cancelled}
+      ]
+
+      for {row, bar} <- cases do
+        assert RunDetail.branch_bar(row) == bar
+        assert bar in RunDetail.bar_states()
+      end
+
+      assert RunDetail.bar_states() == [:succeeded, :failed, :running, :parked, :queued, :cancelled]
+    end
+
+    test "branch_tally/1 counts states and ended outcomes" do
+      rows = [
+        %{state: :ended, outcome: :succeeded},
+        %{state: :ended, outcome: :failed},
+        %{state: :ended, outcome: nil},
+        %{state: :running, outcome: nil},
+        %{state: :queued, outcome: nil},
+        %{state: :parked, outcome: nil}
+      ]
+
+      assert RunDetail.branch_tally(rows) ==
+               %{total: 6, running: 1, queued: 1, parked: 1, ended: 3, succeeded: 1, failed: 1}
+
+      assert RunDetail.branch_tally([]) ==
+               %{total: 0, running: 0, queued: 0, parked: 0, ended: 0, succeeded: 0, failed: 0}
+    end
+
+    test "a non-region run keeps its rows and gains nil join annotations (scenario 13)" do
+      r =
+        run(%{
+          node_executions: [
+            ne("implement", 1, :succeeded),
+            ne("quality_review", 1, :failed, %{detail: "no"}),
+            ne("implement", 2, nil, %{duration_s: nil})
+          ]
+        })
+
+      detail = Runs.run_detail(r, code_flow())
+
+      assert Enum.map(detail.timeline, &{&1.kind, &1[:node_key]}) == [
+               {:node, "implement"},
+               {:node, "quality_review"},
+               {:loop, nil},
+               {:node, "implement"}
+             ]
+
+      assert Enum.all?(node_rows(detail), &(&1.join == nil and &1.joined_from == nil))
+      assert detail.branch_bars == %{}
     end
   end
 

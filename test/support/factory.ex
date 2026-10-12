@@ -244,6 +244,23 @@ defmodule Relay.Factory do
     node_execution |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # Full-control factory (RE440): `run` and `fan_out_execution` (when overridden) must be
+  # persisted. The default `fan_out_execution` is a fresh `fo` execution of `run`.
+  def run_branch_factory(attrs) do
+    {run, attrs} = Map.pop_lazy(attrs, :run, fn -> insert(:run) end)
+    {fan_out, attrs} = Map.pop_lazy(attrs, :fan_out_execution, fn -> insert(:node_execution, run: run, node: "fo") end)
+
+    run_branch = %Schemas.RunBranch{
+      run_id: run.id,
+      fan_out_execution_id: fan_out.id,
+      branch: "a",
+      position: 0,
+      state: :queued
+    }
+
+    run_branch |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   # Full-control factory: `board` (when overridden) must be persisted. `last_heartbeat`
   # defaults to now, so the row reads :fresh — backdate it to exercise :stale / :gone.
   # `version` is the HIGHER of the two floors (RE268): the default runner is a fully current

@@ -1,6 +1,8 @@
 defmodule Relay.RunsReadSideTest do
   use Relay.DataCase, async: true
 
+  import Relay.FanOutFixtures, only: [region_flow: 2, seed_region_run: 2]
+
   alias Relay.Flows
   alias Relay.Runs
 
@@ -53,37 +55,68 @@ defmodule Relay.RunsReadSideTest do
     end
   end
 
-  # RE437 task 5's scenario-1 flow: prep → fo ⇉ {a, b1 ⇄ b2} → fi → after → done.
-  defp region_flow(board, stage) do
-    {:ok, flow} =
-      Flows.create_flow(board, %{
-        key: "region",
-        isolation: :shared_clean,
-        stage_id: stage.id,
-        nodes: [
-          %{key: "prep", type: :shell, run: "true"},
-          %{key: "fo", type: :fan_out},
-          %{key: "a", type: :shell, run: "true"},
-          %{key: "b1", type: :agent, run: "b1"},
-          %{key: "b2", type: :agent, run: "b2"},
-          %{key: "fi", type: :fan_in},
-          %{key: "after", type: :shell, run: "true"}
-        ],
-        edges: [
-          %{from: "start", to: "prep"},
-          %{from: "prep", to: "fo", on: :succeeded},
-          %{from: "fo", to: "a"},
-          %{from: "fo", to: "b1"},
-          %{from: "a", to: "fi", on: :succeeded},
-          %{from: "b1", to: "b2", on: :failed},
-          %{from: "b2", to: "b1", on: :succeeded},
-          %{from: "b1", to: "fi", on: :succeeded},
-          %{from: "fi", to: "after", on: :succeeded},
-          %{from: "after", to: "done", on: :succeeded}
-        ]
-      })
+  describe "run summaries carry the open region's branches (RE440)" do
+    setup do
+      board = insert(:board)
+      stage = insert(:stage, board: board, type: :work, category: :in_progress)
+      region_flow(board, stage)
+      %{board: board, stage: stage}
+    end
 
-    flow
+    test "an open region's tally and bars, in position order (scenario 14)", %{board: board, stage: stage} do
+      card = insert(:card, board: board, stage: stage)
+      seed_region_run(card, [{"a", :ended, :succeeded}, {"b1", :running, nil}, {"c", :queued, nil}])
+
+      summary = Runs.run_summary_for_card(card)
+
+      assert summary.branches == %{
+               total: 3,
+               running: 1,
+               queued: 1,
+               parked: 0,
+               ended: 1,
+               succeeded: 1,
+               failed: 0,
+               bars: [:succeeded, :running, :queued]
+             }
+
+      assert summary.node_index == 2
+      assert summary.node_count == 4
+      assert summary == Runs.run_summaries_for_board(board)[card.id]
+    end
+
+    test "branches is nil once every branch has ended, and for a run with no branches (scenario 15)",
+         %{board: board, stage: stage} do
+      joined = insert(:card, board: board, stage: stage)
+      {_run, branches} = seed_region_run(joined, [{"a", :ended, :succeeded}, {"b1", :running, nil}])
+      Enum.each(branches, &Relay.Repo.update!(Ecto.Changeset.change(&1, state: :ended, outcome: :succeeded)))
+
+      plain = insert(:card, board: board, stage: stage)
+      insert(:run, card: plain, flow_key: "region", status: :running, current_node: "prep")
+
+      assert Runs.run_summary_for_card(joined).branches == nil
+      assert Runs.run_summary_for_card(plain).branches == nil
+      assert Runs.run_summaries_for_board(board)[joined.id].branches == nil
+      assert Runs.run_summaries_for_board(board)[plain.id].branches == nil
+    end
+
+    test "the branch read is one batched query, not one per run (scenario 16)", %{board: board, stage: stage} do
+      for _card <- 1..2 do
+        seed_region_run(insert(:card, board: board, stage: stage), [{"a", :running, nil}, {"b1", :running, nil}])
+      end
+
+      other = insert(:board)
+      other_stage = insert(:stage, board: other, type: :work, category: :in_progress)
+      region_flow(other, other_stage)
+      seed_region_run(insert(:card, board: other, stage: other_stage), [{"a", :running, nil}, {"b1", :running, nil}])
+      insert(:run, card: insert(:card, board: other, stage: other_stage), flow_key: "region", current_node: "prep")
+
+      {two_regions, count_two} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(board) end)
+      {_one_region, count_one} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(other) end)
+
+      assert Enum.all?(Map.values(two_regions), &(&1.branches.total == 2))
+      assert count_two == count_one
+    end
   end
 
   describe "list_runs_for_card/1 and latest_run/1" do
@@ -120,7 +153,9 @@ defmodule Relay.RunsReadSideTest do
 
       assert [got] = Runs.list_runs_for_card(card)
       assert Enum.map(got.run_branches, & &1.id) == [branch.id]
-      assert got |> Runs.run_detail(nil) |> Map.fetch!(:timeline) |> List.last() |> Map.fetch!(:state) == :active
+
+      region = got |> Runs.run_detail(nil) |> Map.fetch!(:timeline) |> Enum.find(&(&1.kind == :region))
+      assert hd(hd(region.lanes).rows).state == :active
     end
 
     test "a run whose flow works in a stage exposes that stage's name on its detail" do

@@ -11,6 +11,8 @@ defmodule RelayWeb.RunComponentsTest do
   # Relay.Runs' per-card summary map (has :flow_version, currently always nil
   # pending RLY-152) or a raw %Schemas.Run{} (no :flow_version key at all —
   # the version chip degrades gracefully when it's absent).
+  alias Schemas.Flow.Edge
+
   defp run(attrs) do
     Map.merge(
       %{
@@ -78,6 +80,77 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "var(--color-success)"
       assert html =~ "box-shadow:0 0 0 2px color-mix(in oklab, var(--color-secondary) 25%, transparent)"
       assert html =~ "opacity:0.5"
+      refute html =~ "run-branch-segment"
+    end
+
+    test "a fan_out with branch bars draws one wide split segment in place of its bar (RE440 scenario 1)" do
+      doc =
+        mini_graph_doc(%{flow_key: "code", current_node: "fo", branch_bars: %{"fo" => [:succeeded, :running, :running]}})
+
+      assert [segment_style] = doc |> LazyHTML.query(".run-branch-segment") |> LazyHTML.attribute("style")
+      assert segment_style =~ "flex:1.6;height:13px"
+      assert bar_classes(doc) == ["run-branch-bar-succeeded", "run-branch-bar-running", "run-branch-bar-running"]
+      assert doc |> LazyHTML.query(".run-mini-graph-segment") |> Enum.count() == 4
+    end
+
+    test "a queued branch draws faint violet and running branches pulse (RE440 scenario 2)" do
+      doc =
+        mini_graph_doc(%{flow_key: "code", current_node: "fo", branch_bars: %{"fo" => [:running, :running, :queued]}})
+
+      assert [first, second, third] = doc |> LazyHTML.query(".run-branch-bar") |> LazyHTML.attribute("style")
+      assert third =~ "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
+      assert first =~ "animation:relaypulse"
+      assert second =~ "animation:relaypulse"
+    end
+
+    test "the split segment stays once the run has moved past the fan_out (RE440 scenario 3)" do
+      doc =
+        mini_graph_doc(%{
+          flow_key: "code",
+          current_node: "fix_findings",
+          branch_bars: %{"fo" => [:succeeded, :failed, :succeeded]}
+        })
+
+      assert doc |> LazyHTML.query(".run-branch-segment") |> Enum.count() == 1
+      assert bar_classes(doc) == ["run-branch-bar-succeeded", "run-branch-bar-failed", "run-branch-bar-succeeded"]
+      assert [failed_style] = doc |> LazyHTML.query(".run-branch-bar-failed") |> LazyHTML.attribute("style")
+      assert failed_style =~ "var(--color-error)"
+    end
+  end
+
+  defp mini_graph_doc(run) do
+    (&RunComponents.run_mini_graph/1)
+    |> render_component(path: ["sync", "implement", "fo", "fi", "precommit"], run: run)
+    |> LazyHTML.from_fragment()
+  end
+
+  defp bar_classes(doc) do
+    doc
+    |> LazyHTML.query(".run-branch-bar")
+    |> LazyHTML.attribute("class")
+    |> Enum.map(fn class -> class |> String.split() |> Enum.find(&(&1 != "run-branch-bar")) end)
+  end
+
+  describe "branch_segment/1 (RE440)" do
+    test "every bar state has its own background (scenario 5)" do
+      for bar <- Relay.Runs.RunDetail.bar_states() do
+        doc = LazyHTML.from_fragment(render_component(&RunComponents.branch_segment/1, bars: [bar]))
+
+        assert [style] = doc |> LazyHTML.query(".run-branch-bar-#{bar}") |> LazyHTML.attribute("style"),
+               "no run-branch-bar-#{bar}"
+
+        assert [_, background] = Regex.run(~r/background:([^;]+);/, style), "no background for #{bar}"
+        assert String.trim(background) != ""
+      end
+    end
+
+    test "the face size is the thin 7px variant" do
+      doc = LazyHTML.from_fragment(render_component(&RunComponents.branch_segment/1, bars: [:running], size: :face))
+
+      assert [style] = doc |> LazyHTML.query(".run-branch-segment") |> LazyHTML.attribute("style")
+      assert style =~ "flex:1.6;height:7px;display:flex;flex-direction:column;gap:1px;"
+      assert [bar_style] = doc |> LazyHTML.query(".run-branch-bar") |> LazyHTML.attribute("style")
+      assert bar_style =~ "flex:1;border-radius:1px;"
     end
   end
 
@@ -190,6 +263,287 @@ defmodule RelayWeb.RunComponentsTest do
 
       assert duration_styles != []
       assert Enum.all?(duration_styles, &(&1 =~ "white-space:nowrap"))
+    end
+  end
+
+  describe "run_region_group/1 and region rows (RE440)" do
+    @t0 ~U[2026-07-20 00:00:00Z]
+
+    # The card mockup's region: prep → fo ⇉ {review_security, review_correctness ⇄ fix_correctness,
+    # review_conventions} → review_join → fix_findings.
+    defp region_flow(max_parallel \\ nil) do
+      node = fn key, type -> %Schemas.Flow.Node{key: key, type: type, run: "x"} end
+      edge = fn from, on, to -> %Edge{from: from, on: on, to: to} end
+
+      %Schemas.Flow{
+        nodes: [
+          node.("prep", :shell),
+          %Schemas.Flow.Node{key: "fo", type: :fan_out, max_parallel: max_parallel},
+          node.("review_security", :agent),
+          node.("review_correctness", :agent),
+          node.("fix_correctness", :agent),
+          node.("review_conventions", :agent),
+          %Schemas.Flow.Node{key: "review_join", type: :fan_in},
+          node.("fix_findings", :agent)
+        ],
+        edges: [
+          edge.("start", nil, "prep"),
+          edge.("prep", :succeeded, "fo"),
+          edge.("fo", nil, "review_security"),
+          edge.("fo", nil, "review_correctness"),
+          edge.("fo", nil, "review_conventions"),
+          edge.("review_security", :succeeded, "review_join"),
+          %Edge{from: "review_correctness", on: :failed, to: "fix_correctness", max_loops: 2},
+          edge.("fix_correctness", :succeeded, "review_correctness"),
+          edge.("review_correctness", :succeeded, "review_join"),
+          edge.("review_conventions", :succeeded, "review_join"),
+          edge.("review_join", :succeeded, "fix_findings"),
+          edge.("fix_findings", :succeeded, "done")
+        ]
+      }
+    end
+
+    defp at(seconds), do: DateTime.add(@t0, seconds, :second)
+
+    # An execution from `from` to `to` seconds after @t0 (`to` nil = still in flight).
+    defp timed(node_key, attempt, outcome, from, to, attrs),
+      do: ne(node_key, attempt, outcome, Map.merge(%{started_at: at(from), finished_at: to && at(to)}, attrs))
+
+    defp rb(id, branch, position, state, outcome \\ nil),
+      do: %{id: id, fan_out_execution_id: 100, branch: branch, position: position, state: state, outcome: outcome}
+
+    defp region_detail(run_attrs, nes, flow), do: detail(Map.merge(%{flow_key: "review"}, run_attrs), nes, flow)
+
+    # Scenario 1: security ✓, correctness on attempt 2 after a failure and a fix ✓ loop, conventions running.
+    defp in_flight_detail do
+      region_detail(
+        %{
+          current_node: "fo",
+          run_branches: [
+            rb(1, "review_security", 0, :ended, :succeeded),
+            rb(2, "review_correctness", 1, :running),
+            rb(3, "review_conventions", 2, :running)
+          ]
+        },
+        [
+          timed("prep", 1, :succeeded, 0, 0, %{id: 10}),
+          timed("fo", 1, :succeeded, 0, 0, %{id: 100}),
+          timed("review_security", 1, :succeeded, 1, 101, %{id: 101, run_branch_id: 1, cost: Decimal.new("0.31")}),
+          timed("review_correctness", 1, :failed, 1, 126, %{
+            id: 102,
+            run_branch_id: 2,
+            cost: Decimal.new("0.38"),
+            detail: "cancel misses in-flight branches"
+          }),
+          timed("review_conventions", 1, nil, 1, nil, %{id: 103, run_branch_id: 3}),
+          timed("fix_correctness", 2, :succeeded, 130, 202, %{id: 104, run_branch_id: 2, cost: Decimal.new("0.22")}),
+          timed("review_correctness", 2, nil, 210, nil, %{id: 105, run_branch_id: 2})
+        ],
+        region_flow()
+      )
+    end
+
+    # Scenario 2: max_parallel 2 — two branches running, review_conventions queued.
+    defp queued_detail do
+      region_detail(
+        %{
+          current_node: "fo",
+          run_branches: [
+            rb(1, "review_security", 0, :running),
+            rb(2, "review_correctness", 1, :running),
+            rb(3, "review_conventions", 2, :queued)
+          ]
+        },
+        [
+          timed("prep", 1, :succeeded, 0, 0, %{id: 10}),
+          timed("fo", 1, :succeeded, 0, 0, %{id: 100}),
+          timed("review_security", 1, nil, 1, nil, %{id: 101, run_branch_id: 1}),
+          timed("review_correctness", 1, nil, 1, nil, %{id: 102, run_branch_id: 2})
+        ],
+        region_flow(2)
+      )
+    end
+
+    # Scenario 3: joined with a failure — correctness spent its loop budget, review_join ✕, fix_findings in flight.
+    defp joined_detail do
+      region_detail(
+        %{
+          current_node: "fix_findings",
+          run_branches: [
+            rb(1, "review_security", 0, :ended, :succeeded),
+            rb(2, "review_correctness", 1, :ended, :failed),
+            rb(3, "review_conventions", 2, :ended, :succeeded)
+          ]
+        },
+        [
+          timed("prep", 1, :succeeded, 0, 0, %{id: 10}),
+          timed("fo", 1, :succeeded, 0, 0, %{id: 100}),
+          timed("review_security", 1, :succeeded, 1, 101, %{id: 101, run_branch_id: 1}),
+          timed("review_correctness", 1, :failed, 1, 126, %{id: 102, run_branch_id: 2, detail: "first pass"}),
+          timed("fix_correctness", 2, :succeeded, 130, 202, %{id: 104, run_branch_id: 2}),
+          timed("review_correctness", 2, :failed, 210, 361, %{
+            id: 105,
+            run_branch_id: 2,
+            detail: "Loop budget spent (max 2)."
+          }),
+          timed("review_conventions", 1, :succeeded, 1, 311, %{id: 103, run_branch_id: 3}),
+          timed("review_join", 1, :failed, 400, 401, %{id: 110}),
+          timed("fix_findings", 1, nil, 402, nil, %{id: 111})
+        ],
+        region_flow()
+      )
+    end
+
+    defp timeline_doc(detail),
+      do: LazyHTML.from_fragment(render_component(&RunComponents.run_node_timeline/1, detail: detail))
+
+    defp text_of(node, selector), do: node |> LazyHTML.query(selector) |> LazyHTML.text() |> squish()
+
+    defp squish(text), do: text |> String.split() |> Enum.join(" ")
+
+    defp styles(node, selector), do: node |> LazyHTML.query(selector) |> LazyHTML.attribute("style")
+
+    # The timeline's direct children, each as {id-or-nil, element}.
+    defp top_level(doc), do: doc |> LazyHTML.query(".run-node-timeline > *") |> Enum.to_list()
+
+    defp has?(node, selector), do: node |> LazyHTML.query(selector) |> Enum.count() > 0
+
+    test "an open region groups its lanes in branch order under a live chip, with the waiting fan_in after (scenario 1)" do
+      doc = timeline_doc(in_flight_detail())
+
+      assert text_of(doc, "#run-region-100-chip") == "2 of 3 running"
+
+      assert doc |> LazyHTML.query(".run-region-lane") |> LazyHTML.attribute("id") == [
+               "run-region-100-lane-review_security",
+               "run-region-100-lane-review_correctness",
+               "run-region-100-lane-review_conventions"
+             ]
+
+      assert has?(doc, "#run-region-100-lane-review_correctness .run-loop-chip")
+      refute has?(doc, "#run-region-100-lane-review_security .run-loop-chip")
+
+      children = top_level(doc)
+      region_index = Enum.find_index(children, &has?(&1, ".run-region-chip"))
+      join_index = Enum.find_index(children, &(text_of(&1, ".run-join-chip") == "waits for all 3"))
+      assert is_integer(region_index)
+      assert join_index == region_index + 1
+      assert text_of(Enum.at(children, join_index), ".run-timeline-name") == "review_join"
+
+      assert render_component(&RunComponents.run_node_timeline/1, detail: in_flight_detail()) =~
+               "border-left:2px solid color-mix(in oklab, var(--color-accent) 40%, var(--color-base-100))"
+    end
+
+    test "a branch held back by max_parallel reads queued, never pending (scenario 2)" do
+      doc = timeline_doc(queued_detail())
+      lane = LazyHTML.query(doc, "#run-region-100-lane-review_conventions")
+
+      assert text_of(doc, "#run-region-100-chip") == "2 running · 1 queued · max 2"
+      assert text_of(lane, ".run-queued-chip") == "queued · waits for a free slot"
+
+      assert [icon_style] = styles(lane, ".run-timeline-icon-queued")
+      assert icon_style =~ "border:2px dashed color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100))"
+      refute LazyHTML.to_html(lane) =~ "border:2px solid var(--color-field-border-hover)"
+    end
+
+    test "a region that joined with a failure shows the failed lane, the join verdict and what follows (scenario 3)" do
+      doc = timeline_doc(joined_detail())
+
+      assert text_of(doc, "#run-region-100-chip") == "1 of 3 failed"
+
+      assert [chip_style] = styles(doc, "#run-region-100-chip")
+      assert chip_style =~ "color-mix(in oklab, var(--color-error) 8%, var(--color-base-100))"
+
+      assert text_of(doc, "#run-region-100-lane-review_correctness") =~ "OUTCOME: FAILED"
+      assert text_of(doc, "#run-region-100-lane-review_correctness") =~ "Loop budget spent (max 2)."
+
+      join_row = doc |> top_level() |> Enum.find(&has?(&1, ".run-join-chip"))
+      assert text_of(join_row, ".run-timeline-name") == "review_join"
+      assert text_of(join_row, ".run-timeline-icon") == "✕"
+      assert text_of(join_row, ".run-join-chip") == "failed · 1 of 3 branches failed"
+
+      next_row = doc |> top_level() |> Enum.find(&has?(&1, ".run-joined-from-chip"))
+      assert text_of(next_row, ".run-timeline-name") == "fix_findings"
+      assert text_of(next_row, ".run-joined-from-chip") == "gets all 3 results, labelled"
+
+      assert text_of(doc, "#run-region-100-lane-review_security .run-lane-outcome") == "succeeded"
+      assert text_of(doc, "#run-region-100-lane-review_conventions .run-lane-outcome") == "succeeded"
+      refute has?(doc, "#run-region-100-lane-review_correctness .run-lane-outcome")
+    end
+
+    test "the header row carries the fan_out tag, the region's duration and its summed cost (scenario 4)" do
+      doc = timeline_doc(in_flight_detail())
+      header = LazyHTML.query(doc, "#run-region-100 > .run-timeline-row")
+
+      assert text_of(header, ".run-timeline-name") == "fo"
+      assert [tag_class] = header |> LazyHTML.query(".run-type-tag") |> LazyHTML.attribute("class")
+      assert tag_class =~ "hidden sm:inline"
+      assert text_of(header, ".run-type-tag") == "fan_out"
+
+      assert [tag_style] = styles(header, ".run-type-tag")
+      assert tag_style =~ "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
+
+      header_text = text_of(header, ".run-timeline-row-line")
+      assert header_text =~ "3:22"
+      assert header_text =~ "$0.91"
+    end
+
+    test "rows inside a region wrap instead of truncating names; rows outside are unchanged (scenario 5)" do
+      doc = timeline_doc(in_flight_detail())
+      region = LazyHTML.query(doc, ".run-region")
+
+      line_styles = styles(region, ".run-timeline-row-line")
+      assert length(line_styles) == 6
+      assert Enum.all?(line_styles, &(&1 =~ "flex-wrap:wrap"))
+
+      name_styles = styles(region, ".run-timeline-name")
+      assert Enum.all?(name_styles, &(&1 =~ "white-space:nowrap"))
+      refute Enum.any?(name_styles, &(&1 =~ "text-overflow:ellipsis"))
+
+      plain =
+        timeline_doc(
+          detail(%{}, [
+            ne("branch", 1, :succeeded, %{duration_s: 8, cost: Decimal.new("0.00")}),
+            ne("quality_review", 1, :failed, %{duration_s: 48, detail: "assert on CSV bytes"}),
+            ne("implement", 2, nil, %{duration_s: nil})
+          ])
+        )
+
+      refute has?(plain, ".run-region")
+      plain_lines = styles(plain, ".run-timeline-row-line")
+      assert length(plain_lines) == 3
+      assert Enum.all?(plain_lines, &(&1 == "display:flex;align-items:center;gap:10px;min-width:0;"))
+      assert Enum.all?(styles(plain, ".run-timeline-name"), &(&1 =~ "overflow:hidden;text-overflow:ellipsis;"))
+    end
+
+    test "a region whose branches all ended without an outcome reads cancelled, in the neutral tone (scenario 6)" do
+      doc =
+        timeline_doc(
+          region_detail(
+            %{
+              status: :cancelled,
+              current_node: nil,
+              finished_at: at(200),
+              run_branches: [
+                rb(1, "review_security", 0, :ended),
+                rb(2, "review_correctness", 1, :ended),
+                rb(3, "review_conventions", 2, :ended)
+              ]
+            },
+            [
+              timed("prep", 1, :succeeded, 0, 0, %{id: 10}),
+              timed("fo", 1, :succeeded, 0, 0, %{id: 100}),
+              timed("review_security", 1, nil, 1, nil, %{id: 101, run_branch_id: 1}),
+              timed("review_correctness", 1, nil, 1, nil, %{id: 102, run_branch_id: 2}),
+              timed("review_conventions", 1, nil, 1, nil, %{id: 103, run_branch_id: 3})
+            ],
+            region_flow()
+          )
+        )
+
+      assert text_of(doc, "#run-region-100-chip") == "cancelled"
+      assert [style] = styles(doc, "#run-region-100-chip")
+      assert style =~ "color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100))"
+      assert style =~ "color:color-mix(in oklab, var(--color-base-content) 65%, transparent)"
     end
   end
 
@@ -361,6 +715,24 @@ defmodule RelayWeb.RunComponentsTest do
     end
   end
 
+  defp face_doc(branches, opts \\ []) do
+    summary = %{
+      status: :running,
+      node_index: 3,
+      node_count: 7,
+      current_node: "fo",
+      flow_key: "code",
+      flow_version: nil,
+      attempts: 4,
+      branches: branches
+    }
+
+    LazyHTML.from_fragment(render_component(&RunComponents.run_face/1, [ref: "RE1", run: {:run, summary}] ++ opts))
+  end
+
+  defp face_text(doc, selector),
+    do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+
   describe "run_face/1" do
     test "running: segment bar + node x of y" do
       html =
@@ -383,6 +755,82 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "node 2 of 4"
       assert html =~ "height:5px"
       assert html =~ "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
+      refute html =~ "run-face-branches"
+      refute html =~ "run-branch-segment"
+    end
+
+    test "an open region splits the fan_out's segment and counts branches (RE440 scenario 6)" do
+      doc =
+        face_doc(%{
+          total: 3,
+          ended: 1,
+          running: 2,
+          queued: 0,
+          parked: 0,
+          succeeded: 1,
+          failed: 0,
+          bars: [:succeeded, :running, :running]
+        })
+
+      assert LazyHTML.text(doc) =~ "node 3 of 7"
+      assert face_text(doc, ".run-face-branches") == "· 1/3 branches"
+      assert [segment_style] = doc |> LazyHTML.query(".run-branch-segment") |> LazyHTML.attribute("style")
+      assert segment_style =~ "height:7px"
+      assert doc |> LazyHTML.query(".run-branch-segment .run-branch-bar") |> Enum.count() == 3
+
+      plain =
+        doc
+        |> LazyHTML.query(".run-face-segments > span")
+        |> LazyHTML.attribute("style")
+        |> Enum.filter(&(&1 =~ "height:5px"))
+
+      assert length(plain) == 6
+    end
+
+    test "queued branches are counted after the ended tally (RE440 scenario 7)" do
+      doc =
+        face_doc(%{
+          total: 3,
+          ended: 0,
+          running: 2,
+          queued: 1,
+          parked: 0,
+          succeeded: 0,
+          failed: 0,
+          bars: [:running, :running, :queued]
+        })
+
+      assert face_text(doc, ".run-face-branches") == "· 0/3 branches · 1 queued"
+    end
+
+    test "the node position and branch count flow as one text run beside fixed dot and age (RE440 smoke)" do
+      doc =
+        face_doc(
+          %{
+            total: 3,
+            ended: 0,
+            running: 2,
+            queued: 1,
+            parked: 0,
+            succeeded: 0,
+            failed: 0,
+            bars: [:running, :running, :queued]
+          },
+          progress_at: DateTime.utc_now()
+        )
+
+      assert face_text(doc, ".run-face-node") == "node 3 of 7 · 0/3 branches · 1 queued"
+      assert [node_style] = doc |> LazyHTML.query(".run-face-node") |> LazyHTML.attribute("style")
+      assert node_style =~ "min-width:0"
+      assert doc |> LazyHTML.query(".run-face-node .run-face-branches") |> Enum.count() == 1
+
+      for selector <- [".run-face-dot", ".run-face-ring", ".run-face-age"] do
+        assert [style] = doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style")
+        assert style =~ "flex-shrink:0", "#{selector} must not shrink"
+      end
+
+      assert [age_style] = doc |> LazyHTML.query(".run-face-age") |> LazyHTML.attribute("style")
+      assert age_style =~ "white-space:nowrap"
     end
 
     test "parked, failed, queued, done, cancelled badges" do

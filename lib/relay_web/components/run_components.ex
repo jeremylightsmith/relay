@@ -23,6 +23,7 @@ defmodule RelayWeb.RunComponents do
 
   alias Phoenix.LiveView.JS
   alias Relay.Runs
+  alias Relay.Runs.RunDetail
   # RE394 — a remote call for `button/1`'s pending face only; never `import` (see moduledoc).
   alias RelayWeb.CoreComponents
   alias RelayWeb.RunStatus
@@ -306,10 +307,14 @@ defmodule RelayWeb.RunComponents do
   def run_mini_graph(assigns) do
     current_index = Enum.find_index(assigns.path, &(&1 == assigns.run.current_node))
 
+    # A fan_out with an entry in `branch_bars` (RE440) draws its split segment — even once the run
+    # has moved past it. Stories and tests pass plain maps, hence Map.get/3.
+    branch_bars = Map.get(assigns.run, :branch_bars, %{})
+
     segments =
       assigns.path
       |> Enum.with_index()
-      |> Enum.map(fn {node, index} -> {node, segment_state(index, current_index)} end)
+      |> Enum.map(fn {node, index} -> {segment_state(index, current_index), Map.get(branch_bars, node, [])} end)
 
     assigns =
       assigns
@@ -321,12 +326,17 @@ defmodule RelayWeb.RunComponents do
       <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin-bottom:6px;">
         {@header}
       </div>
-      <div style="display:flex;gap:3px;">
-        <span
-          :for={{_node, state} <- @segments}
-          class={"run-mini-graph-segment run-mini-graph-segment-#{state}"}
-          style={segment_style(state)}
-        />
+      <div style="display:flex;gap:3px;align-items:center;">
+        <%= for {state, bars} <- @segments do %>
+          <%= if bars != [] do %>
+            <.branch_segment bars={bars} />
+          <% else %>
+            <span
+              class={"run-mini-graph-segment run-mini-graph-segment-#{state}"}
+              style={segment_style(state)}
+            />
+          <% end %>
+        <% end %>
       </div>
     </div>
     """
@@ -352,6 +362,42 @@ defmodule RelayWeb.RunComponents do
   defp segment_style(:pending),
     do: "flex:1;height:9px;border-radius:3px;background:var(--color-field-border-hover);opacity:0.5;"
 
+  # ---------- branch_segment (RE440) ----------
+
+  @doc """
+  A fan-out region's progress segment: one wider segment split into a thin bar per branch, in
+  branch order. `bars` are `Relay.Runs.RunDetail.bar()`s; `size` picks the drawer mini graph's
+  13px segment or the card face's 7px one.
+  """
+  attr :bars, :list, required: true
+  attr :size, :atom, values: [:drawer, :face], default: :drawer
+
+  def branch_segment(assigns) do
+    ~H"""
+    <span class="run-branch-segment" style={branch_segment_style(@size)}>
+      <span
+        :for={bar <- @bars}
+        class={"run-branch-bar run-branch-bar-#{bar}"}
+        style={branch_bar_shape(@size) <> branch_bar_style(bar)}
+      />
+    </span>
+    """
+  end
+
+  defp branch_segment_style(:drawer), do: "flex:1.6;height:13px;display:flex;flex-direction:column;gap:2px;"
+  defp branch_segment_style(:face), do: "flex:1.6;height:7px;display:flex;flex-direction:column;gap:1px;"
+
+  defp branch_bar_shape(:drawer), do: "flex:1;border-radius:2px;"
+  defp branch_bar_shape(:face), do: "flex:1;border-radius:1px;"
+
+  # One clause per RunDetail.bar_states/0 member — no catch-all, so a new state fails loudly.
+  defp branch_bar_style(:succeeded), do: "background:var(--color-success);"
+  defp branch_bar_style(:running), do: "background:var(--color-secondary);animation:relaypulse 1.6s ease-in-out infinite;"
+  defp branch_bar_style(:failed), do: "background:var(--color-error);"
+  defp branch_bar_style(:queued), do: "background:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
+  defp branch_bar_style(:parked), do: "background:var(--color-warning);"
+  defp branch_bar_style(:cancelled), do: "background:var(--color-field-border-hover);opacity:0.5;"
+
   # ---------- run_node_timeline ----------
 
   attr :detail, :map, required: true
@@ -365,12 +411,7 @@ defmodule RelayWeb.RunComponents do
       <%= for row <- @rows do %>
         <%= case row.kind do %>
           <% :loop -> %>
-            <div
-              class="run-loop-chip"
-              style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:6px;padding:6px 10px;"
-            >
-              ↺ {loop_text(row)}
-            </div>
+            <.loop_chip row={row} />
           <% :pending -> %>
             <div
               class="run-timeline-row run-timeline-row-pending"
@@ -381,10 +422,28 @@ defmodule RelayWeb.RunComponents do
                 {Enum.join(row.nodes, " → ")}
               </span>
             </div>
+          <% :region -> %>
+            <.run_region_group row={row} task_progress={@task_progress} />
           <% :node -> %>
-            <.timeline_node_row row={row} task_progress={@task_progress} />
+            <.timeline_node_row row={row} task_progress={@task_progress} wrap?={join_row?(row)} />
         <% end %>
       <% end %>
+    </div>
+    """
+  end
+
+  # A region's `fan_in` and the row that gets its results wrap like the lane rows (RE440).
+  defp join_row?(row), do: row.type == :fan_in or not is_nil(row[:join]) or not is_nil(row[:joined_from])
+
+  attr :row, :map, required: true
+
+  defp loop_chip(assigns) do
+    ~H"""
+    <div
+      class="run-loop-chip"
+      style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-warning) 5%, var(--color-base-100));border-radius:6px;padding:6px 10px;"
+    >
+      ↺ {loop_text(@row)}
     </div>
     """
   end
@@ -394,20 +453,157 @@ defmodule RelayWeb.RunComponents do
   defp loop_text(%{from_node: f, to_node: t, attempt: a, max_loops: m}),
     do: "#{f} failed → #{t} · attempt #{a} · max #{m}"
 
+  # RE440 chip copy, from the domain's numbers only (`tally`, `max_parallel`, `join`, `joined_from`).
+  defp region_chip(%{open?: true, tally: tally} = row), do: {open_region_text(row) <> parked_text(tally), :running}
+
+  defp region_chip(%{tally: %{failed: failed, total: total}}) when failed > 0,
+    do: {"#{failed} of #{total} failed", :failed}
+
+  defp region_chip(%{tally: %{succeeded: total, total: total}}) when total > 0,
+    do: {"#{total} of #{total} succeeded", :succeeded}
+
+  defp region_chip(_row), do: {"cancelled", :neutral}
+
+  defp open_region_text(%{tally: %{queued: queued} = tally, max_parallel: max}) when queued > 0,
+    do: "#{tally.running} running · #{queued} queued" <> if(max, do: " · max #{max}", else: "")
+
+  defp open_region_text(%{tally: tally}), do: "#{tally.running} of #{tally.total} running"
+
+  defp parked_text(%{parked: parked}) when parked > 0, do: " · #{parked} parked"
+  defp parked_text(_tally), do: ""
+
+  defp join_chip(%{state: :waiting, join: %{total: total}}), do: {"waits for all #{total}", :neutral}
+
+  defp join_chip(%{state: :failed, join: %{total: total, failed: failed}}),
+    do: {"failed · #{failed} of #{total} branches failed", :failed}
+
+  defp join_chip(_row), do: nil
+
+  defp joined_from_text(count), do: "gets all #{count} results, labelled"
+
+  @chip_box "font-family:var(--font-mono);font-size:9.5px;border-radius:4px;padding:2px 6px;white-space:nowrap;"
+
+  defp chip_style(:running),
+    do:
+      @chip_box <>
+        "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-secondary) 8%, var(--color-base-100));"
+
+  defp chip_style(:failed),
+    do:
+      @chip_box <>
+        "color:color-mix(in oklab, var(--color-error) 70%, var(--color-base-content));background:color-mix(in oklab, var(--color-error) 8%, var(--color-base-100));"
+
+  defp chip_style(:succeeded),
+    do:
+      @chip_box <>
+        "color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));"
+
+  defp chip_style(:neutral),
+    do:
+      @chip_box <>
+        "color:color-mix(in oklab, var(--color-base-content) 65%, transparent);background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
+
+  # ---------- run_region_group (RE440) ----------
+
+  @doc """
+  One fan-out region entry of the run timeline (RE440, card mockup "Run view — branches grouped
+  under the fan-out"): the `fan_out` header row with the region's summary chip, duration and
+  cost, then a teal rail holding one labelled lane per branch, in branch-position order. `row`
+  is one `kind: :region` row of `Relay.Runs.RunDetail`'s timeline; ids are keyed on its
+  `fan_out_execution_id`, unique across every run the drawer lists.
+  """
   attr :row, :map, required: true
   attr :task_progress, :map, default: nil
 
+  def run_region_group(assigns) do
+    row = assigns.row
+    {chip_text, chip_tone} = region_chip(row)
+
+    assigns =
+      assign(assigns,
+        id: "run-region-#{row.fan_out_execution_id}",
+        header: Map.merge(row.header, %{duration_s: row.duration_s, cost: row.cost}),
+        chip_text: chip_text,
+        chip_tone: chip_tone
+      )
+
+    ~H"""
+    <div id={@id} class="run-region" style="display:flex;flex-direction:column;gap:8px;">
+      <.timeline_node_row row={@header} task_progress={@task_progress} wrap?>
+        <:chip>
+          <span id={"#{@id}-chip"} class="run-region-chip" style={chip_style(@chip_tone)}>
+            {@chip_text}
+          </span>
+        </:chip>
+      </.timeline_node_row>
+      <div
+        class="run-region-rail"
+        style="margin-left:8px;padding-left:18px;border-left:2px solid color-mix(in oklab, var(--color-accent) 40%, var(--color-base-100));display:flex;flex-direction:column;gap:12px;"
+      >
+        <div
+          :for={lane <- @row.lanes}
+          id={"#{@id}-lane-#{lane.branch}"}
+          class="run-region-lane"
+          style="display:flex;flex-direction:column;gap:5px;"
+        >
+          <div
+            class="run-region-lane-label"
+            style="font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+          >
+            BRANCH · {lane.branch}
+          </div>
+          <%= for {lane_row, index} <- Enum.with_index(lane.rows) do %>
+            <%= case lane_row.kind do %>
+              <% :loop -> %>
+                <.loop_chip row={lane_row} />
+              <% :node -> %>
+                <.timeline_node_row
+                  row={lane_row}
+                  task_progress={@task_progress}
+                  wrap?
+                  succeeded?={
+                    index == last_node_index(lane) and RunDetail.branch_bar(lane) == :succeeded
+                  }
+                />
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp last_node_index(lane) do
+    lane.rows
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _index} -> row.kind == :node end)
+    |> List.last({nil, nil})
+    |> elem(1)
+  end
+
+  # `wrap?` (RE440): a row inside a region, or a region's `fan_in` / joined-from row, wraps its
+  # chips onto a second line instead of truncating the node name. Every other row keeps the
+  # truncating single line (RE426).
+  attr :row, :map, required: true
+  attr :task_progress, :map, default: nil
+  attr :wrap?, :boolean, default: false
+  attr :succeeded?, :boolean, default: false, doc: "the last row of a lane whose branch succeeded"
+  slot :chip, doc: "an extra chip after the row's own (the region header's summary chip)"
+
   defp timeline_node_row(assigns) do
+    assigns = assign(assigns, :join_chip, join_chip(assigns.row))
+
     ~H"""
     <div class="run-timeline-row" style="display:flex;flex-direction:column;gap:4px;">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-        <.timeline_icon state={@row.state} />
-        <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+      <div class="run-timeline-row-line" style={row_line_style(@wrap?)}>
+        <.timeline_icon state={@row.state} type={@row.type} />
+        <span class="run-timeline-name" style={row_name_style(@wrap?, @row.state)}>
           {@row.node_key}
         </span>
         <span :if={@row.type} class={type_tag_class(@row.type)} style={type_tag_style(@row.type)}>
           {@row.type}
         </span>
+        {render_slot(@chip)}
         <span
           :if={@row.attempt > 1}
           class="run-attempt-chip"
@@ -435,12 +631,26 @@ defmodule RelayWeb.RunComponents do
         >
           partial
         </span>
-        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);white-space:nowrap;">
-          {run_duration(@row.duration_s)}
+        <span :if={@row.state == :queued} class="run-queued-chip" style={chip_style(:neutral)}>
+          queued · waits for a free slot
         </span>
-        <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
-          {run_cost(@row.cost)}
+        <span :if={@join_chip} class="run-join-chip" style={chip_style(elem(@join_chip, 1))}>
+          {elem(@join_chip, 0)}
         </span>
+        <span :if={@row[:joined_from]} class="run-joined-from-chip" style={chip_style(:neutral)}>
+          {joined_from_text(@row[:joined_from])}
+        </span>
+        <span :if={@succeeded?} class="run-lane-outcome" style={chip_style(:succeeded)}>
+          succeeded
+        </span>
+        <%= unless placeholder_state?(@row.state) do %>
+          <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);white-space:nowrap;">
+            {run_duration(@row.duration_s)}
+          </span>
+          <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
+            {run_cost(@row.cost)}
+          </span>
+        <% end %>
       </div>
       <div
         :if={@row.state == :active && @task_progress}
@@ -461,7 +671,81 @@ defmodule RelayWeb.RunComponents do
     """
   end
 
+  defp row_line_style(false), do: "display:flex;align-items:center;gap:10px;min-width:0;"
+  defp row_line_style(true), do: "display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;min-width:0;"
+
+  defp row_name_style(false, _state),
+    do:
+      "font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+
+  defp row_name_style(true, state) do
+    ink = if placeholder_state?(state), do: 65, else: 95
+
+    "font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) #{ink}%, transparent);white-space:nowrap;"
+  end
+
+  # A queued branch's placeholder and an open region's waiting `fan_in` (RE440): no execution
+  # backs them, so their name is muted and they show no duration or cost.
+  defp placeholder_state?(:queued), do: true
+  defp placeholder_state?(:waiting), do: true
+  defp placeholder_state?(_state), do: false
+
   attr :state, :atom, required: true
+  attr :type, :atom, default: nil
+
+  # RE440: a region's `fan_out` header always draws the fork — it labels the group.
+  defp timeline_icon(%{type: :fan_out} = assigns) do
+    ~H"""
+    <span
+      class="run-timeline-icon run-timeline-icon-fan-out"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;color:color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content));flex:0 0 auto;"
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <path d="M7 1v5M7 6L2.5 12M7 6v6M7 6l4.5 6" />
+      </svg>
+    </span>
+    """
+  end
+
+  # RE440: a branch held back by `max_parallel` — a dashed violet ring, never the grey pending ring.
+  defp timeline_icon(%{state: :queued} = assigns) do
+    ~H"""
+    <span
+      class="run-timeline-icon run-timeline-icon-queued"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;flex:0 0 auto;box-sizing:border-box;border:2px dashed color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100));"
+    />
+    """
+  end
+
+  # RE440: an open region's `fan_in`, waiting on every branch — the join glyph in muted ink.
+  defp timeline_icon(%{state: :waiting} = assigns) do
+    ~H"""
+    <span
+      class="run-timeline-icon run-timeline-icon-waiting"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);flex:0 0 auto;"
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <path d="M2.5 2L7 8M7 2v6M11.5 2L7 8M7 8v5" />
+      </svg>
+    </span>
+    """
+  end
 
   defp timeline_icon(%{state: :done} = assigns) do
     ~H"""
@@ -541,6 +825,8 @@ defmodule RelayWeb.RunComponents do
 
   defp type_tag_class(:agent), do: "run-type-tag run-type-tag-agent hidden sm:inline"
   defp type_tag_class(:gate), do: "run-type-tag run-type-tag-gate hidden sm:inline"
+  defp type_tag_class(:fan_out), do: "run-type-tag run-type-tag-fan_out hidden sm:inline"
+  defp type_tag_class(:fan_in), do: "run-type-tag run-type-tag-fan_in hidden sm:inline"
   defp type_tag_class(_type), do: "run-type-tag run-type-tag-shell hidden sm:inline"
 
   defp type_tag_style(:agent),
@@ -553,10 +839,19 @@ defmodule RelayWeb.RunComponents do
       "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
         "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));border-radius:3px;padding:2px 5px;"
 
+  defp type_tag_style(:fan_out), do: control_tag_style()
+  defp type_tag_style(:fan_in), do: control_tag_style()
+
   defp type_tag_style(_type),
     do:
       "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
         "background:color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);border-radius:3px;padding:2px 5px;"
+
+  # RE440: the control nodes' accent (teal) tag, in the agent tag's 8px/700/uppercase mono box.
+  defp control_tag_style,
+    do:
+      "font-family:var(--font-mono);font-size:8px;font-weight:700;text-transform:uppercase;" <>
+        "background:color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content));border-radius:3px;padding:2px 5px;"
 
   defp task_progress_pct(%{done: done, total: total}) when total > 0, do: min(100, round(done / total * 100))
   defp task_progress_pct(_task_progress), do: 0
@@ -1145,7 +1440,12 @@ defmodule RelayWeb.RunComponents do
   defp face_running(assigns) do
     # RE320: rate limited wears the stalled treatment's amber tokens (no artboard covers it), but
     # it is a REPORTED state, so it shows without the stall threshold.
-    assigns = assign(assigns, :amber?, assigns.stalled? or assigns.rate_limited != nil)
+    # RE440: `branches` is set only while a fan-out region is open (face tests and stories pass
+    # summaries without the key); the fan_out — still `current_node` — draws the split segment.
+    assigns =
+      assigns
+      |> assign(:amber?, assigns.stalled? or assigns.rate_limited != nil)
+      |> assign(:branches, Map.get(assigns.summary, :branches))
 
     ~H"""
     <div
@@ -1163,24 +1463,38 @@ defmodule RelayWeb.RunComponents do
           )
       }
     >
-      <div style="display:flex;gap:2px;">
-        <span
-          :for={i <- 1..(@summary.node_count || 1)}
-          style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"}
-        />
+      <div class="run-face-segments" style="display:flex;gap:2px;align-items:center;">
+        <%= for i <- 1..(@summary.node_count || 1) do %>
+          <%= if @branches && i == @summary.node_index do %>
+            <.branch_segment bars={@branches.bars} size={:face} />
+          <% else %>
+            <span style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"} />
+          <% end %>
+        <% end %>
       </div>
       <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@amber?, do: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))", else: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))")};"}>
-        <span style={"width:6px;height:6px;border-radius:50%;background:#{if(@amber?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @amber?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"} />
+        <%!-- RE440: the dot, ring and age keep their size; the node position and the branch
+             count are ONE text run that wraps inside the remaining width. --%>
+        <span
+          class="run-face-dot"
+          style={"flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#{if(@amber?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @amber?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"}
+        />
         <span
           :if={not @amber?}
-          style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;"
-        /> node {@summary.node_index} of {@summary.node_count}
-        <span style="flex:1;"></span>
+          class="run-face-ring"
+          style="flex-shrink:0;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;"
+        />
+        <span class="run-face-node" style="flex:1;min-width:0;">
+          node {@summary.node_index} of {@summary.node_count}<span
+            :if={@branches}
+            class="run-face-branches"
+          > {face_branches_label(@branches)}</span>
+        </span>
         <span
           :if={@progress_at}
           id={"card-#{@ref}-run-age"}
           class="run-face-age"
-          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+          style="flex-shrink:0;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
         >
           {TimeAgo.ago(DateTime.utc_now(), @progress_at)}
         </span>
@@ -1202,6 +1516,11 @@ defmodule RelayWeb.RunComponents do
       </div>
     </div>
     """
+  end
+
+  defp face_branches_label(%{ended: ended, total: total, queued: queued}) do
+    count = "· #{ended}/#{total} branches"
+    if queued > 0, do: "#{count} · #{queued} queued", else: count
   end
 
   defp face_segment_style(i, %{node_index: idx}) when is_integer(idx) and i < idx,
