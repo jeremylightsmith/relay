@@ -36,6 +36,7 @@ defmodule Schemas do
       NodeJob,
       Release,
       Run,
+      RunBranch,
       Scope,
       Stage,
       StoryActivity,

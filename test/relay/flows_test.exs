@@ -1,6 +1,8 @@
 defmodule Relay.FlowsTest do
   use Relay.DataCase, async: true
 
+  import Relay.FanOutFixtures
+
   alias Relay.Flows
   alias Relay.Repo
   alias Schemas.Flow
@@ -35,12 +37,39 @@ defmodule Relay.FlowsTest do
 
   defp triggers(ctx), do: %{stage_id: ctx.works.id}
 
+  # RE437: create the panel flow with `nodes` / `edges` overridden, expecting a refusal.
+  # Pinned to the fixture's own planning stage: create_flow/2's fresh stage can collide with
+  # board_with_stages/0's positions.
+  defp create_panel(overrides) do
+    %{board: board, works: works} = board_with_stages()
+    Flows.create_flow(board, overrides |> Map.new() |> Map.put(:stage_id, works.id) |> panel_attrs())
+  end
+
+  defp panel_error(overrides) do
+    assert {:error, changeset} = create_panel(overrides)
+    changeset
+  end
+
+  # Every flow-level graph message (on :edges and :nodes) of a refused panel variant.
+  defp panel_messages(overrides) do
+    changeset = panel_error(overrides)
+    messages_on(changeset, :edges) ++ messages_on(changeset, :nodes)
+  end
+
   # A stage holds one flow (RE429), so a test that only cares about the graph gets a fresh main
-  # work stage of its own unless it names one.
+  # work stage of its own unless it names one. Its position is unique: the factory's global
+  # sequence can hand out board_with_stages/0's own positions 1–3.
   defp create_flow(board, attrs) do
     Flows.create_flow(
       board,
-      Map.put_new_lazy(attrs, :stage_id, fn -> insert(:stage, board: board, type: :work, category: :in_progress).id end)
+      Map.put_new_lazy(attrs, :stage_id, fn ->
+        insert(:stage,
+          board: board,
+          type: :work,
+          category: :in_progress,
+          position: 100 + System.unique_integer([:positive])
+        ).id
+      end)
     )
   end
 
@@ -553,7 +582,7 @@ defmodule Relay.FlowsTest do
       assert "only one edge may leave a node per outcome" in messages_on(changeset, :edges)
     end
 
-    test "accepts needs_input edges and human/parallel node types as valid data" do
+    test "accepts needs_input edges and the human node type as valid data" do
       %{board: board} = board_with_stages()
 
       attrs =
@@ -568,6 +597,294 @@ defmodule Relay.FlowsTest do
         })
 
       assert {:ok, _flow} = create_flow(board, attrs)
+    end
+
+    # ---- RE437: fan_out / fan_in regions. `panel` is Relay.FanOutFixtures' valid region. ----
+
+    # Scenario 1
+    test "a valid fan_out / fan_in region saves, its fan-out edges stored with no outcome" do
+      assert {:ok, flow} = create_panel(%{})
+      fan_out_edges = Enum.filter(flow.edges, &(&1.from == "fo"))
+      assert Enum.map(fan_out_edges, & &1.to) == ["a", "b1", "c"]
+      assert Enum.all?(fan_out_edges, &is_nil(&1.on))
+    end
+
+    # Scenario 2
+    test "a fan_out needs at least two outgoing edges" do
+      edges = panel_edges() |> drop_edges("fo", "b1") |> drop_edges("fo", "c")
+
+      cs = panel_error(edges: edges)
+      assert ~s(fan_out "fo" needs at least two outgoing edges) in messages_on(cs, :edges)
+    end
+
+    # Scenario 3
+    test "a fan-out edge may not carry an outcome" do
+      edges = Enum.map(panel_edges(), &if(&1 == %{from: "fo", to: "a"}, do: Map.put(&1, :on, :succeeded), else: &1))
+
+      assert ~s(edge "fo" → "a" leaves a fan_out, which fires every edge on entry — remove "on") in panel_messages(
+               edges: edges
+             )
+    end
+
+    test "a fan-out edge may not carry a when guard" do
+      edges =
+        Enum.map(panel_edges(), &if(&1 == %{from: "fo", to: "a"}, do: Map.put(&1, :when, :foreach_remaining), else: &1))
+
+      assert ~s(edge "fo" → "a" leaves a fan_out, which fires every edge on entry — remove "when") in panel_messages(
+               nodes: put_node(panel_nodes(), "prep", %{foreach: "card.tasks"}),
+               edges: edges
+             )
+    end
+
+    # Scenario 4
+    test "two fan-out edges to one node are named, not reported as duplicate routing" do
+      messages = panel_messages(edges: panel_edges() ++ [%{from: "fo", to: "a"}])
+
+      assert ~s(fan_out "fo" has two edges to "a") in messages
+      refute "only one edge may leave a node per outcome" in messages
+    end
+
+    # Scenario 5
+    test "an edge from a branch to a node outside the region leaves the region" do
+      assert ~s(edge "c" → "after" leaves the region of fan_out "fo") in panel_messages(
+               edges: panel_edges() ++ [%{from: "c", to: "after", on: :failed}]
+             )
+
+      edges = Enum.map(panel_edges(), &if(&1 == %{from: "a", to: "fi", on: :failed}, do: %{&1 | to: "done"}, else: &1))
+      assert ~s(edge "a" → "done" leaves the region of fan_out "fo") in panel_messages(edges: edges)
+    end
+
+    # Scenario 6
+    test "an edge from one branch into another crosses between branches" do
+      assert ~s(edge "a" → "b2" crosses between branches "a" and "b1" of fan_out "fo") in panel_messages(
+               edges: panel_edges() ++ [%{from: "a", to: "b2", on: :partial}]
+             )
+    end
+
+    # Scenario 7
+    test "a branch may park on needs_input without leaving its region" do
+      edges = panel_edges() ++ [%{from: "b2", to: "needs_input", on: :partial}]
+
+      assert {:ok, _flow} = create_panel(%{edges: edges})
+    end
+
+    # Scenario 8
+    test "an edge from a branch back to its own fan_out leaves the region" do
+      assert ~s(edge "b2" → "fo" leaves the region of fan_out "fo") in panel_messages(
+               edges: panel_edges() ++ [%{from: "b2", to: "fo", on: :partial}]
+             )
+    end
+
+    # Scenario 9
+    test "a fan_out's branches must all end at the same fan_in" do
+      nodes = panel_nodes() ++ [%{key: "fi2", type: :fan_in}]
+
+      edges =
+        Enum.map(panel_edges(), &if(&1 == %{from: "c", to: "fi", on: :succeeded}, do: %{&1 | to: "fi2"}, else: &1)) ++
+          [%{from: "fi2", to: "after", on: :succeeded}]
+
+      assert ~s{fan_out "fo" branches end at different fan_ins ("fi", "fi2")} in panel_messages(
+               nodes: nodes,
+               edges: edges
+             )
+    end
+
+    # Scenario 10
+    test "a branch that leaves for a node outside the region instead of joining is refused" do
+      edges =
+        panel_edges()
+        |> drop_edges("a", "fi")
+        |> Kernel.++([%{from: "a", to: "after", on: :succeeded}, %{from: "a", to: "needs_input", on: :failed}])
+
+      assert ~s(edge "a" → "after" leaves the region of fan_out "fo") in panel_messages(edges: edges)
+    end
+
+    test "a branch that dead-ends never reaches a fan_in" do
+      assert ~s(branch "c" of fan_out "fo" never reaches a fan_in) in panel_messages(
+               edges: drop_edges(panel_edges(), "c", "fi")
+             )
+    end
+
+    # Scenario 11
+    test "an edge into a fan_in from outside its region is refused" do
+      assert ~s(edge "prep" → "fi" enters fan_in "fi" from outside its region) in panel_messages(
+               edges: panel_edges() ++ [%{from: "prep", to: "fi", on: :partial}]
+             )
+    end
+
+    # Scenario 12
+    test "a fan_in routes only on succeeded or failed" do
+      assert ~s(fan_in "fi" may route only on succeeded or failed — remove its edge on partial) in panel_messages(
+               edges: panel_edges() ++ [%{from: "fi", to: "after", on: :partial}]
+             )
+
+      assert ~s(fan_in "fi" may route only on succeeded or failed — remove its edge on needs_input) in panel_messages(
+               edges: panel_edges() ++ [%{from: "fi", to: "after", on: :needs_input}]
+             )
+    end
+
+    # Scenario 13
+    test "a fan_in may carry a when guard only on succeeded" do
+      nodes = put_node(panel_nodes(), "prep", %{foreach: "card.tasks"})
+
+      guarded_failed =
+        Enum.map(
+          panel_edges(),
+          &if(&1.from == "fi" and &1.to == "prep", do: Map.put(&1, :when, :foreach_remaining), else: &1)
+        )
+
+      assert ~s(fan_in "fi" may carry a "when" guard only on succeeded) in panel_messages(
+               nodes: nodes,
+               edges: guarded_failed
+             )
+
+      guarded_succeeded =
+        panel_edges()
+        |> drop_edges("fi", "prep")
+        |> drop_edges("fi", "after")
+        |> Kernel.++([
+          %{from: "fi", to: "prep", on: :succeeded, when: :foreach_remaining},
+          %{from: "fi", to: "after", on: :succeeded, when: :foreach_exhausted}
+        ])
+
+      assert {:ok, _flow} = create_panel(%{nodes: nodes, edges: guarded_succeeded})
+    end
+
+    # Scenario 14
+    test "a fan_out inside another fan_out's region is refused: fan-outs cannot nest" do
+      nodes =
+        panel_nodes() ++
+          [
+            %{key: "fo2", type: :fan_out},
+            %{key: "x", type: :shell, run: "true"},
+            %{key: "y", type: :shell, run: "true"},
+            %{key: "fi2", type: :fan_in}
+          ]
+
+      edges =
+        drop_edges(panel_edges(), "c", "fi") ++
+          [
+            %{from: "c", to: "fo2", on: :succeeded},
+            %{from: "fo2", to: "x"},
+            %{from: "fo2", to: "y"},
+            %{from: "x", to: "fi2", on: :succeeded},
+            %{from: "y", to: "fi2", on: :succeeded},
+            %{from: "fi2", to: "fi", on: :succeeded}
+          ]
+
+      assert ~s(fan_out "fo2" sits inside the region of fan_out "fo" — fan-outs cannot nest) in panel_messages(
+               nodes: nodes,
+               edges: edges
+             )
+    end
+
+    # Scenario 15
+    test "a foreach node may not sit inside a region" do
+      assert ~s(foreach node "b1" sits inside the region of fan_out "fo") in panel_messages(
+               nodes: put_node(panel_nodes(), "b1", %{foreach: "card.tasks"})
+             )
+    end
+
+    test "an edge inside a region may not carry a when guard" do
+      nodes = put_node(panel_nodes(), "prep", %{foreach: "card.tasks"})
+
+      edges =
+        Enum.map(
+          panel_edges(),
+          &if(&1.from == "b2" and &1.to == "b1", do: Map.put(&1, :when, :foreach_remaining), else: &1)
+        )
+
+      assert ~s(edge "b2" → "b1" inside the region of fan_out "fo" carries a "when" guard) in panel_messages(
+               nodes: nodes,
+               edges: edges
+             )
+    end
+
+    # Scenario 16
+    test "max_parallel must be at least 1 on a fan_out" do
+      cs = panel_error(nodes: put_node(panel_nodes(), "fo", %{max_parallel: 0}))
+      assert ~s(fan_out "fo": max_parallel must be at least 1) in messages_on(cs, :nodes)
+    end
+
+    test "max_parallel is only valid on a fan_out" do
+      cs = panel_error(nodes: put_node(panel_nodes(), "a", %{max_parallel: 2}))
+      assert ~s(node "a": max_parallel is only valid on a fan_out) in messages_on(cs, :nodes)
+    end
+
+    test "a fan_out's max_parallel is stored" do
+      assert {:ok, flow} = create_panel(%{nodes: put_node(panel_nodes(), "fo", %{max_parallel: 2})})
+      assert %{max_parallel: 2} = Enum.find(flow.nodes, &(&1.key == "fo"))
+    end
+
+    # Scenario 17
+    test "a control node does no work: each work field is named once, with no agent-node error" do
+      cs = panel_error(nodes: put_node(panel_nodes(), "fo", %{agent: "x", run: "go"}))
+      messages = messages_on(cs, :nodes)
+
+      assert ~s(fan_out "fo" does no work — remove "run") in messages
+      assert ~s(fan_out "fo" does no work — remove "agent") in messages
+      refute inspect(errors_on(cs)) =~ "is only valid on an agent node"
+
+      cs = panel_error(nodes: put_node(panel_nodes(), "fi", %{effort: "high"}))
+      assert ~s(fan_in "fi" does no work — remove "effort") in messages_on(cs, :nodes)
+    end
+
+    # Scenario 18
+    test "the start edge cannot target a fan_in" do
+      edges = Enum.map(panel_edges(), &if(&1.from == "start", do: %{&1 | to: "fi"}, else: &1))
+      assert ~s(the start edge cannot target fan_in "fi") in panel_messages(edges: edges)
+    end
+
+    test "a fan_in no fan_out reaches is not closed by any fan_out" do
+      nodes = panel_nodes() ++ [%{key: "fz", type: :fan_in}]
+      edges = panel_edges() ++ [%{from: "fz", to: "done", on: :succeeded}]
+
+      assert ~s(fan_in "fz" is not closed by any fan_out) in panel_messages(nodes: nodes, edges: edges)
+    end
+
+    test "a fan_in closing two fan_outs is refused" do
+      nodes =
+        panel_nodes() ++
+          [%{key: "fo3", type: :fan_out}, %{key: "x", type: :shell, run: "true"}, %{key: "y", type: :shell, run: "true"}]
+
+      edges =
+        panel_edges() ++
+          [
+            %{from: "fo3", to: "x"},
+            %{from: "fo3", to: "y"},
+            %{from: "x", to: "fi", on: :succeeded},
+            %{from: "y", to: "fi", on: :succeeded}
+          ]
+
+      assert ~s{fan_in "fi" closes more than one fan_out ("fo", "fo3")} in panel_messages(nodes: nodes, edges: edges)
+    end
+
+    # Scenario 21
+    test "a legacy parallel node type, string-keyed, is stored as fan_out" do
+      %{board: board, works: works} = board_with_stages()
+
+      nodes =
+        Enum.map(panel_nodes(), fn node ->
+          node = Map.new(node, fn {k, v} -> {Atom.to_string(k), if(is_atom(v), do: Atom.to_string(v), else: v)} end)
+          if node["key"] == "fo", do: %{node | "type" => "parallel"}, else: node
+        end)
+
+      edges =
+        Enum.map(panel_edges(), fn edge ->
+          Map.new(edge, fn {k, v} -> {Atom.to_string(k), if(is_atom(v), do: Atom.to_string(v), else: v)} end)
+        end)
+
+      attrs = %{
+        "key" => "panel",
+        "isolation" => "shared_clean",
+        "stage_id" => works.id,
+        "nodes" => nodes,
+        "edges" => edges
+      }
+
+      assert {:ok, flow} = Flows.create_flow(board, attrs)
+
+      assert %{type: :fan_out} = Enum.find(flow.nodes, &(&1.key == "fo"))
     end
 
     test "rejects non-positive max_retries and max_loops" do

@@ -189,6 +189,32 @@ defmodule Relay.DocsContentTest do
     assert glossary =~ "older mockups still use that word"
   end
 
+  # RE437 shipped `fan_out` / `fan_in` control nodes — the glossary, ADR 0006 and the architecture
+  # pages must describe them, and nothing may still say a parallel node doesn't dispatch.
+  test "fan-out regions are documented everywhere the flow model is described (RE437)" do
+    glossary = File.read!(Path.join(File.cwd!(), "docs/glossary.md"))
+    adr = File.read!(Path.join(File.cwd!(), "docs/adr/0006-workflow-orchestration.md"))
+    runtime = File.read!(Path.join(File.cwd!(), "docs/architecture/runtime.md"))
+    runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
+
+    for term <- ["Control node", "Fan-out region", "Branch"] do
+      assert glossary =~ "- **#{term}** —", "the glossary should define **#{term}**"
+    end
+
+    refute glossary =~ ~r/`parallel`[^.\n]*(do not|does not|doesn't|don't) dispatch/
+
+    for token <- ["`fan_out`", "`fan_in`", "RE161"] do
+      assert adr =~ token
+    end
+
+    refute adr =~ "| `parallel` |", "ADR 0006's node-type table should no longer list `parallel`"
+    refute adr =~ ~r/`parallel`[^.\n]*(do not|does not|doesn't|don't) dispatch/
+
+    assert runtime =~ "run_branches"
+    assert runner =~ "live count"
+    assert runner =~ "concurrent node jobs per run"
+  end
+
   # The `ai_result` shape used to live only in the drawer's private helpers, so agents invented
   # their own spelling, the strip rendered empty, and nobody found out. It is now refused at the
   # write — which only helps if the shape is written down everywhere the author looks.

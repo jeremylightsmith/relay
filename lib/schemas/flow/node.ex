@@ -5,8 +5,17 @@ defmodule Schemas.Flow.Node do
   line, or agent prompt — `{ref}`/`{branch}`/`{relay}` placeholders are the
   runner's to expand). `llm` (RE433) names one of the board's agents
   (`Schemas.Agent`, a harness + model) and nil means inherit the board's
-  default agent; `effort` nil means inherit the harness default. `human`/`parallel` carry no type-specific attrs yet (nothing
-  executes before card 02).
+  default agent; `effort` nil means inherit the harness default. `human` carries no
+  type-specific attrs yet.
+
+  ## Control nodes (RE437)
+
+  `fan_out` and `fan_in` (`control_types/0`) are **control nodes**: the server resolves them and
+  no runner job ever runs them, so they may carry none of `work_fields/0`. A `fan_out` fires
+  every outgoing edge at once (its edges carry no `on`), each edge starting a **branch**; the
+  paired `fan_in` waits for every branch. `max_parallel` (`fan_out` only, nil = every branch at
+  once) caps how many branches run together. Pairing and every region rule live on
+  `Schemas.Flow` (`regions/1`).
 
   `foreach` (nil = not a loop head) makes the node a `foreach` LOOP HEAD:
   each entry into it begins one iteration bound to one of the card's
@@ -27,6 +36,7 @@ defmodule Schemas.Flow.Node do
   | `run` placeholder: task title | `{task}` | `{sub_task}` |
   | `run` placeholder: task id | `{task_id}` | `{sub_task_id}` |
   | the node's LLM (RE433) | `llm` (an agent name) | `model` (`legacy_models/0`) |
+  | node `type` (RE437) | `fan_out` | `parallel` |
 
   A legacy `model` **key** is renamed to `llm`, its value mapped through `legacy_models/0`
   (`"opus"` → `"Claude Opus"`); a value outside the table is carried through verbatim so
@@ -78,9 +88,12 @@ defmodule Schemas.Flow.Node do
     :expects_commits,
     :reads,
     :writes,
-    :role
+    :role,
+    :max_parallel
   ]
-  @types [:agent, :shell, :gate, :parallel, :human]
+  @types [:agent, :shell, :gate, :fan_out, :fan_in, :human]
+  @control_types [:fan_out, :fan_in]
+  @work_fields [:run, :agent, :llm, :effort, :max_retries, :timeout_minutes]
   @roles [:do, :check, :fix]
   @foreach_sources ["card.tasks"]
 
@@ -91,6 +104,9 @@ defmodule Schemas.Flow.Node do
   @legacy_placeholders %{"{sub_task}" => "{task}", "{sub_task_id}" => "{task_id}"}
   # RE433 — the pre-agents `model` value → the agent name every board is seeded with.
   @legacy_models %{"opus" => "Claude Opus", "sonnet" => "Claude Sonnet", "haiku" => "Claude Haiku"}
+  # RE437 — the never-run `parallel` type became `fan_out`, keeping the value's type (string or
+  # atom). The data migration that rewrote stored rows carries its own frozen copy.
+  @legacy_types %{"parallel" => "fan_out", parallel: :fan_out}
 
   @primary_key false
   embedded_schema do
@@ -107,6 +123,7 @@ defmodule Schemas.Flow.Node do
     field :reads, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
     field :writes, {:array, Ecto.Enum}, values: Schemas.Card.contract_fields(), default: []
     field :role, Ecto.Enum, values: @roles
+    field :max_parallel, :integer
   end
 
   @doc """
@@ -129,10 +146,24 @@ defmodule Schemas.Flow.Node do
 
   @doc ~S"""
   The subset of node `type`s a runner actually runs (RLY-139). A strict subset of `types/0` —
-  `:parallel` and `:human` are valid node types that do not dispatch — so this is guarded as a
-  subset, not a partition.
+  `:fan_out`, `:fan_in` and `:human` are valid node types that do not dispatch — so this is
+  guarded as a subset, not a partition.
   """
   def runnable_types, do: [:agent, :shell, :gate]
+
+  @doc ~S"""
+  The control node types (RE437) — resolved on the server, never a runner job. The ONE copy of
+  that set: validation, the engine and the UI all read it from here.
+  """
+  @spec control_types() :: [:fan_out | :fan_in]
+  def control_types, do: @control_types
+
+  @doc """
+  The fields that describe work a runner does (RE437), in message order — a control node
+  (`control_types/0`) may carry none of them.
+  """
+  @spec work_fields() :: [atom()]
+  def work_fields, do: @work_fields
 
   @doc """
   RE433 — the legacy node `model` value → the board agent name it became, the ONE copy (the data
@@ -176,6 +207,8 @@ defmodule Schemas.Flow.Node do
 
   defp normalize_attr("foreach", source) when is_binary(source), do: Map.get(@legacy_foreach_sources, source, source)
 
+  defp normalize_attr("type", type) when is_map_key(@legacy_types, type), do: Map.fetch!(@legacy_types, type)
+
   defp normalize_attr("run", run) when is_binary(run),
     do: String.replace(run, Map.keys(@legacy_placeholders), &Map.fetch!(@legacy_placeholders, &1))
 
@@ -210,8 +243,9 @@ defmodule Schemas.Flow.Node do
   # `agent` names a `.claude/agents/<name>.md` definition the runner passes to
   # `claude -p --agent`. It is meaningless on a shell/gate/human node, so say so
   # loudly rather than silently ignoring it.
+  # A control node hears it once, from `Schemas.Flow`'s "does no work" rule, not twice.
   defp validate_agent_only_on_agent_nodes(changeset) do
-    if get_field(changeset, :agent) && get_field(changeset, :type) != :agent do
+    if get_field(changeset, :agent) && get_field(changeset, :type) not in [:agent | @control_types] do
       add_error(changeset, :agent, "is only valid on an agent node")
     else
       changeset
@@ -220,7 +254,7 @@ defmodule Schemas.Flow.Node do
 
   # RE433: `llm` picks the agent an agent node runs on; nothing else runs an LLM.
   defp validate_llm_only_on_agent_nodes(changeset) do
-    if get_field(changeset, :llm) && get_field(changeset, :type) != :agent do
+    if get_field(changeset, :llm) && get_field(changeset, :type) not in [:agent | @control_types] do
       add_error(changeset, :llm, "is only valid on an agent node")
     else
       changeset

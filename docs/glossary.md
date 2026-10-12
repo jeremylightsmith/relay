@@ -91,6 +91,24 @@ the MMF design specs).
   `role` on any node (`Schemas.Flow.Node.roles/0`) and an authored role always wins; an unset one
   is guessed by `Schemas.Flow.node_roles/1` — every inbound edge `on: failed` → Fix, a `gate` →
   Check, otherwise Do. Display-only: the engine and the runner never branch on it.
+- **Control node** — a flow node the server resolves itself, with no runner job (RE437): the
+  set is `Schemas.Flow.Node.control_types/0`, today the `fan_out` and `fan_in` that bound a
+  fan-out region. `Relay.Runs.RunServer` records one as a `node_executions` row with an
+  immediate outcome, and it carries none of the work fields (`Schemas.Flow.Node.work_fields/0`).
+- **Fan-out region** — a `fan_out` node, the branches its outgoing edges start, and the one
+  paired `fan_in` they all reach (`Schemas.Flow.regions/1`, RE437). The `fan_out` fires every
+  outgoing edge at once; the `fan_in` waits for every branch and resolves `succeeded` when all
+  succeeded, `failed` when any failed, with each branch's result labelled
+  (`Relay.Runs.Engine.join/1`). Branches run concurrently — at most the `fan_out`'s
+  `max_parallel` at a time — in the run's one checkout on its one runner; Relay does no git work
+  for them and doesn't guard their edits. A region can't nest inside another (one inside a
+  `foreach` iteration is fine). Git fork-and-join isolation is deferred to RE161.
+- **Branch** — one fan-out edge's path from its head node to the region's `fan_in`, run as part
+  of the same run (`Schemas.RunBranch`: one `run_branches` row per branch per region entry, its
+  states generated into [`architecture/state.md`](architecture/state.md)). Retries, loop caps
+  and the breaker count per branch, and a branch can wait on a human while its siblings keep
+  running. Not the card's **git** branch (`refs/heads/<branch>`), which a run's `branch` node
+  attaches.
 - **Flow trigger** — the one main stage a flow works in (`flows.stage_id`; a work-type stage,
   `Schemas.Stage.work_types/0`, holding at most one flow — RE429). A flow document spells it
   `"trigger": {"stage": "<name>"}`. **The pull-from / land-on rule:** where the flow *pulls from*

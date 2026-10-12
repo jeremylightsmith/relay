@@ -251,6 +251,8 @@ defmodule RelayWeb.FlowEditorLive do
       agent: nil,
       max_retries: nil,
       timeout_minutes: nil,
+      # RE437: every working-copy node carries every field dirty?/2 compares.
+      max_parallel: nil,
       # RE244: the inspector dereferences these, so a freshly added node must carry them or
       # selecting it raises KeyError.
       reads: [],
@@ -353,7 +355,7 @@ defmodule RelayWeb.FlowEditorLive do
   defp param_value(%{"v" => v}), do: v
   defp param_value(%{"value" => v}), do: v
 
-  defp cast_node_value(f, v) when f in [:max_retries, :timeout_minutes] do
+  defp cast_node_value(f, v) when f in [:max_retries, :timeout_minutes, :max_parallel] do
     case Integer.parse(v || "") do
       {n, _} -> n
       _ -> nil

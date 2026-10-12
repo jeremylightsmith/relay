@@ -62,6 +62,7 @@ defmodule Relay.Runs do
   alias Schemas.NodeExecution
   alias Schemas.NodeJob
   alias Schemas.Run
+  alias Schemas.RunBranch
   alias Schemas.Runner
   alias Schemas.Stage
   alias Schemas.SubTask
@@ -154,14 +155,66 @@ defmodule Relay.Runs do
     Repo.all(from e in NodeExecution, where: e.run_id == ^run_id, order_by: [asc: e.id])
   end
 
-  @doc "The run's single queued or claimed job, or nil."
-  def active_job(%Run{id: run_id}) do
-    # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause
-    # is explicit per ADR 0009 so the filter survives a future refactor of this query.
-    Repo.one(
-      from j in NodeJob,
-        where: j.run_id == ^run_id and j.state in ^NodeJob.active_states() and j.kind in ^NodeJob.flow_kinds()
+  @doc """
+  The run's queued or claimed flow jobs, ordered by `id` — `[]` when none. A run inside a
+  `fan_out` region has one per running branch (RE437); everywhere else it has at most one.
+  """
+  @spec active_jobs(Run.t()) :: [NodeJob.t()]
+  def active_jobs(%Run{id: run_id}) do
+    Repo.all(from j in active_jobs_query(run_id), order_by: [asc: j.id])
+  end
+
+  # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause is
+  # explicit per ADR 0009 so the filter survives a future refactor. The one query behind
+  # `active_jobs/1` and `revoke_active_jobs/1`.
+  defp active_jobs_query(run_id) do
+    from j in NodeJob,
+      where: j.run_id == ^run_id and j.state in ^NodeJob.active_states() and j.kind in ^NodeJob.flow_kinds()
+  end
+
+  @doc """
+  The branch rows of the run's most recent region entry (the highest `fan_out_execution_id`),
+  ordered by `position` — but only while at least one of them is open
+  (`Schemas.RunBranch.open_states/0`). `[]` once that entry has joined, and for a run that never
+  entered a region (RE437).
+  """
+  @spec open_region(Run.t()) :: [RunBranch.t()]
+  def open_region(%Run{id: run_id}) do
+    latest = from b in RunBranch, where: b.run_id == ^run_id, select: max(b.fan_out_execution_id)
+
+    rows =
+      case Repo.one(latest) do
+        nil -> []
+        entry -> Repo.all(from b in RunBranch, where: b.fan_out_execution_id == ^entry, order_by: [asc: b.position])
+      end
+
+    if Enum.any?(rows, &(&1.state in RunBranch.open_states())), do: rows, else: []
+  end
+
+  @doc "Every branch row of the run, ordered by region entry (`fan_out_execution_id`), then `position` (RE437)."
+  @spec list_run_branches(Run.t()) :: [RunBranch.t()]
+  def list_run_branches(%Run{id: run_id}) do
+    Repo.all(
+      from b in RunBranch,
+        where: b.run_id == ^run_id,
+        order_by: [asc: b.fan_out_execution_id, asc: b.position]
     )
+  end
+
+  @doc """
+  Ends every open branch of the run — `state: :ended, current_node: nil`, `outcome` left nil —
+  so a terminal run never leaves a branch `:queued` or `:running` (RE437). Called by
+  `cancel_run/2` (after revoking the jobs) and `close_run!/3`. Returns how many rows it ended.
+  """
+  @spec end_open_branches!(Run.t()) :: non_neg_integer()
+  def end_open_branches!(%Run{id: run_id}) do
+    {count, _rows} =
+      Repo.update_all(
+        from(b in RunBranch, where: b.run_id == ^run_id and b.state in ^RunBranch.open_states()),
+        set: [state: :ended, current_node: nil, updated_at: now()]
+      )
+
+    count
   end
 
   @doc "Subscribes the calling process to `board_id`'s runs topic (`board:<id>:runs`)."
@@ -175,12 +228,14 @@ defmodule Relay.Runs do
   def broadcast_run_changed(board_id, card_id), do: broadcast_runs(board_id, {:run_changed, card_id})
 
   @doc """
-  The card's runs newest-first, node executions preloaded chronologically. Each run's
+  The card's runs newest-first, node executions preloaded chronologically and `run_branches` in
+  `list_run_branches/1` order (RE437 — `RunDetail` reads their states). Each run's
   `flow: :stage` is join-preloaded in the runs query itself (RE426, no per-run N+1): `flow` is
   nil when the flow was deleted (a flow always has its stage, RE429).
   """
   def list_runs_for_card(%Card{id: card_id}) do
     node_executions = from ne in NodeExecution, order_by: [asc: ne.id]
+    run_branches = from b in RunBranch, order_by: [asc: b.fan_out_execution_id, asc: b.position]
 
     Repo.all(
       from r in Run,
@@ -188,7 +243,7 @@ defmodule Relay.Runs do
         left_join: s in assoc(f, :stage),
         where: r.card_id == ^card_id,
         order_by: [desc: r.inserted_at, desc: r.id],
-        preload: [flow: {f, stage: s}, node_executions: ^node_executions]
+        preload: [flow: {f, stage: s}, node_executions: ^node_executions, run_branches: ^run_branches]
     )
   end
 
@@ -1093,19 +1148,24 @@ defmodule Relay.Runs do
   @doc """
   Happy-path linearization of a flow: node keys from the start edge following
   :succeeded edges until the done sentinel (cycle-safe — stops on revisit).
+
+  A `fan_out` is region-aware (RE437): the walk appends the `fan_out`, then its region's
+  `fan_in` (`Schemas.Flow.regions/1`), then continues from the `fan_in`'s `:succeeded` edge.
+  Branch nodes never appear. A region with no paired `fan_in` ends the walk at the `fan_out`.
   """
-  def happy_path(%Flow{edges: edges}) do
+  def happy_path(%Flow{edges: edges} = flow) do
     next = Map.new(edges || [], fn edge -> {{edge.from, edge.on}, edge.to} end)
-    walk(next[{"start", nil}], next, [])
+    joins = Map.new(Flow.regions(flow), &{&1.fan_out, &1.fan_in})
+    walk(next[{"start", nil}], {next, joins}, [])
   end
 
-  defp walk(node, _next, acc) when node in [nil, "done"], do: Enum.reverse(acc)
+  defp walk(node, _graph, acc) when node in [nil, "done"], do: Enum.reverse(acc)
 
-  defp walk(node, next, acc) do
-    if node in acc do
-      Enum.reverse(acc)
-    else
-      walk(next[{node, :succeeded}], next, [node | acc])
+  defp walk(node, {next, joins} = graph, acc) do
+    cond do
+      node in acc -> Enum.reverse(acc)
+      Map.has_key?(joins, node) -> walk(joins[node], graph, [node | acc])
+      true -> walk(next[{node, :succeeded}], graph, [node | acc])
     end
   end
 
@@ -1177,8 +1237,7 @@ defmodule Relay.Runs do
   @doc """
   Starts a run of `flow` for `card` (same board enforced by the pattern
   match). Guards: the flow must be enabled, its graph must use only
-  supported node types (`:human`/`:parallel` → `{:error,
-  :unsupported_node_type}`; execution of both is card 09), its start edge
+  supported node types (`:human` → `{:error, :unsupported_node_type}`), its start edge
   must target a real node, and the card must have no active run (the
   partial unique index backs this against races). Creates the run + first
   execution + queued job in one transaction, moves the card to the flow's
@@ -1201,13 +1260,17 @@ defmodule Relay.Runs do
 
     cond do
       not flow.enabled -> {:error, :flow_disabled}
-      Enum.any?(flow.nodes, &(&1.type not in Flow.Node.runnable_types())) -> {:error, :unsupported_node_type}
+      Enum.any?(flow.nodes, &(&1.type not in startable_types())) -> {:error, :unsupported_node_type}
       # nil (no start edge at all) is a shape the changeset rejects, but it means the same thing
       # here as `"done"` — no first node — and refusing beats inserting a run pointed at nothing.
       start_target in [nil, "done"] -> {:error, :empty_flow}
       true -> do_start_run(card, flow, start_target, context)
     end
   end
+
+  # RE437: every type a run can hold — the runner's, plus the control nodes the server resolves.
+  # Today that leaves out only `:human`.
+  defp startable_types, do: Flow.Node.runnable_types() ++ Flow.Node.control_types()
 
   defp do_start_run(card, flow, start_target, context) do
     case maybe_seed_sub_tasks(card, flow) do
@@ -1245,17 +1308,17 @@ defmodule Relay.Runs do
         card = move_into_work_lane(card, flow)
         run = insert_run(card, flow, start_target, context, tasks_from_plan)
         sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
-        execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
-        job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
-        {card, run, execution, job}
+        {finished, started} = enter_start_node!(run, flow, start_target, sub_task_id)
+        {card, run, finished, started}
       end)
 
     case result do
-      {:ok, {card, run, execution, job}} ->
+      {:ok, {card, run, finished, started}} ->
         broadcast_runs(card.board_id, {:run_started, run})
-        broadcast_runs(card.board_id, {:node_started, run, execution})
+        Enum.each(finished, &broadcast_runs(card.board_id, {:node_finished, run, &1}))
+        Enum.each(started, fn {execution, _job} -> broadcast_runs(card.board_id, {:node_started, run, execution}) end)
 
-        case ensure_server(run, {:dispatch, job.id}) do
+        case ensure_server(run, {:dispatch, Enum.map(started, fn {_execution, job} -> job.id end)}) do
           {:ok, _pid} ->
             {:ok, run}
 
@@ -1271,6 +1334,19 @@ defmodule Relay.Runs do
 
       {:error, %Changeset{errors: errors}} ->
         if Keyword.has_key?(errors, :card_id), do: {:error, :active_run_exists}, else: {:error, :invalid}
+    end
+  end
+
+  # The start node's rows, inside start_seeded_run's transaction: `{finished, started}` — the
+  # control executions resolved on the way (the `fan_out` when the start edge opens a region,
+  # RE437) and every `{execution, job}` to dispatch.
+  defp enter_start_node!(run, flow, start_target, sub_task_id) do
+    if Flow.fan_out?(flow, start_target) do
+      RunServer.enter_region!(run, flow, start_target, sub_task_id)
+    else
+      execution = insert_execution!(run, start_target, 1, 1, sub_task_id)
+      job = insert_job!(run, execution, build_payload(run, flow, start_target, sub_task_id: sub_task_id))
+      {[], [{execution, job}]}
     end
   end
 
@@ -1373,7 +1449,9 @@ defmodule Relay.Runs do
   the execution + job and hands the outcome to the run's `RunServer`
   (serialized per run). Jobs not in queued/claimed are rejected
   with `{:error, :job_not_active}` — a revoked job's late report is
-  dropped.
+  dropped. So is any job of a run that is not `:running`, except a
+  sibling branch's while one branch waits on a human
+  (`report_accepted?/2`, RE437).
   """
   def report_outcome(job, attrs)
 
@@ -1382,7 +1460,7 @@ defmodule Relay.Runs do
       job = Repo.get!(NodeJob, job.id)
       run = Repo.get!(Run, job.run_id)
 
-      if job.state in NodeJob.active_states() and run.status == :running do
+      if job.state in NodeJob.active_states() and report_accepted?(run, job) do
         call_report_outcome(run, job.id, attrs, 1)
       else
         {:error, :job_not_active}
@@ -1568,6 +1646,38 @@ defmodule Relay.Runs do
     if is_binary(detail) and String.trim(detail) != "", do: %{detail: detail, at: at}
   end
 
+  @doc """
+  Whether `run` takes an outcome report for `job` — the ONE rule `report_outcome/2` and
+  `RunServer` both check (the job's own active state is checked beside it). A `:running` run
+  takes any. A run parked on `:needs_input` takes only a job whose execution belongs to a
+  `:running` branch: while one branch waits on a human its siblings keep working (RE437).
+  Everything else — including every whole-run park outside a region — is refused.
+  """
+  @spec report_accepted?(Run.t(), NodeJob.t()) :: boolean()
+  def report_accepted?(%Run{status: :running}, %NodeJob{}), do: true
+
+  def report_accepted?(%Run{status: :parked, parked_reason: :needs_input}, %NodeJob{} = job) do
+    Repo.exists?(
+      from e in NodeExecution,
+        join: b in RunBranch,
+        on: b.id == e.run_branch_id,
+        where: e.id == ^job.node_execution_id and b.state == :running
+    )
+  end
+
+  def report_accepted?(%Run{}, %NodeJob{}), do: false
+
+  @doc """
+  Whether a `RunServer` may come up for a run that is not `:running` (RE437): only one parked on
+  `:needs_input` whose open region still has a `:running` branch — the server that serializes
+  those siblings' reports while the parked branch waits. It attaches only; it never re-enters.
+  """
+  @spec attachable_while_parked?(Run.t()) :: boolean()
+  def attachable_while_parked?(%Run{status: :parked, parked_reason: :needs_input} = run),
+    do: Enum.any?(open_region(run), &(&1.state == :running))
+
+  def attachable_while_parked?(%Run{}), do: false
+
   defp server_gone_exit?({reason, _call}) when reason in [:noproc, :normal], do: true
   defp server_gone_exit?(reason) when reason in [:noproc, :normal], do: true
   defp server_gone_exit?(_reason), do: false
@@ -1612,6 +1722,7 @@ defmodule Relay.Runs do
     stop_server(run)
     run = Repo.get!(Run, run.id)
     revoke_active_jobs(run)
+    end_open_branches!(run)
 
     case Transitions.transition(run, Run.active_statuses(), :cancelled,
            set: [parked_reason: nil, current_node: nil, failure_detail: nil, finished_at: now()]
@@ -1777,7 +1888,12 @@ defmodule Relay.Runs do
   # whole on its local `runner.json` limits, reports the retired top-level `rate_limit` this
   # server ignores, and never pauses Codex at all: the board would show it claiming normally while
   # it sits paused, and hand it a paused harness's work. Genuinely worse than a stopped runner.
-  @min_runner_version 86
+  # RE437 raised this to 88: a fan_out runs several node jobs of one run at once in the card's
+  # worktree. A pre-88 runner tracks that tree's occupancy as one boolean, so the first branch
+  # to finish a terminal run tears the tree down under its still-running siblings, and it
+  # attributes their board-log lines by card ref, so branches clobber each other's. Genuinely
+  # worse than a stopped runner. (88, not 87: RE358 took 87 on main first.)
+  @min_runner_version 88
 
   @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
@@ -2321,8 +2437,18 @@ defmodule Relay.Runs do
   # matches `%{"isolation" => "exclusive"}`, so this is a no-op for talk — the TALK pin is
   # written by `Relay.Talk.finish_turn/3` onto the session row instead, one column, one
   # writer, per RLY-199's rule.
+  #
+  # RE437: a run inside a `fan_out` region has several queued jobs at once. Pinning the run pins
+  # its unpinned queued siblings with it, so every branch runs on the run's runner — the one
+  # holding its worktree — and no other runner can take one in between.
   defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) do
     Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_runner_name: name])
+
+    Repo.update_all(
+      from(j in NodeJob, where: j.run_id == ^run_id and j.state == :queued and is_nil(j.runner_name)),
+      set: [runner_name: name]
+    )
+
     :ok
   end
 
@@ -3200,7 +3326,8 @@ defmodule Relay.Runs do
 
     run = active_run(card)
     last = latest_run(card)
-    job = run && active_job(run)
+    jobs = if run, do: active_jobs(run), else: []
+    job = List.first(jobs)
     capacity = Scheduler.capacity_diagnosis(snapshot)
 
     snapshot
@@ -3208,6 +3335,7 @@ defmodule Relay.Runs do
     |> put_evidence(:current_node, run && run.current_node)
     |> put_evidence(:last_execution, last_execution_summary(last))
     |> put_evidence(:job, job_summary(job))
+    |> put_evidence(:active_job_count, length(jobs))
     |> layer_pin_freshness(board, now)
     |> layer_resume_refusal(run, now)
     |> override_verdict(run, last, job, board, now, capacity)
@@ -3944,6 +4072,10 @@ defmodule Relay.Runs do
 
   @doc false
   def resume_run(%Run{} = run, opts \\ []) do
+    # RE437: a server lingering from a sibling branch's report on the parked run would swallow the
+    # {:reenter, _} start below as {:already_started, pid}. Stopping waits for its in-flight call.
+    stop_server(run)
+
     case Transitions.transition(run, [:parked], :running,
            set: [parked_reason: nil, resume_refused_since: nil, resume_refused_reason: nil]
          ) do
@@ -4004,7 +4136,7 @@ defmodule Relay.Runs do
          {:ok, flow, origin} <- retry_flow(run),
          {:ok, node, mode} <- resolve_retry_target(run, flow, origin, Keyword.get(opts, :at)),
          {:ok, run} <- settle_retry_pin(run, flow, origin) do
-      revive_run(run, flow, node, mode, Keyword.get(opts, :actor, :agent))
+      revive_run(run, flow, region_entry(flow, node), mode, Keyword.get(opts, :actor, :agent))
     end
   end
 
@@ -4290,6 +4422,16 @@ defmodule Relay.Runs do
       {:ok, node, mode}
     else
       {:error, {:unknown_node, node}}
+    end
+  end
+
+  # RE437: a retry target inside a fan-out region (a branch node, or its fan_in) re-enters at the
+  # region's fan_out — `close_run!/3` already ended the stale rows, so the revived run opens a
+  # fresh region rather than resuming half of one.
+  defp region_entry(flow, node) do
+    case Flow.enclosing_region(flow, node) do
+      nil -> node
+      region -> region.fan_out
     end
   end
 
@@ -4660,10 +4802,17 @@ defmodule Relay.Runs do
   # job stays claimable, or its runner keeps working and reports normally). Only a run with no
   # active job re-enters. Boot judges no staleness — `last_heartbeat` froze while the server was
   # down; the RunnerReaper and orphan requeue (`runner_stale?/2`) recover dead runners later.
+  #
+  # RE437: a run with an open region always re-enters — the region-aware re-entry leaves every
+  # branch that still has a job alone and re-dispatches only the `:running` ones that lost theirs.
   @doc false
   @spec boot_mode(Run.t()) :: :attach | {:reenter, nil}
   def boot_mode(%Run{} = run) do
-    if active_job(run), do: :attach, else: {:reenter, nil}
+    cond do
+      open_region(run) != [] -> {:reenter, nil}
+      active_jobs(run) == [] -> {:reenter, nil}
+      true -> :attach
+    end
   end
 
   # A run points at the live flow row: a deleted flow (nilified FK or a
@@ -4721,13 +4870,14 @@ defmodule Relay.Runs do
   end
 
   @doc false
-  def insert_execution!(%Run{} = run, node_key, visit, attempt, sub_task_id \\ nil) do
+  def insert_execution!(%Run{} = run, node_key, visit, attempt, sub_task_id \\ nil, run_branch_id \\ nil) do
     %NodeExecution{
       run_id: run.id,
       node_key: node_key,
       visit: visit,
       attempt: attempt,
       sub_task_id: sub_task_id,
+      run_branch_id: run_branch_id,
       started_at: now()
     }
     |> NodeExecution.changeset()
@@ -4878,6 +5028,7 @@ defmodule Relay.Runs do
     if Transitions.legal?(run.status, status) do
       case Transitions.transition(run, [run.status], status, set: set) do
         {:ok, updated} ->
+          end_open_branches!(updated)
           updated
 
         # The guarded UPDATE already logged the no-op; return the row's current truth.
@@ -4949,18 +5100,16 @@ defmodule Relay.Runs do
 
   @doc false
   def revoke_active_jobs(%Run{id: run_id}) do
-    # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause
-    # is explicit per ADR 0009 so the filter survives a future refactor of this query.
-    jobs =
-      Repo.all(
-        from j in NodeJob,
-          where: j.run_id == ^run_id and j.state in ^NodeJob.active_states() and j.kind in ^NodeJob.flow_kinds()
-      )
+    run_id |> active_jobs_query() |> Repo.all() |> Enum.each(&revoke_job!/1)
+  end
 
-    Enum.each(jobs, fn job ->
-      revoked = job |> Changeset.change(state: :revoked, finished_at: now()) |> Repo.update!()
-      dispatcher().revoke(revoked)
-    end)
+  @doc false
+  # One job: marks it `:revoked` and tells the dispatcher. The region-aware re-entry (RE437)
+  # revokes per job, so a branch that keeps its job is never touched.
+  def revoke_job!(%NodeJob{} = job) do
+    revoked = job |> Changeset.change(state: :revoked, finished_at: now()) |> Repo.update!()
+    dispatcher().revoke(revoked)
+    revoked
   end
 
   # Builds a job payload: the runner's whole contract. Placeholder
@@ -5169,10 +5318,19 @@ defmodule Relay.Runs do
     end
   end
 
+  # A server may stop on its own between the lookup and the stop — a parked run's server does
+  # after every sibling report (RE437) — which is the outcome wanted, not an error.
   defp stop_server(%Run{id: id}) do
     case Registry.lookup(Instance.current().registry, id) do
-      [{pid, _value}] -> GenServer.stop(pid, :normal)
-      [] -> :ok
+      [{pid, _value}] ->
+        try do
+          GenServer.stop(pid, :normal)
+        catch
+          :exit, reason -> if server_gone_exit?(reason), do: :ok, else: exit(reason)
+        end
+
+      [] ->
+        :ok
     end
   end
 

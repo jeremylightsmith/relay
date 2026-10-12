@@ -4,8 +4,9 @@
 
 Accepted (2026-07-18)
 
-**Implementation:** complete. Only `parallel`/`human` node execution is deferred ([RLY-161 W19 —
-parallel fan-out: git fork-and-join (ensemble + map join)]).
+**Implementation:** complete. `fan_out`/`fan_in` shipped on the shared checkout (RE437); their
+git fork-and-join isolation is deferred to [RE161 W19 — parallel git isolation: fork-and-join
+(ensemble + map join)], and `human` node execution is not built.
 
 ## As built (2026-10-08)
 
@@ -18,7 +19,10 @@ parallel fan-out: git fork-and-join (ensemble + map join)]).
   (`lib/schemas/node_execution.ex`).
 - A `foreach` node iterates `card.tasks`, the only accepted source (`lib/schemas/flow/node.ex`).
 - DOT is only a generated render (`docs/designs/flows/code.dot`, generated from `code.json`).
-- `parallel`/`human` are valid node types but do not dispatch (`lib/schemas/flow/node.ex`).
+- `human` is a valid node type but does not dispatch (`lib/schemas/flow/node.ex`). The planned
+  `parallel` type became two **control nodes**, `fan_out` and `fan_in`
+  (`Schemas.Flow.Node.control_types/0`, RE437): `RunServer` resolves them with no runner job, and
+  a stored `parallel` node loads as a `fan_out`.
 - `ai_enabled` is no longer a stage column (RE409): a stage is AI-enabled iff a flow works in it
   (`Relay.Flows.ai_stage_ids/1`); the API still reports it, derived and read-only.
 - The RE board adds a Deploy flow (`.relay/flows/deploy.json`), and its Code flow ends in
@@ -180,7 +184,8 @@ Everything in this section is **illustrative, not final** — the commitment is 
 | `agent` | one headless `claude -p` in the project checkout (repo skills/CLAUDE.md/MCP apply) | all four | `run` (prompt or `/skill`), `model`, `timeout`, `max_retries`, `foreach` |
 | `shell` | a shell command in the job's worktree | `succeeded` / `failed` (exit code) | `run` |
 | `gate` | a deterministic check whose failure must reroute or fail the run — "tests are gates, not suggestions" | `succeeded` / `failed` | `run` (predicate command); no silent override |
-| `parallel` | fan-out of a sub-flow per item | `succeeded` / `partial` / `failed` | `join`: `wait_all` / `first_success`, `max_parallel` |
+| `fan_out` | control node (RE437): resolved by `RunServer`, no job — fires every outgoing edge at once, each starting a **branch** in the run's own checkout | `succeeded` (immediately) | `max_parallel` (nil = every branch at once); outgoing edges carry no `on` |
+| `fan_in` | control node (RE437): waits for every branch of its region (wait-all), then joins (`Relay.Runs.Engine.join/1`) | `succeeded` (all succeeded) / `failed` (any failed) | none — paired with its `fan_out` by `Schemas.Flow.regions/1` |
 | `human` | pauses the run and hands the baton | resumes the flow with the answer | `question` / `questions` (renders the needs-input drawer stepper) |
 
 **Outcomes** (closed set; every edge routes on one)
@@ -321,7 +326,7 @@ and literal example rows: see the
 | Object | Key fields | Values for today's flow |
 | --- | --- | --- |
 | `Flow` | `key`, `board_id`, `trigger` (from/stage/done as stage ids), `isolation`, `enabled`, `origin` (default \| override), nodes, edges | 3 rows: `spec` (Next up → Spec → Spec:Review, `shared_clean`), `plan` (Spec:Done → Plan → Plan:Done, `shared_clean`), `code` (Plan:Done → Code → Review, `exclusive`); all `enabled: false` until their cutover |
-| `Flow.Node` (embedded) | `id`, `type` (agent\|shell\|gate\|parallel\|human), `run`, `model`, `effort`, `timeout`, `max_retries` | per [`docs/designs/flows/`](../designs/flows/README.md) — e.g. code's `implement` = agent/sonnet/high, `precommit` = gate/`mix precommit` |
+| `Flow.Node` (embedded) | `id`, `type` (agent\|shell\|gate\|human, plus the `fan_out`\|`fan_in` control nodes — `Schemas.Flow.Node.types/0`), `run`, `model`, `effort`, `timeout`, `max_retries` | per [`docs/designs/flows/`](../designs/flows/README.md) — e.g. code's `implement` = agent/sonnet/high, `precommit` = gate/`mix precommit` |
 | `Flow.Edge` (embedded) | `from`, `to`, `on` (outcome), `max_loops` | e.g. `quality_review --failed→ implement, max_loops 3` |
 | `Run` | `card_id`, flow key + version snapshot, `status` (running \| parked \| done \| failed \| cancelled), `current_node`, timestamps | one per card per flow traversal; `parked` = today's `needs_input` wait |
 | `NodeExecution` | `run_id`, `node_id`, `attempt`, `outcome`, `detail`, `git_sha`, `session_id`, duration, cost | the per-node history RLY-137 renders; `session_id` powers `--resume` re-entry |
@@ -391,18 +396,24 @@ brain/hands problem we are taking on. What we adopt and where we deliberately di
 - **Distributed by design.** Fabro is server + subprocess workers on one box; our engine
   (Fly) and runners (dev machines) are split by necessity, which is why the node-job
   protocol, heartbeats, and job reclaim exist at all. Accepted cost, already carded.
-- **No `skipped` outcome yet — but parallel's design is settled (Fabro's, adopted).**
-  When `parallel` arrives it works by **fork-and-join on git**: commit the run worktree
-  (`parallel_base`), fork N *ephemeral* worktrees at that SHA (scratch, not pool slots;
-  bounded by `max_parallel` and a per-machine scratch budget; all on the run's runner
-  per affinity), each child commits, then join by policy — **map** (disjoint work:
-  merge all; conflicts route to a rebase agent) or **ensemble** (N attempts at one
-  thing: pick a winner, fast-forward to its SHA, losers recorded as `skipped` with
-  their SHAs inspectable). Ensemble (a review judge-panel) is the expected first
-  customer, **deferred to RLY-161 (W19)** — RLY-139 (Code's cutover) shipped `foreach`
-  instead, sequential `spec_review`/`quality_review` still two agent nodes. Until then:
-  YAGNI — cold build caches make ephemeral forks expensive on a laptop, so this waits
-  for proven value.
+- **Fan-out shipped without git isolation; no `skipped` outcome yet.** RE437 shipped
+  `fan_out` / `fan_in` as server-resolved control nodes on a **shared checkout**: every
+  branch runs in the run's one worktree on its one runner, capped by `max_parallel`. The
+  join is always **wait-all**, with the **any-failed** rule: all branches succeeded →
+  `succeeded`, any failed → `failed`, each branch's result labelled
+  (`Relay.Runs.Engine.join/1`); there is no partial, no threshold and no `skipped`.
+  Concurrent edits, commits and builds in that checkout are the flow author's
+  responsibility, and Relay does no git work for a region
+  ([runner.md](../architecture/runner.md#fan-out-regions-re437)). The **git fork-and-join**
+  design (Fabro's, adopted) is still deferred to [RE161 W19 — parallel git isolation:
+  fork-and-join (ensemble + map join)]: commit the run worktree (`parallel_base`), fork N
+  *ephemeral* worktrees at that SHA (scratch, not pool slots; bounded by `max_parallel` and a
+  per-machine scratch budget; all on the run's runner per affinity), each child commits, then
+  join by policy — **map** (disjoint work: merge all; conflicts route to a rebase agent) or
+  **ensemble** (N attempts at one thing: pick a winner, fast-forward to its SHA, losers
+  recorded as `skipped` with their SHAs inspectable). Ensemble (a review judge-panel) is the
+  expected first customer. YAGNI until then — cold build caches make ephemeral forks
+  expensive on a laptop, so this waits for proven value.
 
 ### Design pass (2026-07-17) — what the artboards decided
 

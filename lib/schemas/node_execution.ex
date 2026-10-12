@@ -15,6 +15,10 @@ defmodule Schemas.NodeExecution do
   and it is the key `Engine.decide/4` scopes `max_loops`/`max_retries`/the
   visit cap to. Programmatic, never cast.
 
+  `run_branch_id` (RE437) is set on every execution inside a `fan_out` region's branch and nil
+  everywhere else — including the `fan_out` and `fan_in` control executions themselves. It is the
+  key `Relay.Runs.RunServer` scopes a branch's decision history to. Programmatic, never cast.
+
   `no_changes` records that the node ASSERTED "succeeded, and no changes were needed" (RE310) —
   what was claimed, not what the engine decided, so a rejected claim is still readable as
   `no_changes: true` with `outcome: :failed`.
@@ -59,6 +63,7 @@ defmodule Schemas.NodeExecution do
     field :resume_at, :utc_datetime
 
     belongs_to :run, Schemas.Run
+    belongs_to :run_branch, Schemas.RunBranch
 
     timestamps(type: :utc_datetime)
   end

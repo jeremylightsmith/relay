@@ -41,7 +41,7 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Activity.Pruner` | ages `:action` chatter out after 14 days; first sweep one interval after boot |
 | `Task.Supervisor` (`Relay.Push.TaskSupervisor`) | push dispatch off the caller's process (RLY-81) |
 | `Finch` (`Relay.Push.APNSFinch`) | dedicated HTTP/2 pool — APNs requires h2; Req's default pool is h1-first |
-| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener` (which self-heals via its own `{:continue, :boot_reconcile}` sweep over every `:parked` run at startup — RLY-200), a boot task that resumes unfinished runs from Postgres — boot resume attaches to every `:running` run that still has an active (`queued`/`claimed`) job, so no revoke and no re-dispatch, and re-enters only a run with no active job (`Relay.Runs.boot_mode/1`, RE410); staleness is left to the `RunnerReaper` and orphan requeue, and `Relay.Runs.RunnerReaper` (RLY-134, inside this `rest_for_one` subtree). `RunServer.init/1` returns `:ignore` for a run that is not `:running`, and a run whose server cannot start is failed via `abandon_serverless_run/2` (boot resume included) rather than left orphaned (RE412, failures.md A13). Not started in test. |
+| `Relay.Runs.Supervisor` | runs engine (RLY-132): run-id `Registry`, `DynamicSupervisor` with one transient `RunServer` per `:running` run, the card-event `Listener` (which self-heals via its own `{:continue, :boot_reconcile}` sweep over every `:parked` run at startup — RLY-200), a boot task that resumes unfinished runs from Postgres — boot resume attaches to every `:running` run that still has an active (`queued`/`claimed`) job, so no revoke and no re-dispatch, and re-enters only a run with no active job (`Relay.Runs.boot_mode/1`, RE410) or with an open fan-out region, whose re-entry leaves every branch that kept its job alone (RE437); staleness is left to the `RunnerReaper` and orphan requeue, and `Relay.Runs.RunnerReaper` (RLY-134, inside this `rest_for_one` subtree). `RunServer.init/1` returns `:ignore` for a run that is not `:running` — except `:attach` on a run parked while a fan-out sibling branch still runs, which stops after each report (RE437) — and a run whose server cannot start is failed via `abandon_serverless_run/2` (boot resume included) rather than left orphaned (RE412, failures.md A13). Not started in test. |
 | `Relay.Runs.RunnerReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) run-lifecycle sweeps (runner liveness + orphaned-run closure + unresumable-run ageing + scheduler presence): `Relay.Runs.reclaim_stale_runners/0` requeues a dead runner's `shared_clean` jobs and parks its `exclusive` runs (`parked_reason: :runner_gone`), and clears its `Relay.Runs.Capacity` entry (RE402); `Relay.Runs.close_orphaned_runs/0` closes any run still active while its card is already in a terminal-type stage (RLY-233) or archived (RE335); `Relay.Runs.abandon_unresumable_runs/0` fails a parked run whose resume the scheduler has refused continuously for `Relay.Runs.unresumable_after_s/0` (30 min), so a dead end becomes a visible failure a human can `retry` (RE297); and `Relay.Runs.SchedulerSupervisor.reconcile/0` (last in the sweep) adopts any board lacking a scheduler (RE387). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
 | `RelayWeb.Endpoint` | Bandit HTTP server, WebSockets |
 
@@ -148,6 +148,64 @@ sequenceDiagram
 A terminally failed run takes a different path — `card_fail_effects/2` →
 `Relay.Cards.mark_failed/3` → card status `:failed`, no question. `ensure_card_blocked/2` is
 reserved for the genuine question above; the two never overlap (RLY-179).
+
+### Fan-out regions (RE437)
+
+A `fan_out` / `fan_in` pair is the one place a run holds several node jobs at once. Both are
+**control nodes** (`Schemas.Flow.Node.control_types/0`): the run's `RunServer` resolves them
+itself, writing a `node_executions` row with an immediate outcome and no `node_job`, so no
+runner ever sees one. The region in between is tracked in `run_branches` (`Schemas.RunBranch`,
+owned by `Relay.Runs`): one row per branch per **region entry**, keyed by the `fan_out`
+execution that opened it, its `state` drawn from `Schemas.RunBranch.states/0` (the generated
+table in [`state.md`](state.md)). Branch executions carry `node_executions.run_branch_id`.
+
+```mermaid
+sequenceDiagram
+    participant S as RunServer (one per run)
+    participant DB as runs · run_branches · node_jobs
+    participant R as the run's runner (one worktree)
+    S->>DB: record fan_out :succeeded (no job), one run_branches row per edge (queued)
+    S->>DB: start up to max_parallel rows → running, enqueue each head node (run_branch_id set)
+    DB-->>R: several node jobs of ONE run, claimed into the same checkout
+    R->>S: report (per job)
+    S->>S: Engine.decide/4 on that branch's history only
+    alt branch reached the fan_in
+        S->>DB: row → ended (outcome, detail); start the next queued row
+    else branch parks on a human
+        S->>DB: row → parked, run parked — siblings keep running
+    end
+    S->>DB: every row ended → record fan_in with Engine.join/1, route it like any node
+```
+
+- **Scheduling.** At most the `fan_out`'s `max_parallel` rows are `running`; each ended row frees
+  a slot for the next `queued` one, by position. `run.current_node` stays the `fan_out` key while
+  the region is open, and `Runs.active_jobs/1` returns one job per running branch.
+- **Branch-scoped budgets.** `max_retries`, `max_loops`, the visit cap and the failure-signature
+  breaker are counted on the branch's own history, so one branch's failures never spend
+  another's. A branch's `{:fail, _}` ends only its row `:failed`; the run carries on to the join.
+- **The join.** When every row is `ended`, the `fan_in` resolves through
+  `Relay.Runs.Engine.join/1` — wait-all, any-failed — which owns the outcome rule and the
+  per-branch label format (don't re-derive either).
+- **Park with siblings.** A branch that waits on a human parks its row and the run, but revokes
+  no sibling job. While the run is parked, a report from a `running` branch is still accepted
+  (`Runs.report_accepted?/2`) and routed inside that branch; `RunServer` attaches for it only
+  when `Runs.attachable_while_parked?/1` says so and stops again after each report, so a parked
+  run holds no long-lived process. No queued branch starts and no join happens until resume.
+- **Re-entry and restart.** Every re-entry with a region open (`Runs.open_region/1`) — resume,
+  `--at`, a restart after a deploy (`Runs.boot_mode/1` always re-enters such a run) — goes branch
+  by branch: a running row with a live job is left alone; one without, and every parked row, gets
+  a fresh attempt of the same visit. Re-entering at a branch node or a `fan_in` with no region open
+  opens a fresh region at its `fan_out` (`Runs.retry_run/2` maps the target the same way).
+- **Cancel and close.** `cancel_run/2` and `close_run!/3` end every open row
+  (`Runs.end_open_branches!/1`), so a terminal run never leaves a branch `queued` or `running`.
+
+The card drawer timeline renders the region flat until RE440 groups it: every in-flight branch
+node is an active row, even while a sibling parks the run (`Relay.Runs.RunDetail`, which reads
+the `run_branches` that `Runs.list_runs_for_card/1` preloads), and `Runs.happy_path/1` steps from
+the `fan_out` straight to its `fan_in`, so a card face reads "node N of M" against the
+`fan_out` while the region is open. The full engine rules are in
+[runner.md](runner.md#fan-out-regions-re437); the runner side — concurrent node jobs in one
+worktree — is in [runner.md's worktree pool](runner.md#runner-mode-relay-start-rly-135-adr-0006-card-05).
 
 ---
 *Sources of truth: `lib/relay/application.ex`, `lib/relay/events.ex`,

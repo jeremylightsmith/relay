@@ -17,6 +17,7 @@ what each term *means*; the sections below say what each value *does*.
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |
+| Run branch state | `queued` · `running` · `parked` · `ended` | `Schemas.RunBranch.states/0` |
 | Run parked reason | `needs_input` · `claimed` · `runner_gone` | `Schemas.Run.parked_reasons/0` |
 | Run resume-refusal reason | `no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot` | `Schemas.Run.resume_refusal_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
@@ -254,6 +255,23 @@ Whether an agent may work a card at all — the human-baton gate, the fresh-pull
 `pullable?/1`, `resumable?/2`), one shared definition the scheduler, the run listener, and the
 board card face all call. It is a set of predicates, not a closed data table, so there is nothing
 to generate; the drift protection there is the shared-predicate test suite.
+
+### Run branch state (RE437)
+
+A run inside a fan-out region also holds one `run_branches` row per branch
+([runtime.md](runtime.md#fan-out-regions-re437)). Its `state` (`Schemas.RunBranch.states/0`) walks
+`queued → running ⇄ parked → ended`:
+
+- **`queued → running`**: a slot under the `fan_out`'s `max_parallel` frees up, and the branch's
+  head node is enqueued.
+- **`running → parked`**: the branch waits on a human or a usage limit. The run parks too, but its
+  `running` siblings carry on.
+- **`parked → running`**: the run resumes, and the branch gets a fresh attempt of the same visit.
+- **`running`/`parked`/`queued` → `ended`**: the branch reaches the `fan_in` or fails. The engine
+  sets its `outcome`. A cancel or close also ends it, with `outcome` left nil.
+
+The `fan_in` joins once every row is `ended`. `ended` is terminal for that region entry; a
+re-entered region gets fresh rows.
 
 ## Node-job state
 

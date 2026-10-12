@@ -44,8 +44,11 @@ RUNNER_CONFIG_REL = ".relay/runner.json"
 RUNNER_CONFIG_PATH = os.path.join(ROOT, RUNNER_CONFIG_REL)
 DRY = False
 FORWARDER = None
-RUN_IDS = {}   # ref -> run_id of the run currently working it (RLY-112)
-NODE_JOB_IDS = {}   # ref -> node_job_id currently running it (runner mode, RLY-135)
+# The node job a worker THREAD is running, for board-log attribution (RLY-112, RLY-135).
+# Per thread, not per ref (RE437): a fan_out runs several node jobs of one run on the same card
+# at once, and a ref-keyed map let each branch clobber the others' ids. Set only by
+# node_job_attribution(); a talk turn and the main loop never set it.
+_JOB_ATTRIBUTION = threading.local()
 USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outside it
 
 # ---- runner version (RLY-184) ----
@@ -60,8 +63,8 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 87
-RUNNER_FINGERPRINT = "6c8267657f97da55691ecbfa952b4d3b91ef9e5630d346bda43cdfd58827151d"
+RUNNER_VERSION = 88
+RUNNER_FINGERPRINT = "3764d94d67d03aa2b906f8fd2ea4c7f9c19784d0e8d8044b2a49c53a09d6e133"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -243,10 +246,30 @@ def _ref_from_tag(tag):
     return m.group(1) if m else None
 
 
+@contextlib.contextmanager
+def node_job_attribution(ref, run_id, node_job_id):
+    """Attribute every forward() for `ref` made on THIS thread, while inside, to this node job
+    and its run (RE437). Each worker thread carries its own, so concurrent jobs on one card
+    never see each other's ids, and one finishing never erases another's."""
+    _JOB_ATTRIBUTION.current = (ref, run_id, node_job_id)
+    try:
+        yield
+    finally:
+        _JOB_ATTRIBUTION.current = None
+
+
+def _attribution_for(ref):
+    """(run_id, node_job_id) of the node job the calling thread runs for `ref`, else Nones."""
+    current = getattr(_JOB_ATTRIBUTION, "current", None)
+    if current is None or ref is None or current[0] != ref:
+        return None, None
+    return current[1], current[2]
+
+
 def forward(kind, text, ref=None):
     """Best-effort: hand one feed line to the background mirror, if one is running."""
     if FORWARDER is not None:
-        FORWARDER.enqueue(kind, text, ref, RUN_IDS.get(ref), NODE_JOB_IDS.get(ref))
+        FORWARDER.enqueue(kind, text, ref, *_attribution_for(ref))
 
 
 class LogForwarder:
@@ -2451,7 +2474,9 @@ class RunnerPool:
 
     Each exclusive worktree is tracked in `self.wts` (name -> record) in one of two states:
       active   -> bound to a non-terminal run; counts toward `max_worktrees`; holds a
-                  MIX_TEST_PARTITION index (RLY-213); `live` True while a job runs in it.
+                  MIX_TEST_PARTITION index (RLY-213); `live` counts the node jobs running in
+                  it — several at once when a fan_out runs its branches (RE437). Only at 0 is
+                  the tree idle: a teardown, release or reuse candidate.
       retained -> a `failed` run's leftover kept for post-mortem; NOT counted; no partition;
                   marked on disk (RETAINED_MARKER); evictable oldest-first past
                   `max_retained_failed` or under capacity pressure.
@@ -2469,9 +2494,13 @@ class RunnerPool:
         self.max_retained_failed = cfg.get("max_retained_failed", 3)
         self.shared_name = f"{self.ns}-clean"
         self.shared_used = 0
-        # name -> {"ref", "run_id", "state": "active"|"retained", "live": bool,
-        #          "partition": str|None, "teardown_failed": bool (RE336, optional)}
+        # name -> {"ref", "run_id", "state": "active"|"retained", "live": int (in-flight node
+        #          jobs, RE437), "partition": str|None, "teardown_failed": bool (RE336, optional)}
         self.wts = {}
+        # name -> {"done": Event, "detail": str|None}: the first-job preparation in flight or
+        # finished for a slot's current occupants (RE437). Set by assign() on a reset placement,
+        # finished by prepared(), waited on by wait_prepared(), dropped when `live` reaches 0.
+        self.preps = {}
         # free MIX_TEST_PARTITION indices for active worktrees (RLY-213); "0" is shared_clean's.
         self.free_partitions = [str(i) for i in range(1, self.max_worktrees + 1)]
         self.lock = threading.Lock()
@@ -2540,7 +2569,7 @@ class RunnerPool:
         `bound` for an active slot awaiting its run's next job."""
         if rec["state"] == "retained":
             return "retained"
-        if rec.get("live"):
+        if rec.get("live", 0) > 0:
             return "running"
         if rec.get("talk_users", 0) > 0:
             return "talk"
@@ -2577,7 +2606,12 @@ class RunnerPool:
     def assign(self, job):
         """Reserve a worktree for `job`; return (slot_name, reset?) or None if none is free.
         reset? is True when the worktree must be created/re-baselined + warmed (first job of a
-        run, or reclaim of a retained one) and False when a live/recovered worktree is reused."""
+        run, or reclaim of a retained one) and False when a live/recovered worktree is reused.
+
+        Every exclusive placement counts one more in-flight node job into `live` (RE437). Several
+        jobs of ONE run (a fan_out's branches) share the card's tree: the first is the reset
+        placement, the rest land in the same-run reuse branch below with reset False and wait
+        for its preparation in execute_one."""
         iso = job["isolation"]
         run_id = job["run_id"]
         with self.lock:
@@ -2594,14 +2628,14 @@ class RunnerPool:
             # retrying it, but it may be half-deleted. Never reuse it as-is: the card's next run
             # re-baselines it (create_or_rebaseline rebuilds a tree whose `.git` link is gone).
             if (rec and rec["state"] == "active" and rec.get("teardown_failed")
-                    and not rec.get("live") and not rec.get("pending_finish")):
+                    and rec.get("live", 0) == 0 and not rec.get("pending_finish")):
                 rec.pop("teardown_failed", None)
                 rec.pop("teardown_logged_at", None)
                 rec["run_id"] = run_id
-                rec["live"] = True
-                return name, True
+                return self._place_locked(name, rec, reset=True)
 
-            # Reuse an active worktree already bound to this run (a later node), one recovered
+            # Reuse an active worktree already bound to this run (a later node, or a concurrent
+            # fan_out branch while its siblings still run — RE437), one recovered
             # from disk with an unknown binding (run_id None), or an IDLE one still bound to an
             # EARLIER run of the same card (RE311): a worktree's identity is the card's branch,
             # so the retry after a cancel legitimately continues in it. Without that last case a
@@ -2611,10 +2645,9 @@ class RunnerPool:
             # re-baseline here — the branch holds the run's commits.
             if rec and rec["state"] == "active" and (
                     rec["run_id"] in (run_id, None)
-                    or (not rec.get("live") and not rec.get("pending_finish"))):
+                    or (rec.get("live", 0) == 0 and not rec.get("pending_finish"))):
                 rec["run_id"] = run_id
-                rec["live"] = True
-                return name, False
+                return self._place_locked(name, rec, reset=False)
 
             # Reclaim a retained (failed) worktree for a new run of the same card: re-baseline it.
             if rec and rec["state"] == "retained":
@@ -2635,18 +2668,17 @@ class RunnerPool:
                 # stale mark would re-baseline the run's NEXT node too, mid-run.
                 rec.pop("teardown_failed", None)
                 rec.pop("teardown_logged_at", None)
-                rec.update(run_id=run_id, state="active", live=True,
-                           ref=rec.get("ref") or job["vars"]["ref"])
-                return name, True
+                rec.update(run_id=run_id, state="active", ref=rec.get("ref") or job["vars"]["ref"])
+                return self._place_locked(name, rec, reset=True)
 
             # A brand-new card: create a fresh worktree if there is room.
             if rec is None:
                 if self._active_count() >= self.max_worktrees:
                     return None
                 self.wts[name] = {"ref": job["vars"]["ref"], "run_id": run_id,
-                                  "state": "active", "live": True,
+                                  "state": "active", "live": 0,
                                   "partition": self._take_partition()}
-                return name, True
+                return self._place_locked(name, self.wts[name], reset=True)
 
             # rec is active and bound to a different run that is either genuinely LIVE (should
             # not happen — one card never runs twice at once) or holds a terminal disposition
@@ -2654,6 +2686,35 @@ class RunnerPool:
             # `release_talk` tear the tree down under the new run. Refuse rather than steal a
             # live worktree; `cmd_start`'s bounded placement retry covers the deferred window.
             return None
+
+    def _place_locked(self, name, rec, reset):
+        """Count one more node job into `rec` and return assign()'s (slot, reset). A reset
+        placement opens the slot's preparation; its siblings wait on it in execute_one (RE437).
+        Caller holds self.lock."""
+        rec["live"] = rec.get("live", 0) + 1
+        if reset:
+            self.preps[name] = {"done": threading.Event(), "detail": None}
+        return name, reset
+
+    # ---- first-job preparation (RE437) ------------------------------------
+    def prepared(self, slot, detail=None):
+        """The reset job finished preparing `slot`: None on success, else the failure detail
+        every waiting sibling reports instead of running."""
+        with self.lock:
+            prep = self.preps.get(slot)
+        if prep is not None:
+            prep["detail"] = detail
+            prep["done"].set()
+
+    def wait_prepared(self, slot):
+        """Block until `slot`'s in-flight preparation finishes; return its failure detail, or
+        None when it succeeded or there is none to wait for."""
+        with self.lock:
+            prep = self.preps.get(slot)
+        if prep is None:
+            return None
+        prep["done"].wait()
+        return prep["detail"]
 
     def release_talk(self, slot):
         """Mark a talk turn's worktree idle. Deliberately does NOT touch `rec["live"]` — that
@@ -2682,7 +2743,7 @@ class RunnerPool:
             rec["talk_users"] = max(0, rec.get("talk_users", 0) - 1)
             if rec["talk_users"] > 0:
                 return                      # another talk turn still occupies this worktree
-            if rec["live"]:
+            if rec["live"] > 0:
                 return                      # a node job still occupies this worktree
             # Popped only once we know we are the last occupant out: above the early returns it
             # would discard the deferred disposition instead of leaving it for whoever is.
@@ -2717,7 +2778,7 @@ class RunnerPool:
             # nothing occupies it (create_or_rebaseline rebuilds a `.git`-less tree); otherwise
             # return None so placement retries.
             if rec is not None and rec.get("teardown_failed"):
-                if rec["live"] or rec.get("talk_users", 0) or rec.get("pending_finish"):
+                if rec["live"] > 0 or rec.get("talk_users", 0) or rec.get("pending_finish"):
                     return None
                 rec.pop("teardown_failed", None)
                 rec.pop("teardown_logged_at", None)
@@ -2728,7 +2789,7 @@ class RunnerPool:
                 return name, False
             if self._active_count() >= self.max_worktrees:
                 return None
-            self.wts[name] = {"ref": ref, "run_id": None, "state": "active", "live": False,
+            self.wts[name] = {"ref": ref, "run_id": None, "state": "active", "live": 0,
                               "talk_users": 1, "partition": self._take_partition(),
                               "talk": True}
             return name, True
@@ -2760,7 +2821,10 @@ class RunnerPool:
             rec = self.wts.get(slot)
             if rec is None:
                 return
-            rec["live"] = False
+            rec["live"] = max(0, rec["live"] - 1)
+            if rec["live"] > 0:
+                return                  # sibling jobs still run here: the last one out decides
+            self.preps.pop(slot, None)
             if run_state is None or run_state in ACTIVE_RUN_STATES:
                 return                                  # revoke or still-live: keep active+bound
             if rec.get("talk_users", 0) > 0:
@@ -2791,7 +2855,7 @@ class RunnerPool:
         name = self.wt_name(ref)
         with self.lock:
             rec = self.wts.get(name)
-            if rec is None or rec["state"] != "active" or rec["live"]:
+            if rec is None or rec["state"] != "active" or rec["live"] > 0:
                 return
             if rec.get("talk") and rec["run_id"] is None:
                 return
@@ -2806,7 +2870,7 @@ class RunnerPool:
         done/cancelled pop the record and free its partition only once the tree is actually
         GONE (RE336). Popping first meant a failed removal left the tree on disk but out of
         `holdings()`, so the server could never name it in `release_held` and the slot leaked
-        until a restart. A record whose removal failed stays `active`, `live=False`, bound to
+        until a restart. A record whose removal failed stays `active`, `live` 0, bound to
         its run and holding its partition: an honest occupant, since it still occupies disk and
         its checkout. `holdings()` reports it `bound`, and every heartbeat's `release_held`
         retries it."""
@@ -3081,10 +3145,10 @@ class RunnerPool:
                 ref = name[len(self.ns) + 1:]
                 if _is_retained_worktree(path):
                     self.wts[name] = {"ref": ref, "run_id": None, "state": "retained",
-                                      "live": False, "partition": None}
+                                      "live": 0, "partition": None}
                 else:
                     self.wts[name] = {"ref": ref, "run_id": None, "state": "active",
-                                      "live": False, "partition": self._take_partition()}
+                                      "live": 0, "partition": self._take_partition()}
             self._evict_retained_over_cap_locked()
 
     def refresh_idle_shared(self):
@@ -3609,9 +3673,8 @@ def _print_claude_event(ev, tag="", mirror=True):
 
     `mirror`, when False, still prints locally but skips `forward()` to the board-log mirror
     (RE268) — used for a talk turn, whose transcript already has its
-    own delivery channel (TalkEventSender) and whose ref is deliberately NOT registered in the
-    ref-keyed NODE_JOB_IDS/RUN_IDS maps forward() reads, to avoid clobbering a concurrently
-    running node job's own attribution for the same card."""
+    own delivery channel (TalkEventSender) and whose worker registers no node_job_attribution,
+    so its lines would carry no node job or run anyway."""
     ref = _ref_from_tag(tag) if mirror else None
     t = ev.get("type")
     if t == "assistant":
@@ -5316,8 +5379,33 @@ def execute_talk(job, slot, reset, control, pool):
         pool.release_talk(slot)
 
 
+def _prepare_slot(job, slot, slot_path, pool):
+    """First job of a run (or reclaim of a retained worktree): create/re-baseline the per-card
+    worktree, then warm it via the project's prepare hook. Returns the failure detail, or None.
+
+    ALWAYS finishes the slot's preparation in the pool (RE437), even when creating it raises,
+    so sibling jobs of the run waiting in execute_one never block forever."""
+    detail = None
+    try:
+        if not DRY:
+            pool.create_or_rebaseline(slot)
+            ref = (job.get("vars") or {}).get("ref")
+            hook_err = pool.run_prepare_hook(slot_path, ref, (job.get("vars") or {}).get("branch"))
+            if hook_err:
+                detail = f"prepare hook failed: {hook_err}"
+                log(f"  ⚠ {ref}: {detail}", ref=ref, kind="error")
+        return detail
+    except BaseException as e:
+        detail = f"worktree preparation crashed: {e}"
+        raise
+    finally:
+        pool.prepared(slot, detail)
+
+
 def execute_one(job, slot, reset, control, pool):
-    """Worker body for one node-job: reset the slot if it is the run's first exclusive job,
+    """Worker body for one node-job: reset the slot if it is the run's first exclusive job —
+    or, when a sibling job of the same run is the one resetting it (concurrent fan_out
+    branches, RE437), wait for that preparation and fail with its error if it failed — then
     run the step, and — unless a revoke landed mid-run — report the outcome and return the
     server's run_state. On revoke of an EXCLUSIVE job, reset the worktree (salvaging via
     stash) since it is bound to this job/run alone; a revoked shared_clean job must NOT reset
@@ -5333,21 +5421,15 @@ def execute_one(job, slot, reset, control, pool):
     completed_outcome = None
     unreported_crash = False   # crash whose own failure-report also failed (§ finally, below)
     try:
-        if reset and not DRY:
-            # First job of a run (or reclaim of a retained worktree): create/re-baseline the
-            # per-card worktree, then warm it via the project's prepare hook. A nonzero hook
-            # FAILS the run fail-fast (RLY-231 decision 2) — report failed and skip the node so
-            # the run's worktree is retained for inspection (the finally releases with `failed`).
-            pool.create_or_rebaseline(slot)
-            ref = (job.get("vars") or {}).get("ref")
-            hook_err = pool.run_prepare_hook(slot_path, ref, (job.get("vars") or {}).get("branch"))
-            if hook_err:
-                detail = f"prepare hook failed: {hook_err}"
-                log(f"  ⚠ {ref}: {detail}", ref=ref, kind="error")
-                completed_outcome = "failed"
-                run_state = report_outcome(job["id"], "failed", detail,
-                                           git_head_sha(slot_path), None)
-                return run_state
+        prep_failure = _prepare_slot(job, slot, slot_path, pool) if reset else pool.wait_prepared(slot)
+        if prep_failure:
+            # A nonzero prepare hook FAILS the run fail-fast (RLY-231 decision 2) — report failed
+            # and skip the node so the run's worktree is retained for inspection (the finally
+            # releases with `failed`). A sibling that waited on it fails the same way (RE437).
+            completed_outcome = "failed"
+            run_state = report_outcome(job["id"], "failed", prep_failure,
+                                       git_head_sha(slot_path), None)
+            return run_state
         outcome, detail, git_sha, session_id, no_changes, resume_at = run_node_job(
             job, slot_path, control, partition=partition)
         if control.cancelled():
@@ -5848,21 +5930,26 @@ def log_usage_transitions(book, paused, logged, now):
         logged.discard(key)
 
 
-# RE358: how long a newly claimed job waits for a superseded job of the same run to exit. A
+# RE358: how long a newly claimed job waits for the superseded job it replaces to exit. A
 # cancelled `claude -p` dies on SIGTERM within a second or two; this bounds a stuck one.
 SUPERSEDED_JOB_JOIN_S = 30
 
 
 def supersede_stale_jobs(entries, job, join_timeout=SUPERSEDED_JOB_JOIN_S):
-    """Stop every in-flight flow job of `job`'s run before `job` is placed; return their ids.
+    """Stop every in-flight flow job `job` replaces — same run, same node — before `job` is
+    placed; return their ids.
 
-    The server keeps at most one active job per run, so a newly claimed job for run R means
-    every other in-flight job of R on this machine is stale: revoked by a Steer now (RE358), or
-    already reported and still in its `finally`, where cancelling is a no-op. A granted claim
-    never carries `revoked`, and `RunnerPool.assign` reuses an exclusive worktree bound to the
-    same run even while it is live — so without this the restarted node would run in the same
-    tree as the `claude -p` it replaced, for up to a heartbeat. Talk jobs are never superseded
-    (a talk turn may run beside its card's node job), and neither is a job with no run.
+    A run has one active job per running branch (`Runs.active_jobs/1`): one outside a fan_out
+    region, one per branch inside it (RE437). Branches are node-disjoint, so a newly claimed job
+    for run R at node N replaces exactly the in-flight job of R at N on this machine: revoked by
+    a Steer now, which re-enters the SAME node (RE358), or already reported and still in its
+    `finally`, where cancelling is a no-op. A job of R at ANOTHER node is a concurrent sibling
+    branch and is never touched — cancelling it killed every branch but the last one claimed.
+    A granted claim never carries `revoked`, and `RunnerPool.assign` reuses an exclusive
+    worktree bound to the same run even while it is live — so without this the restarted node
+    would run in the same tree as the `claude -p` it replaced, for up to a heartbeat. Talk jobs
+    are never superseded (a talk turn may run beside its card's node job), and neither is a job
+    with no run.
 
     `entries` is a snapshot of `in_flight` as `(job_id, entry)` pairs taken under the loop's
     lock; the joins happen here, outside it, bounded by `join_timeout` each."""
@@ -5871,7 +5958,7 @@ def supersede_stale_jobs(entries, job, join_timeout=SUPERSEDED_JOB_JOIN_S):
         return []
     stale = [(job_id, entry) for job_id, entry in entries
              if entry.get("kind") != "talk" and entry.get("run_id") == run_id
-             and job_id != job.get("id")]
+             and entry.get("node_id") == job.get("node_id") and job_id != job.get("id")]
     for job_id, entry in stale:
         log(f"superseding job {job_id} of run {run_id}: job {job.get('id')} replaces it")
         entry["control"].cancel()
@@ -6021,27 +6108,18 @@ def cmd_start(args):
         poller.start()
 
     def worker(job, slot, reset, control):
-        ref = job_ref(job)
-        # A talk job is deliberately NOT registered here (RE268): these maps
-        # are keyed by ref and read by forward() to attribute board-log lines to a node job/run.
-        # A talk turn has neither, so registering it would clobber a concurrently-running node
-        # job's own entries for the same card while the talk turn runs — and popping them in the
-        # finally would erase that node job's attribution entirely for the rest of its run.
-        is_talk = job.get("kind") == "talk"
-        if not is_talk:
-            NODE_JOB_IDS[ref] = job["id"]
-            RUN_IDS[ref] = job.get("run_id")
+        # Board-log attribution is per worker thread (RE437): several node jobs of one run can
+        # work the same card at once. A talk job registers nothing (RE268) — it has neither a
+        # node job nor a run.
         try:
-            if is_talk:
+            if job.get("kind") == "talk":
                 execute_talk(job, slot, reset, control, pool)
             else:
-                execute_one(job, slot, reset, control, pool)
+                with node_job_attribution(job_ref(job), job.get("run_id"), job["id"]):
+                    execute_one(job, slot, reset, control, pool)
         finally:
             with lock:
                 in_flight.pop(job["id"], None)
-            if not is_talk:
-                NODE_JOB_IDS.pop(ref, None)
-                RUN_IDS.pop(ref, None)
             wake.set()
 
     def _shutdown(*_):
@@ -6164,8 +6242,9 @@ def cmd_start(args):
         # quiet stretch reports immediately instead of waiting out an already-open window.
         log(claim_line(job), ref=job_ref(job))
         idle_log.reset()
-        # RE358: stop a stale job of this run (a steered attempt) and wait for it to exit BEFORE
-        # placing this one, so the two never share the run's worktree. Snapshot under the lock,
+        # RE358: stop the stale job this one replaces (a steered attempt of the same run and node)
+        # and wait for it to exit BEFORE placing this one, so the two never share the run's
+        # worktree. A sibling fan_out branch (same run, other node — RE437) is left running. Snapshot under the lock,
         # join outside it; the module global is read here so the bound is current.
         if isinstance(job, dict) and job.get("kind") != "talk":
             with lock:
@@ -6218,7 +6297,8 @@ def cmd_start(args):
         with lock:
             in_flight[job["id"]] = {"thread": t, "control": control,
                                     "harness": (job.get("harness") or {}).get("key"),
-                                    "run_id": job.get("run_id"), "kind": job.get("kind")}
+                                    "run_id": job.get("run_id"), "node_id": job.get("node_id"),
+                                    "kind": job.get("kind")}
         t.start()
         if args.once:
             t.join()

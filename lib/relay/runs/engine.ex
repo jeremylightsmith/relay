@@ -118,6 +118,46 @@ defmodule Relay.Runs.Engine do
     end
   end
 
+  @typedoc "One ended branch of a region entry, as `join/1` reads it (RE437)."
+  @type branch_result :: %{
+          branch: String.t(),
+          position: integer(),
+          outcome: :succeeded | :failed,
+          detail: String.t() | nil
+        }
+
+  @doc """
+  The `fan_in`'s result over a region entry's ended branches (RE437) — the join is always
+  **wait-all**, so this only ever sees every branch of the entry.
+
+    1. The outcome is `:succeeded` iff every row is `:succeeded`; any `:failed` row fails it.
+       There is no partial, no threshold and no skipped.
+    2. The detail labels every branch, in `position` order (the order of the `fan_out`'s edges,
+       whatever order the rows arrive in): one section per row, separated by a blank line.
+    3. A section is the line `## <branch>: <outcome>`, a newline, then the row's detail — or
+       `(no result)` when the detail is nil or blank.
+
+  This is the ONE copy of the label format; a reader that wants a branch's section matches
+  `## <branch>: ` rather than re-deriving it.
+  """
+  @spec join([branch_result()]) :: {:succeeded | :failed, String.t()}
+  def join(rows) do
+    outcome = if Enum.all?(rows, &(&1.outcome == :succeeded)), do: :succeeded, else: :failed
+
+    detail =
+      rows
+      |> Enum.sort_by(& &1.position)
+      |> Enum.map_join("\n\n", &"## #{&1.branch}: #{&1.outcome}\n#{branch_detail(&1.detail)}")
+
+    {outcome, detail}
+  end
+
+  defp branch_detail(detail) when is_binary(detail) do
+    if String.trim(detail) == "", do: "(no result)", else: detail
+  end
+
+  defp branch_detail(_nil), do: "(no result)"
+
   # RE267: a usage limit with a known reset clears by itself — requeue, spending nothing.
   # RE308: anything else blocked never ran — retrying cannot fix an expired login.
   defp blocked(history, current) do

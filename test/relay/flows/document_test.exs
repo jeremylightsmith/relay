@@ -488,4 +488,62 @@ defmodule Relay.Flows.DocumentTest do
       assert decoded_node(%{"key" => "a", "type" => "agent", "model" => "gpt-4"}).llm == "gpt-4"
     end
   end
+
+  # Scenario 22 (RE437): the never-run `parallel` type is a legacy alias of `fan_out`.
+  describe "legacy parallel → fan_out (RE437)" do
+    defp string_keyed(map), do: Map.new(map, fn {k, v} -> {Atom.to_string(k), json_scalar(v)} end)
+    defp json_scalar(v) when is_atom(v) and not is_nil(v), do: Atom.to_string(v)
+    defp json_scalar(v), do: v
+
+    defp panel_doc(nodes) do
+      %{
+        "key" => "panel",
+        "isolation" => "shared_clean",
+        "trigger" => %{"stage" => "Deploy"},
+        "nodes" => Enum.map(nodes, &string_keyed/1),
+        "edges" => Enum.map(Relay.FanOutFixtures.panel_edges(), &string_keyed/1)
+      }
+    end
+
+    defp legacy_panel_doc do
+      Relay.FanOutFixtures.panel_nodes()
+      |> Relay.FanOutFixtures.put_node("fo", %{type: :parallel})
+      |> panel_doc()
+    end
+
+    test "decode/1 reads a parallel node as fan_out" do
+      assert {:ok, %{nodes: nodes}} = Document.decode(legacy_panel_doc())
+      assert %{type: :fan_out, max_parallel: nil} = Enum.find(nodes, &(&1.key == "fo"))
+    end
+
+    test "a saved legacy panel encodes fan_out, with max_parallel only when set" do
+      board = library_board()
+
+      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "panel", legacy_panel_doc())
+      nodes = encoded(board, "panel")["nodes"]
+
+      assert Enum.find(nodes, &(&1["key"] == "fo")) == %{"key" => "fo", "type" => "fan_out"}
+      refute Enum.any?(nodes, &Map.has_key?(&1, "max_parallel"))
+
+      capped = Relay.FanOutFixtures.put_node(Relay.FanOutFixtures.panel_nodes(), "fo", %{max_parallel: 2})
+      assert {:ok, :updated, _flow} = Flows.upsert_from_document(board, "panel", panel_doc(capped))
+
+      assert %{"type" => "fan_out", "max_parallel" => 2} =
+               Enum.find(encoded(board, "panel")["nodes"], &(&1["key"] == "fo"))
+    end
+
+    test "decode ∘ encode of the panel is a fixed point" do
+      board = library_board()
+
+      assert {:ok, :created, _flow} =
+               Flows.upsert_from_document(board, "panel", panel_doc(Relay.FanOutFixtures.panel_nodes()))
+
+      once = encoded(board, "panel")
+      assert {:ok, _tag, _flow} = Flows.upsert_from_document(board, "panel", once)
+      twice = encoded(board, "panel")
+
+      assert twice |> Document.decode!() |> Map.delete(:version) == once |> Document.decode!() |> Map.delete(:version)
+      assert Map.delete(twice, "version") == Map.delete(once, "version")
+    end
+  end
 end

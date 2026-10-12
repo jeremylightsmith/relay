@@ -245,6 +245,28 @@ defmodule RelayWeb.Api.FlowControllerTest do
       assert Flows.get_flow!(board, "spec").version == 1
     end
 
+    # Scenario 24 (RE437): flow-push refuses an invalid region with the editor's exact message.
+    test "a fan_out left with one outgoing edge is a 422 invalid naming it, and writes nothing",
+         %{conn: conn, board: board} do
+      deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
+      {:ok, _flow} = Flows.create_flow(board, Relay.FanOutFixtures.panel_attrs(%{stage_id: deploy.id}))
+      doc = pull(conn, "panel")
+      before_rows = version_rows(board, "panel")
+
+      one_edge =
+        update_in(doc, ["edges"], fn edges ->
+          Enum.reject(edges, &(&1["from"] == "fo" and &1["to"] in ["b1", "c"]))
+        end)
+
+      body = conn |> push_doc("panel", one_edge) |> json_response(422)
+
+      assert body["error"]["code"] == "invalid"
+      assert body["error"]["message"] =~ ~s(fan_out "fo" needs at least two outgoing edges)
+      assert Flows.get_flow!(board, "panel").version == 1
+      assert pull(conn, "panel")["edges"] == doc["edges"]
+      assert version_rows(board, "panel") == before_rows
+    end
+
     test "an edge-level graph error is a 422 invalid carrying the edge's message", %{conn: conn} do
       doc = pull(conn, "spec")
       looped = update_in(doc, ["edges"], fn [edge | rest] -> [Map.put(edge, "max_loops", 0) | rest] end)

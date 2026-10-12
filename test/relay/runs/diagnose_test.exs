@@ -463,4 +463,24 @@ defmodule Relay.Runs.DiagnoseTest do
       assert %{verdict: :dispatchable} = Runs.diagnose(board, card)
     end
   end
+
+  test "RE437: a run with several active branch jobs reports the first and counts them all",
+       %{board: board, works: works} do
+    card = insert(:card, stage: works, status: :working)
+    run = insert(:run, card: card, status: :running, current_node: "fo")
+
+    [first | _] =
+      jobs =
+      for key <- ["a", "b1", "c"] do
+        exec = insert(:node_execution, run: run, node_key: key, outcome: nil, finished_at: nil)
+        insert(:node_job, node_execution: exec, node_key: key, state: :queued, runner_name: nil, claimed_at: nil)
+      end
+
+    assert first.id == Enum.min_by(jobs, & &1.id).id
+
+    assert %{evidence: evidence} = Runs.diagnose(board, card)
+    assert evidence.active_job_count == 3
+    assert evidence.job.id == first.id
+    assert evidence.job.node_key == "a"
+  end
 end

@@ -784,4 +784,47 @@ defmodule RelayWeb.FlowEditorLiveTest do
       assert has_element?(view, "#inspector-effort-hint", "Passed to harnesses that take one; ignored by the rest.")
     end
   end
+
+  describe "fan_out / fan_in regions (RE437)" do
+    defp error_texts(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#flow-editor-errors span")
+      |> Enum.map(&LazyHTML.text/1)
+    end
+
+    defp working_nodes(view), do: :sys.get_state(view.pid).socket.assigns.working.nodes
+
+    # Scenario 25: the editor shows flow-push's message (scenario 3), byte for byte.
+    test "giving a fan-out edge an outcome blocks Save with the shared validation message",
+         %{conn: conn, board: board} do
+      {:ok, _flow} = Flows.create_flow(board, Relay.FanOutFixtures.panel_attrs(%{stage_id: deploy_id(board)}))
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/panel")
+      refute has_element?(view, "#flow-editor-errors")
+
+      index = Enum.find_index(Relay.FanOutFixtures.panel_edges(), &(&1 == %{from: "fo", to: "a"}))
+      render_hook(view, "edit_edge", %{"index" => "#{index}", "field" => "on", "value" => "succeeded"})
+
+      assert ~s(edge "fo" → "a" leaves a fan_out, which fires every edge on entry — remove "on") in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+    end
+
+    # Scenario 26
+    test "the palette places fan_out and fan_in nodes, and offers no parallel node",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+      assert has_element?(view, "#palette-fan_out", "Fan out")
+      assert has_element?(view, "#palette-fan_in", "Fan in")
+      refute has_element?(view, "#palette-parallel")
+
+      view |> element("#palette-fan_out") |> render_click()
+      view |> element("#palette-fan_in") |> render_click()
+
+      added = Enum.filter(working_nodes(view), &(&1.key in ["fan_out-1", "fan_in-1"]))
+      assert [%{key: "fan_out-1", type: :fan_out}, %{key: "fan_in-1", type: :fan_in}] = added
+      assert Enum.all?(added, &(Map.fetch(&1, :max_parallel) == {:ok, nil}))
+    end
+  end
 end

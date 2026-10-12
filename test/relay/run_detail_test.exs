@@ -52,6 +52,129 @@ defmodule Relay.RunDetailTest do
     }
   end
 
+  # RE437 task 5's region flow: prep → fo ⇉ {a, b1 ⇄ b2} → fi → after → done.
+  defp region_flow do
+    %Flow{
+      nodes: [
+        %{key: "prep", type: :shell},
+        %{key: "fo", type: :fan_out},
+        %{key: "a", type: :shell},
+        %{key: "b1", type: :agent},
+        %{key: "b2", type: :agent},
+        %{key: "fi", type: :fan_in},
+        %{key: "after", type: :shell}
+      ],
+      edges: [
+        %{from: "start", on: nil, to: "prep", max_loops: nil},
+        %{from: "prep", on: :succeeded, to: "fo", max_loops: nil},
+        %{from: "fo", on: nil, to: "a", max_loops: nil},
+        %{from: "fo", on: nil, to: "b1", max_loops: nil},
+        %{from: "a", on: :succeeded, to: "fi", max_loops: nil},
+        %{from: "b1", on: :failed, to: "b2", max_loops: nil},
+        %{from: "b2", on: :succeeded, to: "b1", max_loops: nil},
+        %{from: "b1", on: :succeeded, to: "fi", max_loops: nil},
+        %{from: "fi", on: :succeeded, to: "after", max_loops: nil},
+        %{from: "after", on: :succeeded, to: "done", max_loops: nil}
+      ]
+    }
+  end
+
+  # A run with an open region: `fo` fanned out to `a` (branch 1) and `b1` (branch 2), both in flight.
+  defp region_run(attrs \\ %{}) do
+    run(
+      Map.merge(
+        %{
+          status: :running,
+          flow_key: "region",
+          current_node: "fo",
+          run_branches: [%{id: 1, state: :running}, %{id: 2, state: :running}],
+          node_executions: [
+            ne("prep", 1, :succeeded),
+            ne("fo", 1, :succeeded),
+            ne("a", 1, nil, %{run_branch_id: 1, duration_s: nil}),
+            ne("b1", 1, nil, %{run_branch_id: 2, duration_s: nil})
+          ]
+        },
+        attrs
+      )
+    )
+  end
+
+  defp node_rows(detail), do: Enum.filter(detail.timeline, &(&1.kind == :node))
+
+  defp node_row(detail, key), do: Enum.find(node_rows(detail), &(&1.node_key == key))
+
+  describe "run_detail/2 with an open fan-out region (RE437)" do
+    test "every in-flight branch node is an active row, in execution order" do
+      detail = Runs.run_detail(region_run(), region_flow())
+
+      assert Enum.map(node_rows(detail), & &1.node_key) == ["prep", "fo", "a", "b1"]
+      assert node_row(detail, "a").state == :active
+      assert node_row(detail, "b1").state == :active
+    end
+
+    test "no synthetic active row is added for the fan_out the run's current_node names" do
+      detail = Runs.run_detail(region_run(), region_flow())
+
+      assert length(node_rows(detail)) == 4
+      assert Enum.count(node_rows(detail), &(&1.node_key == "fo")) == 1
+    end
+
+    test "no synthetic active row for a control-node current_node even when every execution has settled" do
+      for {current, nes} <- [
+            {"fo", [ne("prep", 1, :succeeded), ne("fo", 1, :succeeded)]},
+            {"fi", [ne("prep", 1, :succeeded), ne("fo", 1, :succeeded), ne("a", 1, :succeeded), ne("b1", 1, :succeeded)]}
+          ] do
+        detail = Runs.run_detail(region_run(%{current_node: current, node_executions: nes}), region_flow())
+
+        assert Enum.map(node_rows(detail), & &1.node_key) == Enum.map(nes, & &1.node_key)
+      end
+    end
+
+    test "control-node rows carry their type tag" do
+      detail = Runs.run_detail(region_run(), region_flow())
+
+      assert node_row(detail, "fo").type == :fan_out
+    end
+
+    test "a branch waiting on a human is paused while its running sibling stays active on a parked run" do
+      r =
+        region_run(%{
+          status: :parked,
+          run_branches: [%{id: 1, state: :parked}, %{id: 2, state: :running}],
+          node_executions: [
+            ne("prep", 1, :succeeded),
+            ne("fo", 1, :succeeded),
+            ne("a", 1, :needs_input, %{run_branch_id: 1}),
+            ne("b1", 1, nil, %{run_branch_id: 2, duration_s: nil})
+          ]
+        })
+
+      detail = Runs.run_detail(r, region_flow())
+
+      assert node_row(detail, "a").state == :paused
+      assert node_row(detail, "b1").state == :active
+    end
+
+    test "a parked run with no run_branches loaded keeps today's paused rows" do
+      for branches <- [:absent, nil, %Ecto.Association.NotLoaded{}] do
+        base = region_run(%{status: :parked})
+        r = if branches == :absent, do: Map.delete(base, :run_branches), else: %{base | run_branches: branches}
+
+        detail = Runs.run_detail(r, region_flow())
+
+        assert node_row(detail, "a").state == :paused
+        assert node_row(detail, "b1").state == :paused
+      end
+    end
+
+    test "the pending tail lists the fan_in and what follows, never the fan_out or branch nodes" do
+      detail = Runs.run_detail(region_run(), region_flow())
+
+      assert %{kind: :pending, nodes: ["fi", "after"]} in detail.timeline
+    end
+  end
+
   describe "breaker_tripped?/1" do
     test "true only on the engine's circuit_breaker token" do
       assert Runs.breaker_tripped?(run(%{status: :failed, failure_detail: "circuit_breaker: repeated 3 times"}))

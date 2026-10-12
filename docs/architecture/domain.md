@@ -239,7 +239,8 @@ sharing behavior.
   boundary owns five things.
   **The engine** (`Relay.Runs.Engine` / `RunServer`): outcome routing, per-node `max_retries`,
   per-edge `max_loops`, the visit cap, the failure-signature breaker (whole-run), needs-input
-  parking and restart resume — budgets are per-`foreach`-iteration.
+  parking and restart resume — budgets are per-`foreach`-iteration and per fan-out branch
+  ([runner.md](runner.md#fan-out-regions-re437)).
   **The scheduler brain**: `Relay.Runs.Scheduler.plan/1`, a pure `Snapshot → Plan` behind a
   per-board `Scheduler.Server`; `capacity_diagnosis/1` turns an empty/silent roster into a verdict.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
@@ -766,6 +767,9 @@ erDiagram
     Card ||--o{ Run : "flow traversals"
     Flow |o--o{ Run : "live definition (nilified on delete)"
     Run ||--o{ NodeExecution : "per-attempt history"
+    Run ||--o{ RunBranch : "fan-out branches (RE437)"
+    NodeExecution ||--o{ RunBranch : "fan_out entry opens"
+    RunBranch |o--o{ NodeExecution : "run_branch_id (nilified on delete)"
     NodeExecution ||--o| NodeJob : "dispatch unit"
     Board ||--o{ Runner : "registered runners"
     Board ||--o{ Membership : has
@@ -795,6 +799,17 @@ erDiagram
 A `Harness` is an agent CLI (command template + closed `models` list) and an `Agent` is a named
 harness + model; flow nodes name an agent in their `llm` and `boards.default_agent_id` is the
 fallback (RE433, `Relay.Agents`).
+
+A `RunBranch` (`run_branches`, owned by `Relay.Runs`, RE437) is one branch of one fan-out
+**region entry**: it belongs to its `Run` (cascade) and to the `fan_out` `NodeExecution` that
+opened the region (`fan_out_execution_id`, cascade), unique on that execution plus `branch` (the
+fan-out edge's `to`), so a region re-entered by a foreach lap or a loop-back gets fresh rows. It
+carries `position`, `state` (`Schemas.RunBranch.states/0`), the `current_node` in flight, and the
+`outcome` / `detail` the `fan_in` joins. A `NodeExecution` run inside a branch points back with
+the nullable `node_executions.run_branch_id` (nilified when the row is deleted); control-node
+executions and every execution outside a region leave it nil.
+`Relay.Runs.list_runs_for_card/1` preloads the rows for the run view
+([runtime.md](runtime.md#fan-out-regions-re437)).
 
 A `Stage` may point at a `parent` (sub-lanes like `Spec:Review`) and a `reject_to_stage`
 (where a rejection sends the card). `Scope` (not shown) is the per-request authorization

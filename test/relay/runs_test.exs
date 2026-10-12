@@ -268,7 +268,7 @@ defmodule Relay.RunsTest do
       assert Relay.Cards.active_owner_type(card) == :ai
 
       # The queued job carries the runner contract.
-      assert %NodeJob{state: :queued} = found = Runs.active_job(run)
+      assert [%NodeJob{state: :queued} = found] = Runs.active_jobs(run)
       assert found.id == job.id
       assert found.payload["run"] == "/brainstorm {ref}"
       assert found.payload["node_type"] == "agent"
@@ -559,7 +559,7 @@ defmodule Relay.RunsTest do
                Runs.report_outcome(job, %{outcome: :needs_input, detail: "Which auth model?", session_id: "s_test1"})
 
       assert_receive {:run_parked, %Run{}}
-      assert Runs.active_job(Runs.get_run!(run.id)) == nil
+      assert Runs.active_jobs(Runs.get_run!(run.id)) == []
       assert [%NodeExecution{outcome: :needs_input, session_id: "s_test1"}] = Runs.list_executions(run)
 
       card = Relay.Cards.get_card(board, card.id)
@@ -966,7 +966,7 @@ defmodule Relay.RunsTest do
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
       {:ok, run} = Runs.start_run(card, flow)
-      queued = Runs.active_job(run)
+      [queued] = Runs.active_jobs(run)
 
       {:ok, runner} =
         Runs.upsert_runner(board, %{"name" => "e1", "capacity" => %{"shared_clean" => 1, "exclusive" => 1}})
@@ -995,12 +995,12 @@ defmodule Relay.RunsTest do
          %{board: board_a, user: user} do
       flow_a = enabled_spec_flow(board_a)
       {:ok, run_a} = Runs.start_run(card_in(board_a, "Next up"), flow_a)
-      queued_a = Runs.active_job(run_a)
+      [queued_a] = Runs.active_jobs(run_a)
 
       {:ok, board_b} = Relay.Boards.create_board(user, %{name: "Other Board", slug: unique_slug("other-board")})
       flow_b = enabled_spec_flow(board_b)
       {:ok, run_b} = Runs.start_run(card_in(board_b, "Next up"), flow_b)
-      queued_b = Runs.active_job(run_b)
+      [queued_b] = Runs.active_jobs(run_b)
 
       # board_a's job was created first (lower id) and both runners share a
       # name, so an unscoped claim would find board_a's job first.
@@ -1012,7 +1012,7 @@ defmodule Relay.RunsTest do
       refute claimed.id == queued_a.id
 
       # board_a's job is untouched.
-      still_queued = Runs.active_job(run_a)
+      [still_queued] = Runs.active_jobs(run_a)
       assert still_queued.id == queued_a.id
       assert still_queued.state == :queued
     end
@@ -1026,7 +1026,7 @@ defmodule Relay.RunsTest do
       # pinned to this runner must claim regardless of advertised capacity.
       flow = exclusive_flow(board, "excl-pin")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
-      job = Runs.active_job(run)
+      [job] = Runs.active_jobs(run)
 
       Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
@@ -1040,7 +1040,7 @@ defmodule Relay.RunsTest do
     test "a job pinned to another runner is never claimed, even with spare capacity", %{board: board} do
       flow = exclusive_flow(board, "excl-pin2")
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
-      job = Runs.active_job(run)
+      [job] = Runs.active_jobs(run)
 
       Repo.update_all(from(j in NodeJob, where: j.id == ^job.id), set: [runner_name: "holder"])
 
@@ -1141,7 +1141,7 @@ defmodule Relay.RunsTest do
     test "returns held jobs, 404s unknown ids, conflicts on unheld state", %{board: board} do
       flow = enabled_spec_flow(board)
       {:ok, run} = Runs.start_run(card_in(board, "Next up"), flow)
-      job = Runs.active_job(run)
+      [job] = Runs.active_jobs(run)
 
       # queued (not held) → conflict
       assert {:error, :conflict} = Runs.get_claimed_job(board, job.id)
@@ -1339,7 +1339,7 @@ defmodule Relay.RunsTest do
 
       run = Repo.one!(from r in Run, where: r.card_id == ^card.id)
       alpha = Repo.one!(from st in SubTask, where: st.card_id == ^card.id and st.title == "Alpha")
-      vars = Runs.active_job(run).payload["vars"]
+      vars = hd(Runs.active_jobs(run)).payload["vars"]
 
       assert vars["task_id"] == alpha.id
       assert vars["task"] == "Alpha"
@@ -1470,7 +1470,7 @@ defmodule Relay.RunsTest do
       assert execution.node_key == "head"
       assert execution.sub_task_id == alpha.id
 
-      job = Runs.active_job(run)
+      [job] = Runs.active_jobs(run)
       assert job.payload["vars"]["task"] == "Alpha"
     end
 
@@ -1480,7 +1480,7 @@ defmodule Relay.RunsTest do
       [alpha, beta] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)
 
       # Iteration 1 succeeds at the tail (here head IS the tail — it carries the guards).
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+      {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :succeeded, detail: "done alpha"})
 
       assert Repo.get!(SubTask, alpha.id).done
       refute Repo.get!(SubTask, beta.id).done
@@ -1489,10 +1489,10 @@ defmodule Relay.RunsTest do
       second = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
       assert second.node_key == "head"
       assert second.sub_task_id == beta.id
-      assert Runs.active_job(run).payload["vars"]["task"] == "Beta"
+      assert hd(Runs.active_jobs(run)).payload["vars"]["task"] == "Beta"
 
       # Iteration 2 exhausts the list: the exhausted guard leaves the loop, unbound.
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done beta"})
+      {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :succeeded, detail: "done beta"})
       assert Repo.get!(SubTask, beta.id).done
 
       third = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
@@ -1506,7 +1506,7 @@ defmodule Relay.RunsTest do
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
       Relay.Events.subscribe(card.board_id)
 
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+      {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :succeeded, detail: "done alpha"})
 
       assert_receive {:card_upserted, %Card{id: id} = broadcast_card}
       assert id == card.id
@@ -1519,7 +1519,7 @@ defmodule Relay.RunsTest do
       {:ok, run} = Runs.start_run(card, flow)
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
 
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :failed, detail: "reviewer refused"})
+      {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :failed, detail: "reviewer refused"})
 
       refute Repo.get!(SubTask, alpha.id).done
     end
@@ -1535,14 +1535,14 @@ defmodule Relay.RunsTest do
 
       # Iteration 1 (Alpha) succeeds at the tail, routing back into the loop head bound to Beta —
       # the "head" node now has TWO executions, under two different sub_tasks.
-      {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: :succeeded, detail: "done alpha"})
+      {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :succeeded, detail: "done alpha"})
       assert Repo.get!(SubTask, alpha.id).done
       assert_receive {:node_started, _run, %NodeExecution{node_key: "head", sub_task_id: beta_id}}
       assert beta_id == beta.id
 
       # Iteration 2 (Beta) needs input: parks the run mid-loop, still bound to Beta.
       assert {:ok, %Run{status: :parked}} =
-               Runs.report_outcome(Runs.active_job(run), %{
+               Runs.report_outcome(hd(Runs.active_jobs(run)), %{
                  outcome: :needs_input,
                  detail: "which?",
                  session_id: "s1"
@@ -1558,7 +1558,7 @@ defmodule Relay.RunsTest do
 
       assert_receive {:node_started, %Run{}, %NodeExecution{node_key: "head"} = execution}
       assert execution.sub_task_id == beta.id
-      assert Runs.active_job(run).payload["vars"]["task"] == "Beta"
+      assert hd(Runs.active_jobs(run)).payload["vars"]["task"] == "Beta"
     end
 
     test "a failed iteration that retries (the :retry inherit path) stays bound to the same sub_task" do
@@ -1567,14 +1567,14 @@ defmodule Relay.RunsTest do
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
 
       assert {:ok, %Run{status: :running}} =
-               Runs.report_outcome(Runs.active_job(run), %{outcome: :failed, detail: "boom"})
+               Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: :failed, detail: "boom"})
 
       retry_execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id and is_nil(e.outcome))
       assert retry_execution.node_key == "head"
       assert retry_execution.visit == 1
       assert retry_execution.attempt == 2
       assert retry_execution.sub_task_id == alpha.id
-      assert Runs.active_job(run).payload["vars"]["findings"] == "boom"
+      assert hd(Runs.active_jobs(run)).payload["vars"]["findings"] == "boom"
     end
 
     test "an unparseable plan never routes past the loop — no node ever runs (RLY-165)" do

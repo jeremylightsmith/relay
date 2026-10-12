@@ -98,10 +98,17 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert html =~ "clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%)"
     end
 
-    test "parallel node: tinted teal fill" do
-      html = one_node(:parallel)
+    # Scenario 27 (RE437)
+    test "fan_out node: FAN OUT tag on the accent fill" do
+      html = one_node(:fan_out)
       assert html =~ "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))"
-      assert html =~ "PARALLEL"
+      assert html =~ "FAN OUT"
+    end
+
+    test "fan_in node: FAN IN tag on the accent fill" do
+      html = one_node(:fan_in)
+      assert html =~ "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))"
+      assert html =~ "FAN IN"
     end
   end
 

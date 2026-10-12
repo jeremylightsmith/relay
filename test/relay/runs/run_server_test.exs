@@ -74,7 +74,7 @@ defmodule Relay.Runs.RunServerTest do
   end
 
   defp report(run, outcome, detail) do
-    {:ok, _run} = Runs.report_outcome(Runs.active_job(run), %{outcome: outcome, detail: detail})
+    {:ok, _run} = Runs.report_outcome(hd(Runs.active_jobs(run)), %{outcome: outcome, detail: detail})
     :ok
   end
 
@@ -119,7 +119,7 @@ defmodule Relay.Runs.RunServerTest do
       assert next.sub_task_id == beta.id
 
       # ...and the findings actually reach the re-run.
-      assert Runs.active_job(run).payload["vars"]["findings"] == "Beta's success branch has no test"
+      assert hd(Runs.active_jobs(run)).payload["vars"]["findings"] == "Beta's success branch has no test"
     end
 
     test "a failed spec_review re-enters implement bound to the SAME task" do
@@ -136,7 +136,7 @@ defmodule Relay.Runs.RunServerTest do
       next = pending(run)
       assert next.node_key == "implement"
       assert next.sub_task_id == beta.id
-      assert Runs.active_job(run).payload["vars"]["findings"] == "Beta is missing the migration"
+      assert hd(Runs.active_jobs(run)).payload["vars"]["findings"] == "Beta is missing the migration"
     end
 
     @tag :capture_log

@@ -245,7 +245,9 @@ defmodule Relay.DataCase do
 
   Ecto emits repo telemetry in the process that issued the query, so filtering on `pid` keeps
   this safe under `async: true` — pass `self()` to count the test's own queries, or a server's
-  pid to count what a `GenServer.call` made it do. The handler is detached afterwards.
+  pid to count what a `GenServer.call` made it do. A query from a task `pid` spawned (`$callers`)
+  counts too: Ecto runs a query's several preloads in parallel tasks. The handler is detached
+  afterwards.
   """
   def count_repo_queries(pid, fun) when is_pid(pid) and is_function(fun, 0) do
     test = self()
@@ -256,7 +258,7 @@ defmodule Relay.DataCase do
       handler_id,
       [:relay, :repo, :query],
       fn _event, _measurements, _meta, _config ->
-        if self() == pid, do: send(test, {:repo_query, tag})
+        if self() == pid or pid in (Process.get(:"$callers") || []), do: send(test, {:repo_query, tag})
       end,
       nil
     )

@@ -30,6 +30,60 @@ defmodule Relay.RunsReadSideTest do
 
       assert Runs.happy_path(flow) == ["a", "b"]
     end
+
+    test "jumps a fan-out region: the fan_out, then its fan_in, never the branch nodes (RE437)" do
+      board = insert(:board)
+      stage = insert(:stage, board: board, type: :work, category: :in_progress)
+      flow = region_flow(board, stage)
+
+      assert Runs.happy_path(flow) == ["prep", "fo", "fi", "after"]
+    end
+
+    test "a running run sitting on the fan_out indexes it as node 2 of 4 on the card face (RE437)" do
+      board = insert(:board)
+      stage = insert(:stage, board: board, type: :work, category: :in_progress)
+      region_flow(board, stage)
+      card = insert(:card, board: board, stage: stage)
+      insert(:run, card: card, flow_key: "region", status: :running, current_node: "fo")
+
+      summary = Runs.run_summary_for_card(card)
+
+      assert summary.node_index == 2
+      assert summary.node_count == 4
+    end
+  end
+
+  # RE437 task 5's scenario-1 flow: prep → fo ⇉ {a, b1 ⇄ b2} → fi → after → done.
+  defp region_flow(board, stage) do
+    {:ok, flow} =
+      Flows.create_flow(board, %{
+        key: "region",
+        isolation: :shared_clean,
+        stage_id: stage.id,
+        nodes: [
+          %{key: "prep", type: :shell, run: "true"},
+          %{key: "fo", type: :fan_out},
+          %{key: "a", type: :shell, run: "true"},
+          %{key: "b1", type: :agent, run: "b1"},
+          %{key: "b2", type: :agent, run: "b2"},
+          %{key: "fi", type: :fan_in},
+          %{key: "after", type: :shell, run: "true"}
+        ],
+        edges: [
+          %{from: "start", to: "prep"},
+          %{from: "prep", to: "fo", on: :succeeded},
+          %{from: "fo", to: "a"},
+          %{from: "fo", to: "b1"},
+          %{from: "a", to: "fi", on: :succeeded},
+          %{from: "b1", to: "b2", on: :failed},
+          %{from: "b2", to: "b1", on: :succeeded},
+          %{from: "b1", to: "fi", on: :succeeded},
+          %{from: "fi", to: "after", on: :succeeded},
+          %{from: "after", to: "done", on: :succeeded}
+        ]
+      })
+
+    flow
   end
 
   describe "list_runs_for_card/1 and latest_run/1" do
@@ -45,6 +99,28 @@ defmodule Relay.RunsReadSideTest do
       assert got_old.id == old.id
       assert Enum.map(got_new.node_executions, & &1.id) == [first.id, second.id]
       assert Runs.latest_run(card).id == new.id
+    end
+
+    test "preloads each run's branches so a parked run's running branch renders active (RE437)" do
+      card = insert(:card)
+      run = insert(:run, card: card, status: :parked, current_node: "fo")
+      fan_out = insert(:node_execution, run: run, node: "fo")
+
+      branch =
+        Relay.Repo.insert!(%Schemas.RunBranch{
+          run_id: run.id,
+          fan_out_execution_id: fan_out.id,
+          branch: "b1",
+          position: 0,
+          state: :running,
+          current_node: "b1"
+        })
+
+      insert(:node_execution, run: run, node: "b1", outcome: nil, duration_s: nil, run_branch_id: branch.id)
+
+      assert [got] = Runs.list_runs_for_card(card)
+      assert Enum.map(got.run_branches, & &1.id) == [branch.id]
+      assert got |> Runs.run_detail(nil) |> Map.fetch!(:timeline) |> List.last() |> Map.fetch!(:state) == :active
     end
 
     test "a run whose flow works in a stage exposes that stage's name on its detail" do
@@ -72,7 +148,8 @@ defmodule Relay.RunsReadSideTest do
       assert detail.flow_key == "code"
     end
 
-    test "lists runs with flow and stage in a constant 2 queries regardless of run count" do
+    # runs (flow + stage joined), node_executions, run_branches (RE437) — never one per run.
+    test "lists runs with flow and stage in a constant 3 queries regardless of run count" do
       board = insert(:board)
       card_a = insert(:card, stage: insert(:stage, board: board))
       card_b = insert(:card, stage: insert(:stage, board: board))
@@ -93,8 +170,8 @@ defmodule Relay.RunsReadSideTest do
 
       assert length(runs_a) == 1
       assert length(runs_b) == 3
-      assert count_a == 2
-      assert count_b == 2
+      assert count_a == 3
+      assert count_b == 3
       assert runs_b |> Enum.map(&Runs.run_detail(&1, nil).stage_name) |> Enum.sort() == ["Code", "Deploy", "Spec"]
     end
 

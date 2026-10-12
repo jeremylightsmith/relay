@@ -17,8 +17,11 @@ defmodule RelayWeb.FlowEditorComponents do
     gate:
       {"GATE", "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
        "color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))"},
-    parallel:
-      {"PARALLEL", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+    fan_out:
+      {"FAN OUT", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+       "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"},
+    fan_in:
+      {"FAN IN", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
        "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"},
     human:
       {"HUMAN", "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
@@ -29,7 +32,8 @@ defmodule RelayWeb.FlowEditorComponents do
     {:agent, "Agent", "var(--color-secondary)"},
     {:shell, "Shell", "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))"},
     {:gate, "Gate", "var(--color-warning)"},
-    {:parallel, "Parallel", "var(--color-accent)"},
+    {:fan_out, "Fan out", "var(--color-accent)"},
+    {:fan_in, "Fan in", "var(--color-accent)"},
     {:human, "Human", "var(--color-primary)"}
   ]
 

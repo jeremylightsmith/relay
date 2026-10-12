@@ -55,11 +55,20 @@ defmodule RelayWeb.FlowGraphComponents do
       tag_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
       tag_bg: nil
     },
-    parallel: %{
+    # RE437: the two control nodes share the accent fill; the tag tells them apart.
+    fan_out: %{
       accent: "var(--color-accent)",
       border: "color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100))",
       fill: "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))",
-      tag: "PARALLEL",
+      tag: "FAN OUT",
+      tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+      tag_bg: "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
+    },
+    fan_in: %{
+      accent: "var(--color-accent)",
+      border: "color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100))",
+      fill: "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))",
+      tag: "FAN IN",
       tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
       tag_bg: "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
     },

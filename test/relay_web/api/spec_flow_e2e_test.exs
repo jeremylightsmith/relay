@@ -130,7 +130,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     assert [%{"prompt" => "Which storage backend?", "options" => ["Postgres", "SQLite"]}] =
              Cards.latest_questions(blocked)
 
-    refute Runs.active_job(Runs.get_run!(run.id))
+    assert Runs.active_jobs(Runs.get_run!(run.id)) == []
 
     # 8-9. The human answers; the Listener resumes the SAME node with resume_session set -
     # the single assertion most likely to catch a break between W5's listener and W9's payload.
@@ -141,7 +141,7 @@ defmodule RelayWeb.Api.SpecFlowE2ETest do
     assert_receive {:node_started, resumed_run, resumed_exec}, 2_000
     assert resumed_run.id == run.id
     assert resumed_exec.node_key == "brainstorm"
-    resume_job = Runs.active_job(Runs.get_run!(run.id))
+    [resume_job] = Runs.active_jobs(Runs.get_run!(run.id))
     assert resume_job.payload["resume_session"] == "sess_e2e_1"
 
     # 10-11. The runner claims the resume job and succeeds -> run :done, card at Spec:Review.

@@ -2767,6 +2767,84 @@ class RunnerPoolTest(unittest.TestCase):
         p = self.pool()
         self.assertEqual(p.busy_summary(), "shared_clean 0/2 busy; exclusive: idle")
 
+    # -- concurrent node jobs of one run (RE437) --------------------------------
+    def place_three(self, p):
+        """Three node jobs of ONE run (a fan_out's branches) placed on the card's tree."""
+        return [p.assign(self.excl("r1", "RLY-1")) for _ in range(3)]
+
+    def count_teardowns(self, p):
+        calls = []
+        p._teardown = lambda slot, retain: calls.append((slot, retain))
+        return calls
+
+    def test_concurrent_jobs_of_one_run_share_one_worktree_and_count_live(self):
+        p = self.pool()
+        self.assertEqual(self.place_three(p), [("exec-RLY-1", True), ("exec-RLY-1", False),
+                                               ("exec-RLY-1", False)])
+        self.assertEqual(p.wts["exec-RLY-1"]["live"], 3)
+        self.assertEqual(p.capacity()["exclusive"], 1)       # one worktree, not three
+
+    def test_a_running_release_decrements_and_keeps_the_tree_running(self):
+        p = self.pool()
+        (slot, _), _, _ = self.place_three(p)
+        job = self.excl("r1", "RLY-1")
+        p.release(job, slot, "running")
+        p.release(job, slot, "running")
+        self.assertEqual(p.wts[slot]["live"], 1)
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "running"}])
+        p.release_held("RLY-1", "done")                      # a live job is still in it
+        self.assertIn(slot, p.wts)
+        self.assertEqual(p.wts[slot]["state"], "active")
+
+    def test_done_tears_the_tree_down_only_when_the_last_job_releases(self):
+        p = self.pool()
+        (slot, _), _, _ = self.place_three(p)
+        calls = self.count_teardowns(p)
+        job = self.excl("r1", "RLY-1")
+        p.release(job, slot, "done")
+        self.assertEqual((calls, p.wts[slot]["live"]), ([], 2))
+        p.release(job, slot, "done")
+        self.assertEqual((calls, p.wts[slot]["live"]), ([], 1))
+        p.release(job, slot, "done")
+        self.assertEqual(calls, [(slot, False)])
+        self.assertNotIn(slot, p.wts)
+
+    def test_failed_retains_the_tree_only_when_the_last_job_releases(self):
+        p = self.pool()
+        (slot, _), _, _ = self.place_three(p)
+        job = self.excl("r1", "RLY-1")
+        p.release(job, slot, "failed")
+        self.assertEqual((p.wts[slot]["state"], p.wts[slot]["live"]), ("active", 2))
+        p.release(job, slot, "failed")
+        self.assertEqual(p.wts[slot]["state"], "active")
+        p.release(job, slot, "failed")
+        self.assertEqual((p.wts[slot]["state"], p.wts[slot]["live"]), ("retained", 0))
+
+    def test_revoking_every_concurrent_job_leaves_the_tree_bound(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, None)
+        p.release(self.excl("r1", "RLY-1"), slot, None)
+        rec = p.wts[slot]
+        self.assertEqual((rec["live"], rec["state"], rec["run_id"]), (0, "active", "r1"))
+        self.assertEqual(p.holdings(), [{"ref": "RLY-1", "state": "bound"}])
+
+    def test_live_never_goes_below_zero(self):
+        p = self.pool()
+        slot, _ = p.assign(self.excl("r1", "RLY-1"))
+        p.release(self.excl("r1", "RLY-1"), slot, None)
+        p.release(self.excl("r1", "RLY-1"), slot, None)       # a stray extra release
+        self.assertEqual(p.wts[slot]["live"], 0)
+
+    def test_an_idle_tree_from_a_finished_run_is_reused_with_a_count_of_one(self):
+        p = self.pool()
+        p.wts["exec-RLY-1"] = {"ref": "RLY-1", "run_id": "r0", "state": "active", "live": 0,
+                               "partition": p._take_partition()}
+        self.assertEqual(p.assign(self.excl("r1", "RLY-1")), ("exec-RLY-1", False))
+        self.assertEqual(p.wts["exec-RLY-1"]["live"], 1)
+        self.assertEqual(p.wts["exec-RLY-1"]["run_id"], "r1")
+
 
 class RunnerPoolRecoverTest(unittest.TestCase):
     """RLY-231 AC #8: a restart re-derives per-card worktrees from `git worktree list` — no
@@ -3724,10 +3802,7 @@ class _FakePopen:
 
 class NodeJobLogAttributionTest(unittest.TestCase):
     def setUp(self):
-        self._fw, self._nj, self._ru = relay.FORWARDER, dict(relay.NODE_JOB_IDS), dict(relay.RUN_IDS)
-        self.addCleanup(setattr, relay, "FORWARDER", self._fw)
-        self.addCleanup(lambda: (relay.NODE_JOB_IDS.clear(), relay.NODE_JOB_IDS.update(self._nj)))
-        self.addCleanup(lambda: (relay.RUN_IDS.clear(), relay.RUN_IDS.update(self._ru)))
+        self.addCleanup(setattr, relay, "FORWARDER", relay.FORWARDER)
 
     def test_watch_payload_shape_is_unchanged_without_a_node_job_id(self):
         fw = relay.LogForwarder()
@@ -3742,13 +3817,75 @@ class NodeJobLogAttributionTest(unittest.TestCase):
                          {"kind": "claude", "ref": "RLY-1", "text": "hi",
                           "run_id": "run-9", "node_job_id": "nj-3"})
 
-    def test_forward_attaches_the_current_node_job_id_for_the_ref(self):
+    def capture(self):
         seen = []
-        relay.FORWARDER = type("F", (), {"enqueue": lambda self, *a: seen.append(a)})()
-        relay.RUN_IDS["RLY-1"] = "run-9"
-        relay.NODE_JOB_IDS["RLY-1"] = "nj-3"
-        relay.forward("claude", "x", "RLY-1")
+        lock = threading.Lock()
+
+        def enqueue(_self, *a):
+            with lock:
+                seen.append(a)
+
+        relay.FORWARDER = type("F", (), {"enqueue": enqueue})()
+        return seen
+
+    def test_forward_attaches_the_current_node_job_id_for_the_ref(self):
+        seen = self.capture()
+        with relay.node_job_attribution("RLY-1", "run-9", "nj-3"):
+            relay.forward("claude", "x", "RLY-1")
         self.assertEqual(seen, [("claude", "x", "RLY-1", "run-9", "nj-3")])
+
+    def test_concurrent_jobs_on_one_ref_each_keep_their_own_attribution(self):
+        """RE437: two branches of one run work the same card at once. Each worker's lines carry
+        its OWN node job id, and the first one finishing never erases the second's."""
+        seen = self.capture()
+        first_forwarded, first_done = threading.Event(), threading.Event()
+        second_entered = threading.Event()
+
+        def first():
+            with relay.node_job_attribution("RLY-1", "run-9", "nj-1"):
+                second_entered.wait(5)
+                relay.forward("claude", "x", "RLY-1")
+                first_forwarded.set()
+            first_done.set()
+
+        def second():
+            with relay.node_job_attribution("RLY-1", "run-9", "nj-2"):
+                second_entered.set()
+                first_forwarded.wait(5)
+                relay.forward("claude", "x", "RLY-1")
+                first_done.wait(5)
+                relay.forward("claude", "x", "RLY-1")     # after the first worker finished
+
+        threads = [threading.Thread(target=first), threading.Thread(target=second)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+        self.assertEqual(seen, [("claude", "x", "RLY-1", "run-9", "nj-1"),
+                                ("claude", "x", "RLY-1", "run-9", "nj-2"),
+                                ("claude", "x", "RLY-1", "run-9", "nj-2")])
+
+    def test_forward_without_a_worker_context_carries_no_ids(self):
+        seen = self.capture()
+        relay.forward("claude", "x", "RLY-1")
+        self.assertEqual(seen, [("claude", "x", "RLY-1", None, None)])
+
+    def test_a_worker_on_another_thread_does_not_attribute_this_threads_lines(self):
+        seen = self.capture()
+        inside, done = threading.Event(), threading.Event()
+
+        def worker():
+            with relay.node_job_attribution("RLY-1", "run-9", "nj-1"):
+                inside.set()
+                done.wait(5)
+
+        t = threading.Thread(target=worker)
+        t.start()
+        inside.wait(5)
+        relay.forward("claude", "x", "RLY-1")             # a talk turn / the main loop
+        done.set()
+        t.join(5)
+        self.assertEqual(seen, [("claude", "x", "RLY-1", None, None)])
 
 
 class ClaimAndReportTest(unittest.TestCase):
@@ -6270,6 +6407,10 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
                 return hook_err
             def partition_for(self, slot):
                 return "1"
+            def prepared(self, slot, detail=None):
+                pass
+            def wait_prepared(self, slot):
+                return None
             def release(self, job, slot, run_state):
                 self.released.append(run_state)
         return P()
@@ -6305,6 +6446,98 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
         relay.execute_one(self.job(), "exec-RLY-1", True, relay.JobControl(), pool)
         self.assertEqual(pool.created, ["exec-RLY-1"])
         self.assertEqual(ran, [True])
+
+
+class ConcurrentPrepWaitTest(unittest.TestCase):
+    """RE437: a run whose first job is a fan_out branch places several jobs at once on a card
+    worktree that does not exist yet. Exactly one (reset True) creates and prepares it; the
+    others wait for that to finish, then run in the prepared tree, or fail with its error."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("run_node_job", "report_outcome", "worktree_path", "git_head_sha",
+                        "DRY", "log")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.log = lambda *a, **k: None
+        relay.worktree_path = lambda name: "/tmp/" + name
+        relay.git_head_sha = lambda path: "sha0"
+        self.calls = []
+        self.lock = threading.Lock()
+        self.reports = {}
+
+        def record(event):
+            with self.lock:
+                self.calls.append(event)
+
+        def report(jid, outcome, detail, *_rest, **_kw):
+            self.reports[jid] = (outcome, detail)
+            return "failed" if outcome == "failed" else "running"
+
+        relay.report_outcome = report
+        relay.run_node_job = lambda job, path, control, partition=None: (
+            record(f"run:{job['id']}") or ("succeeded", "", "sha1", None, False, None))
+        self.record = record
+        self.pool = relay.RunnerPool(
+            {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
+        self.pool._teardown = lambda slot, retain: None
+        self.gate, self.creating = threading.Event(), threading.Event()
+
+        def create(slot):
+            self.creating.set()
+            self.gate.wait(5)
+            record("create")
+
+        self.pool.create_or_rebaseline = create
+
+    def hook(self, err):
+        self.pool.run_prepare_hook = lambda slot_path, ref, branch: self.record("prepare") or err
+
+    def run_both(self):
+        jobs = [{"id": f"nj-{i}", "isolation": "exclusive", "run_id": "r1",
+                 "vars": {"ref": "RLY-1", "branch": "b"}} for i in (1, 2)]
+        placed = [self.pool.assign(j) for j in jobs]
+        self.assertEqual(placed, [("exec-RLY-1", True), ("exec-RLY-1", False)])
+        threads = [threading.Thread(target=relay.execute_one,
+                                    args=(j, slot, reset, relay.JobControl(), self.pool))
+                   for j, (slot, reset) in zip(jobs, placed)]
+        threads[0].start()
+        self.assertTrue(self.creating.wait(5))          # the first job is preparing the tree
+        threads[1].start()
+        time.sleep(0.2)
+        with self.lock:
+            self.assertEqual(self.calls, [])            # the sibling has not run yet
+        self.gate.set()
+        for t in threads:
+            t.join(5)
+            self.assertFalse(t.is_alive())
+
+    def test_a_sibling_runs_only_after_the_first_jobs_preparation_succeeds(self):
+        self.hook(None)
+        self.run_both()
+        self.assertEqual(self.calls[:2], ["create", "prepare"])
+        self.assertEqual(sorted(self.calls[2:]), ["run:nj-1", "run:nj-2"])
+        self.assertEqual(self.pool.wts["exec-RLY-1"]["live"], 0)
+
+    def test_a_failed_preparation_fails_every_waiting_sibling_without_running_it(self):
+        self.hook("boom")
+        self.run_both()
+        self.assertEqual(self.calls, ["create", "prepare"])        # no run_node_job at all
+        self.assertEqual(self.reports, {"nj-1": ("failed", "prepare hook failed: boom"),
+                                        "nj-2": ("failed", "prepare hook failed: boom")})
+        self.assertEqual(self.pool.wts["exec-RLY-1"]["state"], "retained")
+
+    def test_a_job_placed_after_preparation_finished_does_not_wait(self):
+        self.hook(None)
+        self.gate.set()
+        j1 = {"id": "nj-1", "isolation": "exclusive", "run_id": "r1", "vars": {"ref": "RLY-1"}}
+        slot, reset = self.pool.assign(j1)
+        relay.execute_one(j1, slot, reset, relay.JobControl(), self.pool)
+        j2 = dict(j1, id="nj-2")
+        slot, reset = self.pool.assign(j2)
+        self.assertFalse(reset)
+        relay.execute_one(j2, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.calls, ["create", "prepare", "run:nj-1", "run:nj-2"])
 
 
 class ExecuteOneTest(unittest.TestCase):
@@ -7179,14 +7412,14 @@ class _FakeEntry:
     """An `in_flight` entry for supersede_stale_jobs: a real JobControl and a real thread that
     exits once that control is cancelled — or, with `stubborn`, only when the test lets it."""
 
-    def __init__(self, run_id, kind="node", stubborn=False):
+    def __init__(self, run_id, kind="node", stubborn=False, node_id="work"):
         self.control = relay.JobControl()
         self.release = threading.Event()
         gate = self.release if stubborn else self.control._cancelled
         self.thread = threading.Thread(target=lambda: gate.wait(5), daemon=True)
         self.thread.start()
         self.entry = {"thread": self.thread, "control": self.control, "run_id": run_id,
-                      "kind": kind}
+                      "kind": kind, "node_id": node_id}
 
     def finish(self):
         self.release.set()
@@ -7195,9 +7428,10 @@ class _FakeEntry:
 
 
 class SupersedeStaleJobsTest(unittest.TestCase):
-    """RE358 Task 3: a newly claimed job for run R means every other in-flight job of R here is
-    stale (steered, or already reported) — stop it and wait for it before the new one is placed,
-    so the two never share an exclusive worktree."""
+    """RE358 Task 3: a newly claimed job for run R at node N means an in-flight job of R at N
+    here is stale (steered, or already reported) — stop it and wait for it before the new one is
+    placed, so the two never share an exclusive worktree. A job of R at another node is a
+    concurrent fan_out sibling branch (RE437) and is left running."""
 
     def setUp(self):
         self.lines = []
@@ -7214,7 +7448,7 @@ class SupersedeStaleJobsTest(unittest.TestCase):
         one, two, three = _FakeEntry("r1"), _FakeEntry("r2"), _FakeEntry("r1", kind="talk")
         entries = self._entries(**{"1": one, "2": two, "3": three})
 
-        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node"})
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node", "node_id": "work"})
 
         self.assertEqual(superseded, ["1"])
         self.assertTrue(one.control.cancelled())
@@ -7231,7 +7465,7 @@ class SupersedeStaleJobsTest(unittest.TestCase):
         entries = self._entries(**{"4": stuck})
 
         started = time.monotonic()
-        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node"},
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node", "node_id": "work"},
                                                 join_timeout=0.05)
 
         self.assertLess(time.monotonic() - started, 1.0)
@@ -7245,7 +7479,7 @@ class SupersedeStaleJobsTest(unittest.TestCase):
         two = _FakeEntry("r1")
         entries = self._entries(**{"1": one, "2": two})
 
-        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": None, "kind": "talk"})
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": None, "kind": "talk", "node_id": None})
 
         self.assertEqual(superseded, [])
         self.assertFalse(one.control.cancelled())
@@ -7255,8 +7489,22 @@ class SupersedeStaleJobsTest(unittest.TestCase):
         same = _FakeEntry("r1")
         entries = self._entries(**{"9": same})
 
-        self.assertEqual(relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1"}), [])
+        self.assertEqual(relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "node_id": "work"}), [])
         self.assertFalse(same.control.cancelled())
+
+    def test_a_sibling_fan_out_branch_job_of_the_same_run_is_never_superseded(self):
+        """RE437: a fan_out's branches are concurrent jobs of ONE run at distinct nodes. Claiming
+        `beta` must not cancel the still-running `alpha` of the same run."""
+        alpha = _FakeEntry("r1", node_id="alpha")
+        entries = self._entries(**{"1": alpha})
+
+        superseded = relay.supersede_stale_jobs(
+            entries, {"id": "9", "run_id": "r1", "kind": "node", "node_id": "beta"})
+
+        self.assertEqual(superseded, [])
+        self.assertFalse(alpha.control.cancelled())
+        self.assertTrue(alpha.thread.is_alive())
+        self.assertEqual(self.lines, [])
 
 
 class InFlightSessionsTest(unittest.TestCase):
@@ -7505,6 +7753,55 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertEqual(seen["at_b"], {"a_cancelled": True, "a_alive": False, "reports": []})
         self.assertEqual([r[0] for r in self.reports], ["nj-b"])
+
+    def test_concurrent_fan_out_branch_jobs_of_one_run_never_supersede_each_other(self):
+        """RE437 smoke regression: a fan_out hands this runner one job per branch of the SAME run,
+        at distinct nodes. All of them must run at once — claiming a sibling must not cancel the
+        branch already running (the RE358 supersede is for a replaced job at the same node)."""
+        relay.load_runner_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 3, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60, "auto_update": False}
+        relay.SUPERSEDED_JOB_JOIN_S = 3
+        branches = ["alpha", "beta", "gamma"]
+        claims = [job(node_type="shell", run="true", id=f"nj-{b}", run_id="r1", node_id=b,
+                      vars={"ref": "RLY-1"}) for b in branches]
+
+        def claim(*args, **kwargs):
+            time.sleep(0.005)
+            return claims.pop(0) if claims else None
+
+        all_running = threading.Barrier(len(branches), timeout=3)
+        seen = {"cancelled": [], "broken": []}
+
+        def run_node_job(job, path, control, partition=None):
+            try:
+                all_running.wait()
+            except threading.BrokenBarrierError:
+                seen["broken"].append(job["id"])
+            if control.cancelled():
+                seen["cancelled"].append(job["id"])
+            return ("succeeded", "", "sha", None, False, None)
+
+        relay.claim_node_job = claim
+        relay.run_node_job = run_node_job
+        self.reports = []
+        lock = threading.Lock()
+
+        def report(*a):
+            with lock:
+                self.reports.append(a)
+                if len(self.reports) == len(branches):
+                    relay.signal.getsignal(relay.signal.SIGINT)(None, None)
+            return "running"
+
+        relay.report_outcome = report
+        self._watchdog()
+
+        relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+
+        self.assertEqual(seen, {"cancelled": [], "broken": []})
+        self.assertEqual(sorted(r[0] for r in self.reports), ["nj-alpha", "nj-beta", "nj-gamma"])
 
     def test_the_heartbeat_reports_the_session_a_running_job_noted(self):
         """RE358 Task 3 · Scenario 15, wired: cmd_start hands the heartbeat a sessions function
@@ -7956,10 +8253,10 @@ class RateLimitLoopTest(unittest.TestCase):
 
 
 class TalkJobRefMapIsolationTest(unittest.TestCase):
-    """RE268: NODE_JOB_IDS/RUN_IDS are keyed by ref and read by
-    forward() for whichever job is currently registered under that ref. worker() must not
-    register (or clear) a talk job's entry there — doing so would clobber (or, on the talk job's
-    finally, erase) a concurrently-running node job's own attribution for the same card."""
+    """RE268, re-keyed per job by RE437: forward() attributes a board-log line to the node job
+    whose worker thread emitted it. worker() must register nothing for a talk job — a talk turn
+    has neither a node job nor a run, and it must never pick up (or erase) a concurrently
+    running node job's attribution for the same card."""
 
     def setUp(self):
         isolate_runner_locks(self)
@@ -7983,16 +8280,35 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         os.environ.setdefault("RELAY_URL", "http://example.test")
         os.environ.setdefault("RELAY_API_KEY", "k")
 
-    def test_a_talk_job_does_not_clobber_a_concurrent_node_jobs_ref_keyed_entries(self):
-        relay.NODE_JOB_IDS["DE3"] = "real-node-job"
-        relay.RUN_IDS["DE3"] = "real-run"
-        self.addCleanup(relay.NODE_JOB_IDS.pop, "DE3", None)
-        self.addCleanup(relay.RUN_IDS.pop, "DE3", None)
-        seen = {}
+    def test_a_talk_job_neither_sees_nor_clobbers_a_concurrent_node_jobs_attribution(self):
+        seen = []
+
+        class Forwarder:                  # cmd_start builds its own; capture what reaches it
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def enqueue(self, *a):
+                seen.append(a)
+
+        self.addCleanup(setattr, relay, "LogForwarder", relay.LogForwarder)
+        relay.LogForwarder = Forwarder
+        node_inside, talk_done = threading.Event(), threading.Event()
+
+        def node_job():
+            with relay.node_job_attribution("DE3", "real-run", "real-node-job"):
+                node_inside.set()
+                talk_done.wait(5)
+                relay.forward("claude", "node", "DE3")
+
+        node = threading.Thread(target=node_job)
+        node.start()
+        node_inside.wait(5)
 
         def fake_execute_talk(job, slot, reset, control, pool):
-            seen["node_job_id"] = relay.NODE_JOB_IDS.get("DE3")
-            seen["run_id"] = relay.RUN_IDS.get("DE3")
+            relay.forward("claude", "talk", "DE3")
 
         relay.execute_talk = fake_execute_talk
         talk_job = {"id": "tj-1", "kind": "talk", "ref": "DE3", "turn_id": 7,
@@ -8000,12 +8316,13 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
         relay.claim_node_job = lambda *a, **k: talk_job
 
         relay.cmd_start(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
+        talk_done.set()
+        node.join(5)
 
-        # while the talk job ran, the node job's own entries must have been untouched
-        self.assertEqual(seen, {"node_job_id": "real-node-job", "run_id": "real-run"})
-        # and the talk job's finally must not have erased them either
-        self.assertEqual(relay.NODE_JOB_IDS.get("DE3"), "real-node-job")
-        self.assertEqual(relay.RUN_IDS.get("DE3"), "real-run")
+        # the talk turn's line carries no node job; the node job's, after the talk turn's
+        # worker finished, still carries its own
+        self.assertEqual(sorted(seen), [("claude", "node", "DE3", "real-run", "real-node-job"),
+                                        ("claude", "talk", "DE3", None, None)])
 
 
 class AutoUpdateBoundaryTest(unittest.TestCase):

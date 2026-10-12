@@ -105,7 +105,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 86
+      "version": 88
     },
     "running": []
   },
@@ -209,7 +209,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 86
+        "version": 88
       },
       "running": [],
       "sessions": {
@@ -220,7 +220,7 @@
       "harnesses_digest": "<harnesses-digest>",
       "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 86,
+      "required_version": 88,
       "revoked": [],
       "runner_outdated": false,
       "want_capabilities": false

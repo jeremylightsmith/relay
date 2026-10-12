@@ -14,7 +14,13 @@ defmodule Relay.Runs.RunDetail do
   `state: :steered, steered?: true` and, like a `:blocked` wait, is not a spent attempt.
 
   `run` fields are read by dot/`Map.get` access so both a `%Schemas.Run{}` and a
-  plain test/story map work; `:node_executions` may be `nil` (treated as `[]`).
+  plain test/story map work; `:node_executions` may be `nil` (treated as `[]`), and so may
+  `:run_branches` (RE437 — nil, absent or not loaded is treated as `[]`).
+
+  Fan-out regions (RE437) render flat until RE440 groups them: an in-flight execution whose
+  `run_branch_id` names a `:running` branch stays `:active` while a sibling branch parks the run,
+  and a control-node `current_node` (`Schemas.Flow.Node.control_types/0`) never gets a
+  synthetic active row — it has no job of its own.
   `stage_name` comes from the run's own `flow: %{stage: %{name: _}}` (RE426), nil
   whenever that chain is missing or not loaded.
   """
@@ -79,6 +85,8 @@ defmodule Relay.Runs.RunDetail do
   # ---- timeline (was RunComponents.timeline_rows/3) ----
 
   defp timeline(run, nes, flow) do
+    running = running_branch_ids(run)
+
     node_rows =
       nes
       |> Enum.with_index()
@@ -100,18 +108,18 @@ defmodule Relay.Runs.RunDetail do
             []
           end
 
-        loop_row ++ [node_row(ne, run, nes, flow)]
+        loop_row ++ [node_row(ne, run, nes, flow, running)]
       end)
 
-    node_rows ++ synthetic_active(run, nes) ++ pending_tail(run, nes, flow)
+    node_rows ++ synthetic_active(run, nes, flow) ++ pending_tail(run, nes, flow)
   end
 
-  defp node_row(ne, run, nes, flow) do
+  defp node_row(ne, run, nes, flow, running) do
     %{
       kind: :node,
       node_key: ne.node_key,
       attempt: spent_attempt(ne, nes),
-      state: row_state(ne, run),
+      state: branch_row_state(ne, run, running),
       resumed?: resumed?(ne, nes),
       steered?: ne.outcome == :steered,
       partial?: ne.outcome == :partial,
@@ -138,6 +146,23 @@ defmodule Relay.Runs.RunDetail do
 
     max(ne.attempt - waits, 1)
   end
+
+  # ---- run_branches (RE437): the ids of the branches still running ----
+
+  defp running_branch_ids(run) do
+    case Map.get(run, :run_branches) do
+      branches when is_list(branches) -> for %{state: :running, id: id} <- branches, into: MapSet.new(), do: id
+      _nil_or_not_loaded -> MapSet.new()
+    end
+  end
+
+  # An in-flight branch execution keeps running while a sibling branch parks the run; every other
+  # row reads `row_state/2`.
+  defp branch_row_state(%{outcome: nil} = ne, %{status: :parked} = run, running) do
+    if MapSet.member?(running, Map.get(ne, :run_branch_id)), do: :active, else: row_state(ne, run)
+  end
+
+  defp branch_row_state(ne, run, _running), do: row_state(ne, run)
 
   # ---- row_state (was RunComponents.row_state/2), verbatim ----
 
@@ -186,8 +211,8 @@ defmodule Relay.Runs.RunDetail do
 
   # ---- synthetic_active (was RunComponents.synthetic_active/2), adjusted to the node-row shape ----
 
-  defp synthetic_active(%{status: :running, current_node: node_key}, nes) when is_binary(node_key) do
-    if Enum.any?(nes, &is_nil(&1.outcome)) do
+  defp synthetic_active(%{status: :running, current_node: node_key}, nes, flow) when is_binary(node_key) do
+    if Enum.any?(nes, &is_nil(&1.outcome)) or type_tag(node_key, flow) in Flow.Node.control_types() do
       []
     else
       [
@@ -208,7 +233,7 @@ defmodule Relay.Runs.RunDetail do
     end
   end
 
-  defp synthetic_active(_run, _nes), do: []
+  defp synthetic_active(_run, _nes, _flow), do: []
 
   # ---- pending_tail (was RunComponents.pending_tail/3), returns node keys ----
 

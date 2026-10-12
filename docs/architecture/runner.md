@@ -507,7 +507,9 @@ that stays server-side.
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
   or `:revoked` (zombie) job answers 409 `conflict`. A run whose server can't start answers
   **503 `run_server_unavailable`**: the outcome is not recorded, the job stays claimed and the run
-  `:running`, and the runner's idempotent retry re-POSTs it (RE412). The body's optional `resume_at` (RE267,
+  `:running`, and the runner's idempotent retry re-POSTs it (RE412). A job of a run that is not
+  `:running` is refused like a revoked one — except a fan-out sibling's while another branch
+  waits on a human (`Runs.report_accepted?/2`, RE437). The body's optional `resume_at` (RE267,
   ISO-8601 UTC) is read only with outcome `blocked` — an unparseable value is dropped to nil, never
   refused — and makes the engine requeue the node until that reset instead of parking it
   ([failures.md](failures.md) A11b). The node outcomes (including the runner-only `blocked`,
@@ -681,6 +683,60 @@ run marched on to `final_review` and `smoke` with the branch looking clean.
 legitimate escape hatch. The residual risk is confined to the success path, where an external
 write can make `Relay.Runs.remaining_sub_tasks/1` under-count and exit the loop early. The
 failure path never consults `done` at all.
+
+## Fan-out regions (RE437)
+
+A `fan_out` node fires every outgoing edge at once; each edge starts a **branch**, and the paired
+`fan_in` (`Schemas.Flow.regions/1`) waits for all of them. Both are **control nodes**
+(`Schemas.Flow.Node.control_types/0`): `RunServer` resolves them as `node_executions` rows with
+an immediate outcome and **no job**.
+
+- **Entering** a region — a `{:transition, fan_out, _}`, or a start edge into one
+  (`Runs.start_run/3`, which then starts the server with `{:dispatch, job_ids}`) — records the
+  `fan_out` `:succeeded`, inserts one `run_branches` row per branch (`Schemas.RunBranch`, keyed by
+  that `fan_out` execution and the branch key, `:queued`) and starts the first `max_parallel` by
+  position. `run.current_node` stays the `fan_out` key while the region is open.
+- **Starting** a branch sets its row `:running` and enqueues the branch key's node with
+  `node_executions.run_branch_id` set. Its `prior_detail` / `findings` come from the last
+  outcome-bearing non-branch execution before the `fan_out`, re-derived from history, so a branch
+  started later from the queue gets the same vars.
+- **Inside** a branch, `Engine.decide/4` sees only that branch's history, so `max_retries`,
+  `max_loops`, the visit cap and the failure-signature breaker count per branch (the retry
+  findings and commit-guard baselines scope the same way). A transition to the `fan_in` ends the
+  row with the node's outcome; a `{:fail, _}` ends it `:failed` with one `:failure` timeline
+  entry, and the run carries on. Each ended row frees a slot for the next `:queued` one; a
+  queued branch the live flow no longer has ends `:failed` (`branch removed from the flow`).
+- **Joining** — once every row is `:ended` — records the `fan_in` with `Engine.join/1`'s result:
+  `:succeeded` iff every branch succeeded, and one `## <branch>: <outcome>` section per branch.
+  A `fan_in` carrying foreach guards is the loop tail and checks the task off. It is then decided
+  and routed like any other execution, so `{prior_detail}` / `{findings}` reach the next node.
+- **Several active jobs.** A run inside a region holds one job per running branch
+  (`Runs.active_jobs/1`). Claiming an exclusive run's first job pins the run *and* its queued
+  siblings to that runner. `cancel_run/2` and `close_run!/3` end every open branch
+  (`Runs.end_open_branches!/1`); `Runs.open_region/1` returns the latest entry's rows while any is
+  open. `diagnose/3` reports the first active job plus `active_job_count`.
+- **Parking with siblings.** A branch that parks (a question, an escalation edge, a `:blocked`)
+  sets its row `:parked` and parks the run (`park_effects/2` — card blocked, `parked/needs_input`),
+  but revokes **no** sibling job. While the run is parked, `Runs.report_accepted?/2` still takes a
+  report for a job in a `:running` branch: it is decided and routed inside that branch (a next
+  node's job is enqueued and dispatched, an ending ends the row, a park parks it — the card is only
+  re-blocked, never asked twice), but no `:queued` branch starts and no join happens. `RunServer`
+  starts for such a run only in `:attach` (`Runs.attachable_while_parked?/1`) and stops after each
+  report, so a parked run holds no process; `Runs.resume_run/2` also stops any lingering server
+  before its `parked → running` transition.
+- **Re-entry inside an open region.** Every re-entry mode (`{:reenter, _}`, `--at`, advance) with
+  `Runs.open_region/1` non-empty goes branch by branch in one transaction: a `:running` row with an
+  active job is left alone; a `:running` row without one (restart, hand-back, lost runner) and
+  every `:parked` row get a fresh attempt of the same visit with the branch's own last failure as
+  `findings` — a parked row resuming its own `:needs_input` session, never the run-level one —
+  then the region is scheduled. Jobs are revoked per row, never run-wide. The RE410 outcome-less
+  cap counts per branch and parks just that branch (and the run). `Runs.boot_mode/1` always
+  re-enters a run with an open region. With no region open, re-entering at a `fan_out`, a branch
+  node or a `fan_in` opens a fresh region at the `fan_out`; `Runs.retry_run/2` maps such a target
+  to the `fan_out` itself.
+
+Branches share the run's checkout: concurrent edits, commits and builds are the flow author's
+responsibility — Relay neither guards nor forbids them.
 
 ## Run recovery surface (RLY-189)
 
@@ -1020,6 +1076,24 @@ silently billed to the paid API.
     to `max_retained_failed` (default 3, oldest evicted first by mtime past that), not
     counted against capacity. `done`/`cancelled` remove the worktree immediately; a revoke
     (`run_state == nil`) touches nothing.
+  - **Several node jobs per tree (RE437) — concurrent node jobs per run.** A `fan_out`'s
+    branches are node jobs of ONE run, and all of them run at once in the card's one worktree
+    (one exclusive slot, not one per branch). The record's `live` is therefore a **live count**
+    of in-flight node jobs, not a flag: `assign` increments it on every exclusive placement,
+    `release` decrements it, and the terminal disposition above (or its deferral under a talk
+    turn) runs only when it reaches 0 — the last branch out decides, so the first branch to
+    finish never tears the tree down under its siblings. `holdings()` reports `running` while
+    it is above 0. Each job's board-log lines are attributed to that job, not to the card
+    (**per-job attribution**, see Talk turns below), and the first job's preparation finishes
+    before any sibling runs in the tree (the **prep wait**, under *Prepare hook*).
+  - **Shared-checkout hazards — the flow author's responsibility, not Relay's.** Concurrent
+    branches share everything the worktree has, and Relay guards none of it (RE437
+    decision 3): **same-file edits** race and the last write wins; **concurrent `git commit`**
+    contend for `.git/index.lock`, so one fails; and there is **one `MIX_TEST_PARTITION`** and
+    **one `_build`** per tree, so two branches running `mix compile` / `mix test` at once
+    rebuild under each other and truncate the same test database. A region whose branches only
+    read (a review panel) is safe; one whose branches write must split the files between them
+    and leave committing and building to a single node after the `fan_in`.
   - **Never-detach.** Once the run's `branch` node attaches `refs/heads/{branch}`, the
     runner never re-detaches that worktree again — the old mid-run reset-on-revoke path
     (below) is gone. A revoked exclusive job now just stops its subprocess and leaves the
@@ -1038,6 +1112,11 @@ silently billed to the paid API.
     else the main checkout) into the fresh worktree via APFS clonefile copy-on-write
     (`cp -Rc`, falling back to plain `cp -R`), so `mix deps.get` is a no-op and `mix compile`
     only rebuilds the diff.
+    When a run's first job is a branch, several of its jobs are placed on a tree that does
+    not exist yet: exactly one gets `reset` and prepares it, and the rest block in
+    `execute_one` on the pool's per-slot preparation event (`RunnerPool.wait_prepared/1`)
+    until it finishes. They then run in the prepared tree, or — when the hook failed — each
+    report `failed` with the same `prepare hook failed: …` detail instead of running (RE437).
   - **Cleanup hook (RE339).** Right before the runner deletes an intact per-card worktree,
     `run_cleanup_hook/2` runs the project's cleanup hook so it can tear down what prepare set
     up (a dev server, a docker-compose stack, a per-worktree test database, a port
@@ -1191,14 +1270,17 @@ silently billed to the paid API.
   job — the server already knows a revoked job never finished. The same beat carries `sessions`
   (RE358), each in-flight agent job's captured session id, read from its `JobControl` (talk jobs
   are never reported).
-- **A newly claimed job supersedes its run's stale job (RE358).** Before placement, `cmd_start`
-  snapshots `in_flight` under its lock (each entry carries the job's `run_id` and `kind`) and
-  calls `supersede_stale_jobs`: every other in-flight **non-talk** job of the claimed job's run is
-  cancelled through its `JobControl` and joined, outside the lock, for up to
-  `SUPERSEDED_JOB_JOIN_S` (30s; an error line names a job still running after that). The server
-  keeps at most one active job per run, so such a job is either steered (revoked, but the
-  heartbeat that says so may be up to an interval away) or already reported and still in its
-  `finally`, where the cancel is a no-op. This closes a real gap: a granted claim never carries
+- **A newly claimed job supersedes the stale job it replaces (RE358).** Before placement,
+  `cmd_start` snapshots `in_flight` under its lock (each entry carries the job's `run_id`,
+  `node_id` and `kind`) and calls `supersede_stale_jobs`: every other in-flight **non-talk** job
+  of the claimed job's run **at the same node** is cancelled through its `JobControl` and joined,
+  outside the lock, for up to `SUPERSEDED_JOB_JOIN_S` (30s; an error line names a job still
+  running after that). A run has one active job per running branch (`Runs.active_jobs/1`): one
+  outside a fan_out region, one per branch inside it (RE437), and branches are node-disjoint. So
+  a same-run, same-node job is either steered (a Steer now re-enters the same node; revoked, but
+  the heartbeat that says so may be up to an interval away) or already reported and still in its
+  `finally`, where the cancel is a no-op. A same-run job at **another** node is a concurrent
+  sibling branch and is never touched. This closes a real gap: a granted claim never carries
   `revoked`, and `RunnerPool.assign` reuses an exclusive worktree bound to the same `run_id` even
   while it is `live`, so a Steer now restart could otherwise start in the same tree as the
   `claude -p` it replaced. Talk jobs are never superseded — a talk turn may legitimately run
@@ -1424,14 +1506,15 @@ claim/execute/report loop, one more branch.
   console/board-log renderer (`_print_claude_event`).
 
   `_stream_agent_job` also gained `mirror=True`; a talk turn passes `mirror=False` so its
-  events print locally but are never also forwarded to the ref-keyed board-log mirror. Two
+  events print locally but are never also forwarded to the board-log mirror. Two
   things make that necessary: the tag `run_talk_job` builds is ref-clean (`f"[{ref}] (talk) "`,
   "talk" outside the brackets — an earlier `f"[{ref} talk] "` made `_ref_from_tag` extract a ref
   that does not exist, e.g. "DE3 talk", spamming `POST /api/board/logs` under a phantom card),
-  and a talk job is deliberately **not** registered in `NODE_JOB_IDS`/`RUN_IDS` (also ref-keyed):
-  registering it would clobber a concurrently-running node job's own attribution for the same
-  card while the talk turn ran, and popping it in the `finally` would erase that node job's
-  attribution outright.
+  and a talk job's worker deliberately registers no `node_job_attribution`. Board-log
+  attribution is **per worker thread** (RE437, replacing the ref-keyed `NODE_JOB_IDS`/`RUN_IDS`
+  maps): `forward()` stamps a line with the `run_id`/`node_job_id` of the node job the calling
+  thread runs for that ref, so a talk turn's lines carry neither, and concurrent fan-out
+  branches on one card never clobber — or, finishing, erase — each other's ids.
 - **Delivery.** `TalkEventSender` batches and POSTs lines to `/api/talk/turns/:id/events`
   at-least-once — deliberately unlike `LogForwarder`, which drops by construction (`enqueue` on
   a full queue, swallowed `_send` errors). Each line's `client_seq` is per-turn and
@@ -1652,7 +1735,7 @@ working the card and restarts that same node with the note in its guidance.
   beat has carried the session resumes it; a steer before the first such beat restarts on a fresh
   session (the guidance still carries the note).
 - **The restart never shares a worktree with the process it replaced.** When the runner claims the
-  restarted job, it first supersedes the run's still-running stale job — cancels it and waits for
+  restarted job, it first supersedes the run's still-running stale job at that node — cancels it and waits for
   it to exit (`supersede_stale_jobs`, see "Runner mode" above) — before placing the new one. The
   revoke alone was not enough: it only arrives on the next heartbeat, and `RunnerPool.assign`
   reuses an exclusive worktree bound to the same run even while it is live.

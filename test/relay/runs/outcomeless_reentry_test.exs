@@ -122,7 +122,7 @@ defmodule Relay.Runs.OutcomelessReentryTest do
     all_jobs = jobs(run)
     assert length(all_jobs) == cap
     assert Enum.all?(all_jobs, &(&1.state == :revoked))
-    assert Runs.active_job(run) == nil
+    assert Runs.active_jobs(run) == []
 
     card = Repo.get!(Card, ctx.card.id)
     assert card.status == :needs_input

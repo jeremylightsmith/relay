@@ -38,6 +38,7 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Node-job state", {Schemas.NodeJob, :states}},
     {"Node-job kind", {Schemas.NodeJob, :kinds}},
     {"Node outcome", {Schemas.NodeExecution, :outcomes}},
+    {"Run branch state", {Schemas.RunBranch, :states}},
     {"Stage category", {Schemas.Stage, :categories}},
     {"Stage type", {Schemas.Stage, :types}},
     {"Talk turn status", {Schemas.TalkTurn, :statuses}},

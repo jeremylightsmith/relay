@@ -63,7 +63,7 @@ defmodule Relay.Runs.ResumeTest do
     refute_receive {:revoked, _}, 200
     refute_receive {:dispatched, _}, 200
 
-    assert %NodeJob{id: ^job_id, state: :queued} = Runs.active_job(run)
+    assert [%NodeJob{id: ^job_id, state: :queued}] = Runs.active_jobs(run)
     assert [%NodeExecution{}] = Runs.list_executions(run)
 
     {:ok, late} =

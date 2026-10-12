@@ -75,7 +75,7 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Do work"})
     {:ok, run} = Runs.start_run(card, flow)
-    {run, Runs.active_job(run)}
+    {run, hd(Runs.active_jobs(run))}
   end
 
   # RE436: a queued, unpinned shared_clean agent job on `harness_key`, inserted directly — the

@@ -719,4 +719,26 @@ defmodule Relay.Runs.EngineTest do
       assert reason =~ "loop_budget_exhausted"
     end
   end
+
+  describe "join/1 (RE437)" do
+    test "labels every branch by position and fails when any branch failed" do
+      rows = [
+        %{branch: "c", position: 2, outcome: :succeeded, detail: "C ok"},
+        %{branch: "a", position: 0, outcome: :failed, detail: "A broke"},
+        %{branch: "b1", position: 1, outcome: :succeeded, detail: nil}
+      ]
+
+      assert Engine.join(rows) ==
+               {:failed, "## a: failed\nA broke\n\n## b1: succeeded\n(no result)\n\n## c: succeeded\nC ok"}
+    end
+
+    test "succeeds only when every branch succeeded, and reads a blank detail as no result" do
+      rows = [
+        %{branch: "b", position: 1, outcome: :succeeded, detail: "  "},
+        %{branch: "a", position: 0, outcome: :succeeded, detail: "A ok"}
+      ]
+
+      assert Engine.join(rows) == {:succeeded, "## a: succeeded\nA ok\n\n## b: succeeded\n(no result)"}
+    end
+  end
 end
