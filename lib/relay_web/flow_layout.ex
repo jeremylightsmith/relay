@@ -22,10 +22,11 @@ defmodule RelayWeb.FlowLayout do
     * `size` — the canvas `{w, h}`
     * `routes` — edge index (position in the input `edges` list) → `%{points:, label:}`.
       `points` is an axis-aligned polyline from the source node to the target node; `label` is
-      the centre of the edge's pill, or `nil` for a start edge (which carries no pill). Where
-      several edges meet one side of a node, each gets its own port on that border, spread
-      left→right in the order the lines head off (RE340, `port_span/2`); a lone edge keeps the
-      side's centre
+      the centre of the edge's pill, or `nil` for an edge with no outcome (`on` nil — the start
+      edge and every fan-out branch-start edge, which carry no pill). Where several edges meet
+      one side of a node, each gets its own port on that border, spread left→right in the order
+      the lines head off (RE340, `port_span/2`); a lone edge keeps the side's centre. A control
+      node never spreads (RE439): every edge splits from, or merges into, its pill's centre
     * `start_point` — where the entry edge leaves; `done_point` — done's top-centre, where a
       sole exit edge lands (several exit edges spread along done's top border)
     * `parks` — the source of every edge into the `needs_input` park. Those edges have no
@@ -50,6 +51,11 @@ defmodule RelayWeb.FlowLayout do
   @node_h 56
   @gate_w 118
   @gate_h 76
+
+  # RE439: a control node (`Schemas.Flow.Node.control_types/0`) is a compact pill — done's width,
+  # the mockup pill's height — since it carries no work.
+  @control_w 180
+  @control_h 36
 
   # `start` is an invisible anchor the entry edge leaves from. `done` is wide and tall enough to
   # hold the renderer's "lands → <stage>" pill, which sits just below `done_point` (its top edge).
@@ -95,10 +101,14 @@ defmodule RelayWeb.FlowLayout do
 
   @doc """
   Box `{w, h}` for a node type — the single source of node dimensions for both this layout and
-  the renderer. Gate nodes are the diamond (118×76); everything else is the default box (150×56).
+  the renderer. Gate nodes are the diamond (118×76); control nodes (`fan_out` / `fan_in`) are the
+  pill (180×36); everything else is the default box (150×56).
   """
   def node_size(:gate), do: {@gate_w, @gate_h}
-  def node_size(_type), do: {@node_w, @node_h}
+
+  def node_size(type) do
+    if type in Schemas.Flow.Node.control_types(), do: {@control_w, @control_h}, else: {@node_w, @node_h}
+  end
 
   @doc """
   The text of an edge's label pill — outcome, then the foreach guard's human wording, then
@@ -184,7 +194,9 @@ defmodule RelayWeb.FlowLayout do
   @doc """
   The spine of a flow: indexes into `edges` of the walk from the start edge along each node's
   `:succeeded` edge (never the foreach loop-back), stopping at a node with no such edge or one the
-  walk already visited. When a node has several, the first in `edges` order is taken.
+  walk already visited. A plain edge (`on` nil) out of a non-start node is a fan-out branch start
+  and counts as a step too (RE439), so the spine walks through a fan-out along its first branch.
+  When a node has several qualifying edges, the first in `edges` order is taken.
   """
   @spec spine([map]) :: MapSet.t(non_neg_integer)
   def spine(edges), do: walk_spine(Enum.with_index(edges), "start", MapSet.new(["start"]), MapSet.new())
@@ -202,7 +214,14 @@ defmodule RelayWeb.FlowLayout do
   end
 
   defp spine_step?(%{from: "start"}), do: true
-  defp spine_step?(edge), do: Map.get(edge, :on) == :succeeded and Map.get(edge, :when) != :foreach_remaining
+
+  defp spine_step?(edge) do
+    case Map.get(edge, :on) do
+      nil -> true
+      :succeeded -> Map.get(edge, :when) != :foreach_remaining
+      _ -> false
+    end
+  end
 
   defp known_endpoint?(key, known), do: key in ["start", "done"] or MapSet.member?(known, key)
 
@@ -216,13 +235,20 @@ defmodule RelayWeb.FlowLayout do
     real ++ [%{id: :start, width: @start_w, height: @start_h}, %{id: :done, width: @done_w, height: @done_h}]
   end
 
-  # A start edge draws no pill (the renderer never labels it), so it reserves no label room.
-  defp dagre_edge({%{from: "start"} = edge, i}, spine),
-    do: weighted(%{id: i, from: endpoint(edge.from), to: endpoint(edge.to)}, i, spine)
-
+  # An edge with no outcome — the start edge and every fan-out branch start (RE439) — draws no
+  # pill, so it reserves no label room and its route's `label` is nil. `Map.get`, because a
+  # working-copy start edge may carry no `:on` key at all.
   defp dagre_edge({edge, i}, spine) do
-    {w, h} = label_size(edge)
-    weighted(%{id: i, from: endpoint(edge.from), to: endpoint(edge.to), label: %{width: w, height: h}}, i, spine)
+    base = %{id: i, from: endpoint(edge.from), to: endpoint(edge.to)}
+
+    case Map.get(edge, :on) do
+      nil ->
+        weighted(base, i, spine)
+
+      _ ->
+        {w, h} = label_size(edge)
+        weighted(Map.put(base, :label, %{width: w, height: h}), i, spine)
+    end
   end
 
   defp weighted(dagre_edge, i, spine),
@@ -282,6 +308,8 @@ defmodule RelayWeb.FlowLayout do
   #      — without special-casing it. Self-loops (routed off the right side) are left untouched.
   #   2. Group by {node, side}. A group of one keeps dagre's centre anchor, so a plain chain is
   #      drawn exactly as before; `start` is too small to spread, so its edges share its centre.
+  #      A control node (RE439) never spreads either: a fan-out's branches split from one point
+  #      and a fan-in's merge into one, which is what the pill means.
   #   3. Order each group left→right by the x the line heads to past its stub, then the far
   #      endpoint's x, then edge index — deterministic, and no two lines cross at the node.
   #   4. Distribute the n ports evenly over the side's `port_span/2`:
@@ -296,7 +324,9 @@ defmodule RelayWeb.FlowLayout do
     routes
     |> endpoints(boxes)
     |> Enum.group_by(&{&1.id, &1.side})
-    |> Enum.reject(fn {{id, _side}, group} -> id == :start or length(group) == 1 end)
+    |> Enum.reject(fn {{id, _side}, group} ->
+      id == :start or Map.get(types, id) in Schemas.Flow.Node.control_types() or length(group) == 1
+    end)
     |> Enum.flat_map(fn {{id, side}, group} ->
       assign_ports(group, Map.get(types, id, id), Map.fetch!(boxes, id), side, band_edge(bands, id, side), spine)
     end)

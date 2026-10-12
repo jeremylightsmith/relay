@@ -151,7 +151,9 @@ defmodule RelayWeb.FlowEditorLive do
   def handle_event("select_node", %{"key" => to}, %{assigns: %{connecting: %{from: from}}} = socket) do
     socket =
       apply_working(socket, fn w ->
-        %{w | edges: w.edges ++ [%{from: from, to: to, on: :succeeded, max_loops: nil, when: nil}]}
+        # RE439: a fan-out fires every outgoing edge on entry, so its edges carry no outcome.
+        on = if Flow.fan_out?(w, from), do: nil, else: :succeeded
+        %{w | edges: w.edges ++ [%{from: from, to: to, on: on, max_loops: nil, when: nil}]}
       end)
 
     index = length(socket.assigns.working.edges) - 1
@@ -402,7 +404,11 @@ defmodule RelayWeb.FlowEditorLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :layout, FlowLayout.layout(assigns.working.nodes, assigns.working.edges))
+    assigns =
+      assigns
+      |> assign(:layout, FlowLayout.layout(assigns.working.nodes, assigns.working.edges))
+      |> assign(:selected_node, selected_node(assigns.working, assigns.selected))
+      |> assign(:selected_edge, selected_edge(assigns.working, assigns.selected))
 
     ~H"""
     <Layouts.app
@@ -501,9 +507,30 @@ defmodule RelayWeb.FlowEditorLive do
             id="flow-inspector"
             style="width:328px;flex:0 0 auto;border-left:1px solid var(--color-base-300);background:var(--color-base-100);overflow-y:auto;"
           >
+            <%!-- RE439: a fan-out gets its own inspector (MAX PARALLEL, BRANCHES), and so does a
+            fan-in (WAITS FOR, RESOLVES); every other node type keeps node_inspector. --%>
+            <FlowEditorComponents.fan_out_inspector
+              :if={@selected_node && @selected_node.type == :fan_out}
+              node={@selected_node}
+              region={Flow.region(@working, @selected_node.key)}
+              out_edges={outgoing_edges(@working, @selected)}
+              edges={@working.edges}
+              nodes={@working.nodes}
+              referenced_count={referenced_count(@working, @selected_node.key)}
+              read_only?={@read_only?}
+            />
+            <FlowEditorComponents.fan_in_inspector
+              :if={@selected_node && @selected_node.type == :fan_in}
+              node={@selected_node}
+              region={Enum.find(Flow.regions(@working), &(&1.fan_in == @selected_node.key))}
+              edges={@working.edges}
+              nodes={@working.nodes}
+              referenced_count={referenced_count(@working, @selected_node.key)}
+              read_only?={@read_only?}
+            />
             <FlowEditorComponents.node_inspector
-              :if={match?({:node, _}, @selected) and selected_node(@working, @selected)}
-              node={selected_node(@working, @selected)}
+              :if={@selected_node && @selected_node.type not in Flow.Node.control_types()}
+              node={@selected_node}
               edges={outgoing_edges(@working, @selected)}
               referenced_count={referenced_count(@working, elem(@selected, 1))}
               read_only?={@read_only?}
@@ -513,10 +540,11 @@ defmodule RelayWeb.FlowEditorLive do
               board_slug={@board.slug}
             />
             <FlowEditorComponents.edge_inspector
-              :if={match?({:edge, _}, @selected)}
-              edge={selected_edge(@working, @selected)}
+              :if={@selected_edge}
+              edge={@selected_edge}
               index={elem(@selected, 1)}
               read_only?={@read_only?}
+              branch_start?={Flow.fan_out?(@working, @selected_edge.from)}
             />
           </aside>
         </div>
@@ -525,9 +553,9 @@ defmodule RelayWeb.FlowEditorLive do
         <div
           :if={@dirty?}
           id="flow-editor-unsaved-bar"
-          style="padding:12px 18px;background:var(--color-base-100);border-top:1px solid var(--color-field-border);display:flex;align-items:center;gap:14px;"
+          style="padding:12px 18px;background:var(--color-base-100);border-top:1px solid var(--color-field-border);display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;"
         >
-          <span style="display:flex;align-items:center;gap:7px;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));font-size:12.5px;font-weight:600;">
+          <span style="display:flex;align-items:center;gap:7px;padding-top:7px;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));font-size:12.5px;font-weight:600;">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--color-warning);">
             </span>
             Unsaved changes
@@ -535,7 +563,7 @@ defmodule RelayWeb.FlowEditorLive do
           <div
             :if={@errors != []}
             id="flow-editor-errors"
-            style="background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));border-radius:8px;padding:7px 12px;max-width:640px;color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));font-size:12px;"
+            style="flex:1;min-width:260px;max-width:640px;display:flex;flex-direction:column;gap:3px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));border-radius:8px;padding:7px 12px;color:color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));font-size:12px;"
           >
             <span :for={msg <- @errors}>{msg}</span>
           </div>
@@ -746,11 +774,12 @@ defmodule RelayWeb.FlowEditorLive do
   defp stats(working) do
     nodes = length(working.nodes)
     edges = length(working.edges)
-    loops = Enum.count(working.edges, &(&1[:max_loops] not in [nil, 0]))
+    loops = Enum.count(working.edges, &Schemas.Flow.Edge.loop?/1)
     "#{nodes} nodes · #{edges} edges · #{loops} loops"
   end
 
   defp selected_node(working, {:node, key}), do: Enum.find(working.nodes, &(&1.key == key))
+  defp selected_node(_working, _selected), do: nil
   # Each outgoing edge paired with its index in `working.edges`, so an inspector row can
   # `select_edge` it — the only way to reach an undrawn needs_input edge (RE330).
   defp outgoing_edges(working, {:node, key}) do
@@ -758,4 +787,5 @@ defmodule RelayWeb.FlowEditorLive do
   end
 
   defp selected_edge(working, {:edge, i}), do: Enum.at(working.edges, i)
+  defp selected_edge(_working, _selected), do: nil
 end

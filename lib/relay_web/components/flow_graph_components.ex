@@ -55,23 +55,6 @@ defmodule RelayWeb.FlowGraphComponents do
       tag_c: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
       tag_bg: nil
     },
-    # RE437: the two control nodes share the accent fill; the tag tells them apart.
-    fan_out: %{
-      accent: "var(--color-accent)",
-      border: "color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100))",
-      fill: "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))",
-      tag: "FAN OUT",
-      tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
-      tag_bg: "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
-    },
-    fan_in: %{
-      accent: "var(--color-accent)",
-      border: "color-mix(in oklab, var(--color-accent) 35%, var(--color-base-100))",
-      fill: "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))",
-      tag: "FAN IN",
-      tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
-      tag_bg: "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
-    },
     human: %{
       accent: "var(--color-primary)",
       border: "color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100))",
@@ -81,6 +64,21 @@ defmodule RelayWeb.FlowGraphComponents do
       tag_bg: "color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))"
     }
   }
+
+  # RE437/RE439: every control node (`Schemas.Flow.Node.control_types/0`) shares the accent pill's
+  # colours; `type_meta/1` derives each one's tag from its type. Values from card mockup
+  # "Editor — fan out / fan in as compact pills". `ring` is the pill's selection shadow.
+  @control_meta %{
+    accent: "var(--color-accent)",
+    border: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-100))",
+    fill: "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))",
+    tag_c: "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
+    tag_bg: nil,
+    ring: "color-mix(in oklab, var(--color-accent) 30%, transparent)"
+  }
+
+  # the control pill's sub-line (`max N` / `all must succeed`).
+  @pill_sub_style "font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
 
   # the node subtitle's type (its colour varies with the LLM state, RE433).
   @subtitle_style "font-size:9.5px;font-family:ui-monospace,monospace;white-space:nowrap;"
@@ -212,8 +210,22 @@ defmodule RelayWeb.FlowGraphComponents do
         </span>
       <% end %>
 
+      <%= for node <- @nodes, control?(node) do %>
+        <.control_pill
+          node={node}
+          left={elem(position(node, @layout), 0)}
+          top={elem(position(node, @layout), 1)}
+          selected?={@selected == {:node, node.key}}
+          state={Map.get(@node_states, node.key)}
+          data-hot={hot_node?(@focus, node.key)}
+          phx-click={@interactive? && "select_node"}
+          phx-value-key={@interactive? && node.key}
+        />
+      <% end %>
+
       <div
         :for={node <- @nodes}
+        :if={!control?(node)}
         data-node={node.key}
         data-type={node.type}
         data-hot={hot_node?(@focus, node.key)}
@@ -277,6 +289,103 @@ defmodule RelayWeb.FlowGraphComponents do
     """
   end
 
+  @doc """
+  A control node (`Schemas.Flow.Node.control_types/0` — `fan_out` / `fan_in`) drawn as a compact
+  accent pill (RE439): its fork or join glyph, the `FAN OUT` / `FAN IN` tag, the humanized key and
+  a sub-line (`max N` for a fan-out whose `max_parallel` is set, `all must succeed` for a fan-in).
+  Sized by `RelayWeb.FlowLayout.node_size/1`; a long key truncates rather than growing the pill.
+
+  With `left` and `top` set it is absolutely positioned on the graph canvas; without them it
+  renders in flow (storybook). `rest` carries the graph's `phx-click` / `phx-value-key` /
+  `data-hot`.
+  """
+  attr :node, :map, required: true, doc: "needs `key`, `type` (a control type) and optionally `max_parallel`"
+  attr :left, :integer, default: nil
+  attr :top, :integer, default: nil
+  attr :selected?, :boolean, default: false
+  attr :state, :atom, default: nil, doc: "run-state outline, as on a work node"
+  attr :rest, :global
+
+  def control_pill(assigns) do
+    assigns =
+      assign(assigns,
+        meta: type_meta(assigns.node.type),
+        sub: pill_sub(assigns.node),
+        sub_style: @pill_sub_style
+      )
+
+    ~H"""
+    <div
+      data-node={@node.key}
+      data-type={@node.type}
+      style={pill_style(@node.type, @left, @top, @meta, @selected?, @state)}
+      {@rest}
+    >
+      <span style={"color:#{@meta.tag_c};display:flex;"}>
+        <.control_glyph type={@node.type} />
+      </span>
+      <span style={tag_style(@meta)}>{@meta.tag}</span>
+      <span style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;">
+        {humanize(@node.key)}
+      </span>
+      <span :if={@sub} data-pill-sub style={@sub_style}>{@sub}</span>
+    </div>
+    """
+  end
+
+  @doc """
+  A control node's glyph (RE439): the fork for `:fan_out`, the join for `:fan_in`. Strokes in
+  `currentColor`, so the caller's wrapper sets its colour.
+  """
+  attr :type, :atom, required: true, doc: "`:fan_out` | `:fan_in`"
+  attr :size, :integer, default: 14
+
+  def control_glyph(assigns) do
+    assigns = assign(assigns, :d, glyph_path(assigns.type))
+
+    ~H"""
+    <svg
+      data-glyph={@type}
+      width={@size}
+      height={@size}
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linecap="round"
+    >
+      <path d={@d} />
+    </svg>
+    """
+  end
+
+  # Per-type glyph data, not a control-set test.
+  defp glyph_path(:fan_out), do: "M7 1v5M7 6L2.5 12M7 6v6M7 6l4.5 6"
+  defp glyph_path(:fan_in), do: "M2.5 2L7 8M7 2v6M11.5 2L7 8M7 8v5"
+
+  defp pill_sub(%{type: :fan_out} = node) do
+    case Map.get(node, :max_parallel) do
+      nil -> nil
+      max -> "max #{max}"
+    end
+  end
+
+  defp pill_sub(%{type: :fan_in}), do: "all must succeed"
+
+  defp pill_style(type, left, top, meta, selected?, state) do
+    {w, h} = FlowLayout.node_size(type)
+    position = if left && top, do: "position:absolute;left:#{left}px;top:#{top}px;z-index:4;", else: ""
+    ring = if selected?, do: "box-shadow:0 0 0 3px #{meta.ring};", else: ""
+
+    position <>
+      "width:#{w}px;height:#{h}px;border-radius:#{div(h, 2)}px;white-space:nowrap;padding:0 12px;" <>
+      "background:#{meta.fill};border:1.5px solid #{meta.border};" <>
+      "display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;" <>
+      ring <> state_accent(state)
+  end
+
+  defp control?(node), do: node.type in Schemas.Flow.Node.control_types()
+
   # ---- style/geometry helpers (private) ----
 
   # defensive accessors — every shipped shape is dense (see the moduledoc), so these only
@@ -288,7 +397,15 @@ defmodule RelayWeb.FlowGraphComponents do
 
   defp edge_colors, do: @edge_color
   defp edge_color(edge), do: Map.get(@edge_color, edge_on(edge), @edge_color[nil])
-  defp type_meta(type), do: Map.fetch!(@type_meta, type)
+
+  defp type_meta(type) do
+    if type in Schemas.Flow.Node.control_types(),
+      do: Map.put(@control_meta, :tag, control_tag(type)),
+      else: Map.fetch!(@type_meta, type)
+  end
+
+  # `:fan_out` → "FAN OUT", `:fan_in` → "FAN IN".
+  defp control_tag(type), do: type |> Atom.to_string() |> String.replace("_", " ") |> String.upcase()
   defp position(node, layout), do: Map.fetch!(layout.positions, node.key)
 
   defp node_style(node, {x, y}, meta, selected, node_states) do

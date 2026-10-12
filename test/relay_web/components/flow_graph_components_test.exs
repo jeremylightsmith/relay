@@ -98,16 +98,16 @@ defmodule RelayWeb.FlowGraphComponentsTest do
       assert html =~ "clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%)"
     end
 
-    # Scenario 27 (RE437)
+    # Scenario 27 (RE437); RE439 draws it as the accent pill's 7% fill.
     test "fan_out node: FAN OUT tag on the accent fill" do
       html = one_node(:fan_out)
-      assert html =~ "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))"
+      assert html =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
       assert html =~ "FAN OUT"
     end
 
     test "fan_in node: FAN IN tag on the accent fill" do
       html = one_node(:fan_in)
-      assert html =~ "color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100))"
+      assert html =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
       assert html =~ "FAN IN"
     end
   end
@@ -453,6 +453,81 @@ defmodule RelayWeb.FlowGraphComponentsTest do
 
       assert html =~ "plan-implementer · high"
       refute html =~ "data-llm"
+    end
+  end
+
+  describe "control-node pills (RE439)" do
+    alias Relay.FanOutFixtures
+
+    defp panel(nodes \\ FanOutFixtures.panel_nodes(), opts \\ []) do
+      nodes |> graph(FanOutFixtures.panel_edges(), opts) |> LazyHTML.from_fragment()
+    end
+
+    defp q(doc, selector), do: LazyHTML.query(doc, selector)
+    defp style_of(doc, selector), do: doc |> q(selector) |> LazyHTML.attribute("style") |> List.first()
+    defp count(doc, selector), do: doc |> q(selector) |> Enum.count()
+
+    # Scenario 7
+    test "a fan-out draws as the accent pill with the fork glyph, FAN OUT and its max" do
+      doc = panel(FanOutFixtures.put_node(FanOutFixtures.panel_nodes(), "fo", %{max_parallel: 2}), interactive?: false)
+      style = style_of(doc, ~s([data-node="fo"]))
+
+      assert style =~ "height:36px"
+      assert style =~ "border-radius:18px"
+      assert style =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
+      assert style =~ "1.5px solid color-mix(in oklab, var(--color-accent) 45%, var(--color-base-100))"
+
+      assert count(doc, ~s([data-node="fo"] svg[data-glyph="fan_out"] path[d="M7 1v5M7 6L2.5 12M7 6v6M7 6l4.5 6"])) == 1
+      assert doc |> q(~s([data-node="fo"])) |> LazyHTML.text() =~ "FAN OUT"
+      assert doc |> q(~s([data-node="fo"] [data-pill-sub])) |> LazyHTML.text() |> String.trim() == "max 2"
+      assert count(doc, ~s([data-node="fo"][phx-click])) == 0
+    end
+
+    # Scenario 8
+    test "a fan-in draws the join glyph, FAN IN and `all must succeed`" do
+      doc = panel(FanOutFixtures.put_node(FanOutFixtures.panel_nodes(), "fo", %{max_parallel: 2}), interactive?: false)
+
+      assert count(doc, ~s([data-node="fi"] svg[data-glyph="fan_in"] path[d="M2.5 2L7 8M7 2v6M11.5 2L7 8M7 8v5"])) == 1
+      assert doc |> q(~s([data-node="fi"])) |> LazyHTML.text() =~ "FAN IN"
+      assert doc |> q(~s([data-node="fi"] [data-pill-sub])) |> LazyHTML.text() |> String.trim() == "all must succeed"
+    end
+
+    # Scenario 9
+    test "a fan-out with no max_parallel has no sub-line" do
+      doc = panel()
+      assert count(doc, ~s([data-node="fo"] [data-pill-sub])) == 0
+    end
+
+    # Scenario 10
+    test "an interactive, selected fan-out is clickable and carries the accent selection ring" do
+      doc = panel(FanOutFixtures.panel_nodes(), interactive?: true, selected: {:node, "fo"})
+      fo = q(doc, ~s([data-node="fo"]))
+
+      assert LazyHTML.attribute(fo, "phx-click") == ["select_node"]
+      assert LazyHTML.attribute(fo, "phx-value-key") == ["fo"]
+
+      assert style_of(doc, ~s([data-node="fo"])) =~
+               "box-shadow:0 0 0 3px color-mix(in oklab, var(--color-accent) 30%, transparent)"
+    end
+
+    # Scenario 11
+    test "branch-start edges draw the neutral start stroke and no label pill" do
+      doc = panel(FanOutFixtures.panel_nodes(), interactive?: true)
+
+      for i <- [2, 3, 4], do: assert(count(doc, ~s([data-edge="#{i}"])) == 0, "edge #{i} has a pill")
+      assert count(doc, ~s([data-edge="5"])) == 1
+
+      path = q(doc, ~s(path[data-edge-path="2"]))
+      assert LazyHTML.attribute(path, "stroke") == ["color-mix(in oklab, var(--color-base-content) 45%, transparent)"]
+      assert LazyHTML.attribute(path, "marker-end") == ["url(#arw-start)"]
+    end
+
+    # Scenario 12
+    test "a branch's agent node is still the work card" do
+      style = style_of(panel(), ~s([data-node="b1"]))
+
+      assert style =~ "border-left:4px solid var(--color-secondary)"
+      assert style =~ "height:56px"
     end
   end
 end

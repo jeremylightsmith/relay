@@ -56,6 +56,34 @@ defmodule Storybook.FlowGraph do
       %{from: "write_docs", to: "done", on: :succeeded}
     ]
 
+    # RE439: a fan-out region, inlined (test/support's Relay.FanOutFixtures is not compiled in dev).
+    region_nodes = [
+      %{key: "prep", type: :shell, run: "mix deps.get"},
+      %{key: "review_panel", type: :fan_out, max_parallel: 2},
+      %{key: "security", type: :agent, agent: "quality-reviewer", effort: "high"},
+      %{key: "style", type: :agent, agent: "spec-reviewer", effort: "medium"},
+      %{key: "style_fix", type: :agent, agent: "final-fixer", effort: "medium"},
+      %{key: "tests", type: :shell, run: "mix test"},
+      %{key: "review_join", type: :fan_in},
+      %{key: "ship", type: :shell, run: "mix release"}
+    ]
+
+    region_edges = [
+      %{from: "start", to: "prep", on: nil},
+      %{from: "prep", to: "review_panel", on: :succeeded},
+      %{from: "review_panel", to: "security", on: nil},
+      %{from: "review_panel", to: "style", on: nil},
+      %{from: "review_panel", to: "tests", on: nil},
+      %{from: "security", to: "review_join", on: :succeeded},
+      %{from: "style", to: "style_fix", on: :failed, max_loops: 2},
+      %{from: "style_fix", to: "style", on: :succeeded},
+      %{from: "style", to: "review_join", on: :succeeded},
+      %{from: "tests", to: "review_join", on: :succeeded},
+      %{from: "review_join", to: "ship", on: :succeeded},
+      %{from: "review_join", to: "prep", on: :failed},
+      %{from: "ship", to: "done", on: :succeeded}
+    ]
+
     [
       %Variation{
         id: :default_code_flow,
@@ -122,6 +150,22 @@ defmodule Storybook.FlowGraph do
           lands_on: "Review",
           interactive?: false,
           llm: %{default: "Claude Opus", red: MapSet.new(["Gemini Pro"])}
+        }
+      },
+      %Variation{
+        id: :fan_out_region,
+        description:
+          "A fan-out region (RE439): `review panel` and `review join` are compact accent pills " <>
+            "with a fork and a join glyph. The three branch-start edges split from one point " <>
+            "at the fan-out's bottom-centre and carry no label (they have no outcome); every " <>
+            "branch merges into one point at the fan-in's top-centre. The branches between " <>
+            "them are ordinary work nodes — `style` loops with its fixer inside its branch.",
+        attributes: %{
+          nodes: region_nodes,
+          edges: region_edges,
+          layout: RelayWeb.FlowLayout.layout(region_nodes, region_edges),
+          lands_on: "Review",
+          interactive?: false
         }
       },
       %Variation{

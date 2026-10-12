@@ -236,4 +236,40 @@ defmodule RelayWeb.StorybookRenderTest do
     assert doc |> LazyHTML.query("button[id$='-in']") |> Enum.count() >= 1
     assert doc |> LazyHTML.query("button[id$='-reset']") |> LazyHTML.text() =~ "Fit"
   end
+
+  # RE439 scenario 14
+  test "GET /storybook/flow_editor/control_pill shows the fan-out and fan-in pills", %{conn: conn} do
+    html = conn |> get("/storybook/flow_editor/control_pill") |> html_response(200)
+
+    assert html =~ "FAN OUT"
+    assert html =~ "FAN IN"
+    assert html =~ "max 3"
+    assert html =~ "all must succeed"
+  end
+
+  # RE439 Task 2 scenario 14
+  test "GET /storybook/flow_editor/fan_out_inspector shows the branches, the note and Reset", %{conn: conn} do
+    html = conn |> get("/storybook/flow_editor/fan_out_inspector") |> html_response(200)
+
+    assert html =~ "BRANCHES · 3"
+    assert html =~ "Shared checkout."
+    assert html =~ "Reset to all branches"
+  end
+
+  # RE439 Task 3 scenario 8
+  test "GET /storybook/flow_editor/fan_in_inspector shows WAITS FOR and the RESOLVES rule", %{conn: conn} do
+    html = conn |> get("/storybook/flow_editor/fan_in_inspector") |> html_response(200)
+
+    assert html =~ "WAITS FOR · 3 BRANCHES OF"
+    assert html =~ "RESOLVES"
+    assert html =~ "when any branch failed"
+  end
+
+  # RE439 scenario 15
+  test "GET /storybook/flow_graph draws a fan-out region with fork and join glyphs", %{conn: conn} do
+    html = conn |> get("/storybook/flow_graph") |> html_response(200)
+
+    assert html =~ ~s(data-glyph="fan_out")
+    assert html =~ ~s(data-glyph="fan_in")
+  end
 end

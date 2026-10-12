@@ -827,4 +827,350 @@ defmodule RelayWeb.FlowEditorLiveTest do
       assert Enum.all?(added, &(Map.fetch(&1, :max_parallel) == {:ok, nil}))
     end
   end
+
+  describe "fan-out authoring (RE439)" do
+    alias Relay.FanOutFixtures
+    alias RelayWeb.ChangesetErrors
+
+    defp panel_editor(conn, board) do
+      {:ok, _flow} = Flows.create_flow(board, FanOutFixtures.panel_attrs(%{stage_id: deploy_id(board)}))
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/panel")
+      view
+    end
+
+    defp working_edges(view), do: :sys.get_state(view.pid).socket.assigns.working.edges
+
+    defp el_text(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp texts(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
+
+    defp ids(view, selector) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> LazyHTML.attribute("id")
+    end
+
+    defp connect!(view, from, to) do
+      view |> element("#toolbar-connect-edge") |> render_click()
+      view |> element(~s([data-node="#{from}"])) |> render_click()
+      view |> element(~s([data-node="#{to}"])) |> render_click()
+    end
+
+    defp select_fo(view), do: view |> element(~s([data-node="fo"])) |> render_click()
+
+    defp saved_fo(board) do
+      flow = Flows.get_flow!(board, "panel")
+      {flow.version, Enum.find(flow.nodes, &(&1.key == "fo"))}
+    end
+
+    # Scenario 1
+    test "an edge connected out of a fan-out is plain and opens the branch-start inspector",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "fo", "after")
+
+      assert List.last(working_edges(view)) == %{from: "fo", to: "after", on: nil, max_loops: nil, when: nil}
+      assert el_text(view, "#inspector-edge-kind") == "EDGE · BRANCH START"
+    end
+
+    # Scenario 2
+    test "an edge connected out of an ordinary node still routes on succeeded", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "prep", "after")
+
+      assert %{from: "prep", to: "after", on: :succeeded} = List.last(working_edges(view))
+      assert el_text(view, "#inspector-edge-kind") == "EDGE"
+    end
+
+    # Scenario 3
+    test "selecting a fan-out opens the fan-out inspector, not the work-node one", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      assert has_element?(view, ~s(#inspector-node-name[value="fo"]))
+      assert el_text(view, "#inspector-max-parallel-value") == "all"
+      assert has_element?(view, "#inspector-max-parallel-hint", "Unset runs every branch at once (3 today)")
+      assert has_element?(view, "#inspector-max-parallel-inc[disabled]")
+      refute has_element?(view, "#inspector-max-parallel-reset")
+
+      for id <- ~w(#inspector-node-form #inspector-node-agent-form #inspector-llm #inspector-effort-hint
+                   #inspector-max-retries-dec #inspector-node-timeout-form) do
+        refute has_element?(view, id), "expected no #{id} in the fan-out inspector"
+      end
+    end
+
+    # Scenario 4
+    test "stepping MAX PARALLEL down from unset saves max_parallel", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "2"
+      save!(view)
+
+      assert {2, %{max_parallel: 2}} = saved_fo(board)
+    end
+
+    # Scenario 5
+    test "Reset to all branches clears a saved max_parallel", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+      save!(view)
+      assert {2, %{max_parallel: 2}} = saved_fo(board)
+
+      select_fo(view)
+      view |> element("#inspector-max-parallel-reset") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "all"
+      save!(view)
+
+      assert {3, %{max_parallel: nil}} = saved_fo(board)
+    end
+
+    # Scenario 6
+    test "MAX PARALLEL floors at 1 and steps back up", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      render_hook(view, "edit_node_field", %{"key" => "fo", "field" => "max_parallel", "v" => "1"})
+      assert el_text(view, "#inspector-max-parallel-value") == "1"
+      assert has_element?(view, "#inspector-max-parallel-dec[disabled]")
+
+      view |> element("#inspector-max-parallel-inc") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "2"
+    end
+
+    # Scenario 7
+    test "BRANCHES lists each branch with its steps and loop, then the join and shared-checkout note",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      assert el_text(view, "#inspector-branches-label") == "BRANCHES · 3"
+
+      assert ids(view, "button[id^=inspector-branch-]") ==
+               ~w(inspector-branch-a inspector-branch-b1 inspector-branch-c)
+
+      assert texts(view, "button[id^=inspector-branch-] [data-branch-meta]") == ["1 step", "2 steps · loop", "1 step"]
+      assert has_element?(view, "#inspector-fan-out-join", "All branches join at")
+      assert has_element?(view, "#inspector-fan-out-join .font-mono", "fi")
+      assert has_element?(view, "#inspector-shared-checkout", "Shared checkout.")
+    end
+
+    # Scenario 8
+    test "BRANCHES follows the unsaved graph", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "fo", "after")
+      select_fo(view)
+
+      assert el_text(view, "#inspector-branches-label") == "BRANCHES · 4"
+      assert has_element?(view, "#inspector-branch-after")
+      assert has_element?(view, "#inspector-fan-out-join", "The branches don't join at one fan in yet.")
+    end
+
+    # Scenario 9
+    test "clicking a branch row opens the branch-start edge inspector", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-branch-b1") |> render_click()
+
+      assert el_text(view, "#inspector-edge-from") == "fo"
+      assert el_text(view, "#inspector-edge-to") == "b1"
+      assert el_text(view, "#inspector-edge-kind") == "EDGE · BRANCH START"
+      assert texts(view, "#inspector-edge-outcome[disabled] option") == ["(none · fires on entry)"]
+      assert texts(view, "#inspector-edge-when[disabled] option") == ["(none)"]
+      assert has_element?(view, "#inspector-branch-start-note", "fo")
+      refute has_element?(view, "#inspector-delete-edge")
+      refute has_element?(view, "#inspector-max-loops-inc")
+    end
+
+    # Scenario 10
+    test "the toolbar Delete removes a selected branch-start edge", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-branch-b1") |> render_click()
+      view |> element("#toolbar-delete") |> render_click()
+
+      refute Enum.any?(working_edges(view), &(&1.from == "fo" and &1.to == "b1"))
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+    end
+
+    # Scenario 11
+    test "an ordinary edge keeps the editable edge inspector", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      view |> element(~s([data-edge="5"])) |> render_click()
+
+      assert el_text(view, "#inspector-edge-kind") == "EDGE"
+      refute has_element?(view, "#inspector-edge-outcome[disabled]")
+      assert has_element?(view, "#inspector-edge-outcome option[selected]", "succeeded")
+      assert has_element?(view, "#inspector-delete-edge")
+    end
+
+    defp select_node(view, key), do: view |> element(~s([data-node="#{key}"])) |> render_click()
+
+    defp style_of(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.attribute("style")
+      |> List.first()
+    end
+
+    # Task 3 scenario 1
+    test "selecting a fan-in opens the read-only fan-in inspector with WAITS FOR and RESOLVES",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_node(view, "fi")
+
+      assert has_element?(view, ~s(#inspector-node-name[value="fi"]))
+      assert el_text(view, "#inspector-waits-for-label") == "WAITS FOR · 3 BRANCHES OF fo"
+
+      assert ids(view, "[id^=inspector-wait-]:not([id^=inspector-waits-])") ==
+               ~w(inspector-wait-a inspector-wait-b1 inspector-wait-c)
+
+      assert texts(view, "[id^=inspector-wait-] [data-wait-outcomes]") == ["succeeded / failed", "succeeded", "succeeded"]
+      assert has_element?(view, "#inspector-resolves", "when every branch succeeded")
+      assert has_element?(view, "#inspector-resolves", "when any branch failed")
+      assert has_element?(view, "#inspector-fan-in-note", "Always waits for every branch.")
+
+      for sel <- [
+            "#flow-inspector textarea",
+            "#flow-inspector select",
+            "#inspector-max-parallel-dec",
+            "#inspector-max-retries-dec",
+            "#inspector-node-timeout-form"
+          ] do
+        refute has_element?(view, sel), "expected no #{sel} in the fan-in inspector"
+      end
+    end
+
+    # Task 3 scenario 2
+    test "a fan-in no region closes shows 0 branches and defers to the bar", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      view |> element(~s([data-edge="10"])) |> render_click()
+      view |> element("#inspector-delete-edge") |> render_click()
+      select_node(view, "fi")
+
+      assert el_text(view, "#inspector-waits-for-label") == "WAITS FOR · 0 BRANCHES"
+      assert has_element?(view, "#inspector-waits-for-empty", "No fan-out closes here yet. The unsaved bar says why.")
+      assert ~s(branch "c" of fan_out "fo" never reaches a fan_in) in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+    end
+
+    defp leave_region!(view, board) do
+      connect!(view, "c", "after")
+
+      ChangesetErrors.leaf_messages(
+        Schemas.Flow.changeset(%Schemas.Flow{}, %{
+          key: "panel",
+          isolation: :shared_clean,
+          stage_id: deploy_id(board),
+          nodes: FanOutFixtures.panel_nodes(),
+          edges: FanOutFixtures.panel_edges() ++ [%{from: "c", to: "after", on: :succeeded}]
+        })
+      )
+    end
+
+    # Task 3 scenario 3 (acceptance criterion 6)
+    test "an edge leaving the region lists flow-push's messages, disables Save and leaves the canvas unmarked",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      expected = leave_region!(view, board)
+
+      assert ~s(edge "c" → "after" leaves the region of fan_out "fo") in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+      assert error_texts(view) == expected
+
+      for key <- ~w(c after fo fi) do
+        refute style_of(view, ~s([data-node="#{key}"])) =~ "--color-error", "expected #{key} unmarked"
+      end
+    end
+
+    # Task 3 scenario 4
+    test "the unsaved bar lays the error list out as a column, one span per message", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      leave_region!(view, board)
+
+      assert style_of(view, "#flow-editor-errors") =~ "flex-direction:column"
+      assert length(error_texts(view)) == length(Enum.uniq(error_texts(view)))
+      assert style_of(view, "#flow-editor-unsaved-bar") =~ "align-items:flex-start;"
+      assert style_of(view, "#flow-editor-unsaved-bar") =~ "flex-wrap:wrap;"
+    end
+
+    defp connect_done!(view, from) do
+      view |> element("#toolbar-connect-edge") |> render_click()
+      view |> element(~s([data-node="#{from}"])) |> render_click()
+      view |> element("#flow-node-done") |> render_click()
+    end
+
+    # Task 3 scenario 5 (acceptance criterion 2, end to end)
+    test "a whole fan-out region is built, capped and saved in the editor", %{conn: conn, board: board} do
+      {:ok, _flow} =
+        Flows.create_flow(board, %{
+          key: "build",
+          isolation: :shared_clean,
+          stage_id: deploy_id(board),
+          nodes: [%{key: "prep", type: :shell, run: "true"}],
+          edges: [%{from: "start", to: "prep"}, %{from: "prep", to: "done", on: :succeeded}]
+        })
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/build")
+
+      view |> element(~s([data-edge="1"])) |> render_click()
+      view |> element("#inspector-delete-edge") |> render_click()
+
+      view |> element("#palette-fan_out") |> render_click()
+      for _ <- 1..3, do: view |> element("#palette-agent") |> render_click()
+      view |> element("#palette-fan_in") |> render_click()
+
+      connect!(view, "prep", "fan_out-1")
+      for n <- 1..3, do: connect!(view, "fan_out-1", "agent-#{n}")
+      for n <- 1..3, do: connect!(view, "agent-#{n}", "fan_in-1")
+      connect_done!(view, "fan_in-1")
+
+      connect!(view, "fan_in-1", "prep")
+      index = length(working_edges(view)) - 1
+
+      view
+      |> element("#inspector-edge-outcome-form")
+      |> render_change(%{"index" => "#{index}", "field" => "on", "value" => "failed"})
+
+      select_node(view, "fan_out-1")
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+
+      assert error_texts(view) == []
+      save!(view)
+
+      stored = Flows.get_flow!(board, "build")
+      assert stored.version == 2
+
+      fan_out = Enum.find(stored.nodes, &(&1.key == "fan_out-1"))
+
+      assert %{type: :fan_out, max_parallel: 2, run: nil, agent: nil, llm: nil, effort: nil} = fan_out
+      assert %{max_retries: nil, timeout_minutes: nil} = fan_out
+
+      fo_edges = Enum.filter(stored.edges, &(&1.from == "fan_out-1"))
+      assert Enum.map(fo_edges, & &1.to) == ~w(agent-1 agent-2 agent-3)
+      assert Enum.all?(fo_edges, &(is_nil(&1.on) and is_nil(&1.when)))
+
+      assert %{type: :fan_in} = Enum.find(stored.nodes, &(&1.key == "fan_in-1"))
+      assert Enum.any?(stored.edges, &(&1.from == "fan_in-1" and &1.to == "done" and &1.on == :succeeded))
+      assert Enum.any?(stored.edges, &(&1.from == "fan_in-1" and &1.to == "prep" and &1.on == :failed))
+
+      assert %{fan_in: "fan_in-1", max_parallel: 2, branches: [_, _, _]} =
+               Schemas.Flow.region(stored, "fan_out-1")
+    end
+  end
 end

@@ -504,4 +504,75 @@ defmodule RelayWeb.FlowLayoutTest do
       assert ~w(triage fix ship) |> Enum.map(&centre_x(nodes, layout, &1)) |> Enum.uniq() |> length() == 1
     end
   end
+
+  describe "fan_out / fan_in control pills (RE439)" do
+    alias Relay.FanOutFixtures
+
+    defp panel_layout, do: FlowLayout.layout(FanOutFixtures.panel_nodes(), FanOutFixtures.panel_edges())
+
+    # Scenario 1
+    test "every control type is sized as a 180×36 pill; work nodes keep their sizes" do
+      for type <- Schemas.Flow.Node.control_types() do
+        assert FlowLayout.node_size(type) == {180, 36}
+      end
+
+      assert FlowLayout.node_size(:agent) == {150, 56}
+      assert FlowLayout.node_size(:gate) == {118, 76}
+    end
+
+    # Scenario 2
+    test "branch-start edges carry no label; a branch's outcome edge does" do
+      routes = panel_layout().routes
+
+      assert routes[2].label == nil
+      assert routes[3].label == nil
+      assert routes[4].label == nil
+      assert {x, y} = routes[5].label
+      assert is_integer(x) and is_integer(y)
+    end
+
+    # Scenario 3
+    test "every branch-start edge leaves the fan-out from one point, the pill's bottom-centre" do
+      layout = panel_layout()
+      {fx, fy} = layout.positions["fo"]
+
+      for i <- [2, 3, 4] do
+        assert hd(layout.routes[i].points) == {fx + 90, fy + 36}, "edge #{i}"
+      end
+    end
+
+    # Scenario 4
+    test "every edge into the fan-in lands on one point, the pill's top-centre" do
+      layout = panel_layout()
+      {ix, iy} = layout.positions["fi"]
+
+      for i <- [5, 6, 9, 10] do
+        assert List.last(layout.routes[i].points) == {ix + 90, iy}, "edge #{i}"
+      end
+    end
+
+    # Scenario 5
+    test "the spine walks through the fan-out along its first branch" do
+      assert FlowLayout.spine(FanOutFixtures.panel_edges()) == MapSet.new([0, 1, 2, 5, 11, 13])
+    end
+
+    # Scenario 6
+    test "the panel lays out with no overlapping boxes and only axis-aligned routes" do
+      nodes = FanOutFixtures.panel_nodes()
+      layout = panel_layout()
+      boxes = boxes(nodes, layout)
+
+      for {a, box_a} <- boxes, {b, box_b} <- boxes, a < b do
+        refute overlap?(box_a, box_b), "#{a} overlaps #{b}"
+      end
+
+      for {i, %{points: points}} <- layout.routes do
+        assert length(points) >= 2, "edge #{i} has fewer than two points"
+
+        for [{x1, y1}, {x2, y2}] <- segments(points) do
+          assert x1 == x2 or y1 == y2, "edge #{i} has a diagonal segment #{inspect({{x1, y1}, {x2, y2}})}"
+        end
+      end
+    end
+  end
 end

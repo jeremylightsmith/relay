@@ -7,6 +7,8 @@ defmodule RelayWeb.FlowEditorComponents do
   """
   use RelayWeb, :html
 
+  alias Schemas.Flow.Edge
+
   @type_tag %{
     agent:
       {"AGENT", "color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content))",
@@ -17,23 +19,23 @@ defmodule RelayWeb.FlowEditorComponents do
     gate:
       {"GATE", "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))",
        "color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100))"},
-    fan_out:
-      {"FAN OUT", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
-       "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"},
-    fan_in:
-      {"FAN IN", "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))",
-       "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"},
     human:
       {"HUMAN", "color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content))",
        "color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100))"}
   }
 
+  # Every control type (`Schemas.Flow.Node.control_types/0`) shares one badge colour pair; its tag
+  # is derived from the type (`type_tag_entry/1`). The text colour also tints the palette glyph.
+  @control_tag_color "color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content))"
+  @control_tag_bg "color-mix(in oklab, var(--color-accent) 15%, var(--color-base-100))"
+
+  # {type, label, swatch colour}. A control type draws its glyph instead of a swatch (RE439).
   @palette_types [
     {:agent, "Agent", "var(--color-secondary)"},
     {:shell, "Shell", "color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))"},
     {:gate, "Gate", "var(--color-warning)"},
-    {:fan_out, "Fan out", "var(--color-accent)"},
-    {:fan_in, "Fan in", "var(--color-accent)"},
+    {:fan_out, "Fan out", nil},
+    {:fan_in, "Fan in", nil},
     {:human, "Human", "var(--color-primary)"}
   ]
 
@@ -45,7 +47,7 @@ defmodule RelayWeb.FlowEditorComponents do
   attr :read_only?, :boolean, default: false
 
   def palette(assigns) do
-    assigns = assign(assigns, :types, @palette_types)
+    assigns = assign(assigns, types: @palette_types, glyph_color: @control_tag_color)
 
     ~H"""
     <div style="display:flex;gap:5px;">
@@ -58,7 +60,16 @@ defmodule RelayWeb.FlowEditorComponents do
         disabled={@read_only?}
         style="display:flex;align-items:center;gap:6px;background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 85%, transparent);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;"
       >
-        <span style={"width:9px;height:9px;border-radius:#{if type == :gate, do: "0;transform:rotate(45deg)", else: "3px"};background:#{accent};display:inline-block;"}>
+        <span
+          :if={type in Schemas.Flow.Node.control_types()}
+          style={"color:#{@glyph_color};display:flex;"}
+        >
+          <RelayWeb.FlowGraphComponents.control_glyph type={type} size={14} />
+        </span>
+        <span
+          :if={type not in Schemas.Flow.Node.control_types()}
+          style={"width:9px;height:9px;border-radius:#{if type == :gate, do: "0;transform:rotate(45deg)", else: "3px"};background:#{accent};display:inline-block;"}
+        >
         </span>
         {label}
       </button>
@@ -131,46 +142,7 @@ defmodule RelayWeb.FlowEditorComponents do
 
     ~H"""
     <div>
-      <div style="padding:16px 18px;border-bottom:1px solid var(--color-base-300);display:flex;flex-direction:column;gap:10px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style={type_badge_style(@node.type)}>{type_tag(@node.type)}</span>
-          <span style="flex:1;"></span>
-          <button
-            id="inspector-delete-node"
-            type="button"
-            phx-click="delete_selected"
-            disabled={@read_only? or @referenced_count > 0}
-            style={delete_button_style(@referenced_count > 0)}
-          >
-            Delete node
-          </button>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <.meta_label>
-            NODE NAME
-          </.meta_label>
-          <form id="inspector-node-rename-form" phx-change="rename_node">
-            <input type="hidden" name="key" value={@node.key} />
-            <input
-              id="inspector-node-name"
-              name="value"
-              type="text"
-              value={@node.key}
-              disabled={@read_only?}
-              phx-debounce="blur"
-              style="width:100%;padding:7px 9px;border:1px solid var(--color-field-border);border-radius:7px;font-size:15px;font-weight:600;color:var(--color-base-content);background:var(--color-field-bg);"
-            />
-          </form>
-        </div>
-        <div
-          :if={@referenced_count > 0}
-          id="inspector-delete-guard"
-          style="display:flex;align-items:center;gap:7px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));border-radius:7px;padding:7px 9px;font-size:11px;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));"
-        >
-          <span style="font-weight:700;">⚠</span>
-          Referenced by {@referenced_count} edge{if @referenced_count != 1, do: "s"} — clear them before deleting
-        </div>
-      </div>
+      <.node_header node={@node} referenced_count={@referenced_count} read_only?={@read_only?} />
 
       <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
         <div style="display:flex;flex-direction:column;gap:7px;">
@@ -462,23 +434,416 @@ defmodule RelayWeb.FlowEditorComponents do
     """
   end
 
+  # ---- shared node header (type badge, Delete node, NODE NAME, delete guard) ----
+
+  attr :node, :map, required: true
+  attr :referenced_count, :integer, required: true
+  attr :read_only?, :boolean, default: false
+
+  defp node_header(assigns) do
+    ~H"""
+    <div style="padding:16px 18px;border-bottom:1px solid var(--color-base-300);display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style={type_badge_style(@node.type)}>{type_tag(@node.type)}</span>
+        <span style="flex:1;"></span>
+        <button
+          id="inspector-delete-node"
+          type="button"
+          phx-click="delete_selected"
+          disabled={@read_only? or @referenced_count > 0}
+          style={delete_button_style(@referenced_count > 0)}
+        >
+          Delete node
+        </button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <.meta_label>
+          NODE NAME
+        </.meta_label>
+        <form id="inspector-node-rename-form" phx-change="rename_node">
+          <input type="hidden" name="key" value={@node.key} />
+          <input
+            id="inspector-node-name"
+            name="value"
+            type="text"
+            value={@node.key}
+            disabled={@read_only?}
+            phx-debounce="blur"
+            style="width:100%;padding:7px 9px;border:1px solid var(--color-field-border);border-radius:7px;font-size:15px;font-weight:600;color:var(--color-base-content);background:var(--color-field-bg);"
+          />
+        </form>
+      </div>
+      <div
+        :if={@referenced_count > 0}
+        id="inspector-delete-guard"
+        style="display:flex;align-items:center;gap:7px;background:color-mix(in oklab, var(--color-error) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100));border-radius:7px;padding:7px 9px;font-size:11px;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));"
+      >
+        <span style="font-weight:700;">⚠</span>
+        Referenced by {@referenced_count} edge{if @referenced_count != 1, do: "s"} — clear them before deleting
+      </div>
+    </div>
+    """
+  end
+
+  # ---- Fan-out inspector (RE439) ----
+
+  attr :node, :map, required: true, doc: "the working-copy `fan_out` node (`key`, `type`, `max_parallel`)"
+  attr :region, :map, required: true, doc: "`Schemas.Flow.region(working, node.key)`"
+
+  attr :out_edges, :list,
+    required: true,
+    doc:
+      "the fan-out's outgoing working-copy edges as `{edge, index}`, in working-copy order — " <>
+        "`Enum.at(out_edges, branch.position)` is that branch's edge"
+
+  attr :edges, :list, required: true, doc: "every working-copy edge (plain maps), to spot a branch's loop"
+
+  attr :nodes, :list,
+    required: true,
+    doc: "every working-copy node (plain maps), to tint each branch's bar by its head node's type"
+
+  attr :referenced_count, :integer, required: true
+  attr :read_only?, :boolean, default: false
+
+  @doc """
+  The inspector for a `fan_out` node (RE439): NODE NAME, the MAX PARALLEL stepper and Reset, the
+  BRANCHES list derived from the (unsaved) region, the join line and the Shared checkout note.
+  Matches card mockup "Editor — fan out / fan in as compact pills", section 1.
+  """
+  def fan_out_inspector(assigns) do
+    max_parallel = Map.get(assigns.node, :max_parallel)
+    branch_count = length(assigns.region.branches)
+
+    assigns =
+      assign(assigns,
+        max_parallel: max_parallel,
+        branch_count: branch_count,
+        branch_rows: branch_rows(assigns)
+      )
+
+    ~H"""
+    <div>
+      <.node_header node={@node} referenced_count={@referenced_count} read_only?={@read_only?} />
+
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <.meta_label>MAX PARALLEL</.meta_label>
+          <div style="display:inline-flex;align-items:center;border:1px solid var(--color-field-border);border-radius:8px;overflow:hidden;align-self:flex-start;">
+            <button
+              id="inspector-max-parallel-dec"
+              type="button"
+              phx-click="edit_node_field"
+              phx-value-key={@node.key}
+              phx-value-field="max_parallel"
+              phx-value-v={max_parallel_step(@max_parallel, @branch_count, -1)}
+              disabled={@read_only? or @max_parallel == 1}
+              style={stepper_button_style()}
+            >
+              −
+            </button>
+            <span
+              id="inspector-max-parallel-value"
+              style="width:34px;text-align:center;font-size:13px;font-family:ui-monospace,monospace;"
+            >
+              {@max_parallel || "all"}
+            </span>
+            <button
+              id="inspector-max-parallel-inc"
+              type="button"
+              phx-click="edit_node_field"
+              phx-value-key={@node.key}
+              phx-value-field="max_parallel"
+              phx-value-v={max_parallel_step(@max_parallel, @branch_count, 1)}
+              disabled={@read_only? or is_nil(@max_parallel)}
+              style={stepper_button_style()}
+            >
+              +
+            </button>
+          </div>
+          <span
+            id="inspector-max-parallel-hint"
+            class="text-base-content/65"
+            style="font-size:11.5px;line-height:1.45;"
+          >
+            Unset runs every branch at once ({@branch_count} today). Lower it to cap how many branch jobs this run's runner holds at a time.
+          </span>
+          <button
+            :if={@max_parallel}
+            id="inspector-max-parallel-reset"
+            type="button"
+            phx-click="edit_node_field"
+            phx-value-key={@node.key}
+            phx-value-field="max_parallel"
+            phx-value-v=""
+            disabled={@read_only?}
+            style="align-self:flex-start;padding:0;border:0;background:transparent;font-size:11.5px;font-weight:600;color:color-mix(in oklab, var(--color-accent) 45%, var(--color-base-content));"
+          >
+            Reset to all branches
+          </button>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <.meta_label id="inspector-branches-label">BRANCHES · {@branch_count}</.meta_label>
+          <div
+            :if={@branch_rows != []}
+            class="border border-base-300 rounded-lg overflow-hidden"
+            style="margin-top:-1px;"
+          >
+            <%!-- Same select_edge rows as OUTGOING EDGES (RE330): a branch row opens its
+            branch-start edge in the edge inspector. Clickable only when interactive. --%>
+            <button
+              :for={row <- @branch_rows}
+              id={"inspector-branch-#{row.key}"}
+              type="button"
+              phx-click={if !@read_only? and row.index, do: "select_edge"}
+              phx-value-index={if !@read_only?, do: row.index}
+              disabled={@read_only?}
+              style={"display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 11px;border:0;border-top:1px solid var(--color-base-300);background:transparent;color:inherit;font-size:12.5px;cursor:#{if @read_only?, do: "default", else: "pointer"};"}
+            >
+              <span
+                data-branch-bar
+                style={"width:4px;height:16px;border-radius:2px;background:#{row.accent};"}
+              >
+              </span>
+              <span style="font-family:ui-monospace,monospace;font-weight:600;">{row.key}</span>
+              <span style="flex:1;"></span>
+              <span
+                data-branch-meta
+                class="text-base-content/65"
+                style="font-size:11px;font-family:ui-monospace,monospace;"
+              >
+                {row.meta}
+              </span>
+            </button>
+          </div>
+          <span id="inspector-fan-out-join" class="text-base-content/65" style="font-size:11.5px;">
+            Every outgoing edge starts a branch. All of them fire when the run enters this node.
+            <%= if @region.fan_in do %>
+              All branches join at <span class="font-mono">{@region.fan_in}</span>.
+            <% else %>
+              The branches don't join at one fan in yet.
+            <% end %>
+          </span>
+        </div>
+
+        <div
+          id="inspector-shared-checkout"
+          style="font-size:11.5px;line-height:1.5;padding:9px 11px;border-radius:8px;background:color-mix(in oklab, var(--color-accent) 6%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
+        >
+          <b>Shared checkout.</b>
+          Branches run at the same time in this run's worktree. Relay does no git work for them, so edits to the same file, concurrent commits, and parallel
+          <span class="font-mono">mix compile</span>
+          are up to the flow.
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # ---- Fan-in inspector (RE439) ----
+
+  attr :node, :map, required: true, doc: "the working-copy `fan_in` node (`key`, `type`)"
+
+  attr :region, :map,
+    default: nil,
+    doc: "the region whose `fan_in` is this node (`Schemas.Flow.regions/1`), or nil when none closes here"
+
+  attr :edges, :list, required: true, doc: "every working-copy edge (plain maps), for each branch's outcomes"
+
+  attr :nodes, :list,
+    default: [],
+    doc: "every working-copy node (plain maps), to tint each branch's bar by its head node's type"
+
+  attr :referenced_count, :integer, required: true
+  attr :read_only?, :boolean, default: false
+
+  @doc """
+  The inspector for a `fan_in` node (RE439): NODE NAME, the WAITS FOR list derived from the
+  (unsaved) region, the RESOLVES rule and the always-waits note. Nothing on it is editable but the
+  shared header. With no region — nothing closes here, or the region is invalid — it shows the
+  empty line and leaves the why to the unsaved bar. Matches card mockup "Editor — fan out / fan in
+  as compact pills", section 2.
+  """
+  def fan_in_inspector(assigns) do
+    assigns = assign(assigns, :wait_rows, wait_rows(assigns))
+
+    ~H"""
+    <div>
+      <.node_header node={@node} referenced_count={@referenced_count} read_only?={@read_only?} />
+
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <%= if @region do %>
+            <.meta_label id="inspector-waits-for-label">
+              WAITS FOR · {length(@region.branches)} BRANCHES OF {@region.fan_out}
+            </.meta_label>
+            <div class="border border-base-300 rounded-lg overflow-hidden" style="margin-top:-1px;">
+              <div
+                :for={row <- @wait_rows}
+                id={"inspector-wait-#{row.key}"}
+                style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--color-base-300);font-size:12.5px;"
+              >
+                <span
+                  data-branch-bar
+                  style={"width:4px;height:16px;border-radius:2px;background:#{row.accent};"}
+                >
+                </span>
+                <span style="font-family:ui-monospace,monospace;font-weight:600;">{row.key}</span>
+                <span style="flex:1;"></span>
+                <span
+                  data-wait-outcomes
+                  class="text-base-content/65"
+                  style="font-size:11px;font-family:ui-monospace,monospace;"
+                >
+                  {row.outcomes}
+                </span>
+              </div>
+            </div>
+          <% else %>
+            <.meta_label id="inspector-waits-for-label">WAITS FOR · 0 BRANCHES</.meta_label>
+            <span
+              id="inspector-waits-for-empty"
+              class="text-base-content/65"
+              style="font-size:11.5px;line-height:1.45;"
+            >
+              No fan-out closes here yet. The unsaved bar says why.
+            </span>
+          <% end %>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <.meta_label>RESOLVES</.meta_label>
+          <div id="inspector-resolves" style="font-size:12.5px;line-height:1.7;">
+            <div>
+              <span
+                data-resolves-outcome
+                style="font-family:ui-monospace,monospace;font-weight:600;color:var(--color-success);"
+              >
+                succeeded
+              </span>
+              when every branch succeeded
+            </div>
+            <div>
+              <span
+                data-resolves-outcome
+                style="font-family:ui-monospace,monospace;font-weight:600;color:var(--color-error);"
+              >
+                failed
+              </span>
+              when any branch failed
+            </div>
+          </div>
+          <span
+            id="inspector-fan-in-note"
+            class="text-base-content/65"
+            style="font-size:11.5px;line-height:1.45;"
+          >
+            Always waits for every branch. The next node gets each branch's result, labelled by branch.
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # One row per region branch, in branch order: the head node's accent and the de-duplicated `on`
+  # of every edge from the branch's nodes into the fan-in, in edge order.
+  defp wait_rows(%{region: nil}), do: []
+
+  defp wait_rows(%{region: region, edges: edges, nodes: nodes}) do
+    for branch <- region.branches do
+      outcomes =
+        edges
+        |> Enum.filter(&(&1.from in branch.nodes and &1.to == region.fan_in))
+        |> Enum.map(&to_string(Map.get(&1, :on)))
+        |> Enum.uniq()
+        |> Enum.join(" / ")
+
+      %{
+        key: branch.key,
+        accent: type_accent(Enum.find_value(nodes, &(&1.key == branch.key && &1.type))),
+        outcomes: outcomes
+      }
+    end
+  end
+
+  # One row per region branch: its `select_edge` index (the branch's own edge, through
+  # `out_edges` — `position` indexes the fan-out's edges, not the working copy's), the head
+  # node's accent, and the `1 step` / `N steps · loop` meta.
+  defp branch_rows(%{region: region, out_edges: out_edges, edges: edges, nodes: nodes}) do
+    for branch <- region.branches do
+      index =
+        case Enum.at(out_edges, branch.position) do
+          {_edge, index} -> index
+          nil -> nil
+        end
+
+      %{
+        key: branch.key,
+        index: index,
+        accent: type_accent(Enum.find_value(nodes, &(&1.key == branch.key && &1.type))),
+        meta: branch_meta(branch.nodes, edges)
+      }
+    end
+  end
+
+  defp branch_meta(nodes, edges) do
+    steps = if length(nodes) == 1, do: "1 step", else: "#{length(nodes)} steps"
+    if branch_loop?(nodes, edges), do: steps <> " · loop", else: steps
+  end
+
+  # A loop edge (`Schemas.Flow.Edge.loop?/1`) kept within the branch's nodes.
+  defp branch_loop?(nodes, edges) do
+    Enum.any?(edges, &(Edge.loop?(&1) and &1.from in nodes and &1.to in nodes))
+  end
+
+  # The palette's accent for a work type; a control type (nil swatch in @palette_types) or a head
+  # that isn't a node falls back to accent.
+  defp type_accent(type) do
+    Enum.find_value(@palette_types, fn {t, _label, accent} -> t == type && accent end) ||
+      "var(--color-accent)"
+  end
+
+  # MAX PARALLEL's − / + payload (RE439). Floor 1, and only Reset clears it — unlike
+  # `stepper_value/2`, which clears to "" below 1. Unset steps down from the branch count; +
+  # on unset is disabled (unset already runs every branch), so its payload is a no-op "".
+  defp max_parallel_step(nil, branches, -1), do: max(branches - 1, 1)
+  defp max_parallel_step(nil, _branches, 1), do: ""
+  defp max_parallel_step(k, _branches, delta), do: max(k + delta, 1)
+
+  # The disabled OUTCOME / WHEN selects of a branch-start edge (mockup section 3).
+  defp branch_start_select_style,
+    do:
+      "border:1px solid var(--color-field-border);background:var(--color-field-hover);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+
+  defp stepper_button_style,
+    do:
+      "width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:16px;border:0;background:var(--color-base-100);"
+
   # ---- Edge inspector ----
 
   attr :edge, :map, required: true
   attr :index, :integer, required: true
   attr :read_only?, :boolean, default: false
 
+  attr :branch_start?, :boolean,
+    default: false,
+    doc:
+      "the edge leaves a fan-out (RE439): no outcome or guard, so OUTCOME / WHEN read as " <>
+        "disabled and there's no Delete edge or MAX LOOPS (the toolbar Delete still removes it)"
+
   def edge_inspector(assigns) do
-    assigns = assign(assigns, outcomes: @outcomes, whens: Schemas.Flow.Edge.when_values())
+    assigns = assign(assigns, outcomes: @outcomes, whens: Edge.when_values())
 
     ~H"""
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px;">
       <div style="display:flex;align-items:center;gap:8px;">
-        <.meta_label>
-          EDGE
+        <.meta_label id="inspector-edge-kind">
+          {if @branch_start?, do: "EDGE · BRANCH START", else: "EDGE"}
         </.meta_label>
         <span style="flex:1;"></span>
         <button
+          :if={!@branch_start?}
           id="inspector-delete-edge"
           type="button"
           phx-click="delete_selected"
@@ -509,10 +874,19 @@ defmodule RelayWeb.FlowEditorComponents do
         <.meta_label>
           OUTCOME
         </.meta_label>
-        <form id="inspector-edge-outcome-form" phx-change="edit_edge">
+        <select
+          :if={@branch_start?}
+          id="inspector-edge-outcome"
+          disabled
+          style={branch_start_select_style()}
+        >
+          <option>(none · fires on entry)</option>
+        </select>
+        <form :if={!@branch_start?} id="inspector-edge-outcome-form" phx-change="edit_edge">
           <input type="hidden" name="index" value={@index} />
           <input type="hidden" name="field" value="on" />
           <select
+            id="inspector-edge-outcome"
             name="value"
             disabled={@read_only?}
             style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
@@ -532,7 +906,15 @@ defmodule RelayWeb.FlowEditorComponents do
         <.meta_label>
           WHEN
         </.meta_label>
-        <form id="inspector-edge-when-form" phx-change="edit_edge">
+        <select
+          :if={@branch_start?}
+          id="inspector-edge-when"
+          disabled
+          style={branch_start_select_style()}
+        >
+          <option>(none)</option>
+        </select>
+        <form :if={!@branch_start?} id="inspector-edge-when-form" phx-change="edit_edge">
           <input type="hidden" name="index" value={@index} />
           <input type="hidden" name="field" value="when" />
           <select
@@ -553,7 +935,18 @@ defmodule RelayWeb.FlowEditorComponents do
         </form>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:8px;">
+      <span
+        :if={@branch_start?}
+        id="inspector-branch-start-note"
+        class="text-base-content/65"
+        style="font-size:11.5px;line-height:1.45;"
+      >
+        An edge out of a fan-out has no outcome or guard. Entering
+        <span class="font-mono">{@edge.from}</span>
+        fires all of them.
+      </span>
+
+      <div :if={!@branch_start?} style="display:flex;flex-direction:column;gap:8px;">
         <.meta_label>
           MAX LOOPS
         </.meta_label>
@@ -732,12 +1125,21 @@ defmodule RelayWeb.FlowEditorComponents do
 
   # ---- private helpers ----
 
-  defp type_tag(type), do: elem(Map.fetch!(@type_tag, type), 0)
+  defp type_tag(type), do: elem(type_tag_entry(type), 0)
 
   defp type_badge_style(type) do
-    {_tag, color, bg} = Map.fetch!(@type_tag, type)
+    {_tag, color, bg} = type_tag_entry(type)
 
     "font-size:9px;font-weight:700;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:#{color};background:#{bg};padding:3px 8px;border-radius:5px;"
+  end
+
+  defp type_tag_entry(type) do
+    if type in Schemas.Flow.Node.control_types() do
+      tag = type |> Atom.to_string() |> String.replace("_", " ") |> String.upcase()
+      {tag, @control_tag_color, @control_tag_bg}
+    else
+      Map.fetch!(@type_tag, type)
+    end
   end
 
   defp delete_button_style(true),

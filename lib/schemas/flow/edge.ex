@@ -38,6 +38,13 @@ defmodule Schemas.Flow.Edge do
   @doc "The closed set of foreach `when` guard values (AGENTS.md: defined once, read by both the schema field and the flow editor's WHEN control)."
   def when_values, do: @when_values
 
+  @doc """
+  Whether `edge` is a loop-back edge: one carrying a `max_loops` cap (nil or 0 = not a loop).
+  Takes the struct or a plain map (the flow editor's working copy) — the ONE "is this edge a
+  loop" rule the editor's stats bar and fan-out BRANCHES "· loop" flag both read (RE439).
+  """
+  def loop?(edge), do: Map.get(edge, :max_loops) not in [nil, 0]
+
   @doc "Validates one edge; graph-level rules (endpoints, routing) live on Schemas.Flow."
   def changeset(edge, attrs) do
     edge
