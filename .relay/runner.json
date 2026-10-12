@@ -2,7 +2,7 @@
   "namespace": "relay",
   "capacity": {
     "shared_clean": 3,
-    "exclusive": 2
+    "exclusive": 3
   },
   "base": "origin/main",
   "cache_dir": "~/.cache/relay/exec",

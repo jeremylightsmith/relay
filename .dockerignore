@@ -47,3 +47,26 @@ erl_crash.dump
 /assets/node_modules/
 /priv/static/assets/
 /priv/static/cache_manifest.json
+
+# Not part of the server build: the Flutter app (and its multi-GB build/ and .dart_tool/),
+# storybook sources, and local tooling/agent state.
+/flutter/
+/storybook/
+/.playwright-mcp/
+/.github/
+/.githooks/
+/.relay/
+/.relay-watch-state.json
+__pycache__/
+.DS_Store
+
+# `COPY .claude .claude` only needs the Relay-owned skills Scaffold.items/0 lists; never ship
+# the executor worktrees (full repo checkouts) or per-machine settings into the builder.
+/.claude/worktrees/
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
+
+# Secrets and local env — must never reach the build context.
+.envrc
+.envrc.local
+.mcp.json
