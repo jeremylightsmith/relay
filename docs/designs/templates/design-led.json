@@ -1,0 +1,134 @@
+{
+  "slug": "design-led",
+  "name": "Design-led",
+  "tagline": "Mockups before, screenshots after.",
+  "blurb": "AI mocks up the screen first, plans from the approved mockup, builds it, then screenshots the real app next to the mockup for your review. No spec stage; you deploy by hand.",
+  "warning": null,
+  "stages": [
+    {"name": "Backlog", "category": "unstarted", "type": "queue", "wip_limit": null, "sublanes": []},
+    {"name": "Next up", "category": "unstarted", "type": "queue", "wip_limit": 3, "sublanes": []},
+    {"name": "Design", "category": "planning", "type": "planning", "wip_limit": 3, "sublanes": ["review", "done"]},
+    {"name": "Plan", "category": "planning", "type": "planning", "wip_limit": 2, "sublanes": ["review", "done"]},
+    {"name": "Code", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Review", "category": "in_progress", "type": "review", "wip_limit": 3, "sublanes": []},
+    {"name": "Deploy", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Done", "category": "complete", "type": "done", "wip_limit": null, "sublanes": []}
+  ],
+  "agents": [],
+  "flows": [
+    {
+      "key": "design",
+      "isolation": "shared_clean",
+      "trigger": { "stage": "Design" },
+      "nodes": [
+        {
+          "key": "mockups",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "writes": ["mockups"],
+          "run": "Card {ref} needs a design before anyone plans it.\n\n1. Open the running app and screenshot the screen this card changes.\n2. Build two HTML mockups that each make a different decision. Base them on what exists; don't redesign from scratch.\n3. Upload them with `{relay} mockups {ref} <a.html> <b.html> --caption \"<decision A>\" --caption \"<decision B>\"`, one caption per mockup that names its decision.\n4. Comment on what each option trades off: `{relay} comment {ref} @<file>`."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "mockups" },
+        { "from": "mockups", "to": "done", "on": "succeeded" },
+        { "from": "mockups", "to": "needs_input", "on": "failed" }
+      ]
+    },
+    {
+      "key": "plan",
+      "isolation": "shared_clean",
+      "trigger": { "stage": "Plan" },
+      "nodes": [
+        {
+          "key": "plan",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "max_retries": 1,
+          "reads": ["mockups"],
+          "writes": ["tasks"],
+          "run": "You are planning card {ref}. Read it, and the mockup approved at Design, with `{relay} card {ref}`; download the mockup with `{relay} mockups {ref} --pull`.\n\nWrite a short plan: one paragraph on the approach, then 2–6 tasks. Each task must be small enough to build and test in one sitting, and must say how to tell it works.\n\nWrite each task's body to a file in the directory of $RELAY_NODE_SCRATCH, then save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task \"<title>\" @<file>`. Do not write code."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "plan" },
+        { "from": "plan", "to": "done", "on": "succeeded" },
+        { "from": "plan", "to": "needs_input", "on": "failed" }
+      ]
+    },
+    {
+      "key": "code",
+      "isolation": "exclusive",
+      "trigger": { "stage": "Code" },
+      "nodes": [
+        {
+          "key": "implement",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "effort": "high",
+          "max_retries": 1,
+          "expects_commits": true,
+          "foreach": "card.tasks",
+          "reads": ["tasks"],
+          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n0. Work on the git branch `relay/{ref}`: `git switch relay/{ref} 2>/dev/null || git switch -c relay/{ref}`, then record it with `{relay} branch {ref} relay/{ref}`.\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Write a failing test for it, then make it pass.\n3. Commit with the message \"{ref} {task}: <what changed>\".\n\nIf the task is already done, say so and stop. Do not start the next task."
+        },
+        {
+          "key": "validate",
+          "type": "shell",
+          "run": "npm test"
+        },
+        {
+          "key": "fix",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
+        },
+        {
+          "key": "review",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "run": "Every task of card {ref} is built and its tests pass. Review the whole change on this branch against the card and its tasks (`{relay} card {ref}`): anything missing, anything broken, anything a user would trip over. Run the tests once yourself.\n\nFail with a numbered list of the problems, most important first. Succeed if there is nothing worth fixing."
+        },
+        {
+          "key": "fix_review",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "A review of card {ref} found the problems listed below. Fix each one, run the tests, and commit with the message \"{ref}: fix review findings\". Fix only what is listed."
+        },
+        {
+          "key": "screenshots",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "run": "The code for {ref} is built and reviewed. Start the app, open each screen the card changes, and take a screenshot at desktop and phone width. Compare each one with the card's approved mockup (`{relay} mockups {ref} --pull <dir>` downloads it).\n\nUpload the mockups and your screenshots together with `{relay} mockups {ref} <files…>`, one `--caption` per file in order. That call replaces the card's list, so include the mockups; the reviewer then sees each mockup and the real screen side by side.\n\nFail if a screen clearly differs from its mockup, and list the differences."
+        },
+        {
+          "key": "fix_visual",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "The screenshots of card {ref} differ from its approved mockup in the ways listed below. Change the code so each screen matches its mockup, run the tests, and commit with the message \"{ref}: match the mockup\"."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "implement" },
+        { "from": "implement", "to": "validate", "on": "succeeded" },
+        { "from": "implement", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "fix", "on": "failed", "max_loops": 3 },
+        { "from": "fix", "to": "validate", "on": "succeeded" },
+        { "from": "fix", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
+        { "from": "validate", "to": "review", "on": "succeeded", "when": "foreach_exhausted" },
+        { "from": "review", "to": "fix_review", "on": "failed", "max_loops": 2 },
+        { "from": "fix_review", "to": "review", "on": "succeeded" },
+        { "from": "fix_review", "to": "needs_input", "on": "failed" },
+        { "from": "review", "to": "screenshots", "on": "succeeded" },
+        { "from": "screenshots", "to": "done", "on": "succeeded" },
+        { "from": "screenshots", "to": "fix_visual", "on": "failed", "max_loops": 2 },
+        { "from": "fix_visual", "to": "screenshots", "on": "succeeded" },
+        { "from": "fix_visual", "to": "needs_input", "on": "failed" }
+      ]
+    }
+  ]
+}

@@ -146,9 +146,21 @@ defmodule RelayWeb.FlowEditorComponents do
 
       <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
         <div style="display:flex;flex-direction:column;gap:7px;">
-          <.meta_label>
-            {main_label(@node.type)}
-          </.meta_label>
+          <%!-- RE442: an agent node with no subagent runs its prompt as written — the template
+          flows' "no skills" shape — so say so rather than leave SUBAGENT reading as unset. --%>
+          <div class="flex items-center gap-2">
+            <.meta_label>
+              {main_label(@node.type)}
+            </.meta_label>
+            <span
+              :if={inline_agent?(@node)}
+              id="inspector-inline-tag"
+              class="font-mono text-[9.5px] px-[5px] rounded-[3px]"
+              style="background:color-mix(in oklab, var(--color-success) 12%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 65%, var(--color-base-content));"
+            >
+              inline · no skill
+            </span>
+          </div>
           <form id="inspector-node-form" phx-change="edit_node_field">
             <input type="hidden" name="key" value={@node.key} />
             <input type="hidden" name="field" value="run" />
@@ -1153,6 +1165,9 @@ defmodule RelayWeb.FlowEditorComponents do
   defp main_label(:shell), do: "COMMAND"
   defp main_label(:gate), do: "CONDITION"
   defp main_label(_), do: "RUN PROMPT"
+
+  defp inline_agent?(%{type: :agent} = node), do: Map.get(node, :agent) in [nil, ""]
+  defp inline_agent?(_node), do: false
 
   # Omitted entirely when the node declares neither, so today's undeclared flows look unchanged.
   defp contract?(node), do: node.reads != [] or node.writes != []

@@ -1,0 +1,103 @@
+{
+  "slug": "bare-minimum",
+  "name": "Bare minimum",
+  "tagline": "Plan it, build it, ship it yourself.",
+  "blurb": "The smallest useful loop: AI plans and builds each task with a test loop, reviews its own work and screenshots it. You review the screenshots and deploy by hand.",
+  "warning": null,
+  "stages": [
+    {"name": "Backlog", "category": "unstarted", "type": "queue", "wip_limit": null, "sublanes": []},
+    {"name": "Plan", "category": "planning", "type": "planning", "wip_limit": 3, "sublanes": ["done"]},
+    {"name": "Implement", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Review", "category": "in_progress", "type": "review", "wip_limit": 3, "sublanes": []},
+    {"name": "Deploy", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Done", "category": "complete", "type": "done", "wip_limit": null, "sublanes": []}
+  ],
+  "agents": [],
+  "flows": [
+    {
+      "key": "plan",
+      "isolation": "shared_clean",
+      "trigger": { "stage": "Plan" },
+      "nodes": [
+        {
+          "key": "plan",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "max_retries": 1,
+          "writes": ["tasks"],
+          "run": "You are planning card {ref}. Read it with `{relay} card {ref}`.\n\nWrite a short plan: one paragraph on the approach, then 2–6 tasks. Each task must be small enough to build and test in one sitting, and must say how to tell it works.\n\nWrite each task's body to a file in the directory of $RELAY_NODE_SCRATCH, then save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task \"<title>\" @<file>`. Do not write code."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "plan" },
+        { "from": "plan", "to": "done", "on": "succeeded" },
+        { "from": "plan", "to": "needs_input", "on": "failed" }
+      ]
+    },
+    {
+      "key": "implement",
+      "isolation": "exclusive",
+      "trigger": { "stage": "Implement" },
+      "nodes": [
+        {
+          "key": "implement",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "effort": "high",
+          "max_retries": 1,
+          "expects_commits": true,
+          "foreach": "card.tasks",
+          "reads": ["tasks"],
+          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n0. Work on the git branch `relay/{ref}`: `git switch relay/{ref} 2>/dev/null || git switch -c relay/{ref}`, then record it with `{relay} branch {ref} relay/{ref}`.\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Write a failing test for it, then make it pass.\n3. Commit with the message \"{ref} {task}: <what changed>\".\n\nIf the task is already done, say so and stop. Do not start the next task."
+        },
+        {
+          "key": "validate",
+          "type": "shell",
+          "run": "npm test"
+        },
+        {
+          "key": "fix",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
+        },
+        {
+          "key": "review",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "run": "Every task of card {ref} is built and its tests pass. Review the whole change on this branch against the card and its tasks (`{relay} card {ref}`): anything missing, anything broken, anything a user would trip over. Run the tests once yourself.\n\nFail with a numbered list of the problems, most important first. Succeed if there is nothing worth fixing."
+        },
+        {
+          "key": "fix_review",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "A review of card {ref} found the problems listed below. Fix each one, run the tests, and commit with the message \"{ref}: fix review findings\". Fix only what is listed."
+        },
+        {
+          "key": "screenshots",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "run": "The code for {ref} is built and tested. Start the app, open each screen the card changes, and take a screenshot at desktop width (1280px) and phone width (390px).\n\n`{relay} mockups` replaces the card's whole list, so first pull what is there with `{relay} mockups {ref} --pull <dir>`. Then upload those files and your screenshots in one call, with one `--caption` per file in the same order (e.g. \"<screen> — desktop\"), so the reviewer sees what was built.\n\nFail if the app won't start or a screen is broken, and say why."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "implement" },
+        { "from": "implement", "to": "validate", "on": "succeeded" },
+        { "from": "implement", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "fix", "on": "failed", "max_loops": 3 },
+        { "from": "fix", "to": "validate", "on": "succeeded" },
+        { "from": "fix", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
+        { "from": "validate", "to": "review", "on": "succeeded", "when": "foreach_exhausted" },
+        { "from": "review", "to": "fix_review", "on": "failed", "max_loops": 2 },
+        { "from": "fix_review", "to": "review", "on": "succeeded" },
+        { "from": "fix_review", "to": "needs_input", "on": "failed" },
+        { "from": "review", "to": "screenshots", "on": "succeeded" },
+        { "from": "screenshots", "to": "done", "on": "succeeded" },
+        { "from": "screenshots", "to": "needs_input", "on": "failed" }
+      ]
+    }
+  ]
+}

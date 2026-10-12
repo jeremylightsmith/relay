@@ -5,8 +5,10 @@ defmodule RelayWeb.BoardsLive do
   navigates to `/board/<slug>`; the board you arrived from (`?from=<slug>`)
   gets a CURRENT badge. Tiles come starred-first, then A–Z (RE395); each
   tile's star button (`toggle_star`) sets the user's personal star and
-  reorders the grid in place without navigating. "New board" seeds a board and drops you into its
-  settings to name it. Loads fresh on navigate (no realtime — out of scope).
+  reorders the grid in place without navigating. "New board" opens the template picker
+  (RE442, `RelayWeb.TemplatePickerComponents`; `?template=<slug>` opens it preselected), whose
+  submit creates "Untitled board" from the chosen template and drops you into its settings to
+  name it. Loads fresh on navigate (no realtime — out of scope).
   """
 
   use RelayWeb, :live_view
@@ -15,6 +17,7 @@ defmodule RelayWeb.BoardsLive do
   alias Relay.Cards
   alias Relay.Members
   alias RelayWeb.CoreComponents
+  alias RelayWeb.TemplatePickerComponents
   alias RelayWeb.TimeAgo
 
   @impl true
@@ -28,9 +31,8 @@ defmodule RelayWeb.BoardsLive do
         <.button
           type="button"
           id="top-bar-new-board"
-          phx-click="new_board"
+          phx-click="open_template_picker"
           class="btn btn-sm btn-primary font-semibold"
-          pending="Creating…"
         >
           <span class="text-[15px] leading-none">+</span> New board
         </.button>
@@ -170,20 +172,22 @@ defmodule RelayWeb.BoardsLive do
           <.button
             id="new-board-button"
             type="button"
-            phx-click="new_board"
+            phx-click="open_template_picker"
             class="hidden min-h-[220px] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-dashed border-base-content/20 bg-transparent text-base-content/65 drawer:flex"
-            pending="Creating…"
           >
-            <%!-- RE394 — the pending face stacks its faces in a row; keep the tile's column here. --%>
-            <span class="flex flex-col items-center gap-2.5">
-              <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
-                +
-              </span>
-              <span class="text-[13px] font-semibold">New board</span>
+            <span class="flex size-[34px] items-center justify-center rounded-[9px] border-[1.5px] text-xl leading-none">
+              +
             </span>
+            <span class="text-[13px] font-semibold">New board</span>
           </.button>
         </div>
       </div>
+
+      <TemplatePickerComponents.template_picker
+        :if={@picker_open?}
+        templates={@templates}
+        selected={@picker_template}
+      />
     </Layouts.app>
     """
   end
@@ -191,25 +195,60 @@ defmodule RelayWeb.BoardsLive do
   @impl true
   def mount(_params, _session, socket) do
     boards = load_boards(socket.assigns.current_scope.user)
+    templates = Boards.templates()
 
     {:ok,
      socket
      |> assign(:page_title, "Your boards")
      |> assign(:boards, boards)
-     |> assign(:from, nil)}
+     |> assign(:from, nil)
+     |> assign(:templates, templates)
+     |> assign(:picker_open?, false)
+     |> assign(:picker_template, hd(templates).slug)}
   end
 
+  # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
+  # a slug that names no template leaves the picker as it was.
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign(socket, :from, params["from"])}
+    socket = assign(socket, :from, params["from"])
+
+    socket =
+      if known_template?(socket, params["template"]),
+        do: assign(socket, picker_open?: true, picker_template: params["template"]),
+        else: socket
+
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_event("new_board", _params, socket) do
-    {:ok, board} =
-      Boards.create_board(socket.assigns.current_scope.user, %{name: "Untitled board"})
+  def handle_event("open_template_picker", _params, socket) do
+    {:noreply, assign(socket, :picker_open?, true)}
+  end
 
-    {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/settings")}
+  def handle_event("close_template_picker", _params, socket) do
+    {:noreply, assign(socket, :picker_open?, false)}
+  end
+
+  def handle_event("select_template", %{"template" => slug}, socket) do
+    if known_template?(socket, slug),
+      do: {:noreply, assign(socket, :picker_template, slug)},
+      else: {:noreply, socket}
+  end
+
+  # The submitted radio wins; a submit without one falls back to the selected assign. An
+  # unknown slug (a stale or hand-edited form) flashes and leaves the picker open.
+  def handle_event("create_from_template", params, socket) do
+    slug = params["template"] || socket.assigns.picker_template
+    user = socket.assigns.current_scope.user
+
+    case Boards.create_board(user, %{name: "Untitled board", template: slug}) do
+      {:ok, board} ->
+        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/settings")}
+
+      {:error, :unknown_template} ->
+        {:noreply, put_flash(socket, :error, "That template no longer exists. Pick another.")}
+    end
   end
 
   # RE395: sets the negation of the tile's current star (set_starred/3 sets, it doesn't
@@ -225,6 +264,8 @@ defmodule RelayWeb.BoardsLive do
 
     {:noreply, assign(socket, :boards, load_boards(user))}
   end
+
+  defp known_template?(socket, slug), do: Enum.any?(socket.assigns.templates, &(&1.slug == slug))
 
   # RE376: the summary facts come from the one domain definition the native switcher
   # (GET /api/all/boards) also reads; only the member stack is web-specific.

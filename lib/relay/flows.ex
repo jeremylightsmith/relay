@@ -393,6 +393,36 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  Seeds a board template's decoded flows (`Relay.Boards.Templates`, RE442) onto `board`, each
+  **disabled** at v1 on the stage its `trigger.stage` names. Unlike `seed_default_flows!/1` it
+  never skips: a trigger naming a stage the board lacks raises `ArgumentError`, and a flow that
+  fails `Schemas.Flow.changeset/2`, the one-stage rule or the LLM check raises
+  `Ecto.InvalidChangesetError`. Atomic — one failure seeds none of them.
+  """
+  @spec seed_template_flows!(Board.t(), [map()]) :: :ok
+  def seed_template_flows!(%Board{id: board_id} = board, flows) when is_list(flows) do
+    stage_ids = Map.new(Repo.all(from s in Stage, where: s.board_id == ^board_id, select: {s.name, s.id}))
+
+    {:ok, :ok} =
+      Repo.transaction(fn ->
+        Enum.each(flows, fn %{trigger: %{stage: name}} = flow ->
+          stage_id =
+            Map.get(stage_ids, name) ||
+              raise ArgumentError, "flow #{inspect(flow[:key])} triggers on stage #{inspect(name)}, not on this board"
+
+          %Flow{board_id: board.id}
+          |> Flow.changeset(flow |> Map.delete(:trigger) |> Map.put(:stage_id, stage_id))
+          |> validate_stage()
+          |> validate_llms()
+          |> Repo.insert!()
+          |> snapshot!()
+        end)
+      end)
+
+    :ok
+  end
+
+  @doc """
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
   library's dense attr maps and the embedded structs compare field-by-field.

@@ -1,0 +1,128 @@
+{
+  "slug": "three-brain",
+  "name": "Three-brain",
+  "tagline": "Three models plan, one judge merges.",
+  "blurb": "Claude, GPT and Gemini each write a plan in parallel. A judge combines the best of each and mocks up the result for your review. Then a simple build loop, screenshots, and a manual deploy.",
+  "warning": "Needs runners signed in to Claude Code, Codex and Gemini CLI",
+  "stages": [
+    {"name": "Backlog", "category": "unstarted", "type": "queue", "wip_limit": null, "sublanes": []},
+    {"name": "Plan", "category": "planning", "type": "planning", "wip_limit": 2, "sublanes": ["review", "done"]},
+    {"name": "Implement", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Review", "category": "in_progress", "type": "review", "wip_limit": 3, "sublanes": []},
+    {"name": "Deploy", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
+    {"name": "Done", "category": "complete", "type": "done", "wip_limit": null, "sublanes": []}
+  ],
+  "agents": [
+    {"name": "GPT", "harness": "codex"},
+    {"name": "Gemini", "harness": "gemini-cli"}
+  ],
+  "flows": [
+    {
+      "key": "three-brain-plan",
+      "isolation": "shared_clean",
+      "trigger": { "stage": "Plan" },
+      "nodes": [
+        { "key": "split", "type": "fan_out" },
+        {
+          "key": "claude_plan",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "run": "You are one of three planners working on {ref} independently. Two other models are planning the same card, and you can't see their plans.\n\nRead the card with `{relay} card {ref}`. Write a plan: the approach, then 2–6 small tasks, each saying how to tell it works.\n\nReply with the plan as markdown, and put the whole plan in your outcome's detail so the judge receives it. Don't save tasks; a judge will merge the three plans."
+        },
+        {
+          "key": "gpt_plan",
+          "type": "agent",
+          "llm": "GPT",
+          "run": "You are one of three planners working on {ref} independently. Two other models are planning the same card, and you can't see their plans.\n\nRead the card with `{relay} card {ref}`. Write a plan: the approach, then 2–6 small tasks, each saying how to tell it works.\n\nReply with the plan as markdown, and put the whole plan in your outcome's detail so the judge receives it. Don't save tasks; a judge will merge the three plans."
+        },
+        {
+          "key": "gemini_plan",
+          "type": "agent",
+          "llm": "Gemini",
+          "run": "You are one of three planners working on {ref} independently. Two other models are planning the same card, and you can't see their plans.\n\nRead the card with `{relay} card {ref}`. Write a plan: the approach, then 2–6 small tasks, each saying how to tell it works.\n\nReply with the plan as markdown, and put the whole plan in your outcome's detail so the judge receives it. Don't save tasks; a judge will merge the three plans."
+        },
+        { "key": "join", "type": "fan_in" },
+        {
+          "key": "judge",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "writes": ["tasks"],
+          "run": "Three models planned card {ref} independently. Their plans follow, one section per planner:\n\n{prior_detail}\n\nRead the card with `{relay} card {ref}`. Merge the plans into one: keep the best approach, take the strongest tasks from each, and drop duplicates. End with 2–6 tasks, each small enough to build and test in one sitting and saying how to tell it works.\n\n1. Post a comment headed \"How the plans were combined\" with `{relay} comment {ref} @<file>`, crediting what you took from claude_plan, gpt_plan and gemini_plan.\n2. Write each task's body to a file in the directory of $RELAY_NODE_SCRATCH and save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> …`.\n\nDo not write code."
+        },
+        {
+          "key": "mockup",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "writes": ["mockups"],
+          "run": "Card {ref} now has a merged plan; read it with `{relay} card {ref}`. Build one self-contained HTML mockup of the screen the plan changes, based on the app as it is today. Upload it with `{relay} mockups {ref} <mockup.html> --caption \"<what it shows>\"` so the reviewer can approve the plan and the look together."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "split" },
+        { "from": "split", "to": "claude_plan" },
+        { "from": "split", "to": "gpt_plan" },
+        { "from": "split", "to": "gemini_plan" },
+        { "from": "claude_plan", "to": "join", "on": "succeeded" },
+        { "from": "claude_plan", "to": "join", "on": "failed" },
+        { "from": "gpt_plan", "to": "join", "on": "succeeded" },
+        { "from": "gpt_plan", "to": "join", "on": "failed" },
+        { "from": "gemini_plan", "to": "join", "on": "succeeded" },
+        { "from": "gemini_plan", "to": "join", "on": "failed" },
+        { "from": "join", "to": "judge", "on": "succeeded" },
+        { "from": "join", "to": "needs_input", "on": "failed" },
+        { "from": "judge", "to": "mockup", "on": "succeeded" },
+        { "from": "judge", "to": "needs_input", "on": "failed" },
+        { "from": "mockup", "to": "done", "on": "succeeded" },
+        { "from": "mockup", "to": "needs_input", "on": "failed" }
+      ]
+    },
+    {
+      "key": "implement",
+      "isolation": "exclusive",
+      "trigger": { "stage": "Implement" },
+      "nodes": [
+        {
+          "key": "implement",
+          "type": "agent",
+          "llm": "Claude Opus",
+          "effort": "high",
+          "max_retries": 1,
+          "expects_commits": true,
+          "foreach": "card.tasks",
+          "reads": ["tasks"],
+          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n0. Work on the git branch `relay/{ref}`: `git switch relay/{ref} 2>/dev/null || git switch -c relay/{ref}`, then record it with `{relay} branch {ref} relay/{ref}`.\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Write a failing test for it, then make it pass.\n3. Commit with the message \"{ref} {task}: <what changed>\".\n\nIf the task is already done, say so and stop. Do not start the next task."
+        },
+        {
+          "key": "validate",
+          "type": "shell",
+          "run": "npm test"
+        },
+        {
+          "key": "fix",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "expects_commits": true,
+          "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
+        },
+        {
+          "key": "screenshots",
+          "type": "agent",
+          "llm": "Claude Sonnet",
+          "run": "The code for {ref} is built and tested. Start the app, open each screen the card changes, and take a screenshot at desktop width (1280px) and phone width (390px).\n\n`{relay} mockups` replaces the card's whole list, so first pull what is there with `{relay} mockups {ref} --pull <dir>`. Then upload those files and your screenshots in one call, with one `--caption` per file in the same order (e.g. \"<screen> — desktop\"), so the reviewer sees what was built.\n\nFail if the app won't start or a screen is broken, and say why."
+        }
+      ],
+      "edges": [
+        { "from": "start", "to": "implement" },
+        { "from": "implement", "to": "validate", "on": "succeeded" },
+        { "from": "implement", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "fix", "on": "failed", "max_loops": 3 },
+        { "from": "fix", "to": "validate", "on": "succeeded" },
+        { "from": "fix", "to": "needs_input", "on": "failed" },
+        { "from": "validate", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
+        { "from": "validate", "to": "screenshots", "on": "succeeded", "when": "foreach_exhausted" },
+        { "from": "screenshots", "to": "done", "on": "succeeded" },
+        { "from": "screenshots", "to": "needs_input", "on": "failed" }
+      ]
+    }
+  ]
+}

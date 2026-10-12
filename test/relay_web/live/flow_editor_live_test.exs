@@ -1173,4 +1173,37 @@ defmodule RelayWeb.FlowEditorLiveTest do
                Schemas.Flow.region(stored, "fan_out-1")
     end
   end
+
+  # RE442: a template flow's prompt lives in the node itself — an agent node with no `agent`
+  # is tagged so it doesn't read as "forgot to bind a subagent".
+  describe "inline · no skill tag (RE442)" do
+    setup %{user: user} do
+      {:ok, bare} = Boards.create_board(user, %{name: "Bare", slug: unique_slug("bare"), template: "bare-minimum"})
+      %{bare: bare}
+    end
+
+    test "14. an agent node with no agent is tagged inline · no skill", %{conn: conn, bare: bare} do
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/implement")
+      view |> element(~s([data-node="implement"])) |> render_click()
+
+      assert view |> element("#inspector-inline-tag") |> render() =~ "inline · no skill"
+      assert has_element?(view, "#inspector-node-agent")
+      refute has_element?(view, "#inspector-node-agent[value]")
+    end
+
+    test "15. an agent node bound to a subagent carries no tag", %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="implement"])) |> render_click()
+
+      assert has_element?(view, ~s(#inspector-node-agent[value="plan-implementer"]))
+      refute has_element?(view, "#inspector-inline-tag")
+    end
+
+    test "16. a shell node carries no tag", %{conn: conn, bare: bare} do
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/implement")
+      view |> element(~s([data-node="validate"])) |> render_click()
+
+      refute has_element?(view, "#inspector-inline-tag")
+    end
+  end
 end

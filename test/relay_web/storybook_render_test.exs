@@ -15,6 +15,11 @@ defmodule RelayWeb.StorybookRenderTest do
     end
   end
 
+  test "17. GET /storybook/template_picker_components/template_picker renders the picker (RE442)", %{conn: conn} do
+    html = conn |> get("/storybook/template_picker_components/template_picker") |> html_response(200)
+    assert html =~ "Create board from"
+  end
+
   test "GET /storybook/core_components/card_drawer shows the Notes count and the :question state (RE277)",
        %{conn: conn} do
     conn = get(conn, "/storybook/core_components/card_drawer")

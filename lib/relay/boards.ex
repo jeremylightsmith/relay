@@ -9,6 +9,7 @@ defmodule Relay.Boards do
   import Ecto.Query
 
   alias Ecto.Changeset
+  alias Relay.Boards.Templates
   alias Relay.Events
   alias Relay.Flows
   alias Relay.Repo
@@ -235,14 +236,39 @@ defmodule Relay.Boards do
 
   @doc """
   Creates a board for `user`: validates `name`, derives a unique `slug` and a
-  `key` from the name, sets `owner_id` programmatically, and seeds the
-  default 8-stage pipeline, the three story-map releases
-  (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
-  sub-lanes, and the three disabled default flows — all in one transaction.
-  External callers pass only a name (`%{name: ...}` / `%{"name" => ...}`).
+  `key` from the name, sets `owner_id` programmatically, and seeds it — all in one transaction.
+  External callers pass a name (`%{name: ...}` / `%{"name" => ...}`) and, optionally, a
+  `template` slug (`:template` / `"template"`, one of `Relay.Boards.Templates.slugs/0`).
+
+  - **No template** (absent or nil): the default 8-stage pipeline, the three story-map
+    releases (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
+    sub-lanes, and the three disabled default flows.
+  - **A template** (RE442): the template's stages, sub-lanes and WIP limits, the releases, the
+    seeded agents plus the template's own, its flows (disabled; an invalid one raises and rolls
+    the board back), and Review rejecting to Plan. No cards.
+  - **An unknown slug**: `{:error, :unknown_template}`, inserting nothing.
+
   Returns the board with stages preloaded in hierarchical order (`order_stages/1`).
   """
   def create_board(%User{} = user, attrs) do
+    case fetch_template(attrs) do
+      {:ok, template} -> insert_board(user, attrs, template)
+      :error -> {:error, :unknown_template}
+    end
+  end
+
+  @doc "The starter board templates \"New board\" offers, in picker order (`Relay.Boards.Templates.all/0`)."
+  @spec templates() :: [Templates.template()]
+  def templates, do: Templates.all()
+
+  defp fetch_template(attrs) do
+    case Map.get(attrs, :template) || Map.get(attrs, "template") do
+      nil -> {:ok, nil}
+      slug -> if template = Templates.get(slug), do: {:ok, template}, else: :error
+    end
+  end
+
+  defp insert_board(user, attrs, template) do
     name = fetch_name(attrs)
 
     changeset =
@@ -255,11 +281,7 @@ defmodule Relay.Boards do
     Repo.transaction(fn ->
       case Repo.insert(changeset) do
         {:ok, board} ->
-          seed_stages!(board)
-          seed_releases!(board)
-          # RE433: the agents exist before the default flows, whose nodes name them in `llm`.
-          :ok = Relay.Agents.ensure_seeded!(board)
-          seed_lanes_and_flows!(board)
+          seed_board!(board, template)
           insert_owner_membership!(board, user)
 
           board
@@ -270,6 +292,62 @@ defmodule Relay.Boards do
           Repo.rollback(changeset)
       end
     end)
+  end
+
+  defp seed_board!(board, nil) do
+    seed_stages!(board)
+    seed_releases!(board)
+    # RE433: the agents exist before the default flows, whose nodes name them in `llm`.
+    :ok = Relay.Agents.ensure_seeded!(board)
+    seed_lanes_and_flows!(board)
+  end
+
+  # RE442: order matters — sub-lanes before releases (positions), agents before flows (their
+  # nodes name the template's agents in `llm`, which `validate_llms/1` checks).
+  defp seed_board!(board, template) do
+    stages = seed_template_stages!(board, template.stages)
+    seed_releases!(board)
+    :ok = Relay.Agents.ensure_seeded!(board)
+    seed_template_agents!(board, template.agents)
+    :ok = Flows.seed_template_flows!(board, template.flows)
+    seed_review_reject_to!(board, Map.fetch!(stages, "Plan"))
+  end
+
+  # Main stages at positions 1..N, then each stage's sub-lanes in stage order and sub-lane order.
+  # Returns the main stages by name.
+  defp seed_template_stages!(board, stages) do
+    inserted =
+      stages
+      |> Enum.with_index(1)
+      |> Enum.map(fn {stage, position} ->
+        main =
+          %Stage{board_id: board.id}
+          |> Stage.changeset(%{
+            name: stage.name,
+            position: position,
+            category: stage.category,
+            type: stage.type,
+            wip_limit: stage.wip_limit
+          })
+          |> Repo.insert!()
+
+        {main, stage.sublanes}
+      end)
+
+    for {main, sublanes} <- inserted, lane <- sublanes, do: {:ok, _} = enable_lane(main, lane)
+
+    Map.new(inserted, fn {main, _sublanes} -> {main.name, main} end)
+  end
+
+  # A template agent runs on the board's harness with that key, on the first model of the
+  # harness's seeded list — read from the inserted harness, never typed.
+  defp seed_template_agents!(board, agents) do
+    harnesses = Map.new(Relay.Agents.list_harnesses(board), &{&1.key, &1})
+
+    for %{name: name, harness: key} <- agents do
+      %{id: harness_id, models: [model | _]} = Map.fetch!(harnesses, key)
+      {:ok, _} = Relay.Agents.create_agent(board, %{"name" => name, "harness_id" => harness_id, "model" => model})
+    end
   end
 
   @doc "Archives a board (read-only). Broadcasts {:board_updated, board}."

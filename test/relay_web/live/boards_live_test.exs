@@ -46,27 +46,26 @@ defmodule RelayWeb.BoardsLiveTest do
       assert has_element?(view, "#board-card-#{board.slug}-current", "CURRENT")
     end
 
-    test "New board creates a board and navigates to its settings", %{conn: conn, user: user} do
+    test "New board opens the template picker instead of creating a board (RE442)", %{conn: conn, user: user} do
       _default = Boards.get_or_create_default_board(user)
 
       {:ok, view, _html} = live(conn, ~p"/boards")
 
-      assert {:error, {:live_redirect, %{to: to}}} =
-               view |> element("#new-board-button") |> render_click()
+      view |> element("#new-board-button") |> render_click()
 
-      assert to =~ ~r{^/board/[a-z0-9-]+/settings$}
-      assert Repo.aggregate(Board, :count) == 2
+      assert has_element?(view, "#template-picker")
+      assert Repo.aggregate(Board, :count) == 1
     end
 
-    test "the top-bar + New board button creates a board and navigates to its settings",
+    test "the top-bar + New board button opens the template picker (RE442)",
          %{conn: conn, user: user} do
       _default = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/boards")
 
-      {:error, {:live_redirect, %{to: to}}} =
-        view |> element("#top-bar-new-board") |> render_click()
+      view |> element("#top-bar-new-board") |> render_click()
 
-      assert to =~ ~r"^/board/.+/settings$"
+      assert has_element?(view, "#template-picker")
+      assert Repo.aggregate(Board, :count) == 1
     end
 
     test "the New board button uses daisyUI's btn-primary primitive, not a hand-rolled fill",
@@ -78,15 +77,20 @@ defmodule RelayWeb.BoardsLiveTest do
       refute has_element?(view, "#top-bar-new-board.bg-primary")
     end
 
-    test "both New board buttons press to Creating… (RE394)", %{conn: conn, user: user} do
+    test "both New board buttons open the picker, whose Create presses to Creating… (RE394, RE442)",
+         %{conn: conn, user: user} do
       _default = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/boards")
 
       for id <- ~w(top-bar-new-board new-board-button) do
-        assert has_element?(view, "##{id}.pending-action[phx-click=new_board]")
-        assert view |> element("##{id} .pending-idle") |> render() =~ "New board"
-        assert view |> element("##{id} .pending-face") |> render() =~ "Creating…"
+        assert has_element?(view, "##{id}[phx-click=open_template_picker]")
+        refute has_element?(view, "##{id}.pending-action")
       end
+
+      view |> element("#top-bar-new-board") |> render_click()
+
+      assert has_element?(view, "#template-picker-create.pending-action")
+      assert view |> element("#template-picker-create .pending-face") |> render() =~ "Creating…"
     end
 
     test "a board tile shows its needs-you count", %{conn: conn, user: user} do

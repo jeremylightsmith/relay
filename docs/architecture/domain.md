@@ -11,6 +11,22 @@ sharing behavior.
   AI-enabled is derived — `Relay.Flows.ai_stage_ids/1`: a stage some flow works in); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
   `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
   order being `Schemas.Stage.sublane_types/0`. Stage/config semantics: [ADR 0003](../adr/0003-card-state-stage-type-validity.md).
+  **Board templates (RE442):** `create_board/2` takes an optional `template` slug from
+  `Relay.Boards.Templates` (the ONE slug list, `slugs/0`), which loads
+  `docs/designs/templates/*.json` at compile time via `@external_resource`; the web layer reads
+  them only through `Boards.templates/0`. Without a slug the board gets today's default 8-stage
+  pipeline and spec/plan/code flows; an unknown slug is `{:error, :unknown_template}` and
+  inserts nothing. A template seeds, in one transaction, its main stages (with WIP limits),
+  their sub-lanes, the releases, the seeded agents plus its own, its flows — disabled, every
+  node an inline prompt with no `agent` — and Review's `reject_to` = Plan; never cards.
+  **Bare minimum**: Backlog · Plan (+Done) · Implement · Review · Deploy · Done, flows `plan`
+  and `implement`. **Design-led**: Backlog · Next up · Design (+Review, +Done) · Plan (+Review,
+  +Done) · Code · Review · Deploy · Done, flows `design`, `plan` and `code`. **Three-brain**:
+  Backlog · Plan (+Review, +Done) · Implement · Review · Deploy · Done, flows
+  `three-brain-plan` (a `fan_out` to Claude / GPT / Gemini planners, joined by a judge) and
+  `implement`, plus the agents "GPT" (`codex`) and "Gemini" (`gemini-cli`) on each harness's
+  first seeded model. Deploy never has a flow. A stage value outside `Schemas.Stage`'s sets
+  fails the build; a template flow that fails validation raises and rolls the board back.
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
   attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
@@ -156,12 +172,16 @@ sharing behavior.
   `Relay.Flows.Document` is the one serializer both they and the API go through)
   — `Boards.create_board/2` calls it after enabling the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes so every trigger resolves. Flows seed disabled. Nothing executes yet — the engine is the Runs card (02).
+  A template board's flows go through `Relay.Flows.seed_template_flows!/2` instead (RE442):
+  the same trigger-name resolution, changeset, one-stage rule, LLM check and v1 snapshot, but it
+  **never skips** — an unknown trigger stage raises `ArgumentError` and an invalid flow raises
+  `Ecto.InvalidChangesetError`, atomically.
   **Versioning (RLY-152, absorbed into the flow editor card):** every flow's definition
   (nodes, edges, isolation) is versioned — `flows.version` holds the current number, and each
   version is snapshotted immutably into `flow_versions` (`belongs_to :flow`, `version`,
   `isolation`, embedded `nodes`/`edges`; no `updated_at`, never edited after insert). A flow
   always has a snapshot row for its current version — created on `create_flow/2`,
-  `copy_flow/2`, and `seed_default_flows!/1`, and on every bump — the invariant a future
+  `copy_flow/2`, `seed_default_flows!/1` and `seed_template_flows!/2`, and on every bump — the invariant a future
   Runs pin-to-version feature relies on. `save_definition/2` is the one path that changes a
   flow's definition after creation: it validates like `update_flow/2`, then bumps `version` to
   n+1 and writes a new snapshot **only if** the definition changed; a stage-only change
