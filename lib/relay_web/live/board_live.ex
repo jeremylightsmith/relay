@@ -616,6 +616,9 @@ defmodule RelayWeb.BoardLive do
         note_count={MapSet.size(@note_ids)}
         activity={@streams.activity}
         comment_form={@comment_form}
+        note_mode={@note_mode}
+        steer_state={@steer_state}
+        steer_receipts={@steer_receipts}
         uploads={@uploads}
         note_images_pending={@note_images_pending}
         note_image_errors={@note_image_errors}
@@ -1244,6 +1247,7 @@ defmodule RelayWeb.BoardLive do
       |> stream_configure(:activity, dom_id: &activity_dom_id/1)
       |> stream_configure(:talk_events, dom_id: &"talk-event-#{&1.id}")
       |> reset_talk()
+      |> reset_steer()
 
     socket =
       Enum.reduce(board.stages, socket, fn stage, acc ->
@@ -1546,6 +1550,8 @@ defmodule RelayWeb.BoardLive do
          |> assign(:card_runs, runs)
          |> assign_in_flight_task(card, :refresh)
          |> assign(:drawer_tab, default_tab)
+         |> assign(:note_mode, :note)
+         |> assign_steer(card)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
          |> assign_card_dependencies(card)
@@ -2699,6 +2705,31 @@ defmodule RelayWeb.BoardLive do
   def handle_event("post_comment", _params, %{assigns: %{uploads: %{note_images: %{entries: [_ | _]}}}} = socket),
     do: {:noreply, socket}
 
+  # RE358 — Steer now: the same form, but the note stops and restarts the running agent node. A
+  # steer that lost its node meanwhile is still saved as a `:steer` note (`Runs.steer/4` degrades
+  # it), so this never falls back to `Activity.add_comment/2`.
+  def handle_event(
+        "post_comment",
+        %{"comment" => comment_params},
+        %{assigns: %{selected_card: %Card{} = card, note_mode: :steer}} = socket
+      ) do
+    image_ids = Enum.map(pending_images(socket, :note_images), & &1.id)
+
+    case Runs.steer(card, current_actor(socket), comment_params["body"], image_ids) do
+      {:ok, comment, _restarted_or_noted} ->
+        {:noreply,
+         socket
+         |> assign(:note_mode, :note)
+         |> assign_steer(card)
+         |> insert_note(comment)
+         |> assign(:comment_form, empty_comment_form())
+         |> reset_images(:note_images)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :comment_form, to_form(changeset))}
+    end
+  end
+
   def handle_event("post_comment", %{"comment" => comment_params}, %{assigns: %{selected_card: %Card{} = card}} = socket) do
     image_ids = Enum.map(pending_images(socket, :note_images), & &1.id)
 
@@ -2722,6 +2753,16 @@ defmodule RelayWeb.BoardLive do
   end
 
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
+
+  # RE358 — the Notes composer's Note | ↪ Steer now toggle.
+  def handle_event("note_mode", %{"mode" => "steer"}, socket), do: {:noreply, set_note_mode(socket, :steer)}
+  def handle_event("note_mode", %{"mode" => "note"}, socket), do: {:noreply, set_note_mode(socket, :note)}
+  def handle_event("note_mode", _params, socket), do: {:noreply, socket}
+
+  # RE358 — the Talk pane's notice: Talk can't reach the working agent, Steer now on Detail can.
+  def handle_event("steer_from_talk", _params, socket) do
+    {:noreply, socket |> select_drawer_tab(:detail) |> set_note_mode(:steer)}
+  end
 
   # RE427 — the ✕ on a thumbnail still uploading.
   def handle_event("cancel_note_image", %{"ref" => ref}, socket), do: {:noreply, cancel_image(socket, :note_images, ref)}
@@ -3617,6 +3658,7 @@ defmodule RelayWeb.BoardLive do
             socket
             |> assign(:card_runs, Runs.list_runs_for_card(card))
             |> assign_in_flight_task(card, :refresh)
+            |> refresh_steer(card)
 
           _other ->
             socket
@@ -3990,6 +4032,7 @@ defmodule RelayWeb.BoardLive do
     # the card may have parked/resumed a run since the last refresh
     |> assign(:card_runs, Runs.list_runs_for_card(card))
     |> assign_in_flight_task(card, :refresh)
+    |> assign_steer(card)
     |> stream_notes(Activity.list_conversation(card))
     |> stream(:activity, activity, reset: true)
     |> assign_card_dependencies(card)
@@ -5239,6 +5282,7 @@ defmodule RelayWeb.BoardLive do
           |> assign(:card_runs, [])
           |> assign(:drawer_tab, :detail)
           |> reset_talk()
+          |> reset_steer()
           |> stream_notes([])
           |> stream(:activity, [], reset: true)
           # RE362 — field_drafts is deliberately NOT reset: coming back to a card reopens its
@@ -5293,6 +5337,7 @@ defmodule RelayWeb.BoardLive do
           body_loading?: false
         )
         |> reset_talk()
+        |> reset_steer()
         |> reset_images(:note_images)
         |> reset_images(:reject_images)
         |> reset_images(:answer_images)
@@ -5311,6 +5356,54 @@ defmodule RelayWeb.BoardLive do
     |> assign(:talk_seed_open?, false)
     |> stream(:talk_events, [], reset: true)
   end
+
+  # RE358 — the Steer now assigns with nothing loaded: Note mode, nothing to steer, no receipts.
+  defp reset_steer(socket) do
+    assign(socket, note_mode: :note, steer_state: nil, steer_receipts: %{})
+  end
+
+  # RE358 — reread what the drawer's Steer now control needs. Nothing left to steer drops the
+  # composer back to Note. Call it BEFORE (re)streaming the card's notes: a steer note renders its
+  # "sending…" marker or its receipt from @steer_receipts at insert time.
+  defp assign_steer(socket, %Card{} = card) do
+    steer_state = Runs.steer_state(card)
+
+    socket
+    |> assign(:steer_state, steer_state)
+    |> assign(:steer_receipts, Runs.steer_receipts(card))
+    |> then(&if(steer_state, do: &1, else: assign(&1, :note_mode, :note)))
+  end
+
+  # RE358 — a run flush for the open card: refresh the steer assigns, then re-insert every steer
+  # note whose receipt changed (a stream item only re-renders when it is re-inserted).
+  defp refresh_steer(socket, %Card{} = card) do
+    before = socket.assigns.steer_receipts
+    socket = assign_steer(socket, card)
+    receipts = socket.assigns.steer_receipts
+
+    changed =
+      before
+      |> Map.keys()
+      |> Enum.concat(Map.keys(receipts))
+      |> Enum.filter(&(Map.get(before, &1) != Map.get(receipts, &1)))
+      |> MapSet.new()
+
+    if MapSet.size(changed) == 0 do
+      socket
+    else
+      card
+      |> Activity.list_conversation()
+      |> Enum.filter(&MapSet.member?(changed, &1.id))
+      |> Enum.reduce(socket, &insert_note(&2, &1))
+    end
+  end
+
+  # RE358 — Steer mode is only ever entered while there is an agent node to steer.
+  defp set_note_mode(socket, :steer) do
+    if socket.assigns.steer_state, do: assign(socket, :note_mode, :steer), else: socket
+  end
+
+  defp set_note_mode(socket, :note), do: assign(socket, :note_mode, :note)
 
   # RLY-227 — the refs the drawer's prev/next chevrons + swipe navigate to, from
   # the card's own stage column (server is the single source of order and of the

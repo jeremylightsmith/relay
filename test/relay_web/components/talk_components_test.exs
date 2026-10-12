@@ -268,4 +268,32 @@ defmodule RelayWeb.TalkComponentsTest do
     refute html =~ "copy resume cmd"
     refute html =~ "oklch(0.23 0.03 150)"
   end
+
+  describe "talk_pane/1 run_working? notice (RE358)" do
+    test "a working run shows the Steer now notice under the title bar" do
+      doc =
+        (&TalkComponents.talk_pane/1)
+        |> render_component(pane(%{run_working?: true}))
+        |> LazyHTML.from_fragment()
+
+      notice = LazyHTML.query(doc, "#talk-pane-steer-notice")
+      assert LazyHTML.text(notice) =~ "Talk is a separate session — it doesn't reach the working agent."
+      [style] = LazyHTML.attribute(notice, "style")
+      assert style =~ "background:oklch(0.23 0.04 262);"
+      assert style =~ "border-bottom:1px solid oklch(0.26 0.018 262);"
+
+      link = LazyHTML.query(doc, "#talk-pane-steer-link")
+      assert link |> LazyHTML.text() |> String.trim() == "Use Steer now on the Detail tab →"
+      assert LazyHTML.attribute(link, "phx-click") == ["steer_from_talk"]
+      assert LazyHTML.attribute(link, "type") == ["button"]
+    end
+
+    test "no working run, no notice" do
+      html = render_component(&TalkComponents.talk_pane/1, pane(%{}))
+      refute html =~ "talk-pane-steer-notice"
+
+      html = render_component(&TalkComponents.talk_pane/1, pane(%{run_working?: false}))
+      refute html =~ "talk-pane-steer-notice"
+    end
+  end
 end

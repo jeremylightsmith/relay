@@ -115,6 +115,15 @@ defmodule Storybook.Components.CoreComponents.ImageAttachBox do
         template: with_hint(["huge.png is 9.1 MB — the limit is 5 MB."])
       },
       %Variation{
+        id: :primary_tone,
+        description:
+          "RE358 — the Steer now composer: tone :primary swaps the 1px base-300 border for a 2px " <>
+            "primary/60 one. The drop-target treatment is unchanged.",
+        attributes: %{id: "image-attach-box-story-primary", upload: upload(), tone: :primary},
+        slots: [row("Fold the backfill into Task 3")],
+        template: with_hint([])
+      },
+      %Variation{
         id: :drag_over,
         description:
           "A file dragged over the box: LiveView adds phx-drop-target-active (forced here), which " <>

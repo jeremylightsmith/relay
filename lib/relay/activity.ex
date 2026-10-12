@@ -25,7 +25,7 @@ defmodule Relay.Activity do
   Posts a comment on `card` from `attrs` — `:actor`
   (`:agent | {:user, user_id}`, programmatic), `:body` (the only
   user-supplied text), an optional `:kind`
-  (`:comment | :question | :changes_requested`, programmatic, defaults to
+  (`:comment | :question | :changes_requested | :steer`, programmatic, defaults to
   `:comment`), and (RE427) optional `:image_ids` — ids of image attachments
   already uploaded to this card and not yet on a note, linked to the comment in
   the given order (defaults to `[]`; with at least one the body may be blank), and (RE428)

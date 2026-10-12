@@ -210,6 +210,39 @@ defmodule Relay.RunDetailTest do
     end
   end
 
+  describe "steered attempts (RE358)" do
+    test "a steered row reads :steered and is not a spent attempt; its restart reads resumed" do
+      r =
+        run(%{
+          flow_key: "plan",
+          current_node: "write_plan",
+          node_executions: [
+            ne("write_plan", 1, :steered, %{visit: 1, session_id: "s"}),
+            ne("write_plan", 2, nil, %{visit: 1, session_id: nil, duration_s: nil})
+          ]
+        })
+
+      assert [row1, row2] = Enum.filter(Runs.run_detail(r, nil).timeline, &(&1.kind == :node))
+
+      assert %{state: :steered, steered?: true, attempt: 1} = row1
+      assert %{state: :active, steered?: false, resumed?: true, attempt: 1} = row2
+    end
+
+    test "a restart after a steer with no known session is not resumed" do
+      r =
+        run(%{
+          current_node: "write_plan",
+          node_executions: [
+            ne("write_plan", 1, :steered, %{visit: 1, session_id: nil}),
+            ne("write_plan", 2, nil, %{visit: 1, session_id: nil, duration_s: nil})
+          ]
+        })
+
+      assert [_row1, row2] = Enum.filter(Runs.run_detail(r, nil).timeline, &(&1.kind == :node))
+      assert row2.resumed? == false
+    end
+  end
+
   describe "attempt numbers skip :blocked attempts (RE267)" do
     test "a node that waited out a usage limit twice reads as its first attempt" do
       r =

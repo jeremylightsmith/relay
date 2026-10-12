@@ -255,7 +255,7 @@ class ClaimContractKeysTest(unittest.TestCase):
 
     TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars", "harness", "model", "effort"}
-    VARS = {"ref", "branch", "prior_detail", "findings", "task", "task_id"}
+    VARS = {"ref", "branch", "prior_detail", "findings", "guidance", "task", "task_id"}
 
     def test_every_claim_case_has_exactly_the_keys_the_runner_reads(self):
         for case, payload in CONTRACT["claim"].items():
@@ -395,7 +395,17 @@ class ReverseContractTest(unittest.TestCase):
         entry = {"key": "claude-code", "installed": True, "version": None, "signed_in": None,
                  "usage": limiter.wire(FAR_RESET - 800)}
         return relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
-                                    {"agents": [], "skills": []}, harnesses=[entry])
+                                    {"agents": [], "skills": []}, harnesses=[entry],
+                                    sessions={"12": "s1"})
+
+    def test_the_heartbeat_omits_sessions_when_there_are_none(self):
+        """RE358 Task 3 · Scenario 9: `sessions` rides only when an in-flight agent job has
+        captured one — None and an empty map both leave the key off."""
+        for sessions in (None, {}):
+            body = relay.heartbeat_body({"name": "box"}, {"shared_clean": 1}, ["nj-1"], [],
+                                        sessions=sessions)
+            self.assertNotIn("sessions", body)
+        self.assertEqual(self._full_beat()["sessions"], {"12": "s1"})
 
     def test_the_heartbeat_no_longer_carries_a_runner_wide_rate_limit(self):
         # RE436: the pause is per harness now, inside `harnesses[].usage`.
@@ -4036,6 +4046,18 @@ class StreamAgentJobTest(unittest.TestCase):
         _ok, session, _r = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertIsNone(session)
 
+    def test_on_session_hears_each_new_session_id_once(self):
+        """RE358 Task 3 · Scenario 8: the runner reports a job's live session on the heartbeat,
+        so the stream announces it as soon as it is captured — once per distinct value."""
+        lines = [json.dumps({"session_id": "s1"}), json.dumps({"session_id": "s1"}),
+                 json.dumps({"session_id": "s2"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        seen = []
+        _ok, session, _r = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                       session_id_path=".session_id", on_session=seen.append)
+        self.assertEqual(seen, ["s1", "s2"])
+        self.assertEqual(session, "s2")
+
     def test_the_report_records_how_an_auth_failure_ended(self):
         """RE308: the stream used to keep only the session id, so the auth error that
         was in the stream the whole time never reached the outcome."""
@@ -4819,7 +4841,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4830,7 +4852,7 @@ class RunNodeJobTest(unittest.TestCase):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -4881,7 +4903,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9", relay.ClaudeRunReport()
@@ -4954,7 +4976,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -4972,7 +4994,7 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -5009,7 +5031,7 @@ class RunNodeJobTest(unittest.TestCase):
         """The composition helper is only worth anything if run_node_job actually uses it."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -5254,7 +5276,66 @@ class FindingsContractTest(unittest.TestCase):
         self.assertNotIn("{", relay.FINDINGS_CONTRACT_TAIL)
 
 
+class GuidanceContractTest(unittest.TestCase):
+    """RE358: human comments and rejection notes written while a card is being worked reach every
+    agent node. The server derives them live into vars["guidance"]; the runner appends them as a
+    fourth prompt part — after the findings block, before the outcome contract — spliced
+    verbatim, exactly like the RE251 findings block."""
+
+    def test_guidance_sits_between_the_findings_and_the_outcome_contract(self):
+        j = job(node_type="agent", run="implement it",
+                vars={"findings": "fix the CSV", "guidance": "Use approach B"})
+        prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+
+        self.assertTrue(prompt.startswith("implement it"))
+        self.assertLess(prompt.index("fix the CSV"), prompt.index("Use approach B"))
+        self.assertLess(prompt.index("Use approach B"), prompt.index("outcome succeeded --detail"))
+
+    def test_a_job_without_guidance_carries_no_block(self):
+        head = relay.GUIDANCE_CONTRACT_HEAD.strip()
+        for value in (None, "", "   "):
+            j = job(node_type="agent", run="implement it", vars={"guidance": value})
+            prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+            self.assertNotIn(head, prompt, f"guidance={value!r}")
+            self.assertIn("outcome succeeded --detail", prompt)
+
+    def test_a_shell_or_gate_job_carries_no_block(self):
+        for node_type in ("shell", "gate"):
+            j = job("exclusive_shell", node_type=node_type, run="mix precommit",
+                    vars={"guidance": "x"})
+            self.assertEqual(
+                relay.compose_node_prompt(j, "mix precommit", j["vars"]), "mix precommit",
+                f"node_type={node_type!r}")
+
+    def test_guidance_text_is_never_substituted_into(self):
+        """Human prose: a human who types `{ref}` gets those literal characters, and their text
+        can never reach into the var namespace."""
+        j = job(node_type="agent", run="implement it",
+                vars={"ref": "RE358", "guidance": "please check {ref} and {branch}"})
+        prompt = relay.compose_node_prompt(j, "implement it", j["vars"])
+
+        self.assertIn("please check {ref} and {branch}", prompt)
+
+    def test_the_wrapper_has_no_placeholders_and_frames_supersede_and_accounting(self):
+        self.assertNotIn("{", relay.GUIDANCE_CONTRACT_HEAD)
+        self.assertNotIn("{", relay.GUIDANCE_CONTRACT_TAIL)
+
+        block = relay.guidance_block({"guidance": "one note"})
+        self.assertIn("HUMAN GUIDANCE", block)
+        self.assertIn("supersede", block)
+        self.assertIn("one short line per entry", block)
+        self.assertIn("one note", block)
+        self.assertTrue(block.startswith("\n\n---\n"))
+
+
 class JobControlTest(unittest.TestCase):
+    def test_note_session_records_the_jobs_live_session(self):
+        """RE358 Task 3 · Scenario 7: the heartbeat reads it to carry the session past a kill."""
+        c = relay.JobControl()
+        self.assertIsNone(c.session_id)
+        c.note_session("s1")
+        self.assertEqual(c.session_id, "s1")
+
     def test_cancel_terminates_a_registered_running_proc(self):
         c = relay.JobControl()
         proc = _FakePopen([], code=0)
@@ -5549,6 +5630,22 @@ class RunnerHeartbeatTest(unittest.TestCase):
         hb = relay.RunnerHeartbeat({"name": "b", "host": "h"},
                                      lambda: 1 / 0, lambda jid: None, interval=15)
         hb._beat()   # must not raise, exactly like the watcher's Heartbeat
+
+    def test_beat_posts_the_sessions_of_running_agent_jobs(self):
+        """RE358 Task 3 · Scenario 10."""
+        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: ["7"],
+                                   lambda jid: None, interval=15,
+                                   sessions_fn=lambda: {"7": "sess-7"})
+        calls, _revoked = self._capture(hb)
+        (_method, _path, body), = calls
+        self.assertEqual(body["sessions"], {"7": "sess-7"})
+
+    def test_a_beat_without_a_sessions_fn_sends_no_sessions(self):
+        hb = relay.RunnerHeartbeat({"name": "box", "host": "h"}, lambda: [],
+                                   lambda jid: None, interval=15)
+        calls, _revoked = self._capture(hb)
+        (_method, _path, body), = calls
+        self.assertNotIn("sessions", body)
 
     def test_a_404_beat_prints_nothing_to_stderr(self):
         """The server route doesn't exist yet (relay.md: "client-side only
@@ -7078,6 +7175,104 @@ class UsagePollerTest(unittest.TestCase):
         self.assertEqual(relay.USAGE_SLICE_S, 5)
 
 
+class _FakeEntry:
+    """An `in_flight` entry for supersede_stale_jobs: a real JobControl and a real thread that
+    exits once that control is cancelled — or, with `stubborn`, only when the test lets it."""
+
+    def __init__(self, run_id, kind="node", stubborn=False):
+        self.control = relay.JobControl()
+        self.release = threading.Event()
+        gate = self.release if stubborn else self.control._cancelled
+        self.thread = threading.Thread(target=lambda: gate.wait(5), daemon=True)
+        self.thread.start()
+        self.entry = {"thread": self.thread, "control": self.control, "run_id": run_id,
+                      "kind": kind}
+
+    def finish(self):
+        self.release.set()
+        self.control.cancel()
+        self.thread.join(5)
+
+
+class SupersedeStaleJobsTest(unittest.TestCase):
+    """RE358 Task 3: a newly claimed job for run R means every other in-flight job of R here is
+    stale (steered, or already reported) — stop it and wait for it before the new one is placed,
+    so the two never share an exclusive worktree."""
+
+    def setUp(self):
+        self.lines = []
+        self.addCleanup(setattr, relay, "log", relay.log)
+        relay.log = lambda msg, **k: self.lines.append((msg, k.get("kind")))
+
+    def _entries(self, **fakes):
+        for fake in fakes.values():
+            self.addCleanup(fake.finish)
+        return [(job_id, fake.entry) for job_id, fake in fakes.items()]
+
+    def test_stops_and_waits_for_the_same_runs_other_flow_job(self):
+        """Scenario 11."""
+        one, two, three = _FakeEntry("r1"), _FakeEntry("r2"), _FakeEntry("r1", kind="talk")
+        entries = self._entries(**{"1": one, "2": two, "3": three})
+
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node"})
+
+        self.assertEqual(superseded, ["1"])
+        self.assertTrue(one.control.cancelled())
+        self.assertFalse(one.thread.is_alive())
+        self.assertFalse(two.control.cancelled())
+        self.assertTrue(two.thread.is_alive())
+        self.assertFalse(three.control.cancelled())
+        self.assertTrue(three.thread.is_alive())
+        self.assertTrue(any("1" in msg for msg, _kind in self.lines), self.lines)
+
+    def test_a_job_that_ignores_the_cancel_is_waited_for_only_until_the_timeout(self):
+        """Scenario 12."""
+        stuck = _FakeEntry("r1", stubborn=True)
+        entries = self._entries(**{"4": stuck})
+
+        started = time.monotonic()
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1", "kind": "node"},
+                                                join_timeout=0.05)
+
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(superseded, ["4"])
+        errors = [msg for msg, kind in self.lines if kind == "error"]
+        self.assertTrue(any("4" in msg and "still running" in msg for msg in errors), self.lines)
+
+    def test_a_job_with_no_run_supersedes_nothing(self):
+        """Scenario 13: a talk job has no run_id."""
+        one = _FakeEntry(None, kind="talk")
+        two = _FakeEntry("r1")
+        entries = self._entries(**{"1": one, "2": two})
+
+        superseded = relay.supersede_stale_jobs(entries, {"id": "9", "run_id": None, "kind": "talk"})
+
+        self.assertEqual(superseded, [])
+        self.assertFalse(one.control.cancelled())
+        self.assertFalse(two.control.cancelled())
+
+    def test_the_claimed_job_itself_is_never_superseded(self):
+        same = _FakeEntry("r1")
+        entries = self._entries(**{"9": same})
+
+        self.assertEqual(relay.supersede_stale_jobs(entries, {"id": "9", "run_id": "r1"}), [])
+        self.assertFalse(same.control.cancelled())
+
+
+class InFlightSessionsTest(unittest.TestCase):
+    def test_only_flow_jobs_with_a_captured_session_are_reported(self):
+        """RE358 Task 3 · Scenario 15: the heartbeat's `sessions` names each in-flight node job
+        whose stream has captured a session, keyed by the job id as a string."""
+        noted, fresh, talk = relay.JobControl(), relay.JobControl(), relay.JobControl()
+        noted.note_session("sess-1")
+        talk.note_session("sess-talk")
+        entries = [(41, {"control": noted, "kind": "node"}),
+                   (42, {"control": fresh, "kind": "node"}),
+                   ("tj-1", {"control": talk, "kind": "talk"})]
+
+        self.assertEqual(relay.in_flight_sessions(entries), {"41": "sess-1"})
+
+
 class ExecuteLoopTest(unittest.TestCase):
     """`start --once` drains one claim→execute→report cycle; a long-poll timeout is 'no
     work', not an error."""
@@ -7088,7 +7283,8 @@ class ExecuteLoopTest(unittest.TestCase):
                        ("load_runner_config", "claim_node_job", "run_node_job",
                         "report_outcome", "report_talk_outcome", "reset_worktree",
                         "refresh_worktree", "FORWARDER", "env", "log", "DRY",
-                        "PLACEMENT_RETRY_S", "get_board")}
+                        "PLACEMENT_RETRY_S", "get_board", "SUPERSEDED_JOB_JOIN_S",
+                        "RunnerHeartbeat")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         self.addCleanup(relay.signal.signal, relay.signal.SIGINT,
                          relay.signal.getsignal(relay.signal.SIGINT))
@@ -7259,6 +7455,84 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertNotIn("None", talk_reports[0])
         self.assertIn("talk", talk_reports[0])
+
+    def _two_slot_config(self):
+        relay.load_runner_config = lambda: {
+            "name": "box", "namespace": "exec",
+            "capacity": {"shared_clean": 2, "exclusive": 0},
+            "poll_timeout": 1, "heartbeat_interval": 60, "auto_update": False}
+
+    def _watchdog(self, seconds=5):
+        t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
+        t.daemon = True
+        self.addCleanup(t.cancel)
+        t.start()
+
+    def test_a_new_job_for_a_run_supersedes_its_stale_job_before_it_runs(self):
+        """RE358 Task 3 · Scenario 14: a steer revokes A and the server hands out B for the same
+        run. A must be stopped and its worker gone before B starts, so the two never share the
+        run's worktree."""
+        self._two_slot_config()
+        relay.SUPERSEDED_JOB_JOIN_S = 3
+        a = job(node_type="shell", run="true", id="nj-a", run_id="r1", vars={"ref": "RLY-1"})
+        b = job(node_type="shell", run="true", id="nj-b", run_id="r1", vars={"ref": "RLY-1"})
+        claims = [a, b]
+
+        def claim(*args, **kwargs):
+            time.sleep(0.005)
+            return claims.pop(0) if claims else None
+
+        seen = {}
+
+        def run_node_job(job, path, control, partition=None):
+            if job["id"] == "nj-a":
+                seen["a_control"], seen["a_thread"] = control, threading.current_thread()
+                control._cancelled.wait(3)
+                return ("succeeded", "", "sha", None, False, None)
+            seen["at_b"] = {"a_cancelled": seen["a_control"].cancelled(),
+                            "a_alive": seen["a_thread"].is_alive(),
+                            "reports": list(self.reports)}
+            relay.signal.getsignal(relay.signal.SIGINT)(None, None)
+            return ("succeeded", "", "sha", None, False, None)
+
+        relay.claim_node_job = claim
+        relay.run_node_job = run_node_job
+        self.reports = []
+        relay.report_outcome = lambda *a: (self.reports.append(a) or "running")
+        self._watchdog()
+
+        relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+
+        self.assertEqual(seen["at_b"], {"a_cancelled": True, "a_alive": False, "reports": []})
+        self.assertEqual([r[0] for r in self.reports], ["nj-b"])
+
+    def test_the_heartbeat_reports_the_session_a_running_job_noted(self):
+        """RE358 Task 3 · Scenario 15, wired: cmd_start hands the heartbeat a sessions function
+        over its in-flight jobs."""
+        captured = {}
+        real = relay.RunnerHeartbeat
+
+        class Spy(real):
+            def __init__(self, *a, **k):
+                captured["sessions_fn"] = k.get("sessions_fn")
+                super().__init__(*a, **k)
+
+        relay.RunnerHeartbeat = Spy
+        j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+        relay.claim_node_job = lambda *a, **k: j
+
+        def run_node_job(job, path, control, partition=None):
+            control.note_session("sess-1")
+            captured["during"] = captured["sessions_fn"]()
+            return ("succeeded", "", "sha", "sess-1", False, None)
+
+        relay.run_node_job = run_node_job
+        relay.report_outcome = lambda *a: "done"
+
+        relay.cmd_start(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
+
+        self.assertEqual(captured["during"], {"nj-1": "sess-1"})
+        self.assertEqual(captured["sessions_fn"](), {})
 
     def test_once_never_auto_updates(self):
         """A single-job invocation restarting itself would re-run the whole command; the job
@@ -8524,7 +8798,8 @@ class FakeHeartbeat:
     instances = []
 
     def __init__(self, runner, running_fn, on_revoke, interval=15, capacity=None,
-                 held_fn=None, on_release_held=None, usage_fn=None, on_definitions=None):
+                 held_fn=None, on_release_held=None, usage_fn=None, on_definitions=None,
+                 sessions_fn=None):
         self.runner = runner
         self.capacity = capacity or {}
         self.held_fn = held_fn
@@ -10498,7 +10773,7 @@ class TestPartitionTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["partition"] = partition
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -10675,7 +10950,7 @@ class ScratchPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["scratch"] = scratch
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -10792,7 +11067,7 @@ class PlanPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
             seen["plan"] = plan
             return True, "sess-1", relay.ClaudeRunReport()
 

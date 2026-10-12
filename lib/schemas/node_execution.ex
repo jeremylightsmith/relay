@@ -28,6 +28,12 @@ defmodule Schemas.NodeExecution do
   usage limit that refused the agent resets (a rejected `rate_limit_event`'s `resetsAt`). Its
   presence is what `Relay.Runs.Engine.decide/4` reads to requeue the node instead of parking it;
   an auth failure, `billing_error`, or a phrase-only usage limit leaves it nil and parks (RE308).
+
+  `:steered` (RE358) is stamped ONLY by the server, when a human's Steer now stops this attempt
+  and restarts the same node as the next attempt of the same visit (`Relay.Runs.steer/4`). It is
+  in `all_outcomes/0` (the enum) but in `server_only_outcomes/0`, so it is neither something a
+  runner may report (`outcomes/0`, the wire contract) nor something a flow edge may route on. A
+  steered row ends RE410's outcome-less streak and spends no `max_loops` budget.
   """
 
   use Ecto.Schema
@@ -40,7 +46,7 @@ defmodule Schemas.NodeExecution do
     field :node_key, :string
     field :visit, :integer
     field :attempt, :integer
-    field :outcome, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input, :blocked]
+    field :outcome, Ecto.Enum, values: [:succeeded, :failed, :partial, :needs_input, :blocked, :steered]
     field :detail, :string
     field :failure_signature, :string
     field :git_sha, :string
@@ -60,8 +66,26 @@ defmodule Schemas.NodeExecution do
   # RE308: reported by the runner only — never agent-declarable, never routable.
   @runner_only_outcomes [:blocked]
 
-  @doc "The closed set of node outcomes a runner may report."
-  def outcomes, do: Ecto.Enum.values(__MODULE__, :outcome)
+  # RE358: stamped by the server only — never reported, never declared, never routed.
+  @server_only_outcomes [:steered]
+
+  @doc "Every value the outcome column may hold — the whole enum, server-only outcomes included."
+  @spec all_outcomes() :: [atom()]
+  def all_outcomes, do: Ecto.Enum.values(__MODULE__, :outcome)
+
+  @doc """
+  The outcomes only the server stamps (RE358): `:steered`, written when a human's Steer now
+  stops an attempt. The outcome API refuses them, so they are not in `outcomes/0`.
+  """
+  @spec server_only_outcomes() :: [:steered]
+  def server_only_outcomes, do: @server_only_outcomes
+
+  @doc """
+  The closed set of node outcomes a runner may report — the wire contract pinned by the runner
+  contract fixture and `./relay`'s `RUNNER_OUTCOMES`. Excludes `server_only_outcomes/0`.
+  """
+  @spec outcomes() :: [atom()]
+  def outcomes, do: all_outcomes() -- @server_only_outcomes
 
   @doc """
   The outcomes a flow edge may route `on:` — and, identically, the ones an agent may declare

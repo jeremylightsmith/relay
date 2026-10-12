@@ -6103,6 +6103,127 @@ defmodule RelayWeb.CoreComponentsTest do
     end
   end
 
+  describe "note_mode_toggle/1 (RE358)" do
+    defp toggle_doc(mode) do
+      (&CoreComponents.note_mode_toggle/1) |> render_component(id: "t", mode: mode) |> LazyHTML.from_fragment()
+    end
+
+    test "Note mode: the Note segment is the active white chip and Steer now is muted" do
+      doc = toggle_doc(:note)
+
+      assert attr_of(doc, "button#t-note", "data-active") == ["true"]
+      note_classes = doc |> classes("#t-note") |> String.split()
+      for c <- ~w(bg-base-100 shadow-sm text-base-content), do: assert(c in note_classes)
+
+      assert attr_of(doc, "button#t-steer", "data-active") == ["false"]
+      assert "text-base-content/60" in (doc |> classes("#t-steer") |> String.split())
+      assert text_of(doc, "#t-steer") == "↪ Steer now"
+      assert text_of(doc, "#t-note") == "Note"
+
+      assert attr_of(doc, "#t-note", "phx-click") == ["note_mode"]
+      assert attr_of(doc, "#t-steer", "phx-click") == ["note_mode"]
+      assert attr_of(doc, "#t-note", "phx-value-mode") == ["note"]
+      assert attr_of(doc, "#t-steer", "phx-value-mode") == ["steer"]
+      assert attr_of(doc, "#t-note", "type") == ["button"]
+
+      caption = LazyHTML.query(doc, "span.max-sm\\:hidden")
+      assert caption |> LazyHTML.text() |> String.trim() == "shown while the agent works"
+    end
+
+    test "Steer mode: the Steer now segment is primary" do
+      doc = toggle_doc(:steer)
+
+      assert attr_of(doc, "#t-steer", "data-active") == ["true"]
+      steer_classes = doc |> classes("#t-steer") |> String.split()
+      for c <- ~w(bg-primary text-primary-content), do: assert(c in steer_classes)
+      assert attr_of(doc, "#t-note", "data-active") == ["false"]
+      assert "text-base-content/60" in (doc |> classes("#t-note") |> String.split())
+    end
+  end
+
+  describe "steer_receipt/1 (RE358)" do
+    defp receipt_doc(receipt) do
+      (&CoreComponents.steer_receipt/1) |> render_component(id: "r", receipt: receipt) |> LazyHTML.from_fragment()
+    end
+
+    test "a delivered steer reads ✓ Sent to <node> · restarted, session kept" do
+      doc = receipt_doc(%{node: "write_plan", session_kept?: true, reply: nil})
+
+      line = text_of(doc, "#r")
+      assert line =~ "✓"
+      assert line =~ "Sent to"
+      assert text_of(doc, "#r code") == "write_plan"
+      assert text_of(doc, "#r span.max-sm\\:hidden") == "· restarted, session kept"
+      assert count(doc, "#r-reply") == 0
+    end
+
+    test "a receipt without a kept session has no suffix" do
+      doc = receipt_doc(%{node: "write_plan", session_kept?: false, reply: nil})
+
+      assert text_of(doc, "#r code") == "write_plan"
+      assert count(doc, "#r span.max-sm\\:hidden") == 0
+      refute text_of(doc, "#r") =~ "session kept"
+    end
+
+    test "no receipt renders nothing" do
+      assert (&CoreComponents.steer_receipt/1) |> render_component(id: "r", receipt: nil) |> String.trim() == ""
+    end
+
+    test "a reply threads under the receipt with its first paragraph, clamped" do
+      doc =
+        receipt_doc(%{
+          node: "write_plan",
+          session_kept?: true,
+          reply: %{detail: "Dropped the migration task.\n\nSecond paragraph.", at: ~U[2026-10-11 20:00:00Z]}
+        })
+
+      reply_classes = doc |> classes("#r-reply") |> String.split()
+      for c <- ~w(border-l-2 pl-3), do: assert(c in reply_classes)
+
+      assert attr_of(doc, "#r-reply", "style") == [
+               "border-color:color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100))"
+             ]
+
+      assert text_of(doc, "#r-reply") =~ "write_plan"
+      assert "line-clamp-3" in (doc |> classes("#r-reply-body") |> String.split())
+      assert text_of(doc, "#r-reply-body") == "Dropped the migration task."
+      refute text_of(doc, "#r-reply") =~ "Second paragraph."
+      assert count(doc, "#r-reply-more") == 1
+    end
+  end
+
+  describe "image_attach_box/1 tone (RE358)" do
+    defp toned_box_doc(attrs) do
+      assigns = Map.merge(%{upload: story_upload()}, attrs)
+
+      ~H"""
+      <CoreComponents.image_attach_box id="box" upload={@upload} {Map.take(assigns, [:tone])}>
+        <textarea id="note"></textarea>
+      </CoreComponents.image_attach_box>
+      """
+      |> rendered_to_string()
+      |> LazyHTML.from_fragment()
+    end
+
+    test "the default tone keeps the 1px base-300 border" do
+      cls = %{} |> toned_box_doc() |> classes("#box") |> String.split()
+
+      assert "border" in cls
+      assert "border-base-300" in cls
+      refute "border-primary/60" in cls
+    end
+
+    test "the primary tone swaps it for a 2px primary border, drop-target classes intact" do
+      cls = %{tone: :primary} |> toned_box_doc() |> classes("#box") |> String.split()
+
+      assert "border-2" in cls
+      assert "border-primary/60" in cls
+      refute "border-base-300" in cls
+      refute "border" in cls
+      assert "[&.phx-drop-target-active]:border-dashed" in cls
+    end
+  end
+
   defp chip(html, id) do
     html |> LazyHTML.from_fragment() |> LazyHTML.query("##{id}")
   end

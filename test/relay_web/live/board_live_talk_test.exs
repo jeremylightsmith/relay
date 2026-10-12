@@ -365,4 +365,41 @@ defmodule RelayWeb.BoardLiveTalkTest do
 
     assert html =~ "it is waiting on you"
   end
+
+  # RE358 — Talk is a separate session; while an agent node works the card the pane says so and
+  # its link lands on the Detail tab's composer, already in Steer mode.
+  describe "the Steer now notice" do
+    defp running_plan_card(board) do
+      start_engine!()
+      Relay.Runs.FakeDispatcher.register(self())
+      {:ok, flow} = board |> Relay.Flows.get_flow!("plan") |> Relay.Flows.enable_flow()
+      stage = Enum.find(board.stages, &(&1.name == "Next up"))
+      {:ok, card} = Cards.create_card(stage, %{title: "Planning", spec: "# Spec", acceptance_criteria: "1. It works."})
+      {:ok, _run} = Relay.Runs.start_run(card, flow)
+      assert_receive {:dispatched, %Schemas.NodeJob{node_key: "write_plan"}}
+      card
+    end
+
+    test "a running agent node shows the notice, and its link opens Detail in Steer mode", ctx do
+      card = running_plan_card(ctx.board)
+      view = open(ctx.conn, ctx.board, Cards.ref(ctx.board, card))
+
+      view |> element("#card-drawer-tab-talk") |> render_click()
+      assert has_element?(view, "#talk-pane-steer-notice")
+
+      view |> element("#talk-pane-steer-link") |> render_click()
+
+      refute has_element?(view, "#card-drawer-tab-panel-detail.hidden")
+      assert has_element?(view, ~s(#card-drawer-note-mode-steer[data-active="true"]))
+    end
+
+    test "a card with no running run has no notice", ctx do
+      view = open(ctx.conn, ctx.board, ctx.ref)
+
+      view |> element("#card-drawer-tab-talk") |> render_click()
+
+      assert has_element?(view, "#talk-pane")
+      refute has_element?(view, "#talk-pane-steer-notice")
+    end
+  end
 end

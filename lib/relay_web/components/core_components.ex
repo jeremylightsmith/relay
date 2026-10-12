@@ -2164,6 +2164,116 @@ defmodule RelayWeb.CoreComponents do
   defp note_origin_label(:answer, question), do: "FROM ANSWER · Q#{question}"
   defp note_origin_label(:rejection, _question), do: "FROM REJECTION"
 
+  # RE358 — the Notes composer's two modes. `:steer` is only offered while an agent node runs.
+  @note_modes [:note, :steer]
+
+  @doc """
+  The Notes composer's Note | ↪ Steer now toggle (RE358), shown above the composer row while an
+  agent node is working the card. A compact 11.5px track — deliberately not `segmented_control/1`,
+  whose iOS-size segments have no primary active state. Each segment sends `"note_mode"` with
+  `phx-value-mode`; the active one carries `data-active="true"`.
+
+  Ids: the track row is `@id`, the segments `\#{@id}-note` and `\#{@id}-steer`.
+  """
+  attr :id, :string, required: true
+  attr :mode, :atom, values: @note_modes, required: true
+
+  def note_mode_toggle(assigns) do
+    ~H"""
+    <div id={@id} class="flex items-center gap-2">
+      <div class="inline-flex rounded-md bg-base-200 p-[3px] text-[11.5px] font-semibold">
+        <button
+          :for={{mode, label} <- [note: "Note", steer: "↪ Steer now"]}
+          type="button"
+          id={"#{@id}-#{mode}"}
+          phx-click="note_mode"
+          phx-value-mode={mode}
+          data-active={to_string(@mode == mode)}
+          class={["rounded px-2.5 py-1", note_mode_segment_class(mode, @mode == mode)]}
+        >
+          {label}
+        </button>
+      </div>
+      <span class="font-mono text-[10px] text-base-content/45 max-sm:hidden">
+        shown while the agent works
+      </span>
+    </div>
+    """
+  end
+
+  defp note_mode_segment_class(:note, true), do: "bg-base-100 shadow-sm text-base-content"
+  defp note_mode_segment_class(:steer, true), do: "bg-primary text-primary-content shadow-sm"
+  defp note_mode_segment_class(_mode, false), do: "text-base-content/60"
+
+  @doc """
+  A steer note's receipt (RE358), under its body once a claimed agent job delivered it:
+  "✓ Sent to `<node>`", plus "· restarted, session kept" when the restarted attempt resumed the
+  stopped one's session. Once that attempt reports, its reply threads underneath — the node name,
+  when, and the first paragraph of its outcome detail, clamped to three lines with a "more"
+  toggle. Renders nothing for a steer not yet delivered (`receipt` nil).
+
+  `receipt` is one value of `Relay.Runs.steer_receipts/1`.
+
+  Ids: the receipt line is `@id`; the reply `\#{@id}-reply`, its body `\#{@id}-reply-body` and the
+  expand control `\#{@id}-reply-more`.
+  """
+  attr :id, :string, required: true
+  attr :receipt, :map, default: nil
+
+  def steer_receipt(assigns) do
+    ~H"""
+    <div :if={@receipt}>
+      <div
+        id={@id}
+        class="flex flex-wrap items-center gap-x-1.5 pt-0.5 font-mono text-[10px] text-base-content/55"
+      >
+        <span class="text-success">✓</span>
+        Sent to <code class="rounded bg-base-200 px-1 text-base-content/75">{@receipt.node}</code>
+        <span :if={@receipt.session_kept?} class="max-sm:hidden">· restarted, session kept</span>
+      </div>
+      <div
+        :if={@receipt.reply}
+        id={"#{@id}-reply"}
+        class="mt-2 flex items-start gap-2 border-l-2 pl-3"
+        style="border-color:color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100))"
+      >
+        <span
+          class="mt-[3px] shrink-0 rounded-full"
+          style="width:8px;height:8px;background:var(--color-secondary)"
+        >
+        </span>
+        <div class="min-w-0 text-[12px] leading-[18px] text-base-content/75">
+          <div class="flex flex-wrap items-baseline gap-x-1.5">
+            <span
+              class="font-mono text-[10.5px] font-semibold"
+              style="color:color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content))"
+            >
+              {@receipt.node}
+            </span>
+            <span class="font-mono text-[10px] text-base-content/45">
+              · {TimeAgo.ago(@receipt.reply.at)}
+            </span>
+          </div>
+          <p id={"#{@id}-reply-body"} class="line-clamp-3">
+            {first_paragraph(@receipt.reply.detail)}
+          </p>
+          <button
+            type="button"
+            id={"#{@id}-reply-more"}
+            phx-click={JS.toggle_class("line-clamp-3", to: "##{@id}-reply-body")}
+            class="font-mono text-[10px] font-semibold text-base-content/55 underline underline-offset-2"
+          >
+            more
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # The text before the first blank line, trimmed.
+  defp first_paragraph(detail), do: detail |> String.split(~r/\n\s*\n/, parts: 2) |> hd() |> String.trim()
+
   @doc """
   A posted note's images (RE427): a wrapping row of 108px-tall thumbnails, each patching to the
   same-tab viewer (`image_href.(attachment.id)`). Renders nothing for a note without images. It sits
@@ -2231,6 +2341,11 @@ defmodule RelayWeb.CoreComponents do
       "RE428: the DOM id of the textarea whose `![name](url)` links the hook maintains from the " <>
         "server's `image_link_*` push events; nil (the Notes composer) = no link handling"
 
+  attr :tone, :atom,
+    values: [:default, :primary],
+    default: :default,
+    doc: "RE358: `:primary` is the Steer now composer's 2px primary border"
+
   attr :class, :any, default: nil, doc: "extra classes (Storybook forces `phx-drop-target-active`)"
   slot :inner_block, required: true
 
@@ -2249,7 +2364,7 @@ defmodule RelayWeb.CoreComponents do
         # always attached; without `data-upload-name` (disabled) it does nothing. Enum.reject:
         # see RE277 — a nil tail would leave a stray trailing space.
         [
-          "group/attach relative rounded-[7px] border border-base-300 bg-base-100 py-[7px] pl-[11px] pr-2",
+          "group/attach relative rounded-[7px] #{attach_box_border(@tone)} bg-base-100 py-[7px] pl-[11px] pr-2",
           "[&.phx-drop-target-active]:border-2 [&.phx-drop-target-active]:border-dashed [&.phx-drop-target-active]:border-primary",
           @class
         ]
@@ -2380,6 +2495,9 @@ defmodule RelayWeb.CoreComponents do
     </div>
     """
   end
+
+  defp attach_box_border(:default), do: "border border-base-300"
+  defp attach_box_border(:primary), do: "border-2 border-primary/60"
 
   defp attach_thumb_class,
     do: "relative h-[108px] w-[156px] shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-200"
@@ -4377,6 +4495,19 @@ defmodule RelayWeb.CoreComponents do
 
   attr :note_image_errors, :list, default: [], doc: "RE427: the Notes composer's refused-image sentences"
 
+  attr :note_mode, :atom,
+    values: @note_modes,
+    default: :note,
+    doc: "RE358: the Notes composer's mode; `:steer` only takes effect while `steer_state` is set"
+
+  attr :steer_state, :map,
+    default: nil,
+    doc: "RE358: `Relay.Runs.steer_state/1` — `%{node, restarting?}` while an agent node works the card, else nil"
+
+  attr :steer_receipts, :map,
+    default: %{},
+    doc: "RE358: `Relay.Runs.steer_receipts/1` — each delivered `:steer` note's receipt, by comment id"
+
   attr :reject_images_pending, :list,
     default: [],
     doc: "RE428: the Request-changes box's uploaded-but-unsent images, `[%{id, filename, src}]`"
@@ -4414,6 +4545,9 @@ defmodule RelayWeb.CoreComponents do
       |> assign_park_state()
       |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
       |> assign(:working_progress, Cards.sub_task_pct(assigns.card))
+      # RE358 — Steer mode only while there is an agent node to steer; otherwise the composer is Note.
+      |> assign(:steering?, assigns.note_mode == :steer and assigns.steer_state != nil)
+      |> assign(:stopping?, !assigns.archived and match?(%{restarting?: true}, assigns.steer_state))
       |> assign_blocked_state()
       # Map.get because the drawer's `card` is any card-shaped map (Storybook passes plain maps).
       |> assign(:mockup_items, CardMedia.mockup_items(Map.get(assigns.card, :mockups), assigns.attachment_types))
@@ -4841,8 +4975,31 @@ defmodule RelayWeb.CoreComponents do
                     {Relay.Markdown.to_html(@card.rejection.note)}
                   </div>
                 </section>
+                <%!-- RE358 — between a steer and the restarted job's claim the strip says the node
+                is being stopped; the runner sees the revoke within one heartbeat. --%>
                 <section
-                  :if={@card.status == :working and !@archived}
+                  :if={@stopping?}
+                  id="working-strip-stopping"
+                  class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
+                  style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
+                >
+                  <span
+                    class="loading loading-spinner loading-sm shrink-0"
+                    style="color:var(--color-secondary)"
+                  >
+                  </span>
+                  <span
+                    class="min-w-0 flex-1 text-[12.5px] font-semibold"
+                    style="color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content));"
+                  >
+                    Stopping <code class="font-mono">{@steer_state.node}</code>… restarting with your steer
+                  </span>
+                  <span class="font-mono text-[10.5px] text-base-content/50 max-sm:hidden">
+                    ≤ one heartbeat
+                  </span>
+                </section>
+                <section
+                  :if={@card.status == :working and !@archived and !@stopping?}
                   id="working-strip"
                   class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
                   style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
@@ -4859,6 +5016,13 @@ defmodule RelayWeb.CoreComponents do
                     Relay AI is working
                   </span>
                   <span
+                    :if={@steer_state}
+                    id="working-strip-node"
+                    class="font-mono text-[11px] text-base-content/55"
+                  >
+                    on <code>{@steer_state.node}</code>
+                  </span>
+                  <span
                     :if={@working_progress}
                     id="working-strip-pct"
                     class="font-mono text-[11px]"
@@ -4868,7 +5032,8 @@ defmodule RelayWeb.CoreComponents do
                   </span>
                   <span style="flex:1;"></span>
                   <div
-                    class="h-[5px] w-24 overflow-hidden rounded-[3px]"
+                    id="working-strip-progress"
+                    class="h-[5px] w-24 overflow-hidden rounded-[3px] max-sm:hidden"
                     style="background:color-mix(in oklab, var(--color-secondary) 15%, var(--color-base-100));"
                   >
                     <div
@@ -5221,6 +5386,25 @@ defmodule RelayWeb.CoreComponents do
                             >
                               {comment_tag_label(comment.kind)}
                             </span>
+                            <%!-- RE358 — a steer is primary (blue), never the amber treatment. --%>
+                            <span
+                              :if={comment.kind == :steer}
+                              id={"#{dom_id}-steer-tag"}
+                              class="font-mono"
+                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(:steer)};background:color-mix(in oklab, var(--color-primary) 13%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
+                            >
+                              {comment_tag_label(:steer)}
+                            </span>
+                            <span
+                              :if={
+                                comment.kind == :steer and
+                                  not Map.has_key?(@steer_receipts, comment.id)
+                              }
+                              id={"#{dom_id}-sending"}
+                              class="inline-flex items-center gap-1 font-mono text-[10px] text-base-content/55"
+                            >
+                              <span class="loading loading-spinner loading-sm"></span> sending…
+                            </span>
                           </div>
                           <%!-- No bubble: `.md` already renders the artboard's 13px / 20.15px /
                                 base-content 85% prose (assets/css/app.css). Only the amber
@@ -5234,15 +5418,11 @@ defmodule RelayWeb.CoreComponents do
                               # through Enum.reject so this is one dynamic expression instead.
                               [
                                 "timeline-comment-body md",
-                                comment.kind in [:question, :changes_requested] &&
-                                  "rounded-lg px-3 py-2"
+                                comment_box_style(comment.kind) && "rounded-lg px-3 py-2"
                               ]
-                              |> Enum.reject(&(&1 == false))
+                              |> Enum.reject(&(&1 in [nil, false]))
                             }
-                            style={
-                              comment.kind in [:question, :changes_requested] &&
-                                "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
-                            }
+                            style={comment_box_style(comment.kind)}
                           >
                             {Relay.Markdown.to_html(comment.body)}
                           </div>
@@ -5252,6 +5432,11 @@ defmodule RelayWeb.CoreComponents do
                             id={"#{dom_id}-images"}
                             images={note_images(comment)}
                             image_href={@image_href}
+                          />
+                          <.steer_receipt
+                            :if={comment.kind == :steer}
+                            id={"#{dom_id}-receipt"}
+                            receipt={@steer_receipts[comment.id]}
                           />
                         </div>
                       </li>
@@ -5267,18 +5452,33 @@ defmodule RelayWeb.CoreComponents do
                       <%!-- RE427 — the shared image control. Attaching is desktop-web only: the
                             native embed (and a host without uploads) gets no 📎, no drop
                             target and no paste hook — only "Attach images from the web app." --%>
+                      <%!-- RE358 — Note | ↪ Steer now, only while an agent node works the card.
+                            Steer mode is the same form and the same "post_comment" event; only
+                            the box, the placeholder, the button and the hint change. --%>
+                      <div :if={@steer_state} class="pb-2">
+                        <.note_mode_toggle
+                          id={"#{@id}-note-mode"}
+                          mode={if(@steering?, do: :steer, else: :note)}
+                        />
+                      </div>
                       <.image_attach_box
                         id={"#{@id}-note-images"}
                         upload={@uploads && @uploads[:note_images]}
                         pending={@note_images_pending}
                         enabled={note_attach_enabled?(assigns)}
+                        tone={if(@steering?, do: :primary, else: :default)}
                       >
                         <textarea
                           id={"#{@id}-comment-input"}
                           name={@comment_form[:body].name}
                           rows="2"
                           phx-hook="SubmitOnCmdEnter"
-                          placeholder="What you did, what you found, what’s left…"
+                          placeholder={
+                            if(@steering?,
+                              do: "What should #{@steer_state.node} do differently?",
+                              else: "What you did, what you found, what’s left…"
+                            )
+                          }
                           class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
                         >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
                         <.image_attach_button
@@ -5287,12 +5487,24 @@ defmodule RelayWeb.CoreComponents do
                           upload={@uploads[:note_images]}
                         />
                         <.button
+                          :if={!@steering?}
                           type="submit"
+                          id={"#{@id}-comment-submit"}
                           class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
                           pending="Adding…"
                           disabled={note_images_in_flight?(@uploads)}
                         >
                           Add note
+                        </.button>
+                        <.button
+                          :if={@steering?}
+                          type="submit"
+                          id={"#{@id}-comment-submit"}
+                          class="btn btn-primary btn-sm h-[27px] min-h-0 shrink-0 rounded-md px-3 text-[11.5px] font-semibold"
+                          pending="Steering…"
+                          disabled={note_images_in_flight?(@uploads)}
+                        >
+                          Steer now
                         </.button>
                       </.image_attach_box>
                       <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
@@ -5301,9 +5513,29 @@ defmodule RelayWeb.CoreComponents do
                         errors={@note_image_errors}
                         enabled={note_attach_enabled?(assigns)}
                       />
+                      <p
+                        :if={@steer_state && !@steering?}
+                        id={"#{@id}-note-hint"}
+                        class="pt-2 font-mono text-[10.5px] leading-[1.5] text-base-content/55"
+                      >
+                        Reaches the agent at its next step. Switch to
+                        <b class="text-primary">Steer now</b>
+                        to interrupt.
+                      </p>
+                      <p
+                        :if={@steering?}
+                        id={"#{@id}-note-hint"}
+                        class="pt-2 font-mono text-[10.5px] leading-[1.5] text-primary/80"
+                      >
+                        Stops <code>{@steer_state.node}</code>
+                        and restarts it with this note — session kept.
+                      </p>
                     </.form>
                   </div>
-                  <p class="font-mono text-[10.5px] leading-[1.5] text-base-content/50">
+                  <p
+                    :if={!@steer_state || @archived}
+                    class="font-mono text-[10.5px] leading-[1.5] text-base-content/50"
+                  >
                     Notes are card content, not chat — they go into every agent’s context.
                   </p>
                 </section>
@@ -5416,6 +5648,7 @@ defmodule RelayWeb.CoreComponents do
                     seed_open?={@talk_seed_open?}
                     busy?={talk_busy?(@talk_active_turn)}
                     awaiting?={@card.status == :needs_input}
+                    run_working?={@steer_state != nil}
                     stream={@talk_events}
                   />
                 </div>
@@ -7068,11 +7301,26 @@ defmodule RelayWeb.CoreComponents do
 
   defp comment_tag_label(:question), do: "QUESTION"
   defp comment_tag_label(:changes_requested), do: "CHANGES REQUESTED"
+  defp comment_tag_label(:steer), do: "STEER"
 
   defp comment_tag_color(:question), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
 
   defp comment_tag_color(:changes_requested),
     do: "color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))"
+
+  defp comment_tag_color(:steer), do: "color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content))"
+
+  # A note's body box: amber for a question / changes requested, primary for a steer (RE358); an
+  # ordinary note has no box (nil).
+  defp comment_box_style(kind) when kind in [:question, :changes_requested],
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
+
+  defp comment_box_style(:steer),
+    do:
+      "background:color-mix(in oklab, var(--color-primary) 8%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
+
+  defp comment_box_style(_kind), do: nil
 
   defp note_count_label(1), do: "1 note"
   defp note_count_label(count), do: "#{count} notes"

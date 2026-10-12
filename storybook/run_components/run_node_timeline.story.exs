@@ -56,12 +56,23 @@ defmodule Storybook.RunComponents.RunNodeTimeline do
       },
       %Variation{
         id: :needs_input_reentry,
-        description: "needs-input re-entry — the only state that says \"session resumed\"",
+        description: "needs-input re-entry — resumes the session, so it says \"session resumed\"",
         attributes: %{
           detail:
             detail(%{status: :running, flow_key: "spec", current_node: "brainstorm"}, [
               ne("brainstorm", 1, :needs_input, %{duration_s: 190, cost: Decimal.new("0.15")}),
               ne("brainstorm", 2, nil, %{duration_s: nil})
+            ])
+        }
+      },
+      %Variation{
+        id: :steered,
+        description: "Steer now (RE358) — the stopped attempt reads \"steered\"; its restart resumes the session",
+        attributes: %{
+          detail:
+            detail(%{status: :running, flow_key: "plan", current_node: "write_plan"}, [
+              ne("write_plan", 1, :steered, %{duration_s: 95, cost: Decimal.new("0.22"), visit: 1, session_id: "s"}),
+              ne("write_plan", 2, nil, %{duration_s: nil, visit: 1})
             ])
         }
       },

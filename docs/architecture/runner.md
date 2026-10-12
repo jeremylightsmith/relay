@@ -181,7 +181,7 @@ double-booking (YAGNI: no multi-board reservation yet).
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
-  running: [job-ids], held: [{ref, state}], harnesses}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}], harnesses, sessions}` to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
   required_version, latest_runner_version, harnesses_digest}` (the digest since RE433 — see
@@ -210,7 +210,13 @@ double-booking (YAGNI: no multi-board reservation yet).
   with `auto_update` on updates itself against it. Each `harnesses[]` inventory entry carries
   that harness's `usage` (RE436) — `{source, read_at, windows, paused}`, its latest readings and
   its pause if any — read fresh on every beat (see Usage limits below). RE320's top-level
-  `rate_limit` is no longer sent.
+  `rate_limit` is no longer sent. `sessions` (RE358) is `{"<job-id>": "<session-id>"}` — the
+  session each in-flight agent job's stream has captured so far (`JobControl.note_session`, fed
+  by `_stream_agent_job`'s `on_session`), sent only when at least one job has one.
+  `Relay.Runs.record_job_sessions/2` writes each onto that job's `NodeExecution.session_id` —
+  board-scoped and id-parsed like `revoked_among/2`, and only for an active flow job whose
+  execution has no outcome yet (a beat can race the outcome POST). Anything malformed is ignored;
+  the beat still answers 200. See "Steer now" below for why it exists.
 - **Run ids**: each runner worker tags its log lines with the claimed job's `run_id`
   (RLY-112) so a card's timeline can group lines by run.
 
@@ -1182,7 +1188,21 @@ silently billed to the paid API.
   running jobs and only ever fast-forwarded once every shared slot is idle). The old
   reset-on-revoke for exclusive jobs is gone: no reset is ever needed mid-run now that a
   worktree's identity is the card itself. Either way, no outcome is reported for a revoked
-  job — the server already knows a revoked job never finished.
+  job — the server already knows a revoked job never finished. The same beat carries `sessions`
+  (RE358), each in-flight agent job's captured session id, read from its `JobControl` (talk jobs
+  are never reported).
+- **A newly claimed job supersedes its run's stale job (RE358).** Before placement, `cmd_start`
+  snapshots `in_flight` under its lock (each entry carries the job's `run_id` and `kind`) and
+  calls `supersede_stale_jobs`: every other in-flight **non-talk** job of the claimed job's run is
+  cancelled through its `JobControl` and joined, outside the lock, for up to
+  `SUPERSEDED_JOB_JOIN_S` (30s; an error line names a job still running after that). The server
+  keeps at most one active job per run, so such a job is either steered (revoked, but the
+  heartbeat that says so may be up to an interval away) or already reported and still in its
+  `finally`, where the cancel is a no-op. This closes a real gap: a granted claim never carries
+  `revoked`, and `RunnerPool.assign` reuses an exclusive worktree bound to the same `run_id` even
+  while it is `live`, so a Steer now restart could otherwise start in the same tree as the
+  `claude -p` it replaced. Talk jobs are never superseded — a talk turn may legitimately run
+  beside its card's node job.
 - **Auto-update (RE185).** When the beat's `latest_runner_version` exceeds the running
   `RUNNER_VERSION`, `maybe_auto_update` fires from the claim loop — but only at a **job
   boundary** (nothing in flight), never under `--once`, and never more often than
@@ -1514,14 +1534,16 @@ unambiguous verdict.
 
 ### What an agent node's prompt is made of
 
-`./relay` composes an agent node's prompt from up to three parts, in this order
+`./relay` composes an agent node's prompt from up to four parts, in this order
 (`compose_node_prompt`):
 
 1. **the node's own `run`**, rendered — `{ref}`, `{branch}`, `{relay}` and the rest substituted
    from the job's `vars`;
 2. **the findings block**, appended only when the job carries a non-blank `vars["findings"]`
    (RE251);
-3. **the outcome contract**, rendered, appended to every agent node.
+3. **the guidance block**, appended only when the job carries a non-blank `vars["guidance"]`
+   (RE358);
+4. **the outcome contract**, rendered, appended to every agent node.
 
 `shell` and `gate` nodes get part 1 only: their `run` is a command line, not a prompt.
 
@@ -1544,6 +1566,96 @@ there is one rendered copy of each command per prompt.
 **The findings text is spliced verbatim and never rendered.** Findings are free-form reviewer
 prose: a reviewer who writes `{ref}` must see those characters reach the model, and reviewer text
 must never be able to reach into the var namespace. The static wrapper carries no placeholders.
+
+#### The guidance block (RE358)
+
+Human comments and rejection notes written while a card is being worked reach every agent node.
+The server derives them **live**, never snapshotting them into `run.context`:
+`Relay.Runs.guidance_for/2` selects them and `Relay.Runs.render_guidance/2` renders them into
+`vars["guidance"]` (a string, or `nil` when there are none).
+
+- **The window** opens at the earlier of the card's open rejection's `rejected_at` and the run's
+  `inserted_at` (just the run's when no rejection is open), inclusive — timestamps are
+  second-precision and the rejection's own note lands in the same second. So a note a human
+  wrote between a reject and the hand-back still counts on the run the hand-back starts.
+- **The entries** are **user** comments whose kind is in `Schemas.Comment.guidance_kinds/0`
+  (`:comment`, `:changes_requested`, `:steer`) plus any `:changes_requested` note whatever its
+  actor. Agent `:comment`s and every `:question` are excluded. The rejection note is already a
+  `:changes_requested` comment, so it is never appended a second time from `card.rejection`.
+  Entries are ordered oldest → newest (`inserted_at`, then `id`).
+- **The rendering** is one entry per comment, separated by a blank line: a header
+  `<author> · <YYYY-MM-DD HH:MM> UTC` (tagged ` · CHANGES REQUESTED` or ` · STEER` by kind), the
+  body verbatim, and — when the note carries images — `(N images attached — see ./relay card
+  <ref>)`, since images don't travel in a prompt.
+- **Derived at insert, refreshed at claim.** `build_payload/4` computes it for every job it
+  builds (agent, shell and gate alike). In the pull model the claim is the real dispatch — a job
+  is inserted when its run starts or advances but may be claimed much later — so
+  `claim_next_job/4` recomputes it on the job it hands out and stores it back on the row
+  (`refresh_job_guidance!/1`, inside the claim transaction; talk jobs are untouched). A note
+  added after a reject but before the runner picks the job up still reaches it.
+
+In the runner, `guidance_block/1` wraps the text in `GUIDANCE_CONTRACT_HEAD` /
+`GUIDANCE_CONTRACT_TAIL`. The head frames the notes as instructions for this run and says later
+entries **supersede** earlier ones — including the CHANGES REQUESTED note that sent the card back;
+the tail asks for **one short line per entry** in the outcome detail (followed, superseded, or not
+applicable) and makes an unresolvable conflict a `needs-input` escalation. Like the findings
+block, **the guidance text is spliced verbatim and never rendered** — a human who types `{ref}`
+gets those characters, and human prose can never reach the var namespace — and the static wrapper
+carries no placeholders. An older runner ignores the var, which is the pre-RE358 behaviour, so
+`@min_runner_version` was not raised.
+
+### Steer now (RE358)
+
+The drawer's **Steer now** is `Relay.Runs.steer/4`: a human's note that stops the agent node
+working the card and restarts that same node with the note in its guidance.
+
+- **The comment comes first, always.** The steer is saved as a `:steer` comment
+  (`Relay.Activity.add_comment/2`) in its own transaction before anything else happens, so the
+  words survive whatever follows. A blank steer with no images is a changeset error and nothing
+  else happens.
+- **Steered re-entry.** When the card's run is `:running`, the call goes through the run's
+  `RunServer` (`{:steer, actor, body, image_ids}`, serialized with outcome reports). If the run's
+  current node is an **agent** node with an active job whose attempt has no outcome yet — claimed
+  *or* still queued, so a steer is never lost to a payload built before it — then in one
+  transaction the server stamps that attempt `outcome: :steered` (no detail), revokes its job
+  (`revoke_active_jobs/1`; the runner kills the process when its heartbeat's `revoked` list names
+  it) and enters the **same node, same visit, attempt + 1, same `sub_task_id`**. The new job's
+  payload carries `resume_session` = the stopped attempt's `session_id` (so `claude --resume` keeps
+  the conversation when one was captured — see "The session survives the kill" below) plus the
+  stopped job's `findings` and `prior_detail`.
+  After commit: `{:node_finished, run, steered}`, `{:node_started, run, new}`, dispatch. The run's
+  status is never written — it stays `:running`.
+- **`:steered` is server-only.** It is in `Schemas.NodeExecution.server_only_outcomes/0`, so the
+  outcome API refuses it like any unknown outcome (`outcomes/0`, the wire contract pinned by the
+  runner contract fixture, is unchanged) and no edge may route on it. The engine reads a steered
+  row as itself, never as a degraded `:failed`, so it **spends no `max_loops` budget**; and since
+  any outcome ends RE410's outcome-less streak, **steering repeatedly never trips the RE410 cap**
+  (the steered re-entry doesn't consult it anyway). A later re-entry still carries the last *real*
+  failure as findings — `last_failure_detail/1` skips server-only rows as it skips `:blocked`.
+  The Run tab shows a steered attempt as `↪` with a "steered" chip; it is not a spent attempt, and
+  its restart reads "session resumed" when a session was kept.
+- **Degrade to a note.** No running run (none, parked, or one that stopped mid-call), a shell or
+  gate node, or no outcome-less active attempt: nothing is revoked and `steer/4` returns
+  `{:ok, comment, :noted}`. The steer still reaches the **next** agent node through its guidance.
+- **Receipts land at claim.** `refresh_job_guidance!/1` (the claim-time guidance refresh) stamps
+  `comments.delivered_execution_id = job.node_execution_id` on every `:steer` it just rendered that
+  has no receipt yet — for **agent** jobs only (a shell or gate job never delivers a steer), and
+  first delivery wins. `steer_receipts/1` reads them back for the drawer (node, `session_kept?`,
+  and the attempt's outcome detail as its reply once it reports); `steer_state/1` says whether the
+  card's AI-held run is on an agent node and whether a restart is still waiting to be claimed. A
+  flow-job claim emits `{:run_changed, card_id}` so the drawer refetches.
+- **The session survives the kill.** A revoked job reports no outcome, so its session id would be
+  lost. Instead the runner reports every running agent job's captured session on each heartbeat
+  (`sessions: {job-id: session-id}`), and `Relay.Runs.record_job_sessions/2` writes it onto that
+  job's `NodeExecution.session_id` — which is exactly what the steer reads as `resume_session`. So
+  the hand-off is beat → `NodeExecution.session_id` → `resume_session`: a steer after at least one
+  beat has carried the session resumes it; a steer before the first such beat restarts on a fresh
+  session (the guidance still carries the note).
+- **The restart never shares a worktree with the process it replaced.** When the runner claims the
+  restarted job, it first supersedes the run's still-running stale job — cancels it and waits for
+  it to exit (`supersede_stale_jobs`, see "Runner mode" above) — before placing the new one. The
+  revoke alone was not enough: it only arrives on the next heartbeat, and `RunnerPool.assign`
+  reuses an exclusive worktree bound to the same run even while it is live.
 
 ### Agent node → `.claude/agents` definition
 

@@ -423,6 +423,13 @@ defmodule RelayWeb.RunComponents do
           session resumed
         </span>
         <span
+          :if={@row.steered?}
+          class="run-steered-chip"
+          style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border-radius:4px;padding:2px 6px;white-space:nowrap;"
+        >
+          steered
+        </span>
+        <span
           :if={@row.partial?}
           style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-success) 45%, var(--color-base-content));"
         >
@@ -496,6 +503,18 @@ defmodule RelayWeb.RunComponents do
       style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;background:var(--color-error);color:var(--color-error-content);font-size:11px;flex:0 0 auto;"
     >
       ⊗
+    </span>
+    """
+  end
+
+  # RE358: a human's Steer now stopped this attempt — a human action, so primary (blue).
+  defp timeline_icon(%{state: :steered} = assigns) do
+    ~H"""
+    <span
+      class="run-timeline-icon"
+      style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--color-primary);color:var(--color-primary-content);font-size:11px;flex:0 0 auto;"
+    >
+      ↪
     </span>
     """
   end

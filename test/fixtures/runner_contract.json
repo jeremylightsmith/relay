@@ -17,6 +17,7 @@
       "vars": {
         "branch": "cb-1-contract-card",
         "findings": null,
+        "guidance": null,
         "prior_detail": null,
         "ref": "CB1",
         "task": null,
@@ -45,6 +46,7 @@
       "vars": {
         "branch": "ca-1-contract-card",
         "findings": null,
+        "guidance": null,
         "prior_detail": null,
         "ref": "CA1",
         "task": null,
@@ -73,6 +75,7 @@
       "vars": {
         "branch": "ca-1-contract-card",
         "findings": null,
+        "guidance": null,
         "prior_detail": null,
         "ref": "CA1",
         "task": null,
@@ -208,7 +211,10 @@
         "name": "fixture",
         "version": 86
       },
-      "running": []
+      "running": [],
+      "sessions": {
+        "0": "fixture-session"
+      }
     },
     "response": {
       "harnesses_digest": "<harnesses-digest>",
@@ -1749,7 +1755,7 @@
       }
     ]
   },
-  "version": 14,
+  "version": 15,
   "vocabulary": {
     "agent_outcomes": [
       "succeeded",

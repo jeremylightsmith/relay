@@ -35,6 +35,14 @@ defmodule Relay.Runs.RunServer do
       run whose `queued`/`claimed` job survived the restart (RE410,
       `Relay.Runs.boot_mode/1`): no revoke, no dispatch.
 
+  Steered re-entry (RE358 Steer now) is a call, not a start mode: `{:steer, actor, body,
+  image_ids}` saves the `:steer` comment first, then — when the run is on an agent node with an
+  outcome-less active attempt — stamps that attempt `:steered`, revokes its job and enters the
+  SAME node as the next attempt of the same visit, resuming the stopped attempt's `session_id` and
+  carrying its job's `findings` / `prior_detail` forward. One transaction, then `:node_finished` +
+  `:node_started` and dispatch. It is not capped by RE410 (the `:steered` stamp ends the
+  outcome-less streak), and the run's status is never written. Otherwise the steer is a note.
+
   `init/1` refuses (`:ignore`) a run that is missing or no longer `:running` (RE412), so no
   start mode ever runs for a run that a concurrent close or park already took over.
 
@@ -225,6 +233,73 @@ defmodule Relay.Runs.RunServer do
       {:continue, reply} -> {:reply, reply, state}
       {:stop, reply} -> {:stop, :normal, reply, state}
     end
+  end
+
+  # RE358 Steer now. The comment is committed FIRST, in its own transaction, so the human's words
+  # survive whatever follows (and `Activity.add_comment/2` broadcasts directly, so it must never run
+  # inside a transaction that could roll back). Only then is the running attempt stopped and the
+  # same node restarted — or, when there is no agent attempt to stop, the steer stays a note.
+  def handle_call({:steer, actor, body, image_ids}, _from, state) do
+    run = Repo.get!(Run, state.run_id)
+    card = Repo.get!(Card, run.card_id)
+
+    case Runs.add_steer_comment(card, {actor, body, image_ids}) do
+      {:ok, comment} -> {:reply, {:ok, comment, steer_restart(state)}, state}
+      {:error, changeset} -> {:reply, {:error, changeset}, state}
+    end
+  end
+
+  # The steered re-entry: like {:reenter, _}'s same-node path — one transaction (stamp, revoke,
+  # enter), then broadcast and dispatch after commit — but WITHOUT the RE410 cap (a human asked
+  # for this restart; the `:steered` stamp ends the outcome-less streak anyway) and carrying the
+  # stopped job's inputs forward instead of re-deriving them. The run's status is never written.
+  defp steer_restart(state) do
+    run = Repo.get!(Run, state.run_id)
+
+    with :running <- run.status,
+         {:ok, flow} <- Runs.load_flow(run),
+         %{type: :agent} <- Enum.find(flow.nodes, &(&1.key == run.current_node)),
+         %NodeJob{} = job <- Runs.active_job(run),
+         %NodeExecution{outcome: nil, node_key: node_key} = execution when node_key == run.current_node <-
+           Repo.get(NodeExecution, job.node_execution_id) do
+      {:ok, {steered, next_execution, next_job}} = Repo.transaction(fn -> steer_rows!(run, flow, job, execution) end)
+
+      board_id = Runs.board_id_of(run)
+      Runs.broadcast_runs(board_id, {:node_finished, run, steered})
+      Runs.broadcast_runs(board_id, {:node_started, run, next_execution})
+      dispatch_job(next_job)
+      :restarted
+    else
+      _nothing_to_restart -> :noted
+    end
+  end
+
+  # Same visit, next attempt, same binding; the stopped attempt's session is resumed and its
+  # findings / prior_detail ride along, so the restart differs from it only by the fresh guidance.
+  defp steer_rows!(run, flow, job, execution) do
+    steered = stamp_steered!(execution)
+    Runs.revoke_active_jobs(run)
+
+    attempt = max_in_visit(run, steered.node_key, steered.visit) + 1
+    next = Runs.insert_execution!(run, steered.node_key, steered.visit, attempt, steered.sub_task_id)
+    vars = job.payload["vars"] || %{}
+
+    opts = [
+      resume_session: steered.session_id,
+      sub_task_id: steered.sub_task_id,
+      findings: vars["findings"],
+      prior_detail: vars["prior_detail"]
+    ]
+
+    {steered, next, Runs.insert_job!(run, next, Runs.build_payload(run, flow, steered.node_key, opts))}
+  end
+
+  # Not Runs.finalize_job!/2, for the same reason as stamp_outcomeless_park!/2: that marks the job
+  # :done, but this attempt's job is revoked. No detail — the steer comment is the explanation.
+  defp stamp_steered!(execution) do
+    execution
+    |> Ecto.Changeset.change(outcome: :steered, finished_at: DateTime.truncate(DateTime.utc_now(), :second))
+    |> Repo.update!()
   end
 
   # A refused job's `:blocked` has no `resume_at`, so the Engine parks the run — no retry is
@@ -726,12 +801,16 @@ defmodule Relay.Runs.RunServer do
   # The detail of the run's most recent outcome-bearing execution, but ONLY when it
   # failed: a re-entry after a park-on-question or a success carries no findings. A
   # `:blocked` row (RE308) is skipped, not read: the node never ran, so the finding a
-  # retry needs is whatever sent the node here — never "the agent could not run".
+  # retry needs is whatever sent the node here — never "the agent could not run". A
+  # server-only row (RE358's `:steered`) is skipped too: a human stopping an attempt says
+  # nothing about why the node is here, so a re-entry after a steer keeps the real failure.
   defp last_failure_detail(run) do
+    skipped = [:blocked | NodeExecution.server_only_outcomes()]
+
     last =
       Repo.one(
         from e in NodeExecution,
-          where: e.run_id == ^run.id and not is_nil(e.outcome) and e.outcome != ^:blocked,
+          where: e.run_id == ^run.id and not is_nil(e.outcome) and e.outcome not in ^skipped,
           order_by: [desc: e.id],
           limit: 1,
           select: %{outcome: e.outcome, detail: e.detail}

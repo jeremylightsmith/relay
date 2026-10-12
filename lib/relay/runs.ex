@@ -55,6 +55,7 @@ defmodule Relay.Runs do
   alias Schemas.Agent
   alias Schemas.Board
   alias Schemas.Card
+  alias Schemas.Comment
   alias Schemas.Flow
   alias Schemas.Harness
   alias Schemas.HarnessUsage
@@ -64,6 +65,7 @@ defmodule Relay.Runs do
   alias Schemas.Runner
   alias Schemas.Stage
   alias Schemas.SubTask
+  alias Schemas.User
 
   require Logger
   require Scheduler
@@ -1189,8 +1191,9 @@ defmodule Relay.Runs do
   stage is NOT re-moved (rejection re-entry: a gratuitous
   append-move would clear the CHANGES REQUESTED banner via
   `move_card`'s rejection-clearing rule) but is still set `:working`.
-  `opts[:context]` is a STRING-keyed map (e.g.
-  `%{"changes_requested" => note}`) merged into every job payload's vars.
+  `opts[:context]` is a STRING-keyed map merged into every job payload's vars. A rejection
+  re-entry passes none (RE358): its note reaches the agent as live guidance
+  (`guidance_for/2`), derived at dispatch rather than frozen into the run.
   """
   def start_run(%Card{board_id: board_id} = card, %Flow{board_id: board_id} = flow, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
@@ -1416,6 +1419,153 @@ defmodule Relay.Runs do
       {:error, {:server_start_failed, _reason}} ->
         {:error, :run_server_unavailable}
     end
+  end
+
+  @doc """
+  Steer now (RE358): a human's note that stops the agent node working the card and restarts it.
+
+  Always saves `body` (with the attachment ids in `image_ids`, as `Relay.Activity.add_comment/2`
+  takes them) as a `:steer` comment first, so the words survive whatever follows. When the card's
+  active run is `:running`, the call goes through its `RunServer` (serialized with outcome
+  reports). If the run is on an **agent** node with an active job whose attempt has no outcome yet,
+  the server stamps that attempt `:steered`, revokes its job and enters the same node as the next
+  attempt of the same visit, resuming the stopped attempt's session (`session_id`) and keeping its
+  `findings`/`prior_detail`. The fresh job's guidance carries the steer, and its claim stamps the
+  receipt (`steer_receipts/1`). The run never leaves `:running`.
+
+  Returns `{:ok, comment, :restarted}` when an attempt was stopped and restarted, or
+  `{:ok, comment, :noted}` when nothing was revoked: no running run, a parked run, a shell or gate
+  node, or a run that stopped mid-call. The next agent job claimed then delivers the steer.
+  A blank steer with no images is `{:error, changeset}`, and nothing else happens.
+  """
+  @spec steer(Card.t(), {:user, pos_integer()}, String.t() | nil, [String.t()]) ::
+          {:ok, Comment.t(), :restarted | :noted} | {:error, Changeset.t()}
+  def steer(%Card{} = card, {:user, _user_id} = actor, body, image_ids) when is_list(image_ids) do
+    case active_run(card) do
+      %Run{status: :running} = run -> call_steer(run, card, {actor, body, image_ids}, 1)
+      _none_or_parked -> note_steer(card, {actor, body, image_ids})
+    end
+  end
+
+  # Mirrors call_report_outcome/4: a server that cannot start, or that stops before handling the
+  # call, means the run is no longer ours to restart — the steer degrades to a note, never an error.
+  # A call that never reached `handle_call/3` inserted nothing, so the note is not a duplicate.
+  defp call_steer(run, card, {actor, body, image_ids} = steer, retries_left) do
+    case ensure_server(run, :attach) do
+      {:ok, pid} ->
+        try do
+          GenServer.call(pid, {:steer, actor, body, image_ids}, :infinity)
+        catch
+          :exit, reason ->
+            cond do
+              not server_gone_exit?(reason) -> exit(reason)
+              retries_left > 0 -> call_steer(run, card, steer, retries_left - 1)
+              true -> note_steer(card, steer)
+            end
+        end
+
+      {:error, _not_running_or_unstartable} ->
+        note_steer(card, steer)
+    end
+  end
+
+  defp note_steer(card, steer) do
+    with {:ok, comment} <- add_steer_comment(card, steer), do: {:ok, comment, :noted}
+  end
+
+  # The one place a steer comment is written — `steer/4`'s degrade path and the RunServer's
+  # `{:steer, ...}` call both use it.
+  @doc false
+  def add_steer_comment(%Card{} = card, {actor, body, image_ids}) do
+    Activity.add_comment(card, %{actor: actor, body: body, image_ids: image_ids, kind: :steer})
+  end
+
+  @doc """
+  What the drawer's Steer now control needs (RE358), or `nil` when there is nothing to steer.
+
+  Non-nil only when the card's AI holds the baton, its active run is `:running`, the run's flow
+  loads, and the run's current node is an `:agent` node. `restarting?` is true between a steer and
+  the restarted job's claim: the node's newest execution has no outcome, its job is still
+  `:queued`, and the attempt before it in the same visit was `:steered`.
+  """
+  @spec steer_state(Card.t()) :: nil | %{node: String.t(), restarting?: boolean()}
+  def steer_state(%Card{} = card) do
+    card = Repo.preload(card, :owners, force: true)
+
+    with :ai <- Cards.active_owner_type(card),
+         %Run{status: :running, current_node: node} = run when is_binary(node) <- active_run(card),
+         {:ok, flow} <- load_flow(run),
+         %{type: :agent} <- Enum.find(flow.nodes, &(&1.key == node)) do
+      %{node: node, restarting?: steer_restarting?(run, node)}
+    else
+      _nothing_to_steer -> nil
+    end
+  end
+
+  defp steer_restarting?(run, node) do
+    newest =
+      Repo.one(
+        from e in NodeExecution,
+          where: e.run_id == ^run.id and e.node_key == ^node,
+          order_by: [desc: e.id],
+          limit: 1
+      )
+
+    case newest do
+      %NodeExecution{outcome: nil} -> queued_job?(newest) and steered_before?(newest)
+      _other -> false
+    end
+  end
+
+  defp queued_job?(%NodeExecution{id: id}),
+    do: Repo.exists?(from j in NodeJob, where: j.node_execution_id == ^id and j.state == ^:queued)
+
+  # The attempt immediately before this one, same node and visit, was stopped by a steer.
+  defp steered_before?(%NodeExecution{} = execution) do
+    Repo.exists?(
+      from e in NodeExecution,
+        where:
+          e.run_id == ^execution.run_id and e.node_key == ^execution.node_key and e.visit == ^execution.visit and
+            e.attempt == ^(execution.attempt - 1) and e.outcome == ^:steered
+    )
+  end
+
+  @doc """
+  The receipt of every delivered `:steer` comment on the card (RE358), keyed by comment id. A steer
+  is delivered when an agent job carrying it in its guidance is claimed (`claim_next_job/4`);
+  an undelivered steer has no entry.
+
+    * `node` — the delivered execution's node.
+    * `session_kept?` — that execution's job resumed an earlier session (`"resume_session"`).
+    * `reply` — once that execution reports a real outcome (not `:steered`) with a non-blank
+      `detail`: `%{detail:, at: finished_at}`; otherwise `nil`.
+  """
+  @spec steer_receipts(Card.t()) :: %{
+          optional(integer()) => %{
+            node: String.t(),
+            session_kept?: boolean(),
+            reply: nil | %{detail: String.t(), at: DateTime.t()}
+          }
+        }
+  def steer_receipts(%Card{id: card_id}) do
+    from(c in Comment,
+      join: e in NodeExecution,
+      on: e.id == c.delivered_execution_id,
+      left_join: j in NodeJob,
+      on: j.node_execution_id == e.id,
+      where: c.card_id == ^card_id and c.kind == ^:steer,
+      select: {c.id, e, fragment("?->>'resume_session'", j.payload)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {id, execution, resume_session} ->
+      {id, %{node: execution.node_key, session_kept?: not is_nil(resume_session), reply: steer_reply(execution)}}
+    end)
+  end
+
+  defp steer_reply(%NodeExecution{outcome: outcome}) when outcome in [nil, :steered], do: nil
+
+  defp steer_reply(%NodeExecution{detail: detail, finished_at: at}) do
+    if is_binary(detail) and String.trim(detail) != "", do: %{detail: detail, at: at}
   end
 
   defp server_gone_exit?({reason, _call}) when reason in [:noproc, :normal], do: true
@@ -2106,9 +2256,63 @@ defmodule Relay.Runs do
       job ->
         {:ok, claimed} = claim_job(job, name)
         maybe_pin_run(claimed, name)
-        claimed
+        notify_flow_claim(board_id, claimed)
+        refresh_job_guidance!(claimed)
     end
   end
+
+  # RE358: a flow job's claim changes what the card shows (a steer's "Stopping…" strip ends, its
+  # receipt lands), so the drawer refetches on the coarse signal — after the claim commits. A talk
+  # claim changes no run.
+  defp notify_flow_claim(board_id, %NodeJob{kind: kind, card_id: card_id}) do
+    if kind in NodeJob.flow_kinds(), do: broadcast_run_changed(board_id, card_id)
+    :ok
+  end
+
+  # RE358 — in the pull model the claim is the real dispatch: a job is inserted the instant its
+  # run starts or advances, but a runner may pick it up much later. Re-derive the job's guidance
+  # from the card's comments NOW (never read it back off the stored payload) and store it on the
+  # row, so a note added after the insert but before the pickup still reaches the agent. The one
+  # place a claimed job's guidance is (re)computed. Runs inside the claim transaction and never
+  # broadcasts. A talk job (no run) is returned untouched, and so is a flow job whose run or card
+  # row is somehow gone — a claim must not raise over a missing row.
+  #
+  # It also stamps Steer now receipts: an AGENT job delivers every `:steer` it renders that has no
+  # receipt yet (first delivery wins); a shell or gate job never does.
+  defp refresh_job_guidance!(%NodeJob{run_id: run_id, payload: %{"vars" => vars} = payload} = job)
+       when is_integer(run_id) and is_map(vars) do
+    with %Run{} = run <- Repo.get(Run, run_id),
+         %Card{} = card <- Repo.get(Card, job.card_id) do
+      board = Repo.get!(Board, card.board_id)
+      entries = guidance_for(card, run)
+      vars = Map.put(vars, "guidance", render_guidance(entries, Cards.ref(board, card)))
+
+      job = job |> Changeset.change(payload: Map.put(payload, "vars", vars)) |> Repo.update!()
+      stamp_steer_receipts(job, entries)
+      job
+    else
+      nil -> job
+    end
+  end
+
+  defp refresh_job_guidance!(%NodeJob{} = job), do: job
+
+  defp stamp_steer_receipts(%NodeJob{payload: %{"node_type" => "agent"}} = job, entries) do
+    case for(%Comment{kind: :steer, id: id} <- entries, do: id) do
+      [] ->
+        :ok
+
+      ids ->
+        Repo.update_all(
+          from(c in Comment, where: c.id in ^ids and is_nil(c.delivered_execution_id)),
+          set: [delivered_execution_id: job.node_execution_id]
+        )
+
+        :ok
+    end
+  end
+
+  defp stamp_steer_receipts(_not_an_agent_job, _entries), do: :ok
 
   # On claiming an exclusive run's job, persist the holder on the run row so BOTH
   # readers — the claim layer (exclusive_holder/2) and the scheduler (active_runs/1) —
@@ -2215,6 +2419,58 @@ defmodule Relay.Runs do
   end
 
   def refresh_running_card_liveness(_board, _running), do: {0, nil}
+
+  @doc """
+  Records the agent sessions a runner reports on its heartbeat (RE358): `sessions` maps a node-job
+  id (a JSON object key, so a string) to the session id captured from that job's agent stream, and
+  each pair is written onto the job's `NodeExecution.session_id`. That column is what
+  `steer/4` reads as the restarted attempt's `resume_session` — a revoked job reports nothing, so
+  the beat is the only channel that carries the live session past the kill.
+
+  A pair is written only when the job is on THIS board (the `revoked_among/2` scoping and id
+  rule), is a flow job, is still active, and its execution has no outcome yet — a beat can race
+  the outcome POST, and a finished attempt's session is never rewritten. Anything else (a non-map,
+  a foreign/stale/garbage id, a blank or non-string session) is silently ignored: this runs on the
+  liveness path, so it never raises and always answers `:ok`.
+  """
+  @spec record_job_sessions(Board.t(), term()) :: :ok
+  def record_job_sessions(%Board{id: board_id}, sessions) when is_map(sessions) do
+    pairs =
+      for {id, session} <- sessions,
+          int = to_job_id(id),
+          is_integer(int),
+          is_binary(session) and String.trim(session) != "",
+          into: %{},
+          do: {int, session}
+
+    if map_size(pairs) > 0 do
+      ids = Map.keys(pairs)
+
+      from(j in NodeJob,
+        join: c in Card,
+        on: c.id == j.card_id,
+        join: e in NodeExecution,
+        on: e.id == j.node_execution_id,
+        where: c.board_id == ^board_id and j.id in ^ids,
+        where: j.kind in ^NodeJob.flow_kinds() and j.state in ^NodeJob.active_states(),
+        where: is_nil(e.outcome),
+        select: {j.id, e.id}
+      )
+      |> Repo.all()
+      |> Enum.each(fn {job_id, execution_id} ->
+        session = Map.fetch!(pairs, job_id)
+
+        Repo.update_all(
+          from(e in NodeExecution, where: e.id == ^execution_id and is_nil(e.outcome)),
+          set: [session_id: session]
+        )
+      end)
+    end
+
+    :ok
+  end
+
+  def record_job_sessions(_board, _sessions), do: :ok
 
   @doc """
   Of the per-card worktrees a runner declares it HOLDS, those it may now release — the
@@ -4718,12 +4974,15 @@ defmodule Relay.Runs do
     board = Repo.get!(Board, card.board_id)
     node = Enum.find(flow.nodes, &(&1.key == node_key))
 
+    ref = Cards.ref(board, card)
+
     vars =
       Map.merge(run.context, %{
-        "ref" => Cards.ref(board, card),
+        "ref" => ref,
         "branch" => card.branch || default_branch(board, card),
         "prior_detail" => opts[:prior_detail],
         "findings" => opts[:findings],
+        "guidance" => guidance_text(card, run, ref),
         "task" => sub_task_title(opts[:sub_task_id]),
         "task_id" => opts[:sub_task_id]
       })
@@ -4740,6 +4999,81 @@ defmodule Relay.Runs do
       harness_fields(node, card.board_id)
     )
   end
+
+  @doc """
+  The human guidance for `run` on `card` (RE358): the comments a human wrote — or any
+  rejection note — while the card is being worked, oldest → newest (`inserted_at`, then `id`,
+  since timestamps are second-precision), each with `:user` and `:images` preloaded.
+
+  The window opens at the earlier of the open rejection's `rejected_at` and the run's
+  `inserted_at` (just the run's when the card has no open rejection), inclusive — the
+  rejection's own `:changes_requested` note lands in the same second as `rejected_at`. An entry
+  is a **user** comment of a kind in `Schemas.Comment.guidance_kinds/0`, or a
+  `:changes_requested` note from any actor. Agent `:comment`s and every `:question` are left out.
+
+  Derived from the database at call time and never snapshotted: every job's payload is built
+  (and refreshed at claim) from this, so a note added mid-run reaches the next node.
+  """
+  @spec guidance_for(Card.t(), Run.t()) :: [Comment.t()]
+  def guidance_for(%Card{id: card_id} = card, %Run{} = run) do
+    since = guidance_window_start(card, run)
+    kinds = Comment.guidance_kinds()
+
+    Repo.all(
+      from c in Comment,
+        where: c.card_id == ^card_id and c.inserted_at >= ^since,
+        where: (c.actor_type == ^:user and c.kind in ^kinds) or c.kind == ^:changes_requested,
+        order_by: [asc: c.inserted_at, asc: c.id],
+        preload: [:user, :images]
+    )
+  end
+
+  defp guidance_window_start(%Card{rejection: %{rejected_at: %DateTime{} = rejected_at}}, %Run{inserted_at: started}),
+    do: Enum.min([rejected_at, started], DateTime)
+
+  defp guidance_window_start(%Card{}, %Run{inserted_at: started}), do: started
+
+  @doc """
+  Renders `guidance_for/2`'s entries as the text an agent node receives (RE358), or `nil` when
+  there are none. Entries are separated by one blank line; each is a header line —
+  `"<author> · <YYYY-MM-DD HH:MM> UTC"`, tagged `" · CHANGES REQUESTED"` or `" · STEER"` by kind —
+  then the body verbatim (no line for a blank body), then, when the note carries images, a
+  pointer to them on the card named by `ref`. The runner splices this verbatim and never
+  expands placeholders in it.
+  """
+  @spec render_guidance([Comment.t()], String.t()) :: String.t() | nil
+  def render_guidance([], _ref), do: nil
+
+  def render_guidance(comments, ref) when is_list(comments) and is_binary(ref),
+    do: Enum.map_join(comments, "\n\n", &render_guidance_entry(&1, ref))
+
+  defp guidance_text(card, run, ref), do: card |> guidance_for(run) |> render_guidance(ref)
+
+  defp render_guidance_entry(%Comment{} = comment, ref) do
+    [guidance_header(comment), guidance_body(comment.body), guidance_images(comment.images, ref)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp guidance_header(%Comment{} = comment) do
+    stamp = Calendar.strftime(comment.inserted_at, "%Y-%m-%d %H:%M")
+    "#{guidance_author(comment)} · #{stamp} UTC" <> guidance_tag(comment.kind)
+  end
+
+  defp guidance_tag(:changes_requested), do: " · CHANGES REQUESTED"
+  defp guidance_tag(:steer), do: " · STEER"
+  defp guidance_tag(_kind), do: ""
+
+  defp guidance_author(%Comment{actor_type: :user, user: %User{name: name}}) when is_binary(name) and name != "", do: name
+  defp guidance_author(%Comment{actor_type: :user, user: %User{email: email}}) when is_binary(email), do: email
+  defp guidance_author(%Comment{}), do: "Relay AI"
+
+  defp guidance_body(body) when is_binary(body), do: if(String.trim(body) == "", do: nil, else: body)
+  defp guidance_body(_body), do: nil
+
+  defp guidance_images([_one], ref), do: "(1 image attached — see ./relay card #{ref})"
+  defp guidance_images([_ | _] = images, ref), do: "(#{length(images)} images attached — see ./relay card #{ref})"
+  defp guidance_images(_none, _ref), do: nil
 
   # RE433: an agent node resolves its `llm` to a harness + model HERE, at enqueue, so the job
   # carries the command template the runner expands and `insert_job!/3` can route claims by

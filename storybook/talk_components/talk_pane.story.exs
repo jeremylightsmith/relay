@@ -71,6 +71,12 @@ defmodule Storybook.TalkComponents.TalkPane do
       %Variation{
         id: :long_transcript,
         attributes: base(%{id: "talk-pane-long", events: long_transcript()})
+      },
+      # RE358 — an agent node is working the card: the notice under the title bar says Talk can't
+      # reach it and points at Steer now on the Detail tab.
+      %Variation{
+        id: :run_working,
+        attributes: base(%{id: "talk-pane-run-working", busy?: false, run_working?: true})
       }
     ]
   end

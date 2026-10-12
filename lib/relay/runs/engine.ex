@@ -282,9 +282,11 @@ defmodule Relay.Runs.Engine do
   # accounting reads history through this, so a degraded traversal spends the
   # `:failed` edge's budget instead of resetting it. `:needs_input` and `:blocked`
   # park before routing is ever reached, so they never degrade — a `:blocked` row
-  # read as `:failed` here would spend a loop budget on an attempt that never ran.
+  # read as `:failed` here would spend a loop budget on an attempt that never ran. A `:steered`
+  # row (RE358) is a human stopping an attempt to restart it — never a failed traversal either.
   defp effective_outcome(_flow, _node_key, :needs_input), do: :needs_input
   defp effective_outcome(_flow, _node_key, :blocked), do: :blocked
+  defp effective_outcome(_flow, _node_key, :steered), do: :steered
 
   defp effective_outcome(flow, node_key, outcome) do
     if Enum.any?(flow.edges, &(&1.from == node_key and &1.on == outcome)), do: outcome, else: :failed

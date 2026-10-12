@@ -142,6 +142,26 @@ defmodule Relay.Runs.EngineTest do
     end
   end
 
+  describe "steered (RE358): a human stopped the attempt" do
+    test "a steered row spends no :failed edge's max_loops budget" do
+      flow =
+        flow([[key: "review", type: :agent], [key: "fix", type: :agent]], [
+          [from: "start", to: "review"],
+          [from: "review", to: "done", on: :succeeded],
+          [from: "review", to: "fix", on: :failed, max_loops: 1],
+          [from: "fix", to: "done", on: :succeeded]
+        ])
+
+      history = [
+        execution(node_key: "review", outcome: :steered, attempt: 1),
+        failed(node_key: "review", attempt: 2)
+      ]
+
+      current = List.last(history)
+      assert Engine.decide(flow, history, current) == {:transition, "fix", nil}
+    end
+  end
+
   describe "usage-limit waits (RE267): a known reset requeues instead of parking" do
     test "the cap is one named policy number" do
       assert Engine.max_usage_limit_waits() == 3

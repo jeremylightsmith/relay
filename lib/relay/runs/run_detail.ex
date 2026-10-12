@@ -9,7 +9,9 @@ defmodule Relay.Runs.RunDetail do
   `pending_tail/3`, `tripped_node/2`, `last_failure_detail/1`, `parked_attempt/2`,
   `type_tag/2`, `failure_reason/1`, timeline assembly) moved out of
   `RelayWeb.RunComponents` unchanged in behavior. Copy rule (ADR 0006):
-  "session resumed" ONLY after a needs-input re-entry, never a review-failed loop.
+  "session resumed" ONLY after a needs-input re-entry — or a Steer now restart (RE358) whose
+  stopped attempt had a known session — never a review-failed loop. A `:steered` attempt reads
+  `state: :steered, steered?: true` and, like a `:blocked` wait, is not a spent attempt.
 
   `run` fields are read by dot/`Map.get` access so both a `%Schemas.Run{}` and a
   plain test/story map work; `:node_executions` may be `nil` (treated as `[]`).
@@ -111,6 +113,7 @@ defmodule Relay.Runs.RunDetail do
       attempt: spent_attempt(ne, nes),
       state: row_state(ne, run),
       resumed?: resumed?(ne, nes),
+      steered?: ne.outcome == :steered,
       partial?: ne.outcome == :partial,
       type: type_tag(ne.node_key, flow),
       detail: Map.get(ne, :detail),
@@ -122,12 +125,15 @@ defmodule Relay.Runs.RunDetail do
   # RE267: the attempt number a human reads. A `:blocked` attempt spent no retry — RE308 parks it,
   # RE267 requeues it at attempt +1 — so earlier blocked attempts of the same {node, visit} are not
   # counted. Without this a node that waited out a usage limit twice read "attempt 3" on its first
-  # real run, and an escalation said "failed after 3 attempts" for two.
+  # real run, and an escalation said "failed after 3 attempts" for two. A `:steered` attempt (RE358)
+  # is a human restart, not a retry, so it is not counted either.
   defp spent_attempt(ne, nes) do
+    unspent = [:blocked | NodeExecution.server_only_outcomes()]
+
     waits =
       Enum.count(nes, fn other ->
         other.node_key == ne.node_key and Map.get(other, :visit) == Map.get(ne, :visit) and
-          other.attempt < ne.attempt and other.outcome == :blocked
+          other.attempt < ne.attempt and other.outcome in unspent
       end)
 
     max(ne.attempt - waits, 1)
@@ -140,19 +146,23 @@ defmodule Relay.Runs.RunDetail do
   defp row_state(%{outcome: :failed}, _run), do: :failed
   defp row_state(%{outcome: :needs_input}, _run), do: :paused
   defp row_state(%{outcome: :blocked}, _run), do: :paused
+  defp row_state(%{outcome: :steered}, _run), do: :steered
   defp row_state(%{outcome: nil}, %{status: :running}), do: :active
   defp row_state(%{outcome: nil}, %{status: :parked}), do: :paused
   defp row_state(%{outcome: nil}, %{status: :failed}), do: :stopped
   defp row_state(%{outcome: nil}, _run), do: :cancelled
 
-  # ---- resumed? (was RunComponents.resumed?/2), verbatim ----
+  # ---- resumed? (was RunComponents.resumed?/2) ----
 
+  # A needs-input re-entry resumes the session; so does a Steer now restart (RE358), but only when
+  # the stopped attempt had captured a session id — without one the restart starts fresh.
   defp resumed?(%{attempt: attempt, node_key: node_key}, nes) when attempt > 1 do
     nes
     |> Enum.filter(&(&1.node_key == node_key and &1.attempt < attempt))
     |> List.last()
     |> case do
       %{outcome: :needs_input} -> true
+      %{outcome: :steered} = steered -> not is_nil(Map.get(steered, :session_id))
       _other -> false
     end
   end
@@ -187,6 +197,7 @@ defmodule Relay.Runs.RunDetail do
           attempt: 1,
           state: :active,
           resumed?: false,
+          steered?: false,
           partial?: false,
           type: nil,
           detail: nil,

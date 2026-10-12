@@ -97,6 +97,10 @@ defmodule RelayWeb.TalkComponents do
     default: false,
     doc: "the card is parked on a question — switches the lead prompt, per artboard line 829"
 
+  attr :run_working?, :boolean,
+    default: false,
+    doc: "RE358: an agent node is working the card — the notice under the title bar points at Steer now"
+
   attr :events, :list, default: nil, doc: "a plain list (stories/tests); nil when `stream` is used"
   attr :stream, :any, default: nil, doc: "the LiveView @streams.talk_events assign"
 
@@ -126,6 +130,24 @@ defmodule RelayWeb.TalkComponents do
           style={mono_family() <> "flex:0 0 auto;font-size:10px;font-weight:600;background:transparent;border:none;padding:0;color:oklch(0.6 0.02 262);"}
         >
           esc
+        </button>
+      </div>
+      <%!-- RE358 — Talk is its own session; steering the working agent is the Detail tab's job. --%>
+      <div
+        :if={@run_working?}
+        id={"#{@id}-steer-notice"}
+        style="flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 16px;border-bottom:1px solid oklch(0.26 0.018 262);background:oklch(0.23 0.04 262);"
+      >
+        <span style={mono_family() <> "font-size:10.5px;color:oklch(0.8 0.06 262);flex:1;min-width:14rem;"}>
+          ⓘ Talk is a separate session — it doesn't reach the working agent.
+        </span>
+        <button
+          type="button"
+          id={"#{@id}-steer-link"}
+          phx-click="steer_from_talk"
+          style={mono_family() <> "font-size:10.5px;font-weight:600;background:transparent;border:none;padding:0;color:oklch(0.78 0.12 255);text-decoration:underline;text-underline-offset:2px;"}
+        >
+          Use Steer now on the Detail tab →
         </button>
       </div>
 

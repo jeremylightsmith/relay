@@ -535,6 +535,21 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert {:ok, _held} = Runs.get_claimed_job(board, id)
     end
 
+    test "steered is server-only: refused exactly like an unknown outcome, the execution untouched (RE358)",
+         %{conn: conn, board: board, flow: flow} do
+      {_run, id} = claim_one(conn, board, flow)
+
+      bogus = post(conn, ~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => "bogus", "detail" => "x"}))
+      steered = post(conn, ~p"/api/node-jobs/#{id}/outcome", Jason.encode!(%{"outcome" => "steered", "detail" => "x"}))
+
+      assert steered.status == bogus.status
+      assert json_response(steered, 422) == json_response(bogus, 422)
+      assert json_response(steered, 422)["error"]["code"] == "unknown_outcome"
+
+      job = Relay.Repo.get!(Schemas.NodeJob, id)
+      assert Relay.Repo.get!(Schemas.NodeExecution, job.node_execution_id).outcome == nil
+    end
+
     test "reporting on an unheld (reclaimed) job is 409 conflict", %{conn: conn, board: board, flow: flow} do
       {_run, id} = claim_one(conn, board, flow)
 
@@ -1047,6 +1062,78 @@ defmodule RelayWeb.Api.NodeJobControllerTest do
       assert Relay.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-h").harnesses == [
                Map.put(codex, "usage", nil)
              ]
+    end
+  end
+
+  describe "heartbeat sessions (RE358)" do
+    defp sessions_beat(conn, running, sessions) do
+      post(conn, ~p"/api/node-jobs/heartbeat", %{
+        "runner" => %{"name" => "exec-a"},
+        "capacity" => %{"shared_clean" => 1},
+        "running" => running,
+        "sessions" => sessions
+      })
+    end
+
+    defp claimed_agent_job!(board) do
+      flow = four_outcome_flow(board)
+      {_run, _job} = start_queued_job(board, flow)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => "exec-a", "capacity" => %{"shared_clean" => 1}})
+      {:ok, claimed} = Runs.claim_next_job(runner)
+      claimed
+    end
+
+    defp session_of(job), do: Relay.Repo.get!(Schemas.NodeExecution, job.node_execution_id).session_id
+
+    # Task 3 · Scenario 1
+    test "a beat's session is written onto the running job's execution", %{conn: conn, board: board} do
+      job = claimed_agent_job!(board)
+      assert session_of(job) == nil
+
+      assert %{"revoked" => []} =
+               conn |> sessions_beat([job.id], %{"#{job.id}" => "sess-9"}) |> json_response(200)
+
+      assert session_of(job) == "sess-9"
+    end
+
+    # Task 3 · Scenario 2
+    test "a later beat's new session replaces the recorded one", %{conn: conn, board: board} do
+      job = claimed_agent_job!(board)
+      conn |> sessions_beat([job.id], %{"#{job.id}" => "sess-9"}) |> json_response(200)
+      assert session_of(job) == "sess-9"
+
+      conn |> sessions_beat([job.id], %{"#{job.id}" => "sess-10"}) |> json_response(200)
+
+      assert session_of(job) == "sess-10"
+    end
+
+    # Task 3 · Scenario 3
+    test "another board's job and a revoked job are left untouched", %{conn: conn, board: board} do
+      {:ok, other} = Relay.Boards.create_board(insert(:user), %{name: "Other Board", slug: unique_slug("other-board")})
+      {_run, foreign} = start_queued_job(other, four_outcome_flow(other))
+
+      revoked = claimed_agent_job!(board)
+      Relay.Repo.update_all(from(j in Schemas.NodeJob, where: j.id == ^revoked.id), set: [state: :revoked])
+
+      conn
+      |> sessions_beat([foreign.id, revoked.id], %{
+        "#{foreign.id}" => "sess-foreign",
+        "#{revoked.id}" => "sess-revoked"
+      })
+      |> json_response(200)
+
+      assert session_of(foreign) == nil
+      assert session_of(revoked) == nil
+    end
+
+    # Task 3 · Scenario 4
+    test "malformed sessions values still get a 200 and change nothing", %{conn: conn, board: board} do
+      job = claimed_agent_job!(board)
+
+      for sessions <- ["nope", %{"abc" => "s"}, %{"#{job.id}" => 5}, %{"#{job.id}" => ""}] do
+        assert %{"revoked" => []} = conn |> sessions_beat([job.id], sessions) |> json_response(200)
+        assert session_of(job) == nil
+      end
     end
   end
 end

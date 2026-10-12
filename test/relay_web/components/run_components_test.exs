@@ -129,6 +129,24 @@ defmodule RelayWeb.RunComponentsTest do
       assert html =~ "session resumed"
     end
 
+    test "RE358: a steered row shows the steer glyph and a steered chip" do
+      html =
+        render_component(&RunComponents.run_node_timeline/1,
+          detail:
+            detail(%{flow_key: "plan", current_node: "write_plan"}, [
+              ne("write_plan", 1, :steered, %{visit: 1, session_id: "s"}),
+              ne("write_plan", 2, nil, %{visit: 1, duration_s: nil})
+            ])
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      [steered_row | _rest] = doc |> LazyHTML.query(".run-timeline-row") |> Enum.to_list()
+
+      assert steered_row |> LazyHTML.query(".run-timeline-icon") |> LazyHTML.text() |> String.trim() == "↪"
+      assert steered_row |> LazyHTML.query(".run-steered-chip") |> LazyHTML.text() |> String.trim() == "steered"
+      assert doc |> LazyHTML.query(".run-steered-chip") |> Enum.count() == 1
+    end
+
     test "a cancelled run renders nil-outcome rows with the cancelled glyph" do
       html =
         render_component(&RunComponents.run_node_timeline/1,

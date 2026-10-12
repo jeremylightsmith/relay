@@ -12,6 +12,12 @@ defmodule Schemas.Comment do
   RE428 — `origin` (one of `origins/0`, or nil) and `origin_question` record where an image
   note came from: an answer to question N (`:answer` + `origin_question: N`) or a rejection
   (`:rejection`, no question). Both are programmatic, never cast.
+
+  RE358 — `:steer` is a note a human wrote to steer an in-flight agent node. `guidance_kinds/0`
+  names the kinds a **user** comment may carry and still reach the agent as live guidance.
+  `delivered_execution_id` is a steer's receipt: the node execution whose agent job was claimed
+  carrying it (set by `Relay.Runs` at claim time, first delivery wins). Only a `:steer` comment
+  ever has it set; programmatic, never cast.
   """
 
   use Ecto.Schema
@@ -22,16 +28,18 @@ defmodule Schemas.Comment do
 
   @max_images 6
   @origins [:answer, :rejection]
+  @guidance_kinds [:comment, :changes_requested, :steer]
 
   schema "comments" do
     field :actor_type, Ecto.Enum, values: [:user, :agent]
     field :body, :string
-    field :kind, Ecto.Enum, values: [:comment, :question, :changes_requested], default: :comment
+    field :kind, Ecto.Enum, values: [:comment, :question, :changes_requested, :steer], default: :comment
     field :origin, Ecto.Enum, values: @origins
     field :origin_question, :integer
 
     belongs_to :card, Schemas.Card
     belongs_to :user, Schemas.User
+    belongs_to :delivered_execution, Schemas.NodeExecution
 
     has_many :images, Schemas.Attachment, foreign_key: :comment_id, preload_order: [asc: :position]
 
@@ -45,6 +53,14 @@ defmodule Schemas.Comment do
   @doc "Where an image note may come from (RE428): an answer to a question, or a rejection."
   @spec origins() :: [:answer | :rejection]
   def origins, do: @origins
+
+  @doc """
+  The kinds a **user** comment may carry and still count as live guidance for the agent working
+  the card (RE358): plain comments, rejection notes and steers — never a `:question`. This is
+  the guidance filter's one definition; `Relay.Runs.guidance_for/2` reads it.
+  """
+  @spec guidance_kinds() :: [:comment | :changes_requested | :steer]
+  def guidance_kinds, do: @guidance_kinds
 
   @doc """
   Validates a comment whose actor fields are already set on the struct;

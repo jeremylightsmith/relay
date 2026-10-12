@@ -1,6 +1,8 @@
 defmodule Relay.Runs.ListenerTest do
   use Relay.DataCase, async: true
 
+  import Ecto.Query
+
   alias Relay.Runs
   alias Relay.Runs.FakeDispatcher
   alias Relay.Runs.Scheduler.Server
@@ -144,9 +146,91 @@ defmodule Relay.Runs.ListenerTest do
     # than run1's rather than the first {:run_started, _} we see.
     assert_receive {:run_started, %Run{id: run2_id} = run2} when run2_id != run1.id
     refute run2.id == run1.id
-    assert run2.context == %{"changes_requested" => "needs more detail"}
+    # RE358: the note is no longer frozen into the run's context — it reaches the agent as live
+    # guidance, derived from the `:changes_requested` comment the reject posted.
+    assert run2.context == %{}
     assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
-    assert fresh.payload["vars"]["changes_requested"] == "needs more detail"
+    refute Map.has_key?(fresh.payload["vars"], "changes_requested")
+    assert fresh.payload["vars"]["guidance"] =~ "· CHANGES REQUESTED\nneeds more detail"
+  end
+
+  # RE358 acceptance criterion 1: a note added after the reject but before a runner picks the
+  # re-entry job up still reaches it — the claim is the real dispatch, so it refreshes guidance.
+  test "a note added between the reject and the claim reaches the re-entry job",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run1} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+    {:ok, _run} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "spec written"})
+    assert_receive {:run_finished, %Run{status: :done}}
+
+    {:ok, _card} = Relay.Cards.reject(reload(board, card), "Use approach A", {:user, user.id})
+    assert_receive {:run_started, %Run{id: run2_id}} when run2_id != run1.id
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm", state: :queued} = queued}
+
+    {:ok, _comment} =
+      Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "Actually, use approach B"})
+
+    {:ok, runner} =
+      Runs.upsert_runner(board, %{"name" => "listener-runner", "capacity" => %{"shared_clean" => 1, "exclusive" => 1}})
+
+    assert {:ok, %NodeJob{id: id} = claimed} = Runs.claim_next_job(runner)
+    assert id == queued.id
+
+    guidance = claimed.payload["vars"]["guidance"]
+    assert guidance =~ "· CHANGES REQUESTED\nUse approach A"
+    assert guidance =~ "Actually, use approach B"
+
+    assert :binary.match(guidance, "Use approach A") < :binary.match(guidance, "Actually, use approach B")
+  end
+
+  # RE358 acceptance criterion 2: a human holding the baton rejects, adds a follow-up, then hands
+  # back — the window opens at `rejected_at`, earlier than the new run's own start.
+  test "guidance written while a human held the card reaches the run started on hand-back",
+       %{user: user, board: board, flow: flow, card: card} do
+    {:ok, run1} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, job}
+    {:ok, _run} = Runs.report_outcome(job, %{outcome: :succeeded, detail: "spec written"})
+    assert_receive {:run_finished, %Run{status: :done}}
+
+    {:ok, held} = Relay.Cards.take_over(reload(board, card), {:user, user.id})
+    {:ok, _card} = Relay.Cards.reject(held, "first", {:user, user.id})
+    {:ok, _comment} = Relay.Activity.add_comment(reload(board, card), %{actor: {:user, user.id}, body: "second"})
+    # A human holds the baton, so the reject does not re-enter.
+    _ = :sys.get_state(@listener)
+    assert Runs.active_run(reload(board, card)) == nil
+
+    # Backdate the rejection and its notes so the window genuinely has to open at
+    # `rejected_at`: everything here otherwise lands in the same second as the new run.
+    backdate_rejection!(reload(board, card), -120)
+
+    {:ok, _card} = Relay.Cards.assign_ai(reload(board, card), {:user, user.id})
+
+    assert_receive {:run_started, %Run{id: run2_id}} when run2_id != run1.id
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
+
+    guidance = fresh.payload["vars"]["guidance"]
+    assert guidance =~ "first"
+    assert guidance =~ "second"
+    assert :binary.match(guidance, "first") < :binary.match(guidance, "second")
+  end
+
+  defp backdate_rejection!(%Card{rejection: rejection} = card, seconds) do
+    rejected_at = DateTime.add(rejection.rejected_at, seconds, :second)
+
+    card
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.put_embed(:rejection, %{rejection | rejected_at: rejected_at})
+    |> Relay.Repo.update!()
+
+    for comment <- Relay.Repo.all(from c in Schemas.Comment, where: c.card_id == ^card.id) do
+      at = DateTime.add(comment.inserted_at, seconds, :second)
+
+      comment
+      |> Ecto.Changeset.change(inserted_at: at, updated_at: at)
+      |> Relay.Repo.update!()
+    end
+
+    :ok
   end
 
   test "a reject re-enters even when the card's latest run is :failed (RLY-156 regression)",
@@ -178,7 +262,10 @@ defmodule Relay.Runs.ListenerTest do
     {:ok, in_review} = Relay.Cards.move_card(failed_card, review, -1, {:user, user.id})
     {:ok, _card} = Relay.Cards.reject(in_review, "try once more", {:user, user.id})
 
-    assert_receive {:run_started, %Run{context: %{"changes_requested" => "try once more"}}}
+    # RE358: the note reaches the re-entry run as live guidance, not as frozen run context.
+    assert_receive {:dispatched, %NodeJob{} = rerun_job}
+    assert rerun_job.payload["vars"]["guidance"] =~ "try once more"
+    assert Runs.get_run!(rerun_job.run_id).context == %{}
   end
 
   test "no re-entry when the card's latest run failed — a human must intervene",
@@ -420,7 +507,8 @@ defmodule Relay.Runs.ListenerTest do
 
     Relay.Events.broadcast(board.id, {:card_upserted, Relay.Repo.get!(Card, live.id)})
 
-    assert_receive {:run_started, %Run{card_id: card_id, context: %{"changes_requested" => "redo it"}}}
+    assert_receive {:run_started, %Run{card_id: card_id, context: context}}
+    assert context == %{}
     assert card_id == live.id
   end
 

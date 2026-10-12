@@ -27,8 +27,10 @@ defmodule Relay.Runs.Listener do
       (the human may have changed anything).
     * no active run + open rejection + card `:ready` (handed back for rework — a
       reject leaves it `:ready`, a failure leaves it `:failed`) + AI-owned + the
-      card sits in the works-in stage of an enabled flow → start a new run with
-      `context: %{"changes_requested" => note}`. Keying re-entry off *card* status
+      card sits in the works-in stage of an enabled flow → start a new run. The rejection
+      note is not carried as run context (RE358): it is a `:changes_requested` comment, and
+      it reaches every job as live guidance (`Relay.Runs.guidance_for/2`, whose window opens
+      at the rejection's `rejected_at`). Keying re-entry off *card* status
       (not the prior run's) lets a reject after a failed run re-enter while a genuine
       `:failed` card is never auto-restarted (RLY-156/RLY-216) — mirroring the
       scheduler's own `:failed` exclusion.
@@ -193,7 +195,7 @@ defmodule Relay.Runs.Listener do
     flow = Relay.Flows.working_flow(card)
 
     if flow && Relay.Cards.active_owner_type(card) == :ai do
-      _result = Runs.start_run(card, flow, context: %{"changes_requested" => card.rejection.note})
+      _result = Runs.start_run(card, flow)
     end
 
     :ok

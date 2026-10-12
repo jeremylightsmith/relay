@@ -48,6 +48,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => [],
       "held" => [],
+      # RE358: optional, sent only when an in-flight agent job has captured a session — a
+      # `{job-id-string => session-id}` map. Keyed by job id 0, which no board can own (ids are
+      # serial from 1), so the server ignores the entry and the claims below are unaffected.
+      "sessions" => %{"0" => "fixture-session"},
       # RE433: the per-harness inventory, sent on every beat once the runner has fetched
       # /api/harnesses. Claude Code installed, so the claims below are still offered.
       # RE436: each entry carries that harness's `usage` — its latest reading per window and
@@ -298,7 +302,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
     [note_image_item] = note_entry["images"]
 
     document = %{
-      "version" => 14,
+      "version" => 15,
       # RE436 — the shared path/condition/reading cases both usage-rule evaluators must pass:
       # ExUnit runs them in test/relay/usage_rule_cases_test.exs, Python reads them from here.
       "usage_rule_cases" => Relay.UsageRuleCases.cases(),
@@ -417,7 +421,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert "origin" in document["note_images"]["comment_entry"]
     assert note_entry["origin"] == %{"kind" => "answer", "question" => 2}
     assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
-    assert document["version"] == 14
+    assert document["version"] == 15
     assert document["usage_rule_cases"] == Relay.UsageRuleCases.cases()
     assert "usage" in document["harnesses"]["harness_keys"]
 

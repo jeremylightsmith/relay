@@ -53,7 +53,7 @@ defmodule Schemas.VocabularyTest do
           {Schemas.Run, :parked_reasons, :parked_reason},
           {Schemas.NodeJob, :states, :state},
           {Schemas.NodeJob, :kinds, :kind},
-          {Schemas.NodeExecution, :outcomes, :outcome},
+          {Schemas.NodeExecution, :all_outcomes, :outcome},
           {Schemas.Flow, :isolation_classes, :isolation},
           {Schemas.Flow.Node, :roles, :role},
           {Schemas.TalkTurn, :statuses, :status},
@@ -99,6 +99,17 @@ defmodule Schemas.VocabularyTest do
     assert Schemas.NodeExecution.routable_outcomes() -- Schemas.NodeExecution.outcomes() == []
   end
 
+  test "steered is a server-only outcome: in the enum, but never reportable or routable (RE358)" do
+    assert Schemas.NodeExecution.server_only_outcomes() == [:steered]
+    assert :steered in Schemas.NodeExecution.all_outcomes()
+    refute :steered in Schemas.NodeExecution.outcomes()
+    refute :steered in Schemas.NodeExecution.routable_outcomes()
+    assert Schemas.NodeExecution.outcomes() == [:succeeded, :failed, :partial, :needs_input, :blocked]
+
+    assert Schemas.NodeExecution.outcomes() ==
+             Schemas.NodeExecution.all_outcomes() -- Schemas.NodeExecution.server_only_outcomes()
+  end
+
   test "failure_outcomes/0 is exactly the failed/partial/blocked subset of the outcome enum" do
     assert Schemas.NodeExecution.failure_outcomes() == [:failed, :partial, :blocked]
     assert Schemas.NodeExecution.failure_outcomes() -- Schemas.NodeExecution.outcomes() == []
@@ -131,6 +142,14 @@ defmodule Schemas.VocabularyTest do
       source = Map.get(backing, field, field)
       assert source in known, "#{field} is not backed by a Schemas.Card field or association"
     end
+  end
+
+  test "guidance_kinds/0 is the user comment kinds that count as guidance, all in the kind enum (RE358)" do
+    kinds = Ecto.Enum.values(Schemas.Comment, :kind)
+
+    assert Schemas.Comment.guidance_kinds() == [:comment, :changes_requested, :steer]
+    assert Schemas.Comment.guidance_kinds() -- kinds == []
+    assert :steer in kinds
   end
 
   test "`commits` is not a contract field — expects_commits keeps its own field (RE244)" do

@@ -131,6 +131,13 @@ defmodule RelayWeb.Api.NodeJobController do
       the server has finalized/revoked is not active, so it is not refreshed, and `health/1` decides
       `:stopped` before staleness regardless.
 
+    * **Sessions (RE358).** The beat may carry `sessions` — `%{"<job-id>" => "<session-id>"}`,
+      the session each running agent job has captured from its stream — which
+      `Relay.Runs.record_job_sessions/2` writes onto that job's `NodeExecution.session_id`. That is
+      what a Steer now restart reads as `resume_session`: a revoked job reports nothing, so without
+      the beat the steered attempt's session would be lost. Only active flow jobs on this board
+      whose execution has no outcome are written; anything malformed is ignored, never refused.
+
   Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
   board's runner can never be told to kill another's work.
   """
@@ -159,6 +166,12 @@ defmodule RelayWeb.Api.NodeJobController do
       # quiet-but-running agent does not falsely age to `:stale` in `Cards.health/1`. Result
       # ignored: liveness is best-effort.
       _ = Runs.refresh_running_card_liveness(board, running)
+
+      # RE358: the agent session each running job has captured, written onto its execution so a
+      # Steer now restart can resume it — a revoked job reports nothing, so this is the only
+      # channel that carries the session past the kill. Best-effort: a malformed `sessions` is
+      # ignored inside Runs, never refused here.
+      :ok = Runs.record_job_sessions(board, Map.get(params, "sessions"))
 
       json(conn, %{
         revoked: Runs.revoked_among(board, running),
