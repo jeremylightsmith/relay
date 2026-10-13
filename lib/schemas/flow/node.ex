@@ -172,6 +172,15 @@ defmodule Schemas.Flow.Node do
   @spec legacy_models() :: %{String.t() => String.t()}
   def legacy_models, do: @legacy_models
 
+  @doc """
+  RE444 — true for an **inline prompt**: an `:agent` node with no subagent (`agent` nil or `""`),
+  so its `run` text is the whole prompt (the template flows' "no skills" shape). The ONE copy of
+  that predicate: the flow editor's "inline · no skill" tag and the example board's node panel
+  both read it. Takes a struct or a plain map (read via `Map.get/2`).
+  """
+  @spec inline_prompt?(map()) :: boolean()
+  def inline_prompt?(node) when is_map(node), do: Map.get(node, :type) == :agent and Map.get(node, :agent) in [nil, ""]
+
   @doc "The closed set of accepted `foreach` sources (RE367: `\"card.tasks\"`). Read by `changeset/2` and the docs."
   def foreach_sources, do: @foreach_sources
 

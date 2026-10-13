@@ -56,6 +56,13 @@ sharing behavior.
   Also holds the RLY-69 public-board settings (`public_enabled` + `public_intake_stage_id`,
   written via `update_public_settings/2`) and `list_public_cards/1`, the public roadmap's
   card query (non-archived, stage category in `Stage.public_categories/0`).
+  **Example boards (RE444):** `boards.example_template` (nullable, unique) marks a board as the
+  public example of one template slug. It is written only by `mark_example/2` (via
+  `Board.example_changeset/2`, never cast by `changeset/2`), which refuses a slug outside
+  `Templates.slugs/0` (`{:error, :unknown_template}`) and one another board already holds
+  (`{:error, changeset}`). `get_example_board/1` (`{:ok, board}` with stages in hierarchical
+  order, or `:error`) and `example_boards/0` (`%{slug => board name}`, marked boards only) are
+  unscoped reads, like `get_public_board/1`.
   `list_all_boards_for_admin/0` (every board, archived included, with owner email and
   member/card counts in one query, A–Z by name with no stars) and `member_board_ids/1` back the
   superadmin-only `/admin/boards` page (RE353). They are unscoped reads, and the gate is the
@@ -75,6 +82,33 @@ sharing behavior.
   (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved
   membership). A muted member gets no APNs push for that board; browser notifications, badges
   and the needs-you counts are unaffected. Muting never moves a row in the display order.
+- **Examples** (`Relay.Examples`, RE444) — the public, read-only example board for each
+  template: **Streaks (bare-minimum)** `ST`, **Pantry (design-led)** `PA` and **Tiny Dungeon
+  (three-brain)** `DU`. Content lives in `docs/designs/templates/examples/<slug>.json` (name,
+  key, pitch, baton and facts lines, WIP How/Why/Here, per-stage `full`/`why` notes, per-flow
+  blurb + selected node, and the cards top to bottom), loaded at compile time via
+  `@external_resource` and checked against `Boards.templates/0`: an unknown stage or sub-lane, a
+  status `Schemas.Stage.valid_status?/2` refuses, a question on the wrong card, a duplicate ref,
+  a `full` note whose stage doesn't hold exactly its WIP limit, or an unknown flow / node key
+  fails the build. `note_kinds/0` and `batons/0` are the closed sets; `all/0` / `get/1` read the
+  content. `seed!/2` creates each missing board (one transaction per board) with
+  `Boards.create_board/2` + `mark_example/2`, then the cards through `Relay.Cards` with their
+  mockup ref numbers (by setting `card_seq`); it skips existing boards, and `reset: true`
+  deletes and recreates them. The template's flows stay **disabled**, so no runner pulls a
+  sample card. Entry points: `mix relay.examples.seed --owner <email> [--reset]`, and
+  `Relay.Release.seed_examples/2` on the live node (`bin/relay rpc`). Its own boundary because
+  `Cards` already depends on `Boards`. **Web:** the public route `/examples/:template` →
+  `RelayWeb.ExampleBoardLive`, in the router's `:public` `live_session` (beside
+  `/board/:slug/public`), so it renders signed out (`current_scope` nil). It needs both
+  `Boards.get_example_board/1` and `Examples.get/1`, else it raises `Ecto.NoResultsError` (a
+  404 for an unknown or unseeded slug). It is static (no PubSub), renders the main stages
+  through read-only `stage_column/1`s with every card's `sub_tasks` blanked (no run-derived
+  progress), and handles only `select_card` / `close_card` / `select_node` — a final catch-all
+  `handle_event/3` swallows every mutating event. Its "Use the <slug> template" button goes to
+  `/boards?template=<slug>` when signed in, else through `/auth/google?return_to=…` to the same
+  place. The New board picker (`TemplatePickerComponents.template_picker/1`'s `examples`, fed
+  `Boards.example_boards/0` by `BoardsLive`) links each template card with a seeded example to
+  `/examples/<slug>` in a new window.
 - **Agents** — a board's LLMs (RE433). **Harnesses** (`Schemas.Harness`, table `harnesses`):
   an agent CLI's command template (`{placeholder}`s from `Schemas.Harness.placeholders/0`,
   optional `[ … ]` segments), optional `resume_command` / `session_id_path` /
@@ -432,6 +466,7 @@ sharing behavior.
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
   nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star).
+  `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys

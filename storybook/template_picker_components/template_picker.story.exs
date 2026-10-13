@@ -14,12 +14,31 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
   def variations do
     templates = Relay.Boards.templates()
 
-    for {variation_id, template} <- Enum.zip([:first_selected, :second_selected, :third_selected], templates) do
-      %Variation{
-        id: variation_id,
-        description: "#{template.name} selected",
-        attributes: %{templates: templates, selected: template.slug}
-      }
-    end
+    selections =
+      for {variation_id, template} <- Enum.zip([:first_selected, :second_selected, :third_selected], templates) do
+        %Variation{
+          id: variation_id,
+          description: "#{template.name} selected",
+          attributes: %{templates: templates, selected: template.slug}
+        }
+      end
+
+    # RE444: with the example boards seeded, every card links to its public example.
+    selections ++
+      [
+        %Variation{
+          id: :with_examples,
+          description: "Examples seeded — each card links to its public example",
+          attributes: %{
+            templates: templates,
+            selected: hd(templates).slug,
+            examples: %{
+              "bare-minimum" => "Streaks (bare-minimum)",
+              "design-led" => "Pantry (design-led)",
+              "three-brain" => "Tiny Dungeon (three-brain)"
+            }
+          }
+        }
+      ]
   end
 end

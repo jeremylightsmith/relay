@@ -14,8 +14,10 @@ defmodule RelayWeb.TemplatePickerComponents do
     * `"create_from_template"` — the form's `phx-submit`, `%{"template" => slug}`
     * `"close_template_picker"` — Cancel, ✕, a scrim click or Escape
 
-  The mockup's "See the public example" links are deliberately not rendered yet (RE444); each
-  card keeps the `flex-1` spacer they will sit under. Story:
+  Under each card's `flex-1` spacer, a template with a seeded example board (`examples`, from
+  `Relay.Boards.example_boards/0`) links to it at `/examples/<slug>` in a new window (RE444).
+  The link sits inside the card's `<label>`, so clicking it follows the link without selecting
+  the card. Story:
   `storybook/template_picker_components/template_picker.story.exs`.
   """
 
@@ -24,6 +26,10 @@ defmodule RelayWeb.TemplatePickerComponents do
   attr :templates, :list, required: true, doc: "`Relay.Boards.templates/0`, in picker order"
   attr :selected, :string, required: true, doc: "the selected template's slug"
   attr :id, :string, default: "template-picker"
+
+  attr :examples, :map,
+    default: %{},
+    doc: "`Relay.Boards.example_boards/0` — template slug => example board name; only these cards link to one"
 
   def template_picker(assigns) do
     assigns =
@@ -71,7 +77,12 @@ defmodule RelayWeb.TemplatePickerComponents do
             phx-submit="create_from_template"
           >
             <div id={"#{@id}-grid"} class="grid gap-4 px-5 pb-4 grid-cols-1 md:grid-cols-3">
-              <.template_card :for={t <- @templates} template={t} selected?={t.slug == @selected} />
+              <.template_card
+                :for={t <- @templates}
+                template={t}
+                selected?={t.slug == @selected}
+                example={Map.get(@examples, t.slug)}
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-base-300 bg-base-100 sm:rounded-b-[18px]">
@@ -102,6 +113,7 @@ defmodule RelayWeb.TemplatePickerComponents do
 
   attr :template, :map, required: true
   attr :selected?, :boolean, required: true
+  attr :example, :string, default: nil, doc: "the template's example board name, or nil when none is seeded"
 
   defp template_card(assigns) do
     ~H"""
@@ -180,8 +192,22 @@ defmodule RelayWeb.TemplatePickerComponents do
         <span>{@template.warning}</span>
       </div>
 
-      <%!-- RE444 puts the "See the public example" link under this spacer. --%>
       <span class="flex-1"></span>
+
+      <a
+        :if={@example}
+        id={"template-example-#{@template.slug}"}
+        href={~p"/examples/#{@template.slug}"}
+        target="_blank"
+        rel="noopener"
+        title="Opens in a new window"
+        class="link link-primary no-underline hover:underline text-[12.5px]"
+      >
+        See the public example: {@example}&nbsp;<.icon
+          name="hero-arrow-top-right-on-square"
+          class="size-3.5"
+        /><span class="sr-only">(opens in a new window)</span>
+      </a>
     </label>
     """
   end

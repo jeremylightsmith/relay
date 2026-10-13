@@ -42,6 +42,25 @@ defmodule RelayWeb.FlowEditorComponents do
   @efforts ["low", "medium", "high"]
   @outcomes ["succeeded", "failed", "partial", "needs_input"]
 
+  @doc """
+  The green "inline · no skill" tag for an agent node that runs its prompt as written
+  (`Schemas.Flow.Node.inline_prompt?/1`). Shared by the editor inspector and the read-only
+  example node panel so the look lives in one place.
+  """
+  attr :id, :string, required: true
+
+  def inline_prompt_tag(assigns) do
+    ~H"""
+    <span
+      id={@id}
+      class="font-mono text-[9.5px] px-[5px] rounded-[3px]"
+      style="background:color-mix(in oklab, var(--color-success) 12%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 65%, var(--color-base-content));"
+    >
+      inline · no skill
+    </span>
+    """
+  end
+
   # ---- ADD NODE palette ----
 
   attr :read_only?, :boolean, default: false
@@ -152,14 +171,10 @@ defmodule RelayWeb.FlowEditorComponents do
             <.meta_label>
               {main_label(@node.type)}
             </.meta_label>
-            <span
-              :if={inline_agent?(@node)}
+            <.inline_prompt_tag
+              :if={Schemas.Flow.Node.inline_prompt?(@node)}
               id="inspector-inline-tag"
-              class="font-mono text-[9.5px] px-[5px] rounded-[3px]"
-              style="background:color-mix(in oklab, var(--color-success) 12%, var(--color-base-100));color:color-mix(in oklab, var(--color-success) 65%, var(--color-base-content));"
-            >
-              inline · no skill
-            </span>
+            />
           </div>
           <form id="inspector-node-form" phx-change="edit_node_field">
             <input type="hidden" name="key" value={@node.key} />
@@ -1165,9 +1180,6 @@ defmodule RelayWeb.FlowEditorComponents do
   defp main_label(:shell), do: "COMMAND"
   defp main_label(:gate), do: "CONDITION"
   defp main_label(_), do: "RUN PROMPT"
-
-  defp inline_agent?(%{type: :agent} = node), do: Map.get(node, :agent) in [nil, ""]
-  defp inline_agent?(_node), do: false
 
   # Omitted entirely when the node declares neither, so today's undeclared flows look unchanged.
   defp contract?(node), do: node.reads != [] or node.writes != []

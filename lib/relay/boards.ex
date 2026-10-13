@@ -90,6 +90,48 @@ defmodule Relay.Boards do
   end
 
   @doc """
+  Marks `board` as the public example of template `slug` (RE444) — the only writer of
+  `boards.example_template`. Returns `{:error, :unknown_template}` for a slug not in
+  `Relay.Boards.Templates.slugs/0`, and `{:error, changeset}` when another board already holds
+  the slug (unique index).
+  """
+  @spec mark_example(Board.t(), String.t()) :: {:ok, Board.t()} | {:error, :unknown_template | Changeset.t()}
+  def mark_example(%Board{} = board, slug) when is_binary(slug) do
+    if slug in Templates.slugs() do
+      board
+      |> Board.example_changeset(%{example_template: slug})
+      |> Repo.update()
+    else
+      {:error, :unknown_template}
+    end
+  end
+
+  @doc """
+  The public example board for template `slug` (RE444): `{:ok, board}` with stages preloaded in
+  hierarchical order, like `get_public_board/1`, or `:error` when no board is marked with it.
+  Non-scoped — anyone may view an example board.
+  """
+  @spec get_example_board(String.t()) :: {:ok, Board.t()} | :error
+  def get_example_board(slug) when is_binary(slug) do
+    case Repo.one(
+           from b in Board,
+             where: b.example_template == ^slug,
+             preload: [stages: ^from(s in Stage, order_by: s.position)]
+         ) do
+      nil -> :error
+      %Board{} = board -> {:ok, order_board_stages(board)}
+    end
+  end
+
+  @doc "The marked example boards (RE444) as `%{template_slug => board_name}`. Non-scoped."
+  @spec example_boards() :: %{String.t() => String.t()}
+  def example_boards do
+    from(b in Board, where: not is_nil(b.example_template), select: {b.example_template, b.name})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   The board's public-board cards: non-archived cards whose stage category is in
   `Stage.public_categories/0` (i.e. not Done/Complete), stage preloaded, ordered
   newest-first as a stable base. `RelayWeb.PublicBoardLive` groups these by category

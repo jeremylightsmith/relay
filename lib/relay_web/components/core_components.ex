@@ -1588,6 +1588,10 @@ defmodule RelayWeb.CoreComponents do
     default: false,
     doc: "RE389 the drawer is showing this card — renders a bare data-open (the focus-ring highlight)"
 
+  attr :draggable, :boolean,
+    default: true,
+    doc: "RE444 false renders draggable=\"false\" — a read-only stage_column's cards can't be picked up"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -1614,7 +1618,7 @@ defmodule RelayWeb.CoreComponents do
       style={"background:var(--color-base-100);#{@shell_style}border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;cursor:pointer;"}
       role="button"
       tabindex="0"
-      draggable="true"
+      draggable={to_string(@draggable)}
       data-ref={@ref}
       data-status={@status}
       data-health={@health}
@@ -1960,6 +1964,13 @@ defmodule RelayWeb.CoreComponents do
   defp lane_divider(:review), do: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"
   defp lane_divider(:done), do: "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"
   defp lane_divider(_ongoing), do: "var(--color-base-300)"
+
+  # RE444 — the stage note strip: FULL is the at-limit amber, WHY the explanatory info blue.
+  defp note_tone(:full), do: "warning"
+  defp note_tone(:why), do: "info"
+
+  defp note_label(:full), do: "FULL"
+  defp note_label(:why), do: "WHY"
 
   # RLY-1 item 9 — WIP threshold: over → red, at → amber, else neutral. Effective
   # count is the stage's main lane plus its sub-lanes (@total_count); no limit → :none.
@@ -7712,6 +7723,12 @@ defmodule RelayWeb.CoreComponents do
     default: nil,
     doc: "RE389 the ref of the card the drawer is showing, from BoardLive's :open_ref assign; that card renders data-open"
 
+  attr :note, :map,
+    default: nil,
+    doc:
+      "RE444 `%{kind: :full | :why, text:}` — the example boards' FULL / WHY strip, rendered " <>
+        "under the expanded header only"
+
   def stage_column(assigns) do
     sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
     total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
@@ -7851,6 +7868,20 @@ defmodule RelayWeb.CoreComponents do
               +
             </button>
           </header>
+          <div
+            :if={@note}
+            id={"#{@id}-note"}
+            class="stage-note"
+            data-kind={@note.kind}
+            style={"display:flex;gap:7px;align-items:flex-start;padding:8px 13px;border-bottom:1px solid var(--color-base-300);flex:0 0 auto;background:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 7%, var(--color-base-100));"}
+          >
+            <span style={"font-size:10px;font-weight:700;font-family:var(--font-mono);flex:0 0 auto;color:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 70%, var(--color-base-content));"}>
+              {note_label(@note.kind)}
+            </span>
+            <span style={"font-size:11.5px;line-height:1.4;color:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 45%, var(--color-base-content));"}>
+              {@note.text}
+            </span>
+          </div>
           <div class="stage-lanes" style="display:flex;gap:0;flex:1;min-height:0;">
             <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
             <%= if @main_collapsed do %>
@@ -7985,6 +8016,7 @@ defmodule RelayWeb.CoreComponents do
                         vote_count={Map.get(@vote_counts, card.id, 0)}
                         blocked_count={length(Map.get(@blocked_by, card.id, []))}
                         open={open_card?(@open_ref, @board_key, card)}
+                        draggable={!@read_only}
                       />
                     </div>
                     <%!--
@@ -8101,6 +8133,7 @@ defmodule RelayWeb.CoreComponents do
                     vote_count={Map.get(@vote_counts, card.id, 0)}
                     blocked_count={length(Map.get(@blocked_by, card.id, []))}
                     open={open_card?(@open_ref, @board_key, card)}
+                    draggable={!@read_only}
                   />
                 </div>
               </div>

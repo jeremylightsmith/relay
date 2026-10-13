@@ -187,6 +187,7 @@ defmodule RelayWeb.BoardsLive do
         :if={@picker_open?}
         templates={@templates}
         selected={@picker_template}
+        examples={@examples}
       />
     </Layouts.app>
     """
@@ -203,6 +204,7 @@ defmodule RelayWeb.BoardsLive do
      |> assign(:boards, boards)
      |> assign(:from, nil)
      |> assign(:templates, templates)
+     |> assign(:examples, Boards.example_boards())
      |> assign(:picker_open?, false)
      |> assign(:picker_template, hd(templates).slug)}
   end

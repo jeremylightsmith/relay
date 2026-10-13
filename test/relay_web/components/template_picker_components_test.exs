@@ -65,4 +65,22 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert LazyHTML.attribute(icons, "data-type") == ~w(queue planning work review work done)
     assert icons |> LazyHTML.attribute("style") |> Enum.all?(&(&1 =~ "width:8px;height:8px"))
   end
+
+  test "only the templates in examples link to a public example (RE444)" do
+    doc =
+      (&TemplatePickerComponents.template_picker/1)
+      |> render_component(
+        templates: Relay.Boards.templates(),
+        selected: "bare-minimum",
+        examples: %{"three-brain" => "Tiny Dungeon (three-brain)"}
+      )
+      |> LazyHTML.from_fragment()
+
+    assert doc |> LazyHTML.query(~s([id^="template-example-"])) |> LazyHTML.attribute("id") == [
+             "template-example-three-brain"
+           ]
+
+    assert doc |> LazyHTML.query("#template-example-three-brain") |> LazyHTML.text() =~
+             "See the public example: Tiny Dungeon (three-brain)"
+  end
 end

@@ -13,6 +13,8 @@ defmodule Schemas.Board do
   `story_map_view_changeset/2` and keyed by `Relay.StoryMap.view_defaults/0` — the single
   source of truth for which keys the view holds.
   `default_agent_id` (RE433) is the board's default LLM, written only by `Relay.Agents`.
+  `example_template` (RE444) marks the board as a template's public example, written only via
+  `example_changeset/2`.
   """
 
   use Ecto.Schema
@@ -27,6 +29,9 @@ defmodule Schemas.Board do
     field :archived_at, :utc_datetime
     field :public_enabled, :boolean, default: false
     field :story_map_view, :map, default: %{}
+    # RE444: the template slug this board is the public example of. Written only by
+    # `Relay.Boards.mark_example/2` via `example_changeset/2`, never cast by `changeset/2`.
+    field :example_template, :string
 
     belongs_to :owner, Schemas.User
     belongs_to :public_intake_stage, Schemas.Stage
@@ -82,6 +87,18 @@ defmodule Schemas.Board do
   """
   def story_map_view_changeset(board, attrs) do
     cast(board, attrs, [:story_map_view])
+  end
+
+  @doc """
+  Changeset for the RE444 example marking — the one `example_template` column. Deliberately
+  separate from `changeset/2`, mirroring `public_settings_changeset/2`. The slug itself is
+  validated by `Relay.Boards.mark_example/2` against the template list; the unique index
+  keeps it to one board per slug.
+  """
+  def example_changeset(board, attrs) do
+    board
+    |> cast(attrs, [:example_template])
+    |> unique_constraint(:example_template)
   end
 
   @doc "True when the board has been archived (read-only)."

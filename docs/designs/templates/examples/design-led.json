@@ -1,0 +1,121 @@
+{
+  "template": "design-led",
+  "name": "Pantry (design-led)",
+  "key": "PA",
+  "pitch": "A recipe box and weekly meal planner. Save recipes, plan the week, get the grocery list.",
+  "baton": {
+    "ai": "AI designs, plans and builds",
+    "human": "You approve the mockups, the plan and the finished screens, then deploy by hand"
+  },
+  "facts": "8 stages · 3 flows · 3 review gates · manual deploy",
+  "wip": {
+    "how": "Each stage shows wip used/limit. A flow never pulls a card into a full stage; the stage turns amber and the flow waits.",
+    "why": "Mockups and plans are cheap for AI and slow for you. Limits on Design and Plan stop a pile of unreviewed work.",
+    "here": "Code is full (2/2). Finished code moves to Review, which frees a slot, so reviewing is what keeps the board moving."
+  },
+  "notes": {
+    "Code": {"kind": "full", "text": "Full, so the code flow pulls nothing new from Plan until a card moves on to Review."},
+    "Review": {"kind": "why", "text": "Its own stage, so cards waiting on you don't use the build stage's slots."}
+  },
+  "flows": {
+    "design": {"blurb": "design before", "selected": "mockups"},
+    "plan": {"blurb": "no spec stage", "selected": "plan"},
+    "code": {"blurb": "a test loop on each task, a review, then screenshots checked against the mockup", "selected": "screenshots"}
+  },
+  "cards": [
+    {
+      "ref": 31, "title": "Grocery list from this week's meals", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": "planner",
+      "description": "Turn the week's planned meals into one grocery list, with repeated ingredients added up.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 32, "title": "Scale a recipe for 2, 4 or 6 people", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Pick how many you're cooking for and every quantity in the recipe adjusts.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 33, "title": "Import a recipe from a URL", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Paste a link to a recipe site and Pantry pulls in the ingredients and steps, without the life story.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 34, "title": "Nutrition per serving", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Rough calories, protein, carbs and fat for one serving, worked out from the ingredients.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 29, "title": "Recipe photo gallery", "stage": "Next up", "lane": null, "status": "ready", "baton": "human", "tag": "recipes",
+      "description": "Add a few photos to a recipe and swipe through them at the top of the page.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 27, "title": "Weekly meal-plan calendar", "stage": "Design", "lane": null, "status": "working", "baton": "ai", "tag": null,
+      "description": "A week laid out by day and meal, with recipes dragged into each slot.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 26, "title": "Recipe card redesign", "stage": "Design", "lane": "review", "status": "in_review", "baton": "human", "tag": null,
+      "description": "A cleaner recipe card: a big photo, the cook time up front, and ingredients you can tick off.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 24, "title": "Favourites and star ratings", "stage": "Plan", "lane": "review", "status": "in_review", "baton": "human", "tag": null,
+      "description": "Star the recipes you love and rate them out of five, so the best ones float to the top.",
+      "tasks": [
+        {"title": "Store a favourite flag and a rating per recipe", "done": false},
+        {"title": "Add a star toggle to the recipe card", "done": false},
+        {"title": "Add a five-star rating control", "done": false},
+        {"title": "Sort and filter the recipe box by rating", "done": false},
+        {"title": "Show favourites first in search", "done": false}
+      ],
+      "question": null
+    },
+    {
+      "ref": 21, "title": "Search recipes by ingredient", "stage": "Code", "lane": null, "status": "working", "baton": "ai", "tag": null,
+      "description": "Type what's in the fridge and see the recipes you can make with it.",
+      "tasks": [
+        {"title": "Index each recipe's ingredients", "done": true},
+        {"title": "Match a search against ingredient names", "done": true},
+        {"title": "Rank recipes by how many ingredients you have", "done": false},
+        {"title": "Add the search box to the recipe box", "done": false},
+        {"title": "Show which ingredients are missing", "done": false}
+      ],
+      "question": null
+    },
+    {
+      "ref": 22, "title": "Shopping list grouping", "stage": "Code", "lane": null, "status": "needs_input", "baton": "ai", "tag": null,
+      "description": "Group the grocery list so a trip round the shop goes in one pass.",
+      "tasks": [], "question": "Group by store aisle, or by recipe?"
+    },
+    {
+      "ref": 19, "title": "Cook mode: big text, screen stays on", "stage": "Review", "lane": null, "status": "in_review", "baton": "human", "tag": null,
+      "description": "A step-at-a-time view in large type that keeps the screen awake while your hands are floury.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 20, "title": "Recipe tags as chips", "stage": "Review", "lane": null, "status": "in_review", "baton": "human", "tag": null,
+      "description": "Show a recipe's tags as tappable chips that filter the recipe box.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 18, "title": "Print-friendly recipe page", "stage": "Deploy", "lane": null, "status": "ready", "baton": "human", "tag": "ship-it",
+      "description": "Print a recipe on one clean page, without the menus and buttons.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 1, "title": "Add a recipe", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Save a recipe with its ingredients and steps.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 2, "title": "Recipe page", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Each recipe gets its own page with ingredients on one side and steps on the other.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 5, "title": "Tags and filters", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Tag recipes (quick, veggie, batch-cook) and filter the recipe box by tag.",
+      "tasks": [], "question": null
+    }
+  ]
+}

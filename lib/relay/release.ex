@@ -32,6 +32,24 @@ defmodule Relay.Release do
     {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
   end
 
+  @doc """
+  Creates the public example boards (`Relay.Examples.seed!/2`, RE444) owned by the user with
+  `email`, returning the `%{created: slugs, skipped: slugs}` summary; `opts` takes
+  `reset: true`. Raises `ArgumentError` for an unknown email.
+
+  Unlike `migrate/0`, this runs against the **live** node, never `load_app`/`with_repo`: the
+  seeder's `Relay.Events` broadcasts need the running app's PubSub. On Fly:
+
+      fly ssh console -C "/app/bin/relay rpc 'Relay.Release.seed_examples(\"<email>\")'"
+  """
+  @spec seed_examples(String.t(), keyword()) :: %{created: [String.t()], skipped: [String.t()]}
+  def seed_examples(email, opts \\ []) when is_binary(email) do
+    case Relay.Accounts.get_user_by_email(email) do
+      nil -> raise ArgumentError, "no user with email #{email}"
+      owner -> Relay.Examples.seed!(owner, opts)
+    end
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

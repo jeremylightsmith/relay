@@ -53,6 +53,9 @@ flowchart LR
     Cards --> Votes
     Events --> BoardWatch
     Events --> Repo
+    Examples --> Boards
+    Examples --> Cards
+    Examples --> Repo
     Flows --> Agents
     Flows --> Repo
     Members --> Events

@@ -21,6 +21,8 @@ defmodule Schemas.User do
     timestamps(type: :utc_datetime)
   end
 
+  @type t :: %__MODULE__{}
+
   @doc """
   Changeset for profile fields coming from the OAuth provider. `:email` is
   normalized (trimmed/downcased) so every email in the system is canonical —

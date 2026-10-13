@@ -1,0 +1,101 @@
+{
+  "template": "three-brain",
+  "name": "Tiny Dungeon (three-brain)",
+  "key": "DU",
+  "pitch": "A pixel-art dungeon crawler that runs in the browser. Explore rooms, dodge monsters, grab loot.",
+  "baton": {
+    "ai": "Three models plan, a judge merges, AI builds",
+    "human": "You approve the merged plan, review the screenshots, deploy by hand"
+  },
+  "facts": "6 stages · 2 flows · 2 review gates · manual deploy · needs Claude, Codex and Gemini runners",
+  "wip": {
+    "how": "Each stage shows wip used/limit. A flow never pulls a card into a full stage; the stage turns amber and the flow waits.",
+    "why": "One card in Plan runs three models at once. A limit of 2 caps how many runners and tokens planning can burn.",
+    "here": "Plan is full (2/2), so the Slime King stays in Backlog until you approve a plan."
+  },
+  "notes": {
+    "Plan": {"kind": "full", "text": "Full: each card here is running three planners. DU40 waits in Backlog."},
+    "Review": {"kind": "why", "text": "Its own stage, so cards waiting on you don't use the build stage's slots."}
+  },
+  "flows": {
+    "three-brain-plan": {"blurb": "three models plan side by side, a judge merges them, then one mockup", "selected": "gpt_plan"},
+    "implement": {"blurb": "a test loop on each task, then screenshots for you", "selected": "implement"}
+  },
+  "cards": [
+    {
+      "ref": 40, "title": "Boss fight: the Slime King", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": "enemies",
+      "description": "A big green boss at the bottom of the dungeon that splits into smaller slimes when you hit it.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 41, "title": "Treasure chests with a loot table", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Chests that roll from a loot table, so every run turns up something different.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 42, "title": "Mini-map in the corner", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": "ui",
+      "description": "A small map of the rooms you've explored, with the hero as a blinking dot.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 43, "title": "Footstep and coin sounds", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": "audio",
+      "description": "Soft footsteps on stone and a bright clink when you pick up a coin.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 44, "title": "Save the game in the browser", "stage": "Backlog", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Close the tab and pick up where you left off, from the same room with the same loot.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 37, "title": "Torchlight and fog of war", "stage": "Plan", "lane": null, "status": "working", "baton": "ai", "tag": null,
+      "description": "Only the tiles near the hero's torch are lit; rooms you haven't seen stay dark.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 35, "title": "Inventory bar along the bottom", "stage": "Plan", "lane": "review", "status": "in_review", "baton": "human", "tag": null,
+      "description": "A row of slots along the bottom of the screen for the loot you're carrying.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 33, "title": "Bat enemy that swoops at you", "stage": "Implement", "lane": null, "status": "working", "baton": "ai", "tag": null,
+      "description": "A bat that hangs from the ceiling, then dives at the hero when they come close.",
+      "tasks": [
+        {"title": "Bat sprite and flap animation", "done": true},
+        {"title": "Swoop when the hero is in range", "done": false},
+        {"title": "Damage the hero on contact", "done": false}
+      ],
+      "question": null
+    },
+    {
+      "ref": 31, "title": "Hero walk cycle (4 frames)", "stage": "Review", "lane": null, "status": "in_review", "baton": "human", "tag": null,
+      "description": "A four-frame walk for the hero in each direction, so moving looks like walking, not sliding.",
+      "tasks": [
+        {"title": "Draw the four walk frames", "done": true},
+        {"title": "Play them while the hero moves", "done": true},
+        {"title": "Face the direction of travel", "done": true}
+      ],
+      "question": null
+    },
+    {
+      "ref": 30, "title": "Coins and a score counter", "stage": "Deploy", "lane": null, "status": "ready", "baton": "human", "tag": "ship-it",
+      "description": "Coins scattered through the rooms and a score in the top corner that counts them up.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 1, "title": "Tile map renderer", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "Draw a room from a grid of floor and wall tiles.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 2, "title": "Move the hero with arrow keys", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "The arrow keys step the hero one tile at a time.",
+      "tasks": [], "question": null
+    },
+    {
+      "ref": 3, "title": "Walls block movement", "stage": "Done", "lane": null, "status": "ready", "baton": "human", "tag": null,
+      "description": "The hero stops at a wall instead of walking through it.",
+      "tasks": [], "question": null
+    }
+  ]
+}

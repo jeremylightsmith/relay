@@ -99,6 +99,16 @@ defmodule RelayWeb.FlowGraphComponents do
     needs_input: "var(--color-warning)"
   }
 
+  attr :id, :string,
+    default: "flow-graph",
+    doc:
+      "the root div's id (the `FlowFocus` hook needs it unique) — RE444 gives each graph on the " <>
+        "example board its own; a non-default id also prefixes the arrowhead marker ids"
+
+  attr :flow_key, :string,
+    default: nil,
+    doc: "RE444 — when set on an interactive graph, every node click also carries `phx-value-flow`"
+
   attr :nodes, :list, required: true
   attr :edges, :list, required: true
   attr :layout, :map, required: true
@@ -144,12 +154,14 @@ defmodule RelayWeb.FlowGraphComponents do
         adjacency: adjacency,
         focus: focus,
         subtitle_style: @subtitle_style,
-        subtitle_muted: @llm_color["default"]
+        subtitle_muted: @llm_color["default"],
+        marker_prefix: marker_prefix(assigns.id),
+        flow_value: assigns.interactive? && assigns.flow_key
       )
 
     ~H"""
     <div
-      id="flow-graph"
+      id={@id}
       class="relative"
       phx-hook="FlowFocus"
       data-adjacency={Jason.encode!(@adjacency)}
@@ -165,7 +177,7 @@ defmodule RelayWeb.FlowGraphComponents do
         <defs>
           <marker
             :for={{outcome, color} <- edge_colors()}
-            id={"arw-#{outcome || "start"}"}
+            id={"#{@marker_prefix}-#{outcome || "start"}"}
             markerWidth="9"
             markerHeight="9"
             refX="6"
@@ -184,7 +196,7 @@ defmodule RelayWeb.FlowGraphComponents do
           stroke-width="2"
           fill="none"
           stroke-dasharray={if edge_on(g.edge) == :failed, do: "5 4", else: nil}
-          marker-end={"url(#arw-#{edge_on(g.edge) || "start"})"}
+          marker-end={"url(##{@marker_prefix}-#{edge_on(g.edge) || "start"})"}
         />
       </svg>
 
@@ -220,6 +232,7 @@ defmodule RelayWeb.FlowGraphComponents do
           data-hot={hot_node?(@focus, node.key)}
           phx-click={@interactive? && "select_node"}
           phx-value-key={@interactive? && node.key}
+          phx-value-flow={@flow_value}
         />
       <% end %>
 
@@ -231,6 +244,7 @@ defmodule RelayWeb.FlowGraphComponents do
         data-hot={hot_node?(@focus, node.key)}
         phx-click={@interactive? && "select_node"}
         phx-value-key={@interactive? && node.key}
+        phx-value-flow={@flow_value}
         style={
           node_style(node, position(node, @layout), type_meta(node.type), @selected, @node_states)
         }
@@ -386,6 +400,11 @@ defmodule RelayWeb.FlowGraphComponents do
 
   defp control?(node), do: node.type in Schemas.Flow.Node.control_types()
 
+  # The editor's single graph keeps its historic `arw-*` marker ids; any other id scopes them, so
+  # several graphs on one page (RE444's example board) never repeat a DOM id.
+  defp marker_prefix("flow-graph"), do: "arw"
+  defp marker_prefix(id), do: "#{id}-arw"
+
   # ---- style/geometry helpers (private) ----
 
   # defensive accessors — every shipped shape is dense (see the moduledoc), so these only
@@ -398,7 +417,13 @@ defmodule RelayWeb.FlowGraphComponents do
   defp edge_colors, do: @edge_color
   defp edge_color(edge), do: Map.get(@edge_color, edge_on(edge), @edge_color[nil])
 
-  defp type_meta(type) do
+  @doc """
+  A node type's colours and tag — `%{tag:, tag_c:, tag_bg:, accent:, border:, fill:}` (a control
+  type adds `ring`; `tag_bg` is nil where the canvas draws no tag pill). The ONE copy of the
+  per-type palette: the graph draws with it and RE444's example node panel tags its node with it.
+  """
+  @spec type_meta(atom()) :: map()
+  def type_meta(type) do
     if type in Schemas.Flow.Node.control_types(),
       do: Map.put(@control_meta, :tag, control_tag(type)),
       else: Map.fetch!(@type_meta, type)

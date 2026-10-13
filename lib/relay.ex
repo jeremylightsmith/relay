@@ -30,6 +30,7 @@ defmodule Relay do
       Cards,
       Config,
       Events,
+      Examples,
       Flows,
       Flows.Document,
       Flows.Shape,

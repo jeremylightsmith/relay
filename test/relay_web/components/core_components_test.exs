@@ -126,6 +126,19 @@ defmodule RelayWeb.CoreComponentsTest do
   end
 
   describe "board_card/1" do
+    test "is draggable by default, and draggable: false renders draggable=\"false\" (RE444)" do
+      dragged = fn attrs ->
+        (&CoreComponents.board_card/1)
+        |> render_component(Map.merge(%{id: "c1", ref: "ST3", title: "T"}, attrs))
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("article#c1")
+        |> LazyHTML.attribute("draggable")
+      end
+
+      assert dragged.(%{}) == ["true"]
+      assert dragged.(%{draggable: false}) == ["false"]
+    end
+
     test "renders the title and ref" do
       html = render_component(&CoreComponents.board_card/1, id: "card-1", ref: "RLY-3", title: "Ship MMF 03")
 
@@ -761,6 +774,97 @@ defmodule RelayWeb.CoreComponentsTest do
 
       # stage width: 240 (main) + 34 (strip) + 178 (expanded) = 452
       assert html =~ "width:452px"
+    end
+
+    # RE444: the example boards explain a stage in a FULL / WHY strip under its header.
+    @full_note "Full, so the implement flow isn't pulling anything new. ST12 waits in Plan."
+
+    defp noted_column(note) do
+      attrs = %{id: "stage-col-3", name: "Plan", type: :work, stage_id: 3, wip_limit: 2, count: 2}
+      attrs = if note, do: Map.put(attrs, :note, note), else: attrs
+      render_component(&CoreComponents.stage_column/1, attrs)
+    end
+
+    test "a :full note renders a FULL strip in the warning tint (RE444)" do
+      html = noted_column(%{kind: :full, text: @full_note})
+      note = html |> LazyHTML.from_fragment() |> LazyHTML.query("#stage-col-3-note.stage-note[data-kind=full]")
+
+      assert Enum.count(note) == 1
+      assert LazyHTML.text(note) =~ "FULL"
+      assert LazyHTML.text(note) =~ @full_note
+      assert [style] = LazyHTML.attribute(note, "style")
+      assert style =~ "var(--color-warning) 7%"
+    end
+
+    test "a :why note renders a WHY strip in the info tint (RE444)" do
+      html = noted_column(%{kind: :why, text: "Its own stage."})
+      note = html |> LazyHTML.from_fragment() |> LazyHTML.query("#stage-col-3-note.stage-note[data-kind=why]")
+
+      assert Enum.count(note) == 1
+      assert LazyHTML.text(note) =~ "WHY"
+      assert LazyHTML.text(note) =~ "Its own stage."
+      assert [style] = LazyHTML.attribute(note, "style")
+      assert style =~ "var(--color-info) 7%"
+    end
+
+    test "no note renders no strip (RE444)" do
+      refute noted_column(nil) =~ "stage-note"
+    end
+
+    defp one_card_column(read_only) do
+      render_component(&CoreComponents.stage_column/1,
+        id: "stage-col-5",
+        name: "Plan",
+        type: :work,
+        stage_id: 5,
+        board_key: "ST",
+        read_only: read_only,
+        cards: [
+          {"cards-12",
+           %{id: 12, title: "Streak freeze", tag: nil, ref_number: 12, status: :ready, sub_tasks: [], owners: []}}
+        ]
+      )
+    end
+
+    test "a read-only column's cards are not draggable and it has no new-card button (RE444)" do
+      doc = true |> one_card_column() |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("article#cards-12") |> LazyHTML.attribute("draggable") == ["false"]
+      assert doc |> LazyHTML.query("#stage-col-5-new-card") |> Enum.count() == 0
+    end
+
+    test "an editable column's cards stay draggable (RE444)" do
+      doc = false |> one_card_column() |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("article#cards-12") |> LazyHTML.attribute("draggable") == ["true"]
+    end
+
+    test "a read-only column's sub-lane cards are not draggable either (RE444)" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-6",
+          name: "Implement",
+          type: :work,
+          stage_id: 6,
+          board_key: "ST",
+          read_only: true,
+          sublanes: [
+            %{
+              id: 61,
+              name: "Review",
+              lane: :review,
+              owner: :human,
+              count: 1,
+              cards: [
+                {"cards-14",
+                 %{id: 14, title: "Weekly recap", tag: nil, ref_number: 14, status: :in_review, sub_tasks: [], owners: []}}
+              ]
+            }
+          ]
+        )
+
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query("article#cards-14") |> LazyHTML.attribute("draggable") ==
+               ["false"]
     end
   end
 

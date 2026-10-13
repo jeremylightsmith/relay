@@ -501,6 +501,35 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
         id: :type_done,
         description: "done — solid green circle (--color-success)",
         attributes: %{id: "story-stage-type-done", name: "Done", type: :done, stage_id: 905, count: 5}
+      },
+      %Variation{
+        id: :with_note_full,
+        description:
+          "RE444 — an example board's FULL note under the header (warning tint), read-only so " <>
+            "there is no + button",
+        attributes: %{
+          id: "story-stage-note-full",
+          name: "Plan",
+          type: :planning,
+          stage_id: 911,
+          count: 2,
+          wip_limit: 2,
+          read_only: true,
+          note: %{kind: :full, text: "Full, so the implement flow isn't pulling anything new. ST12 waits in Plan."}
+        }
+      },
+      %Variation{
+        id: :with_note_why,
+        description: "RE444 — a WHY note (info tint) explaining why the stage exists",
+        attributes: %{
+          id: "story-stage-note-why",
+          name: "Review",
+          type: :review,
+          stage_id: 912,
+          count: 1,
+          read_only: true,
+          note: %{kind: :why, text: "Its own stage, so cards waiting on you don't use the build stage's slots."}
+        }
       }
     ]
   end

@@ -20,6 +20,11 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "Create board from"
   end
 
+  test "12. GET /storybook/example_board_components/node_panel shows the inline tag (RE444)", %{conn: conn} do
+    html = conn |> get("/storybook/example_board_components/node_panel") |> html_response(200)
+    assert html =~ "inline · no skill"
+  end
+
   test "GET /storybook/core_components/card_drawer shows the Notes count and the :question state (RE277)",
        %{conn: conn} do
     conn = get(conn, "/storybook/core_components/card_drawer")

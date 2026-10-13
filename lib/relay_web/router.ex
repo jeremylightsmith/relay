@@ -127,6 +127,9 @@ defmodule RelayWeb.Router do
           else: []
         ) ++ [{RelayWeb.Auth, :mount_current_scope}, {RelayWeb.Auth, :mount_embed}] do
       live "/board/:slug/public", PublicBoardLive
+
+      # RE444 — a template's seeded example board, read-only for anyone (signed in or out).
+      live "/examples/:template", ExampleBoardLive
     end
   end
 

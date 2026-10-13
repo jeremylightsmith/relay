@@ -31,6 +31,12 @@ defmodule Relay.Accounts do
   @doc "Fetches a user by primary key. Returns nil when not found."
   def get_user(id), do: Repo.get(User, id)
 
+  @doc "Fetches a user by email, case-insensitively (RE444). Returns nil when not found."
+  @spec get_user_by_email(String.t()) :: User.t() | nil
+  def get_user_by_email(email) when is_binary(email) do
+    Repo.one(from u in User, where: fragment("lower(?)", u.email) == ^String.downcase(email), limit: 1)
+  end
+
   @doc """
   Every user for the superadmin `/admin/users` table (RE353), newest first
   (`inserted_at desc, id desc`), with `board_count` = the user's membership rows. Unscoped on

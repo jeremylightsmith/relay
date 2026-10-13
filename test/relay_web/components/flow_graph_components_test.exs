@@ -211,6 +211,54 @@ defmodule RelayWeb.FlowGraphComponentsTest do
     end
   end
 
+  describe "several graphs on one page (RE444)" do
+    @nodes [%{key: "n", type: :agent, run: "go", llm: nil, effort: nil}]
+    @edges [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+
+    test "id and flow_key name the root and tag every node click with its flow" do
+      doc =
+        @nodes |> graph(@edges, id: "flow-graph-plan", flow_key: "plan", interactive?: true) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#flow-graph-plan") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#flow-graph") |> Enum.count() == 0
+
+      node = LazyHTML.query(doc, ~s([data-node="n"]))
+      assert LazyHTML.attribute(node, "phx-value-key") == ["n"]
+      assert LazyHTML.attribute(node, "phx-value-flow") == ["plan"]
+    end
+
+    test "a control pill carries phx-value-flow too" do
+      nodes = [%{key: "split", type: :fan_out, run: nil, max_parallel: nil}, %{key: "join", type: :fan_in, run: nil}]
+
+      edges = [
+        %{from: "start", to: "split", on: nil},
+        %{from: "split", to: "join", on: nil},
+        %{from: "join", to: "done", on: :succeeded}
+      ]
+
+      doc = nodes |> graph(edges, id: "flow-graph-plan", flow_key: "plan", interactive?: true) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query(~s([data-node="split"])) |> LazyHTML.attribute("phx-value-flow") == ["plan"]
+    end
+
+    test "a named graph scopes its arrowhead marker ids so two graphs never share an id" do
+      html = graph(@nodes, @edges, id: "flow-graph-plan", flow_key: "plan")
+
+      assert html =~ ~s(id="flow-graph-plan-arw-start")
+      assert html =~ ~s|marker-end="url(#flow-graph-plan-arw-start)"|
+      refute html =~ ~s(id="arw-start")
+    end
+
+    test "the defaults keep the editor's #flow-graph root and add no phx-value-flow" do
+      html = graph(@nodes, @edges, interactive?: true)
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#flow-graph") |> Enum.count() == 1
+      refute html =~ "phx-value-flow"
+      assert html =~ ~s(id="arw-start")
+    end
+  end
+
   describe "edge routing (RE333)" do
     test "a straight forward edge is drawn as a vertical line" do
       nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]

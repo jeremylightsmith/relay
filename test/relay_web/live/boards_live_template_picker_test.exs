@@ -172,10 +172,27 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     assert texts(view, "#template-facts-three-brain > span") == ["6 stages", "2 flows", "0 skills"]
   end
 
-  test "11. no public-example link is rendered (RE444)", %{conn: conn} do
+  test "11. with no seeded examples, no card links to a public example (RE444)", %{conn: conn} do
     view = open_picker(conn)
 
-    refute has_element?(view, "#template-picker a", "See the public example")
-    refute view |> element("#template-picker") |> render() =~ "See the public example"
+    assert count(view, ~s([id^="template-example-"])) == 0
+  end
+
+  test "12. each template card links to its seeded public example in a new window (RE444)", %{conn: conn} do
+    Relay.Examples.seed!(insert(:user), [])
+    view = open_picker(conn)
+
+    doc = view |> render() |> LazyHTML.from_fragment()
+    link = LazyHTML.query(doc, "a#template-example-bare-minimum")
+
+    assert LazyHTML.attribute(link, "href") == ["/examples/bare-minimum"]
+    assert LazyHTML.attribute(link, "target") == ["_blank"]
+    assert LazyHTML.attribute(link, "rel") == ["noopener"]
+    assert LazyHTML.text(link) =~ "See the public example: Streaks (bare-minimum)"
+    assert link |> LazyHTML.query(".hero-arrow-top-right-on-square") |> Enum.count() == 1
+    assert link |> LazyHTML.query(".sr-only") |> LazyHTML.text() |> String.trim() == "(opens in a new window)"
+
+    assert has_element?(view, "#template-example-design-led")
+    assert has_element?(view, "#template-example-three-brain")
   end
 end
