@@ -1,0 +1,722 @@
+<title>Relay Competitive Landscape</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a field report read top to bottom — one reading column, charts break wider; the human→AI baton (blue→violet) is the only flourish. */
+:root {
+  --bg: #f8fafd;
+  --surface: #ffffff;
+  --ink: #232a35;
+  --ink-2: #4c5563;
+  --ink-3: #737c89;
+  --line: #e2e6ec;
+  --line-2: #eef1f5;
+  --human: #3284d0;   /* Relay: Human = blue */
+  --ai: #795ec9;      /* Relay: AI = violet */
+  --amber: #d58c3b;   /* Blocked / warning */
+  --green: #2c965d;   /* Done */
+  --human-soft: color-mix(in oklab, var(--human) 12%, var(--surface));
+  --ai-soft: color-mix(in oklab, var(--ai) 12%, var(--surface));
+  --amber-soft: color-mix(in oklab, var(--amber) 14%, var(--surface));
+  --display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151b23; --surface: #1e252e; --ink: #eef1f6; --ink-2: #b9c1cc; --ink-3: #8b95a3;
+    --line: #313a46; --line-2: #262e39;
+    --human: #3a93e6; --ai: #9074e9; --amber: #c27f33; --green: #4ab074;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151b23; --surface: #1e252e; --ink: #eef1f6; --ink-2: #b9c1cc; --ink-3: #8b95a3;
+  --line: #313a46; --line-2: #262e39;
+  --human: #3a93e6; --ai: #9074e9; --amber: #c27f33; --green: #4ab074;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 24px; padding-block: 56px 96px; display: grid; gap: 88px; }
+@media (max-width: 600px) { .wrap { padding-inline: 16px; padding-block: 32px 64px; gap: 64px; } }
+
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.015em; }
+h1 { font-size: clamp(2.2rem, 5.4vw, 3.9rem); line-height: 1.02; font-weight: 700; letter-spacing: -0.03em; }
+h2 { font-size: clamp(1.55rem, 3vw, 2.15rem); line-height: 1.1; font-weight: 600; }
+h3 { font-size: 1.12rem; font-weight: 600; line-height: 1.25; }
+p { margin: 0; max-width: 66ch; }
+a { color: var(--human); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; border-radius: 3px; }
+.eyebrow { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.lede { font-size: 1.15rem; color: var(--ink-2); max-width: 62ch; }
+.muted { color: var(--ink-3); }
+.small { font-size: 0.86rem; }
+.num { font-variant-numeric: tabular-nums; }
+section { display: grid; gap: 28px; min-width: 0; }
+.sec-head { display: grid; gap: 12px; }
+
+/* baton strip */
+.baton { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--human) 0 50%, var(--ai) 50% 100%); width: 120px; }
+
+/* hero */
+.hero { display: grid; gap: 22px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 12px; }
+.tile { background: var(--surface); padding: 18px 18px 16px; display: grid; gap: 4px; align-content: start; }
+.tile .big { font-family: var(--display); font-size: 2.1rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.tile .lbl { font-size: 0.86rem; color: var(--ink-2); line-height: 1.4; }
+.tile .src { font-size: 0.72rem; color: var(--ink-3); font-family: var(--mono); }
+@media (max-width: 820px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .tiles { grid-template-columns: 1fr; } }
+
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.88rem; border-top: 1px solid var(--line); padding-top: 14px; }
+nav.toc a { color: var(--ink-2); text-decoration: none; }
+nav.toc a:hover { color: var(--ink); text-decoration: underline; }
+
+/* camps */
+.camps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 980px) { .camps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .camps { grid-template-columns: 1fr; } }
+.camp { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.camp .hd { display: flex; align-items: center; gap: 8px; }
+.camp .hd svg { flex: none; }
+.camp p { font-size: 0.88rem; color: var(--ink-2); }
+.camp .who { font-size: 0.82rem; color: var(--ink-3); line-height: 1.45; }
+.camp .claim { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 8px; }
+
+/* figure shell */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 12px; min-width: 0; }
+figcaption { font-size: 0.84rem; color: var(--ink-3); max-width: 80ch; }
+.fig-title { font-family: var(--display); font-weight: 600; font-size: 1.02rem; }
+.scroll { overflow-x: auto; }
+svg text { font-family: var(--body); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--ink-2); align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 860px) { .two, .three { grid-template-columns: 1fr; } }
+
+/* levels ladder */
+.ladder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; align-items: end; }
+.rung { border-radius: 8px 8px 0 0; background: var(--line-2); border: 1px solid var(--line); border-bottom: 0; padding: 10px 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; position: relative; }
+.rung .lv { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); }
+.rung .nm { font-family: var(--display); font-weight: 600; font-size: 0.98rem; line-height: 1.15; }
+.rung .q { font-size: 0.78rem; color: var(--ink-2); line-height: 1.35; }
+.rung.l2 { background: var(--amber-soft); border-color: color-mix(in oklab, var(--amber) 45%, var(--line)); }
+.rung.l4 { background: var(--ai-soft); border-color: var(--ai); border-width: 2px; border-bottom: 0; }
+.rung.l5 { background: color-mix(in oklab, var(--ink) 88%, var(--surface)); color: var(--surface); border-color: var(--ink); }
+.rung.l5 .lv, .rung.l5 .q { color: color-mix(in oklab, var(--surface) 75%, var(--ink)); }
+.ladder-base { height: 2px; background: var(--ink-3); }
+.pin { font-family: var(--mono); font-size: 0.7rem; font-weight: 500; padding: 2px 6px; border-radius: 4px; justify-self: start; }
+.pin.amber { background: var(--amber); color: #fff; }  /* theme-tokens: white ink on a saturated chip in both themes */
+.pin.ai { background: var(--ai); color: #fff; }
+.who-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; font-size: 0.74rem; color: var(--ink-3); line-height: 1.4; }
+@media (max-width: 760px) {
+  .ladder, .who-row { grid-template-columns: repeat(6, 150px); }
+  .ladder-wrap { overflow-x: auto; }
+}
+
+/* quotes */
+.slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .slots { grid-template-columns: 1fr; } }
+.slot { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.slot .tag { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+blockquote { margin: 0; font-size: 0.95rem; line-height: 1.45; display: grid; gap: 4px; }
+blockquote cite { font-style: normal; font-size: 0.76rem; color: var(--ink-3); }
+blockquote q { quotes: "“" "”"; }
+
+/* taken vs open */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 0.84rem; display: inline-flex; gap: 8px; align-items: baseline; }
+.chip b { font-weight: 500; text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--ink-3) 70%, transparent); }
+.chip i { font-style: normal; color: var(--ink-3); font-size: 0.76rem; }
+.opens { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .opens { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .opens { grid-template-columns: 1fr; } }
+.open { border: 1px solid var(--line); border-left: 4px solid var(--ai); background: var(--surface); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.open.lead { border-left-color: var(--human); background: linear-gradient(90deg, var(--human-soft), var(--surface) 70%); }
+.open p { font-size: 0.88rem; color: var(--ink-2); }
+.callout { border: 1px solid color-mix(in oklab, var(--amber) 50%, var(--line)); background: var(--amber-soft); border-radius: 10px; padding: 14px 16px; font-size: 0.9rem; display: grid; gap: 6px; }
+.callout ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+
+/* tales */
+.tale { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.tl { display: grid; gap: 0; position: relative; padding-left: 18px; }
+.tl::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+.tl div { position: relative; padding: 4px 0; font-size: 0.86rem; color: var(--ink-2); }
+.tl div::before { content: ""; position: absolute; left: -17px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink-3); }
+.tl div.end::before { background: var(--amber); border-color: var(--amber); }
+.tl b { font-family: var(--mono); font-weight: 500; font-size: 0.76rem; color: var(--ink); margin-right: 6px; }
+
+/* ladder of offers */
+.offers { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; align-items: end; }
+.offer { padding: 12px; border: 1px solid var(--line); border-right: 0; background: var(--surface); display: grid; gap: 4px; align-content: start; min-width: 0; }
+.offer:last-child { border-right: 1px solid var(--line); border-radius: 0 10px 10px 0; }
+.offer:first-child { border-radius: 10px 0 0 10px; }
+.offer .step { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-3); }
+.offer .nm { font-family: var(--display); font-weight: 600; font-size: 0.98rem; line-height: 1.2; }
+.offer .pr { font-family: var(--mono); font-size: 0.8rem; color: var(--ai); }
+.offer p { font-size: 0.8rem; color: var(--ink-2); }
+@media (max-width: 860px) {
+  .offers { grid-template-columns: 1fr; }
+  .offer, .offer:first-child, .offer:last-child { border-right: 1px solid var(--line); border-bottom: 0; border-radius: 0; }
+  .offer:first-child { border-radius: 10px 10px 0 0; }
+  .offer:last-child { border-bottom: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+}
+.hyp { font-family: var(--mono); font-size: 0.7rem; padding: 2px 7px; border-radius: 4px; border: 1px dashed var(--amber); color: var(--ink-2); }
+
+.unv { columns: 2 320px; column-gap: 32px; font-size: 0.86rem; color: var(--ink-2); padding-left: 1.1em; margin: 0; }
+.unv li { margin-bottom: 6px; break-inside: avoid; }
+footer { font-size: 0.82rem; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 16px; }
+
+/* tooltip */
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 0.8rem; line-height: 1.4; padding: 7px 10px; border-radius: 6px; max-width: 280px; opacity: 0; transition: opacity .12s; }
+#tip.on { opacity: 1; }
+[data-tip] { cursor: default; }
+@media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="baton" aria-hidden="true"></div>
+    <span class="eyebrow">Relay · competitive landscape · October 2026</span>
+    <h1>Relay can own “whose turn is it”</h1>
+    <p class="lede">Parallel agents, phone approvals, “software factory” and “agents as teammates” are all taken. What nobody sells is the baton: a card that always shows whether a human or an agent holds it, moving through a pipeline with gates you can see.</p>
+    <div class="tiles">
+      <div class="tile"><span class="big num">0</span><span class="lbl">competitors found that make “who holds the card” a first-class property</span><span class="src">5 research tracks</span></div>
+      <div class="tile"><span class="big num">28.3k</span><span class="lbl">GitHub stars on Vibe Kanban, the category leader, now sunsetting</span><span class="src">github.com/BloopAI</span></div>
+      <div class="tile"><span class="big num">66%</span><span class="lbl">of developers use coding agents; Claude Code is the most used</span><span class="src">Stack Overflow 2026</span></div>
+      <div class="tile"><span class="big num">3%</span><span class="lbl">of developers “highly trust” AI output</span><span class="src">Stack Overflow 2025</span></div>
+    </div>
+    <nav class="toc" aria-label="Sections">
+      <a href="#camps">Five camps</a><a href="#map">Positioning map</a><a href="#levels">The five levels</a><a href="#traction">Traction</a><a href="#pain">Customer pain</a><a href="#messaging">Taken vs open</a><a href="#money">Making money</a><a href="#unverified">Unverified</a>
+    </nav>
+  </header>
+
+  <!-- CAMPS -->
+  <section id="camps">
+    <div class="sec-head">
+      <span class="eyebrow">The market</span>
+      <h2>Five camps, and Relay straddles two of them</h2>
+      <p class="muted">Every player found falls into one of these. Each shape is reused on the positioning map below.</p>
+    </div>
+    <div class="camps">
+      <div class="camp">
+        <div class="hd"><svg width="14" height="14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" fill="var(--ink-2)"/></svg><h3>Software &amp; dark factories</h3></div>
+        <p>Spec in, software out. Sold to enterprises as autonomy with “governance.”</p>
+        <div class="who">Factory, Cognition / Devin, StrongDM, Warp, Tessl, Replit</div>
+        <div class="claim">“Build Your Software Factory”</div>
+      </div>
+      <div class="camp">
+        <div class="hd"><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--ink-2)"/></svg><h3>Parallel-agent managers</h3></div>
+        <p>N agents in N git worktrees on your machine. You review and merge.</p>
+        <div class="who">Conductor, Superset, Codex app, Cursor, Claude Code, Happy</div>
+        <div class="claim">“Run parallel coding agents on your Mac”</div>
+      </div>
+      <div class="camp">
+        <div class="hd"><svg width="14" height="14" aria-hidden="true"><path d="M7 0.5 13.5 7 7 13.5 0.5 7Z" fill="var(--ink-2)"/></svg><h3>AI kanban boards</h3></div>
+        <p>A card launches an agent; a review column holds diffs. Incumbent trackers added “assign to agent.”</p>
+        <div class="who">Vibe Kanban (sunset), Cline Kanban, Nimbalyst, Linear, Jira, GitHub Agent HQ</div>
+        <div class="claim">“Artificial colleagues. Natural collaboration.”</div>
+      </div>
+      <div class="camp">
+        <div class="hd"><svg width="14" height="14" aria-hidden="true"><path d="M7 1 13.5 13 0.5 13Z" fill="var(--ink-2)"/></svg><h3>Human-in-the-loop</h3></div>
+        <p>Approval moved from every tool call to every phase.</p>
+        <div class="who">HumanLayer, Jules, Omnara (pivoted)</div>
+        <div class="claim">“Every phase is a place to push back”</div>
+      </div>
+      <div class="camp">
+        <div class="hd"><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5.2" fill="none" stroke="var(--ink-2)" stroke-width="2.2"/></svg><h3>Methodology packs</h3></div>
+        <p>Free skills and specs with huge followings, but no board and no hand-off.</p>
+        <div class="who">superpowers, GitHub Spec Kit, Kiro, Task Master, Backlog.md</div>
+        <div class="claim">Complements, not rivals: Relay is where a method runs</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAP -->
+  <section id="map">
+    <div class="sec-head">
+      <span class="eyebrow">Positioning map</span>
+      <h2>The top-right corner is empty</h2>
+      <p class="muted">Two axes matter for Relay: where the human steps in, and what you look at. Placements are qualitative, judged from each product's own description.</p>
+    </div>
+    <figure>
+      <div class="legend" aria-hidden="true">
+        <span><svg width="12" height="12"><rect x="1" y="1" width="10" height="10" fill="var(--ink-3)"/></svg>Factory</span>
+        <span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--ink-3)"/></svg>Parallel manager</span>
+        <span><svg width="12" height="12"><path d="M6 0.5 11.5 6 6 11.5 0.5 6Z" fill="var(--ink-3)"/></svg>Kanban / tracker</span>
+        <span><svg width="12" height="12"><path d="M6 1 11.5 11 0.5 11Z" fill="var(--ink-3)"/></svg>Human-in-the-loop</span>
+        <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="var(--ink-3)" stroke-width="2"/></svg>Methodology</span>
+        <span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--ai)"/></svg><b>Relay</b></span>
+      </div>
+      <div class="scroll"><svg id="mapsvg" viewBox="0 0 960 560" style="min-width:680px;width:100%;display:block" role="img" aria-label="Positioning map: competitors plotted by where the human steps in and by product surface. Relay is alone in the board-with-stage-owners row at phase gates."></svg></div>
+      <figcaption>Faded marks are shut down or pivoted. kandev is a small open-source project with no visible traction, shown because it is the closest idea. Hover a mark for details.</figcaption>
+    </figure>
+  </section>
+
+  <!-- LEVELS -->
+  <section id="levels">
+    <div class="sec-head">
+      <span class="eyebrow">The frame everyone uses</span>
+      <h2>Dan Shapiro’s five levels, and the missing middle</h2>
+      <p>Shapiro’s January 2026 post gave the industry its vocabulary. The debate since then has been a binary: review every diff (level 3) or turn off the lights (level 5). Nobody sells a deliberate climb to level 4, where you write specs and approve at gates, and the factory runs in between.</p>
+    </div>
+    <figure>
+      <div class="ladder-wrap">
+        <div class="ladder" style="min-height:270px">
+          <div class="rung" style="height:120px"><span class="lv">Level 0</span><span class="nm">Spicy autocomplete</span><span class="q">“the code is unmistakably yours”</span></div>
+          <div class="rung" style="height:150px"><span class="lv">Level 1</span><span class="nm">Coding intern</span><span class="q">AI writes tests and docstrings</span></div>
+          <div class="rung l2" style="height:180px"><span class="lv">Level 2</span><span class="nm">Junior dev / pairing</span><span class="q">“pairing with the AI like a colleague”</span><span class="pin amber">~90% are here</span></div>
+          <div class="rung" style="height:210px"><span class="lv">Level 3</span><span class="nm">Full-time code reviewer</span><span class="q">“Your life is diffs… almost everyone tops out here.”</span></div>
+          <div class="rung l4" style="height:240px"><span class="lv">Level 4</span><span class="nm">Engineering team</span><span class="q">“You collaborate on specs and plans, the agents do the work.”</span><span class="pin ai">Relay’s target</span></div>
+          <div class="rung l5" style="height:270px"><span class="lv">Level 5</span><span class="nm">Dark factory</span><span class="q">“a place where humans are neither needed nor welcome”</span></div>
+        </div>
+        <div class="ladder-base"></div>
+        <div class="who-row" style="margin-top:10px">
+          <div>Copilot, Cursor tab</div>
+          <div>Most IDE assistants</div>
+          <div>Chat + agent mode in Cursor, Claude Code</div>
+          <div>Conductor, Superset, Vibe Kanban, trackers handing back PRs</div>
+          <div><b style="color:var(--ink)">Open.</b> HumanLayer, Jules and Factory gate phases, but none on a board you can see</div>
+          <div>StrongDM, Archon and other DIY repos</div>
+        </div>
+      </div>
+      <figcaption>The level names and quotes are Shapiro’s. “~90% at level 2” is his estimate, not measured. Product placements are our judgment.</figcaption>
+    </figure>
+  </section>
+
+  <!-- TRACTION -->
+  <section id="traction">
+    <div class="sec-head">
+      <span class="eyebrow">Traction</span>
+      <h2>Money flows to factories; attention flows to free methods</h2>
+      <p class="muted">The funded players sell autonomy to enterprises. The biggest open-source followings belong to methods and skill packs, not to boards.</p>
+    </div>
+    <div class="two">
+      <figure>
+        <span class="fig-title">Reported valuations</span>
+        <div class="legend"><span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--human)"/></svg>Confirmed round</span><span><svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" stroke="var(--human)" stroke-width="2" stroke-dasharray="2 2"/></svg>Unverified later report</span></div>
+        <svg id="valsvg" viewBox="0 0 460 230" style="width:100%;display:block" role="img" aria-label="Valuations on a log scale: Linear 1.25 billion, Factory 1.5 billion (4 to 5 billion unverified), Replit 9 billion, Cognition 26 billion (48 billion unverified)."></svg>
+        <figcaption>Log scale. Factory: $150M Series C at $1.5B (Apr 2026); $4B and $5B reports are unconfirmed. Cognition: $26B (May 2026), later reported at about $1B run rate; $48B is in secondary blogs only. Linear’s $1.25B (Jun 2025) comes from an aggregator. For scale, Conductor raised a $22M Series A.</figcaption>
+      </figure>
+      <figure>
+        <span class="fig-title">GitHub stars, open-source players</span>
+        <svg id="starsvg" viewBox="0 0 460 230" style="width:100%;display:block" role="img" aria-label="GitHub stars: superpowers about 292 thousand, Spec Kit about 113 thousand, Vibe Kanban 28.3 thousand, Task Master 28.2 thousand, Superset 15.1 thousand, Backlog.md 7 thousand."></svg>
+        <figcaption>The pale extension marks a reported range (superpowers 243k–292k, Spec Kit 111k–115k, both from secondary snapshots). The method layer is about ten times bigger than any board.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- PAIN -->
+  <section id="pain">
+    <div class="sec-head">
+      <span class="eyebrow">Customer pain</span>
+      <h2>The scarce resource is attention, not code</h2>
+      <p>Usage is surging while trust lags. Developers feel faster than they are, can’t tell which agent is waiting on them, and are building DIY phone-approval hacks to cope.</p>
+    </div>
+    <div class="three">
+      <figure>
+        <span class="fig-title">Use is high, trust is not</span>
+        <svg id="trustsvg" viewBox="0 0 320 210" style="width:100%;display:block" role="img" aria-label="Stack Overflow 2025: 84% use AI, 66% hit almost-right answers, 46% distrust accuracy, 33% trust it, 3% highly trust it."></svg>
+        <figcaption>Stack Overflow Developer Survey 2025.</figcaption>
+      </figure>
+      <figure>
+        <span class="fig-title">Agent use is climbing fast</span>
+        <svg id="adoptsvg" viewBox="0 0 320 210" style="width:100%;display:block" role="img" aria-label="Developers using coding agents: 31% in the 2025 survey, 59% in the April 2026 pulse, 66% in the 2026 survey."></svg>
+        <figcaption>Stack Overflow 2025 survey, April 2026 pulse, 2026 survey. The samples differ, so read it as a direction, not a precise trend.</figcaption>
+      </figure>
+      <figure>
+        <span class="fig-title">Felt faster, measured slower</span>
+        <svg id="metrsvg" viewBox="0 0 320 210" style="width:100%;display:block" role="img" aria-label="METR study: experienced developers believed they were 20% faster but measured 19% slower."></svg>
+        <figcaption>METR randomized trial of experienced open-source developers, using 2025-era tools.</figcaption>
+      </figure>
+    </div>
+
+    <h3 style="margin-top:8px">In their own words, sorted for the brandscript</h3>
+    <div class="slots">
+      <div class="slot"><span class="tag">External problem</span>
+        <blockquote><q>Nothing told you. You find the stuck one by clicking through them.</q><cite>Bargan Constantin, DEV</cite></blockquote>
+        <blockquote><q>unless I keep sitting here, actively prompting and reviewing, no work gets done.</q><cite>Matthew Hawthorne, Push to Prod</cite></blockquote>
+      </div>
+      <div class="slot"><span class="tag">Internal problem</span>
+        <blockquote><q>My brain feels like a fractured mess.</q><cite>Hacker News</cite></blockquote>
+        <blockquote><q>a thin, jittery, frayed sort of weariness.</q><cite>Hacker News</cite></blockquote>
+        <blockquote><q>I am so lonely</q><cite>Harper Reed, on solo LLM workflows</cite></blockquote>
+      </div>
+      <div class="slot"><span class="tag">Philosophical problem</span>
+        <blockquote><q>The scarce resource is not tokens. It is your attention.</q><cite>Bargan Constantin</cite></blockquote>
+        <blockquote><q>Yes programming changes with a genie, but it’s still programming.</q><cite>Kent Beck</cite></blockquote>
+      </div>
+      <div class="slot"><span class="tag">Villain</span>
+        <blockquote><q>The ‘babysitting’ problem is indeed the biggest bottleneck to AI adoption</q><cite>Push to Prod reader</cite></blockquote>
+        <blockquote><q>a place where humans are neither needed nor welcome</q><cite>Dan Shapiro, on the dark factory</cite></blockquote>
+      </div>
+      <div class="slot"><span class="tag">Stakes</span>
+        <blockquote><q>feels like you are done. But you are not done.</q><cite>Dan Shapiro</cite></blockquote>
+        <blockquote><q>[the stalled agent] is usually the one that was closest to finished.</q><cite>Bargan Constantin</cite></blockquote>
+        <blockquote><q>you’ll wake up to a broken codebase</q><cite>Geoffrey Huntley, on Ralph</cite></blockquote>
+      </div>
+      <div class="slot"><span class="tag">Success</span>
+        <blockquote><q>go to sleep, and check their status when I wake up</q><cite>Matthew Hawthorne</cite></blockquote>
+        <blockquote><q>I remove myself as the real-time bottleneck.</q><cite>Matthew Hawthorne</cite></blockquote>
+        <blockquote><q>This stuff is ADDICTIVE!</q><cite>Kent Beck</cite></blockquote>
+      </div>
+    </div>
+    <p class="small muted">They want two things that pull against each other: autonomy (fire off 20 tasks and sleep) and a leash (60% block agents from unapproved changes, Stack Overflow, May 2026). Explicit gates on a board, answerable from a phone, give them both.</p>
+  </section>
+
+  <!-- MESSAGING -->
+  <section id="messaging">
+    <div class="sec-head">
+      <span class="eyebrow">Messaging</span>
+      <h2>What’s taken, and what’s open</h2>
+      <p class="muted">Don’t headline with anything struck through. Use those phrases in supporting copy only where Relay has a clearly different angle.</p>
+    </div>
+    <div class="chips" aria-label="Claims competitors already own">
+      <span class="chip"><b>Run agents in parallel / 10x</b><i>Conductor, Superset, Vibe Kanban</i></span>
+      <span class="chip"><b>No merge conflicts (worktrees)</b><i>everyone</i></span>
+      <span class="chip"><b>Agents as teammates</b><i>Linear, Jira, ClickUp</i></span>
+      <span class="chip"><b>Software factory</b><i>Factory, Tessl, Warp, HumanLayer</i></span>
+      <span class="chip"><b>The bottleneck has shifted to review</b><i>Vibe Kanban</i></span>
+      <span class="chip"><b>You focus on decisions</b><i>Cursor</i></span>
+      <span class="chip"><b>Steer from your phone</b><i>Claude Code, GitHub, Happy</i></span>
+      <span class="chip"><b>Mission control</b><i>GitHub, Codex</i></span>
+      <span class="chip"><b>Your subscription, no lock-in</b><i>Happy, Superset, Conductor</i></span>
+      <span class="chip"><b>A place to push back at every phase</b><i>HumanLayer</i></span>
+      <span class="chip"><b>Spec-driven / agentic engineering</b><i>Kiro, Spec Kit</i></span>
+    </div>
+    <div class="opens">
+      <div class="open lead"><h3>Whose turn is it</h3><p>Who holds the card, human or agent, as a first-class property across a whole flow. Superset’s “waiting on you” status is the nearest phrase anyone uses, and it’s a status light, not a position.</p></div>
+      <div class="open"><h3>Only what needs you</h3><p>Frame mobile and notifications around the human’s attention (“your turn on 3 cards”), not control from a phone.</p></div>
+      <div class="open"><h3>The governed middle</h3><p>Level 4 on purpose: between “your life is diffs” and the dark factory.</p></div>
+      <div class="open"><h3>Kaizen of the factory</h3><p>Flow metrics, value-stream maps and WIP limits in front of the review gate. Practitioners prescribe it; no board offers it.</p></div>
+      <div class="open"><h3>A factory you can see</h3><p>The board is the factory floor, running locally on your own Claude Code. Not a $1k-a-day black box.</p></div>
+      <div class="open"><h3>Bring your method</h3><p>Relay is where Spec Kit or superpowers-style skills actually run, with gates and visibility.</p></div>
+    </div>
+    <div class="callout">
+      <b>Open ground, not proven ground</b>
+      <ul>
+        <li>HumanLayer is funded, gates by phase and already uses factory language. It could claim the baton quickly.</li>
+        <li>Small open-source projects (kandev, Fusion, Archon) show the idea occurs to others.</li>
+        <li>The baton’s appeal hasn’t been tested with users yet.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- MONEY -->
+  <section id="money">
+    <div class="sec-head">
+      <span class="eyebrow">Business model</span>
+      <h2>Free tools don’t earn from usage; teaching can</h2>
+      <p>Two 2026 failures show the trap. The pattern that works is a paid offer next to the free tool, reached from inside it, with a “bring it to work” step at the top.</p>
+    </div>
+    <div class="two">
+      <div class="tale">
+        <span class="eyebrow">Cautionary tale 1</span>
+        <h3>Vibe Kanban: loved, free, shut down</h3>
+        <div class="tl">
+          <div><b>2025</b>Defines the category: worktree per card, review column. “Get 10X more out of Claude Code.”</div>
+          <div><b>peak</b>28.3k stars, a claimed 30,000 active users and 100,000 PRs.</div>
+          <div><b>early 2026</b>HN users notice it “stopped improving and still has bugs.”</div>
+          <div class="end"><b>Apr 10, 2026</b>Sunset announced. Reportedly it “couldn’t monetize a mostly-free tool.” Now community-maintained.</div>
+        </div>
+        <p class="small muted">Those ~30k users are looking for a new home right now. The sunset details come from secondary sources.</p>
+      </div>
+      <div class="tale">
+        <span class="eyebrow">Cautionary tale 2</span>
+        <h3>Tailwind: usage up, revenue gone</h3>
+        <svg id="twsvg" viewBox="0 0 420 170" style="width:100%;display:block" role="img" aria-label="Tailwind Labs, January 2026: usage growing, docs traffic down about 40%, revenue down about 80%, engineers down 75% (4 to 1)."></svg>
+        <p class="small muted">AI agents answered questions without anyone visiting the docs, and the docs were where people found the paid product. Relay’s users talk to Claude Code, which reads READMEs for them. A paid offer that lives only on a docs page will go unseen.</p>
+      </div>
+    </div>
+
+    <figure>
+      <span class="fig-title">What AI-coding education sells for</span>
+      <div class="legend"><span><svg width="22" height="10"><rect x="0" y="2" width="22" height="6" rx="3" fill="var(--human)"/></svg>Individual buys</span><span><svg width="22" height="10"><rect x="0" y="2" width="22" height="6" rx="3" fill="var(--ai)"/></svg>Framed as a professional skill (employer expenses it)</span></div>
+      <div class="scroll"><svg id="pricesvg" viewBox="0 0 900 250" style="min-width:600px;width:100%;display:block" role="img" aria-label="Price ranges: Vibe Coding book 32 dollars; AI Hero cohort 477 to 795; Every one-day workshop 1,000 to 1,500; Elite AI-Assisted Coding cohort 1,125 to 1,500; AI Evals cohort 1,995 to 5,000."></svg></div>
+      <figcaption>Nobody discloses revenue. Every’s ~200-person first workshop (mostly non-coders) is the only enrollment figure found. Every successful teacher sells to an audience they already own: a newsletter or an X following.</figcaption>
+    </figure>
+
+    <div class="sec-head" style="gap:8px">
+      <h3>A possible ladder for Relay <span class="hyp">hypothesis, untested</span></h3>
+      <p class="small muted">No conversion benchmarks were found for free tool → cohort, or individual → team, in AI-coding education.</p>
+    </div>
+    <div class="offers">
+      <div class="offer"><span class="step">Step 1</span><span class="nm">Free local board</span><span class="pr">$0</span><p>The proof and the lead generator. Must be excellent.</p></div>
+      <div class="offer"><span class="step">Step 2</span><span class="nm">Free email course or starter flows</span><span class="pr">$0 · email</span><p>Offered from inside the runner’s first-run output and empty board states.</p></div>
+      <div class="offer"><span class="step">Step 3</span><span class="nm">Self-paced course</span><span class="pr">low ticket</span><p>The method, named and codified.</p></div>
+      <div class="offer"><span class="step">Step 4</span><span class="nm">Live cohort</span><span class="pr">~$800–1,500</span><p>For the after-hours builder who wants to level up.</p></div>
+      <div class="offer"><span class="step">Step 5</span><span class="nm">Team workshop + certified champions</span><span class="pr">$4k+</span><p>“Bring it to work.” Triggered by a company email domain or GitHub org, like Tailscale’s.</p></div>
+    </div>
+    <p class="small muted">Analogues: Tailscale (free personal plan, a work domain starts a business trial, “bring Tailscale to work” rewards); Obsidian (free for work, earns on Sync); Kanban University (certifies trainers who resell the method). The method, the baton and its gates, is what you’d certify, not the software.</p>
+  </section>
+
+  <!-- UNVERIFIED -->
+  <section id="unverified">
+    <div class="sec-head">
+      <span class="eyebrow">Read with care</span>
+      <h2>Unverified or conflicting</h2>
+    </div>
+    <ul class="unv">
+      <li>Factory’s valuation: $1.5B confirmed; $4B and $5B reports unconfirmed.</li>
+      <li>Cognition: $26B confirmed; $48B only in secondary blogs.</li>
+      <li>Conductor’s total funding: $22M Series A confirmed; a “$60M” claim looks unreliable.</li>
+      <li>superpowers stars reported anywhere from 243k to 292k.</li>
+      <li>Cursor’s 2026 revenue estimates conflict ($2B–$3B).</li>
+      <li>AI Evals course price varies across listings ($1,995 to $5,000).</li>
+      <li>A Harvard study (review times up 49%) was seen only in news coverage.</li>
+      <li>Vibe Kanban’s sunset date and reason come from secondary sources.</li>
+      <li>Shapiro’s “90% at level 2” is his own estimate.</li>
+      <li>Gaps: no Reddit sentiment; no homepage copy for Codex, Devin or Amp.</li>
+    </ul>
+    <footer>The full write-up with every source link is in <code>docs/marketing/competitive-landscape.md</code>. Research compiled October 2026.</footer>
+  </section>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function () {
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+  const tipped = (n, t) => { n.setAttribute("data-tip", t); n.setAttribute("tabindex", "0"); return n; };
+
+  /* ---------- positioning map ---------- */
+  (function map() {
+    const s = document.getElementById("mapsvg");
+    const X0 = 170, X1 = 940, Y0 = 30, Y1 = 470, bw = (X1 - X0) / 4, bh = (Y1 - Y0) / 4;
+    const px = v => X0 + v * bw, py = v => Y1 - v * bh;
+    // open-ground highlight
+    el("rect", { x: px(2), y: py(4), width: bw, height: bh, fill: "var(--ai)", "fill-opacity": 0.1, stroke: "var(--ai)", "stroke-dasharray": "4 4", rx: 6 }, s);
+    el("text", { x: px(2) + 10, y: py(4) + 20, fill: "var(--ai)", "font-size": 12, "font-weight": 600 }, s, "OPEN GROUND");
+    // grid
+    for (let i = 0; i <= 4; i++) {
+      el("line", { x1: px(i), x2: px(i), y1: Y0, y2: Y1, stroke: "var(--line)" }, s);
+      el("line", { x1: X0, x2: X1, y1: py(i), y2: py(i), stroke: "var(--line)" }, s);
+    }
+    const xl = [["Approves each", "action / tool call"], ["Reviews each", "diff or PR"], ["Approves at", "phase gates"], ["Nobody", "(lights-out)"]];
+    xl.forEach((l, i) => {
+      el("text", { x: px(i + 0.5), y: Y1 + 22, "text-anchor": "middle", fill: "var(--ink-2)", "font-size": 12.5 }, s, l[0]);
+      el("text", { x: px(i + 0.5), y: Y1 + 38, "text-anchor": "middle", fill: "var(--ink-2)", "font-size": 12.5 }, s, l[1]);
+    });
+    el("text", { x: (X0 + X1) / 2, y: Y1 + 70, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 11, "letter-spacing": "0.08em" }, s, "WHERE THE HUMAN STEPS IN →");
+    const yl = [["Terminal /", "single agent"], ["Session list /", "workspace"], ["Tracker +", "“assign to agent”"], ["Board with stage", "owners + flows"]];
+    yl.forEach((l, i) => {
+      el("text", { x: X0 - 12, y: py(i + 0.5) - 3, "text-anchor": "end", fill: "var(--ink-2)", "font-size": 12.5 }, s, l[0]);
+      el("text", { x: X0 - 12, y: py(i + 0.5) + 13, "text-anchor": "end", fill: "var(--ink-2)", "font-size": 12.5 }, s, l[1]);
+    });
+
+    const P = [
+      ["Claude Code Remote Control", "pm", 0.5, 0.45, "r", "Platform. Approve permission prompts and get push on your phone."],
+      ["Happy", "pm", 0.5, 1.35, "r", "Open-source encrypted mobile app for Claude Code. “adds a harness, not another bill”."],
+      ["Cursor", "pm", 1.25, 0.6, "r", "“launch fleets of agents… while you focus on making decisions”."],
+      ["Codex app", "pm", 1.55, 1.2, "r", "OpenAI’s multi-agent “command center” (Feb 2026)."],
+      ["Conductor", "pm", 1.15, 1.6, "r", "“Run parallel coding agents on your Mac”. $22M Series A (Mar 2026)."],
+      ["Superset", "pm", 1.55, 1.82, "r", "15.1k stars. Status: “working, blocked, or waiting on you”. $15/user/mo."],
+      ["Devin (Cognition)", "f", 1.75, 0.3, "r", "“the first autonomous software engineer”. $26B valuation (May 2026)."],
+      ["Linear · Jira · GitHub Agent HQ", "k", 1.15, 2.5, "r", "Assign an issue to an agent; it hands back a draft PR. The gate lives in GitHub, not the board."],
+      ["Vibe Kanban (sunset)", "k", 1.15, 3.6, "r", "Category leader: 28.3k stars, ~30k users claimed. Sunsetting since Apr 2026.", true],
+      ["Nimbalyst", "k", 1.15, 3.2, "r", "Kanban of sessions + iOS app. Fixed phases, no human/AI stage ownership."],
+      ["Cline Kanban", "k", 1.7, 3.4, "r", "Free, launched Mar 2026. Review column mixes blocked and finished work; dependent cards auto-start."],
+      ["Jules", "h", 2.2, 0.6, "r", "Google. Approve at plan, then diff, then PR."],
+      ["Spec Kit · Kiro", "m", 2.15, 0.22, "r", "Spec-driven. Spec Kit ~111k stars; Kiro $20–200/mo."],
+      ["Factory", "f", 2.7, 0.72, "l", "“Build Your Software Factory”. Droids with “human approval checkpoints”. $1.5B (Apr 2026)."],
+      ["HumanLayer", "h", 2.2, 1.55, "r", "“The Multiplayer Coding Agent Workspace”. Six phases, “Every phase is a place to push back”. $100/user/mo."],
+      ["Warp", "f", 2.75, 1.2, "l", "Pivoted to “Open infrastructure for cloud software factories”, factories as code."],
+      ["kandev (OSS)", "k", 2.2, 3.18, "r", "Small open-source kanban: “different agent per step behind human gates”. No visible traction."],
+      ["StrongDM", "f", 3.45, 0.35, "l", "“Code must not be reviewed by humans.” ~$1,000 of tokens per engineer per day."],
+      ["Archon (OSS)", "f", 3.4, 0.85, "l", "Open-source dark-factory experiment that auto-merges with no human reading the diff."],
+      ["Omnara (pivoted)", "h", 0.55, 0.95, "r", "Moved off mobile control of Claude Code to a Managed Agents alternative.", true],
+    ];
+    const shape = (k, x, y, r, attrs) => {
+      if (k === "f") return el("rect", Object.assign({ x: x - r, y: y - r, width: 2 * r, height: 2 * r }, attrs), s);
+      if (k === "pm") return el("circle", Object.assign({ cx: x, cy: y, r: r }, attrs), s);
+      if (k === "k") return el("path", Object.assign({ d: `M${x} ${y - r * 1.3}L${x + r * 1.3} ${y}L${x} ${y + r * 1.3}L${x - r * 1.3} ${y}Z` }, attrs), s);
+      if (k === "h") return el("path", Object.assign({ d: `M${x} ${y - r * 1.2}L${x + r * 1.2} ${y + r}L${x - r * 1.2} ${y + r}Z` }, attrs), s);
+      return el("circle", Object.assign({ cx: x, cy: y, r: r - 1, fill: "var(--surface)", "stroke-width": 2.4 }, attrs, { fill: "var(--surface)" }), s);
+    };
+    P.forEach(([name, k, vx, vy, side, tip, faded]) => {
+      const x = px(vx), y = py(vy), g = el("g", { opacity: faded ? 0.45 : 1 }, s);
+      const m = shape(k, x, y, 6, k === "m" ? { stroke: "var(--ink-2)" } : { fill: "var(--ink-2)", stroke: "var(--surface)", "stroke-width": 2 });
+      g.appendChild(m);
+      const t = el("text", { x: side === "l" ? x - 12 : x + 12, y: y + 4, "text-anchor": side === "l" ? "end" : "start", fill: "var(--ink)", "font-size": 12.5 }, g, name);
+      tipped(g, name + " — " + tip);
+    });
+    // Relay
+    const rx = px(2.55), ry = py(3.55), g = el("g", {}, s);
+    el("circle", { cx: rx, cy: ry, r: 15, fill: "var(--ai)", "fill-opacity": 0.18 }, g);
+    el("circle", { cx: rx, cy: ry, r: 8, fill: "var(--ai)", stroke: "var(--surface)", "stroke-width": 2 }, g);
+    el("text", { x: rx + 20, y: ry + 5, fill: "var(--ai)", "font-size": 15, "font-weight": 700 }, g, "Relay");
+    tipped(g, "Relay — each stage owned by a human or the AI; configurable flows inside AI stages; review gates on the board; “needs you” inbox and mobile; flow metrics.");
+  })();
+
+  /* ---------- valuations (log dot plot) ---------- */
+  (function val() {
+    const s = document.getElementById("valsvg");
+    const L = 110, R = 440, top = 20, row = 44;
+    const lo = Math.log10(1e9), hi = Math.log10(6e10);
+    const x = v => L + (Math.log10(v) - lo) / (hi - lo) * (R - L);
+    const rows = [
+      ["Linear", 1.25e9, null, "Linear — ~$1.25B (Jun 2025, via aggregator)"],
+      ["Factory", 1.5e9, [4e9, 5e9], "Factory — $1.5B Series C (Apr 2026). $4B / $5B later reports unconfirmed."],
+      ["Replit", 9e9, null, "Replit — $9B; ~$525M estimated run rate; negative gross margins in 2025"],
+      ["Cognition", 2.6e10, [4.8e10], "Cognition (Devin + Windsurf) — $26B (May 2026), ~$492M ARR then; $48B reported in secondary blogs only"],
+    ];
+    [1e9, 2e9, 5e9, 1e10, 2e10, 5e10].forEach(t => {
+      el("line", { x1: x(t), x2: x(t), y1: top - 6, y2: top + row * rows.length - 14, stroke: "var(--line)" }, s);
+      el("text", { x: x(t), y: top + row * rows.length + 4, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 11 }, s, "$" + (t >= 1e10 ? t / 1e9 : t / 1e9) + "B");
+    });
+    rows.forEach(([n, v, unv, tip], i) => {
+      const y = top + i * row + 10, g = el("g", {}, s);
+      el("text", { x: L - 12, y: y + 4, "text-anchor": "end", fill: "var(--ink)", "font-size": 12.5 }, g, n);
+      if (unv) {
+        el("line", { x1: x(v), x2: x(unv[unv.length - 1]), y1: y, y2: y, stroke: "var(--human)", "stroke-width": 2, "stroke-dasharray": "3 3", "stroke-opacity": 0.6 }, g);
+        unv.forEach(u => el("circle", { cx: x(u), cy: y, r: 5, fill: "var(--surface)", stroke: "var(--human)", "stroke-width": 2, "stroke-dasharray": "2 2" }, g));
+      }
+      el("circle", { cx: x(v), cy: y, r: 6.5, fill: "var(--human)", stroke: "var(--surface)", "stroke-width": 2 }, g);
+      el("text", { x: x(v), y: y - 11, "text-anchor": "middle", fill: "var(--ink-2)", "font-size": 11 }, g, "$" + (v / 1e9) + "B");
+      el("rect", { x: 0, y: y - 18, width: 460, height: 36, fill: "transparent" }, g);
+      tipped(g, tip);
+    });
+  })();
+
+  /* ---------- horizontal bars helper ---------- */
+  function hbars(id, rows, opt) {
+    const s = document.getElementById(id);
+    const W = +s.viewBox.baseVal.width, L = opt.L, R = W - opt.Rpad, top = opt.top || 8, rh = opt.rh || 32, bh = opt.bh || 12;
+    const x = v => L + v / opt.max * (R - L);
+    if (opt.ticks) opt.ticks.forEach(t => {
+      el("line", { x1: x(t), x2: x(t), y1: top - 4, y2: top + rh * rows.length - 10, stroke: "var(--line)" }, s);
+      el("text", { x: x(t), y: top + rh * rows.length + 4, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 10.5 }, s, opt.fmtTick(t));
+    });
+    rows.forEach((r, i) => {
+      const y = top + i * rh + (rh - bh) / 2 - 4, g = el("g", {}, s);
+      el("text", { x: L - 10, y: y + bh - 2, "text-anchor": "end", fill: "var(--ink)", "font-size": 12 }, g, r.label);
+      if (r.hi) el("rect", { x: L, y: y, width: Math.max(4, x(r.hi) - L), height: bh, rx: 4, fill: r.color || opt.color, "fill-opacity": 0.3 }, g);
+      el("rect", { x: L, y: y, width: Math.max(4, x(r.v) - L), height: bh, rx: 4, fill: r.color || opt.color }, g);
+      el("text", { x: x(r.hi || r.v) + 6, y: y + bh - 2, fill: "var(--ink-2)", "font-size": 11.5, "font-variant-numeric": "tabular-nums" }, g, r.text);
+      el("rect", { x: 0, y: y - 8, width: W, height: rh - 2, fill: "transparent" }, g);
+      tipped(g, r.tip || (r.label + ": " + r.text));
+    });
+  }
+
+  hbars("starsvg", [
+    { label: "superpowers", v: 243, hi: 292, text: "243–292k", tip: "obra/superpowers — skills pack (brainstorm, plan, TDD). 243k–292k stars reported by secondary snapshots." },
+    { label: "Spec Kit", v: 111, hi: 115, text: "~111–115k", tip: "GitHub Spec Kit — spec-driven development. ~111k–115k stars (secondary)." },
+    { label: "Vibe Kanban", v: 28.3, text: "28.3k · sunset", tip: "Vibe Kanban — 28.3k stars; sunsetting since Apr 2026." },
+    { label: "Task Master", v: 28.2, text: "28.2k", tip: "Task Master — turns a PRD into tasks; not a board. 28.2k stars." },
+    { label: "Superset", v: 15.1, text: "15.1k", tip: "Superset — parallel-agent workspace. 15.1k stars." },
+    { label: "Backlog.md", v: 7.0, text: "7.0k", tip: "Backlog.md — markdown task files; three human checkpoints as agent instructions. 7.0k stars." },
+  ], { L: 92, Rpad: 78, max: 300, color: "var(--human)", ticks: [0, 100, 200, 300], fmtTick: t => t + "k", rh: 34 });
+
+  hbars("trustsvg", [
+    { label: "Use AI tools", v: 84, text: "84%" },
+    { label: "Hit “almost right”", v: 66, text: "66%" },
+    { label: "Distrust accuracy", v: 46, text: "46%" },
+    { label: "Trust it", v: 33, text: "33%" },
+    { label: "Highly trust it", v: 3, text: "3%" },
+  ], { L: 120, Rpad: 44, max: 100, color: "var(--human)", ticks: [0, 50, 100], fmtTick: t => t + "%", rh: 36 });
+
+  hbars("adoptsvg", [
+    { label: "2025 survey", v: 31, text: "31%" },
+    { label: "Apr 2026 pulse", v: 59, text: "59%" },
+    { label: "2026 survey", v: 66, text: "66%", tip: "2026 survey: 66% use coding agents; Claude Code most used (66% of agent users), Copilot 59%." },
+  ], { L: 100, Rpad: 44, max: 100, color: "var(--ai)", ticks: [0, 50, 100], fmtTick: t => t + "%", top: 30, rh: 46, bh: 16 });
+
+  /* ---------- METR diverging ---------- */
+  (function metr() {
+    const s = document.getElementById("metrsvg");
+    const cx = 170, k = 3.6, rows = [["Believed", 20, "var(--human)", "+20% faster"], ["Measured", -19, "var(--amber)", "19% slower"]];
+    el("line", { x1: cx, x2: cx, y1: 20, y2: 170, stroke: "var(--ink-3)", "stroke-width": 1.5 }, s);
+    el("text", { x: cx, y: 190, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 10.5 }, s, "no change");
+    el("text", { x: cx - 4, y: 14, "text-anchor": "end", fill: "var(--ink-3)", "font-size": 10.5 }, s, "← slower");
+    el("text", { x: cx + 4, y: 14, fill: "var(--ink-3)", "font-size": 10.5 }, s, "faster →");
+    rows.forEach(([lab, v, c, txt], i) => {
+      const y = 50 + i * 64, g = el("g", {}, s), w = Math.abs(v) * k;
+      el("rect", { x: v > 0 ? cx + 1 : cx - w - 1, y: y, width: w, height: 22, rx: 4, fill: c }, g);
+      el("text", { x: v > 0 ? cx - 8 : cx + 8, y: y + 15, "text-anchor": v > 0 ? "end" : "start", fill: "var(--ink)", "font-size": 12.5, "font-weight": 600 }, g, lab);
+      el("text", { x: v > 0 ? cx + w + 6 : cx - w - 6, y: y + 15, "text-anchor": v > 0 ? "start" : "end", fill: "var(--ink-2)", "font-size": 12 }, g, txt);
+      tipped(g, lab + ": " + txt + " (METR randomized trial, 2025 tools)");
+    });
+  })();
+
+  /* ---------- Tailwind deltas ---------- */
+  (function tw() {
+    const s = document.getElementById("twsvg");
+    const cx = 210, k = 1.7;
+    el("line", { x1: cx, x2: cx, y1: 6, y2: 160, stroke: "var(--ink-3)", "stroke-width": 1.5 }, s);
+    const rows = [["Usage", null, "“growing faster than it ever has”"], ["Docs traffic", -40, "−40%"], ["Revenue", -80, "−80%"], ["Engineers", -75, "4 → 1"]];
+    rows.forEach(([lab, v, txt], i) => {
+      const y = 12 + i * 38, g = el("g", {}, s);
+      if (v == null) {
+        el("path", { d: `M${cx + 2} ${y + 9}h28l-6 -6m6 6l-6 6`, stroke: "var(--green)", "stroke-width": 2.5, fill: "none", "stroke-linecap": "round" }, g);
+        el("text", { x: cx + 40, y: y + 13, fill: "var(--ink-2)", "font-size": 12 }, g, txt);
+        el("text", { x: cx - 8, y: y + 13, "text-anchor": "end", fill: "var(--ink)", "font-size": 12.5 }, g, lab);
+      } else {
+        const w = Math.abs(v) * k;
+        el("rect", { x: cx - w - 1, y: y, width: w, height: 18, rx: 4, fill: "var(--amber)" }, g);
+        el("text", { x: cx - w - 8, y: y + 13, "text-anchor": "end", fill: "var(--ink)", "font-size": 12.5 }, g, lab);
+        el("text", { x: cx + 8, y: y + 13, fill: "var(--ink-2)", "font-size": 12, "font-variant-numeric": "tabular-nums" }, g, txt);
+      }
+      tipped(g, "Tailwind Labs, Jan 2026 — " + lab + ": " + txt);
+    });
+  })();
+
+  /* ---------- price ranges ---------- */
+  (function prices() {
+    const s = document.getElementById("pricesvg");
+    const L = 260, R = 860, top = 14, rh = 40, max = 5000, x = v => L + v / max * (R - L);
+    const rows = [
+      ["Vibe Coding (book)", 32, 32, "var(--human)", "$32", "Gene Kim & Steve Yegge. Paired with a 4-hour workshop for leaders at an IT Revolution conference."],
+      ["AI Hero cohort", 477, 795, "var(--human)", "$477–795", "Matt Pocock. Free tutorials → self-paced course → cohort (sale price $477)."],
+      ["Every one-day workshop", 1000, 1500, "var(--human)", "$1,000–1,500", "Every. Claude Code 101, bundled with membership. ~200 attendees, mostly non-coders."],
+      ["Elite AI-Assisted Coding", 1125, 1500, "var(--human)", "$1,125–1,500", "Eleanor Berger & Isaac Flath, Maven. 25% early-bird off $1,500."],
+      ["AI Evals cohort", 1995, 5000, "var(--ai)", "$1,995–5,000", "Hamel Husain & Shreya Shankar. Listings conflict; framed as a professional skill employers pay for."],
+    ];
+    [0, 1000, 2000, 3000, 4000, 5000].forEach(t => {
+      el("line", { x1: x(t), x2: x(t), y1: top - 4, y2: top + rh * rows.length - 8, stroke: "var(--line)" }, s);
+      el("text", { x: x(t), y: top + rh * rows.length + 8, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 11 }, s, "$" + t.toLocaleString());
+    });
+    rows.forEach(([n, a, b, c, txt, tip], i) => {
+      const y = top + i * rh + 10, g = el("g", {}, s);
+      el("text", { x: L - 12, y: y + 4, "text-anchor": "end", fill: "var(--ink)", "font-size": 12.5 }, g, n);
+      if (b > a) el("rect", { x: x(a), y: y - 5, width: x(b) - x(a), height: 10, rx: 5, fill: c }, g);
+      else el("circle", { cx: x(a), cy: y, r: 6, fill: c }, g);
+      el("text", { x: x(b) + 10, y: y + 4, fill: "var(--ink-2)", "font-size": 12, "font-variant-numeric": "tabular-nums" }, g, txt);
+      el("rect", { x: 0, y: y - 16, width: 900, height: 32, fill: "transparent" }, g);
+      tipped(g, n + " — " + tip);
+    });
+  })();
+
+  /* ---------- tooltip ---------- */
+  const tip = document.getElementById("tip");
+  const show = (t, cx, cy) => {
+    tip.textContent = t; tip.classList.add("on");
+    const r = tip.getBoundingClientRect();
+    let left = cx + 14, topY = cy + 14;
+    if (left + r.width > innerWidth - 8) left = cx - r.width - 14;
+    if (topY + r.height > innerHeight - 8) topY = cy - r.height - 14;
+    tip.style.left = Math.max(8, left) + "px"; tip.style.top = Math.max(8, topY) + "px";
+  };
+  document.addEventListener("pointermove", e => {
+    const t = e.target.closest && e.target.closest("[data-tip]");
+    if (t) show(t.getAttribute("data-tip"), e.clientX, e.clientY); else tip.classList.remove("on");
+  });
+  document.addEventListener("focusin", e => {
+    const t = e.target.closest && e.target.closest("[data-tip]");
+    if (t) { const r = t.getBoundingClientRect(); show(t.getAttribute("data-tip"), r.right, r.top); }
+  });
+  document.addEventListener("focusout", () => tip.classList.remove("on"));
+})();
+</script>
