@@ -63,8 +63,8 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 88
-RUNNER_FINGERPRINT = "3764d94d67d03aa2b906f8fd2ea4c7f9c19784d0e8d8044b2a49c53a09d6e133"
+RUNNER_VERSION = 89
+RUNNER_FINGERPRINT = "31efe613911dca4a3e767f7cd4928434628d6986b1c622709736687ea68b0464"
 
 # The two constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
@@ -121,6 +121,13 @@ def env(name):
 
 API_MAX_ATTEMPTS = 3  # one initial try + up to two retries
 
+# RE449: how long the outcome POST keeps retrying a transient failure past API_MAX_ATTEMPTS. A
+# finished node's outcome is the one call whose loss throws away real work, and a home network
+# can drop for minutes; the job stays in the heartbeat's `running` list for as long as this
+# retries. Matches the server's exclusive reclaim window (Relay.Runs.exclusive_reclaim_after_s/0).
+OUTCOME_RETRY_BUDGET_S = 600
+OUTCOME_BACKOFF_CAP_S = 30   # the longest single sleep in that extended stretch
+
 # RE336: the read timeout every API call gets unless its caller passes its own. A bare urlopen
 # blocks FOREVER on a half-open connection, and one heartbeat POST caught that way by a server
 # restart wedged a runner's heartbeat thread for days: no release_held, no revoke, no
@@ -132,6 +139,72 @@ def _api_backoff(attempt):
     """Sleep before retry `attempt` (1-based): 0.5s, then 1s. Isolated in a named
     helper so tests can monkeypatch it to a no-op and not actually wait."""
     time.sleep(0.5 * 2 ** (attempt - 1))
+
+
+def _monotonic():
+    """The clock a retry budget is measured on — a named helper so tests can drive elapsed
+    time without patching the global `time` module."""
+    return time.monotonic()
+
+
+def _outcome_delay(attempt, remaining_s):
+    """Seconds to wait before extended retry `attempt` (1-based within the stretch): 2s, 4s,
+    8s, … capped at OUTCOME_BACKOFF_CAP_S, and never past the budget's `remaining_s`."""
+    return max(0, min(2 ** attempt, OUTCOME_BACKOFF_CAP_S, remaining_s))
+
+
+def _outcome_backoff(attempt, remaining_s=OUTCOME_BACKOFF_CAP_S):
+    """Sleep before extended retry `attempt` — the stretch past API_MAX_ATTEMPTS that only a
+    call with a retry budget gets (RE449). Named so tests can monkeypatch it to a no-op."""
+    time.sleep(_outcome_delay(attempt, remaining_s))
+
+
+class _Retries:
+    """Whether a failed attempt of one request is retried, and the logging that goes with it.
+
+    The first API_MAX_ATTEMPTS attempts follow `_retryable` with `_api_backoff` and a log line
+    each, as always. With a `budget_s` (RE449, the outcome POST only) a still-transient failure
+    is retried on past that, with `_outcome_backoff`, until `budget_s` seconds of `_monotonic`
+    have gone by — logging once on entering that stretch and once on leaving it, not per try."""
+
+    def __init__(self, method, path, idempotent, budget_s):
+        self.method, self.path, self.idempotent, self.budget_s = method, path, idempotent, budget_s
+        self.started = _monotonic() if budget_s is not None else None
+        self.extended = False
+
+    def again(self, attempt, err, what):
+        """True (after logging and backing off) when attempt `attempt`'s failure `err` should be
+        retried; `what` names the failure the way the log line opens."""
+        if not _retryable(self.method, err, self.idempotent):
+            return False
+        if attempt < API_MAX_ATTEMPTS:
+            log(f"{what} on {self.method} {self.path}, retrying "
+                f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
+            _api_backoff(attempt)
+            return True
+        if self.budget_s is None:
+            return False
+        remaining = self.budget_s - (_monotonic() - self.started)
+        if remaining <= 0:
+            return False
+        if not self.extended:
+            self.extended = True
+            log(f"{what} on {self.method} {self.path} after {API_MAX_ATTEMPTS} attempts — "
+                f"retrying for up to {self.budget_s}s (retry budget)", kind="error")
+        _outcome_backoff(attempt - API_MAX_ATTEMPTS + 1, remaining)
+        return True
+
+    def settled(self, attempt, answered):
+        """Close the extended stretch, if one was entered: the server `answered`, or we give up."""
+        if not self.extended:
+            return
+        elapsed = round(_monotonic() - self.started)
+        if answered:
+            log(f"{self.method} {self.path} recovered on attempt {attempt}, {elapsed}s into its "
+                f"{self.budget_s}s retry budget", kind="error")
+        else:
+            log(f"{self.method} {self.path} still failing after {attempt} attempts and {elapsed}s "
+                f"— giving up (retry budget {self.budget_s}s)", kind="error")
 
 
 def _retryable(method, err, idempotent=False):
@@ -152,11 +225,13 @@ def _retryable(method, err, idempotent=False):
 
 
 def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True,
-             idempotent=False, *, decode):
+             idempotent=False, retry_budget_s=None, *, decode):
     """The request/retry core api(), api_bytes() and api_download() share: bearer auth, the RE336
     timeout, the `_retryable` retries and die-on-error. A successful response is handed to
     `decode` (which reads its body, and headers if it needs them); the soft_404
-    (None) and soft_conflict (the 409 body) verdicts are returned as they always were."""
+    (None) and soft_conflict (the 409 body) verdicts are returned as they always were.
+    `retry_budget_s` (RE449) opts one call into retrying a transient failure past
+    API_MAX_ATTEMPTS for up to that many seconds; None keeps the API_MAX_ATTEMPTS bound."""
     url = env("RELAY_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -169,18 +244,19 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
     # API_TIMEOUT_S and treats a read timeout as one more transient failure (RE336).
     caller_timeout = timeout is not None
     open_kwargs = {"timeout": timeout if caller_timeout else API_TIMEOUT_S}
-    for attempt in range(1, API_MAX_ATTEMPTS + 1):
+    retries = _Retries(method, path, idempotent, retry_budget_s)
+    attempt = 0
+    while True:
+        attempt += 1
         try:
             with urllib.request.urlopen(req, **open_kwargs) as resp:
-                return decode(resp)
+                result = decode(resp)
         except socket.timeout as e:
             if caller_timeout:
                 raise   # long-poll read timeout — the claim caller treats it as 'no work'
-            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
-                log(f"request timed out after {API_TIMEOUT_S}s on {method} {path}, retrying "
-                    f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
-                _api_backoff(attempt)
+            if retries.again(attempt, e, f"request timed out after {API_TIMEOUT_S}s"):
                 continue
+            retries.settled(attempt, answered=False)
             die(f"request timed out after {API_TIMEOUT_S}s on {method} {path}")
         except urllib.error.HTTPError as e:
             # An HTTPError IS the response — an open file object, like the `resp` the success
@@ -190,40 +266,42 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
             # close prints a ResourceWarning to stderr every 15s for the life of the runner.
             with contextlib.closing(e):
                 if soft_404 and e.code == 404:
+                    retries.settled(attempt, answered=True)
                     return None
                 if soft_conflict and e.code == 409:
                     # A verdict, not a transient error (RLY-184): hand the body to the caller
                     # rather than die()ing into the loop's generic retry.
+                    retries.settled(attempt, answered=True)
                     try:
                         return json.loads(e.read())
                     except Exception:
                         return {"error": {"code": "conflict"}}
-                if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
-                    log(f"API {e.code} on {method} {path}, retrying "
-                        f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
-                    _api_backoff(attempt)
+                if retries.again(attempt, e, f"API {e.code}"):
                     continue
+                retries.settled(attempt, answered=False)
                 try:
                     msg = json.loads(e.read())["error"]["message"]
                 except Exception:
                     msg = f"HTTP {e.code}"
                 die(f"API {e.code}: {msg}")
         except urllib.error.URLError as e:
-            if attempt < API_MAX_ATTEMPTS and _retryable(method, e, idempotent):
-                log(f"request failed ({e.reason}) on {method} {path}, retrying "
-                    f"({attempt}/{API_MAX_ATTEMPTS - 1})", kind="error")
-                _api_backoff(attempt)
+            if retries.again(attempt, e, f"request failed ({e.reason})"):
                 continue
+            retries.settled(attempt, answered=False)
             die(f"request failed: {e.reason}")
+        retries.settled(attempt, answered=True)
+        return result
 
 
 def _json_or_empty(raw):
     return json.loads(raw) if raw else {}
 
 
-def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True, idempotent=False):
+def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True,
+        idempotent=False, retry_budget_s=None):
     return _request(method, path, body, soft_404=soft_404, soft_conflict=soft_conflict,
                     timeout=timeout, auth=auth, idempotent=idempotent,
+                    retry_budget_s=retry_budget_s,
                     decode=lambda resp: _json_or_empty(resp.read()))
 
 
@@ -4371,10 +4449,12 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the runner whether to keep or free an
     exclusive slot (§3). idempotent=True: the endpoint is first-writer-wins per job (RLY-202),
-    so a dropped request/response retries into the server's duplicate-200 rather than die()ing."""
+    so a dropped request/response retries into the server's duplicate-200 rather than die()ing.
+    RE449: a transient failure keeps retrying for up to OUTCOME_RETRY_BUDGET_S — the job stays
+    in the heartbeat's `running` list meanwhile — so a network outage doesn't lose the outcome."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
                outcome_body(outcome, detail, git_sha, session_id, no_changes, resume_at),
-               idempotent=True)
+               idempotent=True, retry_budget_s=OUTCOME_RETRY_BUDGET_S)
     return (resp or {}).get("run_state")
 
 

@@ -152,7 +152,10 @@ defmodule RelayWeb.BoardRunnersLiveTest do
     assert has_element?(view, "#runner-mac-dead .badge-error", "GONE")
     assert has_element?(view, "#runner-mac-dead", "ORPHANED JOB")
     assert has_element?(view, "#runner-mac-dead-at-risk")
-    assert render(element(view, "#runner-mac-dead-at-risk")) =~ "exclusive runs park"
+    # RE449: a gone runner's work is held, not already reclaimed — the note names both windows.
+    at_risk = render(element(view, "#runner-mac-dead-at-risk"))
+    assert at_risk =~ "requeued to another runner after #{div(Relay.Runs.shared_reclaim_after_s(), 60)} min"
+    assert at_risk =~ "exclusive runs park after #{div(Relay.Runs.exclusive_reclaim_after_s(), 60)} min"
     assert has_element?(view, "#summary-fresh", "1 online")
     assert has_element?(view, "#summary-gone", "1 gone")
     # artboard: a gone runner's chips drop to the gray, dimmed treatment

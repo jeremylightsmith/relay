@@ -483,7 +483,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         </span>
                       </div>
                       <%!-- At-risk note (spec's copy correction: shared requeues, exclusive
-                           parks) — artboard lines ~109-114. --%>
+                           parks — each after its RE449 reclaim window) — artboard lines ~109-114. --%>
                       <div
                         :if={runner.freshness != :fresh and runner.jobs != []}
                         id={"runner-#{dom_id(runner)}-at-risk"}
@@ -494,8 +494,7 @@ defmodule RelayWeb.BoardRunnersLive do
                         </span>
                         <span style="font-size:12px;line-height:1.45;color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));">
                           No heartbeat for <b class="font-mono">{beat_age(runner, @now)}</b>
-                          — going stale. Jobs in shared pools are requeued to another runner;
-                          exclusive runs park until it returns (affinity).
+                          — going stale. {held_work_note()}
                         </span>
                       </div>
                     </div>
@@ -864,6 +863,14 @@ defmodule RelayWeb.BoardRunnersLive do
   defp log_text(text), do: text |> to_string() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
   defp last_seen_label(runner, now), do: "last beat " <> beat_age(runner, now) <> " ago"
+
+  # RE449: a stale runner's work is held, not already reclaimed — the windows are read in whole
+  # minutes from their one definition on `Relay.Runs`.
+  defp held_work_note do
+    "Its work is held in case it returns: jobs in shared pools are requeued to another runner " <>
+      "after #{div(Runs.shared_reclaim_after_s(), 60)} min; exclusive runs park after " <>
+      "#{div(Runs.exclusive_reclaim_after_s(), 60)} min (affinity)."
+  end
 
   defp beat_age(runner, now) do
     seconds = max(DateTime.diff(now, runner.last_heartbeat), 0)

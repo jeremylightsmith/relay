@@ -7,7 +7,9 @@ defmodule RelayWeb.Api.RunnerController do
   that function already board-scopes the `NodeJob → Run → Card` join and computes the
   tri-state `freshness` (`Runs.runner_freshness/2`), whose `:gone` branch is deliberately
   the same `runner_stale?/2` predicate the reclaim sweep uses — so a `gone` row here means
-  the reaper has already acted, not merely that a beat looks late.
+  the runner no longer counts (it is not offered work), not merely that a beat looks late. Its
+  in-flight work is held for up to the reclaim window (`Runs.shared_reclaim_after_s/0`,
+  `Runs.exclusive_reclaim_after_s/0`, RE449) before the reaper requeues or parks it.
   """
   use RelayWeb, :controller
 

@@ -15,6 +15,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
@@ -2021,6 +2022,126 @@ class ApiRetryTest(unittest.TestCase):
         rs = relay.report_outcome("nj-1", "succeeded", "", "sha")
         self.assertEqual(rs, "running")
         self.assertEqual(len(self.calls), 2)
+
+
+class OutcomeRetryBudgetTest(unittest.TestCase):
+    """RE449: a finished node's outcome is held through an outage. report_outcome keeps retrying a
+    TRANSIENT failure past API_MAX_ATTEMPTS, with capped backoff, for up to OUTCOME_RETRY_BUDGET_S
+    seconds of a monotonic clock, then gives up exactly as before. A 4xx still fails at once, and
+    the budget is opt-in: every other API call keeps the API_MAX_ATTEMPTS bound."""
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("env", "_api_backoff", "_outcome_backoff", "_monotonic", "log")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", relay.urllib.request.urlopen)
+        relay.env = lambda name: "http://example.test"
+        relay._api_backoff = lambda attempt: None        # never actually sleep
+        relay._outcome_backoff = lambda *a, **k: None    # ditto, for the extended stretch
+        self.now = 0.0
+        relay._monotonic = lambda: self.now
+        self.logs = []
+        relay.log = lambda msg, **k: self.logs.append(msg)
+        self.calls, self.clock_at_call, self.errors = [], [], []
+        self.tick = 10
+
+    def _script(self, outcomes):
+        """urlopen returns/raises each outcome in turn (any iterable, so it may be endless),
+        recording the fake clock at each call and then advancing it by self.tick."""
+        seq = iter(outcomes)
+
+        def fake(req, *a, **k):
+            self.calls.append(req)
+            self.clock_at_call.append(self.now)
+            self.now += self.tick
+            outcome = next(seq)
+            if isinstance(outcome, Exception):
+                self.errors.append(outcome)
+                raise outcome
+            return outcome
+
+        relay.urllib.request.urlopen = fake
+
+    def _forever(self, make):
+        return (make() for _ in itertools.count())
+
+    def _report(self):
+        return relay.report_outcome("nj-1", "succeeded", "", "sha")
+
+    def _budget_lines(self):
+        return [m for m in self.logs if "retry budget" in m]
+
+    def test_urlerror_past_the_attempt_cap_is_retried_until_it_lands(self):
+        self._script([urllib.error.URLError("down")] * 5 + [_FakeResp(b'{"run_state": "done"}')])
+        self.assertEqual(self._report(), "done")
+        self.assertEqual(len(self.calls), 6)
+
+    def test_5xx_past_the_attempt_cap_is_retried_until_it_lands(self):
+        self._script([_http_error(503) for _ in range(4)]
+                     + [_FakeResp(b'{"run_state": "running"}')])
+        self.assertEqual(self._report(), "running")
+        self.assertEqual(len(self.calls), 5)
+        # every retried HTTPError — including those in the extended stretch — was closed
+        self.assertTrue(all(e.fp.closed for e in self.errors))
+
+    def test_read_timeout_past_the_attempt_cap_is_retried_until_it_lands(self):
+        self._script([relay.socket.timeout() for _ in range(4)]
+                     + [_FakeResp(b'{"run_state": "parked"}')])
+        self.assertEqual(self._report(), "parked")
+        self.assertEqual(len(self.calls), 5)
+
+    def test_a_4xx_fails_at_once(self):
+        self._script([_http_error(422, b'{"error": {"message": "bad"}}')])
+        with self.assertRaises(SystemExit):
+            self._report()
+        self.assertEqual(len(self.calls), 1)
+
+    def test_it_gives_up_once_the_budget_is_spent(self):
+        self.tick = 100
+        self._script(self._forever(lambda: urllib.error.URLError("down")))
+        with self.assertRaises(SystemExit):
+            self._report()
+        self.assertGreater(len(self.calls), relay.API_MAX_ATTEMPTS)   # it did use the budget
+        self.assertLess(len(self.calls), 100)                         # ...and stopped
+        self.assertLessEqual(self.clock_at_call[-1], relay.OUTCOME_RETRY_BUDGET_S)
+        lines = self._budget_lines()
+        self.assertEqual(len(lines), 2, self.logs)
+        self.assertIn("giving up", lines[1])
+
+    def test_the_extended_stretch_logs_one_line_in_and_one_line_out(self):
+        self._script([urllib.error.URLError("down")] * 4 + [_FakeResp(b'{"run_state": "done"}')])
+        self.assertEqual(self._report(), "done")
+        lines = self._budget_lines()
+        self.assertEqual(len(lines), 2, self.logs)
+        self.assertIn("POST /api/node-jobs/nj-1/outcome", lines[0])
+        self.assertIn(f"{relay.OUTCOME_RETRY_BUDGET_S}s", lines[0])
+        self.assertIn("recovered", lines[1])
+        # the API_MAX_ATTEMPTS - 1 ordinary retry lines, plus in and out — never one per attempt
+        self.assertEqual(len(self.logs), relay.API_MAX_ATTEMPTS - 1 + 2, self.logs)
+
+    def test_a_get_keeps_the_attempt_cap(self):
+        self._script(self._forever(lambda: urllib.error.URLError("down")))
+        with self.assertRaises(SystemExit):
+            relay.api("GET", "/api/board")
+        self.assertEqual(len(self.calls), relay.API_MAX_ATTEMPTS)
+
+    def test_an_idempotent_post_without_a_budget_keeps_the_attempt_cap(self):
+        self._script(self._forever(lambda: urllib.error.URLError("down")))
+        with self.assertRaises(SystemExit):
+            relay.api("POST", "/api/x", {}, idempotent=True)
+        self.assertEqual(len(self.calls), relay.API_MAX_ATTEMPTS)
+        self.assertEqual(self._budget_lines(), [])
+
+    def test_the_budget_is_ten_minutes(self):
+        self.assertEqual(relay.OUTCOME_RETRY_BUDGET_S, 600)
+
+    def test_the_extended_backoff_is_exponential_capped_and_bounded_by_the_budget(self):
+        delays = [relay._outcome_delay(n, 10_000) for n in range(1, 8)]
+        self.assertEqual(delays, sorted(delays))           # never shrinks
+        self.assertLess(delays[0], delays[1])               # grows
+        self.assertEqual(max(delays), relay.OUTCOME_BACKOFF_CAP_S)   # capped
+        self.assertEqual(relay._outcome_delay(7, 4), 4)     # never past the remaining budget
+        self.assertEqual(relay._outcome_delay(7, -1), 0)
 
 
 class ApiAuthTest(unittest.TestCase):
@@ -8398,6 +8519,34 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         self.assertTrue(idle_calls)        # but was, both before the claim and after it finished
 
 
+    def test_a_job_stays_in_the_heartbeat_running_list_while_its_outcome_retries(self):
+        """RE449: report_outcome may retry for up to OUTCOME_RETRY_BUDGET_S. The worker pops the
+        job from in_flight only after execute_one returns, so the heartbeat keeps listing it the
+        whole time — which is what stops the server reclaiming it as abandoned."""
+        relay.maybe_auto_update = lambda *a, **k: False
+        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None)
+        gate, reporting = threading.Event(), threading.Event()
+        seen = []
+
+        def blocking_report(*a, **k):
+            seen.append(FakeHeartbeat.instances[-1].running_fn())
+            reporting.set()
+            gate.wait(2)               # an outcome POST still riding out an outage
+            return "done"
+
+        relay.report_outcome = blocking_report
+        claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
+                      vars={"ref": "RLY-1"})]
+        relay.claim_node_job = lambda *a, **k: claims.pop(0) if claims else None
+        threading.Timer(0.2, gate.set).start()
+        self._interrupt_after(0.4)
+
+        relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+
+        self.assertTrue(reporting.is_set())
+        self.assertEqual(seen, [["nj-1"]])
+        self.assertEqual(FakeHeartbeat.instances[-1].running_fn(), [])
+
 class StartParserTest(unittest.TestCase):
     """RE319: the runner mode is `relay start`; the old subcommand name is gone, not aliased."""
 
@@ -9118,6 +9267,7 @@ class FakeHeartbeat:
                  held_fn=None, on_release_held=None, usage_fn=None, on_definitions=None,
                  sessions_fn=None):
         self.runner = runner
+        self.running_fn = running_fn
         self.capacity = capacity or {}
         self.held_fn = held_fn
         self.on_release_held = on_release_held

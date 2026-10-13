@@ -507,7 +507,14 @@ that stays server-side.
   response never turns finished work into a failure (RLY-202); and only a `:queued` (reassigned)
   or `:revoked` (zombie) job answers 409 `conflict`. A run whose server can't start answers
   **503 `run_server_unavailable`**: the outcome is not recorded, the job stays claimed and the run
-  `:running`, and the runner's idempotent retry re-POSTs it (RE412). A job of a run that is not
+  `:running`, and the runner's idempotent retry re-POSTs it (RE412). The runner's
+  `report_outcome` is the one API call with a **retry budget** (RE449): after the usual
+  `API_MAX_ATTEMPTS` it keeps retrying a *transient* failure (a connection error, a read timeout
+  or a 5xx — `_retryable`) with exponential backoff capped at `OUTCOME_BACKOFF_CAP_S` for up to
+  `OUTCOME_RETRY_BUDGET_S` (10 min), logging one line on entering that stretch and one on leaving
+  it, then gives up as before. Throughout, the worker stays in `in_flight`, so the heartbeat keeps
+  listing the job in `running` and the server doesn't reclaim it; a 4xx (the 409 above, a 422)
+  still fails at once, and every other call keeps the `API_MAX_ATTEMPTS` bound. A job of a run that is not
   `:running` is refused like a revoked one — except a fan-out sibling's while another branch
   waits on a human (`Runs.report_accepted?/2`, RE437). The body's optional `resume_at` (RE267,
   ISO-8601 UTC) is read only with outcome `blocked` — an unparseable value is dropped to nil, never
@@ -596,15 +603,38 @@ that stays server-side.
   `want_capabilities: true`; the runner clears its cached hash and resends on the next beat.
   `Relay.Runs.preflight_flow/1` reads the stored inventory.
 - **Runner liveness + reclaim.** `Relay.Runs.RunnerReaper` (supervised, see
-  [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_runners/0`:
-  a stale runner's (`Relay.Runs.runner_stale?/2`) in-flight `shared_clean` jobs go back
-  to `queued`; its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`,
-  `parked_reason: :runner_gone`) rather than requeued, since exclusive runs are pinned to
-  one runner's worktree. A `:gone` runner's advertised capacity is also dropped from the
-  scheduler snapshot (`Scheduler.Server.build_snapshot/2`, which keeps only this board's
-  `Relay.Runs.counting_runner?/1` runners — RE338), so the planner never resumes a
-  pinned run onto a machine the reaper has given up on — without this a parked exclusive run
-  oscillates resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
+  [`runtime.md`](runtime.md)) periodically calls `Relay.Runs.reclaim_stale_runners/0`.
+  A runner that goes quiet is not the same as a runner that is gone, so the sweep applies
+  **three liveness windows** (RE449), each defined once on `Relay.Runs` and measured from the
+  runner's `last_heartbeat`:
+
+  | Window | Length | Effect once silent past it |
+  |---|---|---|
+  | stale threshold (`Relay.Runs.runner_stale?/2`) | `max(60s, 2 × interval)` | the runner stops **counting**: freshness `:gone`, its `Relay.Runs.Capacity` entry is evicted (`Capacity.clear/1`), it is not offered work. **No job is touched.** |
+  | `Relay.Runs.shared_reclaim_after_s/0` | 3 min | its in-flight `shared_clean` jobs go back to `queued`, unpinned, so another runner can take them |
+  | `Relay.Runs.exclusive_reclaim_after_s/0` | 10 min | its `exclusive` runs are parked (`Relay.Runs.park_for_reclaim/1`, `parked_reason: :runner_gone`) and their jobs revoked — never requeued, since an exclusive run is pinned to one runner's worktree |
+
+  Each reclaim window is applied as `max(window, the runner's stale threshold)`, so a
+  long-interval runner is never reclaimed before it is even stale; every comparison is a
+  strict `>`. Shared work is reclaimed sooner because another runner can pick it up;
+  an exclusive run can only resume on the same machine, so it waits longer. The sweep stays
+  idempotent (its active-state query skips work an earlier sweep already reclaimed).
+
+  **Reattach for free.** Inside a window the run stays `:running` and the job `:claimed` by
+  that runner, so a runner back from a network blip simply resumes beating: its heartbeat
+  lists the job in `running` and nothing happens — no new attempt, no second execution, the
+  agent is never killed. A runner that **restarted** during the outage and lost the job
+  in-process is handled by the RLY-170 orphan path below (`Relay.Runs.requeue_orphaned_jobs/3`):
+  its first beat omits the job, so the job is requeued — pinned back to that runner when
+  exclusive, unpinned when shared.
+
+  "Is it live?" checks (`working_run_ids/2`, the roster's freshness, preflight, the scheduler's
+  counting filter) all stay on the stale threshold. A `:gone` runner's advertised capacity is
+  dropped from the scheduler snapshot (`Scheduler.Server.build_snapshot/2`, which keeps only
+  this board's `Relay.Runs.counting_runner?/1` runners — RE338) — after `reserve_active_runs`
+  has debited its still-`:running` held runs — so the planner never resumes a pinned run onto a
+  machine that has stopped counting; without this a parked exclusive run oscillates
+  resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
   The same reaper tick also calls `Relay.Runs.close_orphaned_runs/0` — a companion sweep, not
   a runner-liveness check — closing any run still active while its card already sits in a
   terminal-type stage (RLY-233) or has been archived (RE335 — the board's

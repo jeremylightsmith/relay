@@ -5,6 +5,7 @@ defmodule Relay.RunsTest do
 
   alias Relay.Repo
   alias Relay.Runs
+  alias Relay.Runs.Capacity
   alias Relay.Runs.FakeDispatcher
   alias Schemas.Card
   alias Schemas.NodeExecution
@@ -1270,6 +1271,177 @@ defmodule Relay.RunsTest do
       refute Runs.runner_stale?(fresh, now)
       assert Runs.runner_stale?(stale, now)
       refute Runs.runner_stale?(tiny_fresh, now)
+    end
+  end
+
+  describe "reclaim_stale_runners/1 liveness windows (RE449)" do
+    # A runner past the stale threshold stops COUNTING, but its work is held: shared jobs are
+    # requeued only past shared_reclaim_after_s/0, exclusive runs parked only past
+    # exclusive_reclaim_after_s/0 — so a runner back from a network blip reattaches for free.
+    # Every sweep here injects `now`; nothing sleeps.
+
+    # A run of `isolation` whose job `name` (interval `interval`) has claimed, with the runner's
+    # last heartbeat pinned to the returned `t0`.
+    defp held_by(board, isolation, name, interval \\ 30) do
+      {flow, cap} =
+        case isolation do
+          :exclusive -> {exclusive_flow(board, "excl-#{name}"), %{"exclusive" => 1}}
+          :shared_clean -> {enabled_spec_flow(board), %{"shared_clean" => 1}}
+        end
+
+      {:ok, run} = Runs.start_run(card_in(board, "Next up", "Held by #{name}"), flow)
+      {:ok, runner} = Runs.upsert_runner(board, %{"name" => name, "interval" => interval, "capacity" => cap})
+      {:ok, job} = Runs.claim_next_job(runner)
+      assert job.runner_name == name
+
+      t0 = DateTime.truncate(DateTime.utc_now(), :second)
+      beat_at!(runner, t0)
+      %{run: run, runner: runner, job: job, t0: t0}
+    end
+
+    defp beat_at!(runner, at) do
+      Repo.update_all(from(r in Schemas.Runner, where: r.id == ^runner.id), set: [last_heartbeat: at])
+    end
+
+    defp sweep_at(t0, seconds), do: :ok = Runs.reclaim_stale_runners(DateTime.add(t0, seconds, :second))
+
+    defp execution_count(run), do: Repo.aggregate(from(e in NodeExecution, where: e.run_id == ^run.id), :count)
+
+    test "the two reclaim windows are 3 min (shared) and 10 min (exclusive)" do
+      assert Runs.shared_reclaim_after_s() == 180
+      assert Runs.exclusive_reclaim_after_s() == 600
+    end
+
+    test "a runner silent 90s stops counting but keeps its exclusive run", %{board: board} do
+      %{run: run, runner: ex, job: job, t0: t0} = held_by(board, :exclusive, "ex")
+      :ok = Capacity.put(ex.id, board.id, %{shared_clean: 0, exclusive: 1})
+
+      sweep_at(t0, 90)
+
+      run = Runs.get_run!(run.id)
+      assert run.status == :running
+      assert run.parked_reason == nil
+
+      job = Repo.get!(NodeJob, job.id)
+      assert job.state == :claimed
+      assert job.runner_name == "ex"
+
+      refute Map.has_key?(Capacity.snapshot(), ex.id)
+      assert Runs.runner_freshness(Repo.get!(Schemas.Runner, ex.id), DateTime.add(t0, 90, :second)) == :gone
+    end
+
+    test "a runner silent 90s keeps its shared_clean job; no other runner can claim it", %{board: board} do
+      %{job: job, t0: t0} = held_by(board, :shared_clean, "sh")
+
+      sweep_at(t0, 90)
+
+      job = Repo.get!(NodeJob, job.id)
+      assert job.state == :claimed
+      assert job.runner_name == "sh"
+
+      {:ok, other} = Runs.upsert_runner(board, %{"name" => "other", "capacity" => %{"shared_clean" => 1}})
+      assert {:ok, nil} = Runs.claim_next_job(other)
+    end
+
+    test "a shared_clean job is requeued unpinned once its runner is silent past the shared window",
+         %{board: board} do
+      %{job: job, t0: t0} = held_by(board, :shared_clean, "sh")
+
+      sweep_at(t0, 200)
+
+      job = Repo.get!(NodeJob, job.id)
+      assert job.state == :queued
+      assert job.runner_name == nil
+      assert job.claimed_at == nil
+    end
+
+    test "an exclusive run is still held 200s in (past the shared window)", %{board: board} do
+      %{run: run, job: job, t0: t0} = held_by(board, :exclusive, "ex")
+
+      sweep_at(t0, 200)
+
+      assert Runs.get_run!(run.id).status == :running
+      assert Repo.get!(NodeJob, job.id).state == :claimed
+    end
+
+    test "an exclusive run is parked :runner_gone once silent past the exclusive window", %{board: board} do
+      %{run: run, job: job, t0: t0} = held_by(board, :exclusive, "ex")
+
+      sweep_at(t0, 610)
+
+      run = Runs.get_run!(run.id)
+      assert run.status == :parked
+      assert run.parked_reason == :runner_gone
+      assert Repo.get!(NodeJob, job.id).state == :revoked
+    end
+
+    test "the shared window never undercuts a long-interval runner's stale threshold", %{board: board} do
+      %{job: job, t0: t0} = held_by(board, :shared_clean, "slow", 120)
+
+      sweep_at(t0, 200)
+      assert Repo.get!(NodeJob, job.id).state == :claimed
+
+      sweep_at(t0, 241)
+      assert Repo.get!(NodeJob, job.id).state == :queued
+    end
+
+    test "the exclusive window never undercuts a long-interval runner's stale threshold", %{board: board} do
+      %{run: run, t0: t0} = held_by(board, :exclusive, "slowex", 400)
+
+      sweep_at(t0, 610)
+      assert Runs.get_run!(run.id).status == :running
+
+      sweep_at(t0, 801)
+      run = Runs.get_run!(run.id)
+      assert run.status == :parked
+      assert run.parked_reason == :runner_gone
+    end
+
+    test "a runner back inside the window reattaches to the same job — no new attempt", %{board: board} do
+      %{run: run, job: job, t0: t0} = held_by(board, :exclusive, "ex")
+      backdate_claim(job, 600)
+      executions_before = execution_count(run)
+
+      sweep_at(t0, 300)
+
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{"name" => "ex", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [job.id])
+
+      assert Runs.get_run!(run.id).status == :running
+      reattached = Repo.get!(NodeJob, job.id)
+      assert reattached.state == :claimed
+      assert reattached.runner_name == "ex"
+      assert execution_count(run) == executions_before
+    end
+
+    test "a runner back inside the window after a restart gets its exclusive job requeued pinned",
+         %{board: board} do
+      %{run: run, job: job, t0: t0} = held_by(board, :exclusive, "ex")
+      backdate_claim(job, 600)
+
+      sweep_at(t0, 300)
+
+      {:ok, runner} =
+        Runs.upsert_runner(board, %{"name" => "ex", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+
+      :ok = Runs.requeue_orphaned_jobs(board, runner, [])
+
+      requeued = Repo.get!(NodeJob, job.id)
+      assert requeued.state == :queued
+      assert requeued.runner_name == "ex"
+      assert Runs.get_run!(run.id).status == :running
+    end
+
+    test "working_run_ids/2 still drops a runner silent past the 60s stale threshold", %{board: board} do
+      %{run: ex_run, t0: t0} = held_by(board, :exclusive, "ex")
+      {:ok, live} = Runs.upsert_runner(board, %{"name" => "live", "interval" => 30, "capacity" => %{"exclusive" => 1}})
+      at = DateTime.add(t0, 90, :second)
+      beat_at!(live, at)
+
+      assert MapSet.member?(Runs.working_run_ids(board, t0), ex_run.id)
+      refute MapSet.member?(Runs.working_run_ids(board, at), ex_run.id)
     end
   end
 

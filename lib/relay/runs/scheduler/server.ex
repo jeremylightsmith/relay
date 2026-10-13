@@ -219,9 +219,10 @@ defmodule Relay.Runs.Scheduler.Server do
   # runner on this board had room for. Every capacity key is therefore a runner the roster
   # (`Relay.Runs.list_runner_status/2`) names.
   #
-  # A `:gone` runner's advertised capacity is void too — its slots died with the machine, and
-  # the reaper has already requeued/parked its in-flight work. Applied AFTER
-  # reserve_active_runs, so a not-yet-reaped :running run still debits the machine it's stuck
+  # A `:gone` runner's advertised capacity is void too — it no longer counts, while the reaper
+  # holds its in-flight work for up to the reclaim window (`Relay.Runs.shared_reclaim_after_s/0`
+  # / `exclusive_reclaim_after_s/0`, RE449) in case it comes back. Applied AFTER
+  # reserve_active_runs, so a not-yet-reclaimed :running run still debits the machine it's held
   # on before the machine leaves the map. Without this, an exclusive run pinned to a dead
   # machine oscillates forever — the scheduler keeps resuming it onto the lingering capacity
   # and the reaper keeps re-parking it (RLY-199) — and `explain/2` reports "dispatchable"

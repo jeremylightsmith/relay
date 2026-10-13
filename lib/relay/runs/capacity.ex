@@ -26,8 +26,9 @@ defmodule Relay.Runs.Capacity do
   or a `clear/1` that removed an entry — so schedulers reconcile immediately on a change
   (acceptance criterion 2's "without waiting a full tick") without being woken by every beat. The
   runner heartbeat feeds this store; `Relay.Runs.reclaim_stale_runners/1` (the reaper's sweep)
-  evicts every stale runner's entry. With no runner connected it is empty and the scheduler is
-  dormant.
+  evicts every stale runner's entry at the stale threshold — before (and independently of) the
+  later reclaim windows that requeue or park its jobs (RE449). With no runner connected it is
+  empty and the scheduler is dormant.
 
   **`exclusive` semantics (RLY-231):** the `exclusive` class means the max number of
   concurrent per-card worktrees a runner holds, reinterpreted from the old fixed

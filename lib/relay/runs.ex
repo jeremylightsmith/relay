@@ -2847,13 +2847,39 @@ defmodule Relay.Runs do
 
   @runner_stale_floor_s 60
 
+  # RE449: how long a stale runner's work is HELD before the sweep reclaims it. Past the stale
+  # threshold a runner only stops counting; its jobs stay put so a runner back from a network
+  # blip reattaches for free. Shared work is worth reclaiming sooner (any runner can take it);
+  # an exclusive run can only resume on the same machine, so it waits longer.
+  @shared_reclaim_after_s 180
+  @exclusive_reclaim_after_s 600
+
   @doc """
-  The reclaim sweep (criterion 2): for every stale runner, return its in-flight
-  `shared_clean` jobs to `queued` (dropping `runner_name`, so W8 re-offers them)
-  and park its `exclusive` runs (`parked_reason: :runner_gone` — affinity is
-  absolute; the run waits for its machine), and evicts its `Relay.Runs.Capacity` entry so its
-  board stops looking live (RE402). Idempotent; `now` is injectable for
-  the reaper's clock and tests.
+  RE449: seconds a stale runner may stay silent before its `shared_clean` jobs are requeued
+  (applied as `max(this, the runner's stale threshold)`).
+  """
+  @spec shared_reclaim_after_s() :: pos_integer()
+  def shared_reclaim_after_s, do: @shared_reclaim_after_s
+
+  @doc """
+  RE449: seconds a stale runner may stay silent before its `exclusive` runs are parked
+  `:runner_gone` (applied as `max(this, the runner's stale threshold)`).
+  """
+  @spec exclusive_reclaim_after_s() :: pos_integer()
+  def exclusive_reclaim_after_s, do: @exclusive_reclaim_after_s
+
+  @doc """
+  The reclaim sweep. Every runner past the stale threshold (`runner_stale?/2`) stops counting —
+  its `Relay.Runs.Capacity` entry is evicted so its board stops looking live (RE402) — but its
+  work is **held** for a reclaim window (RE449), so a runner back from a brief outage keeps every
+  job it was running:
+
+    * its in-flight `shared_clean` jobs return to `queued` (dropping `runner_name`, so W8
+      re-offers them) once it has been silent past `max(shared_reclaim_after_s/0, threshold)`;
+    * its `exclusive` runs park (`parked_reason: :runner_gone` — affinity is absolute; the run
+      waits for its machine) once silent past `max(exclusive_reclaim_after_s/0, threshold)`.
+
+  Idempotent; `now` is injectable for the reaper's clock and tests.
   """
   def reclaim_stale_runners(now \\ nil) do
     now = now || now()
@@ -2862,7 +2888,7 @@ defmodule Relay.Runs do
     |> Repo.all()
     |> Enum.filter(&runner_stale?(&1, now))
     |> Enum.each(fn runner ->
-      reclaim_runner(runner)
+      reclaim_runner(runner, now)
       Capacity.clear(runner.id)
     end)
 
@@ -2870,16 +2896,20 @@ defmodule Relay.Runs do
   end
 
   @doc "True when `runner` has been silent past `max(60s, 2 × interval)` at `now`. Pure."
-  def runner_stale?(%Runner{last_heartbeat: at, interval: interval}, %DateTime{} = now) do
-    DateTime.diff(now, at, :second) > max(@runner_stale_floor_s, 2 * (interval || 30))
+  def runner_stale?(%Runner{last_heartbeat: at} = runner, %DateTime{} = now) do
+    DateTime.diff(now, at, :second) > stale_after_s(runner)
   end
+
+  # The one stale-threshold shape: `max(60s, 2 × interval)`.
+  defp stale_after_s(%Runner{interval: interval}), do: max(@runner_stale_floor_s, 2 * (interval || 30))
 
   @doc """
   The runner's freshness at `now`: `:fresh | :stale | :gone`. Pure.
 
   `:gone` is deliberately *the same predicate the reaper uses* (`runner_stale?/2`) rather
-  than a second invented threshold — so a `gone` row on the runners view means the runner's
-  in-flight work has been requeued or parked, not merely that a beat looks late.
+  than a second invented threshold — so a `gone` runner no longer counts toward the scheduler
+  and is not offered work. Its in-flight work is **held** for up to the reclaim window
+  (`shared_reclaim_after_s/0`, `exclusive_reclaim_after_s/0`, RE449), not yet requeued or parked.
   """
   def runner_freshness(%Runner{last_heartbeat: at, interval: interval} = runner, %DateTime{} = now) do
     age = DateTime.diff(now, at, :second)
@@ -3874,7 +3904,7 @@ defmodule Relay.Runs do
 
   # `shared_clean` is unchanged: holdings describe per-card worktrees and say nothing about the
   # shared tree, so its occupancy is still the active-job count (any non-"exclusive" isolation
-  # counts as shared, the same rule reclaim_runner/1 applies).
+  # counts as shared, the same rule reclaim_runner/2 applies).
   defp pool_used(name, jobs_used, _held), do: Map.get(jobs_used, name, 0)
 
   # RE337 — every runner's `held`, enriched with at most FOUR queries for the whole roster
@@ -3961,7 +3991,10 @@ defmodule Relay.Runs do
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"
 
-  defp reclaim_runner(%Runner{board_id: board_id, name: name}) do
+  defp reclaim_runner(%Runner{board_id: board_id, name: name, last_heartbeat: at} = runner, now) do
+    silent_s = DateTime.diff(now, at, :second)
+    stale_s = stale_after_s(runner)
+
     rows =
       Repo.all(
         from j in NodeJob,
@@ -3977,7 +4010,13 @@ defmodule Relay.Runs do
           select: {j, r, c.id}
       )
 
-    Enum.each(rows, fn {job, run, card_id} ->
+    rows
+    # RE449: a job is reclaimed only once its runner has been silent past its isolation's window
+    # (never undercutting the runner's own stale threshold); until then it is held for a return.
+    |> Enum.filter(fn {job, _run, _card_id} ->
+      silent_s > max(reclaim_after_s(isolation_class(job.payload["isolation"])), stale_s)
+    end)
+    |> Enum.each(fn {job, run, card_id} ->
       case job.payload["isolation"] do
         "exclusive" -> park_for_reclaim(run)
         _shared -> requeue_job(job, board_id, card_id)
@@ -3985,14 +4024,20 @@ defmodule Relay.Runs do
     end)
   end
 
+  defp reclaim_after_s("exclusive"), do: @exclusive_reclaim_after_s
+  defp reclaim_after_s("shared_clean"), do: @shared_reclaim_after_s
+
   @doc """
   Requeues jobs this runner is holding but is no longer running (RLY-170).
 
   A runner that restarts loses its in-flight job state — it lives in-process — while the
   job stays `:claimed` server-side. Neither existing recovery path can see it:
   `claim_next_job/1` only ever offers `:queued` jobs, and `reclaim_stale_runners/0` only
-  touches a **stale** runner, whereas a restarted one is alive and beating. So the job sat
-  stranded forever, the run stuck on that node, with nothing reporting a problem.
+  touches a **stale** runner — and even then only past its reclaim window (RE449) — whereas a
+  restarted one is alive and beating. So the job sat stranded forever, the run stuck on that
+  node, with nothing reporting a problem. This is also the path for a runner that restarted
+  during an outage and came back *inside* the reclaim window: the reaper never touched its
+  work, so its next beat (which no longer lists the job) requeues it here.
 
   The heartbeat already tells us which jobs the runner IS running, so the **absence** of one
   from that list is the signal. Two things make this safe:
@@ -4014,7 +4059,7 @@ defmodule Relay.Runs do
   """
   def requeue_orphaned_jobs(%Board{id: board_id}, %Runner{} = runner, running_ids) do
     held = for id <- running_ids, int = to_job_id(id), is_integer(int), do: int
-    cutoff = DateTime.add(now(), -orphan_grace_s(runner), :second)
+    cutoff = DateTime.add(now(), -stale_after_s(runner), :second)
 
     from(j in NodeJob,
       join: r in Run,
@@ -4033,10 +4078,6 @@ defmodule Relay.Runs do
     |> Enum.each(fn {job, card_id} -> requeue_orphan(job, runner, board_id, card_id) end)
 
     :ok
-  end
-
-  defp orphan_grace_s(%Runner{interval: interval}) do
-    max(@runner_stale_floor_s, 2 * (interval || 30))
   end
 
   defp requeue_orphan(%NodeJob{} = job, %Runner{name: name}, board_id, card_id) do
