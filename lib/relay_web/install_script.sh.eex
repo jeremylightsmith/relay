@@ -1,0 +1,249 @@
+#!/bin/sh
+# Relay install script for board <%= @slug %> (RE443), served by <%= @base_url %>.
+#
+# Run it from the top of your repo:
+#
+#   curl -fsSL <%= @base_url %>/b/<%= @slug %>/install | sh
+#
+# It checks first and writes nothing until the checks pass. Then it writes ./relay, the
+# onboarding skill, relay.md (+ one pointer line), the starter .relay/ files and .gitignore
+# entries. Nothing is committed. RELAY_API_KEY is sent only as an Authorization header and is
+# never written to a file. Plain POSIX sh: only curl git python3 uname mktemp mkdir chmod mv rm
+# cat grep printf.
+
+set -u
+set -f
+
+BASE=<%= sh_quote(@base_url) %>
+SLUG=<%= sh_quote(@slug) %>
+POINTER='Working Relay cards from this repo: see [relay.md](relay.md).'
+IGNORES='.claude/worktrees/ /tmp/ .envrc.local'
+NL='
+'
+
+say() { printf '%s\n' "$*"; }
+fail() { say "$@"; exit 1; }
+
+# $1 with every $2 backslash-escaped. Quoted patterns are literal in every POSIX sh (bash's
+# bracket expressions mishandle a backslash).
+escape_char() {
+  rest=$1 out=
+  while :; do
+    case $rest in
+      *"$2"*) ;;
+      *) break ;;
+    esac
+    out=$out${rest%%"$2"*}\\$2
+    rest=${rest#*"$2"}
+  done
+  printf '%s' "$out$rest"
+}
+
+# A JSON string literal for the first line of $1, in pure sh: python3 may be what's missing.
+json_str() {
+  s=$(escape_char "${1%%"$NL"*}" '\')
+  printf '"%s"' "$(escape_char "$s" '"')"
+}
+
+check_json() { printf '{"id":%s,"ok":%s,"detail":%s}' "$(json_str "$1")" "$2" "$(json_str "$3")"; }
+
+# POST a JSON body ($2) to the board path $1 with the key. Sets $status and $resp.
+api_post() {
+  out=$(printf '%s' "$2" | curl -sS -X POST \
+    -H "Authorization: Bearer $RELAY_API_KEY" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    --data-binary @- -w "$NL%{http_code}" "$BASE$1") || return 1
+  status=${out##*"$NL"}
+  resp=${out%"$NL"*}
+}
+
+py() { PYTHONIOENCODING=utf-8 python3 -c "$@"; }
+
+# A field of the board's JSON answer, by dotted path ("llm.cli").
+field() {
+  printf '%s' "$resp" | py 'import json, sys
+v = json.load(sys.stdin)
+for k in sys.argv[1].split("."):
+    v = v.get(k) if isinstance(v, dict) else None
+sys.stdout.write("" if v is None else v if isinstance(v, str) else json.dumps(v))' "$1"
+}
+
+# One line per check, then each failed check's fix and the fix command.
+report() {
+  printf '%s' "$resp" | py 'import json, sys
+d = json.load(sys.stdin)
+w = max(len(c["label"]) for c in d["checks"])
+for c in d["checks"]:
+    print(("  %s  %s  %s" % ("ok" if c["ok"] else "!!", c["label"].ljust(w), c["detail"] or "")).rstrip())
+if not d["ok"]:
+    print()
+    for c in d["checks"]:
+        if not c["ok"] and c["fix"]:
+            print(c["fix"])
+    if d.get("fix_command"):
+        print("  " + d["fix_command"])'
+}
+
+has_line() { [ -f "$2" ] && grep -qxF -- "$1" "$2"; }
+
+# Append line $1 to file $2 once, on a line of its own.
+append_line() {
+  has_line "$1" "$2" && return 0
+  if [ -s "$2" ]; then
+    last=$(cat "$2"; printf x)
+    last=${last%x}
+    case $last in
+      *"$NL") ;;
+      *) printf '\n' >> "$2" ;;
+    esac
+  fi
+  printf '%s\n' "$1" >> "$2"
+}
+
+[ -n "${RELAY_API_KEY:-}" ] ||
+  fail "RELAY_API_KEY is not set — copy the export line from step 3 of the setup wizard."
+
+say "Checking first. Nothing is written until these pass."
+
+# ---- local checks (ids from Relay.Setup.preflight_checks/0)
+here=$(pwd -P)
+repo_dir=$here
+case $here in
+  "${HOME:-/nonexistent}"/*) repo_dir="~${here#"$HOME"}" ;;
+esac
+
+git_repo_ok=false git_repo_detail="not inside a git repo"
+if top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
+  if [ "$(cd "$top" && pwd -P)" = "$here" ]; then
+    git_repo_ok=true git_repo_detail=$repo_dir
+  else
+    git_repo_detail="run it from $top, the top of the repo"
+  fi
+fi
+
+remote_ok=false remote_detail="no origin remote" remote_url=
+if url=$(git remote get-url origin 2>/dev/null) && [ -n "$url" ]; then
+  remote_ok=true remote_detail="origin → $url" remote_url=$url
+fi
+
+branch=
+if ref=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null); then
+  branch=${ref#origin/}
+elif ref=$(git symbolic-ref --short HEAD 2>/dev/null); then
+  branch=$ref
+fi
+if [ -n "$branch" ]; then
+  default_branch_ok=true default_branch_detail=$branch
+else
+  default_branch_ok=false default_branch_detail="no default branch found"
+fi
+
+if found=$(command -v python3); then
+  python3_ok=true python3_detail=$found
+else
+  python3_ok=false python3_detail="python3 not found"
+fi
+
+clis=
+for cli in <%= Enum.join(@clis, " ") %>; do
+  if found=$(command -v "$cli"); then v=$(json_str "$found"); else v=null; fi
+  clis="$clis${clis:+,}$(json_str "$cli"):$v"
+done
+
+machine=$(uname -n)
+
+checks="<%= Enum.map_join(@check_ids, ",", &~s|$(check_json #{&1} "$#{&1}_ok" "$#{&1}_detail")|) %>"
+
+body=$(printf '{"slug":%s,"machine":%s,"repo_dir":%s,"remote":%s,"branch":%s,"checks":[%s],"clis":{%s}}' \
+  "$(json_str "$SLUG")" "$(json_str "$machine")" "$(json_str "$repo_dir")" \
+  "$(json_str "$remote_url")" "$(json_str "$branch")" "$checks" "$clis")
+
+# ---- preflight: the key's first authed call
+api_post /api/setup/preflight "$body" || fail "Couldn't reach the board at $BASE. Nothing was written."
+
+message() {
+  if [ "$python3_ok" = true ]; then field error.message; else printf '%s' "$resp"; fi
+}
+
+case $status in
+  200) ;;
+  401) fail "RELAY_API_KEY was not accepted by the board — mint a new key in step 3." ;;
+  403 | 409) fail "$(message)" ;;
+  *) fail "The board answered HTTP $status. Nothing was written." ;;
+esac
+
+if [ "$python3_ok" != true ]; then
+  say "  !!  python3  $python3_detail"
+  say ""
+  fail <%= sh_quote(@python3_fix) %>
+fi
+
+say "Relay install for board $(field board) · default LLM: $(field llm.label)"
+report
+[ "$(field ok)" = true ] || exit 1
+
+cli=$(field llm.cli)
+skill_path=$(field llm.skill_path)
+pointer_file=$(field llm.pointer_file)
+
+pointer_note=
+has_line "$POINTER" "$pointer_file" || pointer_note=" (+1 line in $pointer_file)"
+missing=0
+for line in $IGNORES; do
+  has_line "$line" .gitignore || missing=$((missing + 1))
+done
+
+say "Writing:"
+say "  ./relay"
+say "  $skill_path"
+say "  relay.md$pointer_note"
+say "  .relay/runner.json"
+say "  .relay/prepare-worktree.sh"
+say "  .gitignore (+$missing lines)"
+
+# ---- download everything first; move into place only once all of it arrived
+work=$(mktemp -d "${TMPDIR:-/tmp}/relay-install.XXXXXX") || fail "Couldn't make a temp dir. Nothing was written."
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' INT TERM
+
+fetch() {
+  curl -fsS -o "$work/$2" "$BASE/api/scaffold/$1" ||
+    fail "Couldn't download $1 from the board. Nothing was written."
+}
+
+fetch relay relay
+fetch .claude/skills/relay-onboard/SKILL.md skill
+fetch relay.md relay.md
+
+case $skill_path in
+  */*) mkdir -p "${skill_path%/*}" ;;
+esac
+mv "$work/skill" "$skill_path"
+mv "$work/relay.md" relay.md
+mv "$work/relay" ./relay
+chmod 755 ./relay
+
+append_line "$POINTER" "$pointer_file"
+for line in $IGNORES; do
+  append_line "$line" .gitignore
+done
+
+out=$(python3 ./relay update --starter-only --base "origin/$branch" 2>&1) || {
+  say "$out"
+  fail "./relay update --starter-only failed."
+}
+
+files=$(printf '%s,%s,%s,%s,%s,%s,%s' "$(json_str relay)" "$(json_str "$skill_path")" \
+  "$(json_str relay.md)" "$(json_str "$pointer_file")" "$(json_str .relay/runner.json)" \
+  "$(json_str .relay/prepare-worktree.sh)" "$(json_str .gitignore)")
+
+body=$(printf '{"slug":%s,"machine":%s,"repo_dir":%s,"branch":%s,"files":[%s]}' \
+  "$(json_str "$SLUG")" "$(json_str "$machine")" "$(json_str "$repo_dir")" \
+  "$(json_str "$branch")" "$files")
+
+api_post /api/setup/installed "$body" && [ "$status" = 200 ] ||
+  fail "The files are written, but the board didn't record the install. Run the same command again."
+
+say ""
+say "Done. Nothing is committed yet; onboarding does that with you."
+say "Next: open $cli here and run /relay-onboard"

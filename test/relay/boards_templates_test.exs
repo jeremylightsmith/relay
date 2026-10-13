@@ -140,8 +140,8 @@ defmodule Relay.BoardsTemplatesTest do
                "claude_plan" => "Claude Opus",
                "gpt_plan" => "GPT",
                "gemini_plan" => "Gemini",
-               "judge" => "Claude Opus",
-               "mockup" => "Claude Sonnet"
+               "judge" => nil,
+               "mockup" => nil
              }
 
       assert [region] = Schemas.Flow.regions(plan)
@@ -150,6 +150,23 @@ defmodule Relay.BoardsTemplatesTest do
       assert length(region.branches) == 3
 
       refute Enum.any?(flows["implement"].nodes, &(&1.key == "review"))
+    end
+
+    # RE443 Scenario 16
+    test "every node runs on the board default except three-brain's three planners" do
+      named =
+        for slug <- @slugs,
+            flow <- Flows.list_flows(create!(slug)),
+            node <- flow.nodes,
+            node.llm != nil,
+            into: %{},
+            do: {"#{slug}/#{flow.key}/#{node.key}", node.llm}
+
+      assert named == %{
+               "three-brain/three-brain-plan/claude_plan" => "Claude Opus",
+               "three-brain/three-brain-plan/gpt_plan" => "GPT",
+               "three-brain/three-brain-plan/gemini_plan" => "Gemini"
+             }
     end
 
     # Scenario 8

@@ -95,19 +95,30 @@ defmodule Relay.ApiKeys do
   def revoke(%ApiKey{} = key), do: Repo.delete(key)
 
   @doc """
+  Authenticates a raw `relay_<prefix>_<secret>` token and returns `{:ok, board}`, or
+  `:error` — see `authenticate_key/1`, which does the work.
+  """
+  @spec authenticate(String.t()) :: {:ok, Board.t()} | :error
+  def authenticate(raw_token) when is_binary(raw_token) do
+    with {:ok, key} <- authenticate_key(raw_token), do: {:ok, key.board}
+  end
+
+  @doc """
   Authenticates a raw `relay_<prefix>_<secret>` token: looks the key up by
   prefix, constant-time compares the secret's hash, bumps `last_used_at`
-  (throttled to at most once per minute), and returns `{:ok, board}`. Any
-  malformed, unknown, or revoked token returns `:error`. This is what MMF
-  09's API authentication calls.
+  (throttled to at most once per minute), and returns `{:ok, key}` with its
+  `:board` preloaded. Any malformed, unknown, or revoked token returns
+  `:error`. This is what MMF 09's API authentication calls (RE443: the key
+  itself, so the setup handshake can name it and check its board).
   """
-  def authenticate(raw_token) when is_binary(raw_token) do
+  @spec authenticate_key(String.t()) :: {:ok, ApiKey.t()} | :error
+  def authenticate_key(raw_token) when is_binary(raw_token) do
     with ["relay", prefix, secret] <- String.split(raw_token, "_", parts: 3),
          %ApiKey{} = key <- Repo.get_by(ApiKey, token_prefix: prefix),
          true <- Plug.Crypto.secure_compare(hash_secret(secret), key.token_hash) do
       touch_last_used(key)
 
-      {:ok, Repo.preload(key, :board).board}
+      {:ok, Repo.preload(key, :board)}
     else
       _not_authenticated -> :error
     end

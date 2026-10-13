@@ -18,7 +18,10 @@ sharing behavior.
   pipeline and spec/plan/code flows; an unknown slug is `{:error, :unknown_template}` and
   inserts nothing. A template seeds, in one transaction, its main stages (with WIP limits),
   their sub-lanes, the releases, the seeded agents plus its own, its flows — disabled, every
-  node an inline prompt with no `agent` — and Review's `reject_to` = Plan; never cards.
+  node an inline prompt with no `agent` and no `llm` (so it runs on the board default — except
+  Three-brain's `claude_plan` / `gpt_plan` / `gemini_plan`, RE443) — and Review's `reject_to` =
+  Plan; never cards. The template path also starts the board's setup checklist
+  (`Relay.Setup.start/2`, same transaction); the default path does not.
   **Bare minimum**: Backlog · Plan (+Done) · Implement · Review · Deploy · Done, flows `plan`
   and `implement`. **Design-led**: Backlog · Next up · Design (+Review, +Done) · Plan (+Review,
   +Done) · Code · Review · Deploy · Done, flows `design`, `plan` and `code`. **Three-brain**:
@@ -791,9 +794,49 @@ sharing behavior.
   ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
   here in step 1: receipts, `awaiting` turns, the write lease, card-level runner pinning — a
   talk turn never moves the card's baton.
-- **Scaffold** — the five Relay-owned files (`./relay` + the four `relay-*` skills) the board
-  serves at `/api/scaffold`, built into `priv/scaffold/` by `mix relay.build_scaffold`
+- **Scaffold** — the five Relay-owned files (`./relay`, the three `relay-*` skills and
+  `relay.md`) the board serves at `/api/scaffold`, `relay` with the board's URL baked into its
+  `BOARD_URL` line (RE443), built into `priv/scaffold/` by `mix relay.build_scaffold`
   (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
+- **Setup** (`Relay.Setup`, RE443) — a board's **setup checklist**, the guided path from "board
+  created from a template" to "an agent picked up the first card". Owns the ONE step catalog
+  (`steps/0`, in order 1–5, 5.1–5.8, 6, 7: `id`, `parent`, `title`, `done_title`, `actor` —
+  `actors/0` = `:you_here | :you_terminal | :ai_terminal` — `why`, `what_this_does`,
+  `read_only_note`; strings carry `%{template}` / `%{llm}` / `%{skill_path}` / `%{pointer_file}`
+  placeholders that only `checklist/1` resolves) and the onboarding LLMs (`onboarding_llms/0`,
+  `onboarding_llm/1`: `harness` / `label` read from `Relay.Agents.seed_harnesses/0`, plus `cli`,
+  `blurb`, `install`, `skill_path`, `pointer_file`, `recommended?`, `enabled?` — Gemini CLI is
+  disabled). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
+  all 15 (step 1 done with `"<N> stages · <M> flows · HH:MM"` and the template's name and
+  `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
+  created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
+  `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, position,
+  done_count, finished?, steps}` (the 7 top-level entries; step 5's in `children`); `current/1`
+  is its first unfinished entry. `advance/4` (`:waiting | :done | :failed | :skipped`) is
+  strictly sequential (`{:error, :not_current | :no_checklist | :invalid_status}`), serialized by
+  locking the board row, a no-op on a repeat that changes nothing, and broadcasts
+  `{:setup_changed, board_id}`. `choose_llm/3` (step 2) sets the board default agent to the
+  chosen harness (keeping a default already on it, else reusing the board's first agent on it,
+  else creating one on its first model) and mints the step-3 key `"Setup · <user>"` via
+  `Relay.ApiKeys`; `remint_key/2` mints a fresh one, revoking the old only if it was never used.
+  Both return `{:ok, %{checklist, token}}` — the raw token exists only there; step 3's `data`
+  holds `key_id`. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
+  `step_id/1` (`:llm | :key | :install | :onboard`) names the catalog id of the steps a surface
+  renders specially, so `RelayWeb.SetupComponents` (the wizard panel, chip and phones' read-only
+  checklist `RelayWeb.BoardLive` renders) never re-types one. The install
+  handshake reports through `preflight/2` and `installed/2`, each taking the authenticated
+  `Schemas.ApiKey` (board preloaded) and the script's JSON: `preflight/2` checks the key's board
+  owns the request's `slug` (`:wrong_board`) and that step 2 is done (`:step_2_pending`), ticks
+  step 3 (`"first authed call HH:MM · key …<last_four> · <machine>"`) and marks step 4 `:waiting`
+  (`"preflight passed HH:MM · <machine>"`, `data.checks`) or `:failed` (the first failure's
+  `headline` as `error`, plus `checks` / `headline` / `fix` / `fix_command` in `data`); it answers
+  the board name, the onboarding LLM and every check with its fix text. `preflight_checks/0` is
+  the ONE list of the script's local check ids and labels (`git_repo`, `remote`,
+  `default_branch`, `python3`), whose fix texts live beside it; the server adds the `cli` and
+  `key` lines. `installed/2` finishes step 4 (`"downloaded HH:MM · <repo_dir> · <branch>"`,
+  `data.files`). Steps already past are left alone, so a re-run answers 200 and writes nothing; a
+  board with no checklist answers from its default agent's LLM. Depends
+  on Agents, ApiKeys, Events and Repo, never on Boards or Flows (Boards depends on it).
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
   (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`) are read, so a test overrides them with
@@ -841,6 +884,7 @@ erDiagram
     Board ||--o{ Agent : "named LLMs (RE433)"
     Harness ||--o{ Agent : "runs on"
     Board |o--o| Agent : "default_agent_id"
+    Board ||--o{ BoardSetupStep : "setup checklist (RE443)"
     User ||--o{ UserApiToken : "mobile bearer"
     User ||--o{ DeviceToken : "push"
     Card ||--o{ Vote : upvotes
@@ -854,6 +898,14 @@ erDiagram
 A `Harness` is an agent CLI (command template + closed `models` list) and an `Agent` is a named
 harness + model; flow nodes name an agent in their `llm` and `boards.default_agent_id` is the
 fallback (RE433, `Relay.Agents`).
+
+A `BoardSetupStep` (`board_setup_steps`, owned by `Relay.Setup`, RE443) is one step of a board's
+setup checklist: unique on `(board_id, step)` (cascade on board delete), with `status`
+(`Schemas.BoardSetupStep.statuses/0`; `current_statuses/0` = active / waiting / failed,
+`finished_statuses/0` = done / skipped), `reached_at`, `completed_at`, `evidence`, `error` and a
+`data` map. `users.setup_explanations_hidden` (`Relay.Accounts.set_setup_explanations_hidden/2`,
+cast only by `Schemas.User.preferences_changeset/2`) is the per-user preference to hide the
+checklist's *what this does* lines.
 
 A `RunBranch` (`run_branches`, owned by `Relay.Runs`, RE437) is one branch of one fan-out
 **region entry**: it belongs to its `Run` (cascade) and to the `fan_out` `NodeExecution` that

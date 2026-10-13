@@ -17,6 +17,7 @@ defmodule Schemas.User do
     field :avatar_url, :string
     field :provider, :string
     field :provider_uid, :string
+    field :setup_explanations_hidden, :boolean, default: false
 
     timestamps(type: :utc_datetime)
   end
@@ -36,6 +37,17 @@ defmodule Schemas.User do
     |> validate_required([:email])
     |> unique_constraint(:email)
     |> unique_constraint(:provider_uid)
+  end
+
+  @doc """
+  Changeset for the user's own preferences — today only `setup_explanations_hidden`, whether the
+  board setup checklist (RE443) hides its *what this does* explanations. Kept apart from
+  `changeset/2`, the OAuth profile path, which must never cast a preference.
+  """
+  def preferences_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:setup_explanations_hidden])
+    |> validate_required([:setup_explanations_hidden])
   end
 
   @doc """

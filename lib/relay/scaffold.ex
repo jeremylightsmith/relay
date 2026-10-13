@@ -1,10 +1,11 @@
 defmodule Relay.Scaffold do
   @moduledoc """
-  The six Relay-owned files the board serves at `/api/scaffold`, and the build that produces
+  The five Relay-owned files the board serves at `/api/scaffold`, and the build that produces
   them (RE304, ADR 0010).
 
-  These files are Relay's, never a user's: a project's `./relay`, its four `relay-*` skills,
-  and `relay.md`. That is what lets `./relay update` overwrite them unconditionally — no
+  These files are Relay's, never a user's: a project's `./relay`, its three `relay-*` skills,
+  and `relay.md`. (A fourth, setup skill was retired by RE443 for the board's setup wizard and
+  its install command.) That is what lets `./relay update` overwrite them unconditionally — no
   provenance ledger, no per-file diff prompt.
 
   `relay.md` joined the set after RE304 (see ADR 0010's amendment). It is the agent-facing guide
@@ -22,6 +23,16 @@ defmodule Relay.Scaffold do
   `mix setup`, by the `test` alias, and by the `Dockerfile` before `mix release`) and
   gitignored. Every read here is a runtime read, because a Mix release ships `priv/` but
   ships neither `relay` nor `.claude/`.
+
+  **The served `relay` carries its board's URL (RE443).** The committed file has a placeholder
+  `BOARD_URL = ""` line; `fetch("relay", board_url: url)` bakes the serving board's URL into it
+  so a project needs no `RELAY_URL`. `manifest(board_url: url)` describes those served bytes:
+  the `relay` item's `sha256`/`bytes` are the BAKED copy's — every runner up to v89 checks a
+  download with a raw sha256 against that field, so it must match what is served — and its
+  `unbaked_sha256` is the built placeholder copy's, which `./relay` v90+ compares against with
+  the line reset (`runner_sha256`). The version stays derived from the built (unbaked) shas, so
+  it is one value per build on every board. The line is masked out of the runner's fingerprint,
+  so baking it changes nothing the version guard sees.
   """
 
   use Boundary, deps: []
@@ -31,7 +42,6 @@ defmodule Relay.Scaffold do
   @items [
     ".claude/skills/relay-doctor/SKILL.md",
     ".claude/skills/relay-onboard/SKILL.md",
-    ".claude/skills/relay-setup/SKILL.md",
     ".claude/skills/relay-update/SKILL.md",
     "relay",
     "relay.md"
@@ -46,6 +56,10 @@ defmodule Relay.Scaffold do
 
   @runner_path "relay"
 
+  # The ONE Elixir parse of ./relay's `BOARD_URL` line (RE443), mirroring ./relay's BOARD_URL_RE.
+  # The value is a JSON string literal on one line; the runner contract fixture pins the two.
+  @board_url_re ~r/^BOARD_URL\s*=[ \t]*.*$/m
+
   @doc "The Relay-owned paths, sorted. Nothing else is ever served or updated."
   @spec items() :: [String.t()]
   def items, do: @items
@@ -59,19 +73,43 @@ defmodule Relay.Scaffold do
 
   `:error` rather than a raise: a dev box that has not run `mix setup` should get a clean
   503 from the controller, not a 500.
+
+  With `board_url:` (RE443) the `relay` item describes the copy `fetch/2` serves with that
+  option: `sha256` and `bytes` are the baked bytes', and `unbaked_sha256` is the built
+  placeholder copy's. Without it every item is exactly as built. `version` never changes.
   """
   # `root()` and `@manifest_name` are both fixed, never request input.
   # sobelow_skip ["Traversal.FileModule"]
-  @spec manifest() :: {:ok, map()} | :error
-  def manifest do
+  @spec manifest(keyword()) :: {:ok, map()} | :error
+  def manifest(opts \\ []) do
     with {:ok, body} <- File.read(Path.join(root(), @manifest_name)),
          {:ok, %{"version" => v, "items" => items} = manifest} when is_binary(v) and is_list(items) <-
            Jason.decode(body) do
-      {:ok, manifest}
+      describe_served(manifest, Keyword.get(opts, :board_url))
     else
       _ -> :error
     end
   end
+
+  defp describe_served(manifest, nil), do: {:ok, manifest}
+
+  defp describe_served(%{"items" => items} = manifest, url) when is_binary(url) do
+    case fetch(@runner_path, board_url: url) do
+      {:ok, served} ->
+        {:ok, %{manifest | "items" => Enum.map(items, &describe_runner(&1, served))}}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp describe_runner(%{"path" => @runner_path, "sha256" => built} = item, served) do
+    Map.merge(item, %{"sha256" => sha256(served), "bytes" => byte_size(served), "unbaked_sha256" => built})
+  end
+
+  defp describe_runner(item, _served), do: item
+
+  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 
   @doc """
   The bytes of one served file, or `:error`.
@@ -79,21 +117,41 @@ defmodule Relay.Scaffold do
   `path` is checked against `items/0` — a static allowlist — **before** it reaches the
   filesystem, so this is not a general file server and traversal is impossible by construction
   rather than by sanitising.
+
+  The one option, `board_url:`, bakes that URL into the `BOARD_URL` line of `relay` (RE443) —
+  every other item ignores it, and without it the bytes are exactly what was built.
   """
   # `path` is matched against the @items literal list above before any read; a value that is
-  # not one of those six strings never reaches File.read/1.
+  # not one of those five strings never reaches File.read/1.
   # sobelow_skip ["Traversal.FileModule"]
-  @spec fetch(String.t()) :: {:ok, binary()} | :error
-  def fetch(path) when is_binary(path) do
-    if path in @items do
-      case File.read(Path.join(root(), path)) do
-        {:ok, body} -> {:ok, body}
-        {:error, _} -> :error
-      end
+  @spec fetch(String.t(), keyword()) :: {:ok, binary()} | :error
+  def fetch(path, opts \\ []) when is_binary(path) do
+    with true <- path in @items,
+         {:ok, body} <- File.read(Path.join(root(), path)) do
+      {:ok, maybe_bake(path, body, Keyword.get(opts, :board_url))}
     else
-      :error
+      _ -> :error
     end
   end
+
+  defp maybe_bake(@runner_path, body, url) when is_binary(url), do: bake_board_url(body, url)
+  defp maybe_bake(_path, body, _url), do: body
+
+  @doc """
+  `source` with its `BOARD_URL` line set to `url` (RE443). A source with no such line is
+  returned unchanged; `""` resets it to the placeholder.
+  """
+  @spec bake_board_url(binary(), String.t()) :: binary()
+  def bake_board_url(source, url) when is_binary(source) and is_binary(url) do
+    Regex.replace(@board_url_re, source, fn _ -> board_url_line(url) end, global: false)
+  end
+
+  @doc ~S"""
+  The `BOARD_URL` line for `url`: `BOARD_URL = "<url>"`, the value JSON-encoded so it is a
+  valid Python string literal whatever it contains.
+  """
+  @spec board_url_line(String.t()) :: String.t()
+  def board_url_line(url) when is_binary(url), do: "BOARD_URL = " <> Jason.encode!(url)
 
   @doc """
   The `RUNNER_VERSION` of the `./relay` this app actually serves, or `nil`.
@@ -156,7 +214,7 @@ defmodule Relay.Scaffold do
 
         %{
           "path" => rel,
-          "sha256" => :sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower),
+          "sha256" => sha256(content),
           "bytes" => byte_size(content)
         }
       end

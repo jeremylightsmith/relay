@@ -14,7 +14,7 @@ exits non-zero.
 
 | Command | What it does |
 | --- | --- |
-| `./relay update [--check]` | Install or refresh the six Relay-owned files from the board (`./relay`, the four `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. Add `--json` for machine output. It also removes a leftover Relay-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
+| `./relay update [--check \| --starter-only] [--base REF]` | Install or refresh the five Relay-owned files from the board (`./relay`, the three `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. `--starter-only` writes only a missing `.relay/runner.json` and `.relay/prepare-worktree.sh`, offline. `--base REF` sets the `base` of a runner.json it creates. Add `--json` for machine output. It also removes a leftover Relay-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `./relay board` | The board: stages with their cards |
 | `./relay card RLY-12` | One card: description, plan, branch, timeline |
 | `./relay stages` | The board's stages in board order — position, name, category, type, `ai:`, `wip:` and `substages:` per main stage, each substage indented beneath it. A main stage whose enabled flow is paused by a broken board shape ends with `PAUSED (flow <key>)`. `--json` prints the list |
@@ -122,20 +122,25 @@ Every `--json` command also takes `--field PATH` to print a single dotted-path v
 
 ## Keeping `./relay` current
 
-Relay owns six files in your project — `./relay`, the four `relay-*` skills, and `relay.md` — and your
+Relay owns five files in your project — `./relay`, the three `relay-*` skills, and `relay.md` — and your
 board serves them at `GET /api/scaffold`. They are Relay's, never yours, so an update overwrites
 them unconditionally; nothing else in `.claude/` is ever touched.
 
 ```bash
 ./relay update --check    # served vs. local version, and what would change. Writes nothing.
 ./relay update            # apply
+./relay update --starter-only --base origin/trunk   # only the starter runner.json + prepare hook
 ```
+
+The `./relay` your board serves has the board's URL baked into its `BOARD_URL` line, so it needs
+no `RELAY_URL`; an exported `RELAY_URL` overrides it, and `./relay update` (and auto-update)
+keep a project's baked URL.
 
 The manifest's `version` is derived from the files' content, so it moves exactly when they do.
 **What gets written is decided by content, not by that version:** `./relay update` hashes all
-six files against the manifest on every run and writes the ones that differ, so "this project is
+five files against the manifest on every run and writes the ones that differ, so "this project is
 current" means "nothing needs writing". A deleted skill comes back, and so does an **edited** one
-— these six are Relay-owned, so a local change to them is damage to repair, not a customisation
+— these five are Relay-owned, so a local change to them is damage to repair, not a customisation
 to keep. A version that has moved while the bytes already match writes nothing but the recorded
 version itself (the normal state after `./relay start` self-updates).
 

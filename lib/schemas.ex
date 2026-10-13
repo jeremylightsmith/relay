@@ -14,6 +14,7 @@ defmodule Schemas do
       ApiKey,
       Attachment,
       Board,
+      BoardSetupStep,
       Card,
       CardDependency,
       CardOwner,

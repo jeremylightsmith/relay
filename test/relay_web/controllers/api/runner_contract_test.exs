@@ -22,6 +22,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
   alias Relay.Runs
   alias Relay.Runs.Audit
   alias Relay.Runs.FakeDispatcher
+  alias Relay.Scaffold
 
   @fixture_path "test/fixtures/runner_contract.json"
 
@@ -403,6 +404,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "scaffold" => %{
         "manifest_path" => "/api/scaffold",
         "file_path_example" => "/api/scaffold/relay",
+        # RE443 — the BOARD_URL line the app bakes into a served ./relay; ./relay's
+        # BOARD_URL_RE parses it back.
+        "board_url_line_example" => Scaffold.board_url_line("http://board.test"),
         "manifest" => scaffold_placeholders(scaffold_manifest)
       },
       "tasks" => %{
@@ -618,7 +622,12 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "version" => "<scaffold-version>",
       "items" =>
         Enum.map(manifest["items"], fn item ->
-          %{"path" => item["path"], "sha256" => "<sha256>", "bytes" => "<bytes>"}
+          # RE443: the runner item also carries `unbaked_sha256`; keep the key, mask the value.
+          Map.new(item, fn
+            {"path", path} -> {"path", path}
+            {"bytes", _} -> {"bytes", "<bytes>"}
+            {key, _} -> {key, "<sha256>"}
+          end)
         end)
     }
   end

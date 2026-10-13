@@ -292,6 +292,20 @@ defmodule Relay.AccountsTest do
     end
   end
 
+  describe "set_setup_explanations_hidden/2" do
+    # RE443 Scenario 17
+    test "sets the preference; the OAuth profile changeset never casts it" do
+      user = insert(:user)
+      refute user.setup_explanations_hidden
+
+      assert {:ok, %User{setup_explanations_hidden: true}} = Accounts.set_setup_explanations_hidden(user, true)
+      assert Accounts.get_user(user.id).setup_explanations_hidden
+
+      changeset = User.changeset(user, %{email: user.email, setup_explanations_hidden: false})
+      refute Map.has_key?(changeset.changes, :setup_explanations_hidden)
+    end
+  end
+
   describe "get_user/1" do
     test "returns the user for an id" do
       user = insert(:user)

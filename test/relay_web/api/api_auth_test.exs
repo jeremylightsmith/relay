@@ -11,6 +11,16 @@ defmodule RelayWeb.ApiAuthTest do
     assert json_response(conn, 200)["board"]["key"] == board.key
   end
 
+  # RE443 scenario 2
+  test "an authed request carries the authenticated key in assigns", %{conn: conn} do
+    board = insert(:board)
+    {:ok, %{api_key: key, token: token}} = Relay.ApiKeys.create_key(board, board.owner)
+
+    conn = conn |> auth(token) |> get(~p"/api/board")
+    assert json_response(conn, 200)
+    assert conn.assigns.current_api_key.id == key.id
+  end
+
   test "missing key returns 401", %{conn: conn} do
     conn = get(conn, ~p"/api/board")
     assert json_response(conn, 401)["error"]["code"] == "unauthorized"

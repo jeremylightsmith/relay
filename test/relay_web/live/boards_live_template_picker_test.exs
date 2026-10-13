@@ -99,13 +99,14 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     refute has_element?(view, "#template-warning-design-led")
   end
 
-  test "5. submitting creates Untitled board from the template and opens its settings", %{conn: conn} do
+  test "5. submitting creates Untitled board from the template and opens the board (RE443: the setup wizard lives there)",
+       %{conn: conn} do
     view = open_picker(conn)
 
     assert {:error, {:live_redirect, %{to: to}}} =
              view |> element("#template-picker-form") |> render_submit(%{"template" => "design-led"})
 
-    assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)/settings$}, to)
+    assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)$}, to)
 
     board = Repo.get_by!(Board, slug: slug)
     assert board.name == "Untitled board"

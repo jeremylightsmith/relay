@@ -225,6 +225,14 @@ def errored_result_event(text):
     return {"type": "result", "is_error": True, "result": text}
 
 
+def pin_relay_url(test, url):
+    """Pin RELAY_URL for one test (RE443). The board URL comes from relay_url() — RELAY_URL,
+    else the baked BOARD_URL — not from env(), so a stubbed `relay.env` no longer supplies it."""
+    patcher = unittest.mock.patch.dict(os.environ, {"RELAY_URL": url})
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class _FakeResp:
     """Minimal stand-in for a urlopen() result: a context manager with .read()."""
 
@@ -1917,6 +1925,7 @@ class ApiRetryTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
         relay.env = lambda name: "http://example.test"
+        pin_relay_url(self, "http://example.test")
         relay._api_backoff = lambda attempt: None   # never actually sleep
         relay.log = lambda *a, **k: None
         self._urlopen = relay.urllib.request.urlopen
@@ -2160,6 +2169,7 @@ class ApiAuthTest(unittest.TestCase):
             raise AssertionError(f"api(auth=False) must not read {name}")
 
         relay.env = fake_env
+        pin_relay_url(self, "http://example.test")
         relay._api_backoff = lambda attempt: None
         relay.log = lambda *a, **k: None
         self._urlopen = relay.urllib.request.urlopen
@@ -2267,6 +2277,7 @@ class LegacyIdentityWarningTest(unittest.TestCase):
         relay.ROOT = "/Users/j/src/relay"
         relay.socket.gethostname = lambda: "box.local"
         relay.env = lambda name: "http://relay.test"
+        pin_relay_url(self, "http://relay.test")
 
     def _an_runner_ran_here_as(self, name):
         """Leave the residue `acquire_singleton_lock` leaves and never unlinks: an identity
@@ -3901,6 +3912,52 @@ class PrepareWorktreeHookTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
 
 
+class GenericPrepareHookTest(PrepareWorktreeHookTest):
+    """RE443: `./relay update --starter-only` lays down `render_prepare_hook()` — the same
+    copy-from-cache-or-main-checkout logic as this repo's own hook, generalized over a `WARM`
+    list that starts empty. Empty WARM is a no-op that succeeds."""
+
+    def setUp(self):
+        super().setUp()
+        self.HOOK = os.path.join(self.tmp, "prepare-worktree.sh")
+        self.write_hook(relay.render_prepare_hook())
+
+    def write_hook(self, text):
+        with open(self.HOOK, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(self.HOOK, 0o755)
+
+    def warm(self, dirs):
+        text = relay.render_prepare_hook()
+        self.assertIn('\nWARM=""\n', text)
+        self.write_hook(text.replace('\nWARM=""\n', f'\nWARM="{dirs}"\n', 1))
+
+    def test_an_empty_warm_list_exits_0_and_creates_nothing(self):
+        before = sorted(os.listdir(self.wt))
+        env = dict(os.environ, RELAY_WORKTREE=self.wt, RELAY_CACHE_DIR="")
+        proc = subprocess.run(["sh", self.HOOK], cwd=self.wt, env=env,
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(sorted(os.listdir(self.wt)), before)
+
+    # The inherited RLY-231 behaviours, run against the generic hook once WARM names the dirs.
+    def test_copies_deps_from_the_main_checkout_when_no_cache_dir(self):
+        self.warm("deps _build")
+        super().test_copies_deps_from_the_main_checkout_when_no_cache_dir()
+
+    def test_prefers_the_cache_dir_over_the_main_checkout(self):
+        self.warm("deps")
+        super().test_prefers_the_cache_dir_over_the_main_checkout()
+
+    def test_skips_a_dir_that_is_not_warm_anywhere_without_failing(self):
+        self.warm("deps _build")
+        super().test_skips_a_dir_that_is_not_warm_anywhere_without_failing()
+
+    def test_does_not_clobber_an_existing_destination(self):
+        self.warm("deps")
+        super().test_does_not_clobber_an_existing_destination()
+
+
 class _FakePopen:
     """Minimal Popen stand-in: yields the given stdout lines, then exits with `code`."""
 
@@ -4057,6 +4114,7 @@ class ApiTimeoutPassthroughTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
         relay.env = lambda name: "http://example.test"
+        pin_relay_url(self, "http://example.test")
         relay._api_backoff = lambda attempt: None
         relay.log = lambda *a, **k: None
         self._urlopen = relay.urllib.request.urlopen
@@ -4114,6 +4172,7 @@ class ApiDefaultTimeoutTest(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
         relay.env = lambda name: "http://example.test"
+        pin_relay_url(self, "http://example.test")
         relay._api_backoff = lambda attempt: None
         relay.log = lambda *a, **k: None
         self._urlopen = relay.urllib.request.urlopen
@@ -5914,6 +5973,7 @@ class RunnerHeartbeatTest(unittest.TestCase):
                                      lambda: [], lambda jid: None, interval=15)
         orig_env, orig_urlopen = relay.env, relay.urllib.request.urlopen
         relay.env = lambda name: "http://example.test"
+        pin_relay_url(self, "http://example.test")
         # Hold the fake 404 and close it ourselves: Python 3.14's HTTPError warns
         # (ResourceWarning, on stderr under unittest) when it is garbage-collected unclosed,
         # which is the test's own fixture leaking, not relay printing anything.
@@ -6291,6 +6351,19 @@ class AutoUpdateInstallTest(unittest.TestCase):
     def test_an_unwritable_target_is_reported_not_raised(self):
         self.assertFalse(relay.install_runner(VALID_STUB.format(99), 99,
                                                 os.path.join(self.tmp, "nope", "relay")))
+
+    # RE443: the auto-update path rewrites ./relay too, and must not drop the baked board URL.
+    def test_it_keeps_the_local_baked_board_url(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write('#!/usr/bin/env python3\nRUNNER_VERSION = 1\nBOARD_URL = "https://mine.test"\n')
+        source = '#!/usr/bin/env python3\nRUNNER_VERSION = 99\nBOARD_URL = ""\nprint("hi")\n'
+
+        self.assertTrue(relay.install_runner(source, 99, self.path))
+
+        with open(self.path, encoding="utf-8") as f:
+            written = f.read()
+        self.assertIn('\nBOARD_URL = "https://mine.test"\n', written)
+        self.assertIn('print("hi")', written)
 
 
 class AutoUpdateHandshakeTest(unittest.TestCase):
@@ -7677,6 +7750,7 @@ class ExecuteLoopTest(unittest.TestCase):
         self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
         relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(b"{}")
         relay.env = lambda name: "http://relay.test" if name == "RELAY_URL" else "x"
+        pin_relay_url(self, "http://relay.test")
         relay.log = lambda *a, **k: None
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
@@ -8774,6 +8848,62 @@ class RunnerSingletonLockTest(unittest.TestCase):
                 relay.acquire_runner_locks(cfg)
 
 
+class BoardUrlTest(unittest.TestCase):
+    """RE443: a served ./relay carries its board's URL on the BOARD_URL line. RELAY_URL still
+    overrides it; with neither, every URL-needing verb dies with a pointer to the install."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "BOARD_URL", relay.BOARD_URL)
+        prev = os.environ.get("RELAY_URL")
+        self.addCleanup(lambda: os.environ.__setitem__("RELAY_URL", prev)
+                        if prev is not None else os.environ.pop("RELAY_URL", None))
+        os.environ.pop("RELAY_URL", None)
+
+    def test_the_baked_url_is_used_when_relay_url_is_unset(self):
+        relay.BOARD_URL = "https://b.test"
+        self.assertEqual(relay.relay_url(), "https://b.test")
+
+    def test_relay_url_overrides_the_baked_url(self):
+        relay.BOARD_URL = "https://b.test"
+        os.environ["RELAY_URL"] = "http://override.test"
+        self.assertEqual(relay.relay_url(), "http://override.test")
+
+    def test_an_empty_relay_url_falls_back_to_the_baked_url(self):
+        relay.BOARD_URL = "https://b.test"
+        os.environ["RELAY_URL"] = ""
+        self.assertEqual(relay.relay_url(), "https://b.test")
+
+    def test_neither_dies_naming_the_missing_baked_url(self):
+        relay.BOARD_URL = ""
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(relay.Died) as cm:
+                relay.relay_url()
+        self.assertIn("no baked board URL", cm.exception.msg)
+
+    def test_the_committed_runner_carries_an_empty_placeholder(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn('\nBOARD_URL = ""\n', src)
+        self.assertEqual(relay.board_url_of(src), "")
+
+    def test_bake_then_read_round_trips(self):
+        baked = relay.bake_board_url('x\nBOARD_URL = ""\ny\n', "https://relay.test")
+        self.assertEqual(baked, 'x\nBOARD_URL = "https://relay.test"\ny\n')
+        self.assertEqual(relay.board_url_of(baked), "https://relay.test")
+        self.assertEqual(relay.bake_board_url(baked, ""), 'x\nBOARD_URL = ""\ny\n')
+
+    def test_a_source_without_the_line_is_unchanged_and_reads_empty(self):
+        self.assertEqual(relay.bake_board_url("x\n", "https://relay.test"), "x\n")
+        self.assertEqual(relay.board_url_of("x\n"), "")
+
+    # The 5016 call site renders `{url}` into a node's command: an unset URL stays "", never dies.
+    def test_build_payload_url_var_falls_back_to_the_baked_url(self):
+        relay.BOARD_URL = "https://b.test"
+        self.assertEqual(relay.configured_relay_url(), "https://b.test")
+        relay.BOARD_URL = ""
+        self.assertEqual(relay.configured_relay_url(), "")
+
+
 class RunnerFingerprintGuardTest(unittest.TestCase):
     """RLY-184: any edit to ./relay must come with a RUNNER_VERSION bump.
 
@@ -8816,6 +8946,15 @@ class RunnerFingerprintGuardTest(unittest.TestCase):
             src = f.read()
         self.assertNotEqual(relay.runner_fingerprint(src + "\n# a trailing comment\n"),
                             relay.runner_fingerprint(src))
+
+    # RE443: the board bakes its URL into every served ./relay, so the baked line is masked too
+    # — a served copy must fingerprint the same as the committed placeholder.
+    def test_baking_a_board_url_is_fingerprint_stable(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            src = f.read()
+        baked = relay.bake_board_url(src, "https://relay.example")
+        self.assertNotEqual(baked, src, "the bake matched nothing")
+        self.assertEqual(relay.runner_fingerprint(baked), relay.runner_fingerprint(src))
 
 
 def version_bump_problem(current_src, base_src, main_src, base_rev="the merge-base"):
@@ -9766,7 +9905,7 @@ class UpdateTest(unittest.TestCase):
 
     BOARD = "http://board.test"
 
-    SKILLS = ("relay-setup", "relay-update", "relay-doctor", "relay-onboard")
+    SKILLS = ("relay-update", "relay-doctor", "relay-onboard")
 
     def setUp(self):
         isolate_relay_state(self)
@@ -9789,6 +9928,10 @@ class UpdateTest(unittest.TestCase):
         for skill in self.SKILLS:
             self.served[f".claude/skills/{skill}/SKILL.md"] = f"{skill} skill\n"
         self.fetched = []
+        # RE443: when set, the stub serves ./relay with this URL baked into its BOARD_URL line,
+        # and the manifest describes the baked bytes in `sha256` and the placeholder copy in
+        # `unbaked_sha256` — exactly what the app does. The version stays the build's.
+        self.baked_url = None
         self.stub()
 
     # ---- the stub board ----
@@ -9801,7 +9944,19 @@ class UpdateTest(unittest.TestCase):
         digest = hashlib.sha256(
             "\n".join(sorted(f"{i['path']}:{i['sha256']}" for i in items)).encode()
         ).hexdigest()[:12]
+        for item in items:
+            if item["path"] == relay.RUNNER_REL and self.baked_url is not None:
+                served = self.serve(relay.RUNNER_REL).encode()
+                item.update({relay.UNBAKED_SHA_KEY: item["sha256"],
+                             "sha256": hashlib.sha256(served).hexdigest(),
+                             "bytes": len(served)})
         return {"version": digest, "items": items}
+
+    def serve(self, rel):
+        body = self.served[rel]
+        if rel == relay.RUNNER_REL and self.baked_url is not None:
+            body = body.replace('\nBOARD_URL = ""\n', f'\nBOARD_URL = "{self.baked_url}"\n')
+        return body
 
     def stub(self):
         def fake(req, *a, **k):
@@ -9810,14 +9965,15 @@ class UpdateTest(unittest.TestCase):
             if url == self.BOARD + relay.SCAFFOLD_PATH:
                 return _FakeResp(json.dumps(self.manifest()).encode())
             rel = url.split(self.BOARD + relay.SCAFFOLD_PATH + "/", 1)[1]
-            return _FakeResp(self.served[rel].encode())
+            return _FakeResp(self.serve(rel).encode())
 
         relay.urllib.request.urlopen = fake
 
     # ---- helpers ----
 
-    def args(self, check=False, force=False):
-        return argparse.Namespace(check=check, force=force, json=False, field=None)
+    def args(self, check=False, force=False, starter_only=False, base=None):
+        return argparse.Namespace(check=check, force=force, json=False, field=None,
+                                  starter_only=starter_only, base=base)
 
     def path(self, rel):
         return os.path.join(self.tmp, rel)
@@ -9926,7 +10082,125 @@ class UpdateTest(unittest.TestCase):
 
     # ---- apply ----
 
-    def test_update_installs_all_six_files_and_records_the_version(self):
+    # ---- RE443: the board URL baked into ./relay ----
+
+    BAKEABLE_STUB = ('#!/usr/bin/env python3\nRUNNER_VERSION = {}\nBOARD_URL = ""\n'
+                     'print("hi")\n')
+
+    def _read(self, rel):
+        with open(self.path(rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_baked_runner_is_accepted_against_the_placeholder_sha(self):
+        self.served[relay.RUNNER_REL] = self.BAKEABLE_STUB.format(relay.RUNNER_VERSION)
+        self.baked_url = "http://board.test"
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertIn(relay.RUNNER_REL, report["written"])
+        self.assertIn('\nBOARD_URL = "http://board.test"\n', self._read(relay.RUNNER_REL))
+
+    # RE443 review: every runner up to v89 verifies a download with a RAW
+    # `hashlib.sha256(body).hexdigest() != item["sha256"]` and dies otherwise — so the manifest's
+    # `sha256` must hash the served (baked) bytes, or no installed runner can update itself.
+    def test_a_pre_v90_raw_sha_check_accepts_the_served_runner(self):
+        self.served[relay.RUNNER_REL] = self.BAKEABLE_STUB.format(relay.RUNNER_VERSION)
+        self.baked_url = "http://board.test"
+
+        item = next(i for i in self.manifest()["items"] if i["path"] == relay.RUNNER_REL)
+        body = relay._fetch(relay.scaffold_base() + "/" + relay.RUNNER_REL)
+
+        self.assertIn(b'\nBOARD_URL = "http://board.test"\n', body)
+        self.assertEqual(hashlib.sha256(body).hexdigest(), item["sha256"])
+        self.assertEqual(relay.runner_sha256(body), item[relay.UNBAKED_SHA_KEY])
+
+    # A board that predates `unbaked_sha256` served the placeholder copy's sha in `sha256`.
+    def test_manifest_sha_falls_back_to_sha256_without_the_unbaked_key(self):
+        runner = {"path": relay.RUNNER_REL, "sha256": "a" * 64}
+        self.assertEqual(relay.manifest_sha(runner), "a" * 64)
+        self.assertEqual(relay.manifest_sha({**runner, relay.UNBAKED_SHA_KEY: "b" * 64}), "b" * 64)
+        self.assertEqual(relay.manifest_sha({"path": relay.GUIDE_REL, "sha256": "c" * 64,
+                                             relay.UNBAKED_SHA_KEY: "d" * 64}), "c" * 64)
+
+    def test_a_baked_runner_is_current_on_the_next_run(self):
+        self.served[relay.RUNNER_REL] = self.BAKEABLE_STUB.format(relay.RUNNER_VERSION)
+        self.baked_url = "http://board.test"
+        capture_ret(relay.cmd_update, self.args())
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertEqual(report["changed"], [])
+        self.assertTrue(report["current"])
+
+    def test_an_update_keeps_the_local_baked_board_url(self):
+        self.served[relay.RUNNER_REL] = self.BAKEABLE_STUB.format(relay.RUNNER_VERSION)
+        self.baked_url = "http://board.test"
+        self.write_local(relay.RUNNER_REL, '#!/usr/bin/env python3\nRUNNER_VERSION = 1\n'
+                                           'BOARD_URL = "https://mine.test"\nprint("old")\n')
+        os.chmod(self.path(relay.RUNNER_REL), 0o755)
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        self.assertIn(relay.RUNNER_REL, report["written"])
+        written = self._read(relay.RUNNER_REL)
+        self.assertIn('\nBOARD_URL = "https://mine.test"\n', written)
+        self.assertIn('print("hi")', written)
+
+    # ---- RE443: --starter-only / --base ----
+
+    def test_starter_only_writes_the_config_and_hook_offline(self):
+        report = capture_ret(relay.cmd_update, self.args(starter_only=True, base="origin/trunk"))
+
+        self.assertEqual(self.fetched, [])
+        self.assertEqual(report, {"config": "created", "hook": "created", "applied": True})
+        config = json.loads(relay.strip_json_comments(self._read(relay.RUNNER_CONFIG_REL)))
+        self.assertEqual(config["base"], "origin/trunk")
+        hook = self.path(relay.PREPARE_HOOK_DEFAULT)
+        self.assertEqual(os.stat(hook).st_mode & 0o777, 0o755)
+        self.assertIn('\nWARM=""\n', self._read(relay.PREPARE_HOOK_DEFAULT))
+        self.assertFalse(os.path.exists(self.path(relay.RUNNER_REL)))
+
+    def test_starter_only_never_overwrites_either_file(self):
+        capture_ret(relay.cmd_update, self.args(starter_only=True, base="origin/trunk"))
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"namespace": "mine"}\n')
+        self.write_local(relay.PREPARE_HOOK_DEFAULT, "#!/bin/sh\necho mine\n")
+
+        report = capture_ret(relay.cmd_update, self.args(starter_only=True))
+
+        self.assertEqual(report, {"config": "present", "hook": "present", "applied": True})
+        self.assertEqual(self._read(relay.RUNNER_CONFIG_REL), '{"namespace": "mine"}\n')
+        self.assertEqual(self._read(relay.PREPARE_HOOK_DEFAULT), "#!/bin/sh\necho mine\n")
+
+    def test_starter_only_defaults_the_base(self):
+        capture_ret(relay.cmd_update, self.args(starter_only=True))
+
+        config = json.loads(relay.strip_json_comments(self._read(relay.RUNNER_CONFIG_REL)))
+        self.assertEqual(config["base"], relay.DEFAULT_BASE)
+
+    def test_starter_only_is_not_refused_in_the_relay_app_repo(self):
+        self._make_app_repo()
+
+        report = capture_ret(relay.cmd_update, self.args(starter_only=True))
+
+        self.assertEqual(report["config"], "created")
+        self.assertEqual(report["hook"], "created")
+
+    def test_a_plain_update_honours_base_for_the_config_it_creates(self):
+        capture_ret(relay.cmd_update, self.args(base="origin/trunk"))
+
+        config = json.loads(relay.strip_json_comments(self._read(relay.RUNNER_CONFIG_REL)))
+        self.assertEqual(config["base"], "origin/trunk")
+
+    def test_starter_only_and_base_are_registered(self):
+        args = relay.build_parser().parse_args(
+            ["update", "--starter-only", "--base", "origin/trunk", "--json"])
+        self.assertTrue(args.starter_only)
+        self.assertEqual(args.base, "origin/trunk")
+        plain = relay.build_parser().parse_args(["update"])
+        self.assertFalse(plain.starter_only)
+        self.assertIsNone(plain.base)
+
+    def test_update_installs_all_five_files_and_records_the_version(self):
         report = capture_ret(relay.cmd_update, self.args())
 
         for rel in self.served:
@@ -9935,11 +10209,11 @@ class UpdateTest(unittest.TestCase):
         with open(self.path(".relay/scaffold.json")) as f:
             self.assertEqual(json.load(f)["version"], self.manifest()["version"])
 
-    def test_the_six_are_the_runner_the_guide_and_the_four_relay_skills(self):
+    def test_the_five_are_the_runner_the_guide_and_the_three_relay_skills(self):
         report = capture_ret(relay.cmd_update, self.args())
         installed = sorted(report["written"])
 
-        self.assertEqual(len(installed), 6)
+        self.assertEqual(len(installed), 5)
         self.assertIn(relay.RUNNER_REL, installed)
         self.assertIn(relay.GUIDE_REL, installed)
         for rel in installed:
@@ -10023,7 +10297,8 @@ class UpdateTest(unittest.TestCase):
                       out)
 
     def test_the_json_report_carries_config(self):
-        args = argparse.Namespace(check=False, force=False, json=True, field=None)
+        args = argparse.Namespace(check=False, force=False, json=True, field=None,
+                                  starter_only=False, base=None)
 
         out = capture(relay.cmd_update, args)
 
@@ -10264,19 +10539,28 @@ class ScaffoldContractTest(unittest.TestCase):
 
     def test_item_keys_are_what_scaffold_status_reads(self):
         for item in self.scaffold["manifest"]["items"]:
-            self.assertEqual(set(item), {"path", "sha256", "bytes"})
+            extra = {relay.UNBAKED_SHA_KEY} if item["path"] == relay.RUNNER_REL else set()
+            self.assertEqual(set(item), {"path", "sha256", "bytes"} | extra)
 
     def test_the_manifest_carries_a_version_string(self):
         self.assertIn("version", self.scaffold["manifest"])
 
     def test_the_runner_path_update_special_cases_is_a_manifest_item(self):
         paths = [i["path"] for i in self.scaffold["manifest"]["items"]]
-        self.assertEqual(len(paths), 6)
+        self.assertEqual(len(paths), 5)
         self.assertIn(relay.RUNNER_REL, paths)
         self.assertIn(relay.GUIDE_REL, paths)
         for path in paths:
             self.assertTrue(path in (relay.RUNNER_REL, relay.GUIDE_REL)
                             or path.startswith(".claude/skills/relay-"), path)
+
+    # RE443: the app bakes BOARD_URL with Relay.Scaffold.board_url_line/1; ./relay parses the
+    # same line with BOARD_URL_RE. One example pins the two together.
+    def test_the_baked_board_url_line_matches_the_app(self):
+        self.assertEqual(relay.bake_board_url('BOARD_URL = ""\n', "http://board.test").strip(),
+                         self.scaffold["board_url_line_example"])
+        self.assertEqual(relay.board_url_of(self.scaffold["board_url_line_example"] + "\n"),
+                         "http://board.test")
 
     def test_the_raw_file_route_is_the_base_plus_the_item_path(self):
         self.assertEqual(relay.scaffold_base("http://x") + "/" + relay.RUNNER_REL,

@@ -43,6 +43,7 @@ flowchart LR
     Boards --> Events
     Boards --> Flows
     Boards --> Repo
+    Boards --> Setup
     Cards --> Activity
     Cards --> Boards
     Cards --> Events
@@ -71,6 +72,10 @@ flowchart LR
     Runs --> Flows
     Runs --> Repo
     Runs --> Scaffold
+    Setup --> Agents
+    Setup --> ApiKeys
+    Setup --> Events
+    Setup --> Repo
     StoryMap --> Cards
     StoryMap --> Events
     StoryMap --> Repo

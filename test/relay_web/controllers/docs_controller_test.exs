@@ -24,7 +24,7 @@ defmodule RelayWeb.DocsControllerTest do
           "Create a board",
           "RELAY_URL",
           "RELAY_API_KEY",
-          "/relay-setup",
+          "/install",
           "relay start",
           "Settings",
           "Next up"
@@ -68,7 +68,8 @@ defmodule RelayWeb.DocsControllerTest do
     refute html =~ "RLY-181"
     refute html =~ "not available yet"
     assert html =~ "/api/scaffold"
-    assert html =~ "/relay-setup"
+    assert html =~ "/install"
+    refute html =~ "/relay-setup"
     refute html =~ "relay-config"
     refute html =~ "install.sh"
     refute html =~ "./relay init"
@@ -195,13 +196,16 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "except"
   end
 
-  test "the getting-started page says /relay-onboard authors relay.md and runner.json (RE304)",
+  # RE443: the install command lays down the starter runner.json (`./relay update
+  # --starter-only`); /relay-onboard then wires the repo to the flows and reviews that file.
+  test "the getting-started page says the install lays down runner.json and /relay-onboard reviews it",
        %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
-    assert html =~ "authors"
+    assert html =~ "./relay update --starter-only"
     assert html =~ "relay.md"
     assert html =~ ".relay/runner.json"
+    assert html =~ "wires this repo to your board"
   end
 
   test "an unknown slug is a 404", %{conn: conn} do

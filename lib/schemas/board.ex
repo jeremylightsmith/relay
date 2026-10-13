@@ -58,11 +58,13 @@ defmodule Schemas.Board do
     |> validate_required([:name, :slug, :key])
     |> validate_length(:name, min: 1, max: 80)
     |> validate_format(:key, ~r/\A[A-Z]{2}\z/, message: "must be exactly 2 letters")
-    |> validate_format(:slug, ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/,
-      message: "must be lowercase letters, numbers, and hyphens"
-    )
+    |> validate_format(:slug, slug_format(), message: "must be lowercase letters, numbers, and hyphens")
     |> unique_constraint(:slug)
   end
+
+  @doc "The board slug format — lowercase letters and digits in hyphen-separated runs (RE443: the install route checks it too)."
+  @spec slug_format() :: Regex.t()
+  def slug_format, do: ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
 
   # Upcase, then keep only A–Z. `validate_format/3` above enforces the "exactly 2" rule on the
   # normalized value, so "rl" -> "RL", "R1" -> "R" (rejected), "abc" -> "ABC" (rejected).

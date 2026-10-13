@@ -21,6 +21,7 @@ what each term *means*; the sections below say what each value *does*.
 | Run parked reason | `needs_input` · `claimed` · `runner_gone` | `Schemas.Run.parked_reasons/0` |
 | Run resume-refusal reason | `no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot` | `Schemas.Run.resume_refusal_reasons/0` |
 | Run status | `running` · `parked` · `done` · `failed` · `cancelled` | `Schemas.Run.statuses/0` |
+| Setup step status | `pending` · `active` · `waiting` · `done` · `failed` · `skipped` | `Schemas.BoardSetupStep.statuses/0` |
 | Stage category | `unstarted` · `planning` · `in_progress` · `complete` | `Schemas.Stage.categories/0` |
 | Stage type | `queue` · `work` · `planning` · `review` · `done` | `Schemas.Stage.types/0` |
 | Talk event kind | `user` · `tool` · `out` · `error` | `Schemas.TalkEvent.kinds/0` |

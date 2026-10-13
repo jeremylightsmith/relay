@@ -44,6 +44,7 @@ defmodule Relay do
       Runs.SchedulerSupervisor,
       Runs.Supervisor,
       Scaffold,
+      Setup,
       StoryMap,
       Talk,
       ValueStream,

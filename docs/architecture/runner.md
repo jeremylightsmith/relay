@@ -383,17 +383,19 @@ The board serves the scaffold again. Two routes on the **unauthenticated** `/api
 alongside `/api/version`:
 
 - `GET /api/scaffold` (`RelayWeb.Api.ScaffoldController.manifest/2`) — the manifest:
-  `{"version": "<12 hex>", "items": [{"path", "sha256", "bytes"}, …]}`.
+  `{"version": "<12 hex>", "items": [{"path", "sha256", "bytes"}, …]}`; the `relay` item also
+  carries `unbaked_sha256` (RE443, see **Hashing** below).
 - `GET /api/scaffold/*path` (`.show/2`) — the raw bytes of one manifest entry, 404 for anything
-  else. `Relay.Scaffold.fetch/1` checks a **static allowlist**, so this is not a general file
+  else. `Relay.Scaffold.fetch/2` checks a **static allowlist**, so this is not a general file
   server and traversal is impossible by construction.
 
-Unauthenticated because `/relay-setup` downloads `./relay` before a project has minted a board
-key, and because these files were published openly regardless.
+Unauthenticated because the board's install script (`/b/<slug>/install`) downloads `./relay`
+before anything has authenticated, and because these files were published openly regardless.
 
-**Exactly six files are Relay-owned** (`Relay.Scaffold.items/0`): `./relay`, the four
-`.claude/skills/relay-{setup,update,doctor,onboard}/SKILL.md`, and `relay.md`. They are never
-user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
+**Exactly five files are Relay-owned** (`Relay.Scaffold.items/0`): `./relay`, the three
+`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`, and `relay.md`. (RE443 retired the
+fourth, setup skill: the board's setup wizard hands out the install command instead.) They are
+never user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
 `AGENTS.md`/`CLAUDE.md`, `.relay/runner.json`, flow documents) is out of scope and is never
 served by this surface; wiring those is `/relay-onboard`'s job. The one local exception
@@ -401,7 +403,72 @@ served by this surface; wiring those is `/relay-onboard`'s job. The one local ex
 runner's own template — no endpoint serves it — and reports it under the `config` key
 (`created`, `missing` under `--check`, or `present`). It is never overwritten, never part of
 the scaffold version or manifest, never touched by auto-update, and not behind the in-app-repo
-`--force` refusal.
+`--force` refusal. `--base REF` sets the `base` of a runner.json the update creates.
+
+**`./relay update --starter-only [--base REF]`** (RE443) writes **only** the user-owned starter
+files, each only when missing: that `.relay/runner.json` and a generic
+`.relay/prepare-worktree.sh` (mode 755, `render_prepare_hook()` — the copy-from-cache-or-main-
+checkout warm-up, generalized over a `WARM=""` list the project fills in; empty, it copies
+nothing and exits 0). No network, no scaffold work, not refused in the Relay app repo, never an
+overwrite. Report: `{"config": "created"|"present", "hook": "created"|"present", "applied":
+true}`. The install script runs it after laying down the scaffold.
+
+**The served `./relay` carries its board's URL** (RE443). The committed file has a placeholder
+line `BOARD_URL = ""` right after `RUNNER_FINGERPRINT`; `ScaffoldController.show/2` serves it
+via `Relay.Scaffold.fetch("relay", board_url: RelayWeb.Endpoint.url())`, which rewrites that one
+line to `BOARD_URL = "<url>"` (`Relay.Scaffold.bake_board_url/2` / `board_url_line/1`, the ONE
+Elixir regex; `./relay`'s `bake_board_url` / `board_url_of` / `BOARD_URL_RE` are the ONE Python
+parse; the contract fixture's `scaffold.board_url_line_example` pins the two). The URL is the
+endpoint's configured one, never the request's `Host`, because this text gets executed.
+
+- **Lookup:** `relay_url()` — `RELAY_URL` when set and non-empty, else the baked `BOARD_URL`,
+  else it dies pointing at the install command. Every URL-needing call site goes through it; a
+  node's `{url}` variable uses the non-dying `configured_relay_url()`.
+- **Hashing:** the manifest describes the **served** bytes — `Relay.Scaffold.manifest(board_url:
+  RelayWeb.Endpoint.url())` sets the `relay` item's `sha256`/`bytes` to the baked copy's, because
+  every runner up to v89 verifies a download with a raw sha256 against that field, and adds
+  `unbaked_sha256`, the built placeholder copy's (the build never bakes). `./relay` v90+ hashes
+  `relay` with its `BOARD_URL` reset to `""` (`runner_sha256`) and compares it with
+  `manifest_sha(item)` — `unbaked_sha256`, or `sha256` from a board that predates the key —
+  both for `scaffold_status` and for verifying a downloaded body before install; otherwise a
+  baked local copy would read as changed forever. The scaffold **version** is derived from the
+  built (unbaked) shas, so it is one value per build on every board. The contract fixture pins
+  `unbaked_sha256`.
+- **Fingerprint:** `FINGERPRINT_MASK` masks `RUNNER_VERSION|RUNNER_FINGERPRINT|BOARD_URL`, so a
+  baked copy fingerprints the same as the committed one.
+- **Carried across rewrites:** `install_runner` keeps the existing file's non-empty `BOARD_URL`
+  over the one it is installing, so neither `./relay update` nor auto-update ever drops (or
+  repoints) a project's board.
+
+**The install handshake** (RE443). `GET /b/:slug/install` (`RelayWeb.InstallController`, a
+pipeline-free public route) serves a POSIX `sh` script rendered by `RelayWeb.InstallScript.render/2`
+from `lib/relay_web/install_script.sh.eex`, for any slug in `Schemas.Board.slug_format/0` (whether
+or not that board exists; anything else is a plain 404). It bakes `RelayWeb.Endpoint.url/0` and the
+format-checked slug — never the request's `Host` — plus the check ids from
+`Relay.Setup.preflight_checks/0` and the CLIs from `Relay.Setup.onboarding_llms/0`. Run in a repo
+as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
+
+1. runs the local checks (`git_repo` — `pwd` is the work tree's top level; `remote` — `origin`;
+   `default_branch` — `origin/HEAD`, else the current branch; `python3`) and `command -v` for each
+   onboarding CLI, using only `curl git python3 uname mktemp mkdir chmod mv rm cat grep printf`;
+2. `POST /api/setup/preflight` (board key) — the key's first authed call, which ticks setup step 3
+   and marks step 4 `waiting` or `failed` with the fix text. It prints the board's answer, one
+   `ok`/`!!` line per check; on any failure, the fixes and `fix_command`, then exits 1 having
+   written nothing;
+3. downloads `relay`, the onboarding skill and `relay.md` from `/api/scaffold/*path` into a temp
+   dir and moves them into place only once all arrived (`./relay`, the LLM's `skill_path`,
+   `relay.md`), appends the `relay.md` pointer line to the LLM's `pointer_file` and the three
+   `.gitignore` entries — each only if absent — and runs `./relay update --starter-only --base
+   origin/<branch>`;
+4. `POST /api/setup/installed` (board key), which finishes step 4 and activates step 5, then
+   prints `Next: open <cli> here and run /relay-onboard`.
+
+The key travels only in the `Authorization` header and is never written to a file. Both
+`/api/setup/*` endpoints refuse a key from another board (`403 wrong_board`); preflight also
+refuses a board still on step 2 (`409 step_2_pending`). A re-run is safe: steps already past are
+left alone and nothing is duplicated. A board with no checklist still gets the install (its LLM is
+the default agent's), with no checklist writes. `RelayWeb.ApiAuth` assigns `:current_api_key`
+(from `Relay.ApiKeys.authenticate_key/1`) for this.
 
 **The version is derived, never maintained.** `Relay.Scaffold.version/1` is the first 12 hex
 characters of the sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when
@@ -1876,7 +1943,7 @@ Replies: `# Escalating a plan-mandated finding` and `# Re-reviewing after a fix 
 version of this page said a `references/` file "would never reach the model"; that is wrong for
 any agent that reads it with a tool, and the probe is what settled it.
 
-**Shipping caveat for the `relay-*` skills.** The four `relay-*` skills still cannot rely on a
+**Shipping caveat for the `relay-*` skills.** The three `relay-*` skills still cannot rely on a
 sibling file — not because of how they load, but because of how they ship: `Relay.Scaffold.items/0`
 names `SKILL.md` only, so a reference file next to one would silently vanish from every scaffolded
 repo (which is why `relay-onboard/SKILL.md` says so). Agents are unaffected: `Relay.Scaffold`

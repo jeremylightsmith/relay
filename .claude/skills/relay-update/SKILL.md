@@ -7,18 +7,18 @@ description: Use when a project's Relay tooling may be stale — refreshing `./r
 
 ## Overview
 
-Relay owns exactly six files in your project:
+Relay owns exactly five files in your project:
 
 | Item | Path |
 |---|---|
 | the runner | `./relay` |
 | the agent guide | `relay.md` |
-| entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
 | updater skill | `.claude/skills/relay-update/SKILL.md` |
 | doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
 | onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |
 
-Your board serves them at `$RELAY_URL/api/scaffold`. They are **never user-edited**, so an
+Your board serves them at `$RELAY_URL/api/scaffold` (first installed by the
+`curl -fsSL <board>/b/<slug>/install | sh` command from the board's setup wizard). They are **never user-edited**, so an
 update overwrites them unconditionally — there is nothing of yours to lose, and no diff to
 review. Everything else in `.claude/` is yours and this skill never touches it.
 

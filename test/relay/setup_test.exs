@@ -1,0 +1,363 @@
+defmodule Relay.SetupTest do
+  @moduledoc "RE443: the board-owned setup checklist (`Relay.Setup`), the step-2 LLM pick and the step-3 key."
+  use Relay.DataCase, async: true
+
+  alias Relay.Agents
+  alias Relay.ApiKeys
+  alias Relay.Boards
+  alias Relay.Boards.Templates
+  alias Relay.Events
+  alias Relay.Setup
+  alias Schemas.BoardSetupStep
+
+  defp create!(slug, user \\ nil) do
+    user = user || insert(:user)
+    {:ok, board} = Boards.create_board(user, %{name: "S", slug: unique_slug("setup"), template: slug})
+    board
+  end
+
+  defp step(board, id), do: board |> Setup.checklist() |> Map.fetch!(:steps) |> Enum.find(&(&1.id == id))
+
+  defp rows(board), do: Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board.id, order_by: s.id))
+
+  defp setup_board(_) do
+    user = insert(:user)
+    %{user: user, board: create!("bare-minimum", user)}
+  end
+
+  # Moves the board's checklist to step `id` by finishing every top-level step before it.
+  defp advance_to!(board, id) do
+    for prior <- ~w(2 3 4 5 6 7), prior < id, do: {:ok, _} = Setup.advance(board, prior, :done, %{})
+    board
+  end
+
+  describe "BoardSetupStep" do
+    test "statuses are the closed set in order, with its two partitions" do
+      assert BoardSetupStep.statuses() == [:pending, :active, :waiting, :done, :failed, :skipped]
+      assert BoardSetupStep.current_statuses() == [:active, :waiting, :failed]
+      assert BoardSetupStep.finished_statuses() == [:done, :skipped]
+    end
+  end
+
+  describe "preview_checklist/2" do
+    test "builds a checklist with no database: unlisted steps pending, done_title only for :done" do
+      llm = Setup.onboarding_llm("claude-code")
+
+      checklist =
+        Setup.preview_checklist(
+          %{"1" => :done, "2" => :skipped, "3" => %{status: :failed, evidence: "preflight failed"}},
+          %{template: "Bare minimum", llm: llm}
+        )
+
+      [one, two, three | rest] = checklist.steps
+      assert one.title == "Board created from Bare minimum"
+      assert two.status == :skipped
+      assert two.title != two.done_title
+      assert three.evidence == "preflight failed"
+      assert Enum.all?(rest, &(&1.status == :pending))
+      assert checklist.current_id == "3"
+      assert checklist.done_count == 2
+      assert checklist.board_id == nil
+      assert checklist.llm == llm
+    end
+
+    test "checklist/1 is preview_checklist/2 over the board's rows" do
+      board = create!("bare-minimum")
+      checklist = Setup.checklist(board)
+      rows = Map.new(rows(board), &{&1.step, &1})
+
+      assert Setup.preview_checklist(rows, Map.take(checklist, [:board_id, :template, :template_warning, :llm])) ==
+               checklist
+    end
+  end
+
+  describe "start/2 via create_board/2" do
+    # Scenario 1
+    test "a bare-minimum board starts on step 2 with step 1 done" do
+      checklist = Setup.checklist(create!("bare-minimum"))
+
+      assert Enum.map(checklist.steps, & &1.id) == ~w(1 2 3 4 5 6 7)
+      [one, two | rest] = checklist.steps
+
+      assert one.status == :done
+      assert one.title == "Board created from Bare minimum"
+      assert one.evidence =~ ~r/^6 stages · 2 flows · \d\d:\d\d$/
+      assert two.status == :active
+      assert two.reached_at
+      assert Enum.all?(rest, &(&1.status == :pending))
+
+      assert checklist.template == "Bare minimum"
+      assert checklist.current_id == "2"
+      assert checklist.position == 2
+      assert checklist.done_count == 1
+      refute checklist.finished?
+    end
+
+    # Scenario 2
+    test "a board created with no template, or from the factory, has no checklist" do
+      {:ok, plain} = Boards.create_board(insert(:user), %{name: "Plain", slug: unique_slug("plain")})
+
+      for board <- [plain, insert(:board)] do
+        assert Setup.checklist(board) == nil
+        assert Setup.current(board) == nil
+      end
+    end
+
+    # Scenario 3
+    test "step 5 carries sub-steps 5.1–5.8 and names the onboarding LLM" do
+      five = step(create!("bare-minimum"), "5")
+
+      assert Enum.map(five.children, & &1.id) == ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
+      assert Enum.all?(five.children, &(&1.status == :pending))
+      assert five.title == "Onboard, in Claude Code"
+      assert String.starts_with?(five.why, "Claude Code reads this checklist")
+    end
+
+    test "placeholders resolve against the onboarding LLM" do
+      four = step(create!("bare-minimum"), "4")
+
+      assert ".claude/skills/relay-onboard/SKILL.md — the onboarding skill" in four.what_this_does
+      assert "relay.md, plus one line in CLAUDE.md pointing at it" in four.what_this_does
+      refute Enum.any?(four.what_this_does, &(&1 =~ "%{"))
+    end
+
+    # Scenario 10 (warning half)
+    test "template_warning is three-brain's warning, nil on bare-minimum" do
+      warning = Templates.get("three-brain").warning
+      assert is_binary(warning)
+
+      assert Setup.checklist(create!("three-brain")).template_warning == warning
+      assert Setup.checklist(create!("bare-minimum")).template_warning == nil
+    end
+
+    # Scenario 18
+    test "deleting the board deletes its setup rows" do
+      board = create!("bare-minimum")
+      assert length(rows(board)) == 15
+
+      {:ok, _} = Repo.delete(board)
+      assert rows(board) == []
+    end
+  end
+
+  describe "advance/4" do
+    setup :setup_board
+
+    # Scenario 4
+    test "refuses a step that is not current, an unknown status, and a board with no checklist", %{board: board} do
+      before = rows(board)
+
+      assert Setup.advance(board, "4", :done, %{}) == {:error, :not_current}
+      assert Setup.advance(board, "5.1", :done, %{}) == {:error, :not_current}
+      assert rows(board) == before
+
+      assert Setup.advance(board, "2", :bogus, %{}) == {:error, :invalid_status}
+      assert Setup.advance(insert(:board), "2", :done, %{}) == {:error, :no_checklist}
+    end
+
+    # Scenario 5
+    test "done completes the step, activates the next, and an identical repeat changes nothing", %{board: board} do
+      attrs = %{evidence: "chosen 14:03 · change in Settings", data: %{"llm" => "codex"}}
+
+      assert {:ok, checklist} = Setup.advance(board, "2", :done, attrs)
+      assert checklist.position == 3
+
+      two = Enum.find(checklist.steps, &(&1.id == "2"))
+      assert two.status == :done
+      assert two.completed_at
+      assert two.evidence == "chosen 14:03 · change in Settings"
+
+      three = Enum.find(checklist.steps, &(&1.id == "3"))
+      assert three.status == :active
+      assert three.reached_at
+
+      before = rows(board)
+      assert {:ok, _} = Setup.advance(board, "2", :done, attrs)
+      assert rows(board) == before
+    end
+
+    # Scenario 6
+    test "failed keeps the error and holds the next step; waiting then done clears it", %{board: board} do
+      advance_to!(board, "4")
+
+      assert {:ok, _} =
+               Setup.advance(board, "4", :failed, %{
+                 error: "Preflight stopped: Codex isn't on your PATH",
+                 data: %{"checks" => [%{"name" => "codex", "ok" => false}]}
+               })
+
+      assert %{status: :failed, error: "Preflight stopped: Codex isn't on your PATH"} = step(board, "4")
+      assert step(board, "5").status == :pending
+
+      assert {:ok, _} = Setup.advance(board, "4", :waiting, %{evidence: "preflight passed 14:10 · jl-mbp"})
+      assert {:ok, _} = Setup.advance(board, "4", :done, %{"evidence" => "downloaded 14:11 · ~/src/x · main"})
+
+      four = step(board, "4")
+      assert four.status == :done
+      assert four.error == nil
+      assert four.evidence == "downloaded 14:11 · ~/src/x · main"
+      assert four.data["checks"] == [%{"name" => "codex", "ok" => false}]
+      assert step(board, "5").status == :active
+    end
+
+    # Scenario 7
+    test "a change broadcasts {:setup_changed, board_id}; a refusal does not", %{board: board} do
+      board_id = board.id
+      Events.subscribe(board_id)
+
+      assert {:ok, _} = Setup.advance(board, "2", :done, %{})
+      assert_receive {:setup_changed, ^board_id}
+
+      assert {:error, :not_current} = Setup.advance(board, "5", :done, %{})
+      refute_receive {:setup_changed, _}
+    end
+
+    test "advancing 2–7 to done finishes the checklist", %{board: board} do
+      for id <- ~w(2 3 4 5 6 7), do: assert({:ok, _} = Setup.advance(board, id, :done, %{}))
+
+      checklist = Setup.checklist(board)
+      assert checklist.finished?
+      assert checklist.current_id == nil
+      assert checklist.position == 7
+      assert checklist.done_count == 7
+      assert Setup.current(board) == nil
+    end
+  end
+
+  describe "choose_llm/3" do
+    setup :setup_board
+
+    # Scenario 8
+    test "claude-code keeps the default, finishes step 2 and mints the step-3 key", %{board: board, user: user} do
+      assert {:ok, %{token: "relay_" <> _ = token, checklist: checklist}} = Setup.choose_llm(board, user, "claude-code")
+
+      assert Agents.default_agent(board).name == "Claude Opus"
+
+      two = Enum.find(checklist.steps, &(&1.id == "2"))
+      assert two.status == :done
+      assert two.data["llm"] == "claude-code"
+      assert two.evidence =~ ~r/^chosen \d\d:\d\d · change in Settings$/
+      assert two.title == "Default LLM: Claude Code"
+
+      three = Enum.find(checklist.steps, &(&1.id == "3"))
+      assert three.status == :active
+      assert [key] = ApiKeys.list_keys(board)
+      assert key.created_by_id == user.id
+      assert three.data["key_id"] == key.id
+      refute inspect(Setup.checklist(board)) =~ token
+    end
+
+    # Scenario 9
+    test "codex creates a Codex agent on the codex harness's first model", %{board: board, user: user} do
+      assert {:ok, %{checklist: checklist}} = Setup.choose_llm(board, user, "codex")
+
+      default = Agents.default_agent(board)
+      assert default.harness.key == "codex"
+      [%{models: [first_model | _]}] = Enum.filter(Agents.seed_harnesses(), &(&1.key == "codex"))
+      assert default.model == first_model
+
+      assert checklist.llm.cli == "codex"
+      assert Enum.find(checklist.steps, &(&1.id == "5")).title == "Onboard, in Codex"
+    end
+
+    # Scenario 10
+    test "codex on three-brain reuses the existing GPT agent" do
+      user = insert(:user)
+      board = create!("three-brain", user)
+      agents_before = length(Agents.list_agents(board))
+
+      assert {:ok, _} = Setup.choose_llm(board, user, "codex")
+
+      assert Agents.default_agent(board).name == "GPT"
+      assert length(Agents.list_agents(board)) == agents_before
+    end
+
+    # Scenario 11
+    test "a disabled, unknown or repeated pick is refused and mints no key", %{board: board, user: user} do
+      assert Setup.choose_llm(board, user, "gemini-cli") == {:error, :disabled_llm}
+      assert Setup.choose_llm(board, user, "nope") == {:error, :unknown_llm}
+      assert ApiKeys.list_keys(board) == []
+      assert step(board, "2").status == :active
+
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      assert Setup.choose_llm(board, user, "codex") == {:error, :not_current}
+      assert length(ApiKeys.list_keys(board)) == 1
+    end
+  end
+
+  describe "remint_key/2" do
+    setup :setup_board
+
+    # Scenario 12
+    test "revokes an unused setup key and mints a new one", %{board: board, user: user} do
+      {:ok, %{token: old}} = Setup.choose_llm(board, user, "claude-code")
+
+      assert {:ok, %{token: new, checklist: checklist}} = Setup.remint_key(board, user)
+      assert new != old
+      assert ApiKeys.authenticate(old) == :error
+      assert {:ok, _board} = ApiKeys.authenticate(new)
+      assert [new_key] = ApiKeys.list_keys(board)
+      assert Enum.find(checklist.steps, &(&1.id == "3")).data["key_id"] == new_key.id
+    end
+
+    test "a key a runner already used stays in place", %{board: board, user: user} do
+      {:ok, %{token: old}} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _board} = ApiKeys.authenticate(old)
+      assert [%{last_used_at: %DateTime{}}] = ApiKeys.list_keys(board)
+
+      assert {:ok, %{token: new}} = Setup.remint_key(board, user)
+      assert {:ok, _} = ApiKeys.authenticate(old)
+      assert {:ok, _} = ApiKeys.authenticate(new)
+      assert length(ApiKeys.list_keys(board)) == 2
+    end
+
+    test "refuses while step 2 is current", %{board: board, user: user} do
+      assert Setup.remint_key(board, user) == {:error, :not_current}
+    end
+  end
+
+  describe "catalog" do
+    # Scenario 13
+    test "onboarding_llms/0 reads harness and label from the seed harnesses" do
+      llms = Setup.onboarding_llms()
+      seeds = Map.new(Agents.seed_harnesses(), &{&1.key, &1.name})
+
+      assert Enum.map(llms, & &1.harness) == ["claude-code", "codex", "gemini-cli"]
+      assert Enum.all?(llms, &(seeds[&1.harness] == &1.label))
+      assert for(%{enabled?: false, harness: h} <- llms, do: h) == ["gemini-cli"]
+      assert Setup.onboarding_llm("codex").pointer_file == "AGENTS.md"
+      assert Setup.onboarding_llm("nope") == nil
+    end
+
+    # Scenario 14
+    test "install_command/2 trims the base URL's trailing slash" do
+      assert Setup.install_command("https://relay.test/", "streaks") ==
+               "curl -fsSL https://relay.test/b/streaks/install | sh"
+    end
+
+    # RE443 task 4: the wizard branches on these steps without re-typing their ids.
+    test "step_id/1 names the catalog id of each step the board drives" do
+      assert Setup.step_id(:llm) == "2"
+      assert Setup.step_id(:key) == "3"
+      assert Setup.step_id(:install) == "4"
+      assert Setup.step_id(:onboard) == "5"
+      assert Enum.find(Setup.steps(), &(&1.id == Setup.step_id(:onboard))).actor == :ai_terminal
+    end
+
+    # Scenario 15
+    test "steps/0 is the catalog in order, every actor known, every child under step 5" do
+      steps = Setup.steps()
+      ids = Enum.map(steps, & &1.id)
+
+      assert ids == ~w(1 2 3 4 5 5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8 6 7)
+      assert ids == Enum.uniq(ids)
+      assert Enum.all?(steps, &(&1.actor in Setup.actors()))
+      assert for(%{parent: parent} <- steps, parent, uniq: true, do: parent) == ["5"]
+
+      assert Enum.all?(steps, fn step ->
+               step |> Map.keys() |> Enum.sort() ==
+                 Enum.sort([:id, :parent, :title, :done_title, :actor, :why, :what_this_does, :read_only_note])
+             end)
+    end
+  end
+end

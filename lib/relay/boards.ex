@@ -4,7 +4,7 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Agents, Relay.Events, Relay.Flows, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Agents, Relay.Events, Relay.Flows, Relay.Repo, Relay.Setup, Schemas]
 
   import Ecto.Query
 
@@ -13,6 +13,7 @@ defmodule Relay.Boards do
   alias Relay.Events
   alias Relay.Flows
   alias Relay.Repo
+  alias Relay.Setup
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Membership
@@ -325,6 +326,7 @@ defmodule Relay.Boards do
         {:ok, board} ->
           seed_board!(board, template)
           insert_owner_membership!(board, user)
+          start_setup!(board, template)
 
           board
           |> Repo.preload(stages: from(s in Stage, order_by: s.position))
@@ -335,6 +337,10 @@ defmodule Relay.Boards do
       end
     end)
   end
+
+  # RE443: only a template board gets a setup checklist; the default path has none.
+  defp start_setup!(_board, nil), do: :ok
+  defp start_setup!(board, template), do: :ok = Setup.start(board, template)
 
   defp seed_board!(board, nil) do
     seed_stages!(board)

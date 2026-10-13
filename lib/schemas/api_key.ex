@@ -14,6 +14,8 @@ defmodule Schemas.ApiKey do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @name_max_length 80
 
   schema "api_keys" do

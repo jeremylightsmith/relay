@@ -24,7 +24,6 @@
         {
           "key": "mockups",
           "type": "agent",
-          "llm": "Claude Opus",
           "writes": ["mockups"],
           "run": "Card {ref} needs a design before anyone plans it.\n\n1. Open the running app and screenshot the screen this card changes.\n2. Build two HTML mockups that each make a different decision. Base them on what exists; don't redesign from scratch.\n3. Upload them with `{relay} mockups {ref} <a.html> <b.html> --caption \"<decision A>\" --caption \"<decision B>\"`, one caption per mockup that names its decision.\n4. Comment on what each option trades off: `{relay} comment {ref} @<file>`."
         }
@@ -43,7 +42,6 @@
         {
           "key": "plan",
           "type": "agent",
-          "llm": "Claude Opus",
           "max_retries": 1,
           "reads": ["mockups"],
           "writes": ["tasks"],
@@ -64,7 +62,6 @@
         {
           "key": "implement",
           "type": "agent",
-          "llm": "Claude Opus",
           "effort": "high",
           "max_retries": 1,
           "expects_commits": true,
@@ -80,33 +77,28 @@
         {
           "key": "fix",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "expects_commits": true,
           "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
         },
         {
           "key": "review",
           "type": "agent",
-          "llm": "Claude Opus",
           "run": "Every task of card {ref} is built and its tests pass. Review the whole change on this branch against the card and its tasks (`{relay} card {ref}`): anything missing, anything broken, anything a user would trip over. Run the tests once yourself.\n\nFail with a numbered list of the problems, most important first. Succeed if there is nothing worth fixing."
         },
         {
           "key": "fix_review",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "expects_commits": true,
           "run": "A review of card {ref} found the problems listed below. Fix each one, run the tests, and commit with the message \"{ref}: fix review findings\". Fix only what is listed."
         },
         {
           "key": "screenshots",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "run": "The code for {ref} is built and reviewed. Start the app, open each screen the card changes, and take a screenshot at desktop and phone width. Compare each one with the card's approved mockup (`{relay} mockups {ref} --pull <dir>` downloads it).\n\nUpload the mockups and your screenshots together with `{relay} mockups {ref} <files…>`, one `--caption` per file in order. That call replaces the card's list, so include the mockups; the reviewer then sees each mockup and the real screen side by side.\n\nFail if a screen clearly differs from its mockup, and list the differences."
         },
         {
           "key": "fix_visual",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "expects_commits": true,
           "run": "The screenshots of card {ref} differ from its approved mockup in the ways listed below. Change the code so each screen matches its mockup, run the tests, and commit with the message \"{ref}: match the mockup\"."
         }

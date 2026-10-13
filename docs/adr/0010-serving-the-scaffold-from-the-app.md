@@ -96,9 +96,34 @@ outside the set: it holds genuinely per-machine values (`capacity`, `base`, `pre
 overwriting it unconditionally would clobber real configuration.
 
 The Decision section above is left as written — it records what was decided at the time, and
-"five" there should be read as superseded by this amendment. Everywhere outside this document the
-count is **six**. Nothing else changes: same derived version, same unconditional overwrite, same
+"five" there should be read as superseded by this amendment. (RE443's amendment below brings the
+count back to five.) Nothing else changes: same derived version, same unconditional overwrite, same
 manifest shape.
+
+## Amendment (2026-10-12) — `/relay-setup` retired; `relay` served with a baked `BOARD_URL` (five files)
+
+RE443 retires the `/relay-setup` skill. Its job — get `./relay` onto disk before a project has
+a key — moved to the board: a board created from a template opens a setup wizard whose step 4
+hands out `curl -fsSL <board>/b/<slug>/install | sh`. A skill that had to be downloaded by hand
+before it could download everything else is no longer needed, so it leaves the set, and the
+scaffold is back to **five** files: `./relay`, `relay.md`, and the three
+`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`. The two count statements above ("five"
+in the Decision, "six" in the first amendment) are both superseded by this one.
+
+The served `relay` now carries the serving board's URL: the committed file has a placeholder
+`BOARD_URL = ""` line, and `GET /api/scaffold/relay` rewrites it to `BOARD_URL = "<url>"` using
+the endpoint's configured URL (never the request's `Host`). `GET /api/scaffold` describes those
+served bytes: the `relay` item's `sha256` and `bytes` are the **baked** copy's, because every
+runner up to v89 checks a download with a raw `sha256(body) == item["sha256"]` and would refuse
+anything else — leaving no installed runner able to `./relay update` itself. The item gains one
+key, `unbaked_sha256`, the sha of the built placeholder file (the build never bakes), which
+`./relay` v90+ compares against after resetting the line (`runner_sha256` / `manifest_sha`,
+falling back to `sha256` from a board without the key). The **version stays derived from the
+built (unbaked) shas**, so one build has one version on every board, whatever its URL.
+`RELAY_URL` overrides the baked value, `./relay update` and auto-update keep a project's baked
+value, and the line is masked out of the runner fingerprint. Everything else in this ADR — the
+derived version rule, the unconditional overwrite — is unchanged; the manifest shape changes
+only by that one additive key on the `relay` item.
 
 ## Alternatives considered
 

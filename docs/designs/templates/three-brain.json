@@ -45,14 +45,12 @@
         {
           "key": "judge",
           "type": "agent",
-          "llm": "Claude Opus",
           "writes": ["tasks"],
           "run": "Three models planned card {ref} independently. Their plans follow, one section per planner:\n\n{prior_detail}\n\nRead the card with `{relay} card {ref}`. Merge the plans into one: keep the best approach, take the strongest tasks from each, and drop duplicates. End with 2–6 tasks, each small enough to build and test in one sitting and saying how to tell it works.\n\n1. Post a comment headed \"How the plans were combined\" with `{relay} comment {ref} @<file>`, crediting what you took from claude_plan, gpt_plan and gemini_plan.\n2. Write each task's body to a file in the directory of $RELAY_NODE_SCRATCH and save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> …`.\n\nDo not write code."
         },
         {
           "key": "mockup",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "writes": ["mockups"],
           "run": "Card {ref} now has a merged plan; read it with `{relay} card {ref}`. Build one self-contained HTML mockup of the screen the plan changes, based on the app as it is today. Upload it with `{relay} mockups {ref} <mockup.html> --caption \"<what it shows>\"` so the reviewer can approve the plan and the look together."
         }
@@ -84,7 +82,6 @@
         {
           "key": "implement",
           "type": "agent",
-          "llm": "Claude Opus",
           "effort": "high",
           "max_retries": 1,
           "expects_commits": true,
@@ -100,14 +97,12 @@
         {
           "key": "fix",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "expects_commits": true,
           "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
         },
         {
           "key": "screenshots",
           "type": "agent",
-          "llm": "Claude Sonnet",
           "run": "The code for {ref} is built and tested. Start the app, open each screen the card changes, and take a screenshot at desktop width (1280px) and phone width (390px).\n\n`{relay} mockups` replaces the card's whole list, so first pull what is there with `{relay} mockups {ref} --pull <dir>`. Then upload those files and your screenshots in one call, with one `--caption` per file in the same order (e.g. \"<screen> — desktop\"), so the reviewer sees what was built.\n\nFail if the app won't start or a screen is broken, and say why."
         }
       ],

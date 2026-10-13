@@ -63,17 +63,42 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 89
-RUNNER_FINGERPRINT = "31efe613911dca4a3e767f7cd4928434628d6986b1c622709736687ea68b0464"
+RUNNER_VERSION = 90
+RUNNER_FINGERPRINT = "6983e8c36b8750dbc96ae09450f67ed0672ff10fc43b7c40c9de15f315c4b1e1"
+BOARD_URL = ""
 
-# The two constant lines above are masked out of the hash: satisfying the guard (bump the
-# integer, paste the fingerprint) must not itself re-break it. Everything else in the file is
-# covered, so no behaviour change can slip through without a deliberate bump.
-FINGERPRINT_MASK = re.compile(r"(?m)^(RUNNER_VERSION|RUNNER_FINGERPRINT)\s*=.*$")
+# The three constant lines above are masked out of the hash: satisfying the guard (bump the
+# integer, paste the fingerprint) must not itself re-break it, and BOARD_URL (RE443) is the
+# board's URL, which the board bakes into every copy it serves (`Relay.Scaffold.bake_board_url`)
+# so a project needs no RELAY_URL. The committed file carries it empty. Everything else in the
+# file is covered, so no behaviour change can slip through without a deliberate bump.
+FINGERPRINT_MASK = re.compile(r"(?m)^(RUNNER_VERSION|RUNNER_FINGERPRINT|BOARD_URL)\s*=.*$")
+
+# The ONE Python parse of the BOARD_URL line (RE443); `Relay.Scaffold`'s @board_url_re is the
+# app's. The value is a JSON string literal on one line; the contract fixture pins the two.
+BOARD_URL_RE = re.compile(r"(?m)^BOARD_URL\s*=[ \t]*(.*?)[ \t]*$")
+
+
+def board_url_of(source):
+    """The URL baked into a ./relay `source`, or "" when the line is absent, empty or garbled."""
+    m = BOARD_URL_RE.search(source)
+    if not m:
+        return ""
+    try:
+        value = json.loads(m.group(1))
+    except ValueError:
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def bake_board_url(source, url):
+    """`source` with its BOARD_URL line set to `url` ("" resets it to the placeholder). A source
+    without the line is returned unchanged."""
+    return BOARD_URL_RE.sub(lambda _m: f"BOARD_URL = {json.dumps(url)}", source, count=1)
 
 
 def runner_fingerprint(source=None):
-    """sha256 of this file with the two version constants masked out (RLY-184).
+    """sha256 of this file with the three masked constants masked out (RLY-184).
 
     No git dependency, so it behaves identically in a worktree, on a detached HEAD, or in CI."""
     if source is None:
@@ -117,6 +142,20 @@ def log(msg, *, ref=None, kind="lifecycle"):
 def env(name):
     v = os.environ.get(name)
     return v or die(f"{name} is not set")
+
+
+def configured_relay_url():
+    """The board this ./relay talks to, or "": RELAY_URL when set and non-empty, else the
+    baked BOARD_URL (RE443). For the callers that must not die on neither."""
+    return os.environ.get("RELAY_URL") or BOARD_URL
+
+
+def relay_url():
+    """The board this ./relay talks to (RE443) — RELAY_URL overrides the baked BOARD_URL — or
+    die. Every URL-needing call site goes through here."""
+    return configured_relay_url() or die(
+        "RELAY_URL is not set and this ./relay has no baked board URL — re-run the install "
+        "command from your board's setup wizard, or export RELAY_URL")
 
 
 API_MAX_ATTEMPTS = 3  # one initial try + up to two retries
@@ -232,7 +271,7 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
     (None) and soft_conflict (the 409 body) verdicts are returned as they always were.
     `retry_budget_s` (RE449) opts one call into retrying a transient failure past
     API_MAX_ATTEMPTS for up to that many seconds; None keeps the API_MAX_ATTEMPTS bound."""
-    url = env("RELAY_URL").rstrip("/") + path
+    url = relay_url().rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if auth:
@@ -1142,7 +1181,7 @@ def print_card(c):
         print("\n--- mockups ---")
         for m in mockups:
             print(f'  {m.get("caption") or "-"}  {m.get("url", "")}')
-    base = env("RELAY_URL").rstrip("/") if note_images(c) else ""
+    base = relay_url().rstrip("/") if note_images(c) else ""
     for e in c.get("timeline") or []:
         who = e.get("author", {}).get("name", "?")
         if e.get("kind") == "comment":
@@ -2259,8 +2298,9 @@ def _starter_key(lines, comments, key, value, last=False):
         lines.append(f"  {json.dumps(key)}: {json.dumps(value)}{comma}")
 
 
-def render_runner_config(namespace):
-    """The full commented starter runner.json for `namespace`. Strict JSON once the full-line
+def render_runner_config(namespace, base=None):
+    """The full commented starter runner.json for `namespace`, its `base` set to `base` when
+    given (RE443, `relay update --base REF`) else the default. Strict JSON once the full-line
     `//` comments are stripped, and still strict JSON with the three `worktrees` lines
     uncommented (the key before them keeps its comma; their closer carries one). Never writes
     a `name`: the file is tracked, and a pinned name would recreate the RE305 collision."""
@@ -2282,7 +2322,7 @@ def render_runner_config(namespace):
     _starter_key(lines, ["The ref every pool worktree is created at and reset to. Change it for "
                          "a repo on `master`,",
                          "a fork tracking `upstream/main`, etc."],
-                 "base", d["base"])
+                 "base", base or d["base"])
     _starter_key(lines, ["Scratch cache handed to worktree hooks as RELAY_CACHE_DIR."],
                  "cache_dir", f"~/.cache/relay/{namespace}")
     lines += [
@@ -2309,9 +2349,10 @@ def render_runner_config(namespace):
     return "\n".join(lines) + "\n"
 
 
-def ensure_runner_config(check):
+def ensure_runner_config(check, base=None):
     """Create the starter .relay/runner.json if it is missing (RE383): `"present"` (left
-    byte-identical, always), `"missing"` (`--check`: nothing written) or `"created"`.
+    byte-identical, always), `"missing"` (`--check`: nothing written) or `"created"`. `base`
+    (RE443's `--base REF`) only shapes a file this call creates.
 
     The path is resolved from ROOT at CALL time, not RUNNER_CONFIG_PATH (computed at import),
     so a repointed ROOT — every UpdateTest — never reads or writes this checkout's file. The
@@ -2322,7 +2363,79 @@ def ensure_runner_config(check):
     if check:
         return "missing"
     try:
-        _write_file(path, render_runner_config(default_namespace()), "644")
+        _write_file(path, render_runner_config(default_namespace(), base), "644")
+    except OSError as e:
+        die(f"could not write {path}: {e}")
+    return "created"
+
+
+def render_prepare_hook():
+    """The generic per-worktree warm-up hook `relay update --starter-only` lays down at
+    PREPARE_HOOK_DEFAULT (RE443): this repo's own RLY-231 copy-from-cache-or-main-checkout logic,
+    generalized over a `WARM` list the project fills in. It ships empty, so until someone names
+    a directory it copies nothing and exits 0. Raw, so the sed backslash reaches sh verbatim."""
+    return r"""#!/usr/bin/env sh
+# Relay prepare hook: warm a freshly created per-card worktree so a run does not start from a
+# cold dependency install. Each directory named in WARM (space-separated, relative to the repo
+# root — e.g. "node_modules" or "deps _build") is copied into the new worktree from the
+# configured cache dir, else from the main checkout, using an APFS copy-on-write clone where
+# available and a plain recursive copy elsewhere. Empty WARM: nothing is copied.
+#
+# Invoked by ./relay right after `git worktree add`, cwd = the new worktree. Inputs arrive as
+# both argv and env. A nonzero exit FAILS the run (fail-fast) — a broken cache surfaces at once.
+#
+#   $1/$RELAY_WORKTREE   abs path of the new worktree (== cwd)
+#   $2/$RELAY_REF        card ref
+#   $3/$RELAY_BRANCH     branch the run will attach
+#   $4/$RELAY_BASE       base ref
+#   $5/$RELAY_CACHE_DIR  configured cache dir (may be empty)
+set -eu
+
+WARM=""
+
+[ -z "$WARM" ] && exit 0
+
+WORKTREE="${RELAY_WORKTREE:-$1}"
+CACHE_DIR="${RELAY_CACHE_DIR:-}"
+
+# The warm source: the configured cache dir if it holds the dir, else the main checkout's own
+# copy (the repo you ran `relay start` from). git's common dir points at the main checkout's
+# .git; its parent is that checkout's root.
+MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's#/\.git/*$##')"
+
+copy_dir() {
+  # copy_dir <name>: clone <src>/<name> into $WORKTREE/<name> if the destination is missing.
+  name="$1"
+  dest="$WORKTREE/$name"
+  [ -e "$dest" ] && return 0
+  src=""
+  if [ -n "$CACHE_DIR" ] && [ -d "$CACHE_DIR/$name" ]; then
+    src="$CACHE_DIR/$name"
+  elif [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT/$name" ]; then
+    src="$MAIN_ROOT/$name"
+  fi
+  [ -z "$src" ] && return 0     # nothing warm to copy → a cold build is correct, not an error
+  mkdir -p "$(dirname "$dest")"
+  # -c = APFS clonefile (copy-on-write); fall back to a plain recursive copy elsewhere.
+  cp -Rc "$src" "$dest" 2>/dev/null || cp -R "$src" "$dest"
+}
+
+for name in $WARM; do
+  copy_dir "$name"
+done
+echo "prepare-worktree: warmed $WORKTREE from ${CACHE_DIR:-$MAIN_ROOT}"
+"""
+
+
+def ensure_prepare_hook():
+    """Create the generic PREPARE_HOOK_DEFAULT (mode 755) if it is missing (RE443): `"present"`
+    (left byte-identical, always) or `"created"`. User-owned, like runner.json: never
+    overwritten, so this repo's own project-specific hook is safe from it."""
+    path = os.path.join(ROOT, PREPARE_HOOK_DEFAULT)
+    if os.path.exists(path):
+        return "present"
+    try:
+        _write_file(path, render_prepare_hook(), "755")
     except OSError as e:
         die(f"could not write {path}: {e}")
     return "created"
@@ -5093,7 +5206,7 @@ def run_node_job(job, slot_path, control, partition=None):
     raw_vars = dict(job.get("vars") or {})
     raw_vars.setdefault("ref", ref)
     raw_vars.setdefault("relay", HERE)
-    raw_vars.setdefault("url", os.environ.get("RELAY_URL", ""))
+    raw_vars.setdefault("url", configured_relay_url())
     vars = {k: v for k, v in raw_vars.items() if v is not None}
     cmd = render(job["run"], vars)
 
@@ -5581,7 +5694,7 @@ def _lock_dir():
 
 
 def identity_lock_path(cfg):
-    key = (env("RELAY_URL") + "\0" + cfg["name"]).encode("utf-8")
+    key = (relay_url() + "\0" + cfg["name"]).encode("utf-8")
     return os.path.join(_lock_dir(), f"exec-{hashlib.sha256(key).hexdigest()[:16]}.lock")
 
 
@@ -5716,6 +5829,37 @@ def _sha256_file(path):
         return None
 
 
+def runner_sha256(data):
+    """sha256 of ./relay bytes with BOARD_URL reset to the placeholder (RE443) — the manifest's
+    `unbaked_sha256` (see `manifest_sha`), since the board bakes its URL into the copy it
+    serves. Every manifest comparison for RUNNER_REL goes through here."""
+    try:
+        data = bake_board_url(data.decode("utf-8"), "").encode("utf-8")
+    except UnicodeDecodeError:
+        pass                                # not a ./relay at all: hash it as-is, never matches
+    return hashlib.sha256(data).hexdigest()
+
+
+def _runner_sha256_file(path):
+    try:
+        with open(path, "rb") as f:
+            return runner_sha256(f.read())
+    except OSError:
+        return None
+
+
+def carry_board_url(source, path):
+    """`source` with the BOARD_URL of the ./relay already at `path` when that one is non-empty,
+    else `source` as served (RE443): a project's baked board survives every rewrite of the file,
+    by `relay update` and by auto-update alike."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            local = board_url_of(f.read())
+    except (OSError, UnicodeDecodeError):
+        local = ""
+    return bake_board_url(source, local) if local else source
+
+
 RUNNER_VERSION_RE = re.compile(r"(?m)^RUNNER_VERSION\s*=\s*(\d+)")
 
 
@@ -5827,9 +5971,11 @@ def install_runner(source, version, path=None):
     os.replace() is atomic, so a concurrent `./relay card …` invocation reads either the old
     file or the new one, never a half-written one. The write is recorded so the write-safety
     guard recognizes the resulting dirt as ours next time.
+
+    The installed file keeps the BOARD_URL of the one it replaces when that is set (RE443).
     """
     path = path or HERE
-    data = source.encode("utf-8")
+    data = carry_board_url(source, path).encode("utf-8")
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
@@ -6073,7 +6219,7 @@ def cmd_start(args):
     update_state = check_update_handshake(new_auto_update_state())
     config_url = scaffold_base()
     poll_timeout = args.interval or cfg["poll_timeout"]
-    env("RELAY_URL"), env("RELAY_API_KEY")
+    relay_url(), env("RELAY_API_KEY")
     acquire_runner_locks(cfg)   # RLY-193: refuse a colliding second runner before any work
     runner = runner_ident(cfg)
     pool = RunnerPool(cfg)
@@ -6209,12 +6355,12 @@ def cmd_start(args):
     signal.signal(signal.SIGINT, _shutdown)
 
     log(f"runner {cfg['name']} v{RUNNER_VERSION} → "
-        f"board {board_desc or 'UNREACHABLE'} at {env('RELAY_URL')} — "
+        f"board {board_desc or 'UNREACHABLE'} at {relay_url()} — "
         f"namespace {cfg['namespace']} — "
         f"advertising {fmt_capacity(cfg['capacity'])}"
         + (" (dry-run)" if DRY else "") + (" — one job" if args.once else ""))
     if board_error:
-        log(f"WARNING: could not reach the board at {env('RELAY_URL')} — {board_error}. "
+        log(f"WARNING: could not reach the board at {relay_url()} — {board_error}. "
             "Polling anyway; if no work ever arrives, check RELAY_URL and RELAY_API_KEY.",
             kind="error")
     identity_warning = legacy_identity_warning(cfg["name"])
@@ -6446,7 +6592,7 @@ def cmd_outcome(args):
 
 # ============================ the scaffold (RE304) ============================
 #
-# Relay owns exactly six files in a project — `./relay`, the four `relay-*` skills, and
+# Relay owns exactly five files in a project — `./relay`, the three `relay-*` skills, and
 # `relay.md` — and the BOARD serves them at /api/scaffold. They are never user-edited, which is
 # what lets an update overwrite them unconditionally: no provenance ledger, no per-file diff
 # prompt, no "did you edit this or did we ship a newer one?" question.
@@ -6461,8 +6607,8 @@ GUIDE_REL = "relay.md"                 # the agent-facing guide; plain content, 
 
 
 def _fetch(url, timeout=30):
-    """GET a URL with NO credentials, returning raw bytes. `/relay-setup` and `relay update`
-    run before a board key exists, so this deliberately bypasses api()'s bearer token — the
+    """GET a URL with NO credentials, returning raw bytes. The board's install script and
+    `relay update` run before a board key is in hand, so this deliberately bypasses api()'s bearer token — the
     scaffold routes are unauthenticated by design (RE304).
 
     Used for the manifest's file BODIES; the manifest itself goes through api() instead (JSON,
@@ -6476,8 +6622,8 @@ def _fetch(url, timeout=30):
 
 
 def scaffold_base(url=None):
-    """The scaffold base URL on the board. The one place RELAY_URL becomes a scaffold URL."""
-    return (url or env("RELAY_URL")).rstrip("/") + SCAFFOLD_PATH
+    """The scaffold base URL on the board. The one place the board URL becomes a scaffold URL."""
+    return (url or relay_url()).rstrip("/") + SCAFFOLD_PATH
 
 
 def _safe_path(rel):
@@ -6536,9 +6682,9 @@ def fetch_scaffold_manifest():
 
 
 def in_relay_app_repo():
-    """Whether ROOT is the Relay APP repo — the one place the six files are SOURCE, not copies.
+    """Whether ROOT is the Relay APP repo — the one place the five files are SOURCE, not copies.
 
-    `lib/relay/scaffold.ex` is the marker: it is the module that defines the six paths and the
+    `lib/relay/scaffold.ex` is the marker: it is the module that defines the five paths and the
     version rule, so it exists in the app repo and nowhere else. A consuming project never has it.
     """
     return os.path.isfile(os.path.join(ROOT, "lib", "relay", "scaffold.ex"))
@@ -6580,7 +6726,7 @@ def scaffold_status():
     """The ONE comparison behind both `--check` and apply.
 
     **The work list is the verdict.** Every item is hashed against the manifest on every run,
-    and `current` is simply "nothing to write" — never a version comparison. The six files
+    and `current` is simply "nothing to write" — never a version comparison. The five files
     total ~209 KB, so there is no cost reason to gate the hashing on a cheaper signal, and
     two states make the hash the only trustworthy one:
 
@@ -6593,7 +6739,11 @@ def scaffold_status():
         leaves the version matching, and a version-gated check called the project current and
         left it broken — in the one file `relay update` exists to heal.
 
-    A missing file needs no separate condition: `_sha256_file` returns None for it, which
+    `./relay` is compared with its BOARD_URL reset (RE443) against the item's `unbaked_sha256`
+    (`manifest_sha`): the board serves, and the project keeps, a baked copy, and two projects on
+    two boards hold different bytes of one build.
+
+    A missing file needs no separate condition: the sha is None for it, which
     never equals a manifest sha, so it lands in `changed` like any other repair. `missing`
     stays in the report as information, not as a trigger.
 
@@ -6606,10 +6756,32 @@ def scaffold_status():
     missing = [i["path"] for i in manifest["items"]
                if not os.path.exists(_safe_path(i["path"]))]
     changed = [i["path"] for i in manifest["items"]
-               if _sha256_file(_safe_path(i["path"])) != i["sha256"]
+               if _scaffold_sha256_file(i["path"]) != manifest_sha(i)
                or (i["path"] == RUNNER_REL and not os.access(_safe_path(i["path"]), os.X_OK))]
     return {"served_version": served, "local_version": local, "current": not changed,
             "missing": missing, "changed": changed, "items": manifest["items"]}
+
+
+# RE443: the manifest's `relay` item carries the sha of the BAKED bytes the board serves in
+# `sha256` (so every runner up to v89, which checks a download raw, can still update itself) and
+# the built placeholder copy's in this key. Pinned to test/fixtures/runner_contract.json.
+UNBAKED_SHA_KEY = "unbaked_sha256"
+
+
+def manifest_sha(item):
+    """The sha a manifest item is compared against: for ./relay its `unbaked_sha256` (what
+    `runner_sha256` yields), falling back to `sha256` from a board that predates that key —
+    whose `sha256` was the placeholder copy's. Every other item is compared byte-for-byte."""
+    if item["path"] == RUNNER_REL:
+        return item.get(UNBAKED_SHA_KEY) or item["sha256"]
+    return item["sha256"]
+
+
+def _scaffold_sha256_file(rel):
+    """The manifest-comparable sha of a local scaffold item: ./relay is hashed with its baked
+    BOARD_URL reset (RE443), everything else byte-for-byte."""
+    path = _safe_path(rel)
+    return _runner_sha256_file(path) if rel == RUNNER_REL else _sha256_file(path)
 
 
 def install_scaffold(status):
@@ -6618,7 +6790,10 @@ def install_scaffold(status):
     Each body is checked against the manifest's sha256 before it touches disk, and `./relay`
     additionally goes through RE185's verified installer (`verify_runner_source` +
     `install_runner`'s atomic os.replace and write ledger) rather than a second copy of that
-    logic — so a concurrent `./relay card …` never reads a half-written CLI.
+    logic — so a concurrent `./relay card …` never reads a half-written CLI. The served
+    `./relay` arrives with the board's URL baked in, so its sha is checked with that line reset
+    (`runner_sha256`) against `manifest_sha`, and `install_runner` keeps a local non-empty
+    BOARD_URL over it (RE443).
     """
     base = scaffold_base()
     written = []
@@ -6631,7 +6806,8 @@ def install_scaffold(status):
             body = _fetch(url)
         except OSError as e:
             die(f"GET {url} failed: {e}")
-        if hashlib.sha256(body).hexdigest() != item["sha256"]:
+        sha = runner_sha256(body) if rel == RUNNER_REL else hashlib.sha256(body).hexdigest()
+        if sha != manifest_sha(item):
             die(f"{rel} does not match the manifest sha256 — refusing to write it")
         # install_runner() mkstemps NEXT TO the target and does not create directories, so a
         # first-ever install into a bare project needs the target's directory to exist first.
@@ -6677,8 +6853,25 @@ def format_scaffold(report):
     return "\n".join(lines + _format_config(report))
 
 
+def format_starter(report):
+    """The human report for `relay update --starter-only` (RE443)."""
+    return "\n".join([f"  {report['config']} {RUNNER_CONFIG_REL}",
+                      f"  {report['hook']} {PREPARE_HOOK_DEFAULT}"])
+
+
+def update_starter_only(args):
+    """`relay update --starter-only` (RE443): only the two user-owned starter files — the runner
+    config (`base` from `--base`) and the generic prepare hook — each only if missing. No network
+    and no scaffold work, so it needs no board and is not refused in the Relay app repo."""
+    report = {"config": ensure_runner_config(False, args.base),
+              "hook": ensure_prepare_hook(),
+              "applied": True}
+    emit(args, report, lambda: print(format_starter(report)))
+    return report
+
+
 def cmd_update(args):
-    """Install or refresh the six Relay-owned files from the board (RE304).
+    """Install or refresh the five Relay-owned files from the board (RE304).
 
     `--check` reports and writes nothing (and needs no TTY); without it, apply. Replaces
     `relay init`: one mechanism, no prompts, no optional items.
@@ -6687,7 +6880,7 @@ def cmd_update(args):
     (auto-update moved the bytes, the marker stayed behind), and without this the marker would
     lag forever. `--check` never writes it — reporting must stay side-effect free.
 
-    Applying REFUSES in the Relay app repo without `--force`. There the six files are the
+    Applying REFUSES in the Relay app repo without `--force`. There the five files are the
     source, and ADR 0010 couples publishing to deploying, so the board's served copy is by
     construction behind HEAD on any branch that touches them — meaning an apply would silently
     revert the very work in progress, skills first and `./relay` last. RE185's auto-update
@@ -6700,13 +6893,18 @@ def cmd_update(args):
 
     Last, it creates a starter .relay/runner.json when there is none (RE383, report key
     `config`). That file is user-owned — never overwritten, not a scaffold item, so `current`
-    stays scaffold-only — and the app-repo refusal does not cover it, since it overwrites nothing."""
+    stays scaffold-only — and the app-repo refusal does not cover it, since it overwrites nothing.
+    `--base REF` (RE443) sets the `base` of a runner.json this creates.
+
+    `--starter-only` (RE443) writes just the user-owned starter files: see update_starter_only."""
+    if args.starter_only:
+        return update_starter_only(args)
     status = scaffold_status()
     obsolete = obsolete_scaffold()
     written, removed = [], []
     if not args.check:
         if status["changed"] and in_relay_app_repo() and not args.force:
-            die("refusing to install into the Relay app repo: these six files are the SOURCE "
+            die("refusing to install into the Relay app repo: these five files are the SOURCE "
                 "here, not installed copies, and the board serves whatever was last deployed — "
                 f"applying would revert {len(status['changed'])} of them to it. "
                 "Use `./relay update --check` to see the difference, or --force if you really "
@@ -6717,7 +6915,7 @@ def cmd_update(args):
             write_scaffold_state(status["served_version"])
         removed = remove_obsolete(obsolete)
     # RE383: user-owned, so it sits after the scaffold work and outside the app-repo refusal.
-    config = ensure_runner_config(args.check)
+    config = ensure_runner_config(args.check, args.base)
     report = {"served_version": status["served_version"],
               "local_version": status["local_version"],
               "current": status["current"] and not obsolete,
@@ -7035,10 +7233,17 @@ def build_parser():
 
     # ---- Setup ----
     up = add("update", cmd_update, json_flag=True)
-    up.add_argument("--check", action="store_true",
-                    help="report what would change and write nothing")
+    mode = up.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true",
+                      help="report what would change and write nothing")
+    mode.add_argument("--starter-only", action="store_true",
+                      help=f"only create {RUNNER_CONFIG_REL} and {PREPARE_HOOK_DEFAULT} when "
+                           "missing — no board, no scaffold")
+    up.add_argument("--base", metavar="REF",
+                    help=f"the `base` of a {RUNNER_CONFIG_REL} this creates "
+                         f"(default {DEFAULT_BASE})")
     up.add_argument("--force", action="store_true",
-                    help="install even into the Relay app repo, where these six files are the source")
+                    help="install even into the Relay app repo, where these five files are the source")
     add("version", cmd_version, json_flag=True)
 
     _add_command_groups(p, sub)

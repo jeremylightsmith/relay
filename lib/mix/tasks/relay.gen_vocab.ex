@@ -41,6 +41,7 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Run branch state", {Schemas.RunBranch, :states}},
     {"Stage category", {Schemas.Stage, :categories}},
     {"Stage type", {Schemas.Stage, :types}},
+    {"Setup step status", {Schemas.BoardSetupStep, :statuses}},
     {"Talk turn status", {Schemas.TalkTurn, :statuses}},
     {"Talk event kind", {Schemas.TalkEvent, :kinds}}
   ]

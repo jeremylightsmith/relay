@@ -35,6 +35,8 @@ defmodule Relay.Events do
       receivers re-derive the affected card's count (and, if that card's drawer is
       open, its supporters). Payload is minimal on purpose — the count is a query,
       not a value pushed through the event.
+    * `{:setup_changed, board_id}` — the board's setup checklist (`Relay.Setup`, RE443)
+      started or a step changed; coarse on purpose, receivers re-read the checklist.
 
   A global firehose topic (`events:firehose`) additionally carries every
   event as `{board_id, event}` — one subscription observes all boards

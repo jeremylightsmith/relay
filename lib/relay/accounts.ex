@@ -255,6 +255,16 @@ defmodule Relay.Accounts do
   @doc "Revokes (deletes) a user token. It stops authenticating immediately."
   def revoke_user_api_token(%UserApiToken{} = token), do: Repo.delete(token)
 
+  @doc """
+  Sets whether `user` hides the board setup checklist's *what this does* explanations (RE443).
+  """
+  @spec set_setup_explanations_hidden(User.t(), boolean()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def set_setup_explanations_hidden(%User{} = user, hidden?) when is_boolean(hidden?) do
+    user
+    |> User.preferences_changeset(%{setup_explanations_hidden: hidden?})
+    |> Repo.update()
+  end
+
   # Throttled exactly like Relay.ApiKeys: a polling client must not write a row per
   # request, so only stamp when never used or older than the threshold.
   defp touch_user_token_last_used(%UserApiToken{last_used_at: last_used_at} = token) do

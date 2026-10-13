@@ -284,6 +284,7 @@
     }
   },
   "scaffold": {
+    "board_url_line_example": "BOARD_URL = \"http://board.test\"",
     "file_path_example": "/api/scaffold/relay",
     "manifest": {
       "items": [
@@ -299,18 +300,14 @@
         },
         {
           "bytes": "<bytes>",
-          "path": ".claude/skills/relay-setup/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
           "path": ".claude/skills/relay-update/SKILL.md",
           "sha256": "<sha256>"
         },
         {
           "bytes": "<bytes>",
           "path": "relay",
-          "sha256": "<sha256>"
+          "sha256": "<sha256>",
+          "unbaked_sha256": "<sha256>"
         },
         {
           "bytes": "<bytes>",

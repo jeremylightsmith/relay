@@ -177,6 +177,43 @@ defmodule Relay.ApiKeysTest do
     end
   end
 
+  # RE443 scenario 1: the key itself, so the setup handshake can name it (…last_four) and
+  # check it belongs to the board in the install URL.
+  describe "authenticate_key/1" do
+    test "returns the key with its board preloaded and bumps last_used_at" do
+      board = insert(:board)
+      board_id = board.id
+      {:ok, %{api_key: key, token: token}} = ApiKeys.create_key(board, insert(:user))
+      four = String.slice(token, -4, 4)
+
+      assert {:ok, %ApiKey{board: %Schemas.Board{id: ^board_id}, last_four: ^four} = found} =
+               ApiKeys.authenticate_key(token)
+
+      assert found.id == key.id
+      assert Repo.get!(ApiKey, key.id).last_used_at
+    end
+
+    test "a forged or revoked token is :error" do
+      board = insert(:board)
+      {:ok, %{api_key: key, token: token}} = ApiKeys.create_key(board, insert(:user))
+      ["relay", prefix, _secret] = String.split(token, "_", parts: 3)
+
+      assert ApiKeys.authenticate_key("relay_#{prefix}_#{String.duplicate("0", 64)}") == :error
+      assert ApiKeys.authenticate_key("garbage") == :error
+
+      {:ok, _} = ApiKeys.revoke(key)
+      assert ApiKeys.authenticate_key(token) == :error
+    end
+
+    test "authenticate/1 still returns the board" do
+      board = insert(:board)
+      board_id = board.id
+      {:ok, %{token: token}} = ApiKeys.create_key(board, insert(:user))
+
+      assert {:ok, %Schemas.Board{id: ^board_id}} = ApiKeys.authenticate(token)
+    end
+  end
+
   describe "authenticate/1 last_used_at throttling" do
     test "writes last_used_at when it was never set" do
       board = insert(:board)

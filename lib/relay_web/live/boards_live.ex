@@ -7,8 +7,8 @@ defmodule RelayWeb.BoardsLive do
   tile's star button (`toggle_star`) sets the user's personal star and
   reorders the grid in place without navigating. "New board" opens the template picker
   (RE442, `RelayWeb.TemplatePickerComponents`; `?template=<slug>` opens it preselected), whose
-  submit creates "Untitled board" from the chosen template and drops you into its settings to
-  name it. Loads fresh on navigate (no realtime — out of scope).
+  submit creates "Untitled board" from the chosen template and opens the board, where its setup
+  wizard (RE443) waits. Loads fresh on navigate (no realtime — out of scope).
   """
 
   use RelayWeb, :live_view
@@ -245,8 +245,9 @@ defmodule RelayWeb.BoardsLive do
     user = socket.assigns.current_scope.user
 
     case Boards.create_board(user, %{name: "Untitled board", template: slug}) do
+      # RE443: a template board opens on the board itself, where its setup wizard lives.
       {:ok, board} ->
-        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}/settings")}
+        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
 
       {:error, :unknown_template} ->
         {:noreply, put_flash(socket, :error, "That template no longer exists. Pick another.")}

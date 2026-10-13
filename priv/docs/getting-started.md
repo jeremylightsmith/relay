@@ -16,8 +16,9 @@ board seeds:
 - the **Spec:Review**, **Spec:Done** and **Plan:Done** lanes;
 - the **default flows** — Spec, Plan and Code.
 
-There is no setup wizard to look for, and nothing to import. The seeded flows arrive
-**disabled**; step 5 is where you turn one on.
+A board created from a template also opens a **setup wizard** beside it, which walks you
+through the steps below and ticks each one as the board sees it happen. Nothing needs
+importing. The seeded flows arrive **disabled**; step 5 is where you turn one on.
 
 Note your board's URL — it looks like `https://<board-host>/board/<slug>`. The `<slug>`
 appears in every board URL below.
@@ -46,32 +47,31 @@ the error you get without it.
 Everything the CLI needs is served by **your board** — **no access to the Relay repository is
 needed**, there is no repository to clone, and nothing comes from a third party.
 
-Download the `/relay-setup` skill into your project, then run it inside Claude Code:
+Create the board from a template and follow its **setup wizard**, docked beside the board.
+**Step 4 of the wizard gives you the install command** for your board — run it once, from the
+root of your project's git checkout:
 
 ```bash
-mkdir -p .claude/skills/relay-setup
-curl -fsSL "$RELAY_URL/api/scaffold/.claude/skills/relay-setup/SKILL.md" \
-  -o .claude/skills/relay-setup/SKILL.md
+curl -fsSL "https://<board-host>/b/<slug>/install" | sh
 ```
 
-```
-/relay-setup
-```
+The script checks your project first and writes nothing until those checks pass. Then it
+fetches `./relay` from `$RELAY_URL/api/scaffold/relay` **with your board's URL already baked
+in**, so the CLI finds its board without `RELAY_URL` (an exported `RELAY_URL` still overrides
+it, and `./relay update` keeps it). It also installs the Relay-owned skills and `relay.md`, and
+lays down a starter `.relay/runner.json` and `.relay/prepare-worktree.sh` with
+`./relay update --starter-only` — that is where step 4's capacity configuration comes from.
+Your board API key is never written to disk.
 
-That is the whole of CLI setup. `/relay-setup` downloads `./relay` from
-`$RELAY_URL/api/scaffold/relay` and runs `./relay update` to install the four Relay-owned
-skills and `relay.md`. Because a skill written mid-session is not discoverable until the skill
-list is rebuilt, it then asks you to **restart Claude Code** and run `/relay-onboard`, which
-wires this repo to your board's flows. `/relay-onboard` also authors `.relay/runner.json` for
-this repo if it is missing — that is where step 4's capacity configuration comes from.
+Then start Claude Code in the project and run `/relay-onboard`, which
+wires this repo to your board's flows and reviews the starter `.relay/runner.json` with you.
 
-Relay owns exactly six files in your project and updates them as a set:
+Relay owns exactly five files in your project and updates them as a set:
 
 | Item | Path |
 |---|---|
 | the runner | `./relay` |
 | the agent guide | `relay.md` |
-| entry-point skill | `.claude/skills/relay-setup/SKILL.md` |
 | updater skill | `.claude/skills/relay-update/SKILL.md` |
 | doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
 | onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |

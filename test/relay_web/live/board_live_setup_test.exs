@@ -1,0 +1,237 @@
+defmodule RelayWeb.BoardLiveSetupTest do
+  @moduledoc """
+  RE443 task 4: the setup wizard on the board — the docked-left panel (`#setup-panel`), the
+  top-bar chip (`#setup-chip`) and the read-only checklist phones see (`#setup-mobile`), all
+  rendered from `Relay.Setup.checklist/1` and re-rendered live on `{:setup_changed, board_id}`.
+  """
+  use RelayWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Relay.Agents
+  alias Relay.ApiKeys
+  alias Relay.Boards
+  alias Relay.Repo
+  alias Relay.Setup
+  alias Schemas.User
+
+  setup :register_and_log_in_user
+
+  defp create!(user, template, name \\ "Streaks") do
+    {:ok, board} = Boards.create_board(user, %{name: name, slug: unique_slug("streaks"), template: template})
+    board
+  end
+
+  defp text(view, selector) do
+    view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() |> String.replace(~r/\s+/, " ")
+  end
+
+  # The element's own attribute, not its descendants'.
+  defp attr(view, selector, name) do
+    view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.attribute(name) |> List.first()
+  end
+
+  defp token_in(view) do
+    assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+    "export RELAY_API_KEY=" <> token = view |> text("#setup-key-line code") |> String.trim()
+    token
+  end
+
+  defp pick!(view, harness) do
+    view |> element("#setup-llm-form") |> render_change(%{"llm" => harness})
+    view |> element("#setup-use-llm") |> render_click()
+    view
+  end
+
+  describe "a board created from a template" do
+    # Scenario 1
+    test "opens on the docked wizard beside the still-rendered board", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum", "Streaks")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      panel = text(view, "#setup-panel")
+      assert panel =~ "SETUP"
+      assert panel =~ "2 of 7"
+      assert panel =~ "Set up Streaks"
+
+      step1 = text(view, "#setup-step-1")
+      assert step1 =~ "Board created from Bare minimum"
+      assert step1 =~ "6 stages · 2 flows"
+
+      assert has_element?(view, "#setup-step-2 #setup-llm-form")
+      assert has_element?(view, ~s(section[id^="category-"]))
+      assert text(view, "#setup-chip") =~ "Setup · 2 of 7"
+    end
+
+    # Scenario 3
+    test "step 2 offers the LLMs, Gemini disabled, and picking Codex mints the shown-once key",
+         %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#setup-llm-gemini-cli[disabled]")
+      assert text(view, "#setup-step-2") =~ "coming soon"
+
+      pick!(view, "codex")
+
+      assert Agents.default_agent(board).harness.key == "codex"
+      step2 = text(view, "#setup-step-2")
+      assert step2 =~ "Default LLM: Codex"
+      assert step2 =~ "chosen"
+      assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+      assert text(view, "#setup-step-5") =~ "Onboard, in Codex"
+    end
+
+    # Scenario 4
+    test "a reload hides the key; minting a new one shows a fresh token and kills the first",
+         %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      first = view |> pick!("claude-code") |> token_in()
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(reloaded, "#setup-key-box")
+      assert has_element?(reloaded, "#setup-mint-key")
+
+      reloaded |> element("#setup-mint-key") |> render_click()
+      second = token_in(reloaded)
+
+      assert second != first
+      assert ApiKeys.authenticate(first) == :error
+      assert {:ok, _board} = ApiKeys.authenticate(second)
+    end
+
+    # Scenario 5
+    test "step 4 shows the install command and names the default CLI in the then-row",
+         %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, _} = Setup.advance(board, "2", :done, %{})
+      {:ok, _} = Setup.advance(board, "3", :done, %{})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      install = text(view, "#setup-install-command")
+      assert install =~ "curl -fsSL"
+      assert install =~ "/b/#{board.slug}/install | sh"
+      assert text(view, "#setup-then") =~ "Open claude in the same folder"
+    end
+
+    # Scenario 5 (after scenario 3's pick)
+    test "step 4's then-row follows the step-2 pick", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      pick!(view, "codex")
+      {:ok, _} = Setup.advance(board, "3", :done, %{})
+
+      assert text(view, "#setup-then") =~ "Open codex in the same folder"
+      assert text(view, "#setup-install-command") =~ "/b/#{board.slug}/install | sh"
+    end
+
+    # Scenario 6
+    test "the failed preflight and the finished install re-render live", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, _} = Setup.advance(board, "2", :done, %{})
+      {:ok, _} = Setup.advance(board, "3", :done, %{})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      {:ok, _} =
+        Setup.advance(board, "4", :failed, %{
+          error: "Preflight stopped: Claude Code isn't on your PATH",
+          data: %{
+            "checks" => [%{"id" => "cli", "label" => "claude on PATH", "ok" => false, "detail" => "not found"}],
+            "fix" => "Install it…",
+            "fix_command" => "npm install -g @anthropic-ai/claude-code"
+          }
+        })
+
+      step4 = text(view, "#setup-step-4")
+      assert step4 =~ "Preflight stopped: Claude Code isn't on your PATH"
+      assert step4 =~ "npm install -g @anthropic-ai/claude-code"
+      checks = text(view, "#setup-preflight-checks")
+      assert checks =~ "claude on PATH"
+      assert checks =~ "not found"
+
+      {:ok, _} = Setup.advance(board, "4", :waiting, %{evidence: "preflight passed 14:10 · jl-mbp"})
+      {:ok, _} = Setup.advance(board, "4", :done, %{evidence: "downloaded 14:11 · ~/src/x · main"})
+
+      assert text(view, "#setup-step-4") =~ "✓ downloaded"
+      assert has_element?(view, ~s(#setup-step-5[data-status="active"]))
+    end
+
+    # Scenario 7
+    test "minimize hides the panel and keeps the chip; the chip reopens it", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-minimize") |> render_click()
+      refute has_element?(view, "#setup-panel")
+      assert has_element?(view, "#setup-chip")
+
+      view |> element("#setup-chip") |> render_click()
+      assert has_element?(view, "#setup-panel")
+    end
+
+    # Scenario 8
+    test "the expert toggle hides explanations and persists on the user", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#setup-how-relay-works")
+      assert has_element?(view, "#setup-panel .setup-why")
+
+      view |> element("#setup-explanations-toggle") |> render_click()
+
+      refute has_element?(view, "#setup-how-relay-works")
+      refute has_element?(view, "#setup-panel .setup-why")
+      assert Repo.get!(User, user.id).setup_explanations_hidden
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(reloaded, "#setup-how-relay-works")
+      refute has_element?(reloaded, "#setup-panel .setup-why")
+    end
+
+    # Scenario 9
+    test "phones get a read-only checklist instead of the columns", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert text(view, "#setup-continue-banner") =~ "Continue on a computer"
+      refute has_element?(view, "#setup-mobile #setup-llm-form")
+      refute has_element?(view, "#setup-mobile #setup-key-box")
+      refute has_element?(view, "#setup-mobile #setup-install-command")
+      refute has_element?(view, "#setup-mobile button")
+      refute has_element?(view, "#setup-mobile input")
+      assert text(view, "#setup-mobile-checklist-step-3") =~ "Needs a computer"
+      assert text(view, "#setup-mobile") =~ "The board appears here once setup is done."
+
+      assert has_element?(view, "#setup-mobile.drawer\\:hidden")
+      assert has_element?(view, "#board-bands.hidden.drawer\\:flex")
+      refute attr(view, "#board-bands", "style") =~ "display:flex"
+      assert has_element?(view, "#board-pager-nav.hidden")
+      assert has_element?(view, "#setup-panel.hidden.drawer\\:flex")
+    end
+
+    # Scenario 10
+    test "a three-brain board warns about its three LLMs on step 2", %{conn: conn, user: user} do
+      three = create!(user, "three-brain")
+      {:ok, view, _html} = live(conn, ~p"/board/#{three.slug}")
+      assert text(view, "#setup-template-warning") =~ "Three-brain boards run Claude Code, Codex and Gemini"
+
+      bare = create!(user, "bare-minimum")
+      {:ok, bare_view, _html} = live(conn, ~p"/board/#{bare.slug}")
+      refute has_element?(bare_view, "#setup-template-warning")
+    end
+  end
+
+  # Scenario 2
+  describe "a board with no checklist" do
+    test "renders no wizard, chip or mobile checklist", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#setup-panel")
+      refute has_element?(view, "#setup-chip")
+      refute has_element?(view, "#setup-mobile")
+      assert attr(view, "#board-bands", "style") =~ "display:flex"
+      refute has_element?(view, "#board-pager-nav.hidden")
+    end
+  end
+end

@@ -548,10 +548,11 @@ CLI: `./relay version`.
 
 ### GET /api/scaffold
 
-The manifest of the six Relay-owned files this board serves: `./relay`, the four
+The manifest of the five Relay-owned files this board serves: `./relay`, the three
 `relay-*` skills, and `relay.md` (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
-pipeline as `GET /api/version` — `/relay-setup` runs before a project has a board key, so this
-has to be reachable with no `Authorization` header at all. `503 scaffold_unavailable` if the
+pipeline as `GET /api/version` — the board's install script (`/b/<slug>/install`) fetches them
+before anything has authenticated, so this has to be reachable with no `Authorization` header at
+all. `503 scaffold_unavailable` if the
 board has not built its scaffold (`mix relay.build_scaffold`, which `mix setup` runs
 automatically); a deployed board never returns it.
 
@@ -572,16 +573,85 @@ curl https://relay.example/api/scaffold
 
 One file's raw bytes. `path` is checked against the manifest's `items` — a static allowlist —
 before it ever reaches the filesystem, so this is not a general file server: any path outside
-the six Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+the five Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+
+`relay` is served with this board's URL baked into its `BOARD_URL = "<url>"` line (RE443), so a
+project needs no `RELAY_URL`. The URL is the board's configured one, never the request's `Host`.
+The manifest's `sha256` for `relay` is that of the placeholder copy (`BOARD_URL = ""`), and
+`./relay update` resets the line before comparing.
 
 ```
 curl https://relay.example/api/scaffold/relay
 curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
 ```
 
-CLI: `./relay update` fetches the manifest, hashes each of the six files against it, and
+CLI: `./relay update` fetches the manifest, hashes each of the five files against it, and
 re-downloads only the ones whose content differs — which covers a file that is missing, and one
 that has been edited. `.relay/scaffold.json` records what was installed; it is not the trigger.
+
+### POST /api/setup/preflight
+
+The board's install script (`curl -fsSL <host>/b/<slug>/install | sh`, RE443) calls this before it
+writes anything; you rarely call it by hand. Board key required — it is the key's first authed
+call, which ticks setup step 3. It then records the preflight on step 4 (`waiting` when every
+check passed, `failed` with the fix text otherwise). Steps already past are left alone, so a re-run
+answers 200 and changes nothing. A board with no setup checklist answers the same way and records
+nothing.
+
+```
+curl -X POST https://relay.example/api/setup/preflight \
+  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks",
+       "remote": "git@github.com:jl/streaks.git", "branch": "main",
+       "checks": [{"id": "git_repo", "ok": true, "detail": "~/src/streaks"},
+                  {"id": "remote", "ok": true, "detail": "origin → git@github.com:jl/streaks.git"},
+                  {"id": "default_branch", "ok": true, "detail": "main"},
+                  {"id": "python3", "ok": true, "detail": "/usr/bin/python3"}],
+       "clis": {"claude": "/usr/local/bin/claude", "codex": null, "gemini": null}}'
+```
+
+`checks` must carry each local check id exactly once (`git_repo`, `remote`, `default_branch`,
+`python3`); `clis` maps each onboarding CLI to its path, or `null` when it isn't on `PATH`.
+
+```json
+{ "ok": true, "board": "Streaks",
+  "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
+           "skill_path": ".claude/skills/relay-onboard/SKILL.md", "pointer_file": "CLAUDE.md" },
+  "checks": [
+    { "id": "git_repo", "label": "git repo", "ok": true, "detail": "~/src/streaks", "fix": null },
+    { "id": "remote", "label": "remote", "ok": true, "detail": "origin → git@github.com:jl/streaks.git", "fix": null },
+    { "id": "default_branch", "label": "default branch", "ok": true, "detail": "main", "fix": null },
+    { "id": "python3", "label": "python3", "ok": true, "detail": "/usr/bin/python3", "fix": null },
+    { "id": "cli", "label": "claude on PATH", "ok": true, "detail": "/usr/local/bin/claude", "fix": null },
+    { "id": "key", "label": "RELAY_API_KEY", "ok": true, "detail": "accepted by the board (…Wm7x)", "fix": null }
+  ],
+  "headline": null, "fix": null, "fix_command": null }
+```
+
+On a failed check `ok` is `false`, the check carries its `fix`, and `headline` / `fix` /
+`fix_command` describe the first failure (e.g. `"Preflight stopped: Claude Code isn't on your
+PATH"`, `"npm install -g @anthropic-ai/claude-code"`). Errors: `403 wrong_board` ("this key belongs
+to a different board") when `slug` is not the key's board; `409 step_2_pending` when the board's
+setup hasn't picked a default LLM yet; `422 invalid` for a malformed body or an unknown check id.
+
+### POST /api/setup/installed
+
+The install script's success report, after it wrote the Relay files. Board key required.
+Finishes setup step 4 (activating step 5) when it is the current step; otherwise changes nothing.
+
+```
+curl -X POST https://relay.example/api/setup/installed \
+  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks", "branch": "main",
+       "files": ["relay", ".claude/skills/relay-onboard/SKILL.md", "relay.md", "CLAUDE.md",
+                 ".relay/runner.json", ".relay/prepare-worktree.sh", ".gitignore"]}'
+```
+
+```json
+{ "ok": true }
+```
+
+Errors: `403 wrong_board`, `422 invalid`.
 
 ---
 

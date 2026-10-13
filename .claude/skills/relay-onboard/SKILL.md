@@ -16,7 +16,7 @@ Three legitimate paths, and the human picks one:
 
 - **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
   names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `./relay`
-  and the four `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
+  and the three `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
   A seeded factory takes the **migrated shape** from the start — see Phase 3.
 - **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
 - **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
@@ -42,7 +42,7 @@ missing, so an interrupted session continues instead of restarting. On an alread
 
 ## When to Use
 
-- Wiring Relay into a repo for the first time, right after `/relay-setup`.
+- Wiring Relay into a repo for the first time, right after the board's install command.
 - A repo whose `.claude/` and whose flows have drifted so far apart that the answer is a *path*,
   not a patch.
 - Before enabling a board's flows for the first time.
@@ -55,11 +55,12 @@ Two independent floors. The credential floor is always a **stop** — a skill ca
 The scaffold floor stops only when `./relay` itself is missing; a stale `relay-*` skill
 self-heals via `./relay update` instead.
 
-1. **Scaffold floor** — `./relay` and the four `relay-*` skills must be installed. If
-   `./relay` is missing, stop and hand the human the entry point:
+1. **Scaffold floor** — `./relay` and the three `relay-*` skills must be installed. If
+   `./relay` is missing, stop and hand the human the entry point — step 4 of the board's setup
+   wizard, which shows this command with the board's host and slug filled in:
 
-   ```
-   /relay-setup
+   ```bash
+   curl -fsSL <board>/b/<slug>/install | sh
    ```
 
    If `./relay` is present but any `relay-*` skill is missing or stale, refresh them with the

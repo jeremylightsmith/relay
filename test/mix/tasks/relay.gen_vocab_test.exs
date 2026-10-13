@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Relay.GenVocabTest do
       end
     end
 
-    test "the registry covers all twelve closed sets" do
+    test "the registry covers all thirteen closed sets" do
       labels = GenVocab.vocabularies() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
       assert labels == [
@@ -55,6 +55,7 @@ defmodule Mix.Tasks.Relay.GenVocabTest do
                "Run parked reason",
                "Run resume-refusal reason",
                "Run status",
+               "Setup step status",
                "Stage category",
                "Stage type",
                "Talk event kind",

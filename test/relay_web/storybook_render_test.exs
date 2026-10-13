@@ -25,6 +25,12 @@ defmodule RelayWeb.StorybookRenderTest do
     assert html =~ "inline · no skill"
   end
 
+  test "13. GET /storybook/setup_components/setup_checklist renders the setup checklist (RE443)", %{conn: conn} do
+    html = conn |> get("/storybook/setup_components/setup_checklist") |> html_response(200)
+    assert html =~ "Add your key to your environment"
+    assert html =~ "AI · terminal"
+  end
+
   test "GET /storybook/core_components/card_drawer shows the Notes count and the :question state (RE277)",
        %{conn: conn} do
     conn = get(conn, "/storybook/core_components/card_drawer")

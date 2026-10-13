@@ -99,10 +99,17 @@ defmodule RelayWeb.BoardLive do
   DEFAULTS — assigned in `assign_story_map_view/2` and passed down as an attr, and `Clear`
   merges `Map.take(view_defaults(), filter_keys())` rather than re-typing which keys are
   filters.
+
+  RE443 adds the setup wizard for a board created from a template: `:setup` is
+  `Relay.Setup.checklist/1` (nil for a board without one), rendered by `RelayWeb.SetupComponents`
+  as the docked-left panel and top-bar chip at ≥45rem and as a read-only checklist in place of the
+  columns below it. `{:setup_changed, _}` re-reads only the checklist. The shown-once step-3 key
+  lives only in `:setup_token`, never persisted, broadcast or put in the URL.
   """
 
   use RelayWeb, :live_view
 
+  alias Relay.Accounts
   alias Relay.Activity
   alias Relay.AgentLog
   alias Relay.Attachments
@@ -113,6 +120,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Members
   alias Relay.Presence
   alias Relay.Runs
+  alias Relay.Setup
   alias Relay.StoryMap
   alias Relay.Talk
   alias Relay.Votes
@@ -122,6 +130,7 @@ defmodule RelayWeb.BoardLive do
   alias RelayWeb.FlowShapeComponents
   alias RelayWeb.NativeCardNav
   alias RelayWeb.RunComponents
+  alias RelayWeb.SetupComponents
   alias RelayWeb.StoryMapComponents
   alias RelayWeb.StoryMapFilter
   alias RelayWeb.StoryMapGrid
@@ -209,6 +218,13 @@ defmodule RelayWeb.BoardLive do
         />
       </:title>
       <:actions :if={!viewer_open?(assigns)}>
+        <%!-- RE443 — the setup chip: `Setup · <position> of 7`; a click reopens the panel. --%>
+        <SetupComponents.setup_chip
+          :if={@live_action not in [:card, :story_map] and setup_active?(@setup)}
+          id="setup-chip"
+          checklist={@setup}
+          click="setup_open"
+        />
         <.card_search
           query={@search_query}
           results={@search_results}
@@ -279,212 +295,248 @@ defmodule RelayWeb.BoardLive do
           if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")
         ]}
       >
-        <div id="board" phx-hook="BoardDnD" class="flex min-h-0 flex-1 flex-col">
-          <div
-            :if={@read_only?}
-            id="read-only-banner"
-            class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5 action-group"
-            style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
-          >
-            <.icon name="hero-archive-box" class="size-4" />
-            <span class="flex-1">This board is archived and read-only.</span>
-            <.button
-              type="button"
-              id="restore-board-button"
-              phx-click="restore_board"
-              class="btn btn-sm"
-              pending="Restoring…"
-            >
-              Restore
-            </.button>
-          </div>
-          <RunComponents.stopped_work_banner
-            :if={@stopped_work}
-            id="stopped-work-banner"
-            verdict={@stopped_work}
-            class="mx-4 mb-2 mt-2 sm:mx-5"
+        <%!-- RE443 — below 45rem an unfinished setup checklist replaces the columns, read-only. --%>
+        <SetupComponents.setup_mobile
+          :if={setup_active?(@setup)}
+          id="setup-mobile"
+          checklist={@setup}
+          class="min-h-0 flex-1 overflow-y-auto bg-base-200 drawer:hidden"
+        />
+        <%!-- RE443 — the setup wizard docks left of the board (≥45rem); #board is untouched. --%>
+        <div
+          id="board-row"
+          class={["flex min-h-0", if(setup_active?(@setup), do: "drawer:flex-1", else: "flex-1")]}
+        >
+          <SetupComponents.setup_panel
+            :if={setup_active?(@setup) and not @setup_minimized}
+            id="setup-panel"
+            class="hidden drawer:flex"
+            checklist={@setup}
+            board_name={@board.name}
+            board_slug={@board.slug}
+            hide_explanations={@setup_hide_explanations}
+            token={@setup_token}
+            install_command={@setup_install_command}
+            selected_llm={@setup_llm_selected}
           />
-          <%!-- RE432 — one amber banner per flow paused by a broken board shape. --%>
-          <div :if={@paused_flows != []} class="mx-4 mb-2 mt-2 sm:mx-5">
-            <FlowShapeComponents.paused_flow_banners
-              id="paused-flow-banners"
-              flows={@paused_flows}
-              slug={@board.slug}
-              editor?={not @read_only?}
+          <div id="board" phx-hook="BoardDnD" class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              :if={@read_only?}
+              id="read-only-banner"
+              class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5 action-group"
+              style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+            >
+              <.icon name="hero-archive-box" class="size-4" />
+              <span class="flex-1">This board is archived and read-only.</span>
+              <.button
+                type="button"
+                id="restore-board-button"
+                phx-click="restore_board"
+                class="btn btn-sm"
+                pending="Restoring…"
+              >
+                Restore
+              </.button>
+            </div>
+            <RunComponents.stopped_work_banner
+              :if={@stopped_work}
+              id="stopped-work-banner"
+              verdict={@stopped_work}
+              class="mx-4 mb-2 mt-2 sm:mx-5"
             />
-          </div>
-          <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
+            <%!-- RE432 — one amber banner per flow paused by a broken board shape. --%>
+            <div :if={@paused_flows != []} class="mx-4 mb-2 mt-2 sm:mx-5">
+              <FlowShapeComponents.paused_flow_banners
+                id="paused-flow-banners"
+                flows={@paused_flows}
+                slug={@board.slug}
+                editor?={not @read_only?}
+              />
+            </div>
+            <%!-- RLY-94 · BOARD-01 — phone-width pager nav: compact header + stage chip
                 strip. Hidden at ≥45rem; the BoardPager hook owns the data-active
                 highlight and chip-tap scrolling (see assets/js/hooks/board_pager.js). --%>
-          <nav
-            id="board-pager-nav"
-            phx-hook="BoardPager"
-            class="board-pager-nav drawer:hidden"
-            aria-label="Stages"
-          >
-            <%!-- RLY-95 · BOARD-01 — plain web: ‹ back · board name (the ‹ is the route
+            <nav
+              id="board-pager-nav"
+              phx-hook="BoardPager"
+              class={["board-pager-nav drawer:hidden", setup_active?(@setup) && "hidden"]}
+              aria-label="Stages"
+            >
+              <%!-- RLY-95 · BOARD-01 — plain web: ‹ back · board name (the ‹ is the route
                   back to /boards; ?from= drives the CURRENT badge). RE376: embedded, the
                   native shell owns board switching, so the name becomes the switcher
                   title instead. --%>
-            <div id="board-pager-header" class="board-pager-header">
-              <%!-- RE376 · BOARD-01 — embedded, the board name is the switcher: the BoardPager
+              <div id="board-pager-header" class="board-pager-header">
+                <%!-- RE376 · BOARD-01 — embedded, the board name is the switcher: the BoardPager
                     hook bridges a tap to the native shell (relayOpenBoardSwitcher), which
                     opens the native "Switch board" sheet. Plain web keeps ‹ + title. --%>
-              <button
-                :if={@embed}
-                type="button"
-                id="board-switch-board"
-                class="board-pager-switch"
-                aria-label="Switch board"
-                data-board={@board.slug}
-              >
-                <span class="board-pager-title">{@board.name}</span>
-                <.icon
-                  name="hero-chevron-down"
-                  class="board-pager-caret size-6 text-base-content/45"
-                />
-              </button>
-              <.link
-                :if={not @embed}
-                id="board-pager-back"
-                navigate={~p"/boards?from=#{@board.slug}"}
-                class="board-pager-back"
-                aria-label="All boards"
-              >
-                ‹
-              </.link>
-              <span :if={not @embed} class="board-pager-title">{@board.name}</span>
-              <%!-- RLY-126 · BOARD-04 — embed-only: opens the NATIVE New-card sheet via the
+                <button
+                  :if={@embed}
+                  type="button"
+                  id="board-switch-board"
+                  class="board-pager-switch"
+                  aria-label="Switch board"
+                  data-board={@board.slug}
+                >
+                  <span class="board-pager-title">{@board.name}</span>
+                  <.icon
+                    name="hero-chevron-down"
+                    class="board-pager-caret size-6 text-base-content/45"
+                  />
+                </button>
+                <.link
+                  :if={not @embed}
+                  id="board-pager-back"
+                  navigate={~p"/boards?from=#{@board.slug}"}
+                  class="board-pager-back"
+                  aria-label="All boards"
+                >
+                  ‹
+                </.link>
+                <span :if={not @embed} class="board-pager-title">{@board.name}</span>
+                <%!-- RLY-126 · BOARD-04 — embed-only: opens the NATIVE New-card sheet via the
                     BoardPager hook's relayCreateCard bridge. Plain web has no native handler,
                     so the button does not render outside embed mode. --%>
-              <button
-                :if={@embed}
-                type="button"
-                id="board-create-card"
-                class="board-pager-create btn btn-primary btn-circle size-11 min-h-11"
-                aria-label="New card"
-                data-board={@board.slug}
-                data-stages={Jason.encode!(for stage <- flat_stages(@stage_groups), do: stage.name)}
-              >
-                <.icon name="hero-plus" class="size-6" />
-              </button>
-            </div>
-            <div class="board-pager-chips">
-              <button
-                :for={
-                  {stage, collapsed?} <-
-                    pager_chips(
-                      @stage_groups,
-                      @stage_counts,
-                      @sublanes_by_parent,
-                      @force_open,
-                      @stage_force_closed
-                    )
-                }
-                type="button"
-                id={"stage-chip-#{stage.id}"}
-                class="board-pager-chip"
-                data-chip-stage-id={stage.id}
-                data-stage-name={stage.name}
-                data-ai={to_string(Map.has_key?(@stage_flows, stage.id))}
-                data-collapsed={to_string(collapsed?)}
-              >
-                <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
-                <span class="board-pager-chip-dot"></span>
-                {stage.name}
-                <span class="board-pager-chip-count">
-                  {total_count(stage, @stage_counts, @sublanes_by_parent)}
-                </span>
-              </button>
-            </div>
-            <span class="board-pager-fade" aria-hidden="true"></span>
-          </nav>
-          <div
-            id="board-bands"
-            class="drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]"
-            style="display:flex;gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:var(--color-base-200);flex:1 1 auto;min-height:0;"
-          >
-            <section
-              :for={{category, stages} <- @stage_groups}
-              id={"category-#{category}"}
-              style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
-            >
-              <div
-                class="category-band-header"
-                style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;"
-              >
-                <span class="category-dot" style={category_dot_style(category)}></span>
-                <h2
-                  class="category-band"
-                  style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0;"
+                <button
+                  :if={@embed}
+                  type="button"
+                  id="board-create-card"
+                  class="board-pager-create btn btn-primary btn-circle size-11 min-h-11"
+                  aria-label="New card"
+                  data-board={@board.slug}
+                  data-stages={Jason.encode!(for stage <- flat_stages(@stage_groups), do: stage.name)}
                 >
-                  {category_label(category)}
-                </h2>
-                <span style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);">
-                  {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
-                </span>
+                  <.icon name="hero-plus" class="size-6" />
+                </button>
               </div>
-              <div
-                class="category-stages"
-                style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;"
+              <div class="board-pager-chips">
+                <button
+                  :for={
+                    {stage, collapsed?} <-
+                      pager_chips(
+                        @stage_groups,
+                        @stage_counts,
+                        @sublanes_by_parent,
+                        @force_open,
+                        @stage_force_closed
+                      )
+                  }
+                  type="button"
+                  id={"stage-chip-#{stage.id}"}
+                  class="board-pager-chip"
+                  data-chip-stage-id={stage.id}
+                  data-stage-name={stage.name}
+                  data-ai={to_string(Map.has_key?(@stage_flows, stage.id))}
+                  data-collapsed={to_string(collapsed?)}
+                >
+                  <span :if={collapsed?} class="board-pager-chip-caret" aria-hidden="true">▸</span>
+                  <span class="board-pager-chip-dot"></span>
+                  {stage.name}
+                  <span class="board-pager-chip-count">
+                    {total_count(stage, @stage_counts, @sublanes_by_parent)}
+                  </span>
+                </button>
+              </div>
+              <span class="board-pager-fade" aria-hidden="true"></span>
+            </nav>
+            <%!-- RE443 — while setup is unfinished the columns hide below 45rem (`hidden
+                drawer:flex`), so `display` moves off the inline style, which would beat `hidden`. --%>
+            <div
+              id="board-bands"
+              class={[
+                "drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]",
+                setup_active?(@setup) && "hidden drawer:flex"
+              ]}
+              style={board_bands_style(@setup)}
+            >
+              <section
+                :for={{category, stages} <- @stage_groups}
+                id={"category-#{category}"}
+                style="display:flex;flex-direction:column;gap:9px;flex:0 0 auto;"
               >
-                <.stage_column
-                  :for={stage <- stages}
-                  id={"stage-col-#{stage.position}"}
-                  name={stage.name}
-                  type={stage.type}
-                  flow={Map.get(@stage_flows, stage.id)}
-                  paused={MapSet.member?(@paused_stage_ids, stage.id)}
-                  board_slug={@board.slug}
-                  category={category}
-                  stage_id={stage.id}
-                  collapsed={
-                    stage_collapsed?(
-                      stage,
-                      @stage_counts,
-                      @sublanes_by_parent,
-                      @force_open,
-                      @stage_force_closed
-                    )
-                  }
-                  pager={@pager_mode}
-                  main_collapsed={
-                    lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
-                  }
-                  count={Map.fetch!(@stage_counts, stage.id)}
-                  wip_limit={stage.wip_limit}
-                  board_key={@board.key}
-                  terminal={stage.id == @terminal_stage_id}
-                  revealed={if(stage.id == @terminal_stage_id, do: @done_revealed)}
-                  questions={@needs_input_questions}
-                  health={@health_by_card}
-                  runs={@face_runs}
-                  run_meta={@run_face_meta}
-                  vote_counts={@vote_counts}
-                  blocked_by={@blocked_by}
-                  open_ref={@open_ref}
-                  cards={Map.fetch!(@streams, stream_name(stage.id))}
-                  composing={@composing_stage_id == stage.id}
-                  compose_form={@compose_form}
-                  composable={not @embed}
-                  read_only={@read_only?}
-                  sublanes={
-                    for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
-                      %{
-                        id: sub.id,
-                        name: lane_label(sub.type),
-                        lane: sub.type,
-                        owner: :human,
-                        count: Map.fetch!(@stage_counts, sub.id),
-                        cards: Map.fetch!(@streams, stream_name(sub.id)),
-                        collapsed:
-                          lane_collapsed?(sub.id, sub.type, @stage_counts, @force_open, @force_closed)
-                      }
-                    end
-                  }
-                />
-              </div>
-            </section>
+                <div
+                  class="category-band-header"
+                  style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;"
+                >
+                  <span class="category-dot" style={category_dot_style(category)}></span>
+                  <h2
+                    class="category-band"
+                    style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0;"
+                  >
+                    {category_label(category)}
+                  </h2>
+                  <span style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);">
+                    {category_card_count(category, stages, @stage_counts, @sublanes_by_parent)}
+                  </span>
+                </div>
+                <div
+                  class="category-stages"
+                  style="display:flex;gap:9px;align-items:stretch;flex:1;min-height:0;"
+                >
+                  <.stage_column
+                    :for={stage <- stages}
+                    id={"stage-col-#{stage.position}"}
+                    name={stage.name}
+                    type={stage.type}
+                    flow={Map.get(@stage_flows, stage.id)}
+                    paused={MapSet.member?(@paused_stage_ids, stage.id)}
+                    board_slug={@board.slug}
+                    category={category}
+                    stage_id={stage.id}
+                    collapsed={
+                      stage_collapsed?(
+                        stage,
+                        @stage_counts,
+                        @sublanes_by_parent,
+                        @force_open,
+                        @stage_force_closed
+                      )
+                    }
+                    pager={@pager_mode}
+                    main_collapsed={
+                      lane_collapsed?(stage.id, :main, @stage_counts, @force_open, @force_closed)
+                    }
+                    count={Map.fetch!(@stage_counts, stage.id)}
+                    wip_limit={stage.wip_limit}
+                    board_key={@board.key}
+                    terminal={stage.id == @terminal_stage_id}
+                    revealed={if(stage.id == @terminal_stage_id, do: @done_revealed)}
+                    questions={@needs_input_questions}
+                    health={@health_by_card}
+                    runs={@face_runs}
+                    run_meta={@run_face_meta}
+                    vote_counts={@vote_counts}
+                    blocked_by={@blocked_by}
+                    open_ref={@open_ref}
+                    cards={Map.fetch!(@streams, stream_name(stage.id))}
+                    composing={@composing_stage_id == stage.id}
+                    compose_form={@compose_form}
+                    composable={not @embed}
+                    read_only={@read_only?}
+                    sublanes={
+                      for sub <- Map.get(@sublanes_by_parent, stage.id, []) do
+                        %{
+                          id: sub.id,
+                          name: lane_label(sub.type),
+                          lane: sub.type,
+                          owner: :human,
+                          count: Map.fetch!(@stage_counts, sub.id),
+                          cards: Map.fetch!(@streams, stream_name(sub.id)),
+                          collapsed:
+                            lane_collapsed?(
+                              sub.id,
+                              sub.type,
+                              @stage_counts,
+                              @force_open,
+                              @force_closed
+                            )
+                        }
+                      end
+                    }
+                  />
+                </div>
+              </section>
+            </div>
           </div>
         </div>
         <div
@@ -1173,6 +1225,15 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
       |> assign(:read_only?, Board.archived?(board))
+      # RE443 — the setup wizard: the board's checklist (nil when it has none), the shown-once
+      # step-3 key (socket-only, never persisted or broadcast), whether this socket minimized
+      # the panel, the step-2 picker's selection and the user's expert toggle.
+      |> assign(:setup, Setup.checklist(board))
+      |> assign(:setup_token, nil)
+      |> assign(:setup_install_command, Setup.install_command(RelayWeb.Endpoint.url(), board.slug))
+      |> assign(:setup_minimized, false)
+      |> assign(:setup_llm_selected, recommended_llm())
+      |> assign(:setup_hide_explanations, socket.assigns.current_scope.user.setup_explanations_hidden)
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
       |> assign(:archived_cards, [])
@@ -1371,6 +1432,30 @@ defmodule RelayWeb.BoardLive do
   # RE390 — whether the viewer is showing: one is requested AND its key is among the open card's
   # items in that section. Every "is the viewer up" check reads this.
   defp viewer_open?(assigns), do: viewer_item(assigns) != nil
+
+  # RE443 — the setup wizard shows while the board has an unfinished checklist.
+  defp setup_active?(%{finished?: false}), do: true
+  defp setup_active?(_none_or_finished), do: false
+
+  @board_bands_style "gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:var(--color-base-200);flex:1 1 auto;min-height:0;"
+
+  # `display:flex` is inline only when setup isn't showing; otherwise the classes own `display`
+  # so `hidden` can win below 45rem.
+  defp board_bands_style(setup) do
+    if setup_active?(setup), do: @board_bands_style, else: "display:flex;" <> @board_bands_style
+  end
+
+  defp recommended_llm, do: Enum.find(Setup.onboarding_llms(), & &1.recommended?).harness
+
+  defp assign_setup_key(socket, {:ok, %{checklist: checklist, token: token}}) do
+    assign(socket, setup: checklist, setup_token: token)
+  end
+
+  defp assign_setup_key(socket, {:error, _reason}) do
+    socket
+    |> assign(:setup, Setup.checklist(socket.assigns.board))
+    |> put_flash(:error, "Setup has moved on since this page loaded. Try again from the current step.")
+  end
 
   # RLY-234 / RE400 — the drawer's ‹ › cluster: server-driven on the web board drawer, or native
   # mode on the card host when the shell named its neighbors. Never while the viewer covers it.
@@ -1584,9 +1669,48 @@ defmodule RelayWeb.BoardLive do
         story_map_rename_start story_map_rename_change story_map_rename_submit
         story_map_rename_cancel story_map_delete story_map_reorder
         talk_send talk_stop talk_clear talk_slash
+        setup_choose_llm setup_mint_key
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
+
+  # RE443 — the setup wizard. The picker's selection is per socket; choosing it (step 2) and
+  # re-minting the key (step 3) hold the returned token ONLY in this socket's assigns.
+  def handle_event("setup_select_llm", %{"llm" => harness}, socket) do
+    case Setup.onboarding_llm(harness) do
+      %{enabled?: true} -> {:noreply, assign(socket, :setup_llm_selected, harness)}
+      _unknown_or_disabled -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("setup_choose_llm", %{"llm" => harness}, socket) do
+    %{board: board, current_scope: scope} = socket.assigns
+    {:noreply, assign_setup_key(socket, Setup.choose_llm(board, scope.user, harness))}
+  end
+
+  def handle_event("setup_mint_key", _params, socket) do
+    %{board: board, current_scope: scope} = socket.assigns
+    {:noreply, assign_setup_key(socket, Setup.remint_key(board, scope.user))}
+  end
+
+  def handle_event("setup_toggle_explanations", _params, socket) do
+    scope = socket.assigns.current_scope
+
+    case Accounts.set_setup_explanations_hidden(scope.user, not socket.assigns.setup_hide_explanations) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_scope, %{scope | user: user})
+         |> assign(:setup_hide_explanations, user.setup_explanations_hidden)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Couldn't save that preference. Try again.")}
+    end
+  end
+
+  def handle_event("setup_minimize", _params, socket), do: {:noreply, assign(socket, :setup_minimized, true)}
+
+  def handle_event("setup_open", _params, socket), do: {:noreply, assign(socket, :setup_minimized, false)}
 
   def handle_event("restore_board", _params, socket) do
     {:ok, _board} = Boards.unarchive_board(socket.assigns.board)
@@ -3440,6 +3564,16 @@ defmodule RelayWeb.BoardLive do
       end
 
     {:noreply, refresh_card_health(socket, card_id, List.last(entries))}
+  end
+
+  # RE443: the board's setup checklist changed (`Relay.Setup`) — another tab, or the install
+  # script's API calls. Re-read only the checklist (one query), never the whole board. The
+  # shown-once key stays on screen only while step 3 is still the current step.
+  def handle_info({:setup_changed, _board_id}, socket) do
+    setup = Setup.checklist(socket.assigns.board)
+    token = if setup && setup.current_id == Setup.step_id(:key), do: socket.assigns.setup_token
+
+    {:noreply, assign(socket, setup: setup, setup_token: token)}
   end
 
   # `Phoenix.Ecto.SQL.Sandbox` traps exits on the request process by default (recommended for

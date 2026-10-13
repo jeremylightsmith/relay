@@ -204,9 +204,15 @@ defmodule RelayWeb.Router do
 
   # Unauthenticated on purpose (RLY-177): the deployed SHA leaks nothing a deploy does not,
   # and "which release is live?" must be answerable before you have a board key in hand.
-  # RE304 puts the scaffold here for the same reason: `/relay-setup` downloads `./relay`
-  # before a project has minted a key. The exact route precedes the glob so `/api/scaffold`
+  # RE304 puts the scaffold here for the same reason: the board's install script downloads
+  # `./relay` before anything has authenticated. The exact route precedes the glob so `/api/scaffold`
   # is the manifest, not a zero-segment file lookup.
+  # RE443: the board's install script, piped into `sh`. Public and pipeline-free on purpose —
+  # it carries no secret, curl sends no `Accept: json`, and it answers plain text.
+  scope "/", RelayWeb do
+    get "/b/:slug/install", InstallController, :show
+  end
+
   scope "/api", RelayWeb.Api do
     pipe_through :api
 
@@ -269,6 +275,8 @@ defmodule RelayWeb.Router do
     post "/node-jobs/:id/outcome", NodeJobController, :outcome
     post "/talk/turns/:id/events", TalkController, :events
     post "/talk/turns/:id/outcome", TalkController, :outcome
+    post "/setup/preflight", SetupController, :preflight
+    post "/setup/installed", SetupController, :installed
   end
 
   # Enable LiveDashboard in development

@@ -25,10 +25,10 @@ defmodule Relay.ScaffoldTest do
   end
 
   describe "build!/2" do
-    test "the manifest lists exactly the six Relay-owned items", %{src: src, dest: dest} do
+    test "the manifest lists exactly the five Relay-owned items", %{src: src, dest: dest} do
       manifest = Scaffold.build!(src, dest)
 
-      assert length(Scaffold.items()) == 6
+      assert length(Scaffold.items()) == 5
       assert Enum.map(manifest["items"], & &1["path"]) == Scaffold.items()
 
       for item <- manifest["items"] do
@@ -66,9 +66,42 @@ defmodule Relay.ScaffoldTest do
 
     test "a missing source file is a loud failure, not a silently short manifest",
          %{src: src, dest: dest} do
-      File.rm!(Path.join(src, ".claude/skills/relay-setup/SKILL.md"))
+      File.rm!(Path.join(src, ".claude/skills/relay-doctor/SKILL.md"))
 
       assert_raise File.Error, fn -> Scaffold.build!(src, dest) end
+    end
+  end
+
+  describe "items/0" do
+    # RE443: /relay-setup is retired — the board's setup wizard hands out an install command.
+    test "is exactly the five Relay-owned paths, sorted, with no relay-setup" do
+      assert Scaffold.items() == [
+               ".claude/skills/relay-doctor/SKILL.md",
+               ".claude/skills/relay-onboard/SKILL.md",
+               ".claude/skills/relay-update/SKILL.md",
+               "relay",
+               "relay.md"
+             ]
+
+      assert Scaffold.items() == Enum.sort(Scaffold.items())
+      refute Enum.any?(Scaffold.items(), &String.contains?(&1, "relay-setup"))
+    end
+  end
+
+  describe "bake_board_url/2 and board_url_line/1 (RE443)" do
+    test "bakes the URL into the BOARD_URL line" do
+      assert Scaffold.bake_board_url("x\nBOARD_URL = \"\"\ny\n", "https://relay.test") ==
+               "x\nBOARD_URL = \"https://relay.test\"\ny\n"
+    end
+
+    test "a source with no BOARD_URL line is returned unchanged" do
+      source = "#!/usr/bin/env python3\nRUNNER_VERSION = 9\n"
+
+      assert Scaffold.bake_board_url(source, "https://relay.test") == source
+    end
+
+    test "board_url_line/1 is the JSON-quoted assignment" do
+      assert Scaffold.board_url_line("http://board.test") == ~s(BOARD_URL = "http://board.test")
     end
   end
 
@@ -83,7 +116,7 @@ defmodule Relay.ScaffoldTest do
       assert body =~ "RELAY_NODE_SCRATCH"
     end
 
-    test "the manifest names the same six items the module declares" do
+    test "the manifest names the same five items the module declares" do
       assert {:ok, manifest} = Scaffold.manifest()
       assert Enum.map(manifest["items"], & &1["path"]) == Scaffold.items()
       assert manifest["version"] =~ ~r/\A[0-9a-f]{12}\z/
@@ -93,6 +126,15 @@ defmodule Relay.ScaffoldTest do
       assert {:ok, source} = Scaffold.fetch("relay")
       assert String.starts_with?(source, "#!")
       assert source =~ "RUNNER_VERSION"
+    end
+
+    test "fetch/2 with board_url: bakes the URL into the served relay, and only that line" do
+      {:ok, placeholder} = Scaffold.fetch("relay")
+      assert placeholder =~ ~r/^BOARD_URL = ""$/m
+
+      assert {:ok, baked} = Scaffold.fetch("relay", board_url: "https://relay.test")
+      assert baked =~ ~r/^BOARD_URL = "https:\/\/relay.test"$/m
+      assert Scaffold.bake_board_url(baked, "") == placeholder
     end
 
     test "fetch/1 refuses anything outside the manifest, including traversal" do

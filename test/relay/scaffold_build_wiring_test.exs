@@ -9,7 +9,7 @@ defmodule Relay.ScaffoldBuildWiringTest do
   failure is completely silent in production: `GET /api/scaffold` answers 503
   `scaffold_unavailable`, every heartbeat advertises `latest_runner_version: null` (which the
   runner reads as "never auto-update", indistinguishable from "nothing published"), and
-  `/relay-setup` cannot bootstrap a project at all. Nothing else in the suite would fail.
+  the board's install command cannot bootstrap a project at all. Nothing else in the suite would fail.
   """
   use ExUnit.Case, async: true
 
