@@ -110,6 +110,50 @@ defmodule Relay.Flows do
 
   defp skill_token(_run), do: []
 
+  @typedoc """
+  One `.claude/` file a set of flows names (RE447): an `agent` (a node's `agent` field) or a
+  `skill` (an agent node's leading slash command), the repo path(s) that satisfy it — a skill is
+  present when EITHER path exists — and every `{flow, node}` naming it.
+  """
+  @type referenced_file :: %{
+          kind: :agent | :skill,
+          name: String.t(),
+          paths: [String.t()],
+          used_by: [%{flow: String.t(), node: String.t()}]
+        }
+
+  @doc """
+  The `.claude/` agent and skill files `flows` name (RE447): one `referenced_file()` per distinct
+  `{kind, name}`, in order of first appearance — flows in the order given, nodes in each flow's
+  order, and on one node its agent before its skill. `used_by` follows the same walk. Pure, and
+  it extracts exactly what `node_requirements/1` does (a skill only from a `type: :agent` node).
+
+  The ONE place the referenced-file path shapes live: the template picker's copy warning
+  (`Relay.Boards.copy_sources/1`) and `GET /api/setup` both read it.
+  """
+  @spec referenced_files(Flow.t() | [Flow.t()]) :: [referenced_file()]
+  def referenced_files(%Flow{} = flow), do: referenced_files([flow])
+
+  def referenced_files(flows) when is_list(flows) do
+    refs = Enum.flat_map(flows, fn flow -> Enum.flat_map(flow.nodes || [], &node_files(flow.key, &1)) end)
+    used_by = Enum.group_by(refs, fn {kind, name, _used} -> {kind, name} end, fn {_kind, _name, used} -> used end)
+
+    for {kind, name, _used} <- Enum.uniq_by(refs, fn {kind, name, _used} -> {kind, name} end) do
+      %{kind: kind, name: name, paths: file_paths(kind, name), used_by: Map.fetch!(used_by, {kind, name})}
+    end
+  end
+
+  # A node's `{kind, name, used_by}` references, its agent before its skill.
+  defp node_files(flow_key, node) do
+    used = %{flow: flow_key, node: node.key}
+    agents = if node.agent, do: [{:agent, node.agent, used}], else: []
+    skills = if node.type == :agent, do: Enum.map(skill_token(node.run), &{:skill, &1, used}), else: []
+    agents ++ skills
+  end
+
+  defp file_paths(:agent, name), do: [".claude/agents/#{name}.md"]
+  defp file_paths(:skill, name), do: [".claude/skills/#{name}/SKILL.md", ".claude/commands/#{name}.md"]
+
   @doc "The board's flow with `key`, or nil."
   def get_flow(%Board{id: board_id}, key) when is_binary(key) do
     Repo.get_by(Flow, board_id: board_id, key: key)
@@ -424,6 +468,38 @@ defmodule Relay.Flows do
   end
 
   @doc """
+  Copies `flows` (another board's) onto `board` for a board copy (RE447): each under its own
+  `key`, `isolation`, nodes and edges, on the stage `stage_ids` maps its source stage to,
+  **disabled** at v1 with its v1 snapshot. Validated like every insert (`Schemas.Flow.changeset/2`,
+  the one-stage rule, the LLM check); a failure raises `Ecto.InvalidChangesetError` and an
+  unmapped stage `KeyError`, like `seed_template_flows!/2`.
+  """
+  @spec copy_board_flows!(Board.t(), [Flow.t()], %{integer() => integer()}) :: :ok
+  def copy_board_flows!(%Board{id: board_id}, flows, stage_ids) when is_list(flows) and is_map(stage_ids) do
+    for flow <- flows do
+      %Flow{board_id: board_id}
+      |> Flow.changeset(
+        Map.merge(definition_attrs(flow), %{key: flow.key, stage_id: Map.fetch!(stage_ids, flow.stage_id)})
+      )
+      |> validate_stage()
+      |> validate_llms()
+      |> Repo.insert!()
+      |> snapshot!()
+    end
+
+    :ok
+  end
+
+  # A flow's definition as insert attrs — the one shape `copy_flow/2` and `copy_board_flows!/3` share.
+  defp definition_attrs(%Flow{} = flow) do
+    %{
+      isolation: flow.isolation,
+      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
+      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
+    }
+  end
+
+  @doc """
   Whether the flow's definition (nodes, edges, isolation) differs from the
   default library's definition for its key — normalized comparison, so the
   library's dense attr maps and the embedded structs compare field-by-field.
@@ -456,13 +532,7 @@ defmodule Relay.Flows do
   """
   @spec copy_flow(Flow.t(), Stage.t()) :: {:ok, Flow.t()} | {:error, Changeset.t()}
   def copy_flow(%Flow{} = flow, %Stage{} = stage) do
-    attrs = %{
-      key: copy_key(flow, stage),
-      isolation: flow.isolation,
-      stage_id: stage.id,
-      nodes: Enum.map(flow.nodes, &Map.take(&1, Flow.Node.fields())),
-      edges: Enum.map(flow.edges, &Map.take(&1, Flow.Edge.fields()))
-    }
+    attrs = Map.merge(definition_attrs(flow), %{key: copy_key(flow, stage), stage_id: stage.id})
 
     Repo.transaction(fn -> insert_flow!(%Board{id: flow.board_id}, attrs) end)
   end

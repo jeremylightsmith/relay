@@ -30,6 +30,21 @@ sharing behavior.
   `implement`, plus the agents "GPT" (`codex`) and "Gemini" (`gemini-cli`) on each harness's
   first seeded model. Deploy never has a flow. A stage value outside `Schemas.Stage`'s sets
   fails the build; a template flow that fails validation raises and rolls the board back.
+  **Board copy (RE447):** `create_board/2` also takes `copy_from` (a board slug), which wins
+  over `template`. The source resolves through the membership-scoped `get_board/2` (a member
+  board, archived or not); anything else is `{:error, :not_found}` and inserts nothing. In the
+  same one transaction it copies the source's main stages, sub-lanes (inserted directly, so
+  they keep their own names and WIP limits), positions and reject-to wiring remapped to the new
+  stage ids; seeds the default releases; copies harnesses, agents and the default agent
+  (`Relay.Agents.copy_from!/2`, before `ensure_seeded!/1`, which then only adds missing seed
+  harnesses); and copies the flows onto the remapped stages, **disabled** at v1
+  (`Flows.copy_board_flows!/3`). It is a plain copy: no cards, no public intake, no example
+  template and no link back, so later edits to the source never reach it. The `.claude/` files
+  the flows name are not copied — they live in the source's repo. It starts the setup
+  checklist like a template board, step 1 reading `copied from <source name>`
+  (`Setup.start/2`'s `:evidence` override; `Setup` may not call `Flows`, so the label is passed
+  in). `copy_sources/1` lists what "New board" can copy from — `list_boards/1`'s boards, each
+  with its main-stage and flow counts and `Flows.referenced_files/1` of its flows.
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
   attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
@@ -291,6 +306,14 @@ sharing behavior.
   and skill names a flow's nodes name, with no runner knowledge. It lives here rather than
   in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);
   `Runs` reads it to answer whether anyone can actually satisfy it.
+  **Referenced files (RE447):** `Flows.referenced_files/1` is the same pure read over one flow
+  or a list, shaped as repo files: one `%{kind: :agent | :skill, name, paths, used_by}` per
+  distinct agent or skill, in first-appearance order, `used_by` being every
+  `%{flow:, node:}` naming it. An agent's path is `.claude/agents/<name>.md`; a skill is
+  present at either `.claude/skills/<name>/SKILL.md` or `.claude/commands/<name>.md`. It
+  shares `node_requirements/1`'s extraction (a skill only from an agent node's leading slash
+  command) and is the ONE place those path shapes live: the template picker's copy warning
+  (via `Boards.copy_sources/1`) and `GET /api/setup` both read it.
 - **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
   `Schemas.Flow` graph against a card as a supervised, Postgres-backed state machine. This
   boundary owns five things.

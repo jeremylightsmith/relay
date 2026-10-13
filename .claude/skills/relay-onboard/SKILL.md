@@ -26,7 +26,9 @@ answer.
 **Blast radius:** Relay's own files only — `./relay`, the onboarding skill file(s), `relay.md`
 and the one pointer line in your LLM's convention file, `.gitignore`, everything under
 `.relay/` (flows, `runner.json`, `prepare-worktree.sh`, `project.md`) — plus the board's flows
-and the cards made in 5.7–5.8. It **never touches app code**: no source, tests, config or
+and the cards made in 5.7–5.8. On a copied board, 5.4 may also write the missing
+`.claude/agents/*.md`, `.claude/skills/*/SKILL.md` and `.claude/commands/*.md` files that the
+board's flows name. It **never touches app code**: no source, tests, config or
 dependencies of the project itself. If a fix seems to need app code, it becomes a `#setup card`
 instead.
 
@@ -50,10 +52,19 @@ Run `./relay setup status --json` and read the exit code first.
 Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe at any point:
 running `/relay-onboard` again resumes at the first unmet sub-step.
 
+<<<<<<< HEAD
 The status JSON carries what the loop needs: `board`, `connect`, `template`, `llm` (`harness`,
 `label`, `cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
 `done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`, and
 `steps` (each with `id`, `title`, `status`, `evidence`, `error`, `data`, `children`).
+=======
+The status JSON carries what the loop needs: `board`, `template`, `llm` (`harness`, `label`,
+`cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
+`done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`,
+`referenced_files` (`[{kind, name, paths, used_by: [{flow, node}]}]`, the agent and skill files
+the board's flows name), `missing_file_resolutions`, and `steps` (each with `id`, `title`,
+`status`, `evidence`, `error`, `data`, `children`).
+>>>>>>> 9f745cf7 (RE447 Onboard: list and resolve a copied board's missing repo files at 5.1 / 5.4)
 
 ## Connecting another machine
 
@@ -112,9 +123,22 @@ Never mark a step done that isn't.
 ## 5.1 Pull the flows
 
 Say you are pulling the board's flows. List them with `./relay flow`, then for each key write
-`./relay flow <key> --json` to `.relay/flows/<key>.json`. Report:
+`./relay flow <key> --json` to `.relay/flows/<key>.json`.
+
+Then check the files the flows name: status `referenced_files`. An entry is **missing** when
+none of its `paths` exists in this repo (a skill is there if either of its paths is). A board
+copied from another board's flows can name files that only live in that board's repo.
+
+If nothing is missing — always the case on a template board — say nothing extra and report:
 
     ./relay setup report 5.1 --status done --evidence "<N> flows"
+
+If some are missing, list them by name in one message — "This board's flows name <M> files that
+aren't in this repo: <names>; we'll sort each one out at 5.4" — and report them, each entry as
+`referenced_files` has it:
+
+    ./relay setup report 5.1 --status done --evidence "<N> flows · <M> missing files" \
+      --data '{"missing_files": [{"kind": "agent", "name": "plan-implementer", "paths": [".claude/agents/plan-implementer.md"], "used_by": [{"flow": "code", "node": "implement"}]}]}'
 
 ## 5.2 Detect, then confirm
 
@@ -160,6 +184,51 @@ Then report done with the final answers:
 
 ## 5.4 Customize: propose, agree one by one, apply
 
+### First, the missing files (copied boards only)
+
+When 5.1's `data` has a non-empty `missing_files`, resolve each one **before** the regular
+proposals. Otherwise skip this part and say nothing about it.
+
+Step 1's `evidence` reads `copied from <source>` on a copied board. Say *"Before the changes:
+this board was copied from <source>, and its flows name <N> files that aren't in this repo:"*
+followed by the first few names (end with `…` when there are more). If step 1's evidence doesn't
+start with `copied from`, say *"this board's flows name <N> files that aren't in this repo"*
+instead. Then give the options, one line each (status `missing_file_resolutions`):
+
+- `stub` — write a minimal file for you to fill in later
+- `inline` — write the prompt into the flow node itself
+- `drop` — remove the node (I'll tell you what it rewires)
+- *"Or give me a path to the real file if you have it locally."* (`path`)
+
+Ask about **one file at a time**: `k/N  <name> (used by <flow> › <node>)?`, listing every
+`used_by` pair joined with `, `.
+
+Apply each answer **as it is given** — this walk is the exception to "nothing changes until
+every proposal is decided":
+
+- `stub` — an agent gets `.claude/agents/<name>.md` with frontmatter `name` and `description`
+  and a one-line TODO body; a skill gets `.claude/skills/<name>/SKILL.md` with `name` and
+  `description`.
+- `inline` — in `.relay/flows/<flow>.json`, clear the node's `agent` and set its `run` to the
+  prompt: the agent file's body if the human pastes it, otherwise a short prompt you write and
+  show.
+- `drop` — remove the node from `.relay/flows/<flow>.json` and point its incoming edges at its
+  `succeeded` target. Say what it rewired.
+- `path` — copy the file from that local path to the entry's first `paths` entry, and say
+  *"Copied it from there."* If the path doesn't exist, say *"<path> doesn't exist. Try another
+  path, or stub / inline / drop."* and ask about the **same** file again.
+
+Report when the walk starts and after each answer, sending the whole list every time — each
+entry as 5.1 had it plus its `resolution` (`null` until answered) and `source` (the local path
+for `path`, otherwise `null`):
+
+    ./relay setup report 5.4 --status waiting --evidence "missing files k of N resolved" \
+      --data '{"missing_files": [{"kind": "agent", "name": "plan-implementer", "paths": [".claude/agents/plan-implementer.md"], "used_by": [{"flow": "code", "node": "implement"}], "resolution": "path", "source": "~/src/relay/.claude/agents/plan-implementer.md"}]}'
+
+Keep the final `missing_files` list in 5.4's `data` from then on, next to `changes`.
+
+### Then, the proposals
+
 From the answers and what you detected, list **every** proposed change up front, numbered.
 Candidates:
 
@@ -176,15 +245,18 @@ Report the whole list, each `pending`:
     ./relay setup report 5.4 --status waiting \
       --data '{"changes": [{"summary": "validate: `mix test` → `mix precommit`", "decision": "pending", "note": null}]}'
 
+(On a copied board, send `missing_files` alongside `changes` in every 5.4 report.)
+
 Then for each change in turn: mark it `asking` and report the whole list, ask "(yes / no /
 edit)", record the answer as `accepted`, `rejected` or `edited` (an edit's wording goes in
 `note`), and report the whole list again. Wrap commands and paths in backticks in `summary`.
 
-Nothing on disk changes before the last decision — `git status` stays as it was. Then say you
-are about to write, apply **only** the accepted and edited changes, and report:
+Nothing on disk changes before the last decision — `git status` stays as it was (apart from the
+missing files already resolved above). Then say you are about to write, apply **only** the
+accepted and edited changes, and report:
 
     ./relay setup report 5.4 --status done --evidence "<short summary, e.g. dropped screenshots>" \
-      --data '{"changes": [ …every change with its final decision… ]}'
+      --data '{"changes": [ …every change with its final decision… ], "missing_files": [ … ]}'
 
 ## 5.5 Push the flows back, enabled
 
@@ -200,7 +272,9 @@ won't go green: fix the flow file and retry, at most 3 attempts.
 
 Say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
 wrote — `./relay`, the skill file(s) (status `llm.skill_path`), `relay.md`, the pointer-file
-line, `.gitignore`, `.relay/` including `.relay/project.md` — and **nothing else** (stage those
+line, `.gitignore`, `.relay/` including `.relay/project.md`, and any `.claude/agents/*.md`,
+`.claude/skills/*/SKILL.md` or `.claude/commands/*.md` file 5.4 wrote for a missing file — and
+**nothing else** (stage those
 paths by name; leave any other change in the tree alone). Then land it the way the `landing`
 answer says: push straight to `<base>`, or push a branch and open a PR.
 
@@ -252,8 +326,10 @@ and that the first card turns violet on the board when an agent picks it up. Exi
 ## Common mistakes
 
 - **Redoing finished sub-steps.** Always start from status; a re-run resumes, it never restarts.
+- **Listing proposals before the missing files.** On a copied board 5.4 resolves each missing
+  file first.
 - **Writing during 5.4's agreement.** No file — flows, `runner.json`, the warm-up hook, prompt
-  pointers — changes until the last change is decided.
+  pointers — changes until the last change is decided (the missing-files walk excepted).
 - **Reporting a partial list.** 5.3 sends all answers so far; 5.4 sends the whole change list.
 - **Committing more than Relay's files in 5.6.** Stage paths by name; app code is never part of
   it.

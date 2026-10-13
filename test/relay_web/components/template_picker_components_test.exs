@@ -83,4 +83,137 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert doc |> LazyHTML.query("#template-example-three-brain") |> LazyHTML.text() =~
              "See the public example: Tiny Dungeon (three-brain)"
   end
+
+  # RE447 — the 4th option, "Copy from a board I have access to".
+
+  @relay %{slug: "relay", name: "Relay", key: "RE", stages: 9, flows: 4, files: []}
+  @acme %{slug: "acme", name: "Acme web", key: "ACM", stages: 7, flows: 3, files: []}
+
+  defp copy_picker(attrs) do
+    (&TemplatePickerComponents.template_picker/1)
+    |> render_component(
+      Keyword.merge([templates: Relay.Boards.templates(), selected: TemplatePickerComponents.copy_option()], attrs)
+    )
+    |> LazyHTML.from_fragment()
+  end
+
+  defp text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+  defp present?(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count() == 1
+
+  defp files(names), do: Enum.map(names, &%{kind: :agent, name: &1, paths: [".claude/agents/#{&1}.md"], used_by: []})
+
+  @nine ~w(plan-implementer spec-reviewer quality-reviewer final-fixer rebaser smoke-tester acceptance-tester final-reviewer ci-fixer)
+
+  test "RE447 1. the copy card renders unselected beneath the templates, without its source list" do
+    doc = copy_picker(selected: "bare-minimum", copy_sources: [])
+
+    card = classes(doc, "#template-card-copy")
+    assert "md:col-span-3" in card
+    assert "border-base-300" in card
+    refute "border-primary" in card
+
+    card_text = text(doc, "#template-card-copy")
+    assert card_text =~ "Copy from a board I have access to"
+    assert card_text =~ "Same stages and flows as one of your boards."
+
+    assert card_text =~
+             "A plain copy: stages, flows and WIP limits, no cards. It doesn't remember where it came from and never picks up later changes."
+
+    refute present?(doc, "#template-copy-search")
+
+    assert TemplatePickerComponents.copy_option() == "copy"
+
+    assert doc |> LazyHTML.query("#template-radio-copy") |> LazyHTML.attribute("value") == [
+             TemplatePickerComponents.copy_option()
+           ]
+
+    assert doc |> LazyHTML.query("#template-radio-copy") |> LazyHTML.attribute("name") == ["template"]
+  end
+
+  test "RE447 2. selected, the copy card lists the sources and the button names the chosen one" do
+    doc = copy_picker(copy_from: "relay", copy_sources: [@relay, @acme])
+
+    card = classes(doc, "#template-card-copy")
+    assert "border-2" in card
+    assert "border-primary" in card
+
+    assert "bg-base-200" in classes(doc, "#copy-source-relay")
+    refute "bg-base-200" in classes(doc, "#copy-source-acme")
+
+    relay_text = text(doc, "#copy-source-relay")
+    assert relay_text =~ "Relay"
+    assert relay_text =~ "RE"
+    assert relay_text =~ "9 stages · 4 flows"
+    assert text(doc, "#copy-source-acme") =~ "7 stages · 3 flows"
+
+    assert present?(doc, ~s(#copy-source-radio-relay[name="copy_from"][value="relay"][checked]))
+    refute present?(doc, "#copy-source-radio-acme[checked]")
+
+    assert text(doc, "#template-picker-create") =~ "Copy Relay's stages and flows"
+    refute present?(doc, "#template-copy-warning")
+  end
+
+  test "RE447 3. a source whose flows name repo files warns with the first five names and +N more" do
+    doc = copy_picker(copy_from: "relay", copy_sources: [%{@relay | files: files(@nine)}, @acme])
+
+    warning = text(doc, "#template-copy-warning")
+    assert warning =~ "Relay's flows name 9 files that live in its repo, not on the board."
+    assert warning =~ "stub it, inline it into the flow, or drop the node"
+
+    assert text(doc, "#template-copy-warning-files") ==
+             "plan-implementer · spec-reviewer · quality-reviewer · final-fixer · rebaser · +4 more"
+  end
+
+  test "RE447 4. one file reads singular; exactly five lists all five with no +0 more" do
+    one = copy_picker(copy_from: "relay", copy_sources: [%{@relay | files: files(["plan-implementer"])}])
+
+    assert text(one, "#template-copy-warning") =~ "Relay's flows name 1 file that lives in its repo, not on the board."
+    assert text(one, "#template-copy-warning-files") == "plan-implementer"
+
+    five = copy_picker(copy_from: "relay", copy_sources: [%{@relay | files: files(Enum.take(@nine, 5))}])
+
+    assert text(five, "#template-copy-warning-files") ==
+             "plan-implementer · spec-reviewer · quality-reviewer · final-fixer · rebaser"
+  end
+
+  test "RE447 5. the search filters sources by name or key, case-insensitively" do
+    ac = copy_picker(copy_from: "relay", copy_query: "ac", copy_sources: [@relay, @acme])
+    assert present?(ac, "#copy-source-acme")
+    refute present?(ac, "#copy-source-relay")
+
+    re = copy_picker(copy_from: "relay", copy_query: "re", copy_sources: [@relay, @acme])
+    assert present?(re, "#copy-source-relay")
+    refute present?(re, "#copy-source-acme")
+
+    none = copy_picker(copy_from: "relay", copy_query: "zzz", copy_sources: [@relay, @acme])
+    refute present?(none, "#copy-source-relay")
+    refute present?(none, "#copy-source-acme")
+    assert text(none, "#template-copy-empty") == "No boards match."
+
+    assert present?(re, ~s(#template-copy-search[name="copy_query"][value="re"][placeholder="Search your boards…"]))
+  end
+
+  test "RE447 smoke: many sources scroll inside a capped list, and the panel wraps its content" do
+    many = for i <- 1..250, do: %{@acme | slug: "board-#{i}", name: "Board #{i}", key: "B#{i}"}
+    doc = copy_picker(copy_from: "board-1", copy_sources: [%{hd(many) | files: files(@nine)} | tl(many)])
+
+    list = classes(doc, "#template-copy-list")
+    assert "max-h-[240px]" in list
+    assert "overflow-y-auto" in list
+
+    # The panel is a flex child of the scrolling max-h-screen wrapper: it must
+    # size to its content (not stretch to, and stop at, the viewport).
+    panel = classes(doc, "#template-picker-panel")
+    assert "self-start" in panel
+    assert "shrink-0" in panel
+
+    assert present?(doc, "#template-copy-warning")
+  end
+
+  test "RE447 6. with no boards to copy, the button is disabled and names no board" do
+    doc = copy_picker(copy_from: nil, copy_sources: [])
+
+    assert present?(doc, "#template-picker-create[disabled]")
+    assert text(doc, "#template-picker-create") =~ "Copy a board's stages and flows"
+  end
 end

@@ -363,7 +363,9 @@
       "first_flow_stage",
       "interview",
       "llm",
+      "missing_file_resolutions",
       "position",
+      "referenced_files",
       "steps",
       "template"
     ],

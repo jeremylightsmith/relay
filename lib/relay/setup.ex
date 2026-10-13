@@ -368,6 +368,10 @@ defmodule Relay.Setup do
   # The ONE set of 5.4 per-change markers.
   @change_decisions ["pending", "asking", "accepted", "rejected", "edited"]
 
+  # The ONE set of 5.4's missing-file resolutions (RE447): a copied board's flows can name
+  # `.claude/` files the repo lacks, and 5.4 resolves each one before the regular proposals.
+  @missing_file_resolutions ["stub", "inline", "drop", "path"]
+
   @nothing_written "run the same command again. Nothing was written."
 
   # The ONE list of the install script's local checks, in print order, with each one's fix text.
@@ -491,6 +495,14 @@ defmodule Relay.Setup do
   @doc ~S(The 5.4 per-change markers a `data["changes"]` entry's `"decision"` takes.)
   @spec change_decisions() :: [String.t()]
   def change_decisions, do: @change_decisions
+
+  @doc ~S"""
+  The ways 5.4 resolves a missing repo file (RE447) — a `data["missing_files"]` entry's
+  `"resolution"`: write a `stub`, `inline` the prompt into the flow node, `drop` the node, or copy
+  it from a local `path`.
+  """
+  @spec missing_file_resolutions() :: [String.t()]
+  def missing_file_resolutions, do: @missing_file_resolutions
 
   @doc "The statuses `advance/4` (and `POST /api/setup/steps/:step`) accepts, in status order."
   @spec advance_statuses() :: [BoardSetupStep.status()]
@@ -778,27 +790,27 @@ defmodule Relay.Setup do
   # ---------------------------------------------------------------- checklist
 
   @doc """
-  Starts the board's checklist: one row per catalog id. Step 1 is done (its evidence counts the
-  board's top-level stages and flows; its data carries the template's name and warning), step 2
+  Starts the board's checklist: one row per catalog id. Step 1 is done (its evidence is the
+  `:evidence` given verbatim — a copied board passes `"copied from <name>"`, RE447 — else it counts
+  the board's top-level stages and flows; its data carries the template's name and warning), step 2
   is active, the rest are pending. Runs inside `create_board`'s transaction, so it raises on
   failure. Broadcasts `{:setup_changed, board_id}` once.
   """
   @spec start(Board.t(), %{
           required(:name) => String.t(),
           optional(:warning) => String.t() | nil,
+          optional(:evidence) => String.t(),
           optional(atom()) => any()
         }) ::
           :ok
   def start(%Board{id: board_id}, template) do
     now = now()
-    stages = Repo.aggregate(from(s in Stage, where: s.board_id == ^board_id and is_nil(s.parent_id)), :count)
-    flows = Repo.aggregate(from(f in Flow, where: f.board_id == ^board_id), :count)
 
     created = %{
       status: :done,
       reached_at: now,
       completed_at: now,
-      evidence: "#{stages} stages · #{flows} flows · #{hhmm(now)}",
+      evidence: Map.get_lazy(template, :evidence, fn -> created_evidence(board_id, now) end),
       data: %{"template" => template.name, "template_warning" => Map.get(template, :warning)}
     }
 
@@ -814,6 +826,13 @@ defmodule Relay.Setup do
     end
 
     Events.broadcast(board_id, {:setup_changed, board_id})
+  end
+
+  # Step 1's default evidence: the board's top-level stages and flows, and when it was made.
+  defp created_evidence(board_id, now) do
+    stages = Repo.aggregate(from(s in Stage, where: s.board_id == ^board_id and is_nil(s.parent_id)), :count)
+    flows = Repo.aggregate(from(f in Flow, where: f.board_id == ^board_id), :count)
+    "#{stages} stages · #{flows} flows · #{hhmm(now)}"
   end
 
   @doc """

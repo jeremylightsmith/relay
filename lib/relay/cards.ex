@@ -2346,12 +2346,18 @@ defmodule Relay.Cards do
     end
   end
 
+  # `rejected_at` is stamped BEFORE the `:changes_requested` note is inserted, so the note's
+  # (second-precision) `inserted_at` can never precede it: `Runs.guidance_for/2` opens its
+  # window at `rejected_at`, and a second boundary falling between the two writes would
+  # otherwise drop the rejection's own note from the re-entry run's guidance.
   defp move_and_reject(card, from_stage, target, note, actor) do
+    rejected_at = DateTime.truncate(DateTime.utc_now(), :second)
+
     with {:ok, moved} <- move_card(card, target, @append_index, actor),
          {:ok, ready} <- ready_for_rework(moved, target, actor),
          :ok <- attach_note(ready, note, actor, :changes_requested) do
       log_gate(ready, :rejected, actor, from_stage, target, note)
-      {:ok, put_rejection(ready, from_stage, target, note, actor)}
+      {:ok, put_rejection(ready, from_stage, target, note, actor, rejected_at)}
     end
   end
 
@@ -2667,7 +2673,7 @@ defmodule Relay.Cards do
   # Sets the card's single open rejection embed, replacing any existing one
   # (on_replace: :delete), then broadcasts the upsert so open drawers show the
   # banner live (MMF 18).
-  defp put_rejection(%Card{} = card, %Stage{} = from, %Stage{} = to, note, actor) do
+  defp put_rejection(%Card{} = card, %Stage{} = from, %Stage{} = to, note, actor, rejected_at) do
     rejection = %CardRejection{
       note: note,
       from_stage_id: from.id,
@@ -2675,7 +2681,7 @@ defmodule Relay.Cards do
       to_stage_id: to.id,
       to_stage_name: Boards.stage_display_name(to),
       rejected_by: actor_display_name(actor),
-      rejected_at: DateTime.truncate(DateTime.utc_now(), :second)
+      rejected_at: rejected_at
     }
 
     {:ok, updated} =

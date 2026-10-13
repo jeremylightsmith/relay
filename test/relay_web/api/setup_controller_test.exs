@@ -335,6 +335,45 @@ defmodule RelayWeb.Api.SetupControllerTest do
       refute response.resp_body =~ "token"
       assert board.name == "Streaks"
     end
+
+    # RE447 task 3, scenario 2
+    test "a template board names no repo files and carries the missing-file resolutions",
+         %{conn: conn, token: token} do
+      data = conn |> status(token) |> json_response(200) |> Map.fetch!("data")
+
+      assert data["referenced_files"] == []
+      assert data["missing_file_resolutions"] == Setup.missing_file_resolutions()
+    end
+
+    # RE447 task 3, scenario 3
+    test "answers the agent and skill files the board's flows name",
+         %{conn: conn, board: board, token: token} do
+      insert(:flow,
+        board: board,
+        key: "code",
+        nodes: [
+          %Schemas.Flow.Node{key: "implement", type: :agent, agent: "plan-implementer"},
+          %Schemas.Flow.Node{key: "plan", type: :agent, run: "/write-plan {ref}"}
+        ]
+      )
+
+      data = conn |> status(token) |> json_response(200) |> Map.fetch!("data")
+
+      assert data["referenced_files"] == [
+               %{
+                 "kind" => "agent",
+                 "name" => "plan-implementer",
+                 "paths" => [".claude/agents/plan-implementer.md"],
+                 "used_by" => [%{"flow" => "code", "node" => "implement"}]
+               },
+               %{
+                 "kind" => "skill",
+                 "name" => "write-plan",
+                 "paths" => [".claude/skills/write-plan/SKILL.md", ".claude/commands/write-plan.md"],
+                 "used_by" => [%{"flow" => "code", "node" => "plan"}]
+               }
+             ]
+    end
   end
 
   describe "POST /api/setup/steps/:step" do
@@ -348,6 +387,33 @@ defmodule RelayWeb.Api.SetupControllerTest do
 
       assert body["data"]["current"] == "5.2"
       assert wire_step(body, "5.1")["evidence"] == "2 flows"
+    end
+
+    # RE447 task 3, scenario 4
+    test "5.1's missing_files round-trips and the report answers referenced_files",
+         %{conn: conn, token: token} = context do
+      on_step(context, "5.1")
+
+      missing = [
+        %{
+          "kind" => "agent",
+          "name" => "plan-implementer",
+          "paths" => [".claude/agents/plan-implementer.md"],
+          "used_by" => [%{"flow" => "code", "node" => "implement"}]
+        }
+      ]
+
+      body =
+        conn
+        |> report(token, "5.1", %{
+          "status" => "done",
+          "evidence" => "3 flows · 2 missing files",
+          "data" => %{"missing_files" => missing}
+        })
+        |> json_response(200)
+
+      assert wire_step(body, "5.1")["data"]["missing_files"] == missing
+      assert body["data"]["referenced_files"] == []
     end
 
     # Scenario 19

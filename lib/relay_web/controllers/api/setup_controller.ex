@@ -17,6 +17,7 @@ defmodule RelayWeb.Api.SetupController do
   """
   use RelayWeb, :controller
 
+  alias Relay.Flows
   alias Relay.Setup
   alias RelayWeb.Api.ErrorJSON
 
@@ -65,10 +66,18 @@ defmodule RelayWeb.Api.SetupController do
   defp put_valid(true, key, value, status, attrs), do: {:cont, {:ok, status, Map.put(attrs, key, value)}}
   defp put_valid(false, _key, _value, _status, _attrs), do: {:halt, {:error, :invalid}}
 
+  # Both routes answer the files the board's flows name (RE447); computed here because
+  # `Relay.Setup` can't depend on `Relay.Flows`.
   defp render_checklist(conn, checklist) do
+    board = conn.assigns.current_board
+
     conn
     |> put_view(json: RelayWeb.Api.SetupJSON)
-    |> render(:show, checklist: checklist, board: conn.assigns.current_board)
+    |> render(:show,
+      checklist: checklist,
+      board: board,
+      referenced_files: Flows.referenced_files(Flows.list_flows(board))
+    )
   end
 
   defp no_checklist(conn), do: error(conn, :not_found, "no_checklist", "no guided setup on this board")

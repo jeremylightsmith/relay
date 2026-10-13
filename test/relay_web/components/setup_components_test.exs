@@ -188,6 +188,21 @@ defmodule RelayWeb.SetupComponentsTest do
       refute has?(doc, "#setup-changes")
     end
 
+    # RE447 task 3, scenario 9
+    test "5.4's row shows the missing-files progress while it resolves them" do
+      doc =
+        onboard_doc(
+          Map.merge(frame_d(), %{
+            "5.4" => %{status: :waiting, evidence: "missing files 2 of 9 resolved"},
+            "5.5" => :pending,
+            "5.6" => :pending
+          }),
+          mode: :interactive
+        )
+
+      assert text(doc, "#setup-step-5-4") =~ "missing files 2 of 9 resolved"
+    end
+
     # Scenario 2
     test "frame F1: the answers so far, the next question and where they're saved" do
       doc =

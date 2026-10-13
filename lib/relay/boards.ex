@@ -290,13 +290,81 @@ defmodule Relay.Boards do
     seeded agents plus the template's own, its flows (disabled; an invalid one raises and rolls
     the board back), and Review rejecting to Plan. No cards.
   - **An unknown slug**: `{:error, :unknown_template}`, inserting nothing.
+  - **`copy_from`** (`:copy_from` / `"copy_from"`, a board slug; RE447) wins over `template`:
+    a plain copy of that board — its main stages, sub-lanes, WIP limits and reject-to wiring
+    (remapped to the new stages), the releases, its harnesses, agents and default agent
+    (`Relay.Agents.copy_from!/2`), and its flows, disabled at v1. No cards, no public intake,
+    and no link back: later edits to the source never reach the copy. The source must be one
+    `get_board/2` resolves for `user` (a member board, archived or not); anything else is
+    `{:error, :not_found}`, inserting nothing. The setup checklist starts with step 1 reading
+    `copied from <source name>`.
 
   Returns the board with stages preloaded in hierarchical order (`order_stages/1`).
   """
   def create_board(%User{} = user, attrs) do
+    case fetch_copy_source(user, attrs) do
+      {:ok, %Board{} = source} -> insert_board(user, attrs, {:copy, source})
+      :error -> {:error, :not_found}
+      {:ok, nil} -> create_from_template(user, attrs)
+    end
+  end
+
+  defp create_from_template(user, attrs) do
     case fetch_template(attrs) do
       {:ok, template} -> insert_board(user, attrs, template)
       :error -> {:error, :unknown_template}
+    end
+  end
+
+  # `{:ok, nil}` when no `copy_from` is given; `:error` when it names no board `user` is a member of.
+  defp fetch_copy_source(user, attrs) do
+    case Map.get(attrs, :copy_from) || Map.get(attrs, "copy_from") do
+      nil -> {:ok, nil}
+      slug when is_binary(slug) -> if source = get_board(user, slug), do: {:ok, source}, else: :error
+      _other -> :error
+    end
+  end
+
+  @doc """
+  The boards `user` can copy a new board from (RE447) — `list_boards/1`'s boards, in its order —
+  each with its main-stage and flow counts and the `.claude/` files its flows name
+  (`Relay.Flows.referenced_files/1`), which the template picker warns about.
+  """
+  @spec copy_sources(User.t()) :: [
+          %{
+            slug: String.t(),
+            name: String.t(),
+            key: String.t(),
+            stages: non_neg_integer(),
+            flows: non_neg_integer(),
+            files: [Flows.referenced_file()]
+          }
+        ]
+  def copy_sources(%User{} = user) do
+    boards = list_boards(user)
+    board_ids = Enum.map(boards, & &1.id)
+
+    main_counts =
+      Map.new(
+        Repo.all(
+          from s in Stage,
+            where: s.board_id in ^board_ids and is_nil(s.parent_id),
+            group_by: s.board_id,
+            select: {s.board_id, count(s.id)}
+        )
+      )
+
+    for board <- boards do
+      flows = Flows.list_flows(board)
+
+      %{
+        slug: board.slug,
+        name: board.name,
+        key: board.key,
+        stages: Map.get(main_counts, board.id, 0),
+        flows: length(flows),
+        files: Flows.referenced_files(flows)
+      }
     end
   end
 
@@ -338,8 +406,12 @@ defmodule Relay.Boards do
     end)
   end
 
-  # RE443: only a template board gets a setup checklist; the default path has none.
+  # RE443: only a template or copied board gets a setup checklist; the default path has none.
   defp start_setup!(_board, nil), do: :ok
+
+  defp start_setup!(board, {:copy, source}),
+    do: :ok = Setup.start(board, %{name: source.name, evidence: "copied from #{source.name}"})
+
   defp start_setup!(board, template), do: :ok = Setup.start(board, template)
 
   defp seed_board!(board, nil) do
@@ -348,6 +420,17 @@ defmodule Relay.Boards do
     # RE433: the agents exist before the default flows, whose nodes name them in `llm`.
     :ok = Relay.Agents.ensure_seeded!(board)
     seed_lanes_and_flows!(board)
+  end
+
+  # RE447: the same order as a template. The source's agents are copied BEFORE
+  # `ensure_seeded!/1`, which then adds only the seed harnesses the source lacked (seeding first
+  # would collide on agent names); and they exist before the flows whose nodes name them in `llm`.
+  defp seed_board!(board, {:copy, source}) do
+    stage_ids = copy_stages!(board, source.stages)
+    seed_releases!(board)
+    :ok = Relay.Agents.copy_from!(board, source)
+    :ok = Relay.Agents.ensure_seeded!(board)
+    :ok = Flows.copy_board_flows!(board, Flows.list_flows(source), stage_ids)
   end
 
   # RE442: order matters — sub-lanes before releases (positions), agents before flows (their
@@ -385,6 +468,36 @@ defmodule Relay.Boards do
     for {main, sublanes} <- inserted, lane <- sublanes, do: {:ok, _} = enable_lane(main, lane)
 
     Map.new(inserted, fn {main, _sublanes} -> {main.name, main} end)
+  end
+
+  # A board copy's stages (RE447): mains, then sub-lanes under their copied parents — inserted
+  # directly, so they keep their own name, position and WIP limit (`enable_lane/2` would rename
+  # them) — then reject-to remapped in a second pass, since it can point forward. Positions are
+  # copied verbatim, so they stay unique. Returns `%{source_stage_id => copy_stage_id}`.
+  defp copy_stages!(board, stages) do
+    {mains, sublanes} = Enum.split_with(stages, &is_nil(&1.parent_id))
+    ids = copy_stage_rows!(board, mains, %{})
+    ids = copy_stage_rows!(board, sublanes, ids)
+
+    for %Stage{reject_to_stage_id: reject_to} = stage <- stages, not is_nil(reject_to) do
+      copy_id = Map.fetch!(ids, stage.id)
+      Repo.update_all(from(s in Stage, where: s.id == ^copy_id), set: [reject_to_stage_id: Map.fetch!(ids, reject_to)])
+    end
+
+    ids
+  end
+
+  defp copy_stage_rows!(board, stages, ids) do
+    Enum.reduce(stages, ids, fn stage, ids ->
+      copy =
+        %Stage{board_id: board.id, parent_id: stage.parent_id && Map.fetch!(ids, stage.parent_id)}
+        |> Stage.changeset(
+          Map.take(stage, [:name, :description, :position, :category, :type, :wip_limit, :collapsed_by_default])
+        )
+        |> Repo.insert!()
+
+      Map.put(ids, stage.id, copy.id)
+    end)
   end
 
   # A template agent runs on the board's harness with that key, on the first model of the

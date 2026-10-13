@@ -8,7 +8,11 @@ defmodule RelayWeb.BoardsLive do
   reorders the grid in place without navigating. "New board" opens the template picker
   (RE442, `RelayWeb.TemplatePickerComponents`; `?template=<slug>` opens it preselected), whose
   submit creates "Untitled board" from the chosen template and opens the board, where its setup
-  wizard (RE443) waits. Loads fresh on navigate (no realtime — out of scope).
+  wizard (RE443) waits. The picker's 4th option (RE447) copies instead: it lists
+  `Boards.copy_sources/1` (loaded once at mount), and its submit creates "Untitled board" as a
+  plain copy of the chosen board (`Boards.create_board/2`'s `copy_from`); a board the user
+  can't copy flashes the same refusal as an unknown one. Loads fresh on navigate (no realtime —
+  out of scope).
   """
 
   use RelayWeb, :live_view
@@ -19,6 +23,8 @@ defmodule RelayWeb.BoardsLive do
   alias RelayWeb.CoreComponents
   alias RelayWeb.TemplatePickerComponents
   alias RelayWeb.TimeAgo
+
+  @copy_refused "That board isn't available to copy. Pick another."
 
   @impl true
   def render(assigns) do
@@ -188,6 +194,9 @@ defmodule RelayWeb.BoardsLive do
         templates={@templates}
         selected={@picker_template}
         examples={@examples}
+        copy_sources={@copy_sources}
+        copy_from={@picker_copy_from}
+        copy_query={@picker_copy_query}
       />
     </Layouts.app>
     """
@@ -195,8 +204,10 @@ defmodule RelayWeb.BoardsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    boards = load_boards(socket.assigns.current_scope.user)
+    user = socket.assigns.current_scope.user
+    boards = load_boards(user)
     templates = Boards.templates()
+    copy_sources = Boards.copy_sources(user)
 
     {:ok,
      socket
@@ -206,7 +217,10 @@ defmodule RelayWeb.BoardsLive do
      |> assign(:templates, templates)
      |> assign(:examples, Boards.example_boards())
      |> assign(:picker_open?, false)
-     |> assign(:picker_template, hd(templates).slug)}
+     |> assign(:picker_template, hd(templates).slug)
+     |> assign(:copy_sources, copy_sources)
+     |> assign(:picker_copy_from, copy_sources |> List.first(%{}) |> Map.get(:slug))
+     |> assign(:picker_copy_query, "")}
   end
 
   # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
@@ -232,26 +246,31 @@ defmodule RelayWeb.BoardsLive do
     {:noreply, assign(socket, :picker_open?, false)}
   end
 
-  def handle_event("select_template", %{"template" => slug}, socket) do
-    if known_template?(socket, slug),
-      do: {:noreply, assign(socket, :picker_template, slug)},
-      else: {:noreply, socket}
+  # RE447: the copy card's change also carries its search text and chosen source; a
+  # `copy_from` that isn't one of @copy_sources keeps the previous choice.
+  def handle_event("select_template", %{"template" => slug} = params, socket) do
+    if known_template?(socket, slug) or slug == TemplatePickerComponents.copy_option() do
+      {:noreply,
+       socket
+       |> assign(:picker_template, slug)
+       |> assign(:picker_copy_query, params["copy_query"] || socket.assigns.picker_copy_query)
+       |> assign(:picker_copy_from, copy_source_or(socket, params["copy_from"]))}
+    else
+      {:noreply, socket}
+    end
   end
 
-  # The submitted radio wins; a submit without one falls back to the selected assign. An
-  # unknown slug (a stale or hand-edited form) flashes and leaves the picker open.
+  # The submitted radio wins; a submit without one falls back to the selected assign — for
+  # the template and, when copying, for the source. An unknown slug (a stale or hand-edited
+  # form) flashes and leaves the picker open. A copy source isn't pre-filtered here: the
+  # domain's membership check refuses a board the user isn't in exactly as it refuses one
+  # that doesn't exist, so both read the same flash.
   def handle_event("create_from_template", params, socket) do
     slug = params["template"] || socket.assigns.picker_template
-    user = socket.assigns.current_scope.user
 
-    case Boards.create_board(user, %{name: "Untitled board", template: slug}) do
-      # RE443: a template board opens on the board itself, where its setup wizard lives.
-      {:ok, board} ->
-        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
-
-      {:error, :unknown_template} ->
-        {:noreply, put_flash(socket, :error, "That template no longer exists. Pick another.")}
-    end
+    if slug == TemplatePickerComponents.copy_option(),
+      do: create_board(socket, %{copy_from: params["copy_from"] || socket.assigns.picker_copy_from}),
+      else: create_board(socket, %{template: slug})
   end
 
   # RE395: sets the negation of the tile's current star (set_starred/3 sets, it doesn't
@@ -269,6 +288,32 @@ defmodule RelayWeb.BoardsLive do
   end
 
   defp known_template?(socket, slug), do: Enum.any?(socket.assigns.templates, &(&1.slug == slug))
+
+  defp copy_source_or(socket, slug) do
+    if Enum.any?(socket.assigns.copy_sources, &(&1.slug == slug)),
+      do: slug,
+      else: socket.assigns.picker_copy_from
+  end
+
+  # No source at all (nothing to copy) must not fall through to `create_board/2`'s
+  # no-template default board.
+  defp create_board(socket, %{copy_from: nil}), do: {:noreply, put_flash(socket, :error, @copy_refused)}
+
+  defp create_board(socket, attrs) do
+    user = socket.assigns.current_scope.user
+
+    case Boards.create_board(user, Map.put(attrs, :name, "Untitled board")) do
+      # RE443: a new board opens on the board itself, where its setup wizard lives.
+      {:ok, board} ->
+        {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
+
+      {:error, :unknown_template} ->
+        {:noreply, put_flash(socket, :error, "That template no longer exists. Pick another.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, @copy_refused)}
+    end
+  end
 
   # RE376: the summary facts come from the one domain definition the native switcher
   # (GET /api/all/boards) also reads; only the member stack is web-specific.

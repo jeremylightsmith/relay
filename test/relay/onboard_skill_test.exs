@@ -100,6 +100,42 @@ defmodule Relay.OnboardSkillTest do
     end
   end
 
+  # A `## <heading>` section of the skill, up to the next `## ` heading.
+  defp section(doc, heading) do
+    [_before, rest] = String.split(doc, "\n" <> heading, parts: 2)
+    rest |> String.split("\n## ", parts: 2) |> hd()
+  end
+
+  # RE447 task 3, scenario 6
+  test "names every missing-file resolution, the 5.4 progress evidence and referenced_files", %{doc: doc} do
+    for resolution <- Setup.missing_file_resolutions() do
+      assert doc =~ "`#{resolution}`", "the skill never names resolution #{resolution}"
+    end
+
+    assert doc =~ "missing files k of N resolved"
+    assert doc =~ "`referenced_files`"
+  end
+
+  # RE447 task 3, scenario 7
+  test "5.4 walks the missing files before listing the proposals, re-asking on a bad path", %{doc: doc} do
+    customize = section(doc, "## 5.4")
+    {missing_at, _} = :binary.match(customize, "missing_files")
+    {proposals_at, _} = :binary.match(customize, "list **every** proposed change")
+
+    assert missing_at < proposals_at
+    assert customize =~ "Copied it from there."
+    assert customize =~ "doesn't exist"
+  end
+
+  # RE447 task 3, scenario 8
+  test "5.1 lists the missing files and stays silent when nothing is missing", %{doc: doc} do
+    pull = section(doc, "## 5.1")
+
+    assert pull =~ "missing_files"
+    assert pull =~ "referenced_files"
+    assert pull =~ "nothing is missing"
+  end
+
   # Scenario 10
   test "no flow in this repo names relay-onboard as a node step" do
     files = Path.wildcard(".relay/flows/*.json") ++ Path.wildcard("docs/designs/flows/*.json")

@@ -38,7 +38,10 @@ defmodule Relay.CardsRejectTest do
       assert r.rejected_at
 
       timeline = Activity.list_timeline(card)
-      assert Enum.any?(timeline, &(is_struct(&1, Schemas.Comment) and &1.body == "Handle the empty case"))
+      note = Enum.find(timeline, &(is_struct(&1, Schemas.Comment) and &1.body == "Handle the empty case"))
+      assert note
+      # The guidance window opens at `rejected_at`, so the rejection's own note must not predate it.
+      refute DateTime.before?(note.inserted_at, r.rejected_at)
       entry = Enum.find(timeline, &(Map.get(&1, :type) == :rejected))
 
       assert entry.meta == %{

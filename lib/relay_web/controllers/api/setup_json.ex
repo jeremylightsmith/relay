@@ -2,15 +2,22 @@ defmodule RelayWeb.Api.SetupJSON do
   @moduledoc """
   Renders a board's setup checklist (`Relay.Setup.checklist/1`) for `GET /api/setup` and
   `POST /api/setup/steps/:step` (RE445). `current` is `Relay.Setup.reportable_id/1` — the one step
-  a report may move; the interview catalog and the 5.4 change decisions ride along so
-  `./relay setup` and the skill never re-type them. Statuses and actors are strings, datetimes
-  ISO 8601 or null. The step-3 key's raw token is never stored, so it can't appear here. `connect`
-  is true for a connected machine's checklist (RE446): the skill runs its pull-only onboard.
+  a report may move; the interview catalog, the 5.4 change decisions and the 5.4 missing-file
+  resolutions ride along so `./relay setup` and the skill never re-type them.
+
+  `referenced_files` (RE447) is `Relay.Flows.referenced_files/1` over the board's flows — every
+  `.claude/` agent or skill file they name, with its repo `paths` and the `{flow, node}` pairs
+  using it (`[]` when the flows name none, as on every template board). `/relay-onboard` checks
+  them at 5.1 and resolves the missing ones at 5.4.
+
+  Statuses, actors and file kinds are strings, datetimes ISO 8601 or null. The step-3 key's raw
+  token is never stored, so it can't appear here. `connect` is true for a connected machine's
+  checklist (RE446): the skill runs its pull-only onboard.
   """
 
   alias Relay.Setup
 
-  def show(%{checklist: checklist, board: board}) do
+  def show(%{checklist: checklist, board: board, referenced_files: referenced_files}) do
     %{
       data: %{
         board: board.name,
@@ -26,10 +33,14 @@ defmodule RelayWeb.Api.SetupJSON do
         finished: checklist.finished?,
         interview: Setup.interview_questions(),
         change_decisions: Setup.change_decisions(),
+        missing_file_resolutions: Setup.missing_file_resolutions(),
+        referenced_files: Enum.map(referenced_files, &referenced_file/1),
         steps: Enum.map(checklist.steps, &step/1)
       }
     }
   end
+
+  defp referenced_file(file), do: %{file | kind: Atom.to_string(file.kind)}
 
   defp step(entry) do
     %{

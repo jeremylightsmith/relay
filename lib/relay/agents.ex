@@ -164,6 +164,45 @@ defmodule Relay.Agents do
     Repo.update_all(from(b in Board, where: b.id == ^board_id), set: [default_agent_id: default.id])
   end
 
+  # Every harness field a board copy carries over; `key` is set programmatically, never cast.
+  @copied_harness_fields [:key, :name, :command, :models, :resume_command, :session_id_path, :signed_in_check, :usage]
+
+  @doc """
+  Copies `source`'s harnesses and agents onto `target` (RE447 board copy): each harness under the
+  same `key`, each agent (`name`, `model`) on the copied harness with its source harness's key,
+  and `target`'s default agent set to the copy of `source`'s default (by name) — left nil when
+  `source` has none. Run it **before** `ensure_seeded!/1` on `target`, which then adds only the
+  seed harnesses `source` lacked and no seed agents.
+  """
+  @spec copy_from!(Board.t(), Board.t()) :: :ok
+  def copy_from!(%Board{id: target_id}, %Board{id: source_id}) do
+    harness_ids =
+      Map.new(list_harnesses(source_id), fn harness ->
+        copy = Repo.insert!(struct(Harness, harness |> Map.take(@copied_harness_fields) |> Map.put(:board_id, target_id)))
+        {harness.id, copy.id}
+      end)
+
+    agents =
+      for agent <- list_agents(source_id) do
+        Repo.insert!(%Agent{
+          board_id: target_id,
+          harness_id: Map.fetch!(harness_ids, agent.harness_id),
+          name: agent.name,
+          model: agent.model
+        })
+      end
+
+    case default_agent(source_id) do
+      nil ->
+        :ok
+
+      %Agent{name: name} ->
+        default = Enum.find(agents, &(&1.name == name))
+        Repo.update_all(from(b in Board, where: b.id == ^target_id), set: [default_agent_id: default.id])
+        :ok
+    end
+  end
+
   # ---------------------------------------------------------------- reads
 
   @doc "The board's harnesses, oldest first."

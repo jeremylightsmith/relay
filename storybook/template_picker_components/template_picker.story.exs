@@ -9,6 +9,8 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
   # inside its own iframe.
   def container, do: {:iframe, style: "height: 820px;"}
 
+  @relay_agents ~w(plan-implementer spec-reviewer quality-reviewer final-fixer rebaser smoke-tester acceptance-tester final-reviewer ci-fixer)
+
   # RE442, card mockup "Picker — New board opens three template cards": the real templates from
   # `Relay.Boards.templates/0`, once per selection (the warning box shows on the third).
   def variations do
@@ -38,7 +40,53 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
               "three-brain" => "Tiny Dungeon (three-brain)"
             }
           }
+        },
+        # RE447, card mockup "Picker — 4th option: copy from a board I have access to".
+        %Variation{
+          id: :copy_selected,
+          description: "Copy selected — Relay chosen, its flows name 9 repo files",
+          attributes: %{
+            templates: templates,
+            selected: RelayWeb.TemplatePickerComponents.copy_option(),
+            copy_from: "relay",
+            copy_sources: [
+              %{slug: "relay", name: "Relay", key: "RE", stages: 9, flows: 4, files: agent_files(@relay_agents)},
+              %{slug: "acme-web", name: "Acme web", key: "ACM", stages: 7, flows: 3, files: []}
+            ]
+          }
+        },
+        %Variation{
+          id: :copy_many_boards,
+          description:
+            "Copy selected with 40 boards — the list scrolls in place; the warning and button stay right under it",
+          attributes: %{
+            templates: templates,
+            selected: RelayWeb.TemplatePickerComponents.copy_option(),
+            copy_from: "relay",
+            copy_sources: [
+              %{slug: "relay", name: "Relay", key: "RE", stages: 9, flows: 4, files: agent_files(@relay_agents)}
+              | for(
+                  i <- 1..39,
+                  do: %{slug: "board-#{i}", name: "Board #{i}", key: "B#{i}", stages: 7, flows: 3, files: []}
+                )
+            ]
+          }
+        },
+        %Variation{
+          id: :copy_no_boards,
+          description: "Copy selected with no boards to copy — the button is disabled",
+          attributes: %{
+            templates: templates,
+            selected: RelayWeb.TemplatePickerComponents.copy_option(),
+            copy_sources: []
+          }
         }
       ]
+  end
+
+  defp agent_files(names) do
+    for name <- names do
+      %{kind: :agent, name: name, paths: [".claude/agents/#{name}.md"], used_by: [%{flow: "code", node: name}]}
+    end
   end
 end

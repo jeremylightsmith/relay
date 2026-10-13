@@ -175,11 +175,7 @@ defmodule Relay.DataCase do
   then this to bring it back), so it is safe whether or not a stop already ran.
   """
   def restart_engine!(opts \\ []) do
-    # The boot `Task` does not trap exits, so stopping the tree while it is still mid-query
-    # (`resume_all/0` under a loaded full suite) kills the sandbox connection's client and
-    # poisons the shared connection for the rest of the test — the next Repo call in the test
-    # process raises `DBConnection.OwnershipError`. Let it finish first.
-    if engine_running?(), do: await_engine_boot!()
+    quiesce_engine!()
 
     case ExUnit.Callbacks.stop_supervised(Relay.Runs.Supervisor) do
       :ok -> :ok
@@ -195,13 +191,6 @@ defmodule Relay.DataCase do
   # `restart_engine!()` reuses the exact names `start_engine!/1` picked, instead of rolling fresh
   # random ones that orphan any `Process.whereis(pinned_name)` the test relies on.
   @engine_opts_key :relay_data_case_engine_opts
-
-  defp engine_running? do
-    case Process.get(@engine_opts_key) do
-      nil -> false
-      opts -> is_pid(Process.whereis(Keyword.fetch!(opts, :name)))
-    end
-  end
 
   @doc """
   Blocks until this test's engine boot task (`Relay.Runs.resume_all/0`) has finished. Call it
@@ -229,6 +218,42 @@ defmodule Relay.DataCase do
     end
 
     :ok
+  end
+
+  # Every engine process shares the test's ONE sandbox connection. Killing one while it holds
+  # that connection mid-query (the shutdown `restart_engine!/1` does) makes DBConnection tear the
+  # ownership proxy down: the in-flight query fails with "client … exited", and every later query
+  # — the test's own included — raises `DBConnection.OwnershipError`. So before stopping the
+  # tree, let it go idle: wait out the boot task, then drain each run server, the Listener and the
+  # RunnerReaper. Two rounds, because a run server's work emits card events the Listener then
+  # reconciles, and a reconcile can poke a run server. A no-op when the tree is already down.
+  defp quiesce_engine! do
+    with opts when is_list(opts) <- Process.get(@engine_opts_key),
+         sup when is_pid(sup) <- Process.whereis(Keyword.fetch!(opts, :name)) do
+      await_engine_boot!()
+
+      for _round <- 1..2 do
+        opts |> Keyword.fetch!(:run_supervisor) |> run_server_pids() |> Enum.each(&sync_process/1)
+        opts |> Keyword.fetch!(:listener) |> sync_process()
+        opts |> Keyword.fetch!(:runner_reaper) |> sync_process()
+      end
+    end
+
+    :ok
+  end
+
+  defp run_server_pids(run_supervisor) do
+    for {_id, pid, _type, _modules} <- DynamicSupervisor.which_children(run_supervisor), is_pid(pid), do: pid
+  catch
+    :exit, _not_running -> []
+  end
+
+  # `:sys.get_state/1` returns once the process has handled everything already in its mailbox.
+  defp sync_process(name_or_pid) do
+    _ = :sys.get_state(name_or_pid)
+    :ok
+  catch
+    :exit, _not_running -> :ok
   end
 
   defp start_engine_tree!(opts) do

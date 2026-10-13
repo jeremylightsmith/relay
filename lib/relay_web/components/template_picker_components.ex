@@ -10,32 +10,72 @@ defmodule RelayWeb.TemplatePickerComponents do
   border both come from it, so what's shown and what's submitted can't disagree. Events, all
   handled by `RelayWeb.BoardsLive`:
 
-    * `"select_template"` — the form's `phx-change`, `%{"template" => slug}`
-    * `"create_from_template"` — the form's `phx-submit`, `%{"template" => slug}`
+    * `"select_template"` — the form's `phx-change`, `%{"template" => slug_or_copy}` plus,
+      while the copy card is selected, `"copy_query"` and `"copy_from"`
+    * `"create_from_template"` — the form's `phx-submit`, the same fields
     * `"close_template_picker"` — Cancel, ✕, a scrim click or Escape
 
   Under each card's `flex-1` spacer, a template with a seeded example board (`examples`, from
   `Relay.Boards.example_boards/0`) links to it at `/examples/<slug>` in a new window (RE444).
   The link sits inside the card's `<label>`, so clicking it follows the link without selecting
-  the card. Story:
-  `storybook/template_picker_components/template_picker.story.exs`.
+  the card.
+
+  **The 4th option** (RE447, card mockup "Picker — 4th option: copy from a board I have access
+  to"): a full-width card beneath the three, its `template` radio valued `copy_option/0`. While
+  it is selected it reveals a search box (`copy_query`, filtering `copy_sources` by name or key,
+  case-insensitively), one `copy_from` radio row per `Relay.Boards.copy_sources/1` board
+  (`N stages · M flows`), an amber warning naming the first five `.claude/` files the chosen
+  board's flows reference (`+N more` past that), and a button reading "Copy <board>'s stages
+  and flows" — disabled when there is no board to copy. Its outer element is a `<div>`, not a
+  `<label>`, because each source row is a label; the left column is a
+  `<label for="template-radio-copy">`, so clicks in the search box or on a row never touch the
+  `template` radio.
+
+  Story: `storybook/template_picker_components/template_picker.story.exs` — one variation per
+  template selection, `:with_examples`, and the copy variations `:copy_selected` and
+  `:copy_no_boards`.
   """
 
   use RelayWeb, :html
 
+  @copy_option "copy"
+
+  @doc """
+  The one `template` radio value that means "copy a board" (RE447) rather than a template slug.
+  `RelayWeb.BoardsLive` compares the submitted value against it.
+  """
+  @spec copy_option() :: String.t()
+  def copy_option, do: @copy_option
+
+  # How many file names the copy warning lists before it says "+N more".
+  @warning_file_names 5
+
   attr :templates, :list, required: true, doc: "`Relay.Boards.templates/0`, in picker order"
-  attr :selected, :string, required: true, doc: "the selected template's slug"
+  attr :selected, :string, required: true, doc: "the selected template's slug, or `copy_option/0`"
   attr :id, :string, default: "template-picker"
+
+  attr :copy_sources, :list,
+    default: [],
+    doc: "`Relay.Boards.copy_sources/1` rows — the boards the 4th option can copy"
+
+  attr :copy_from, :string, default: nil, doc: "the selected copy source's slug"
+  attr :copy_query, :string, default: "", doc: "the copy card's search text"
 
   attr :examples, :map,
     default: %{},
     doc: "`Relay.Boards.example_boards/0` — template slug => example board name; only these cards link to one"
 
   def template_picker(assigns) do
+    copy? = assigns.selected == @copy_option
+    source = Enum.find(assigns.copy_sources, &(&1.slug == assigns.copy_from))
+
     assigns =
       assign(assigns,
         form: to_form(%{"template" => assigns.selected}),
-        selected_name: selected_name(assigns.templates, assigns.selected)
+        copy?: copy?,
+        source: source,
+        create_label: create_label(copy?, source, selected_name(assigns.templates, assigns.selected)),
+        create_disabled?: copy? and is_nil(source)
       )
 
     ~H"""
@@ -47,7 +87,7 @@ defmodule RelayWeb.TemplatePickerComponents do
           role="dialog"
           aria-modal="true"
           aria-labelledby={"#{@id}-title"}
-          class="bg-base-200 w-full sm:max-w-[1080px] sm:rounded-[18px] shadow-xl flex flex-col border border-base-300"
+          class="bg-base-200 w-full sm:max-w-[1080px] sm:rounded-[18px] shadow-xl flex flex-col border border-base-300 self-start shrink-0"
         >
           <div class="flex items-start gap-3 px-5 pt-5 pb-3">
             <div class="flex flex-col gap-1">
@@ -83,6 +123,12 @@ defmodule RelayWeb.TemplatePickerComponents do
                 selected?={t.slug == @selected}
                 example={Map.get(@examples, t.slug)}
               />
+              <.copy_card
+                selected?={@copy?}
+                sources={@copy_sources}
+                source={@source}
+                query={@copy_query}
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-base-300 bg-base-100 sm:rounded-b-[18px]">
@@ -100,8 +146,9 @@ defmodule RelayWeb.TemplatePickerComponents do
                 id={"#{@id}-create"}
                 class="btn btn-primary btn-sm w-full sm:w-auto"
                 pending="Creating…"
+                disabled={@create_disabled?}
               >
-                Create board from {@selected_name}
+                {@create_label}
               </.button>
             </div>
           </.form>
@@ -210,6 +257,184 @@ defmodule RelayWeb.TemplatePickerComponents do
       </a>
     </label>
     """
+  end
+
+  attr :selected?, :boolean, required: true
+  attr :sources, :list, required: true
+  attr :source, :map, default: nil, doc: "the selected source row, or nil"
+  attr :query, :string, required: true
+
+  defp copy_card(assigns) do
+    assigns = assign(assigns, :visible, filter_sources(assigns.sources, assigns.query))
+
+    ~H"""
+    <div
+      id="template-card-copy"
+      class={[
+        "md:col-span-3 flex flex-col md:flex-row gap-4 rounded-[14px] bg-base-100 p-4 cursor-pointer",
+        if(@selected?, do: "border-2 border-primary", else: "border border-base-300 m-px")
+      ]}
+      style={
+        @selected? &&
+          "box-shadow:0 0 0 4px color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));"
+      }
+    >
+      <label
+        for="template-radio-copy"
+        class="flex flex-col gap-2 md:w-[340px] flex-none cursor-pointer"
+      >
+        <div class="flex items-start gap-3">
+          <input
+            type="radio"
+            id="template-radio-copy"
+            name="template"
+            value={copy_option()}
+            checked={@selected?}
+            class="radio radio-primary radio-sm mt-0.5"
+          />
+          <div class="flex flex-col gap-0.5 min-w-0">
+            <span class="font-semibold text-[15px]">Copy from a board I have access to</span>
+            <span class="text-[13px] text-base-content/55">
+              Same stages and flows as one of your boards.
+            </span>
+          </div>
+        </div>
+        <p class="text-[12.5px] leading-[1.5] text-base-content/75">
+          A plain copy: stages, flows and WIP limits, no cards. It doesn't remember where it came from and never picks up later changes.
+        </p>
+      </label>
+
+      <%!-- Unselected, the rest of the card still selects it. --%>
+      <label
+        :if={!@selected?}
+        for="template-radio-copy"
+        class="hidden md:block flex-1 cursor-pointer"
+        aria-hidden="true"
+      >
+      </label>
+
+      <div :if={@selected?} class="flex-1 min-w-0 flex flex-col gap-1.5">
+        <input
+          type="text"
+          id="template-copy-search"
+          name="copy_query"
+          value={@query}
+          class="input input-sm w-full"
+          placeholder="Search your boards…"
+          autocomplete="off"
+          phx-debounce="150"
+        />
+        <div id="template-copy-list" class="flex flex-col gap-1 max-h-[240px] overflow-y-auto">
+          <.copy_source_row
+            :for={s <- @visible}
+            source={s}
+            selected?={@source != nil and s.slug == @source.slug}
+          />
+          <p
+            :if={@visible == []}
+            id="template-copy-empty"
+            class="px-2.5 py-2 text-[12.5px] text-base-content/55"
+          >
+            No boards match.
+          </p>
+        </div>
+
+        <div
+          :if={@source && @source.files != []}
+          id="template-copy-warning"
+          class="flex items-start gap-2 rounded-lg px-2.5 py-2 mt-1"
+          style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));font-size:12px"
+        >
+          <span
+            aria-hidden="true"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+          >
+            ⚠
+          </span>
+          <span class="flex flex-col gap-1">
+            <span>
+              <b>{warning_headline(@source)}</b>
+              They aren't copied. When you onboard, the LLM asks about each one: stub it, inline it into the flow, or drop the node.
+            </span>
+            <span
+              id="template-copy-warning-files"
+              class="font-mono text-[10.5px] text-base-content/55"
+            >
+              {warning_files(@source.files)}
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :source, :map, required: true
+  attr :selected?, :boolean, required: true
+
+  defp copy_source_row(assigns) do
+    ~H"""
+    <label
+      id={"copy-source-#{@source.slug}"}
+      class={[
+        "flex items-center gap-2.5 rounded-lg px-2.5 py-2 cursor-pointer",
+        @selected? && "bg-base-200"
+      ]}
+      style={
+        if @selected?,
+          do: "border:1px solid color-mix(in oklab, var(--color-primary) 50%, var(--color-base-100))",
+          else: "border:1px solid transparent"
+      }
+    >
+      <input
+        type="radio"
+        id={"copy-source-radio-#{@source.slug}"}
+        name="copy_from"
+        value={@source.slug}
+        checked={@selected?}
+        class="radio radio-primary radio-xs"
+      />
+      <span class="flex flex-col min-w-0">
+        <span class="text-[13px] font-semibold">
+          {@source.name}
+          <span class="font-mono text-[10.5px] text-base-content/55 font-normal">{@source.key}</span>
+        </span>
+        <span class="font-mono text-[10.5px] text-base-content/55">{source_facts(@source)}</span>
+      </span>
+    </label>
+    """
+  end
+
+  defp create_label(true = _copy?, nil = _source, _template_name), do: "Copy a board's stages and flows"
+  defp create_label(true, source, _template_name), do: "Copy #{source.name}'s stages and flows"
+  defp create_label(false, _source, template_name), do: "Create board from #{template_name}"
+
+  defp filter_sources(sources, query) do
+    case query |> to_string() |> String.trim() |> String.downcase() do
+      "" ->
+        sources
+
+      q ->
+        Enum.filter(
+          sources,
+          &(String.contains?(String.downcase(&1.name), q) or String.contains?(String.downcase(&1.key), q))
+        )
+    end
+  end
+
+  defp source_facts(source), do: "#{count_label(source.stages, "stage")} · #{count_label(source.flows, "flow")}"
+
+  defp warning_headline(%{name: name, files: [_]}),
+    do: "#{name}'s flows name 1 file that lives in its repo, not on the board."
+
+  defp warning_headline(%{name: name, files: files}),
+    do: "#{name}'s flows name #{length(files)} files that live in its repo, not on the board."
+
+  defp warning_files(files) do
+    {shown, rest} = Enum.split(files, @warning_file_names)
+    names = Enum.map(shown, & &1.name)
+    names = if rest == [], do: names, else: names ++ ["+#{length(rest)} more"]
+    Enum.join(names, " · ")
   end
 
   defp selected_name(templates, slug) do

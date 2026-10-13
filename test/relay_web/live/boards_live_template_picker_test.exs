@@ -5,11 +5,15 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
   """
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Relay.Boards
   alias Relay.Repo
+  alias Relay.Setup
+  alias RelayWeb.TemplatePickerComponents
   alias Schemas.Board
+  alias Schemas.Card
 
   setup :register_and_log_in_user
 
@@ -24,11 +28,15 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     view
   end
 
+  # The three template cards; RE447's 4th card (`#template-card-copy`) is a copy option, not a
+  # template.
+  @template_cards ~s{#template-picker [id^="template-card-"]:not(#template-card-copy)}
+
   defp card_ids(view) do
     view
     |> render()
     |> LazyHTML.from_fragment()
-    |> LazyHTML.query(~s(#template-picker [id^="template-card-"]))
+    |> LazyHTML.query(@template_cards)
     |> LazyHTML.attribute("id")
   end
 
@@ -147,7 +155,8 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
   test "9. the strips show main stage names only, no WIP, and mark Review sub-lanes", %{conn: conn} do
     view = open_picker(conn)
-    picker_text = view |> element("#template-picker") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text()
+    # The template cards only: RE447's copy card names "WIP limits" in its plain-copy note.
+    picker_text = view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(@template_cards) |> LazyHTML.text()
 
     refute picker_text =~ ~r/wip/i
     refute picker_text =~ ~r/default board/i
@@ -195,5 +204,119 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
     assert has_element?(view, "#template-example-design-led")
     assert has_element?(view, "#template-example-three-brain")
+  end
+
+  describe "RE447: the 4th option, copy from a board I have access to" do
+    setup %{user: user} do
+      {:ok, relay} = Boards.create_board(user, %{name: "Relay", slug: unique_slug("relay")})
+      {:ok, acme} = Boards.create_board(user, %{name: "Acme web", slug: unique_slug("acme-web")})
+      {:ok, secret} = Boards.create_board(insert(:user), %{name: "Secret", slug: unique_slug("secret")})
+      %{relay: relay, acme: acme, secret: secret}
+    end
+
+    defp select_copy(view, params \\ %{}) do
+      view
+      |> element("#template-picker-form")
+      |> render_change(Map.merge(%{"template" => TemplatePickerComponents.copy_option()}, params))
+    end
+
+    test "7. selecting the copy card lists only the boards the user is a member of", %{
+      conn: conn,
+      relay: relay,
+      acme: acme,
+      secret: secret
+    } do
+      view = open_picker(conn)
+      select_copy(view)
+
+      assert has_element?(view, "#copy-source-#{relay.slug}")
+      assert has_element?(view, "#copy-source-#{acme.slug}")
+      refute has_element?(view, "#copy-source-#{secret.slug}")
+
+      for template <- Boards.templates() do
+        assert has_element?(view, "#template-card-#{template.slug}")
+      end
+    end
+
+    test "8. the search narrows the list and choosing a source relabels the button", %{
+      conn: conn,
+      relay: relay,
+      acme: acme
+    } do
+      view = open_picker(conn)
+      select_copy(view)
+
+      select_copy(view, %{"copy_query" => "acme"})
+      assert has_element?(view, "#copy-source-#{acme.slug}")
+      refute has_element?(view, "#copy-source-#{relay.slug}")
+
+      select_copy(view, %{"copy_from" => acme.slug})
+      assert has_element?(view, "#template-picker-create", "Copy Acme web's stages and flows")
+    end
+
+    test "9. a default board's flows name .claude/agents files, so the picker warns with +N more", %{
+      conn: conn,
+      user: user,
+      relay: relay
+    } do
+      view = open_picker(conn)
+      select_copy(view, %{"copy_from" => relay.slug})
+
+      files = Enum.find(Boards.copy_sources(user), &(&1.slug == relay.slug)).files
+      assert length(files) > 5
+
+      assert has_element?(view, "#template-copy-warning")
+      [names] = texts(view, "#template-copy-warning-files")
+      assert String.ends_with?(names, "+#{length(files) - 5} more")
+    end
+
+    test "10. submitting the copy creates a plain copy of Relay and opens it", %{
+      conn: conn,
+      user: user,
+      relay: relay
+    } do
+      view = open_picker(conn)
+      select_copy(view, %{"copy_from" => relay.slug})
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view
+               |> element("#template-picker-form")
+               |> render_submit(%{"template" => TemplatePickerComponents.copy_option(), "copy_from" => relay.slug})
+
+      assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)$}, to)
+      copy = Boards.get_board(user, slug)
+      assert copy.name == "Untitled board"
+
+      main_names = fn board ->
+        board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.map(& &1.name)
+      end
+
+      assert main_names.(copy) == main_names.(relay)
+      assert Repo.aggregate(from(c in Card, where: c.board_id == ^copy.id), :count) == 0
+
+      step_one = Enum.find(Setup.checklist(copy).steps, &(&1.id == "1"))
+      assert step_one.evidence == "copied from Relay"
+    end
+
+    test "11. a board the user isn't in gets the same refusal as an unknown board", %{
+      conn: conn,
+      user: user,
+      secret: secret
+    } do
+      view = open_picker(conn)
+      select_copy(view)
+      before = length(Boards.list_boards(user))
+
+      for slug <- [secret.slug, "no-such-board"] do
+        html =
+          view
+          |> element("#template-picker-form")
+          |> render_submit(%{"template" => TemplatePickerComponents.copy_option(), "copy_from" => slug})
+
+        assert html =~ "That board isn&#39;t available to copy. Pick another."
+        assert has_element?(view, "#template-picker")
+        assert length(Boards.list_boards(user)) == before
+      end
+    end
   end
 end

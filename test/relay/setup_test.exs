@@ -136,6 +136,18 @@ defmodule Relay.SetupTest do
       assert Setup.checklist(create!("bare-minimum")).template_warning == nil
     end
 
+    # RE447 scenario 15
+    test "an :evidence override is step 1's evidence verbatim; without it the count stays" do
+      copied = insert(:board)
+      :ok = Setup.start(copied, %{name: "Relay", evidence: "copied from Relay"})
+      assert step(copied, "1").evidence == "copied from Relay"
+      assert Setup.checklist(copied).template == "Relay"
+
+      counted = insert(:board)
+      :ok = Setup.start(counted, %{name: "Bare minimum"})
+      assert step(counted, "1").evidence =~ ~r/^\d+ stages · \d+ flows · \d\d:\d\d$/
+    end
+
     # Scenario 18
     test "deleting the board deletes its setup rows" do
       board = create!("bare-minimum")
@@ -540,6 +552,11 @@ defmodule Relay.SetupTest do
 
       assert Enum.all?(questions, &(is_binary(&1.question) and String.trim(&1.question) != ""))
       assert Setup.change_decisions() == ["pending", "asking", "accepted", "rejected", "edited"]
+    end
+
+    # RE447 task 3, scenario 1
+    test "missing_file_resolutions/0 is 5.4's closed set of missing-file resolutions" do
+      assert Setup.missing_file_resolutions() == ["stub", "inline", "drop", "path"]
     end
 
     # Scenario 15

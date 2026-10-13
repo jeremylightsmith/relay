@@ -657,6 +657,10 @@ Errors: `403 wrong_board`, `422 invalid`.
 
 The board's setup checklist, as the `/relay-onboard` skill reads it (RE445). Board key required.
 `current` is the one step a report may move — the current sub-step of step 5 while onboarding.
+`referenced_files` lists the `.claude/` agent and skill files the board's flows name (a skill is
+present when either of its `paths` exists) — `[]` when they name none, as on every template
+board; a board copied from another board can name files its repo doesn't have yet.
+`missing_file_resolutions` are the ways step 5.4 resolves a missing one.
 
 ```
 curl https://relay.example/api/setup -H "Authorization: Bearer $RELAY_API_KEY"
@@ -671,6 +675,11 @@ curl https://relay.example/api/setup -H "Authorization: Bearer $RELAY_API_KEY"
     "first_flow_stage": "Plan", "position": 5, "done_count": 4, "finished": false,
     "interview": [{ "id": "done", "label": "Done means", "question": "What does \"done\" mean for a card: …" }, …],
     "change_decisions": ["pending", "asking", "accepted", "rejected", "edited"],
+    "missing_file_resolutions": ["stub", "inline", "drop", "path"],
+    "referenced_files": [
+      { "kind": "agent", "name": "plan-implementer", "paths": [".claude/agents/plan-implementer.md"],
+        "used_by": [{ "flow": "code", "node": "implement" }] }
+    ],
     "steps": [
       { "id": "5", "parent": null, "title": "Onboard, in Claude Code", "actor": "ai_terminal",
         "status": "active", "evidence": null, "error": null, "data": {},
