@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# @describe Run a command against production (Fly app: relayboard).
+#
+# direnv puts bin/ on your PATH inside the project, so this is a bare `prod` command.
+# Its sibling is `dev`. Deploys are not here: the board's Deploy stage runs bin/deploy_fly.sh.
+
+set -euo pipefail
+
+# Adding a command
+#
+#   Commands are declared with argc (https://github.com/sigoden/argc). A `# @cmd` comment
+#   above a function makes that function a subcommand, and argc builds `--help` out of
+#   these comments — there is no list to register it in. Flags work the same way:
+#   `# @flag -y --yes  Some help text` becomes `$argc_yes` (set to 1) inside the function.
+#
+#   argc is pinned in mise.toml, so `mise install` provides it.
+
+# The repo root is one level up from bin/. cd there so config-file paths (fly.toml) resolve.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+ENV_NAME=production
+APP=relayboard
+
+# Check a tool is installed before we try to use it. $1 = binary, $2 = what to do about it.
+need() {
+  command -v "$1" >/dev/null || {
+    echo "$1 not found on PATH. $2" >&2
+    exit 1
+  }
+}
+
+# Ask before doing something destructive. You type the environment's name, so muscle memory
+# can't carry you through it. --yes skips it (for scripts).
+confirm() {
+  [[ "${argc_yes:-0}" == 1 ]] && return 0
+  echo "About to $1"
+  read -r -p "Type '$ENV_NAME' to continue: " answer
+  [[ "$answer" == "$ENV_NAME" ]] || {
+    echo "Aborted." >&2
+    exit 1
+  }
+}
+
+# @cmd Run any flyctl command against production.
+#
+# Everything after `fly` is handed to flyctl untouched, with `--app relayboard` appended.
+# `prod fly status`, `prod fly secrets list`.
+#
+# The flag goes last so it wins over an `--app` you typed yourself. It is only appended when
+# you are calling a subcommand: flyctl's root command has no `--app` flag, so adding it to
+# `prod fly --help` or `prod fly --version` would turn them into an error.
+# @arg args~ Passed to `flyctl` verbatim.
+fly() {
+  need flyctl "Install it and run 'fly auth login'."
+  # ${a[@]+"${a[@]}"} rather than plain "${a[@]}": argc leaves argc_args undefined when no
+  # extra arguments are given, and `set -u` on bash 3.2 (macOS /bin/bash) aborts on that.
+  local args=(${argc_args[@]+"${argc_args[@]}"})
+  case "${args[0]:-}" in
+    "" | -*) exec flyctl ${args[@]+"${args[@]}"} ;;
+    *) exec flyctl "${args[@]}" --app "$APP" ;;
+  esac
+}
+
+# @cmd Tail the application logs.
+#
+# Extra arguments go to flyctl, so the usual filters still work: `prod logs --no-tail`.
+# @arg args* Extra arguments passed through to `flyctl logs`.
+logs() {
+  need flyctl "Install it and run 'fly auth login'."
+  exec flyctl logs --app "$APP" ${argc_args[@]+"${argc_args[@]}"}
+}
+
+# @cmd Open a shell on a running machine.
+#
+# This is a plain shell. For an IEx session attached to the running app, use `iex`.
+# @arg args* Extra arguments passed through to `fly ssh console`.
+console() {
+  need flyctl "Install it and run 'fly auth login'."
+  exec flyctl ssh console -a "$APP" ${argc_args[@]+"${argc_args[@]}"}
+}
+
+# @cmd Open an IEx shell attached to the running app.
+#
+# --pty is explicit because flyctl only allocates a terminal by default when no -C command
+# is given, and IEx without one is unusable.
+iex() {
+  need flyctl "Install it and run 'fly auth login'."
+  exec flyctl ssh console -a "$APP" --pty -C "/app/bin/relay remote"
+}
+
+# @cmd Create the public example boards (RE444) that don't exist yet.
+#
+# Runs Relay.Release.seed_examples/2 on the running node. Idempotent: an example board that
+# already exists is skipped, so this is safe to re-run. --reset deletes and recreates all
+# three, so it asks first.
+#
+# `rpc`, not `eval`: the seeder's broadcasts need the live app's PubSub. Prints the
+# created/skipped summary, because `fly ssh console -C` exits 0 even when the remote command
+# dies — no summary line means it failed.
+# @option --owner The board owner's email (default: your git user.email).
+# @flag --reset Delete and recreate the example boards.
+# @flag -y --yes Skip the confirmation prompt (with --reset).
+seed-examples() {
+  need flyctl "Install it and run 'fly auth login'."
+  local owner="${argc_owner:-$(git config user.email)}" reset=false
+  # The email is spliced into Elixir source, so allow only plain address characters.
+  [[ "$owner" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || {
+    echo "'$owner' doesn't look like an email address. Pass --owner <email>." >&2
+    exit 1
+  }
+  if [[ "${argc_reset:-0}" == 1 ]]; then
+    confirm "delete and recreate the example boards on $ENV_NAME (Fly app: $APP)."
+    reset=true
+  fi
+  local expr="IO.inspect(Relay.Release.seed_examples(\\\"$owner\\\", reset: $reset), label: \\\"Examples\\\")"
+  flyctl ssh console -a "$APP" -C "/app/bin/relay rpc \"$expr\""
+}
+
+command -v argc >/dev/null || {
+  echo "argc not found on PATH. It is pinned in mise.toml — run 'mise install'." >&2
+  exit 1
+}
+
+eval "$(argc --argc-eval "$0" "$@")"
