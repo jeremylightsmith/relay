@@ -127,7 +127,7 @@ defmodule RelayWeb.Admin.OnboardingLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/admin/onboarding")
 
-    assert text_of(view, "#onboarding-row-#{board.id}-step") == "7 · Watch an agent pick up your first card"
+    assert text_of(view, "#onboarding-row-#{board.id}-step") == "7 · First card claimed"
     assert has_element?(view, "#onboarding-row-#{board.id}-step.badge-success")
     assert text_of(view, "#onboarding-row-#{board.id}-on-step") == "—"
   end

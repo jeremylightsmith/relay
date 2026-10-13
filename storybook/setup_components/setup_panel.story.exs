@@ -10,6 +10,8 @@ defmodule Storybook.SetupComponents.SetupPanel do
   # The panel's controls use the page-wide `setup-` ids, so each variation gets its own iframe.
   def container, do: {:iframe, style: "height: 980px;"}
 
+  # RE446 adds the payoff variation and D (connect a machine), card mockup "Payoff — first card turns violet, Settings →
+  # Setup, connect a machine", frame A's panel.
   # RE443, card mockup "Wizard — docked left on the empty board, every step state + expert
   # toggle": frames A (key step active), B (LLM pick with the Three-brain warning) and C (install
   # failed in preflight), D (the onboard loop running, RE445), plus the expert toggle on.
@@ -84,6 +86,28 @@ defmodule Storybook.SetupComponents.SetupPanel do
         }
       },
       %Variation{
+        id: :payoff,
+        description: "Payoff · the first card claimed: You're set up, 7 of 7 (RE446)",
+        attributes: %{
+          id: "setup-panel",
+          board_name: "Streaks",
+          board_slug: "streaks",
+          hide_explanations: true,
+          checklist: payoff_checklist()
+        }
+      },
+      %Variation{
+        id: :d_connect_a_machine,
+        description: "D · connect a machine: Sam's member note, the board-wide steps skipped, 2 of 6 (RE446)",
+        attributes: %{
+          id: "setup-panel",
+          board_name: "Streaks",
+          board_slug: "streaks",
+          user_name: "Sam",
+          checklist: connect_checklist()
+        }
+      },
+      %Variation{
         id: :hide_explanations,
         description: "I know Relay: no diagram, why lines or What this does",
         attributes: %{
@@ -114,6 +138,49 @@ defmodule Storybook.SetupComponents.SetupPanel do
         ]
       }
     }
+  end
+
+  # Every step done, setup taking 40 minutes from the board's creation to the first claim.
+  defp payoff_checklist do
+    [_pending, _active, _waiting, done, _failed, _skipped] = BoardSetupStep.statuses()
+    runner = Relay.Setup.step_id(:runner)
+    claim = Relay.Setup.step_id(:first_claim)
+    [created | _] = Relay.Setup.steps()
+
+    Relay.Setup.steps()
+    |> Map.new(&{&1.id, done})
+    |> Map.merge(%{
+      created.id => %{status: done, completed_at: ~U[2026-10-12 14:02:00Z], evidence: "6 stages · 2 flows · 14:02"},
+      runner => %{status: done, evidence: "heartbeat 14:40 · jl-mbp · claude logged_in"},
+      claim => %{
+        status: done,
+        completed_at: ~U[2026-10-12 14:42:00Z],
+        evidence: "STR1 claimed 14:42 by jl-mbp",
+        data: %{"card_ref" => "STR1", "card_id" => 1, "runner" => "jl-mbp", "machine" => "jl-mbp", "verb" => "planning"}
+      }
+    })
+    |> checklist()
+  end
+
+  # An unsaved connect (RE446, frame D): `Relay.Setup.connect_skips/0` skipped, step 3 active and
+  # the board's first claim read into step 7's board-wide evidence.
+  defp connect_checklist do
+    [_pending, active, _waiting, done, _failed, skipped] = BoardSetupStep.statuses()
+    [created | _] = Relay.Setup.steps()
+    evidence = %{created.id => "already set up", Relay.Setup.step_id(:llm) => "board-wide · already chosen"}
+
+    rows =
+      Relay.Setup.connect_skips()
+      |> Map.new(&{&1, %{status: skipped, evidence: evidence[&1]}})
+      |> Map.put(Relay.Setup.step_id(:key), active)
+
+    Relay.Setup.preview_checklist(rows, %{
+      template: "Bare minimum",
+      llm: Relay.Setup.onboarding_llm("claude-code"),
+      connect?: true,
+      board_name: "Streaks",
+      board_claim: %{status: done, completed_at: ~U[2026-10-12 14:42:00Z], data: %{"card_ref" => "STR1"}}
+    })
   end
 
   # `Relay.Setup.preview_checklist/2`: `states` maps a step id to a status, or to a row-shaped

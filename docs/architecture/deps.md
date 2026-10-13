@@ -74,6 +74,7 @@ flowchart LR
     Runs --> Flows
     Runs --> Repo
     Runs --> Scaffold
+    Runs --> Setup
     Setup --> Agents
     Setup --> ApiKeys
     Setup --> Events

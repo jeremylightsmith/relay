@@ -10,9 +10,24 @@ defmodule RelayWeb.SetupComponents do
       (no controls; each unfinished step shows its `read_only_note`).
     * `setup_panel/1` — the docked-left wizard: header, progress, expert toggle,
       `how_relay_works/1`, the interactive checklist and a footer.
-    * `setup_chip/1` — the top-bar `Setup · <position> of 7` chip.
+    * `setup_chip/1` — the top-bar `Setup · <position> of <total>` chip, `Setup · done` once
+      the checklist is finished.
+    * `setup_done_box/1` — the "You're set up" box atop a finished panel (RE446): Close setup
+      (`"setup_close"`) and Connect another machine (`"setup_connect_another"`).
+    * `setup_callout/1` — the payoff callout (RE446, card mockup "Payoff — first card turns
+      violet, Settings → Setup, connect a machine", frame A): "An agent has the baton", pinned
+      under the claimed card by the colocated `.SetupCallout` hook, which also rings that card
+      (`data-setup-baton`). Watch it work (`"setup_callout_watch"`) and Got it (`"setup_close"`).
     * `setup_mobile/1` — what a phone sees instead of the columns: "Continue on a computer" and
       the read-only checklist.
+    * Board settings → Setup (RE446, frame C): `status_line/1` (`"Finished 12 Oct, 14:42 · 7 of
+      7 · 40 min"` / `"In progress · 4 of 7"`), `project_answers/1` (the 5.3 answers) and
+      `setup_machines_table/1` (`Relay.Setup.machines/1`).
+
+  Connect a machine (RE446, frame D): a checklist with `connect?: true` renders its skipped steps
+  with a dashed `–` marker and muted evidence, hides the sub-steps a machine never runs
+  (`Relay.Setup.connect_skips/0`) and, unsaved (`machine_id: nil`), offers "Mint my key" on step
+  3. `setup_panel/1` titles it "Connect a machine to <board>" with the member note (`user_name`).
 
   Step 5 (RE445, frames D, F1, F2 and E of the wizard mockup) is the `/relay-onboard` loop: in
   both modes its sub-steps 5.1–5.8 render as rows with a status glyph (`✓ ▸ ◌ ! ○ –`) and their
@@ -31,7 +46,8 @@ defmodule RelayWeb.SetupComponents do
   can both be on the page. Events, all handled by `RelayWeb.BoardLive`: `"setup_select_llm"`
   (the LLM form's `phx-change`, `%{"llm" => harness}`), `"setup_choose_llm"`
   (`%{"llm" => harness}`), `"setup_mint_key"`, `"setup_toggle_explanations"`,
-  `"setup_minimize"` and `"setup_open"`.
+  `"setup_minimize"`, `"setup_open"`, `"setup_close"`, `"setup_callout_watch"` and
+  `"setup_connect_another"`.
 
   Stories: `storybook/setup_components/`.
   """
@@ -101,19 +117,31 @@ defmodule RelayWeb.SetupComponents do
     finished? = step.status in BoardSetupStep.finished_statuses()
     current? = step.status in BoardSetupStep.current_statuses()
 
+    connect_skipped? = assigns.checklist.connect? and step.status == :skipped
+
     assigns =
       assign(assigns,
         finished?: finished?,
         current?: current?,
         onboard?: assigns.interactive and current? and step.id == Setup.step_id(:onboard),
-        tone: actor_tone(step.actor)
+        tone: actor_tone(step.actor),
+        connect_skipped?: connect_skipped?,
+        children: visible_children(step.children, assigns.checklist.connect?)
       )
 
     ~H"""
     <li id={step_dom_id(@prefix, @step.id)} data-status={@step.status} class="flex gap-3">
       <div class="setup-marker-col flex flex-col items-center">
-        <span class="setup-marker font-mono" style={marker_style(@step.status, @tone)}>
-          {marker_glyph(@step)}
+        <span
+          class="setup-marker font-mono"
+          style={
+            if(@connect_skipped?,
+              do: connect_skipped_marker(),
+              else: marker_style(@step.status, @tone)
+            )
+          }
+        >
+          {if(@connect_skipped?, do: skipped_glyph(), else: marker_glyph(@step))}
         </span>
         <span
           :if={not @last}
@@ -141,7 +169,7 @@ defmodule RelayWeb.SetupComponents do
               class="font-mono"
               style={"font-size:10.5px;" <> faint()}
             >
-              {elapsed_minutes(@step.reached_at, @now)} min
+              {minutes(elapsed_minutes(@step.reached_at, @now), :short)}
             </span>
           <% end %>
         </div>
@@ -174,6 +202,7 @@ defmodule RelayWeb.SetupComponents do
           :if={@interactive and @current? and @step.id == Setup.step_id(:key)}
           prefix={@prefix}
           token={@token}
+          unsaved={@checklist.connect? and is_nil(@checklist.machine_id)}
         />
         <.install_block
           :if={@interactive and @current? and @step.id == Setup.step_id(:install)}
@@ -193,12 +222,19 @@ defmodule RelayWeb.SetupComponents do
         >
           <span>{evidence_glyph(@step.status)} {@step.evidence}</span>
         </div>
+        <div
+          :if={@connect_skipped? and @step.evidence}
+          class="setup-evidence font-mono"
+          style={"font-size:10.5px;" <> muted()}
+        >
+          {@step.evidence}
+        </div>
         <.preflight_checks
           :if={@interactive and @current? and @step.id == Setup.step_id(:install)}
           prefix={@prefix}
           checks={List.wrap(@step.data["checks"])}
         />
-        <.substeps :if={@step.children != []} prefix={@prefix} children={@step.children} />
+        <.substeps :if={@children != []} prefix={@prefix} children={@children} />
         <details :if={@explain and @current? and @step.what_this_does != []} class="setup-what">
           <summary
             class="link link-hover flex cursor-pointer list-none items-center gap-1.5"
@@ -488,11 +524,18 @@ defmodule RelayWeb.SetupComponents do
 
   defp pending_glyph, do: "○"
 
+  defp skipped_glyph, do: "–"
+
+  # A connect leaves out the sub-steps a machine never runs (`Setup.connect_skips/0`); a board's
+  # checklist shows all of them.
+  defp visible_children(children, true = _connect?), do: Enum.reject(children, &(&1.id in Setup.connect_skips()))
+  defp visible_children(children, false), do: children
+
   defp substep_glyph(:done), do: "✓"
   defp substep_glyph(:active), do: "▸"
   defp substep_glyph(:waiting), do: "◌"
   defp substep_glyph(:failed), do: "!"
-  defp substep_glyph(:skipped), do: "–"
+  defp substep_glyph(:skipped), do: skipped_glyph()
   defp substep_glyph(:pending), do: pending_glyph()
 
   defp substep_color(:done), do: tone_70("success")
@@ -569,6 +612,20 @@ defmodule RelayWeb.SetupComponents do
 
   attr :prefix, :string, required: true
   attr :token, :string, required: true
+  attr :unsaved, :boolean, default: false, doc: "an unsaved connect: nothing minted yet"
+
+  defp key_box(%{token: nil, unsaved: true} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"#{@prefix}-mint-key"}
+      phx-click="setup_mint_key"
+      class="btn btn-primary btn-sm self-start"
+    >
+      Mint my key
+    </button>
+    """
+  end
 
   defp key_box(%{token: nil} = assigns) do
     ~H"""
@@ -729,12 +786,13 @@ defmodule RelayWeb.SetupComponents do
   attr :board_slug, :string, default: nil
   attr :class, :any, default: "flex", doc: "the aside's display classes (BoardLive: `hidden drawer:flex`)"
   attr :now, DateTime, default: nil, doc: "the clock step 5's elapsed time reads; nil is `DateTime.utc_now/0`"
+  attr :user_name, :string, default: nil, doc: "who is signed in (name or email), for a connect's member note"
 
   def setup_panel(assigns) do
     assigns =
       assign(assigns,
         prefix: @panel_prefix,
-        progress: round(assigns.checklist.done_count * 100 / length(assigns.checklist.steps)),
+        progress: round(assigns.checklist.done_count * 100 / assigns.checklist.total),
         warn?: assigns.checklist.template_warning && assigns.checklist.current_id == Setup.step_id(:llm)
       )
 
@@ -751,7 +809,7 @@ defmodule RelayWeb.SetupComponents do
         <div class="flex items-center gap-2">
           <.setup_label />
           <span class="font-mono" style={"font-size:10.5px;" <> muted()}>
-            {@checklist.position} of {length(@checklist.steps)}
+            {@checklist.position} of {@checklist.total}
           </span>
           <span class="flex-1"></span>
           <button
@@ -764,7 +822,18 @@ defmodule RelayWeb.SetupComponents do
             ⟨
           </button>
         </div>
-        <h2 class="font-semibold tracking-tight" style="font-size:18px">Set up {@board_name}</h2>
+        <h2 class="font-semibold tracking-tight" style="font-size:18px">
+          {if(@checklist.connect?,
+            do: "Connect a machine to #{@board_name}",
+            else: "Set up #{@board_name}"
+          )}
+        </h2>
+        <.member_note
+          :if={@checklist.connect?}
+          id={"#{@prefix}-member-note"}
+          user_name={@user_name}
+          board_name={@board_name}
+        />
         <progress class="progress progress-primary h-1.5 w-full" value={@progress} max="100">
         </progress>
         <label class="flex cursor-pointer items-center gap-2" style={"font-size:12px;" <> muted()}>
@@ -778,6 +847,7 @@ defmodule RelayWeb.SetupComponents do
         </label>
       </div>
       <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+        <.setup_done_box :if={@checklist.finished?} id={"#{@prefix}-done"} checklist={@checklist} />
         <div
           :if={@warn?}
           id={"#{@prefix}-template-warning"}
@@ -821,6 +891,345 @@ defmodule RelayWeb.SetupComponents do
         </button>
       </div>
     </aside>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :user_name, :string, required: true
+  attr :board_name, :string, required: true
+
+  # A connect's "whose key is this" note (frame D): the key and the runner are the signed-in person's.
+  defp member_note(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="flex items-start gap-2 rounded-lg bg-base-200 px-2.5 py-2"
+      style="font-size:11.5px"
+    >
+      <span
+        class="font-mono"
+        style="font-size:9px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;background:var(--color-primary);color:var(--color-primary-content)"
+      >
+        {initials(@user_name)}
+      </span>
+      <span>
+        Signed in as <b>{@user_name}</b>, a member of {@board_name}. The key this mints is {@user_name}'s, and so is the runner.
+        <span style={muted()}>Not a member? Ask an owner to add you in Members first.</span>
+      </span>
+    </div>
+    """
+  end
+
+  # The first letters of the first two words, or the first two letters of a one-word name, upcased.
+  defp initials(nil), do: "?"
+
+  defp initials(name) do
+    case_result =
+      case String.split(name) do
+        [first, second | _rest] -> String.first(first) <> String.first(second)
+        [one] -> String.slice(one, 0, 2)
+        [] -> "?"
+      end
+
+    String.upcase(case_result)
+  end
+
+  # ---------------------------------------------------------------- Board settings → Setup
+
+  @doc """
+  The one-line state of a board's setup for Board settings → Setup:
+  `"Finished 12 Oct, 14:42 · 7 of 7 · 40 min"` once finished, else `"In progress · 4 of 7"`.
+  """
+  @spec status_line(map()) :: String.t()
+  def status_line(%{finished?: true, finished_at: %DateTime{} = at, total: total} = checklist) do
+    Enum.join(
+      [
+        "Finished #{Calendar.strftime(at, "%-d %b, %H:%M")}",
+        "#{total} of #{total}" | List.wrap(minutes(checklist.elapsed_minutes, :short))
+      ],
+      " · "
+    )
+  end
+
+  def status_line(%{position: position, total: total}), do: "In progress · #{position} of #{total}"
+
+  attr :id, :string, required: true
+  attr :answers, :list, required: true, doc: "`Relay.Setup.project_answers/1`: `[%{id, label, answer}]`"
+
+  @doc """
+  The onboarding answers (5.3) for Board settings → Setup (frame C): a two-column label/answer grid,
+  or "No answers yet" when there are none, and a footnote saying where to change them.
+  """
+  def project_answers(assigns) do
+    assigns = assign(assigns, interview: Setup.step_id(:interview))
+
+    ~H"""
+    <div id={@id} class="flex flex-col gap-2">
+      <div class="flex items-baseline gap-2">
+        <span style="font-size:13.5px;font-weight:600">Project answers</span>
+        <span class="font-mono" style={"font-size:10.5px;" <> muted()}>
+          from onboarding · also in .relay/project.md
+        </span>
+      </div>
+      <div
+        :if={@answers != []}
+        class="grid gap-x-6 gap-y-1 rounded-lg border border-base-300 p-3"
+        style="grid-template-columns:repeat(2,minmax(0,1fr))"
+      >
+        <div
+          :for={answer <- @answers}
+          id={"#{@id}-#{answer.id}"}
+          class="grid gap-2"
+          style="grid-template-columns:96px minmax(0,1fr);font-size:12px"
+        >
+          <span style={muted()}>{answer.label}</span>
+          <span class="truncate" style="font-weight:500">{answer.answer}</span>
+        </div>
+      </div>
+      <p
+        :if={@answers == []}
+        class="rounded-lg border border-base-300 p-3"
+        style={"font-size:12px;" <> muted()}
+      >
+        No answers yet. Onboarding records them in step {@interview}.
+      </p>
+      <p id={"#{@id}-footnote"} style={"font-size:11.5px;" <> muted()}>
+        A copy for reference. To change one, edit .relay/project.md in the repo; the next onboard run reports it here.
+      </p>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true, doc: "the table's DOM id; rows are `<id>-board` and `<id>-<machine id>`"
+  attr :machines, :list, required: true, doc: "`Relay.Setup.machines/1`"
+
+  @doc """
+  Every setup on the board, for Board settings → Setup (frame C): Machine, Person, Key (`…last4`),
+  Harnesses (`claude ✓`) and the Setup badge (success once finished, else primary). An empty cell
+  reads a faint `—`.
+  """
+  def setup_machines_table(assigns) do
+    ~H"""
+    <table id={@id} class="table table-sm">
+      <thead>
+        <tr>
+          <th>Machine</th>
+          <th>Person</th>
+          <th>Key</th>
+          <th>Harnesses</th>
+          <th>Setup</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={row <- @machines} id={"#{@id}-#{row.id}"}>
+          <td class="font-medium"><.cell value={row.machine} /></td>
+          <td><.cell value={row.person} /></td>
+          <td class="font-mono text-xs">
+            <.cell value={row.key_last_four && "…#{row.key_last_four}"} />
+          </td>
+          <td class="font-mono text-xs"><.cell value={harnesses(row.harnesses)} /></td>
+          <td>
+            <span class={[
+              "badge badge-sm badge-soft",
+              if(row.finished?, do: "badge-success", else: "badge-primary")
+            ]}>
+              {if(row.finished?, do: "✓ #{row.progress}", else: row.progress)}
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  attr :value, :string, required: true
+
+  defp cell(%{value: nil} = assigns), do: ~H|<span style={faint()}>—</span>|
+  defp cell(assigns), do: ~H|{@value}|
+
+  defp harnesses([]), do: nil
+
+  defp harnesses(harnesses) do
+    Enum.map_join(harnesses, ", ", fn
+      %{cli: cli, signed_in: true} -> "#{cli} ✓"
+      %{cli: cli, signed_in: false} -> "#{cli} ✕"
+      %{cli: cli} -> cli
+    end)
+  end
+
+  # ---------------------------------------------------------------- payoff
+
+  attr :id, :string, required: true
+  attr :checklist, :map, required: true, doc: "a finished `Relay.Setup.checklist/1`"
+
+  @doc """
+  The "You're set up" box atop a finished panel: the minutes setup took (`elapsed_minutes`),
+  then Close setup (`#setup-close`, `"setup_close"`) and Connect another machine
+  (`#setup-connect-another`, `"setup_connect_another"`).
+  """
+  def setup_done_box(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="flex flex-col gap-1.5 rounded-xl p-3"
+      style="background:color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 45%, var(--color-base-100))"
+    >
+      <span style="font-size:14px;font-weight:700;color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content))">
+        You're set up.{elapsed(@checklist.elapsed_minutes)}
+      </span>
+      <span style={"font-size:12.5px;" <> muted()}>
+        This panel closes on its own once you've seen the card. Reopen it any time from Board
+        settings → Setup.
+      </span>
+      <div class="flex gap-2 pt-1">
+        <button type="button" id="setup-close" phx-click="setup_close" class="btn btn-sm btn-primary">
+          Close setup
+        </button>
+        <button
+          type="button"
+          id="setup-connect-another"
+          phx-click="setup_connect_another"
+          class="btn btn-sm btn-ghost"
+        >
+          ➕ Connect another machine
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp elapsed(nil), do: nil
+  defp elapsed(minutes), do: " #{minutes(minutes, :long)}."
+
+  # The ONE minutes format: `"40 min"` (the settings status line) or `"40 minutes"` / `"1 minute"`
+  # (the done box).
+  defp minutes(nil, _style), do: nil
+  defp minutes(minutes, :short), do: "#{minutes} min"
+  defp minutes(1, :long), do: "1 minute"
+  defp minutes(minutes, :long), do: "#{minutes} minutes"
+
+  attr :id, :string, required: true
+  attr :callout, :map, required: true, doc: "the checklist's `callout`: `card_ref`, `machine`, `llm`, `verb`"
+
+  @doc """
+  The payoff callout, "An agent has the baton". Render it once, outside every stream, inside a
+  `relative` box that also holds `#board`: the `.SetupCallout` hook pins it ~12px under
+  `#board [data-ref=<card_ref>]` (or at 24px/24px when that card isn't on screen) and sets
+  `data-setup-baton` on that card for its violet ring. The hook owns this root's `left`/`top`,
+  so the root carries no server `style`.
+  """
+  def setup_callout(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      phx-hook=".SetupCallout"
+      data-card-ref={@callout.card_ref}
+      class="absolute z-30"
+      role="status"
+    >
+      <div
+        class="relative flex flex-col gap-2 rounded-xl bg-base-100 p-3.5"
+        style="width:300px;border:1px solid color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-100));box-shadow:0 10px 30px color-mix(in oklab, var(--color-neutral) 18%, transparent)"
+      >
+        <span
+          class="absolute"
+          aria-hidden="true"
+          style="left:40px;top:-7px;width:12px;height:12px;background:var(--color-base-100);transform:rotate(45deg);border-left:1px solid color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-100));border-top:1px solid color-mix(in oklab, var(--color-secondary) 55%, var(--color-base-100))"
+        >
+        </span>
+        <div class="flex items-center gap-2">
+          <span
+            class="font-mono"
+            style="font-size:9px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;background:var(--color-secondary);color:var(--color-secondary-content)"
+          >
+            AI
+          </span>
+          <span style="font-size:13.5px;font-weight:700">An agent has the baton</span>
+        </div>
+        <p style="font-size:12.5px;line-height:1.5">
+          {@callout.card_ref} just turned <b style="color:color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content))">violet</b>: your runner on {@callout.machine} claimed it and {@callout.llm} is {@callout.verb} it now.
+        </p>
+        <p style="font-size:12.5px;line-height:1.5">
+          When it needs you (a plan to approve, a question, a review) it comes back
+          <b style="color:color-mix(in oklab, var(--color-primary) 80%, var(--color-base-content))">
+            blue
+          </b>
+          and shows up in Needs you.
+        </p>
+        <div class="flex items-center gap-2 pt-1">
+          <button
+            type="button"
+            id={"#{@id}-watch"}
+            phx-click="setup_callout_watch"
+            class="btn btn-secondary btn-sm"
+          >
+            Watch it work
+          </button>
+          <button
+            type="button"
+            id={"#{@id}-dismiss"}
+            phx-click="setup_close"
+            class="btn btn-ghost btn-sm"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".SetupCallout">
+      // RE446 — pins the payoff callout ~12px under the claimed card, its arrow over the card's
+      // left part, and rings that card (data-setup-baton, styled in app.css). Cards are stream
+      // items that a re-insert replaces, so a MutationObserver on #board re-applies the ring;
+      // updated() and resize/scroll re-apply the position. The fallback (card filtered, paged
+      // away, or not rendered) is 24px/24px.
+      const GAP = 12
+      const FALLBACK = 24
+
+      export default {
+        mounted() {
+          this.board = document.getElementById("board")
+          this.place = () => this.apply()
+          window.addEventListener("resize", this.place)
+          if (this.board) {
+            this.board.addEventListener("scroll", this.place, {capture: true, passive: true})
+            this.mutations = new MutationObserver(this.place)
+            this.mutations.observe(this.board, {childList: true, subtree: true})
+          }
+          this.apply()
+        },
+        updated() { this.apply() },
+        destroyed() {
+          window.removeEventListener("resize", this.place)
+          if (this.board) this.board.removeEventListener("scroll", this.place, {capture: true})
+          if (this.mutations) this.mutations.disconnect()
+          this.unring()
+        },
+        card() {
+          if (!this.board) return null
+          return this.board.querySelector(`[data-ref="${CSS.escape(this.el.dataset.cardRef)}"]`)
+        },
+        unring(keep) {
+          document.querySelectorAll("[data-setup-baton]").forEach(el => {
+            if (el !== keep) el.removeAttribute("data-setup-baton")
+          })
+        },
+        apply() {
+          const card = this.card()
+          this.unring(card)
+          const box = this.el.offsetParent
+          if (!card || !box || card.getClientRects().length === 0) {
+            this.el.style.left = `${FALLBACK}px`
+            this.el.style.top = `${FALLBACK}px`
+            return
+          }
+          if (!card.hasAttribute("data-setup-baton")) card.setAttribute("data-setup-baton", "")
+          const c = card.getBoundingClientRect()
+          const b = box.getBoundingClientRect()
+          this.el.style.left = `${Math.round(c.left - b.left)}px`
+          this.el.style.top = `${Math.round(c.bottom - b.top + GAP)}px`
+        }
+      }
+    </script>
     """
   end
 
@@ -879,7 +1288,7 @@ defmodule RelayWeb.SetupComponents do
   def setup_chip(assigns) do
     assigns =
       assign(assigns,
-        label: "Setup · #{assigns.checklist.position} of #{length(assigns.checklist.steps)}",
+        label: chip_label(assigns.checklist),
         style:
           "background:color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content))"
       )
@@ -906,6 +1315,9 @@ defmodule RelayWeb.SetupComponents do
     </span>
     """
   end
+
+  defp chip_label(%{finished?: true}), do: "Setup · done"
+  defp chip_label(%{position: position, total: total}), do: "Setup · #{position} of #{total}"
 
   # ---------------------------------------------------------------- mobile
 
@@ -979,6 +1391,9 @@ defmodule RelayWeb.SetupComponents do
       "background:var(--color-#{tone});color:var(--color-#{tone}-content);" <>
       "box-shadow:0 0 0 4px color-mix(in oklab, var(--color-#{tone}) 18%, var(--color-base-100))"
   end
+
+  # A skipped step on a connect (frame D): a dashed faint circle around `–`.
+  defp connect_skipped_marker, do: @marker <> "border:1.5px dashed var(--color-base-300);" <> @faint
 
   defp marker_glyph(%{status: :done}), do: "✓"
   defp marker_glyph(%{status: :failed}), do: "!"

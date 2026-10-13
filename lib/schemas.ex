@@ -39,6 +39,7 @@ defmodule Schemas do
       Run,
       RunBranch,
       Scope,
+      SetupMachine,
       Stage,
       StoryActivity,
       StoryStep,

@@ -1501,7 +1501,7 @@ def setup_checklist(current="5.1", done_through=0, finished=False):
         setup_step("6", "Start the runner", rest),
         setup_step("7", "Watch an agent pick up your first card", rest),
     ]
-    values = {"board": "Streaks", "template": "bare_minimum",
+    values = {"board": "Streaks", "connect": False, "template": "bare_minimum",
               "llm": {"harness": "claude_code", "label": "Claude Code", "cli": "claude",
                       "skill_path": ".claude/skills/relay-onboard/SKILL.md"},
               "current_id": None if finished else "5",

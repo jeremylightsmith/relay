@@ -4,7 +4,8 @@ defmodule RelayWeb.Api.SetupJSON do
   `POST /api/setup/steps/:step` (RE445). `current` is `Relay.Setup.reportable_id/1` — the one step
   a report may move; the interview catalog and the 5.4 change decisions ride along so
   `./relay setup` and the skill never re-type them. Statuses and actors are strings, datetimes
-  ISO 8601 or null. The step-3 key's raw token is never stored, so it can't appear here.
+  ISO 8601 or null. The step-3 key's raw token is never stored, so it can't appear here. `connect`
+  is true for a connected machine's checklist (RE446): the skill runs its pull-only onboard.
   """
 
   alias Relay.Setup
@@ -13,6 +14,7 @@ defmodule RelayWeb.Api.SetupJSON do
     %{
       data: %{
         board: board.name,
+        connect: checklist.connect?,
         template: checklist.template,
         llm: Map.take(checklist.llm, [:harness, :label, :cli, :skill_path]),
         current_id: checklist.current_id,

@@ -175,6 +175,12 @@ defmodule Relay.DataCase do
   then this to bring it back), so it is safe whether or not a stop already ran.
   """
   def restart_engine!(opts \\ []) do
+    # The boot `Task` does not trap exits, so stopping the tree while it is still mid-query
+    # (`resume_all/0` under a loaded full suite) kills the sandbox connection's client and
+    # poisons the shared connection for the rest of the test — the next Repo call in the test
+    # process raises `DBConnection.OwnershipError`. Let it finish first.
+    if engine_running?(), do: await_engine_boot!()
+
     case ExUnit.Callbacks.stop_supervised(Relay.Runs.Supervisor) do
       :ok -> :ok
       {:error, :not_found} -> :ok
@@ -189,6 +195,13 @@ defmodule Relay.DataCase do
   # `restart_engine!()` reuses the exact names `start_engine!/1` picked, instead of rolling fresh
   # random ones that orphan any `Process.whereis(pinned_name)` the test relies on.
   @engine_opts_key :relay_data_case_engine_opts
+
+  defp engine_running? do
+    case Process.get(@engine_opts_key) do
+      nil -> false
+      opts -> is_pid(Process.whereis(Keyword.fetch!(opts, :name)))
+    end
+  end
 
   @doc """
   Blocks until this test's engine boot task (`Relay.Runs.resume_all/0`) has finished. Call it

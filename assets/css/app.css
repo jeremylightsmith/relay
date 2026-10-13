@@ -274,6 +274,15 @@
   outline-style: auto;
   outline-color: -webkit-focus-ring-color;
 }
+/* RE446: the setup payoff — the card the runner just claimed wears a violet
+   ring while the "An agent has the baton" callout points at it. The
+   .SetupCallout hook sets the attribute. The card's own box-shadow is an
+   inline style, so this one needs !important to win. */
+[data-setup-baton] {
+  box-shadow:
+    0 0 0 4px color-mix(in oklab, var(--color-secondary) 22%, var(--color-base-100)),
+    0 8px 24px color-mix(in oklab, var(--color-secondary) 25%, transparent) !important;
+}
 .stage-drop.drag-over {
   outline: 2px dashed var(--color-primary);
   outline-offset: 2px;

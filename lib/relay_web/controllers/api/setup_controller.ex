@@ -10,6 +10,8 @@ defmodule RelayWeb.Api.SetupController do
   `GET /api/setup` and `POST /api/setup/steps/:step` (RE445) are how `./relay setup status|report`
   — and through it the `/relay-onboard` skill — read the checklist and move its reportable step
   (`Relay.Setup.reportable_id/1`). Both answer `{"data": checklist}` (`RelayWeb.Api.SetupJSON`).
+  Every endpoint works the key's own setup (`Relay.Setup.target_for_key/1`, RE446): a connected
+  machine's checklist for the key minted for it, else the board's.
 
   Refusals use the `RelayWeb.Api.ErrorJSON` envelope.
   """
@@ -25,7 +27,7 @@ defmodule RelayWeb.Api.SetupController do
   def installed(conn, params), do: respond(conn, Setup.installed(conn.assigns.current_api_key, params))
 
   def status(conn, _params) do
-    case Setup.checklist(conn.assigns.current_board) do
+    case conn |> target() |> Setup.checklist() do
       nil -> no_checklist(conn)
       checklist -> render_checklist(conn, checklist)
     end
@@ -33,17 +35,19 @@ defmodule RelayWeb.Api.SetupController do
 
   # The body is read from `conn.body_params`, not `params`, so the path's `step` can't collide.
   def report(conn, %{"step" => step_id}) do
-    board = conn.assigns.current_board
+    target = target(conn)
 
     with {:ok, status, attrs} <- parse_report(conn.body_params),
-         {:ok, checklist} <- Setup.advance(board, step_id, status, attrs) do
+         {:ok, checklist} <- Setup.advance(target, step_id, status, attrs) do
       render_checklist(conn, checklist)
     else
       {:error, :invalid} -> error(conn, :unprocessable_entity, "invalid", "Invalid request")
       {:error, :no_checklist} -> no_checklist(conn)
-      {:error, :not_current} -> not_current(conn, step_id, Setup.checklist(board))
+      {:error, :not_current} -> not_current(conn, step_id, Setup.checklist(target))
     end
   end
+
+  defp target(conn), do: Setup.target_for_key(conn.assigns.current_api_key)
 
   defp parse_report(%{"status" => status} = body) when is_map_key(@statuses, status) do
     optional = [{"evidence", &is_binary/1}, {"error", &is_binary/1}, {"data", &is_map/1}]

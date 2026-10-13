@@ -1,7 +1,9 @@
 defmodule Schemas.BoardSetupStep do
   @moduledoc """
   One step of a board's setup checklist (RE443): a row per `(board_id, step)`, where `step` is a
-  catalog id from `Relay.Setup.steps/0` (`"1"`…`"7"`, and `"5.1"`…`"5.8"` under step 5).
+  catalog id from `Relay.Setup.steps/0` (`"1"`…`"7"`, and `"5.1"`…`"5.8"` under step 5). A
+  connected machine's checklist (RE446) is a row per `(machine_id, step)` on the same board; the
+  board's own rows have `machine_id` nil.
 
   `status` is the step's state — the ONE closed set is `statuses/0`. The checklist is strictly
   sequential: one top-level step is current (`current_statuses/0`) at a time and every step after
@@ -25,6 +27,7 @@ defmodule Schemas.BoardSetupStep do
     field :data, :map, default: %{}
 
     belongs_to :board, Schemas.Board
+    belongs_to :machine, Schemas.SetupMachine
 
     timestamps(type: :utc_datetime)
   end

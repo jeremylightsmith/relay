@@ -469,12 +469,16 @@ The key travels only in the `Authorization` header and is never written to a fil
 refuses a board still on step 2 (`409 step_2_pending`). A re-run is safe: steps already past are
 left alone and nothing is duplicated. A board with no checklist still gets the install (its LLM is
 the default agent's), with no checklist writes. `RelayWeb.ApiAuth` assigns `:current_api_key`
-(from `Relay.ApiKeys.authenticate_key/1`) for this.
+(from `Relay.ApiKeys.authenticate_key/1`) for this. Every `/api/setup/*` route works the key's own
+setup (`Relay.Setup.target_for_key/1`, RE446): a key minted by **Connect a machine** reports into
+that machine's checklist (step 3 reads `"minted for <name> · first authed call …"`), never the
+board's, and a board key never touches a machine's.
 
 **Onboarding reports** (RE445). After the install, step 5 is worked by the `/relay-onboard` skill
 through two more board-key routes on `RelayWeb.Api.SetupController`, rendered by
-`RelayWeb.Api.SetupJSON`: `GET /api/setup` answers `{"data": checklist}` — the board name, the
-template, the onboarding LLM, `current_id` / `current_sub_id` / `current`
+`RelayWeb.Api.SetupJSON`: `GET /api/setup` answers `{"data": checklist}` — the board name,
+`connect` (true for a connected machine's checklist, RE446: the skill then does 5.1 and a
+pull-only 5.6 check), the template, the onboarding LLM, `current_id` / `current_sub_id` / `current`
 (`Relay.Setup.reportable_id/1`, the one step a report may move), `first_flow_stage`, the
 position counts, the 5.3 `interview` catalog, the 5.4 `change_decisions`, and every step (string
 statuses and actors, ISO 8601 datetimes, step 5's sub-steps in `children`). `POST
@@ -564,6 +568,15 @@ that stays server-side.
   `retry` refuses it as "not connected") because runner rows are never pruned. RE305 changed
   the *default* name from the bare hostname to `<checkout-dir>@<short-host>`, so a defaulted
   runner warns loudly at startup and names the legacy identity — see the Config bullet below.
+- **Setup side effects (RE446).** Both endpoints also drive the board's guided-setup checklist
+  (`Relay.Setup`): `heartbeat/2` calls `Setup.observe_heartbeat/2` with the authed key and the
+  post-upsert runner, so a board waiting on step 6 ticks it on the first heartbeat (machine and
+  per-harness sign-in as the evidence) — or, for a connected machine's key, that machine's step 6
+  (recording its `host` / `runner_name`), never the board's; a granted claim calls `Setup.observe_claim/2` from
+  `Relay.Runs.claim_next_job/4` **after** the `FOR UPDATE SKIP LOCKED` transaction commits, so a
+  board waiting on step 7 finishes setup on its first claim — a setup write never rolls a claim
+  back and the setup board lock never nests in the job lock. Both are no-ops returning `:ok` on
+  every other board (one `exists?` query), so neither response changes.
   (A parked run whose
   holder advertises `exclusive: 0` can still be handed its own resume — the runner keeps
   polling while it holds bound slots via `RunnerPool.has_bound_slots/0`.)

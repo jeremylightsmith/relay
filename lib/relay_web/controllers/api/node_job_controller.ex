@@ -10,6 +10,7 @@ defmodule RelayWeb.Api.NodeJobController do
   alias Relay.Agents
   alias Relay.Runs
   alias Relay.Runs.Capacity
+  alias Relay.Setup
   alias Relay.Talk
   alias Schemas.Runner
 
@@ -172,6 +173,10 @@ defmodule RelayWeb.Api.NodeJobController do
       # channel that carries the session past the kill. Best-effort: a malformed `sessions` is
       # ignored inside Runs, never refused here.
       :ok = Runs.record_job_sessions(board, Map.get(params, "sessions"))
+
+      # RE446: a runner's first heartbeat ticks the key's board setup step 6. A no-op (and always
+      # `:ok`) unless that step is the one the setup is waiting on.
+      :ok = Setup.observe_heartbeat(conn.assigns.current_api_key, runner)
 
       json(conn, %{
         revoked: Runs.revoked_among(board, running),

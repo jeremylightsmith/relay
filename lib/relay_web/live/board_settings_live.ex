@@ -66,11 +66,13 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Relay.Flows
   alias Relay.Members
   alias Relay.Runs
+  alias Relay.Setup
   alias RelayWeb.AgentsSettingsComponents
   alias RelayWeb.BoardCrumbs
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowSettingsComponents
   alias RelayWeb.FlowShapeComponents
+  alias RelayWeb.SetupComponents
   alias Schemas.Agent
   alias Schemas.ApiKey
   alias Schemas.Board
@@ -161,6 +163,14 @@ defmodule RelayWeb.BoardSettingsLive do
             {section_label(:keys)}
           </.link>
           <.link
+            :if={@setup}
+            patch={~p"/board/#{@board.slug}/settings?section=setup"}
+            id="settings-tab-setup"
+            style={tab_style(@section == :setup)}
+          >
+            {section_label(:setup)}
+          </.link>
+          <.link
             navigate={~p"/board/#{@board.slug}/runners"}
             id="settings-tab-runners"
             style={tab_style(false)}
@@ -222,6 +232,14 @@ defmodule RelayWeb.BoardSettingsLive do
             style={nav_style(@section == :keys)}
           >
             {section_label(:keys)}
+          </.link>
+          <.link
+            :if={@setup}
+            patch={~p"/board/#{@board.slug}/settings?section=setup"}
+            id="settings-nav-setup"
+            style={nav_style(@section == :setup)}
+          >
+            {section_label(:setup)}
           </.link>
           <div
             id="settings-flows-moved-note"
@@ -973,6 +991,54 @@ defmodule RelayWeb.BoardSettingsLive do
               </div>
             </section>
 
+            <section :if={@section == :setup} id="setup-pane" class="flex flex-col gap-5">
+              <div>
+                <h2 class="font-semibold tracking-tight text-base-content" style="font-size:20px">
+                  {section_label(:setup)}
+                </h2>
+                <p
+                  id="setup-finished-line"
+                  class="mb-2"
+                  style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+                >
+                  {SetupComponents.status_line(@setup)}
+                </p>
+                <div class="flex items-start gap-4 border-b border-base-300 py-3">
+                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span style="font-size:13.5px;font-weight:600">Setup wizard</span>
+                    <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)">
+                      Reopen the checklist beside the board. It shows what was seen and when.
+                    </span>
+                  </div>
+                  <button type="button" id="setup-reopen" phx-click="setup_reopen" class="btn btn-sm">
+                    Reopen setup wizard
+                  </button>
+                </div>
+                <div class="flex items-start gap-4 border-b border-base-300 py-3">
+                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span style="font-size:13.5px;font-weight:600">Connect one of your machines</span>
+                    <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)">
+                      Same wizard: mints a key in your name, then install, a pull-only onboard and the
+                      runner. Board-wide steps already done are skipped. Teammates connect from their
+                      own wizard once they're in Members.
+                    </span>
+                  </div>
+                  <.link
+                    navigate={~p"/board/#{@board.slug}?setup=connect"}
+                    id="setup-connect"
+                    class="btn btn-sm btn-primary"
+                  >
+                    ➕ Connect a machine
+                  </.link>
+                </div>
+              </div>
+              <SetupComponents.project_answers id="setup-project-answers" answers={@setup_answers} />
+              <div class="flex flex-col gap-2">
+                <span style="font-size:13.5px;font-weight:600">Machines on this board</span>
+                <SetupComponents.setup_machines_table id="setup-machines" machines={@setup_machines} />
+              </div>
+            </section>
+
             <section :if={@section == :keys} id="api-key-pane">
               <.page_heading class="mb-1">
                 API keys
@@ -1211,6 +1277,7 @@ defmodule RelayWeb.BoardSettingsLive do
      |> assign(:copy_key, nil)
      |> assign(:add_form, to_form(%{}, as: :add))
      |> assign_members()
+     |> assign_setup()
      |> close_agent_panel()
      |> close_harness_panel()
      |> refresh_agents()
@@ -1219,7 +1286,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    socket = assign(socket, :section, section(params))
+    socket = assign(socket, :section, resolve_section(section(params), socket.assigns.setup))
     socket = if socket.assigns.section == :keys, do: socket, else: assign(socket, :revealed, nil)
     {:noreply, socket}
   end
@@ -1390,6 +1457,13 @@ defmodule RelayWeb.BoardSettingsLive do
      socket
      |> put_flash(:info, "Board archived.")
      |> push_navigate(to: ~p"/boards")}
+  end
+
+  # RE446 — reopening the wizard isn't a board edit, so an archived board allows it too.
+  def handle_event("setup_reopen", _params, socket) do
+    board = socket.assigns.board
+    {:ok, _checklist} = Setup.reopen(board)
+    {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
   end
 
   def handle_event("invite_member", %{"invite" => %{"email" => email}}, socket) do
@@ -1856,6 +1930,7 @@ defmodule RelayWeb.BoardSettingsLive do
   def section_label(:members), do: "Members"
   def section_label(:keys), do: "API keys"
   def section_label(:runners), do: "Runners"
+  def section_label(:setup), do: "Setup"
 
   defp section(%{"section" => "public"}), do: :public
   defp section(%{"section" => "stages"}), do: :stages
@@ -1864,7 +1939,12 @@ defmodule RelayWeb.BoardSettingsLive do
   defp section(%{"section" => "flows"}), do: :stages
   defp section(%{"section" => "keys"}), do: :keys
   defp section(%{"section" => "members"}), do: :members
+  defp section(%{"section" => "setup"}), do: :setup
   defp section(_params), do: :general
+
+  # RE446 — Setup exists only on a board with a setup checklist; elsewhere it is General.
+  defp resolve_section(:setup, nil = _setup), do: :general
+  defp resolve_section(section, _setup), do: section
 
   # RE433 — the one reload point for the Agents pane, run after every agent/harness mutation.
   defp refresh_agents(socket) do
@@ -2154,6 +2234,24 @@ defmodule RelayWeb.BoardSettingsLive do
     |> Enum.map(fn {_field, {message, _meta}} -> message end)
     |> Enum.uniq()
     |> Enum.join("; ")
+  end
+
+  # RE446 — Board settings → Setup: the board's checklist (nil hides the section), its machines
+  # and the onboarding answers.
+  defp assign_setup(socket) do
+    board = socket.assigns.board
+
+    case Setup.checklist(board) do
+      nil ->
+        assign(socket, setup: nil, setup_machines: [], setup_answers: [])
+
+      checklist ->
+        assign(socket,
+          setup: checklist,
+          setup_machines: Setup.machines(board),
+          setup_answers: Setup.project_answers(board)
+        )
+    end
   end
 
   defp assign_members(socket) do

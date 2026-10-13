@@ -27,6 +27,12 @@ defmodule Relay.Setup do
   after a committed create (5.8 finishes on a card in `first_flow_stage`, the top-level stage
   with the lowest position that holds a flow). Both are no-ops unless that sub-step is current.
 
+  Steps 6 and 7 (RE446) are board-observed too: the runner heartbeat calls `observe_heartbeat/2`
+  (step 6, the machine and its harness sign-in) and `Relay.Runs.claim_next_job/4` calls
+  `observe_claim/2` after its commit (step 7, the payoff: the claimed card's facts land in step 7's
+  `data`). `close/1` / `reopen/1` store the payoff state (`callout_dismissed_at`, `closed_at`) on
+  step 7, which the checklist exposes as `closed?` and `callout`.
+
   `choose_llm/3` (step 2) sets the board's default agent and mints the step-3 board key;
   `remint_key/2` replaces it. The raw token is returned to the caller once and never stored.
 
@@ -55,6 +61,9 @@ defmodule Relay.Setup do
   alias Schemas.BoardSetupStep
   alias Schemas.Card
   alias Schemas.Flow
+  alias Schemas.NodeJob
+  alias Schemas.Runner
+  alias Schemas.SetupMachine
   alias Schemas.Stage
   alias Schemas.User
 
@@ -68,7 +77,10 @@ defmodule Relay.Setup do
           actor: actor(),
           why: String.t() | nil,
           what_this_does: [String.t()],
-          read_only_note: String.t() | nil
+          read_only_note: String.t() | nil,
+          connect_title: String.t() | nil,
+          connect_why: String.t() | nil,
+          short: String.t()
         }
 
   @type llm :: %{
@@ -92,6 +104,9 @@ defmodule Relay.Setup do
           why: String.t() | nil,
           what_this_does: [String.t()],
           read_only_note: String.t() | nil,
+          connect_title: String.t() | nil,
+          connect_why: String.t() | nil,
+          short: String.t(),
           status: BoardSetupStep.status(),
           reached_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil,
@@ -103,6 +118,8 @@ defmodule Relay.Setup do
 
   @type checklist :: %{
           board_id: integer() | nil,
+          connect?: boolean(),
+          machine_id: integer() | nil,
           template: String.t(),
           template_warning: String.t() | nil,
           llm: llm(),
@@ -112,6 +129,13 @@ defmodule Relay.Setup do
           position: 1..7,
           done_count: 0..7,
           finished?: boolean(),
+          total: pos_integer(),
+          closed?: boolean(),
+          callout:
+            nil | %{card_ref: String.t(), card_id: integer(), machine: String.t(), llm: String.t(), verb: String.t()},
+          started_at: DateTime.t() | nil,
+          finished_at: DateTime.t() | nil,
+          elapsed_minutes: non_neg_integer() | nil,
           steps: [entry()]
         }
 
@@ -141,7 +165,15 @@ defmodule Relay.Setup do
 
   @admin_states [:in_progress, :stuck, :done]
 
-  @step_blank %{parent: nil, done_title: nil, why: nil, what_this_does: [], read_only_note: nil}
+  @step_blank %{
+    parent: nil,
+    done_title: nil,
+    why: nil,
+    what_this_does: [],
+    read_only_note: nil,
+    connect_title: nil,
+    connect_why: nil
+  }
 
   @onboard_children [
     {"5.1", "Pull flows into .relay/flows/"},
@@ -161,6 +193,8 @@ defmodule Relay.Setup do
                id: "1",
                title: "Board created",
                done_title: "Board created from %{template}",
+               connect_title: "Board: %{board}",
+               short: "board",
                actor: :you_here,
                why: "Your stages and flows, from the template. No cards yet.",
                what_this_does: [
@@ -171,6 +205,8 @@ defmodule Relay.Setup do
                id: "2",
                title: "Pick your default LLM",
                done_title: "Default LLM: %{llm}",
+               connect_title: "Default LLM: %{llm}",
+               short: "llm",
                actor: :you_here,
                why: "Flows run on this CLI unless a node says otherwise.",
                what_this_does: [
@@ -182,6 +218,8 @@ defmodule Relay.Setup do
                id: "3",
                title: "Add your key to your environment",
                done_title: "Key in your environment",
+               connect_title: "Your key for this machine",
+               short: "key",
                actor: :you_here,
                why: "The runner proves it's allowed to work this board with this key.",
                what_this_does: [
@@ -194,6 +232,8 @@ defmodule Relay.Setup do
              %{
                id: "4",
                title: "Install in your repo",
+               connect_title: "Install on this machine",
+               short: "install",
                actor: :you_terminal,
                why:
                  "Puts the runner and the onboarding skill in your repo. It's a script you run, not a file you set up.",
@@ -210,17 +250,25 @@ defmodule Relay.Setup do
              %{
                id: "5",
                title: "Onboard, in %{llm}",
+               connect_title: "Onboard, pull only",
+               short: "onboard",
                actor: :ai_terminal,
                why:
                  "Open %{cli} in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
-               what_this_does: ["Run /relay-onboard in your repo; it works sub-steps 5.1–5.8 below."]
+               what_this_does: ["Run /relay-onboard in your repo; it works sub-steps 5.1–5.8 below."],
+               connect_why:
+                 "Pulls the board's flows and checks the Relay files are already on origin/main. No interview, no customizing."
              }
            ] ++
-             Enum.map(@onboard_children, fn {id, title} -> %{id: id, parent: "5", title: title, actor: :ai_terminal} end) ++
+             Enum.map(@onboard_children, fn {id, title} ->
+               %{id: id, parent: "5", title: title, short: title, actor: :ai_terminal}
+             end) ++
              [
                %{
                  id: "6",
                  title: "Start the runner",
+                 done_title: "Runner online",
+                 short: "runner",
                  actor: :you_terminal,
                  why: "The runner is what actually picks up cards. Give it its own terminal and leave it running.",
                  what_this_does: ["Run ./relay start in its own terminal. This ticks on the runner's first heartbeat."]
@@ -228,6 +276,9 @@ defmodule Relay.Setup do
                %{
                  id: "7",
                  title: "Watch an agent pick up your first card",
+                 done_title: "First card claimed",
+                 connect_title: "First card",
+                 short: "first card",
                  actor: :you_here,
                  why: "Setup is done when the runner claims a real card, not before.",
                  what_this_does: [
@@ -255,11 +306,31 @@ defmodule Relay.Setup do
   @install_step Enum.at(@top_ids, 3)
   @onboard_step Enum.at(@top_ids, 4)
 
+  # The two top-level steps the board observes itself (RE446): 6 (the runner's first heartbeat)
+  # and 7 (the first node-job claim, the payoff).
+  @runner_step Enum.at(@top_ids, 5)
+  @claim_step Enum.at(@top_ids, 6)
+
+  # The verb the payoff callout uses for the claimed card's stage category, read at claim time.
+  @claim_verbs %{planning: "planning", in_progress: "building"}
+  @claim_verb_default "working on"
+
   # The sub-steps the board observes itself: 5.5 (flows pushed back) and 5.8 (the first card).
   @interview_step @onboard_children |> Enum.at(2) |> elem(0)
   @customize_step @onboard_children |> Enum.at(3) |> elem(0)
   @push_step @onboard_children |> Enum.at(4) |> elem(0)
   @first_card_step @onboard_children |> Enum.at(7) |> elem(0)
+
+  # What a connected machine (RE446) skips: the board-wide steps (1, 2 and 7) and every onboard
+  # sub-step but 5.1 (pull the flows) and 5.6 (the Relay files are on origin/main).
+  @pull_step @onboard_children |> Enum.at(0) |> elem(0)
+  @files_step @onboard_children |> Enum.at(5) |> elem(0)
+  @connect_skips [@created_step, @llm_step] ++
+                   for({id, _title} <- @onboard_children, id not in [@pull_step, @files_step], do: id) ++
+                   [@claim_step]
+
+  # The skipped board-wide steps' evidence on a connect; step 7's is read from the board at build time.
+  @connect_evidence %{@created_step => "already set up", @llm_step => "board-wide · already chosen"}
 
   # The ONE 5.3 interview catalog, in the order the skill asks it.
   @interview_questions [
@@ -385,17 +456,30 @@ defmodule Relay.Setup do
   @doc """
   The catalog id of the step that plays `role`: `:llm` (step 2's pick), `:key` (step 3's board
   key), `:install` (step 4's install script), `:onboard` (step 5, with its sub-steps),
-  `:interview` (5.3, the answers) or `:customize` (5.4, the agreed changes). Surfaces that render
-  a step differently (the wizard's LLM picker, key box, install command, answers and changes
-  blocks) branch on this rather than re-typing an id.
+  `:interview` (5.3, the answers), `:customize` (5.4, the agreed changes), `:runner` (step 6, the
+  runner's first heartbeat) or `:first_claim` (step 7, the first claim). Surfaces that render a
+  step differently (the wizard's LLM picker, key box, install command, answers and changes
+  blocks, the payoff) branch on this rather than re-typing an id.
   """
-  @spec step_id(:llm | :key | :install | :onboard | :interview | :customize) :: String.t()
+  @spec step_id(:llm | :key | :install | :onboard | :interview | :customize | :runner | :first_claim) ::
+          String.t()
   def step_id(:llm), do: @llm_step
   def step_id(:key), do: @key_step
   def step_id(:install), do: @install_step
   def step_id(:onboard), do: @onboard_step
   def step_id(:interview), do: @interview_step
   def step_id(:customize), do: @customize_step
+  def step_id(:runner), do: @runner_step
+  def step_id(:first_claim), do: @claim_step
+
+  @doc """
+  The steps a connected machine skips, in catalog order: the board-wide steps (board, default LLM,
+  first claim) and the onboard sub-steps a machine doesn't redo (detect, interview, customize,
+  push back, follow-ups, first card). The ONE list; `connect_machine/2` and the connect preview
+  read it.
+  """
+  @spec connect_skips() :: [String.t()]
+  def connect_skips, do: @connect_skips
 
   @doc """
   The 5.3 interview, in the order it is asked: each question's `id` (the key of 5.3's
@@ -465,15 +549,17 @@ defmodule Relay.Setup do
   """
   @spec preflight(ApiKey.t(), map()) :: {:ok, map()} | {:error, :wrong_board | :step_2_pending | :invalid}
   def preflight(%ApiKey{board: %Board{} = board} = key, params) when is_map(params) do
+    target = target_for_key(key)
+
     with {:ok, req} <- parse_preflight(params),
          :ok <- same_board(board, req.slug),
-         {:ok, current_id} <- preflight_step(board) do
+         {:ok, current_id} <- preflight_step(target) do
       llm = install_llm(board.id)
       checks = local_checks(req.checks) ++ [cli_check(llm, req.clis), key_check(key)]
       failed = Enum.find(checks, &(not &1["ok"]))
       failure = failure(failed, llm)
 
-      record_preflight(board, current_id, %{key: key, machine: req.machine, checks: checks, failed: failed}, failure)
+      record_preflight(target, current_id, %{key: key, machine: req.machine, checks: checks, failed: failed}, failure)
 
       {:ok,
        Map.merge(
@@ -497,11 +583,13 @@ defmodule Relay.Setup do
   `{:error, :wrong_board | :invalid}`.
   """
   @spec installed(ApiKey.t(), map()) :: {:ok, map()} | {:error, :wrong_board | :invalid}
-  def installed(%ApiKey{board: %Board{} = board}, params) when is_map(params) do
+  def installed(%ApiKey{board: %Board{} = board} = key, params) when is_map(params) do
+    target = target_for_key(key)
+
     with {:ok, req} <- parse_installed(params),
          :ok <- same_board(board, req.slug) do
-      with %{id: @install_step} <- current(board) do
-        advance(board, @install_step, :done, %{
+      with %{id: @install_step} <- current(target) do
+        advance(target, @install_step, :done, %{
           evidence: "downloaded #{hhmm(now())} · #{req.repo_dir} · #{req.branch}",
           data: %{"files" => req.files}
         })
@@ -575,21 +663,22 @@ defmodule Relay.Setup do
   defp same_board(%Board{slug: slug}, slug), do: :ok
   defp same_board(_board, _slug), do: {:error, :wrong_board}
 
-  # The step a preflight reports into: nil when the board has no checklist (or it is finished).
-  defp preflight_step(board) do
-    case current(board) do
+  # The step a preflight reports into: nil when the target has no checklist (or it is finished). A
+  # machine's steps 1 and 2 are skipped, so a machine key is never `:step_2_pending`.
+  defp preflight_step(target) do
+    case current(target) do
       nil -> {:ok, nil}
-      %{id: id} when id in [@created_step, @llm_step] -> {:error, :step_2_pending}
-      %{id: id} -> {:ok, id}
+      %{id: id} -> with(:ok <- past_llm_step(id), do: {:ok, id})
     end
   end
+
+  defp past_llm_step(current_id) when current_id in [@created_step, @llm_step], do: {:error, :step_2_pending}
+  defp past_llm_step(_current_id), do: :ok
 
   # The checklist's onboarding LLM; a board with no checklist uses its default agent's. A disabled
   # LLM can't be installed, so it falls back to the default harness's.
   defp install_llm(board_id) do
-    rows = Map.new(Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board_id)), &{&1.step, &1})
-
-    case checklist_llm(board_id, rows) do
+    case checklist_llm(board_id, read_rows({board_id, nil})) do
       %{enabled?: true} = llm -> llm
       _disabled -> onboarding_llm(Agents.default_harness_key())
     end
@@ -640,26 +729,29 @@ defmodule Relay.Setup do
 
   # Step 3 ticks on the key's first authed call; then step 4 records the result. A step already
   # past is left alone, and `advance/4` writes nothing for a repeat that changes nothing.
-  defp record_preflight(board, @key_step, result, failure) do
+  defp record_preflight(target, @key_step, result, failure) do
+    evidence = ["first authed call #{hhmm(now())}", "key …#{result.key.last_four}", result.machine]
+
     _ =
-      advance(board, @key_step, :done, %{
-        evidence: "first authed call #{hhmm(now())} · key …#{result.key.last_four} · #{result.machine}"
+      advance(target, @key_step, :done, %{
+        evidence: Enum.join(minted_for(target) ++ evidence, " · "),
+        data: %{"machine" => result.machine}
       })
 
-    record_preflight(board, @install_step, result, failure)
+    record_preflight(target, @install_step, result, failure)
   end
 
-  defp record_preflight(board, @install_step, %{failed: nil} = result, _failure) do
-    advance(board, @install_step, :waiting, %{
+  defp record_preflight(target, @install_step, %{failed: nil} = result, _failure) do
+    advance(target, @install_step, :waiting, %{
       evidence: "preflight passed #{hhmm(now())} · #{result.machine}",
       data: %{"checks" => result.checks}
     })
   end
 
-  defp record_preflight(board, @install_step, %{failed: failed} = result, failure) do
+  defp record_preflight(target, @install_step, %{failed: failed} = result, failure) do
     detail = if String.trim(failed["detail"]) == "", do: failed["label"], else: failed["detail"]
 
-    advance(board, @install_step, :failed, %{
+    advance(target, @install_step, :failed, %{
       error: failure.headline,
       evidence: "preflight failed #{hhmm(now())} · #{detail} · #{result.machine}",
       data: %{
@@ -671,7 +763,17 @@ defmodule Relay.Setup do
     })
   end
 
-  defp record_preflight(_board, _step_id, _result, _failure), do: :ok
+  defp record_preflight(_target, _step_id, _result, _failure), do: :ok
+
+  # A machine's step-3 evidence names whose key it is: the board's own key is the board's.
+  defp minted_for(%SetupMachine{} = machine) do
+    case Repo.preload(machine, :user).user do
+      nil -> []
+      user -> ["minted for #{display_name(user)}"]
+    end
+  end
+
+  defp minted_for(_board), do: []
 
   # ---------------------------------------------------------------- checklist
 
@@ -715,18 +817,203 @@ defmodule Relay.Setup do
   end
 
   @doc """
-  The board's checklist, every placeholder resolved: its template, the onboarding LLM, where it
-  stands (`current_id`, `position`, `done_count`, `finished?`) and the 7 top-level entries (step
-  5's sub-steps in its `children`). nil when the board has no checklist.
+  The checklist of a board — or of one connected machine (RE446) — every placeholder resolved: its
+  template, the onboarding LLM, where it stands (`current_id`, `position`, `done_count`,
+  `finished?`) and the 7 top-level entries (step 5's sub-steps in its `children`). A machine's
+  checklist is a connect (`connect?: true`, see `connect_machine/2`). nil when there is none.
   """
-  @spec checklist(Board.t() | integer()) :: checklist() | nil
-  def checklist(board) do
-    board_id = board_id(board)
+  @spec checklist(Board.t() | SetupMachine.t() | integer()) :: checklist() | nil
+  def checklist(target), do: target |> scope() |> scoped_checklist()
 
-    case Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board_id)) do
-      [] -> nil
-      rows -> build(board_id, Map.new(rows, &{&1.step, &1}))
+  defp scoped_checklist(scope) do
+    case read_rows(scope) do
+      rows when map_size(rows) == 0 -> nil
+      rows -> build(scope, rows)
     end
+  end
+
+  @doc "A connected machine's checklist (`checklist/1`), by machine or id; nil when it is gone."
+  @spec machine_checklist(SetupMachine.t() | integer()) :: checklist() | nil
+  def machine_checklist(%SetupMachine{} = machine), do: checklist(machine)
+
+  def machine_checklist(machine_id) when is_integer(machine_id) do
+    with %SetupMachine{} = machine <- Repo.get(SetupMachine, machine_id), do: checklist(machine)
+  end
+
+  @doc """
+  The connect-a-machine checklist `user` sees on `board`: their most recent unfinished machine's,
+  else an unsaved preview (`machine_id: nil`, the `connect_skips/0` skipped, step 3 active, the
+  rest pending) that inserts nothing. nil when the board has no checklist.
+  """
+  @spec connect_checklist(Board.t(), User.t()) :: checklist() | nil
+  def connect_checklist(%Board{id: board_id}, %User{id: user_id}) do
+    board_rows = read_rows({board_id, nil})
+
+    if map_size(board_rows) > 0,
+      do:
+        latest_unfinished(board_id, user_id) ||
+          preview_checklist(connect_rows(nil), connect_context(board_id, board_rows))
+  end
+
+  defp latest_unfinished(board_id, user_id) do
+    from(m in SetupMachine,
+      where: m.board_id == ^board_id and m.user_id == ^user_id,
+      order_by: [desc: m.inserted_at, desc: m.id]
+    )
+    |> Repo.all()
+    |> Enum.map(&checklist/1)
+    |> Enum.find(&(&1 && not &1.finished?))
+  end
+
+  @doc """
+  Connects `user`'s machine to `board` (RE446): mints a board key `"Setup · <name>"` in their name
+  and inserts a `Schemas.SetupMachine` with its own checklist rows — every `connect_skips/0` step
+  `:skipped` (step 1 `"already set up"`, step 2 `"board-wide · already chosen"`), step 3 `:active`
+  with the key's id, the rest `:pending`. The board's own rows are untouched. Refused while the
+  board is still on step 1 or 2. Broadcasts `{:setup_changed, board_id}` once. Returns the raw
+  token — its only copy.
+  """
+  @spec connect_machine(Board.t(), User.t()) ::
+          {:ok, %{machine: SetupMachine.t(), checklist: checklist(), token: String.t()}}
+          | {:error, :no_checklist | :step_2_pending}
+  def connect_machine(%Board{} = board, %User{} = user) do
+    Repo.transact(fn ->
+      with {:ok, board_rows} <- lock({board.id, nil}),
+           :ok <- past_llm_step(current_id(board_rows)) do
+        machine = insert_machine!(board, user)
+        token = mint_key!(scope(machine), board, user)
+        :ok = Events.broadcast(board.id, {:setup_changed, board.id})
+        machine = Repo.get!(SetupMachine, machine.id)
+        {:ok, %{machine: machine, checklist: checklist(machine), token: token}}
+      end
+    end)
+  end
+
+  defp insert_machine!(board, user) do
+    machine = Repo.insert!(%SetupMachine{board_id: board.id, user_id: user.id})
+
+    for {id, fields} <- connect_rows(now()) do
+      Repo.insert!(struct(BoardSetupStep, Map.merge(fields, %{board_id: board.id, machine_id: machine.id, step: id})))
+    end
+
+    machine
+  end
+
+  @doc """
+  Where a board key reports its setup: the connected machine it was minted for, else its board
+  (`key.board`, preloaded here when it isn't). The install handshake, `GET /api/setup`,
+  `POST /api/setup/steps/:step` and the heartbeat all route through it.
+  """
+  @spec target_for_key(ApiKey.t()) :: Board.t() | SetupMachine.t()
+  def target_for_key(%ApiKey{} = key), do: machine_for_key(key) || Repo.preload(key, :board).board
+
+  defp machine_for_key(%ApiKey{id: key_id}),
+    do: Repo.one(from(m in SetupMachine, where: m.api_key_id == ^key_id, order_by: m.id, limit: 1))
+
+  @doc """
+  Every setup on `board`, for Board settings → Setup: the board's own first (only once its step 3
+  has a key), then each connected machine, oldest first. A row carries `id` (`:board` or the
+  machine's id), `machine` (step 6's host; else the board's step-3 preflight machine, or the
+  machine row's `host`), `person` (whose key it is), `key_last_four` (nil once revoked),
+  `harnesses` (the installed ones its step-6 runner reports, `[]` before a runner),
+  `finished?` and `progress` (`"7/7"` / `"6/6"` once finished, else `"<current id> <short>"`).
+  """
+  @spec machines(Board.t()) :: [
+          %{
+            id: :board | integer(),
+            machine: String.t() | nil,
+            person: String.t() | nil,
+            key_last_four: String.t() | nil,
+            harnesses: [%{cli: String.t(), signed_in: boolean() | nil}],
+            finished?: boolean(),
+            progress: String.t()
+          }
+        ]
+  def machines(%Board{id: board_id}) do
+    board_rows = read_rows({board_id, nil})
+    runners = Map.new(Repo.all(from(r in Runner, where: r.board_id == ^board_id)), &{&1.name, &1})
+
+    machines =
+      Repo.all(
+        from(m in SetupMachine,
+          where: m.board_id == ^board_id,
+          order_by: [asc: m.inserted_at, asc: m.id],
+          preload: [:user, :api_key]
+        )
+      )
+
+    board_row(board_id, board_rows, runners) ++ Enum.map(machines, &machine_row(&1, runners))
+  end
+
+  defp board_row(board_id, %{@key_step => %{data: %{"key_id" => key_id} = key_data}} = rows, runners)
+       when not is_nil(key_id) do
+    key = Repo.one(from(k in ApiKey, where: k.id == ^key_id, preload: :created_by))
+    checklist = build({board_id, nil}, rows)
+    runner_data = rows[@runner_step].data
+
+    [
+      %{
+        id: :board,
+        machine: runner_data["host"] || key_data["machine"],
+        person: key && display_name(key.created_by),
+        key_last_four: key && key.last_four,
+        harnesses: runner_harnesses(runners, runner_data["runner"]),
+        finished?: checklist.finished?,
+        progress: progress(checklist)
+      }
+    ]
+  end
+
+  defp board_row(_board_id, _rows, _runners), do: []
+
+  defp machine_row(machine, runners) do
+    checklist = checklist(machine)
+    runner_data = Enum.find(checklist.steps, &(&1.id == @runner_step)).data
+
+    %{
+      id: machine.id,
+      machine: runner_data["host"] || machine.host,
+      person: display_name(machine.user),
+      key_last_four: machine.api_key && machine.api_key.last_four,
+      harnesses: runner_harnesses(runners, runner_data["runner"]),
+      finished?: checklist.finished?,
+      progress: progress(checklist)
+    }
+  end
+
+  defp runner_harnesses(runners, name) do
+    case runners[name] do
+      %Runner{harnesses: harnesses} ->
+        for %{"key" => key, "installed" => true} = harness <- harnesses || [],
+            do: %{cli: harness_cli(key), signed_in: harness["signed_in"]}
+
+      nil ->
+        []
+    end
+  end
+
+  defp progress(%{finished?: true, total: total}), do: "#{total}/#{total}"
+
+  defp progress(%{current_id: current_id, steps: steps}),
+    do: "#{current_id} #{Enum.find(steps, &(&1.id == current_id)).short}"
+
+  @doc """
+  The onboarding answers for Board settings → Setup: 5.3's `data["answers"]` in
+  `interview_questions/0` order, the answered (non-blank) ones only. `[]` when there are none or
+  the board has no checklist.
+  """
+  @spec project_answers(Board.t()) :: [%{id: String.t(), label: String.t(), answer: String.t()}]
+  def project_answers(%Board{} = board) do
+    answers =
+      case Repo.one(from(s in rows_query(scope(board)), where: s.step == ^@interview_step, select: s.data)) do
+        %{"answers" => %{} = answers} -> answers
+        _none -> %{}
+      end
+
+    for %{id: id, label: label} <- @interview_questions,
+        answer = answers[id],
+        is_binary(answer) and String.trim(answer) != "",
+        do: %{id: id, label: label, answer: answer}
   end
 
   @doc """
@@ -737,9 +1024,9 @@ defmodule Relay.Setup do
   def reportable_id(%{current_sub_id: sub_id, current_id: current_id}), do: sub_id || current_id
 
   @doc "The step the checklist is on: the first top-level entry not finished, or nil."
-  @spec current(Board.t() | integer()) :: entry() | nil
-  def current(board) do
-    case checklist(board) do
+  @spec current(Board.t() | SetupMachine.t() | integer()) :: entry() | nil
+  def current(target) do
+    case checklist(target) do
       nil -> nil
       %{steps: steps} -> Enum.find(steps, &(not finished_status?(&1.status)))
     end
@@ -764,6 +1051,7 @@ defmodule Relay.Setup do
     from(s in BoardSetupStep,
       join: b in assoc(s, :board),
       left_join: o in assoc(b, :owner),
+      where: is_nil(s.machine_id),
       order_by: [desc: b.inserted_at, desc: b.id],
       select: {s, %{board_id: b.id, name: b.name, slug: b.slug, inserted_at: b.inserted_at, owner_email: o.email}}
     )
@@ -783,11 +1071,11 @@ defmodule Relay.Setup do
   an older finished step is `{:error, :not_current}`. Any change broadcasts
   `{:setup_changed, board_id}` once. Serialized on the board row.
   """
-  @spec advance(Board.t() | integer(), String.t(), atom(), map()) ::
+  @spec advance(Board.t() | SetupMachine.t() | integer(), String.t(), atom(), map()) ::
           {:ok, checklist()} | {:error, :not_current | :no_checklist | :invalid_status}
-  def advance(board, step_id, status, attrs) when is_binary(step_id) and is_map(attrs) do
+  def advance(target, step_id, status, attrs) when is_binary(step_id) and is_map(attrs) do
     if status in @advance_statuses,
-      do: Repo.transact(fn -> locked_advance(board_id(board), step_id, status, attrs) end),
+      do: Repo.transact(fn -> locked_advance(scope(target), step_id, status, attrs) end),
       else: {:error, :invalid_status}
   end
 
@@ -800,7 +1088,7 @@ defmodule Relay.Setup do
           {:ok, %{checklist: checklist(), token: String.t()}} | {:error, :not_current | :unknown_llm | :disabled_llm}
   def choose_llm(%Board{} = board, %User{} = user, harness_key) do
     Repo.transact(fn ->
-      with {:ok, rows} <- lock_current(board.id, @llm_step),
+      with {:ok, rows} <- lock_current({board.id, nil}, @llm_step),
            {:ok, llm} <- enabled_llm(harness_key) do
         :ok = make_default!(board, llm)
 
@@ -811,27 +1099,34 @@ defmodule Relay.Setup do
           })
 
         # step 2's advance above already queued the one broadcast for this change
-        token = mint_key!(board, user)
+        token = mint_key!({board.id, nil}, board, user)
         {:ok, %{checklist: checklist(board.id), token: token}}
       end
     end)
   end
 
   @doc """
-  Step 3: mints a fresh board key in `user`'s name and points step 3 at it. The previous setup key
-  is revoked when it was never used; a key a runner already used stays. Returns the raw token once.
+  Step 3: mints a fresh board key in `user`'s name and points step 3 at it — the board's, or a
+  connected machine's (which also moves `machine.api_key_id`). The previous setup key is revoked
+  when it was never used; a key a runner already used stays. Returns the raw token once.
   """
-  @spec remint_key(Board.t(), User.t()) :: {:ok, %{checklist: checklist(), token: String.t()}} | {:error, :not_current}
-  def remint_key(%Board{} = board, %User{} = user) do
+  @spec remint_key(Board.t() | SetupMachine.t(), User.t()) ::
+          {:ok, %{checklist: checklist(), token: String.t()}} | {:error, :not_current}
+  def remint_key(target, %User{} = user) when is_struct(target, Board) or is_struct(target, SetupMachine) do
+    {board_id, _machine_id} = scope = scope(target)
+
     Repo.transact(fn ->
-      with {:ok, rows} <- lock_current(board.id, @key_step) do
-        :ok = revoke_unused_key(board, rows[@key_step])
-        token = mint_key!(board, user)
-        :ok = Events.broadcast(board.id, {:setup_changed, board.id})
-        {:ok, %{checklist: checklist(board.id), token: token}}
+      with {:ok, rows} <- lock_current(scope, @key_step) do
+        :ok = revoke_unused_key(board_id, rows[@key_step])
+        token = mint_key!(scope, target_board(target), user)
+        :ok = Events.broadcast(board_id, {:setup_changed, board_id})
+        {:ok, %{checklist: scoped_checklist(scope), token: token}}
       end
     end)
   end
+
+  defp target_board(%Board{} = board), do: board
+  defp target_board(%SetupMachine{board_id: board_id}), do: Repo.get!(Board, board_id)
 
   # ---------------------------------------------------------------- board-observed sub-steps
 
@@ -843,7 +1138,7 @@ defmodule Relay.Setup do
   """
   @spec observe_flow_push(integer(), String.t()) :: :ok
   def observe_flow_push(board_id, flow_key) when is_integer(board_id) and is_binary(flow_key),
-    do: observe(board_id, @push_step, &push_change(board_id, &1, flow_key))
+    do: observe({board_id, nil}, @push_step, &push_change(board_id, &1, flow_key))
 
   @doc """
   Called by `Relay.Cards` after a card create committed. While 5.8 is the current sub-step, a
@@ -852,28 +1147,112 @@ defmodule Relay.Setup do
   """
   @spec observe_card_created(Card.t()) :: :ok
   def observe_card_created(%Card{board_id: board_id, stage_id: stage_id}),
-    do: observe(board_id, @first_card_step, fn _row -> first_card_change(board_id, stage_id) end)
+    do: observe({board_id, nil}, @first_card_step, fn _row -> first_card_change(board_id, stage_id) end)
+
+  @doc """
+  Called by `RelayWeb.Api.NodeJobController` on every runner heartbeat, with the post-upsert
+  `runner`. While step 6 is the reportable step of the key's setup (`target_for_key/1`: its
+  connected machine's, else its board's) it finishes step 6 (`"heartbeat HH:MM · <machine>"`, then
+  `" · <cli> logged_in|logged_out|installed, …"` for each installed harness) and activates the
+  next step; a machine's tick also records `host` / `runner_name` on its `setup_machines` row.
+  `<machine>` is the runner's host, else its name. A machine key never touches the board's rows,
+  nor a board key a machine's. Otherwise a no-op. Always `:ok`: the heartbeat is the runner's
+  liveness path.
+  """
+  @spec observe_heartbeat(ApiKey.t(), Runner.t()) :: :ok
+  def observe_heartbeat(%ApiKey{board_id: board_id} = key, %Runner{} = runner) when is_integer(board_id) do
+    target = target_for_key(key)
+    observe(scope(target), @runner_step, fn _row -> heartbeat_change(target, runner) end)
+  end
+
+  def observe_heartbeat(_key, _runner), do: :ok
+
+  @doc """
+  Called by `Relay.Runs.claim_next_job/4` after a claim committed. While step 7 is the reportable
+  step of the job's board setup it finishes step 7 (`"<REF> claimed HH:MM by <runner>"`) — and
+  with it the checklist — storing the payoff facts in its `data`: `card_ref`, `card_id`,
+  `runner`, `machine` and the `verb` for the card's stage category at claim time. Otherwise a
+  no-op, including for a card that no longer exists. Always `:ok`: a claim never fails on setup.
+  """
+  @spec observe_claim(NodeJob.t(), Runner.t()) :: :ok
+  def observe_claim(%NodeJob{card_id: card_id}, %Runner{} = runner) when is_integer(card_id) do
+    case Repo.one(from(c in Card, where: c.id == ^card_id, select: c.board_id)) do
+      nil -> :ok
+      board_id -> observe({board_id, nil}, @claim_step, fn _row -> claim_change(card_id, runner) end)
+    end
+  end
+
+  def observe_claim(_job, _runner), do: :ok
+
+  @doc """
+  Closes a finished setup: stamps step 7's `data["callout_dismissed_at"]` (kept if already set)
+  and `data["closed_at"]`, so the checklist reads `closed?: true, callout: nil`. A repeat writes
+  nothing. Broadcasts `{:setup_changed, board_id}` on a change. Serialized on the board row.
+  """
+  @spec close(Board.t() | integer()) :: {:ok, checklist()} | {:error, :no_checklist | :not_finished}
+  def close(board) do
+    board_id = board_id(board)
+
+    Repo.transact(fn ->
+      with {:ok, rows} <- lock({board_id, nil}),
+           :ok <- finished(rows) do
+        stamp = DateTime.to_iso8601(now())
+        row = rows[@claim_step]
+
+        :ok =
+          write_payoff!(row, row.data |> Map.put_new("callout_dismissed_at", stamp) |> Map.put_new("closed_at", stamp))
+
+        {:ok, checklist(board_id)}
+      end
+    end)
+  end
+
+  @doc """
+  Reopens a closed setup: clears step 7's `data["closed_at"]` only, so the callout stays
+  dismissed. Broadcasts `{:setup_changed, board_id}` on a change. Serialized on the board row.
+  """
+  @spec reopen(Board.t() | integer()) :: {:ok, checklist()} | {:error, :no_checklist}
+  def reopen(board) do
+    board_id = board_id(board)
+
+    Repo.transact(fn ->
+      with {:ok, rows} <- lock({board_id, nil}) do
+        row = rows[@claim_step]
+        :ok = write_payoff!(row, Map.delete(row.data, "closed_at"))
+        {:ok, checklist(board_id)}
+      end
+    end)
+  end
+
+  defp finished(rows), do: if(current_id(rows), do: {:error, :not_finished}, else: :ok)
+
+  defp write_payoff!(%{data: data}, data), do: :ok
+
+  defp write_payoff!(row, data) do
+    row |> Ecto.Changeset.change(data: data) |> Repo.update!()
+    Events.broadcast(row.board_id, {:setup_changed, row.board_id})
+  end
 
   # A cheap unlocked check first (most writes happen on boards not sitting on this sub-step),
   # then the locked re-check and the advance. `change` answers `{status, attrs}` or nil.
-  defp observe(board_id, step_id, change) do
-    if observable?(board_id, step_id) do
-      {:ok, _} = Repo.transact(fn -> {:ok, locked_observe(board_id, step_id, change)} end)
+  defp observe(scope, step_id, change) do
+    if observable?(scope, step_id) do
+      {:ok, _} = Repo.transact(fn -> {:ok, locked_observe(scope, step_id, change)} end)
     end
 
     :ok
   end
 
-  defp observable?(board_id, step_id) do
+  defp observable?(scope, step_id) do
     Repo.exists?(
-      from(s in BoardSetupStep,
-        where: s.board_id == ^board_id and s.step == ^step_id and s.status not in ^BoardSetupStep.finished_statuses()
+      from(s in rows_query(scope),
+        where: s.step == ^step_id and s.status not in ^BoardSetupStep.finished_statuses()
       )
     )
   end
 
-  defp locked_observe(board_id, step_id, change) do
-    with {:ok, rows} <- lock(board_id),
+  defp locked_observe(scope, step_id, change) do
+    with {:ok, rows} <- lock(scope),
          ^step_id <- rows_reportable_id(rows),
          {status, attrs} <- change.(rows[step_id]) do
       apply_advance(rows, step_id, status, attrs)
@@ -901,20 +1280,106 @@ defmodule Relay.Setup do
     end
   end
 
-  # ---------------------------------------------------------------- internals
+  # A machine's step-6 tick also names the machine; this runs inside the locked advance, only once
+  # step 6 is the machine's reportable step.
+  defp heartbeat_change(%SetupMachine{id: id}, runner) do
+    {1, _} =
+      Repo.update_all(from(m in SetupMachine, where: m.id == ^id),
+        set: [host: machine(runner), runner_name: runner.name, updated_at: now()]
+      )
 
-  # Like `Agents.ensure_seeded!/1`: lock the board row so two callers can't both advance.
-  defp lock(board_id) do
-    _ = Repo.one(from(b in Board, where: b.id == ^board_id, select: b.id, lock: "FOR UPDATE"))
+    heartbeat_change(runner)
+  end
 
-    case Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board_id)) do
-      [] -> {:error, :no_checklist}
-      rows -> {:ok, Map.new(rows, &{&1.step, &1})}
+  defp heartbeat_change(%Board{}, runner), do: heartbeat_change(runner)
+
+  defp heartbeat_change(runner) do
+    machine = machine(runner)
+
+    harnesses =
+      for %{"key" => key, "installed" => true} = harness <- runner.harnesses || [] do
+        %{"cli" => harness_cli(key), "signed_in" => harness["signed_in"]}
+      end
+
+    parts = for %{"cli" => cli, "signed_in" => signed_in} <- harnesses, do: "#{cli} #{sign_in(signed_in)}"
+    tail = if parts == [], do: [], else: [Enum.join(parts, ", ")]
+
+    {:done,
+     %{
+       evidence: Enum.join(["heartbeat #{hhmm(now())}", machine | tail], " · "),
+       data: %{"host" => machine, "runner" => runner.name, "harnesses" => harnesses}
+     }}
+  end
+
+  defp harness_cli(key) do
+    case onboarding_llm(key) do
+      %{cli: cli} -> cli
+      nil -> key
     end
   end
 
-  defp lock_current(board_id, step_id) do
-    with {:ok, rows} <- lock(board_id),
+  defp sign_in(true), do: "logged_in"
+  defp sign_in(false), do: "logged_out"
+  defp sign_in(_unknown), do: "installed"
+
+  defp machine(%Runner{host: host, name: name}) do
+    if is_binary(host) and String.trim(host) != "", do: host, else: name
+  end
+
+  # The card's ref and stage category at claim time; nil (a no-op) when the card is gone.
+  defp claim_change(card_id, runner) do
+    query =
+      from(c in Card,
+        join: b in assoc(c, :board),
+        join: s in assoc(c, :stage),
+        where: c.id == ^card_id,
+        select: {b.key, c.ref_number, s.category}
+      )
+
+    with {key, ref_number, category} <- Repo.one(query) do
+      ref = Card.format_ref(key, ref_number)
+
+      {:done,
+       %{
+         evidence: "#{ref} claimed #{hhmm(now())} by #{runner.name}",
+         data: %{
+           "card_ref" => ref,
+           "card_id" => card_id,
+           "runner" => runner.name,
+           "machine" => machine(runner),
+           "verb" => Map.get(@claim_verbs, category, @claim_verb_default)
+         }
+       }}
+    end
+  end
+
+  # ---------------------------------------------------------------- internals
+
+  # A checklist's rows are a scope: `{board_id, nil}` for the board's own (`machine_id` nil), or
+  # `{board_id, machine_id}` for one connected machine's. Every row read goes through `rows_query/1`.
+  defp scope(%Board{id: id}), do: {id, nil}
+  defp scope(%SetupMachine{board_id: board_id, id: id}), do: {board_id, id}
+  defp scope(id) when is_integer(id), do: {id, nil}
+
+  defp rows_query({board_id, nil}), do: from(s in BoardSetupStep, where: s.board_id == ^board_id and is_nil(s.machine_id))
+
+  defp rows_query({_board_id, machine_id}), do: from(s in BoardSetupStep, where: s.machine_id == ^machine_id)
+
+  defp read_rows(scope), do: scope |> rows_query() |> Repo.all() |> Map.new(&{&1.step, &1})
+
+  # Like `Agents.ensure_seeded!/1`: lock the board row so two callers can't both advance. A machine's
+  # checklist locks its board's row too.
+  defp lock({board_id, _machine_id} = scope) do
+    _ = Repo.one(from(b in Board, where: b.id == ^board_id, select: b.id, lock: "FOR UPDATE"))
+
+    case read_rows(scope) do
+      rows when map_size(rows) == 0 -> {:error, :no_checklist}
+      rows -> {:ok, rows}
+    end
+  end
+
+  defp lock_current(scope, step_id) do
+    with {:ok, rows} <- lock(scope),
          ^step_id <- current_id(rows) do
       {:ok, rows}
     else
@@ -922,10 +1387,10 @@ defmodule Relay.Setup do
     end
   end
 
-  defp locked_advance(board_id, step_id, status, attrs) do
-    with {:ok, rows} <- lock(board_id),
+  defp locked_advance(scope, step_id, status, attrs) do
+    with {:ok, rows} <- lock(scope),
          :ok <- apply_advance(rows, step_id, status, attrs) do
-      {:ok, checklist(board_id)}
+      {:ok, scoped_checklist(scope)}
     end
   end
 
@@ -1051,40 +1516,88 @@ defmodule Relay.Setup do
     agent
   end
 
-  defp mint_key!(board, user) do
+  # Writes the new key's id to the scope's step 3 — and, for a machine, to `machine.api_key_id`.
+  defp mint_key!({_board_id, machine_id} = scope, board, user) do
     {:ok, %{api_key: api_key, token: token}} = ApiKeys.create_key(board, user, key_name(user))
-    row = Repo.get_by!(BoardSetupStep, board_id: board.id, step: @key_step)
+    row = Repo.one!(from(s in rows_query(scope), where: s.step == ^@key_step))
 
     row
     |> Ecto.Changeset.change(data: Map.put(row.data, "key_id", api_key.id))
     |> Repo.update!()
 
+    if machine_id do
+      {1, _} =
+        Repo.update_all(from(m in SetupMachine, where: m.id == ^machine_id),
+          set: [api_key_id: api_key.id, updated_at: now()]
+        )
+    end
+
     token
   end
 
-  defp key_name(user), do: String.slice("Setup · #{user.name || user.email}", 0, ApiKey.name_max_length())
+  defp key_name(user), do: String.slice("Setup · #{display_name(user)}", 0, ApiKey.name_max_length())
 
-  defp revoke_unused_key(board, row) do
+  defp display_name(nil), do: nil
+  defp display_name(%User{} = user), do: user.name || user.email
+
+  defp revoke_unused_key(board_id, row) do
     with id when not is_nil(id) <- row.data["key_id"],
-         %ApiKey{last_used_at: nil} = key <- Repo.get_by(ApiKey, id: id, board_id: board.id) do
+         %ApiKey{last_used_at: nil} = key <- Repo.get_by(ApiKey, id: id, board_id: board_id) do
       {:ok, _} = ApiKeys.revoke(key)
     end
 
     :ok
   end
 
-  defp build(board_id, rows), do: build(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
+  defp build({board_id, nil}, rows), do: build(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
 
-  defp build(board_id, rows, llm, first_flow_stage) do
-    created = rows[@created_step]
+  defp build({board_id, machine_id}, rows),
+    do: preview_checklist(rows, Map.put(connect_context(board_id, read_rows({board_id, nil})), :machine_id, machine_id))
 
-    preview_checklist(rows, %{
+  defp build(board_id, rows, llm, first_flow_stage),
+    do: preview_checklist(rows, board_context(board_id, rows, llm, first_flow_stage))
+
+  defp board_context(board_id, board_rows, llm, first_flow_stage) do
+    created = board_rows[@created_step]
+
+    %{
       board_id: board_id,
       template: created && created.data["template"],
       template_warning: created && created.data["template_warning"],
       llm: llm,
       first_flow_stage: first_flow_stage
+    }
+  end
+
+  # A connect reads the board's template, LLM and name, and its step 7 for the board-wide evidence.
+  defp connect_context(board_id, board_rows) do
+    board_id
+    |> board_context(board_rows, checklist_llm(board_id, board_rows), first_flow_stage(board_id))
+    |> Map.merge(%{
+      connect?: true,
+      board_name: Repo.one!(from(b in Board, where: b.id == ^board_id, select: b.name)),
+      board_claim: board_rows[@claim_step]
     })
+  end
+
+  # A connect's rows before anything ran (`connect_skips/0` skipped, step 3 active, the rest
+  # pending), as `preview_row/1` fields; `reached_at` is nil for an unsaved preview.
+  defp connect_rows(now) do
+    Map.new(@steps, fn %{id: id} ->
+      fields =
+        cond do
+          id == @key_step ->
+            %{status: :active, reached_at: now}
+
+          id in @connect_skips ->
+            %{status: :skipped, reached_at: now, completed_at: now, evidence: @connect_evidence[id]}
+
+          true ->
+            %{status: :pending}
+        end
+
+      {id, fields}
+    end)
   end
 
   # The name of the top-level stage with the lowest position that holds a flow, enabled or not.
@@ -1186,9 +1699,17 @@ defmodule Relay.Setup do
   `:template`, `:template_warning` and onboarding `:llm` (one of `onboarding_llms/0`), plus an
   optional `:board_id` and `:first_flow_stage` (nil when absent). `checklist/1` delegates here;
   Storybook fixtures call it directly.
+
+  A connect (RE446) passes `connect?: true`, the `:board_name` (`%{board}`), the board's step-7
+  row as `:board_claim` and the `:machine_id` (nil for an unsaved preview): each step's
+  `connect_title` / `connect_why` replace its titles / why, step 7 reads
+  `"board-wide · <REF> claimed <D Mon>"` (or `"board-wide · waiting for the first claim"`), and the
+  tally covers steps 1–6 only — `total` 6, `position == done_count`, `finished_at` step 6's
+  completion, never `closed?` and no `callout`.
   """
   @spec preview_checklist(%{optional(String.t()) => map() | atom()}, map()) :: checklist()
   def preview_checklist(rows, %{llm: llm} = context) when is_map(rows) do
+    connect? = context[:connect?] == true
     rows = Map.new(@steps, &{&1.id, preview_row(Map.get(rows, &1.id))})
 
     fill = %{
@@ -1196,39 +1717,90 @@ defmodule Relay.Setup do
       "%{llm}" => llm.label,
       "%{cli}" => llm.cli,
       "%{skill_path}" => to_string(llm.skill_path),
-      "%{pointer_file}" => to_string(llm.pointer_file)
+      "%{pointer_file}" => to_string(llm.pointer_file),
+      "%{board}" => to_string(context[:board_name])
     }
 
     children = Enum.group_by(Enum.filter(@steps, & &1.parent), & &1.parent)
+    entry = &(&1 |> connect_step(connect?) |> entry(rows, fill))
 
     steps =
       for step <- @steps, is_nil(step.parent) do
         step
-        |> entry(rows, fill)
-        |> Map.put(
-          :children,
-          Enum.map(Map.get(children, step.id, []), &(&1 |> entry(rows, fill) |> Map.put(:children, [])))
-        )
+        |> entry.()
+        |> Map.put(:children, Enum.map(Map.get(children, step.id, []), &(&1 |> entry.() |> Map.put(:children, []))))
       end
 
-    current = Enum.find_index(steps, &(not finished_status?(&1.status)))
-    current_id = current && Enum.at(steps, current).id
-    done_count = Enum.count(steps, &finished_status?(&1.status))
+    steps = if connect?, do: Enum.map(steps, &board_claim_evidence(&1, context[:board_claim])), else: steps
+    tally = tally(steps, connect?)
+    current = Enum.find_index(tally, &(not finished_status?(&1.status)))
+    current_id = current && Enum.at(tally, current).id
+    done_count = Enum.count(tally, &finished_status?(&1.status))
+    last = List.last(tally)
+    started_at = Enum.find(steps, &(&1.id == @created_step)).completed_at
+    finished_at = if finished_status?(last.status), do: last.completed_at
 
     %{
       board_id: context[:board_id],
+      connect?: connect?,
+      machine_id: context[:machine_id],
       template: context[:template],
       template_warning: context[:template_warning],
       llm: llm,
       current_id: current_id,
       current_sub_id: current_id && current_sub_id(rows, current_id),
       first_flow_stage: context[:first_flow_stage],
-      position: if(current, do: current + 1, else: length(steps)),
+      position: position(connect?, current, done_count, length(tally)),
       done_count: done_count,
       finished?: is_nil(current),
+      total: length(tally),
+      closed?: not connect? and not is_nil(last.data["closed_at"]),
+      callout: callout(last, llm, connect?),
+      started_at: started_at,
+      finished_at: finished_at,
+      elapsed_minutes: elapsed_minutes(started_at, finished_at),
       steps: steps
     }
   end
+
+  # A connect's tally leaves out step 7: the board's first claim, never a machine's.
+  defp tally(steps, true = _connect?), do: Enum.reject(steps, &(&1.id == @claim_step))
+  defp tally(steps, false), do: steps
+
+  defp elapsed_minutes(%DateTime{} = started_at, %DateTime{} = finished_at),
+    do: DateTime.diff(finished_at, started_at, :minute)
+
+  defp elapsed_minutes(_started_at, _finished_at), do: nil
+
+  defp position(true = _connect?, _current, done_count, _total), do: done_count
+  defp position(false, nil, _done_count, total), do: total
+  defp position(false, current, _done_count, _total), do: current + 1
+
+  # On a connect a step's `connect_title` replaces its title and done title, its `connect_why` its why.
+  defp connect_step(step, false), do: step
+
+  defp connect_step(step, true) do
+    step = if step.connect_title, do: %{step | title: step.connect_title, done_title: step.connect_title}, else: step
+    if step.connect_why, do: %{step | why: step.connect_why}, else: step
+  end
+
+  defp board_claim_evidence(%{id: @claim_step} = entry, board_claim),
+    do: %{entry | evidence: "board-wide · " <> board_claim_text(board_claim)}
+
+  defp board_claim_evidence(entry, _board_claim), do: entry
+
+  defp board_claim_text(%{status: :done, completed_at: %DateTime{} = at, data: %{"card_ref" => ref}}),
+    do: "#{ref} claimed #{Calendar.strftime(at, "%-d %b")}"
+
+  defp board_claim_text(_board_claim), do: "waiting for the first claim"
+
+  # The payoff callout: only once step 7 is done with a claimed card and not yet dismissed.
+  defp callout(%{status: :done, data: %{"card_ref" => ref} = data}, llm, false = _connect?)
+       when not is_map_key(data, "callout_dismissed_at") do
+    %{card_ref: ref, card_id: data["card_id"], machine: data["machine"], llm: llm.label, verb: data["verb"]}
+  end
+
+  defp callout(_claimed, _llm, _connect?), do: nil
 
   @blank_row %{status: :pending, reached_at: nil, completed_at: nil, evidence: nil, error: nil, data: %{}}
 
@@ -1253,6 +1825,7 @@ defmodule Relay.Setup do
     Map.merge(step, %{
       title: resolve(title, fill),
       done_title: resolve(step.done_title, fill),
+      connect_title: resolve(step.connect_title, fill),
       why: resolve(step.why, fill),
       what_this_does: Enum.map(step.what_this_does, &resolve(&1, fill)),
       status: row.status,

@@ -354,6 +354,7 @@
     "status_keys": [
       "board",
       "change_decisions",
+      "connect",
       "current",
       "current_id",
       "current_sub_id",

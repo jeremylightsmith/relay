@@ -380,4 +380,110 @@ defmodule RelayWeb.SetupComponentsTest do
       assert text(doc, "#setup-step-5-1 .setup-substep-title") == "Pull flows into .relay/flows/"
     end
   end
+
+  describe "the payoff (RE446)" do
+    defp preview(rows),
+      do: Setup.preview_checklist(rows, %{template: "Bare minimum", llm: Setup.onboarding_llm("claude-code")})
+
+    defp all_done, do: Map.new(Setup.steps(), &{&1.id, :done})
+
+    defp callout_doc do
+      callout = %{card_ref: "STR1", card_id: 1, machine: "jl-mbp", llm: "Claude Code", verb: "building"}
+
+      (&SetupComponents.setup_callout/1)
+      |> render_component(id: "setup-callout", callout: callout)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp first_attr(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name) |> List.first()
+
+    # Scenario 11
+    test "setup_callout/1 carries the hook, the card ref, the verb and the two buttons" do
+      doc = callout_doc()
+
+      # The colocated `.SetupCallout` renders qualified by its module.
+      assert first_attr(doc, "#setup-callout", "phx-hook") == "RelayWeb.SetupComponents.SetupCallout"
+      assert first_attr(doc, "#setup-callout", "data-card-ref") == "STR1"
+      assert doc |> LazyHTML.query("#setup-callout") |> LazyHTML.text() =~ "Claude Code is building it now"
+      assert first_attr(doc, "#setup-callout-watch", "class") == "btn btn-secondary btn-sm"
+      assert first_attr(doc, "#setup-callout-dismiss", "class") == "btn btn-ghost btn-sm"
+    end
+
+    # Scenario 12
+    test "setup_chip/1 reads done once finished, else its position of the total" do
+      chip = fn checklist ->
+        (&SetupComponents.setup_chip/1)
+        |> render_component(id: "setup-chip", checklist: checklist)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.trim()
+      end
+
+      assert chip.(preview(all_done())) == "Setup · done"
+      assert chip.(preview(%{"1" => :done, "2" => :done, "3" => :done, "4" => :active})) == "Setup · 4 of 7"
+    end
+
+    test "setup_done_box/1 says 1 minute, singular" do
+      checklist = %{preview(all_done()) | elapsed_minutes: 1}
+
+      text =
+        (&SetupComponents.setup_done_box/1)
+        |> render_component(id: "setup-done", checklist: checklist)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+
+      assert text =~ "You're set up. 1 minute."
+    end
+  end
+
+  describe "connect a machine (RE446)" do
+    defp connect_board do
+      owner = insert(:user, name: "Jeremy")
+
+      {:ok, board} =
+        Boards.create_board(owner, %{name: "Streaks", slug: unique_slug("streaks"), template: "bare-minimum"})
+
+      {:ok, _} = Setup.choose_llm(board, owner, "claude-code")
+      board
+    end
+
+    defp substep_ids(html, list_id) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("##{list_id}-step-5 li[id]")
+      |> LazyHTML.attribute("id")
+    end
+
+    # Scenario 13
+    test "an unsaved connect renders only the sub-steps a machine runs; a board's renders all eight" do
+      board = connect_board()
+      connect = Setup.connect_checklist(board, insert(:user, name: "Sam"))
+      assert connect.machine_id == nil
+
+      html = render_component(&SetupComponents.setup_checklist/1, id: "c", checklist: connect)
+      assert substep_ids(html, "c") == ["c-step-5-1", "c-step-5-6"]
+
+      html = render_component(&SetupComponents.setup_checklist/1, id: "c", checklist: Setup.checklist(board))
+      onboard = Setup.step_id(:onboard)
+      all = for %{parent: ^onboard, id: id} <- Setup.steps(), do: "c-step-" <> String.replace(id, ".", "-")
+      assert length(all) == 8
+      assert substep_ids(html, "c") == all
+    end
+
+    test "the connect panel's member note initials the signed-in person's name" do
+      board = connect_board()
+      connect = Setup.connect_checklist(board, insert(:user, name: "Jeremy Lightsmith"))
+
+      text =
+        (&SetupComponents.setup_panel/1)
+        |> render_component(id: "setup-panel", checklist: connect, board_name: "Streaks", user_name: "Jeremy Lightsmith")
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#setup-member-note")
+        |> LazyHTML.text()
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
+
+      assert text =~ ~r/^JL Signed in as Jeremy Lightsmith, a member of Streaks\./
+    end
+  end
 end

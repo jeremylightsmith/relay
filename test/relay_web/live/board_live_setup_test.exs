@@ -6,6 +6,7 @@ defmodule RelayWeb.BoardLiveSetupTest do
   """
   use RelayWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Relay.Agents
@@ -13,6 +14,8 @@ defmodule RelayWeb.BoardLiveSetupTest do
   alias Relay.Boards
   alias Relay.Repo
   alias Relay.Setup
+  alias Schemas.Card
+  alias Schemas.Stage
   alias Schemas.User
 
   setup :register_and_log_in_user
@@ -267,6 +270,175 @@ defmodule RelayWeb.BoardLiveSetupTest do
 
       refute has_element?(view, "#setup-onboard-pr")
       assert has_element?(view, ~s(#setup-step-5-6[data-status="done"]))
+    end
+  end
+
+  describe "the payoff: step 7's first claim (RE446)" do
+    # Every step a report moves, in catalog order: a parent with children is walked through them.
+    defp walk do
+      parents = for %{parent: parent} <- Setup.steps(), parent, into: MapSet.new(), do: parent
+      for %{id: id} <- tl(Setup.steps()), id not in parents, do: id
+    end
+
+    # Moves the board's checklist to step `id` by finishing every reportable step before it.
+    defp advance_to!(board, id) do
+      for prior <- Enum.take_while(walk(), &(&1 != id)), do: {:ok, _} = Setup.advance(board, prior, :done, %{})
+      board
+    end
+
+    defp top_ids, do: for(%{parent: nil, id: id} <- Setup.steps(), do: id)
+
+    # A bare-minimum board walked to step 7, then finished by a claim of a real card on it.
+    defp finished!(user) do
+      board = user |> create!("bare-minimum") |> advance_to!(Setup.step_id(:first_claim))
+      stage = Repo.one!(from(s in Stage, where: s.board_id == ^board.id, order_by: s.position, limit: 1))
+      card = insert(:card, stage: stage, title: "Streak counter")
+      ref = Card.format_ref(board.key, card.ref_number)
+
+      {:ok, _} =
+        Setup.advance(board, Setup.step_id(:first_claim), :done, %{
+          evidence: "#{ref} claimed 14:12 by jl-mbp",
+          data: %{
+            "card_ref" => ref,
+            "card_id" => card.id,
+            "runner" => "jl-mbp",
+            "machine" => "jl-mbp",
+            "verb" => "planning"
+          }
+        })
+
+      %{board: board, card: card, ref: ref}
+    end
+
+    defp gone?(view), do: Enum.map(~w(#setup-callout #setup-panel #setup-chip), &has_element?(view, &1))
+
+    # Scenario 1
+    test "the claimed card gets the baton callout", %{conn: conn, user: user} do
+      %{board: board, ref: ref} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert attr(view, "#setup-callout", "data-card-ref") == ref
+      callout = text(view, "#setup-callout")
+      assert callout =~ "An agent has the baton"
+      assert callout =~ "#{ref} just turned violet: your runner on jl-mbp claimed it and Claude Code is planning it now."
+
+      assert callout =~
+               "When it needs you (a plan to approve, a question, a review) it comes back blue and shows up in Needs you."
+
+      assert view |> text("#setup-callout-watch") |> String.trim() == "Watch it work"
+      assert view |> text("#setup-callout-dismiss") |> String.trim() == "Got it"
+    end
+
+    # Scenario 2
+    test "the panel shows the You're set up box, 7 of 7, and the chip reads done", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      checklist = Setup.checklist(board)
+
+      done = text(view, "#setup-panel #setup-done")
+      assert done =~ "You're set up. #{checklist.elapsed_minutes} minutes."
+      assert done =~ "Reopen it any time from Board settings → Setup."
+      assert view |> text("#setup-done #setup-close") |> String.trim() == "Close setup"
+      assert view |> text("#setup-done #setup-connect-another") |> String.trim() == "➕ Connect another machine"
+      assert text(view, "#setup-panel") =~ "#{checklist.total} of #{checklist.total}"
+      assert view |> text("#setup-chip") |> String.trim() == "Setup · done"
+    end
+
+    # Scenario 3
+    test "steps 6 and 7 read Runner online and First card claimed", %{conn: conn, user: user} do
+      %{board: board, ref: ref} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert text(view, "#setup-step-6") =~ "Runner online"
+      step7 = text(view, "#setup-step-7")
+      assert step7 =~ "First card claimed"
+      assert step7 =~ "#{ref} claimed 14:12 by jl-mbp"
+    end
+
+    # Scenario 4
+    test "Watch it work opens the card and removes every piece of setup chrome", %{conn: conn, user: user} do
+      %{board: board, card: card, ref: ref} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-callout-watch") |> render_click()
+
+      assert_patch(view, "/board/#{board.slug}?card=#{ref}")
+      assert text(view, "#card-drawer") =~ card.title
+      assert gone?(view) == [false, false, false]
+    end
+
+    # Scenario 5
+    test "Got it closes setup", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-callout-dismiss") |> render_click()
+
+      assert gone?(view) == [false, false, false]
+      assert Setup.checklist(board).closed?
+    end
+
+    # Scenario 6
+    test "Close setup stays closed across a remount", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-close") |> render_click()
+
+      {:ok, remounted, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(remounted, "#setup-panel")
+      refute has_element?(remounted, "#setup-chip")
+      refute has_element?(remounted, "#setup-callout")
+      refute has_element?(remounted, "#setup-mobile")
+    end
+
+    # Scenario 7
+    test "closing in one view removes the panel and chip from another", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, first, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, second, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(second, "#setup-panel")
+
+      first |> element("#setup-close") |> render_click()
+
+      render(second)
+      refute has_element?(second, "#setup-panel")
+      refute has_element?(second, "#setup-chip")
+    end
+
+    # Scenario 8
+    test "reopening brings the finished panel back without the callout", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, _} = Setup.close(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#setup-panel")
+
+      {:ok, _} = Setup.reopen(board)
+
+      assert has_element?(view, "#setup-panel")
+      for id <- top_ids(), do: assert(has_element?(view, ~s(#setup-step-#{id}[data-status="done"])))
+      refute has_element?(view, "#setup-callout")
+    end
+
+    # Scenario 9
+    test "a finished setup keeps the columns on phones", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#setup-mobile")
+      assert has_element?(view, "#setup-panel")
+      assert attr(view, "#board-bands", "style") =~ "display:flex"
+      refute has_element?(view, "#board-pager-nav.hidden")
+    end
+
+    # Scenario 10
+    test "Connect another machine patches to ?setup=connect", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-connect-another") |> render_click()
+
+      assert_patch(view, "/board/#{board.slug}?setup=connect")
     end
   end
 

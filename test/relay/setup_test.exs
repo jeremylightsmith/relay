@@ -554,7 +554,19 @@ defmodule Relay.SetupTest do
 
       assert Enum.all?(steps, fn step ->
                step |> Map.keys() |> Enum.sort() ==
-                 Enum.sort([:id, :parent, :title, :done_title, :actor, :why, :what_this_does, :read_only_note])
+                 Enum.sort([
+                   :id,
+                   :parent,
+                   :title,
+                   :done_title,
+                   :actor,
+                   :why,
+                   :what_this_does,
+                   :read_only_note,
+                   :connect_title,
+                   :connect_why,
+                   :short
+                 ])
              end)
     end
   end

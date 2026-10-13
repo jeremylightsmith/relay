@@ -423,4 +423,62 @@ defmodule RelayWeb.Api.SetupControllerTest do
     assert %{"error" => %{"code" => "unauthorized"}} =
              conn |> post(~p"/api/setup/steps/5.1", %{"status" => "done"}) |> json_response(401)
   end
+
+  # RE446: a connected machine's key reports into the machine's own checklist.
+  describe "a connected machine's key" do
+    setup :setup_board
+
+    setup %{board: board} do
+      sam = insert(:user, name: "Sam")
+      {:ok, %{machine: machine, token: sam_token}} = Setup.connect_machine(board, sam)
+      %{sam: sam, machine: machine, sam_token: sam_token}
+    end
+
+    defp machine_step(machine, id),
+      do:
+        machine
+        |> Setup.checklist()
+        |> Map.fetch!(:steps)
+        |> Enum.flat_map(&[&1 | &1.children])
+        |> Enum.find(&(&1.id == id))
+
+    # Scenario 14
+    test "a preflight ticks the machine's step 3 and 4, not the board's",
+         %{conn: conn, board: board, machine: machine, sam_token: sam_token} do
+      board_before = {step(board, "3"), step(board, "4")}
+
+      body = conn |> preflight(sam_token, preflight_body(board, %{"machine" => "sam-linux"})) |> json_response(200)
+
+      assert body["ok"] == true
+      three = machine_step(machine, "3")
+      assert three.status == :done
+      assert three.evidence =~ ~r/^minted for Sam · first authed call \d\d:\d\d · key …\w{4} · sam-linux$/
+      assert three.data["machine"] == "sam-linux"
+      assert machine_step(machine, "4").status == :waiting
+      assert {step(board, "3"), step(board, "4")} == board_before
+    end
+
+    # Scenario 15
+    test "GET /api/setup answers the machine's connect checklist", %{conn: conn, token: token, sam_token: sam_token} do
+      data = conn |> status(sam_token) |> json_response(200) |> Map.fetch!("data")
+
+      assert data["connect"] == true
+      assert data["current"] == "3"
+      assert Enum.find(data["steps"], &(&1["id"] == "1"))["status"] == "skipped"
+
+      assert conn |> status(token) |> json_response(200) |> get_in(["data", "connect"]) == false
+    end
+
+    # Scenario 16
+    test "a report moves the machine's step and leaves the board's checklist alone",
+         %{conn: conn, board: board, machine: machine, sam_token: sam_token} do
+      for id <- ~w(3 4), do: {:ok, _} = Setup.advance(machine, id, :done, %{})
+      board_before = Setup.checklist(board)
+
+      body = conn |> report(sam_token, "5.1", %{"status" => "done", "evidence" => "2 flows"}) |> json_response(200)
+
+      assert body["data"]["current"] == "5.6"
+      assert Setup.checklist(board) == board_before
+    end
+  end
 end

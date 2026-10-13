@@ -27,6 +27,7 @@ defmodule Relay.Runs do
       Relay.Flows,
       Relay.Repo,
       Relay.Scaffold,
+      Relay.Setup,
       Schemas
     ],
     exports: [Supervisor, Capacity, RunDetail, SchedulerSupervisor]
@@ -53,6 +54,7 @@ defmodule Relay.Runs do
   alias Relay.Runs.Scheduler.Snapshot
   alias Relay.Runs.SchedulerSupervisor
   alias Relay.Runs.Transitions
+  alias Relay.Setup
   alias Schemas.Agent
   alias Schemas.Board
   alias Schemas.Card
@@ -2325,7 +2327,9 @@ defmodule Relay.Runs do
   is free"; the transport always passes the real thing.
 
   `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction so two runners never grab the same
-  job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches.
+  job. Returns `{:ok, job}` or `{:ok, nil}` when nothing matches. A granted job is then reported
+  to `Relay.Setup.observe_claim/2` (RE446), outside the transaction, so the board's first claim
+  ticks setup step 7.
   """
   @spec claim_next_job(Runner.t(), map() | nil, list(), [String.t()] | nil) :: {:ok, NodeJob.t() | nil}
   def claim_next_job(runner, free_capacity \\ nil, held \\ [], claimable \\ nil)
@@ -2342,7 +2346,12 @@ defmodule Relay.Runs do
     # limit); nil = not narrowed. Only ever narrows — a key the runner never reported installed
     # stays unclaimable.
     installed = if is_list(claimable), do: Enum.filter(installed, &(&1 in claimable)), else: installed
-    Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) end)
+    result = Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) end)
+
+    # RE446: the board's first claim ticks setup step 7 — observed after the claim committed, so
+    # a setup write never rolls a claim back and the setup board lock never nests in the job lock.
+    with {:ok, %NodeJob{} = job} <- result, do: :ok = Setup.observe_claim(job, runner)
+    result
   end
 
   # The isolation classes with room, as the STRINGS the payload stores. Accepts either shape:

@@ -811,8 +811,14 @@ sharing behavior.
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
   `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, current_sub_id,
-  first_flow_stage, position, done_count, finished?, steps}` (the 7 top-level entries; step 5's in
-  `children`); `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
+  first_flow_stage, position, done_count, finished?, total, closed?, callout, started_at,
+  finished_at, elapsed_minutes, steps}` (the 7 top-level entries; step 5's in `children`). The
+  payoff keys (RE446) come from the rows alone, so `preview_checklist/2` carries them too: `total`
+  is the top-level step count (7), `started_at` step 1's `completed_at`, `finished_at` step 7's
+  once it is finished, `elapsed_minutes` the whole minutes between them (nil unless both are set),
+  `closed?` whether step 7's `data["closed_at"]` is set, and `callout` — `%{card_ref, card_id,
+  machine, llm, verb}`, `llm` the checklist LLM's label — only while step 7 is done with a claimed
+  card and its `data["callout_dismissed_at"]` is absent; `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
   unfinished child of that entry (nil when it has none) — derived from finished-ness, so a board
   that reached step 5 before RE445 still reports 5.1 — and `first_flow_stage` the NAME of the
   lowest-position top-level stage holding a flow. `reportable_id/1` (`current_sub_id ||
@@ -833,15 +839,33 @@ sharing behavior.
   and is enabled, else waits on `"P of N flows pushed"`), and `Relay.Cards` calls
   `observe_card_created/1` after a committed `create_card/3` (while 5.8 is current, a card in
   `first_flow_stage` or one of its substages finishes 5.8 — `"first card in <stage>"` — and with
-  it step 5). Both always return `:ok`, so setup state never fails a push or a create. `choose_llm/3` (step 2) sets the board default agent to the
+  it step 5). Both always return `:ok`, so setup state never fails a push or a create. Steps 6
+  and 7 are board-observed the same way (RE446): `RelayWeb.Api.NodeJobController.heartbeat/2`
+  calls `observe_heartbeat/2` with the authed `Schemas.ApiKey` and the post-upsert
+  `Schemas.Runner` (while step 6 is reportable on the key's board it finishes —
+  `"Runner online"`, `"heartbeat HH:MM · <machine>"` then `" · <cli> logged_in|logged_out|installed,
+  …"` per installed harness, `<machine>` the runner's host else its name; `data` `host`, `runner`,
+  `harnesses` `[%{cli, signed_in}]`), and `Relay.Runs.claim_next_job/4` calls `observe_claim/2`
+  with the granted `Schemas.NodeJob` after its transaction commits (while step 7 is reportable on
+  the job's board it finishes — `"First card claimed"`, `"<REF> claimed HH:MM by <runner>"` — and
+  with it the checklist; `data` `card_ref`, `card_id`, `runner`, `machine` and `verb`, the
+  claimed card's stage category at claim time: `:planning` → `planning`, `:in_progress` →
+  `building`, else `working on`). Both return `:ok` whatever the setup state, and the no-checklist
+  path is one cheap `exists?` query. `close/1` (`{:error, :not_finished | :no_checklist}`) stamps
+  step 7's `callout_dismissed_at` and `closed_at`; `reopen/1` clears `closed_at` only, so the
+  callout never returns. Both write step 7's `data` directly under the board lock (never through
+  `advance/4`) and broadcast `{:setup_changed, board_id}` on a change. `choose_llm/3` (step 2) sets the board default agent to the
   chosen harness (keeping a default already on it, else reusing the board's first agent on it,
   else creating one on its first model) and mints the step-3 key `"Setup · <user>"` via
   `Relay.ApiKeys`; `remint_key/2` mints a fresh one, revoking the old only if it was never used.
   Both return `{:ok, %{checklist, token}}` — the raw token exists only there; step 3's `data`
   holds `key_id`. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
-  `step_id/1` (`:llm | :key | :install | :onboard`) names the catalog id of the steps a surface
+  `step_id/1` (`:llm | :key | :install | :onboard | :interview | :customize | :runner |
+  :first_claim`) names the catalog id of the steps a surface
   renders specially, so `RelayWeb.SetupComponents` (the wizard panel, chip and phones' read-only
-  checklist `RelayWeb.BoardLive` renders) never re-types one. The install
+  checklist `RelayWeb.BoardLive` renders, plus RE446's payoff callout and "You're set up" box)
+  never re-types one. BoardLive shows the chip and panel while the checklist isn't `closed?`, but
+  swaps the columns for the read-only checklist on phones only while it is unfinished. The install
   handshake reports through `preflight/2` and `installed/2`, each taking the authenticated
   `Schemas.ApiKey` (board preloaded) and the script's JSON: `preflight/2` checks the key's board
   owns the request's `slug` (`:wrong_board`) and that step 2 is done (`:step_2_pending`), ticks
@@ -864,8 +888,42 @@ sharing behavior.
   `stuck_after/0` is the ONE stuck threshold (7200 s; `stuck?` = unfinished and `on_step` strictly
   greater) and `admin_states/0` the ONE closed set of row states (`[:in_progress, :stuck,
   :done]`, a partition). They back the superadmin-only `/admin/onboarding` page
-  (`RelayWeb.Admin.OnboardingLive`); `list_for_admin` is an unscoped read, and the gate is the
-  `/admin` route. Depends
+  (`RelayWeb.Admin.OnboardingLive`); `list_for_admin` is an unscoped read (the board's own rows
+  only), and the gate is the `/admin` route.
+  **Connect a machine** (RE446) is the same checklist run per person on their own machine, stored
+  as a `Schemas.SetupMachine` with its own `board_setup_steps` rows (`machine_id` set; the board's
+  own rows have it nil, and every board read filters on that — one private `rows_query/1`).
+  `connect_machine/2` (`{:error, :no_checklist | :step_2_pending}`) mints the member's key
+  `"Setup · <name>"`, inserts the machine and its 15 rows — `connect_skips/0` (the ONE list:
+  `1`, `2`, `5.2`–`5.5`, `5.7`, `5.8`, `7`) `:skipped` (step 1 `"already set up"`, step 2
+  `"board-wide · already chosen"`), step 3 `:active` with `data.key_id`, the rest pending — and
+  broadcasts once. A connect checklist carries `connect?: true` and its `machine_id` (both
+  `false` / nil on the board's): each catalog step's `connect_title` / `connect_why` replace its
+  titles / why (`%{board}` is the board's name), step 7 reads `"board-wide · <REF> claimed <D
+  Mon>"` or `"board-wide · waiting for the first claim"` from the board's own step 7, and the tally
+  covers steps 1–6 (`total` 6, `position == done_count`, `finished_at` step 6's completion, never
+  `closed?`, no `callout`). Every catalog step also has a `short` label (`"install"`, …).
+  `connect_checklist/2` is the user's latest unfinished machine's checklist, else an unsaved
+  preview; `machine_checklist/1` reads one machine's. `target_for_key/1` routes a board key to the
+  machine minted for it, else its board, and `preflight/2`, `installed/2`, `observe_heartbeat/2`
+  and `GET /api/setup` / `POST /api/setup/steps/:step` all go through it — a machine key never
+  touches the board's rows nor a board key a machine's, and a machine's preflight is never
+  `:step_2_pending`. On a machine, step 3's evidence is `"minted for <name> · first authed call
+  HH:MM · key …<four> · <machine>"` (step 3's `data.machine` is the preflight's machine on both),
+  step 6's tick also writes `host` / `runner_name` to the `setup_machines` row, and
+  `checklist/1`, `advance/4` and `remint_key/2` take the machine as a target (`remint_key/2` also
+  moves `machine.api_key_id`). `machines/1` lists every setup on a board for Board settings →
+  Setup — the board's own first (once its step 3 has a key), then each machine oldest first:
+  `id` (`:board` or the machine id), `machine`, `person`, `key_last_four` (nil once revoked),
+  `harnesses` (`[%{cli, signed_in}]` from the step-6 runner's row), `finished?` and `progress`
+  (`"7/7"` / `"6/6"`, else `"<current id> <short>"`). `project_answers/1` is 5.3's answered
+  interview questions in order (`[%{id, label, answer}]`). Both feed `BoardSettingsLive`'s
+  **Setup** section (`?section=setup`, only on a board with a checklist, else General): the
+  status line, Reopen setup wizard (`reopen/1`, then back to the board), the answers, the machines
+  table and Connect a machine, a link to `/board/:slug?setup=connect` — `BoardLive`'s connect mode,
+  which shows the member's `connect_checklist/2` in the panel whatever the board's `closed?`,
+  never mints on mount, and routes "Mint my key" to `connect_machine/2` (then `remint_key/2` on
+  that machine). Depends
   on Agents, ApiKeys, Events and Repo, never on Boards, Flows or Cards (all three depend on it).
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
@@ -915,6 +973,8 @@ erDiagram
     Harness ||--o{ Agent : "runs on"
     Board |o--o| Agent : "default_agent_id"
     Board ||--o{ BoardSetupStep : "setup checklist (RE443)"
+    Board ||--o{ SetupMachine : "connected machines (RE446)"
+    SetupMachine ||--o{ BoardSetupStep : "machine checklist (RE446)"
     User ||--o{ UserApiToken : "mobile bearer"
     User ||--o{ DeviceToken : "push"
     Card ||--o{ Vote : upvotes
@@ -930,12 +990,21 @@ harness + model; flow nodes name an agent in their `llm` and `boards.default_age
 fallback (RE433, `Relay.Agents`).
 
 A `BoardSetupStep` (`board_setup_steps`, owned by `Relay.Setup`, RE443) is one step of a board's
-setup checklist: unique on `(board_id, step)` (cascade on board delete), with `status`
+setup checklist — or, with `machine_id` set (RE446), of one connected machine's: the board's own
+rows are unique on `(board_id, step) WHERE machine_id IS NULL`, a machine's on
+`(machine_id, step) WHERE machine_id IS NOT NULL` (cascade on board and machine delete), with `status`
 (`Schemas.BoardSetupStep.statuses/0`; `current_statuses/0` = active / waiting / failed,
 `finished_statuses/0` = done / skipped), `reached_at`, `completed_at`, `evidence`, `error` and a
-`data` map. `users.setup_explanations_hidden` (`Relay.Accounts.set_setup_explanations_hidden/2`,
+`data` map — step 7's carries the first claim's facts plus the payoff state
+(`callout_dismissed_at`, `closed_at`, ISO 8601, RE446). `users.setup_explanations_hidden` (`Relay.Accounts.set_setup_explanations_hidden/2`,
 cast only by `Schemas.User.preferences_changeset/2`) is the per-user preference to hide the
 checklist's *what this does* lines.
+
+A `SetupMachine` (`setup_machines`, owned by `Relay.Setup`, RE446) is one person's machine
+connected to a board: `board_id` (cascade on board delete), `user_id` and `api_key_id` (the
+machine's step-3 key; both nilified on delete, so revoking the key leaves the machine), and the
+`host` / `runner_name` its step-6 heartbeat recorded. Its checklist is its `board_setup_steps`
+rows. Every field is programmatic, never cast.
 
 A `RunBranch` (`run_branches`, owned by `Relay.Runs`, RE437) is one branch of one fan-out
 **region entry**: it belongs to its `Run` (cascade) and to the `fan_out` `NodeExecution` that

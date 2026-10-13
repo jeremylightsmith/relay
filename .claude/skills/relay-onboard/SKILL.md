@@ -50,10 +50,31 @@ Run `./relay setup status --json` and read the exit code first.
 Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe at any point:
 running `/relay-onboard` again resumes at the first unmet sub-step.
 
-The status JSON carries what the loop needs: `board`, `template`, `llm` (`harness`, `label`,
-`cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
+The status JSON carries what the loop needs: `board`, `connect`, `template`, `llm` (`harness`,
+`label`, `cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
 `done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`, and
 `steps` (each with `id`, `title`, `status`, `evidence`, `error`, `data`, `children`).
+
+## Connecting another machine
+
+When status says `"connect": true`, this key belongs to a person's **own machine** on a board
+that is already set up: the board-wide steps and the interview, customize, push-back, follow-up
+and first-card sub-steps are already `skipped`. Only 5.1 and 5.6 are left.
+
+- Announce *"Setup checklist for <board>: <done_count> of 6 done. Next is <current>, <what it
+  does>."*
+- Do **5.1** exactly as written.
+- At **5.6**, do **not** commit, push or open a PR. `git fetch`, then check that `./relay`,
+  `relay.md` and the skill file (status `llm.skill_path`) all exist on origin/<base>
+  (`git cat-file -e origin/<base>:<path>` for each). If they all do:
+
+      ./relay setup report 5.6 --status done --evidence "origin/<base> has the Relay files"
+
+  Otherwise:
+
+      ./relay setup report 5.6 --status failed --error "The Relay files aren't on origin/<base> yet. Finish onboarding on the first machine, then run /relay-onboard again."
+
+Then go to **Close**.
 
 ## The loop
 

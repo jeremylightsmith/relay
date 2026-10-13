@@ -105,6 +105,13 @@ defmodule RelayWeb.BoardLive do
   as the docked-left panel and top-bar chip at ≥45rem and as a read-only checklist in place of the
   columns below it. `{:setup_changed, _}` re-reads only the checklist. The shown-once step-3 key
   lives only in `:setup_token`, never persisted, broadcast or put in the URL.
+
+  RE446 adds connect a machine: `?setup=connect` (read in `handle_params/3`, beside any `?card=`)
+  puts the panel in connect mode, showing this member's `Relay.Setup.connect_checklist/2` in
+  `:setup_connect` whatever the board's own `closed?`, with the board's chip and callout hidden.
+  Mounting mints nothing; the first "Mint my key" (`"setup_mint_key"`) calls
+  `Relay.Setup.connect_machine/2`, later ones `Relay.Setup.remint_key/2` on that machine. Close
+  setup there only patches back to the board.
   """
 
   use RelayWeb, :live_view
@@ -139,6 +146,7 @@ defmodule RelayWeb.BoardLive do
   alias Schemas.Card
   alias Schemas.Comment
   alias Schemas.Run
+  alias Schemas.SetupMachine
   alias Schemas.Stage
   alias Schemas.TalkEvent
   alias Schemas.TalkSession
@@ -218,9 +226,13 @@ defmodule RelayWeb.BoardLive do
         />
       </:title>
       <:actions :if={!viewer_open?(assigns)}>
-        <%!-- RE443 — the setup chip: `Setup · <position> of 7`; a click reopens the panel. --%>
+        <%!-- RE443 — the setup chip: `Setup · <position> of 7` (`Setup · done` once finished,
+            RE446); a click reopens the panel. Gone once setup is closed. --%>
         <SetupComponents.setup_chip
-          :if={@live_action not in [:card, :story_map] and setup_active?(@setup)}
+          :if={
+            @live_action not in [:card, :story_map] and setup_shown?(@setup) and
+              not @setup_connect_mode
+          }
           id="setup-chip"
           checklist={@setup}
           click="setup_open"
@@ -297,21 +309,31 @@ defmodule RelayWeb.BoardLive do
       >
         <%!-- RE443 — below 45rem an unfinished setup checklist replaces the columns, read-only. --%>
         <SetupComponents.setup_mobile
-          :if={setup_active?(@setup)}
+          :if={setup_unfinished?(@setup)}
           id="setup-mobile"
           checklist={@setup}
           class="min-h-0 flex-1 overflow-y-auto bg-base-200 drawer:hidden"
         />
-        <%!-- RE443 — the setup wizard docks left of the board (≥45rem); #board is untouched. --%>
+        <%!-- RE443 — the setup wizard docks left of the board (≥45rem); #board is untouched.
+            RE446 — the payoff callout is positioned against this row, outside every stream. --%>
         <div
           id="board-row"
-          class={["flex min-h-0", if(setup_active?(@setup), do: "drawer:flex-1", else: "flex-1")]}
+          class={[
+            "relative flex min-h-0",
+            if(setup_unfinished?(@setup), do: "drawer:flex-1", else: "flex-1")
+          ]}
         >
+          <SetupComponents.setup_callout
+            :if={setup_callout?(assigns)}
+            id="setup-callout"
+            callout={@setup.callout}
+          />
           <SetupComponents.setup_panel
-            :if={setup_active?(@setup) and not @setup_minimized}
+            :if={setup_panel_checklist(assigns) && not @setup_minimized}
             id="setup-panel"
             class="hidden drawer:flex"
-            checklist={@setup}
+            checklist={setup_panel_checklist(assigns)}
+            user_name={if(@setup_connect_mode, do: user_name(@current_scope.user))}
             board_name={@board.name}
             board_slug={@board.slug}
             hide_explanations={@setup_hide_explanations}
@@ -359,7 +381,7 @@ defmodule RelayWeb.BoardLive do
             <nav
               id="board-pager-nav"
               phx-hook="BoardPager"
-              class={["board-pager-nav drawer:hidden", setup_active?(@setup) && "hidden"]}
+              class={["board-pager-nav drawer:hidden", setup_unfinished?(@setup) && "hidden"]}
               aria-label="Stages"
             >
               <%!-- RLY-95 · BOARD-01 — plain web: ‹ back · board name (the ‹ is the route
@@ -445,7 +467,7 @@ defmodule RelayWeb.BoardLive do
               id="board-bands"
               class={[
                 "drawer:min-w-0 drawer:w-auto drawer:overflow-x-auto drawer:overflow-y-hidden drawer:[-webkit-overflow-scrolling:touch] drawer:[overscroll-behavior-x:contain]",
-                setup_active?(@setup) && "hidden drawer:flex"
+                setup_unfinished?(@setup) && "hidden drawer:flex"
               ]}
               style={board_bands_style(@setup)}
             >
@@ -1229,6 +1251,10 @@ defmodule RelayWeb.BoardLive do
       # step-3 key (socket-only, never persisted or broadcast), whether this socket minimized
       # the panel, the step-2 picker's selection and the user's expert toggle.
       |> assign(:setup, Setup.checklist(board))
+      # RE446 — `?setup=connect` (set in handle_params/3): this member's connect-a-machine
+      # checklist replaces the board's in the panel. `:setup_token` is whichever panel's key.
+      |> assign(:setup_connect_mode, false)
+      |> assign(:setup_connect, nil)
       |> assign(:setup_token, nil)
       |> assign(:setup_install_command, Setup.install_command(RelayWeb.Endpoint.url(), board.slug))
       |> assign(:setup_minimized, false)
@@ -1330,6 +1356,7 @@ defmodule RelayWeb.BoardLive do
       socket
       |> assign(:nav_back_label, nav_back_label(params))
       |> assign(:native_nav, native_nav(socket.assigns.live_action, params))
+      |> assign_setup_connect(params["setup"] == "connect")
 
     if viewer_only_change?(socket, ref, previous_ref, viewer) do
       {:noreply, assign_viewer(socket, viewer)}
@@ -1433,19 +1460,85 @@ defmodule RelayWeb.BoardLive do
   # items in that section. Every "is the viewer up" check reads this.
   defp viewer_open?(assigns), do: viewer_item(assigns) != nil
 
-  # RE443 — the setup wizard shows while the board has an unfinished checklist.
-  defp setup_active?(%{finished?: false}), do: true
-  defp setup_active?(_none_or_finished), do: false
+  # RE443 / RE446 — the setup chip and panel show while the board has a checklist that isn't
+  # closed: unfinished, or finished with its "You're set up" box until Close setup.
+  defp setup_shown?(%{closed?: false}), do: true
+  defp setup_shown?(_none_or_closed), do: false
+
+  # RE443 — only an unfinished checklist swaps the columns for the read-only checklist on phones
+  # and hides the pager; a finished one must never hide the board.
+  defp setup_unfinished?(%{finished?: false}), do: true
+  defp setup_unfinished?(_none_or_finished), do: false
+
+  # RE446 — the payoff callout: a callout to show, and a board in the DOM to pin it to.
+  defp setup_callout?(%{setup_connect_mode: true}), do: false
+  defp setup_callout?(%{setup: %{callout: %{}}} = assigns), do: board_in_dom?(%{assigns: assigns})
+  defp setup_callout?(_assigns), do: false
 
   @board_bands_style "gap:22px;padding:16px 18px 18px 18px;align-items:stretch;background:var(--color-base-200);flex:1 1 auto;min-height:0;"
 
-  # `display:flex` is inline only when setup isn't showing; otherwise the classes own `display`
-  # so `hidden` can win below 45rem.
+  # `display:flex` is inline only when setup is finished or absent; otherwise the classes own
+  # `display` so `hidden` can win below 45rem.
   defp board_bands_style(setup) do
-    if setup_active?(setup), do: @board_bands_style, else: "display:flex;" <> @board_bands_style
+    if setup_unfinished?(setup), do: @board_bands_style, else: "display:flex;" <> @board_bands_style
+  end
+
+  # RE446 — the checklist the panel shows: in connect mode this member's connect (whatever the
+  # board's own `closed?`), else the board's while it is shown; nil hides the panel.
+  defp setup_panel_checklist(%{setup_connect_mode: true, setup_connect: connect}), do: connect
+  defp setup_panel_checklist(%{setup: setup}), do: if(setup_shown?(setup), do: setup)
+
+  defp user_name(user), do: user.name || user.email
+
+  # RE446 — entering connect mode reads this member's connect checklist (an unsaved preview until
+  # "Mint my key"; mounting never mints); leaving it drops it. Either way drops the shown-once key,
+  # which belonged to the other panel. A params pass that keeps the mode changes nothing.
+  defp assign_setup_connect(%{assigns: %{setup_connect_mode: mode}} = socket, mode), do: socket
+
+  defp assign_setup_connect(socket, true) do
+    %{board: board, current_scope: scope} = socket.assigns
+
+    assign(socket,
+      setup_connect_mode: true,
+      setup_connect: Setup.connect_checklist(board, scope.user),
+      setup_token: nil,
+      setup_minimized: false
+    )
+  end
+
+  defp assign_setup_connect(socket, false),
+    do: assign(socket, setup_connect_mode: false, setup_connect: nil, setup_token: nil)
+
+  # The connect checklist re-read: its machine's once minted, else the member's latest unfinished
+  # machine or a fresh preview.
+  defp read_setup_connect(%{setup_connect: %{machine_id: id}}) when is_integer(id), do: Setup.machine_checklist(id)
+  defp read_setup_connect(%{board: board, current_scope: scope}), do: Setup.connect_checklist(board, scope.user)
+
+  # Step 3 on a connect: the first click connects the machine, later ones re-mint its key.
+  defp mint_connect_key(%{board: board, current_scope: scope, setup_connect: connect}) do
+    case connect do
+      %{machine_id: nil} -> Setup.connect_machine(board, scope.user)
+      %{machine_id: id} -> Setup.remint_key(%SetupMachine{id: id, board_id: board.id}, scope.user)
+    end
+  end
+
+  defp assign_connect_key(socket, {:ok, %{checklist: checklist, token: token}}),
+    do: assign(socket, setup_connect: checklist, setup_token: token)
+
+  defp assign_connect_key(socket, {:error, _reason}) do
+    socket
+    |> assign(:setup_connect, read_setup_connect(socket.assigns))
+    |> put_flash(:error, "Setup has moved on since this page loaded. Try again from the current step.")
   end
 
   defp recommended_llm, do: Enum.find(Setup.onboarding_llms(), & &1.recommended?).harness
+
+  defp close_setup(socket) do
+    case Setup.close(socket.assigns.board) do
+      {:ok, checklist} -> assign(socket, :setup, checklist)
+      {:error, _not_finished_or_none} -> assign(socket, :setup, Setup.checklist(socket.assigns.board))
+    end
+  end
 
   defp assign_setup_key(socket, {:ok, %{checklist: checklist, token: token}}) do
     assign(socket, setup: checklist, setup_token: token)
@@ -1688,6 +1781,9 @@ defmodule RelayWeb.BoardLive do
     {:noreply, assign_setup_key(socket, Setup.choose_llm(board, scope.user, harness))}
   end
 
+  def handle_event("setup_mint_key", _params, %{assigns: %{setup_connect_mode: true, setup_connect: %{}}} = socket),
+    do: {:noreply, assign_connect_key(socket, mint_connect_key(socket.assigns))}
+
   def handle_event("setup_mint_key", _params, socket) do
     %{board: board, current_scope: scope} = socket.assigns
     {:noreply, assign_setup_key(socket, Setup.remint_key(board, scope.user))}
@@ -1711,6 +1807,36 @@ defmodule RelayWeb.BoardLive do
   def handle_event("setup_minimize", _params, socket), do: {:noreply, assign(socket, :setup_minimized, true)}
 
   def handle_event("setup_open", _params, socket), do: {:noreply, assign(socket, :setup_minimized, false)}
+
+  # RE446 — the payoff. Close setup and Got it close it for every viewer (`{:setup_changed, _}`);
+  # Watch it work also opens the claimed card. Closing the wizard isn't a board edit, so an
+  # archived board allows it too.
+  # In connect mode, Close setup only leaves connect mode: the board's own setup is not this
+  # member's to close.
+  def handle_event("setup_close", _params, %{assigns: %{setup_connect_mode: true}} = socket),
+    do: {:noreply, push_patch(socket, to: ~p"/board/#{socket.assigns.board.slug}")}
+
+  def handle_event("setup_close", _params, socket), do: {:noreply, close_setup(socket)}
+
+  def handle_event("setup_callout_watch", _params, socket) do
+    %{board: board, setup: setup} = socket.assigns
+    ref = setup && setup.callout && setup.callout.card_ref
+    socket = close_setup(socket)
+    {:noreply, if(ref, do: push_patch(socket, to: ~p"/board/#{board.slug}?card=#{ref}"), else: socket)}
+  end
+
+  # Already in connect mode (a finished connect), the patch keeps the mode, so start the next
+  # machine here: the member's next connect is an unsaved preview.
+  def handle_event("setup_connect_another", _params, socket) do
+    %{board: board, current_scope: scope, setup_connect_mode: connect_mode} = socket.assigns
+
+    socket =
+      if connect_mode,
+        do: assign(socket, setup_connect: Setup.connect_checklist(board, scope.user), setup_token: nil),
+        else: socket
+
+    {:noreply, push_patch(socket, to: ~p"/board/#{board.slug}?setup=connect")}
+  end
 
   def handle_event("restore_board", _params, socket) do
     {:ok, _board} = Boards.unarchive_board(socket.assigns.board)
@@ -3569,11 +3695,14 @@ defmodule RelayWeb.BoardLive do
   # RE443: the board's setup checklist changed (`Relay.Setup`) — another tab, or the install
   # script's API calls. Re-read only the checklist (one query), never the whole board. The
   # shown-once key stays on screen only while step 3 is still the current step.
+  # RE446 — in connect mode the connect checklist is re-read too, and the key follows it.
   def handle_info({:setup_changed, _board_id}, socket) do
     setup = Setup.checklist(socket.assigns.board)
-    token = if setup && setup.current_id == Setup.step_id(:key), do: socket.assigns.setup_token
+    connect = if socket.assigns.setup_connect_mode, do: read_setup_connect(socket.assigns)
+    shown = if socket.assigns.setup_connect_mode, do: connect, else: setup
+    token = if shown && shown.current_id == Setup.step_id(:key), do: socket.assigns.setup_token
 
-    {:noreply, assign(socket, setup: setup, setup_token: token)}
+    {:noreply, assign(socket, setup: setup, setup_connect: connect, setup_token: token)}
   end
 
   # `Phoenix.Ecto.SQL.Sandbox` traps exits on the request process by default (recommended for
