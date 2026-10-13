@@ -558,4 +558,172 @@ defmodule Relay.SetupTest do
              end)
     end
   end
+
+  describe "list_for_admin/1" do
+    @now ~U[2026-01-01 12:00:00Z]
+
+    defp set_step!(board, id, fields),
+      do: Repo.update_all(from(s in BoardSetupStep, where: s.board_id == ^board.id and s.step == ^id), set: fields)
+
+    defp ago(seconds), do: DateTime.add(@now, -seconds, :second)
+
+    defp admin_row(board), do: Enum.find(Setup.list_for_admin(@now), &(&1.board_id == board.id))
+
+    # Scenario 1
+    test "stuck_after/0 is two hours and admin_states/0 the three row states in chip order" do
+      assert Setup.stuck_after() == 7200
+      assert Setup.admin_states() == [:in_progress, :stuck, :done]
+    end
+
+    # Scenario 2
+    test "one row per guided-setup board, none for a board created without a template" do
+      owner = insert(:user, email: "ana@pantry.io")
+      {:ok, board} = Boards.create_board(owner, %{name: "Pantry", slug: unique_slug("pantry"), template: "bare-minimum"})
+      {:ok, _plain} = Boards.create_board(owner, %{name: "Plain", slug: unique_slug("plain")})
+
+      assert [row] = Setup.list_for_admin(@now)
+      assert row.board_id == board.id
+      assert row.name == "Pantry"
+      assert row.slug == board.slug
+      assert row.owner_email == "ana@pantry.io"
+      assert row.inserted_at == board.inserted_at
+      assert row.template == Templates.get("bare-minimum").name
+      assert row.template == Repo.get_by!(BoardSetupStep, board_id: board.id, step: "1").data["template"]
+      assert row.llm == nil
+      assert row.current == %{id: "2", title: "Pick your default LLM", status: :active, actor: :you_here}
+    end
+
+    # Scenario 3
+    test "on_step and total count seconds from step reached and step 1 completed" do
+      board = create!("bare-minimum")
+      set_step!(board, "1", completed_at: ago(30 * 60))
+      set_step!(board, "2", reached_at: ago(10 * 60))
+      evidence = Repo.get_by!(BoardSetupStep, board_id: board.id, step: "1").evidence
+      assert evidence =~ ~r/^\d+ stages · \d+ flows · \d\d:\d\d$/
+
+      row = admin_row(board)
+      assert row.on_step == 600
+      assert row.total == 1800
+      assert row.stuck? == false
+      assert row.state == :in_progress
+      assert row.last == %{kind: :evidence, text: evidence}
+    end
+
+    # Scenario 4
+    test "a failed step is current and its error is the last line; the llm is step 2's label" do
+      board = create!("bare-minimum")
+      {:ok, _} = Setup.advance(board, "2", :done, %{evidence: "chosen 14:03", data: %{"llm" => "codex"}})
+      {:ok, _} = Setup.advance(board, "3", :done, %{})
+
+      {:ok, _} =
+        Setup.advance(board, "4", :failed, %{
+          error: "Preflight stopped: python3 isn't on your PATH",
+          evidence: "preflight failed 14:09"
+        })
+
+      row = admin_row(board)
+      assert row.llm == "Codex"
+      assert row.current.id == "4"
+      assert row.current.status == :failed
+      assert row.last == %{kind: :error, text: "Preflight stopped: python3 isn't on your PATH"}
+    end
+
+    # Scenario 5
+    test "exactly stuck_after/0 on one step is not stuck" do
+      board = advance_to!(create!("bare-minimum"), "3")
+      set_step!(board, "3", reached_at: ago(7200))
+
+      row = admin_row(board)
+      assert row.on_step == 7200
+      assert row.stuck? == false
+      assert row.state == :in_progress
+    end
+
+    # Scenario 6
+    test "one second past stuck_after/0 is stuck" do
+      board = advance_to!(create!("bare-minimum"), "3")
+      set_step!(board, "3", reached_at: ago(7201))
+
+      row = admin_row(board)
+      assert row.stuck? == true
+      assert row.state == :stuck
+    end
+
+    # Scenario 7
+    test "a finished checklist is done, current on step 7, total up to step 7's completion" do
+      board = advance_to!(create!("bare-minimum"), "7")
+      {:ok, _} = Setup.advance(board, "7", :done, %{evidence: "STR-1 claimed by jl-mbp"})
+      set_step!(board, "1", completed_at: ago(3 * 3600))
+      set_step!(board, "7", completed_at: ago(2 * 3600 + 20 * 60))
+
+      row = admin_row(board)
+      assert row.state == :done
+      assert row.stuck? == false
+      assert row.on_step == nil
+      assert row.current.id == "7"
+      assert row.total == 2400
+      assert row.last == %{kind: :evidence, text: "STR-1 claimed by jl-mbp"}
+    end
+
+    # Scenario 8
+    test "on step 5 the current sub-step is reported, timed from step 5" do
+      board = advance_to!(create!("bare-minimum"), "5.1")
+      set_step!(board, "5", reached_at: ago(3600))
+
+      Repo.update_all(from(s in BoardSetupStep, where: s.board_id == ^board.id and s.step in ~w(5.1 5.2 5.3 5.4 5.5)),
+        set: [status: :done]
+      )
+
+      set_step!(board, "5.6", status: :waiting, evidence: "PR #4 open")
+
+      row = admin_row(board)
+      assert row.current == %{id: "5.6", title: "Relay files on origin/main", status: :waiting, actor: :ai_terminal}
+      assert row.on_step == 3600
+      assert row.last == %{kind: :evidence, text: "PR #4 open"}
+    end
+
+    # Scenario 9
+    test "newest board first" do
+      a = create!("bare-minimum")
+      b = create!("bare-minimum")
+      Repo.update_all(from(x in Schemas.Board, where: x.id == ^a.id), set: [inserted_at: ~U[2026-01-01 10:00:00Z]])
+      Repo.update_all(from(x in Schemas.Board, where: x.id == ^b.id), set: [inserted_at: ~U[2026-01-01 11:00:00Z]])
+
+      assert Enum.map(Setup.list_for_admin(@now), & &1.board_id) == [b.id, a.id]
+    end
+
+    # Scenario 10
+    test "the row's checklist is the board's checklist" do
+      board = create!("bare-minimum")
+      {:ok, _} = Setup.advance(board, "2", :done, %{data: %{"llm" => "claude-code"}})
+
+      row = admin_row(board)
+      assert row.checklist == Setup.checklist(board)
+      assert row.checklist.board_id == board.id
+    end
+
+    # Scenario 11
+    test "lists every board with a constant number of queries" do
+      for _ <- 1..3, do: create!("bare-minimum")
+      test_pid = self()
+      handler_id = {__MODULE__, :list_for_admin_queries, make_ref()}
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:relay, :repo, :query],
+          fn _event, _measurements, metadata, _config ->
+            if self() == test_pid, do: send(test_pid, {:query, metadata.source})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert length(Setup.list_for_admin(@now)) == 3
+      assert_received {:query, "board_setup_steps"}
+      assert_received {:query, "flows"}
+      refute_received {:query, _}
+    end
+  end
 end

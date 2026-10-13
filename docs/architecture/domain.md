@@ -853,7 +853,19 @@ sharing behavior.
   `default_branch`, `python3`), whose fix texts live beside it; the server adds the `cli` and
   `key` lines. `installed/2` finishes step 4 (`"downloaded HH:MM · <repo_dir> · <branch>"`,
   `data.files`). Steps already past are left alone, so a re-run answers 200 and writes nothing; a
-  board with no checklist answers from its default agent's LLM. Depends
+  board with no checklist answers from its default agent's LLM.
+  `list_for_admin/0,1` (RE448) returns one progress row per board with a checklist, newest board
+  first, from a constant two queries (steps joined to their board and left-joined to its owner, plus every board's first flow stage, each
+  checklist built by `preview_checklist/2`): `board_id`, `name`, `slug`, `owner_email`,
+  `inserted_at`, `template`, `llm` (step 2's label, nil before), `current` (`id` / `title` /
+  `status` / `actor` — step 5's first current sub-step while on step 5, step 7 once finished),
+  `on_step` and `total` (seconds), `last` (`%{kind: :error | :evidence, text}` — the latest
+  failed step's error, else evidence), `stuck?`, `state` and the full `checklist`.
+  `stuck_after/0` is the ONE stuck threshold (7200 s; `stuck?` = unfinished and `on_step` strictly
+  greater) and `admin_states/0` the ONE closed set of row states (`[:in_progress, :stuck,
+  :done]`, a partition). They back the superadmin-only `/admin/onboarding` page
+  (`RelayWeb.Admin.OnboardingLive`); `list_for_admin` is an unscoped read, and the gate is the
+  `/admin` route. Depends
   on Agents, ApiKeys, Events and Repo, never on Boards, Flows or Cards (all three depend on it).
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary

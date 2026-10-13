@@ -16,6 +16,12 @@ defmodule RelayWeb.Admin.IndexLive do
         description: "Every board, archived included, with owner and member/card counts."
       },
       %{
+        id: "admin-page-onboarding",
+        label: "Onboarding",
+        path: ~p"/admin/onboarding",
+        description: "Boards created with guided setup: current step, time on it, and which are stuck."
+      },
+      %{
         id: "admin-page-users",
         label: "Users",
         path: ~p"/admin/users",

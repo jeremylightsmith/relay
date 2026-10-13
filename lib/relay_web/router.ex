@@ -151,6 +151,7 @@ defmodule RelayWeb.Router do
         ) ++ [{RelayWeb.Auth, :require_superadmin}, RelayWeb.BrowserNotify] do
       live "/", IndexLive
       live "/boards", BoardsLive
+      live "/onboarding", OnboardingLive
       live "/users", UsersLive
       live "/api", ApiLive
     end

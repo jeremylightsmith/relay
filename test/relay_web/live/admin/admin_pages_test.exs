@@ -5,7 +5,7 @@ defmodule RelayWeb.Admin.AdminPagesTest do
 
   alias Schemas.Scope
 
-  @paths ["/admin", "/admin/boards", "/admin/users"]
+  @paths ["/admin", "/admin/boards", "/admin/users", "/admin/onboarding"]
 
   defp log_in_superadmin(%{conn: conn}) do
     admin = insert(:user, email: hd(Scope.superadmin_emails()))
@@ -35,11 +35,12 @@ defmodule RelayWeb.Admin.AdminPagesTest do
   describe "/admin as the superadmin" do
     setup :log_in_superadmin
 
-    test "links to Boards, Users and API log", %{conn: conn} do
+    test "links to Boards, Onboarding, Users and API log", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin")
 
       assert has_element?(view, "h1", "Admin")
       assert has_element?(view, ~s(#admin-page-boards[href="/admin/boards"]), "Boards")
+      assert has_element?(view, ~s(#admin-page-onboarding[href="/admin/onboarding"]), "Onboarding")
       assert has_element?(view, ~s(#admin-page-users[href="/admin/users"]), "Users")
       assert has_element?(view, ~s(#admin-page-api[href="/admin/api"]), "API log")
     end

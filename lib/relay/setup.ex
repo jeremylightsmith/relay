@@ -34,6 +34,10 @@ defmodule Relay.Setup do
   the key's first authed call ticks step 3, the preflight result marks step 4 waiting or failed
   (with the fix text from `preflight_checks/0`'s catalog), and the written files finish step 4.
 
+  `list_for_admin/1` derives one progress row per checklist board (current step, time on it,
+  total time, last evidence or error, stuck after `stuck_after/0`) from one query, for the
+  superadmin `/admin/onboarding` page (RE448).
+
   `Relay.Boards`, `Relay.Flows` and `Relay.Cards` depend on this context, so this one never calls
   them: it counts stages, flows and cards with `Relay.Repo` queries.
   """
@@ -111,7 +115,31 @@ defmodule Relay.Setup do
           steps: [entry()]
         }
 
+  @type admin_state :: :in_progress | :stuck | :done
+
+  @type admin_row :: %{
+          board_id: integer(),
+          name: String.t(),
+          slug: String.t(),
+          owner_email: String.t() | nil,
+          inserted_at: DateTime.t(),
+          template: String.t() | nil,
+          llm: String.t() | nil,
+          current: %{id: String.t(), title: String.t(), status: BoardSetupStep.status(), actor: actor()},
+          on_step: non_neg_integer() | nil,
+          total: non_neg_integer() | nil,
+          last: %{kind: :evidence | :error, text: String.t()} | nil,
+          stuck?: boolean(),
+          state: admin_state(),
+          checklist: checklist()
+        }
+
   @actors [:you_here, :you_terminal, :ai_terminal]
+
+  # A board on the same step for longer than this many seconds (2h) is stuck.
+  @stuck_after 2 * 60 * 60
+
+  @admin_states [:in_progress, :stuck, :done]
 
   @step_blank %{parent: nil, done_title: nil, why: nil, what_this_does: [], read_only_note: nil}
 
@@ -383,6 +411,14 @@ defmodule Relay.Setup do
   @doc "The statuses `advance/4` (and `POST /api/setup/steps/:step`) accepts, in status order."
   @spec advance_statuses() :: [BoardSetupStep.status()]
   def advance_statuses, do: @advance_statuses
+
+  @doc "Seconds on one step after which an unfinished checklist is stuck: 7200 (2h). The ONE threshold."
+  @spec stuck_after() :: pos_integer()
+  def stuck_after, do: @stuck_after
+
+  @doc "The states an admin row is in, a partition, in filter order: in progress, stuck, done."
+  @spec admin_states() :: [admin_state()]
+  def admin_states, do: @admin_states
 
   @doc "The LLMs step 2 offers, in seed-harness order: Claude Code, Codex, Gemini CLI."
   @spec onboarding_llms() :: [llm()]
@@ -710,6 +746,33 @@ defmodule Relay.Setup do
   end
 
   @doc """
+  One progress row per board with a checklist, for the superadmin `/admin/onboarding` page
+  (RE448), newest board first (`inserted_at`, then id, descending). Unscoped on purpose: the gate
+  is the `/admin` route. two queries (steps joined to their board and its owner; every board's first flow stage), each checklist
+  built by `preview_checklist/2`.
+
+  A row carries the board's `board_id`, `name`, `slug`, `owner_email` and `inserted_at`; step 1's
+  `template`; the `llm` label step 2 picked (nil before); the `current` entry (`id`, `title`,
+  `status`, `actor` — step 5's first current sub-step while on step 5, step 7 once finished);
+  `on_step` (seconds since the current top-level step was reached, nil once finished) and `total`
+  (seconds from step 1's completion to step 7's, or to `now`); `last` — the latest failed step's
+  error or else evidence, walking the catalog backwards; `stuck?` (`on_step > stuck_after/0`);
+  `state` (one of `admin_states/0`) and the full `checklist`.
+  """
+  @spec list_for_admin(DateTime.t()) :: [admin_row()]
+  def list_for_admin(now \\ now()) do
+    from(s in BoardSetupStep,
+      join: b in assoc(s, :board),
+      left_join: o in assoc(b, :owner),
+      order_by: [desc: b.inserted_at, desc: b.id],
+      select: {s, %{board_id: b.id, name: b.name, slug: b.slug, inserted_at: b.inserted_at, owner_email: o.email}}
+    )
+    |> Repo.all()
+    |> Enum.chunk_by(fn {_step, board} -> board.board_id end)
+    |> admin_rows(now)
+  end
+
+  @doc """
   Moves the reportable step (`reportable_id/1`) to `status` (`:waiting | :done | :failed |
   :skipped`). `attrs` may carry `evidence`, `error` (kept only for `:failed`) and `data` (merged
   into the row's data at the top level only), with atom or string keys. `:done` / `:skipped`
@@ -1010,15 +1073,17 @@ defmodule Relay.Setup do
     :ok
   end
 
-  defp build(board_id, rows) do
+  defp build(board_id, rows), do: build(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
+
+  defp build(board_id, rows, llm, first_flow_stage) do
     created = rows[@created_step]
 
     preview_checklist(rows, %{
       board_id: board_id,
       template: created && created.data["template"],
       template_warning: created && created.data["template_warning"],
-      llm: checklist_llm(board_id, rows),
-      first_flow_stage: first_flow_stage(board_id)
+      llm: llm,
+      first_flow_stage: first_flow_stage
     })
   end
 
@@ -1030,6 +1095,27 @@ defmodule Relay.Setup do
     |> Repo.one()
   end
 
+  defp admin_rows(groups, now) do
+    stages = first_flow_stages(Enum.map(groups, fn [{_step, board} | _] -> board.board_id end))
+
+    Enum.map(groups, fn [{_step, board} | _] = steps ->
+      admin_row(board, Map.new(steps, fn {step, _board} -> {step.step, step} end), stages[board.board_id], now)
+    end)
+  end
+
+  # `first_flow_stage/1` for many boards in ONE query: board id => stage name.
+  defp first_flow_stages(board_ids) do
+    from(f in Flow,
+      join: s in Stage,
+      on: s.id == f.stage_id,
+      where: f.board_id in ^board_ids and is_nil(s.parent_id),
+      order_by: [desc: s.position, desc: s.id],
+      select: {f.board_id, s.name}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   defp first_flow_stage_query(board_id) do
     from(f in Flow,
       join: s in Stage,
@@ -1039,6 +1125,59 @@ defmodule Relay.Setup do
       limit: 1
     )
   end
+
+  # No per-board default-agent lookup (a query per board): before step 2 the placeholders read
+  # the default harness's LLM.
+  defp admin_row(board, rows, first_flow_stage, now) do
+    picked = picked_llm(rows)
+    checklist = build(board.board_id, rows, picked || onboarding_llm(Agents.default_harness_key()), first_flow_stage)
+    finished? = checklist.finished?
+    [first | _] = checklist.steps
+
+    top =
+      if finished?,
+        do: List.last(checklist.steps),
+        else: Enum.find(checklist.steps, &(&1.id == checklist.current_id))
+
+    on_step = if not finished? and top.reached_at, do: DateTime.diff(now, top.reached_at)
+    stuck? = not finished? and not is_nil(on_step) and on_step > @stuck_after
+
+    Map.merge(board, %{
+      template: checklist.template,
+      llm: picked && picked.label,
+      current: admin_current(top, finished?),
+      on_step: on_step,
+      total: admin_total(first.completed_at, if(finished?, do: top.completed_at, else: now)),
+      last: admin_last(checklist.steps),
+      stuck?: stuck?,
+      state: admin_state(finished?, stuck?),
+      checklist: checklist
+    })
+  end
+
+  defp admin_current(top, finished?) do
+    child = if not finished?, do: Enum.find(top.children, &(&1.status in BoardSetupStep.current_statuses()))
+    Map.take(child || top, [:id, :title, :status, :actor])
+  end
+
+  defp admin_total(started, ended) when is_nil(started) or is_nil(ended), do: nil
+  defp admin_total(started, ended), do: DateTime.diff(ended, started)
+
+  # Reverse catalog order: 7, 6, 5.8 … 5.1, 5, 4, 3, 2, 1.
+  defp admin_last(steps) do
+    steps
+    |> Enum.flat_map(&[&1 | &1.children])
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{status: :failed, error: error} when is_binary(error) -> %{kind: :error, text: error}
+      %{evidence: evidence} when is_binary(evidence) -> %{kind: :evidence, text: evidence}
+      _entry -> nil
+    end)
+  end
+
+  defp admin_state(true, _stuck?), do: :done
+  defp admin_state(false, true), do: :stuck
+  defp admin_state(false, false), do: :in_progress
 
   @doc """
   The pure, DB-free half of `checklist/1`: builds the checklist from `rows` — a map of step id to
@@ -1100,12 +1239,12 @@ defmodule Relay.Setup do
 
   # Step 2's pick, else the board default agent's harness, else claude-code.
   defp checklist_llm(board_id, rows) do
-    picked = rows[@llm_step] && rows[@llm_step].data["llm"]
-
-    onboarding_llm(picked) ||
+    picked_llm(rows) ||
       onboarding_llm(with(%{harness: %{key: key}} <- Agents.default_agent(board_id), do: key)) ||
       onboarding_llm(Agents.default_harness_key())
   end
+
+  defp picked_llm(rows), do: onboarding_llm(rows[@llm_step] && rows[@llm_step].data["llm"])
 
   defp entry(step, rows, fill) do
     row = rows[step.id]
