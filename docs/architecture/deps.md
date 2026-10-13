@@ -51,6 +51,7 @@ flowchart LR
     Cards --> Members
     Cards --> Push
     Cards --> Repo
+    Cards --> Setup
     Cards --> Votes
     Events --> BoardWatch
     Events --> Repo
@@ -59,6 +60,7 @@ flowchart LR
     Examples --> Repo
     Flows --> Agents
     Flows --> Repo
+    Flows --> Setup
     Members --> Events
     Members --> Repo
     Push --> Members

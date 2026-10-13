@@ -19,6 +19,9 @@ are configured per board in **Settings › Stages** (the stage's FLOW band), nev
 3. Confirm: `./relay board` prints your board.
 4. Wire the repo to a flow: run `/relay-onboard` in Claude Code. If the repo is already wired and
    one node broke, use `/relay-doctor`.
+5. `/relay-onboard` works the board's guided-setup checklist with `./relay setup status` (the
+   checklist and its current step) and `./relay setup report STEP --status …` (one step at a
+   time). Both exit 3 on a board with no checklist.
 
 ## Mental model
 
@@ -65,6 +68,7 @@ or `@path`.
 | `./relay retry RLY-12 [--at NODE]` · `./relay cancel RLY-12` | Retry · stop the active run |
 | `./relay stages` · `./relay stage add …` | List · edit the board's stages |
 | `./relay flow code --json` · `./relay flow-push code code.json` | Pull · push a flow |
+| `./relay setup status` · `./relay setup report 5.1 --status done --evidence "…"` | Guided-setup checklist · report its current step (`--error`, `--data JSON`) |
 | `./relay update` | Refresh `./relay`, the `relay-*` skills and this file (prefer `/relay-update`) |
 
 ## Working inside a flow

@@ -1,5 +1,9 @@
 defmodule RelayWeb.SetupComponentsTest do
-  @moduledoc "RE443 task 4: `RelayWeb.SetupComponents.setup_checklist/1` — one marker per step state."
+  @moduledoc """
+  RE443 task 4: `RelayWeb.SetupComponents.setup_checklist/1` — one marker per step state. RE445
+  task 3: step 5's body — the sub-step rows, elapsed time, answers, changes, PR wait and failed
+  blocks (card mockup frames D, F1, F2, E).
+  """
   use Relay.DataCase, async: true
 
   import Phoenix.LiveViewTest
@@ -91,5 +95,289 @@ defmodule RelayWeb.SetupComponentsTest do
     assert doc |> LazyHTML.query("input") |> Enum.count() == 0
     refute html =~ "relay_secret"
     refute html =~ "curl -fsSL"
+  end
+
+  describe "step 5's body (RE445)" do
+    @now ~U[2026-10-12 14:40:00Z]
+
+    defp onboard_doc(rows, opts \\ []) do
+      checklist = Setup.preview_checklist(rows, %{template: "Bare minimum", llm: Setup.onboarding_llm("claude-code")})
+
+      html =
+        render_component(
+          &SetupComponents.setup_checklist/1,
+          Keyword.merge([id: "setup", checklist: checklist, now: @now], opts)
+        )
+
+      LazyHTML.from_fragment(html)
+    end
+
+    defp first_four_done, do: Map.new(~w(1 2 3 4), &{&1, :done})
+
+    defp q(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.to_list()
+
+    defp has?(doc, selector), do: q(doc, selector) != []
+
+    defp text(doc, selector) do
+      [node] = q(doc, selector)
+      node |> LazyHTML.text() |> String.replace(~r/\s+/, " ") |> String.trim()
+    end
+
+    defp style(doc, selector) do
+      [node] = q(doc, selector)
+      node |> LazyHTML.attribute("style") |> List.first()
+    end
+
+    defp class(doc, selector) do
+      [node] = q(doc, selector)
+      node |> LazyHTML.attribute("class") |> List.first()
+    end
+
+    defp glyph(doc, sub), do: text(doc, "#setup-step-#{sub} .setup-substep-glyph")
+
+    defp evidence(doc, sub), do: text(doc, "#setup-step-#{sub} .setup-substep-evidence")
+
+    defp frame_d do
+      Map.merge(first_four_done(), %{
+        "5" => %{status: :active, reached_at: DateTime.add(@now, -12 * 60)},
+        "5.1" => %{status: :done, evidence: "2 flows"},
+        "5.2" => %{status: :done, evidence: "elixir · mix precommit"},
+        "5.3" => %{status: :done, evidence: "9 of 9 answered"},
+        "5.4" => %{status: :done, evidence: "dropped screenshots"},
+        "5.5" => %{status: :done, evidence: "enabled"},
+        "5.6" => %{
+          status: :waiting,
+          evidence: "PR #12 open · checked 14:31",
+          data: %{"pr_url" => "https://github.com/jl/streaks/pull/12", "base" => "main"}
+        }
+      })
+    end
+
+    @four_answers %{
+      "done" => "PR merged",
+      "landing" => "PR into main",
+      "deploy" => "stays human",
+      "baton" => "plans + finished code"
+    }
+
+    # Scenario 1
+    test "frame D: elapsed time, the waiting-for-PR block and the sub-step glyphs" do
+      doc = onboard_doc(frame_d())
+
+      assert text(doc, "#setup-onboard-elapsed") == "12 min"
+
+      pr = text(doc, "#setup-onboard-pr")
+      assert pr =~ "Waiting for your PR to merge"
+      assert pr =~ "The runner can't work until these files are on origin/main."
+      assert style(doc, "#setup-onboard-pr") =~ "var(--color-secondary) 7%"
+
+      [link] = q(doc, "#setup-onboard-pr-link")
+      assert LazyHTML.attribute(link, "href") == ["https://github.com/jl/streaks/pull/12"]
+      assert LazyHTML.attribute(link, "target") == ["_blank"]
+      assert LazyHTML.attribute(link, "rel") == ["noopener noreferrer"]
+      assert text(doc, "#setup-onboard-pr-link") == "github.com/jl/streaks/pull/12"
+
+      assert glyph(doc, "5-1") == "✓"
+      assert style(doc, "#setup-step-5-1 .setup-substep-glyph") =~ "var(--color-success) 70%"
+      assert evidence(doc, "5-1") == "2 flows"
+      assert glyph(doc, "5-6") == "◌"
+      assert class(doc, "#setup-step-5-6 .setup-substep-glyph") =~ "animate-pulse"
+      assert glyph(doc, "5-7") == "○"
+
+      refute has?(doc, "#setup-answers")
+      refute has?(doc, "#setup-changes")
+    end
+
+    # Scenario 2
+    test "frame F1: the answers so far, the next question and where they're saved" do
+      doc =
+        onboard_doc(
+          Map.merge(first_four_done(), %{
+            "5" => :active,
+            "5.1" => :done,
+            "5.2" => :done,
+            "5.3" => %{status: :waiting, data: %{"answers" => @four_answers}}
+          })
+        )
+
+      assert has?(doc, "details#setup-answers[open]")
+      assert text(doc, "#setup-answers-count") == "4 of 9"
+
+      rows =
+        doc
+        |> q("#setup-answers [id^='setup-answer-']")
+        |> Enum.map(&(&1 |> LazyHTML.attribute("id") |> List.first()))
+
+      assert rows == ~w(setup-answer-done setup-answer-landing setup-answer-deploy setup-answer-baton)
+      assert text(doc, "#setup-answer-done") == "Done means PR merged"
+      assert text(doc, "#setup-answer-landing") == "Changes land PR into main"
+      assert text(doc, "#setup-answer-deploy") == "Deploy stays human"
+      assert text(doc, "#setup-answer-baton") == "Baton back plans + finished code"
+
+      assert text(doc, "#setup-question-next") == "question 5 of 9 in your terminal…"
+      assert text(doc, "#setup-project-md") == "→ .relay/project.md (committed in 5.6) · copy kept on the board"
+      assert glyph(doc, "5-3") == "◌"
+    end
+
+    # Scenario 3
+    test "5.3 active with no answers yet shows no answers block" do
+      doc =
+        onboard_doc(Map.merge(first_four_done(), %{"5" => :active, "5.1" => :done, "5.2" => :done, "5.3" => :active}))
+
+      refute has?(doc, "#setup-answers")
+      assert glyph(doc, "5-3") == "▸"
+      assert style(doc, "#setup-step-5-3 .setup-substep-glyph") =~ "var(--color-secondary) 70%"
+    end
+
+    # Scenario 4
+    test "frame F2: every proposed change with its agreement marker" do
+      answers =
+        Map.merge(@four_answers, %{
+          "ui" => "mix phx.server · :4000",
+          "never_touch" => "priv/repo/migrations",
+          "warm_up" => "_build, deps",
+          "capacity" => "2 cards",
+          "misfits" => "none"
+        })
+
+      changes = [
+        %{"summary" => "validate: `mix test` → `mix precommit`", "decision" => "accepted"},
+        %{"summary" => "drop `screenshots` node from implement", "decision" => "rejected"},
+        %{"summary" => "runner.json: capacity 3 → 2", "decision" => "edited", "note" => "→ 2, limit 60%"},
+        %{"summary" => "warm-up hook: copy `_build`, `deps`", "decision" => "asking"},
+        %{"summary" => "never-touch list → every flow prompt", "decision" => "pending"}
+      ]
+
+      doc =
+        onboard_doc(
+          Map.merge(first_four_done(), %{
+            "5" => :active,
+            "5.1" => :done,
+            "5.2" => :done,
+            "5.3" => %{status: :done, data: %{"answers" => answers}},
+            "5.4" => %{status: :waiting, data: %{"changes" => changes}}
+          })
+        )
+
+      assert text(doc, "#setup-answers-count") == "9 of 9"
+      refute has?(doc, "#setup-question-next")
+
+      assert text(doc, "#setup-changes-header") == "5 proposed changes · agreeing one at a time"
+
+      expected = [
+        {1, "accepted", "✓", "accepted"},
+        {2, "rejected", "✕", "rejected"},
+        {3, "edited", "✎", "→ 2, limit 60%"},
+        {4, "asking", "▸", "asking you now"},
+        {5, "pending", "○", ""}
+      ]
+
+      for {i, decision, glyph, label} <- expected do
+        assert has?(doc, ~s(#setup-change-#{i}[data-decision="#{decision}"]))
+        assert text(doc, "#setup-change-#{i} .setup-change-glyph") == glyph
+        assert text(doc, "#setup-change-#{i} .setup-change-label") == label
+      end
+
+      codes = doc |> q("#setup-change-1 code") |> Enum.map(&LazyHTML.text/1)
+      assert codes == ["mix test", "mix precommit"]
+      assert text(doc, "#setup-change-1 .setup-change-summary") == "validate: mix test → mix precommit"
+
+      assert text(doc, "#setup-changes-note") ==
+               "Nothing is changed until all 5 are decided. Then only the accepted ones are applied."
+    end
+
+    # Scenario 4 (Risks: escaped, and a stray backtick stays literal)
+    test "a change summary is escaped and an odd backtick renders literally" do
+      changes = [%{"summary" => "use `<b>` tags `here", "decision" => "pending"}]
+
+      doc =
+        onboard_doc(
+          Map.merge(first_four_done(), %{
+            "5" => :active,
+            "5.1" => :done,
+            "5.2" => :done,
+            "5.3" => %{status: :done, data: %{"answers" => @four_answers}},
+            "5.4" => %{status: :waiting, data: %{"changes" => changes}}
+          })
+        )
+
+      refute has?(doc, "#setup-change-1 b")
+      assert doc |> q("#setup-change-1 code") |> Enum.map(&LazyHTML.text/1) == ["<b>"]
+      assert text(doc, "#setup-change-1 .setup-change-summary") == "use <b> tags `here"
+    end
+
+    # Scenario 5
+    test "frame E: the failed sub-step block" do
+      doc =
+        onboard_doc(
+          Map.merge(first_four_done(), %{
+            "5" => :active,
+            "5.1" => :done,
+            "5.2" => :done,
+            "5.3" => :done,
+            "5.4" => :done,
+            "5.5" => %{
+              status: :failed,
+              error: "422 flow “implement”: node validate has no command",
+              evidence: "422 · attempt 3/3",
+              data: %{"attempts" => 3}
+            }
+          })
+        )
+
+      failed = text(doc, "#setup-onboard-failed")
+      assert failed =~ "5.5 failed 3 times, now asking you in the terminal"
+      assert failed =~ "422 flow “implement”: node validate has no command"
+      assert style(doc, "#setup-onboard-failed") =~ "var(--color-error) 7%"
+
+      assert glyph(doc, "5-5") == "!"
+      assert style(doc, "#setup-step-5-5 .setup-substep-glyph") =~ "var(--color-error) 70%"
+      assert evidence(doc, "5-5") == "422 · attempt 3/3"
+    end
+
+    # Scenario 6
+    test "a failed sub-step with no attempts reads 1 time" do
+      doc =
+        onboard_doc(Map.merge(first_four_done(), %{"5" => :active, "5.1" => %{status: :failed, error: "boom"}}))
+
+      assert text(doc, "#setup-onboard-failed") =~ "5.1 failed 1 time, now asking you in the terminal"
+    end
+
+    # Scenario 7
+    test "read-only mode renders the sub-step list only" do
+      doc = onboard_doc(frame_d(), mode: :read_only)
+
+      for n <- 1..8, do: assert(has?(doc, "#setup-step-5-#{n} .setup-substep-glyph"))
+      assert glyph(doc, "5-1") == "✓"
+      assert evidence(doc, "5-1") == "2 flows"
+      assert glyph(doc, "5-6") == "◌"
+
+      refute has?(doc, "#setup-onboard-pr")
+      refute has?(doc, "#setup-answers")
+      refute has?(doc, "#setup-changes")
+      refute has?(doc, "#setup-onboard-elapsed")
+    end
+
+    # Scenario 8
+    test "step 5 pending: faint sub-step titles with ○ and no elapsed time" do
+      doc = onboard_doc(%{"1" => :done, "2" => :active})
+
+      for n <- 1..8 do
+        assert glyph(doc, "5-#{n}") == "○"
+        assert style(doc, "#setup-step-5-#{n} .setup-substep-title-cell") =~ "var(--color-base-content) 40%"
+      end
+
+      refute has?(doc, "#setup-onboard-elapsed")
+    end
+
+    # Scenario 9
+    test "step 5's why names the CLI and the sub-steps carry the mockup's titles" do
+      doc = onboard_doc(Map.put(first_four_done(), "5", :active))
+
+      assert text(doc, "#setup-step-5 .setup-why") ==
+               "Open claude in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck."
+
+      assert text(doc, "#setup-step-5-1 .setup-substep-title") == "Pull flows into .relay/flows/"
+    end
   end
 end

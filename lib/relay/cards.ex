@@ -17,6 +17,7 @@ defmodule Relay.Cards do
       Relay.Members,
       Relay.Push,
       Relay.Repo,
+      Relay.Setup,
       Relay.Votes,
       Schemas
     ]
@@ -30,6 +31,7 @@ defmodule Relay.Cards do
   alias Relay.Members
   alias Relay.Push
   alias Relay.Repo
+  alias Relay.Setup
   alias Relay.Votes
   alias Schemas.Attachment
   alias Schemas.Board
@@ -115,6 +117,8 @@ defmodule Relay.Cards do
         end
       end)
 
+    # After the commit: a card that never landed must never tick setup step 5.8.
+    with {:ok, card} <- result, do: :ok = Setup.observe_card_created(card)
     broadcast_upserted(result)
   end
 

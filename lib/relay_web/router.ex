@@ -277,6 +277,8 @@ defmodule RelayWeb.Router do
     post "/talk/turns/:id/outcome", TalkController, :outcome
     post "/setup/preflight", SetupController, :preflight
     post "/setup/installed", SetupController, :installed
+    get "/setup", SetupController, :status
+    post "/setup/steps/:step", SetupController, :report
   end
 
   # Enable LiveDashboard in development

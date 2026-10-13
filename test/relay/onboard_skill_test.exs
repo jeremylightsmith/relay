@@ -1,5 +1,12 @@
 defmodule Relay.OnboardSkillTest do
+  @moduledoc """
+  The static contract for `/relay-onboard` (RE445): a loop over the board's guided-setup
+  checklist, sub-steps 5.1–5.8, driven through `./relay setup status|report`. The skill asks
+  questions, so it is never run from a flow node — this test is the check.
+  """
   use ExUnit.Case, async: true
+
+  alias Relay.Setup
 
   @skill Path.join([File.cwd!(), ".claude", "skills", "relay-onboard", "SKILL.md"])
 
@@ -7,12 +14,7 @@ defmodule Relay.OnboardSkillTest do
     {:ok, doc: File.read!(@skill)}
   end
 
-  defp phase(doc, n) do
-    [_, from] = String.split(doc, "## Phase #{n}", parts: 2)
-    [body, _] = String.split(from, "## Phase #{n + 1}", parts: 2)
-    String.replace(body, ~r/\s+/, " ")
-  end
-
+  # Scenario 1
   test "the skill directory holds exactly SKILL.md — the scaffold build copies nothing else" do
     assert File.ls!(Path.dirname(@skill)) == ["SKILL.md"]
   end
@@ -21,162 +23,91 @@ defmodule Relay.OnboardSkillTest do
     assert doc =~ ~r/^name: relay-onboard$/m
   end
 
-  test "heads every phase of the spine", %{doc: doc} do
-    for phase <- ["Floor check", "Detect", "Choose the path", "Plan", "Apply", "Enable"] do
-      assert doc =~ ~r/^## Phase \d+ — .*#{Regex.escape(phase)}/m
+  # Scenario 2
+  test "names every onboard sub-step from the catalog", %{doc: doc} do
+    onboard = Setup.step_id(:onboard)
+    children = for %{id: id, parent: ^onboard} <- Setup.steps(), do: id
+
+    assert children != []
+
+    for id <- children do
+      assert doc =~ id, "the skill never names sub-step #{id}"
     end
   end
 
-  test "forbids running from a flow node", %{doc: doc} do
+  # Scenario 3
+  test "names every interview question id", %{doc: doc} do
+    ids = Enum.map(Setup.interview_questions(), & &1.id)
+    assert ids != []
+
+    for id <- ids do
+      assert doc =~ "`#{id}`", "the skill never names interview question #{id}"
+    end
+  end
+
+  # Scenario 4
+  test "refuses a board with no checklist politely", %{doc: doc} do
+    assert doc =~ "This board predates guided setup; use /relay-doctor."
+  end
+
+  # Scenario 5
+  test "the retired paths and the vendor name are gone", %{doc: doc} do
+    refute doc =~ ~r/\b(seed|adopt|adopting|hybrid)\b/i
+    refute doc =~ "Claude"
+  end
+
+  # Scenario 6
+  test "drives the loop through ./relay setup and names its artifacts", %{doc: doc} do
+    for needle <- [
+          "./relay setup status",
+          "./relay setup report",
+          "not_current",
+          ".relay/project.md",
+          "In a new terminal, run ./relay start",
+          "--tag setup",
+          ~s("enabled": true),
+          "your LLM"
+        ] do
+      assert doc =~ needle, "the skill does not say #{inspect(needle)}"
+    end
+  end
+
+  # Scenario 7
+  test "forbids flow nodes, names its blast radius, and never touches app code", %{doc: doc} do
     assert doc =~ "Never run this from a flow node"
-  end
-
-  test "names its blast radius and what it excludes", %{doc: doc} do
     assert doc =~ "**Blast radius:**"
-
-    for allowed <- ["`.claude/`", "`.relay/runner.json`", "flow documents"] do
-      assert doc =~ allowed
-    end
-
-    assert doc =~ "**Never** app code, git branches, commits, or cards."
+    assert doc =~ "app code"
   end
 
-  test "consumes the doctor rather than restating its checks", %{doc: doc} do
-    assert doc =~ "/relay-doctor"
-    assert doc =~ "adds no checks of its own"
-    refute doc =~ ~r/\bbin\/relay doctor\b/
-  end
+  # Scenario 8
+  test "bounds retries at 3 and offers the three stuck options", %{doc: doc} do
+    assert doc =~ "attempt 3/3"
+    assert doc =~ ~s({"attempts": 3})
 
-  test "imports the runner's own capability resolver", %{doc: doc} do
-    assert doc =~ "collect_capabilities()"
-  end
-
-  test "makes the path an explicit user choice", %{doc: doc} do
-    assert doc =~ "never a hidden inference"
-
-    for path <- ["**Seed**", "**Adopt**", "**Hybrid**"] do
-      assert doc =~ path
+    for option <- ["show the diff", "reset and redo", "#setup card"] do
+      assert doc =~ option
     end
   end
 
-  # RE304: the scaffold no longer ships `writing-skills`, so pointing at it from a skill that
-  # DOES ship would dangle in every scaffolded project. The authoring guidance is inlined
-  # instead — assert on that, and assert the dead pointer stays gone.
-  test "inlines how to author a missing step, or drops the node", %{doc: doc} do
-    refute doc =~ "writing-skills"
-    assert doc =~ ".claude/agents/<name>.md"
-    assert doc =~ ".claude/skills/<name>/SKILL.md"
-    assert doc =~ "drop the node"
-  end
+  # Scenario 9
+  test "mentions each data key and change decision the wizard renders", %{doc: doc} do
+    for key <- ["answers", "changes", "pr_url", "attempts"] do
+      assert doc =~ ~s("#{key}"), "the skill never reports data key #{key}"
+    end
 
-  test "terminates on zero errors and reports a stall instead of looping", %{doc: doc} do
-    assert doc =~ "zero errors"
-    assert doc =~ "two consecutive passes"
-  end
-
-  test "reports warnings without chasing them", %{doc: doc} do
-    assert doc =~ "Warnings are reported, not chased."
-  end
-
-  test "enables flows via flow-push, one confirmation per flow, only when green", %{doc: doc} do
-    assert doc =~ "flow-push"
-    assert doc =~ "one confirmation per flow"
-    assert doc =~ "Never offer to enable a flow that still has errors"
-  end
-
-  # RE383: `./relay update` generates a documented starter runner.json, so Phase 3 reviews it
-  # with the human and recreates a missing one with the command — it never hand-authors it.
-  test "Phase 3 reviews the generated .relay/runner.json instead of authoring it", %{doc: doc} do
-    phase3 = phase(doc, 3)
-
-    assert phase3 =~ ".relay/runner.json"
-    refute phase3 =~ "author it for this repo"
-    assert phase3 =~ "run `./relay update` to create it"
-    assert phase3 =~ "**never hand-write it**"
-
-    for key <- ["`capacity`", "`base`", "`worktrees`"] do
-      assert phase3 =~ key
+    for decision <- Setup.change_decisions() -- ["pending"] do
+      assert doc =~ "`#{decision}`", "the skill never names decision #{decision}"
     end
   end
 
-  test "onboarding does not author relay.md — the scaffold serves it", %{doc: doc} do
-    # relay.md joined Scaffold.items/0, so `./relay update` installs and repairs it. If this
-    # skill still authored one per repo, the next update would silently overwrite that work.
-    assert "relay.md" in Relay.Scaffold.items()
+  # Scenario 10
+  test "no flow in this repo names relay-onboard as a node step" do
+    files = Path.wildcard(".relay/flows/*.json") ++ Path.wildcard("docs/designs/flows/*.json")
+    assert files != []
 
-    [_, phase3_and_later] = String.split(doc, "## Phase 3", parts: 2)
-    [phase3, _] = String.split(phase3_and_later, "## Phase 4", parts: 2)
-
-    refute phase3 =~ "relay.md"
-  end
-
-  test "the floor check preamble does not claim the scaffold floor is never a mutation", %{
-    doc: doc
-  } do
-    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
-    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
-
-    refute phase0 =~ "neither is something a skill can fix"
-    assert phase0 =~ "a skill cannot mint a key"
-    assert phase0 =~ "self-heals via `./relay update`"
-  end
-
-  # The missing `relay-*` skill may *be* `relay-update`, and the Skill tool cannot resolve a
-  # name that is not installed — so the floor must repair itself with the command.
-  test "the scaffold floor repairs missing skills with the command, not the Skill tool", %{doc: doc} do
-    [_, phase0_and_later] = String.split(doc, "## Phase 0", parts: 2)
-    [phase0, _] = String.split(phase0_and_later, "## Phase 1", parts: 2)
-
-    assert phase0 =~ "./relay update --json"
-    refute String.replace(phase0, ~r/\s+/, " ") =~ "run `/relay-update` (via the `Skill` tool)"
-  end
-
-  test "the sibling-file mistake names the current scaffold mechanism, not the retired publish task",
-       %{doc: doc} do
-    refute doc =~ "the publish task"
-    assert doc =~ "Scaffold.items"
-  end
-
-  # RE369: a factory authored today should start out on the tasks contract the shipped flows
-  # declare, and the doctor's tasks-cutover recipe is the one spec for it.
-  describe "the migrated shape" do
-    test "the Seed path says a seeded factory takes the migrated shape", %{doc: doc} do
-      [overview, _] = String.split(doc, "## When to Use", parts: 2)
-
-      assert String.replace(overview, ~r/\s+/, " ") =~ "takes the **migrated shape**"
-    end
-
-    test "Phase 3's author-one guidance names the tasks verbs and points at the doctor's recipe",
-         %{doc: doc} do
-      phase3 = phase(doc, 3)
-
-      assert phase3 =~ "**Author the migrated shape.**"
-      assert phase3 =~ "relay tasks add"
-      assert phase3 =~ "relay task show"
-      assert phase3 =~ ~s(writes: ["plan", "tasks"])
-      assert phase3 =~ ~s(reads: ["tasks"])
-      assert phase3 =~ "`tasks-cutover`"
-      assert phase3 =~ "**Factory migrations**"
-    end
-
-    test "Phase 3 does not restate the recipe's mechanics", %{doc: doc} do
-      phase3 = phase(doc, 3)
-
-      refute phase3 =~ "tasks list"
-      refute phase3 =~ "task rm"
-      refute phase3 =~ "$RELAY_PLAN"
-    end
-
-    test "Phase 4 also loops until no migration is pending", %{doc: doc} do
-      assert phase(doc, 4) =~ "no migration pending"
-    end
-
-    # Phase 5 is the last phase, so it runs to `## Common mistakes`, not `## Phase 6`.
-    test "the closing summary lists skipped migrations", %{doc: doc} do
-      [_, phase5] = String.split(doc, "## Phase 5", parts: 2)
-      [phase5, _] = String.split(phase5, "## Common mistakes", parts: 2)
-
-      assert String.replace(phase5, ~r/\s+/, " ") =~ "any migration the human skipped"
+    for file <- files, node <- file |> File.read!() |> Jason.decode!() |> Map.get("nodes", []) do
+      refute Jason.encode!(node) =~ "relay-onboard",
+             "#{file} node #{node["key"]} names relay-onboard as a step"
     end
   end
 
@@ -185,8 +116,10 @@ defmodule Relay.OnboardSkillTest do
       assert File.read!("relay.md") =~ "/relay-onboard"
     end
 
-    test "AGENTS.md names it under Skill discipline" do
-      assert File.read!("AGENTS.md") =~ "/relay-onboard"
+    test "AGENTS.md names it under Skill discipline, without the retired paths" do
+      agents = File.read!("AGENTS.md")
+      assert agents =~ "/relay-onboard"
+      refute agents =~ ~r/seed \/ adopt \/ hybrid/
     end
   end
 end

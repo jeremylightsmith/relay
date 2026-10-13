@@ -5,14 +5,27 @@ defmodule Relay.Setup do
 
   This module owns the step **catalog** (`steps/0`), the ONE list of step ids, titles, actors,
   *why* and *what this does* lines; every surface renders from it through `checklist/1`, the only
-  place the `%{template}`, `%{llm}`, `%{skill_path}` and `%{pointer_file}` placeholders resolve.
-  It also owns the onboarding LLMs (`onboarding_llms/0`) step 2 offers.
+  place the `%{template}`, `%{llm}`, `%{cli}`, `%{skill_path}` and `%{pointer_file}` placeholders
+  resolve. It also owns the onboarding LLMs (`onboarding_llms/0`) step 2 offers.
 
   Storage is one `Schemas.BoardSetupStep` row per `(board, catalog id)`, inserted by `start/2`
   from `Relay.Boards.create_board/2` on the template path only — a board with no rows has no
-  checklist. `advance/4` moves it strictly in order: only the current step (the first top-level
-  step not in `Schemas.BoardSetupStep.finished_statuses/0`) may change. Every change broadcasts
-  `{:setup_changed, board_id}` through `Relay.Events.broadcast/2`.
+  checklist. `advance/4` moves it strictly in order: only the **reportable** step
+  (`reportable_id/1`) may change — the current sub-step (`current_sub_id`, the first unfinished
+  child of the current top-level step) when that step has children, else the current top-level
+  step (the first not in `Schemas.BoardSetupStep.finished_statuses/0`). A parent with children is
+  never advanced directly: activating it activates its first child, finishing a child activates
+  the next, and finishing the last child finishes the parent (`"onboarded HH:MM"`) and activates
+  the next top-level step. Every change broadcasts `{:setup_changed, board_id}` through
+  `Relay.Events.broadcast/2`.
+
+  Step 5's sub-steps (RE445) are reported by the `/relay-onboard` skill through
+  `GET /api/setup` / `POST /api/setup/steps/:step`; `interview_questions/0` (5.3) and
+  `change_decisions/0` (5.4) are the closed sets their `data` uses. Two are also **board-observed**:
+  `Relay.Flows` calls `observe_flow_push/2` after a committed flow push (5.5 finishes once every
+  board flow has been pushed and is enabled) and `Relay.Cards` calls `observe_card_created/1`
+  after a committed create (5.8 finishes on a card in `first_flow_stage`, the top-level stage
+  with the lowest position that holds a flow). Both are no-ops unless that sub-step is current.
 
   `choose_llm/3` (step 2) sets the board's default agent and mints the step-3 board key;
   `remint_key/2` replaces it. The raw token is returned to the caller once and never stored.
@@ -21,8 +34,8 @@ defmodule Relay.Setup do
   the key's first authed call ticks step 3, the preflight result marks step 4 waiting or failed
   (with the fix text from `preflight_checks/0`'s catalog), and the written files finish step 4.
 
-  `Relay.Boards` depends on this context, so this one never calls `Relay.Boards` or
-  `Relay.Flows`: it counts stages and flows with `Relay.Repo` queries.
+  `Relay.Boards`, `Relay.Flows` and `Relay.Cards` depend on this context, so this one never calls
+  them: it counts stages, flows and cards with `Relay.Repo` queries.
   """
 
   use Boundary, deps: [Relay.Agents, Relay.ApiKeys, Relay.Events, Relay.Repo, Schemas]
@@ -36,6 +49,7 @@ defmodule Relay.Setup do
   alias Schemas.ApiKey
   alias Schemas.Board
   alias Schemas.BoardSetupStep
+  alias Schemas.Card
   alias Schemas.Flow
   alias Schemas.Stage
   alias Schemas.User
@@ -89,6 +103,8 @@ defmodule Relay.Setup do
           template_warning: String.t() | nil,
           llm: llm(),
           current_id: String.t() | nil,
+          current_sub_id: String.t() | nil,
+          first_flow_stage: String.t() | nil,
           position: 1..7,
           done_count: 0..7,
           finished?: boolean(),
@@ -100,14 +116,14 @@ defmodule Relay.Setup do
   @step_blank %{parent: nil, done_title: nil, why: nil, what_this_does: [], read_only_note: nil}
 
   @onboard_children [
-    {"5.1", "Pull the board's flows into .relay/flows/"},
-    {"5.2", "Detect your repo, then confirm what was found"},
-    {"5.3", "Interview: what the repo can't answer"},
-    {"5.4", "Customize flows, runner.json and the warm-up hook"},
+    {"5.1", "Pull flows into .relay/flows/"},
+    {"5.2", "Detect & confirm repo facts"},
+    {"5.3", "Interview → .relay/project.md"},
+    {"5.4", "Customize: propose, agree 1 by 1, apply"},
     {"5.5", "Push flows back (enabled on arrival)"},
     {"5.6", "Relay files on origin/main"},
-    {"5.7", "Follow-up cards tagged #setup"},
-    {"5.8", "Your first card"}
+    {"5.7", "Follow-up cards #setup"},
+    {"5.8", "First card"}
   ]
 
   # The ONE step catalog, in catalog order 1, 2, 3, 4, 5, 5.1 … 5.8, 6, 7.
@@ -168,7 +184,7 @@ defmodule Relay.Setup do
                title: "Onboard, in %{llm}",
                actor: :ai_terminal,
                why:
-                 "%{llm} reads this checklist and works it top to bottom in your terminal, asking you only what it can't see.",
+                 "Open %{cli} in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
                what_this_does: ["Run /relay-onboard in your repo; it works sub-steps 5.1–5.8 below."]
              }
            ] ++
@@ -196,6 +212,13 @@ defmodule Relay.Setup do
 
   @top_ids for step <- @steps, is_nil(step.parent), do: step.id
 
+  # Each parent's children ids, in catalog order.
+  @child_ids @steps |> Enum.filter(& &1.parent) |> Enum.group_by(& &1.parent, & &1.id)
+
+  # Every step a report can move, in the order the checklist walks them: a parent with children
+  # is replaced by its children (1, 2, 3, 4, 5.1 … 5.8, 6, 7).
+  @walk_ids Enum.flat_map(@top_ids, &Map.get(@child_ids, &1, [&1]))
+
   # The steps this context drives itself: step 1 (start), step 2 (choose_llm), step 3 (the key),
   # step 4 (the install handshake).
   @created_step Enum.at(@top_ids, 0)
@@ -203,6 +226,48 @@ defmodule Relay.Setup do
   @key_step Enum.at(@top_ids, 2)
   @install_step Enum.at(@top_ids, 3)
   @onboard_step Enum.at(@top_ids, 4)
+
+  # The sub-steps the board observes itself: 5.5 (flows pushed back) and 5.8 (the first card).
+  @interview_step @onboard_children |> Enum.at(2) |> elem(0)
+  @customize_step @onboard_children |> Enum.at(3) |> elem(0)
+  @push_step @onboard_children |> Enum.at(4) |> elem(0)
+  @first_card_step @onboard_children |> Enum.at(7) |> elem(0)
+
+  # The ONE 5.3 interview catalog, in the order the skill asks it.
+  @interview_questions [
+    %{id: "done", label: "Done means", question: ~s(What does "done" mean for a card: a PR opened, merged, or deployed?)},
+    %{
+      id: "landing",
+      label: "Changes land",
+      question: "How do changes land: a PR you merge, or a push straight to the base branch?"
+    },
+    %{
+      id: "deploy",
+      label: "Deploy",
+      question: "How do you deploy, and does Relay ever do it (by default Deploy stays human)?"
+    },
+    %{id: "baton", label: "Baton back", question: "Where does the baton come back to you?"},
+    %{
+      id: "ui",
+      label: "UI",
+      question: "Is there a UI, and how do you run it (no UI drops the screenshot and smoke nodes)?"
+    },
+    %{id: "never_touch", label: "Never touch", question: "Which paths must an agent never touch?"},
+    %{
+      id: "warm_up",
+      label: "Warm-up",
+      question: "Which build or dependency directories should a fresh checkout warm up?"
+    },
+    %{
+      id: "capacity",
+      label: "Capacity",
+      question: "How many cards at once, and how much of your LLM plan may Relay use?"
+    },
+    %{id: "misfits", label: "Misfits", question: "Is there anything in the template that doesn't fit how you work?"}
+  ]
+
+  # The ONE set of 5.4 per-change markers.
+  @change_decisions ["pending", "asking", "accepted", "rejected", "edited"]
 
   @nothing_written "run the same command again. Nothing was written."
 
@@ -283,23 +348,41 @@ defmodule Relay.Setup do
 
   @doc """
   The ONE step catalog, in order `1, 2, 3, 4, 5, 5.1 … 5.8, 6, 7`. Sub-steps carry `parent: "5"`.
-  Strings may hold `%{template}`, `%{llm}`, `%{skill_path}` and `%{pointer_file}`, resolved only by
-  `checklist/1`.
+  Strings may hold `%{template}`, `%{llm}`, `%{cli}`, `%{skill_path}` and `%{pointer_file}`,
+  resolved only by `checklist/1`.
   """
   @spec steps() :: [step()]
   def steps, do: @steps
 
   @doc """
   The catalog id of the step that plays `role`: `:llm` (step 2's pick), `:key` (step 3's board
-  key), `:install` (step 4's install script) or `:onboard` (step 5, with its sub-steps). Surfaces
-  that render a step differently (the wizard's LLM picker, key box, install command) branch on
-  this rather than re-typing an id.
+  key), `:install` (step 4's install script), `:onboard` (step 5, with its sub-steps),
+  `:interview` (5.3, the answers) or `:customize` (5.4, the agreed changes). Surfaces that render
+  a step differently (the wizard's LLM picker, key box, install command, answers and changes
+  blocks) branch on this rather than re-typing an id.
   """
-  @spec step_id(:llm | :key | :install | :onboard) :: String.t()
+  @spec step_id(:llm | :key | :install | :onboard | :interview | :customize) :: String.t()
   def step_id(:llm), do: @llm_step
   def step_id(:key), do: @key_step
   def step_id(:install), do: @install_step
   def step_id(:onboard), do: @onboard_step
+  def step_id(:interview), do: @interview_step
+  def step_id(:customize), do: @customize_step
+
+  @doc """
+  The 5.3 interview, in the order it is asked: each question's `id` (the key of 5.3's
+  `data["answers"]` map), its short `label` and the `question` itself.
+  """
+  @spec interview_questions() :: [%{id: String.t(), label: String.t(), question: String.t()}]
+  def interview_questions, do: @interview_questions
+
+  @doc ~S(The 5.4 per-change markers a `data["changes"]` entry's `"decision"` takes.)
+  @spec change_decisions() :: [String.t()]
+  def change_decisions, do: @change_decisions
+
+  @doc "The statuses `advance/4` (and `POST /api/setup/steps/:step`) accepts, in status order."
+  @spec advance_statuses() :: [BoardSetupStep.status()]
+  def advance_statuses, do: @advance_statuses
 
   @doc "The LLMs step 2 offers, in seed-harness order: Claude Code, Codex, Gemini CLI."
   @spec onboarding_llms() :: [llm()]
@@ -610,6 +693,13 @@ defmodule Relay.Setup do
     end
   end
 
+  @doc """
+  The one step a report may move: the current sub-step when the current top-level step has
+  children, else the current top-level step; nil when the checklist is finished.
+  """
+  @spec reportable_id(checklist()) :: String.t() | nil
+  def reportable_id(%{current_sub_id: sub_id, current_id: current_id}), do: sub_id || current_id
+
   @doc "The step the checklist is on: the first top-level entry not finished, or nil."
   @spec current(Board.t() | integer()) :: entry() | nil
   def current(board) do
@@ -620,11 +710,14 @@ defmodule Relay.Setup do
   end
 
   @doc """
-  Moves the current top-level step to `status` (`:waiting | :done | :failed | :skipped`). `attrs`
-  may carry `evidence`, `error` (kept only for `:failed`) and `data` (merged into the row's data),
-  with atom or string keys. `:done` / `:skipped` complete the step and activate the next one. A
+  Moves the reportable step (`reportable_id/1`) to `status` (`:waiting | :done | :failed |
+  :skipped`). `attrs` may carry `evidence`, `error` (kept only for `:failed`) and `data` (merged
+  into the row's data at the top level only), with atom or string keys. `:done` / `:skipped`
+  complete the step and activate the next one — the next sub-step, or, after the last, the
+  parent finishes and the next top-level step activates. A
   repeat that would change nothing returns `{:ok, checklist}` without writing or broadcasting —
-  including the repeat of the transition that just finished the step. Any change broadcasts
+  on the reportable step, or the repeat of the transition that just finished the step before it;
+  an older finished step is `{:error, :not_current}`. Any change broadcasts
   `{:setup_changed, board_id}` once. Serialized on the board row.
   """
   @spec advance(Board.t() | integer(), String.t(), atom(), map()) ::
@@ -677,6 +770,74 @@ defmodule Relay.Setup do
     end)
   end
 
+  # ---------------------------------------------------------------- board-observed sub-steps
+
+  @doc """
+  Called by `Relay.Flows` after a flow push (`upsert_from_document/3`) committed. While 5.5 is
+  the current sub-step it records `flow_key` in 5.5's `data["pushed"]`; once every board flow has
+  been pushed and is enabled 5.5 finishes (`"N flows enabled"`), else it waits
+  (`"P of N flows pushed"`). Otherwise a no-op. Always `:ok`: a push never fails on setup state.
+  """
+  @spec observe_flow_push(integer(), String.t()) :: :ok
+  def observe_flow_push(board_id, flow_key) when is_integer(board_id) and is_binary(flow_key),
+    do: observe(board_id, @push_step, &push_change(board_id, &1, flow_key))
+
+  @doc """
+  Called by `Relay.Cards` after a card create committed. While 5.8 is the current sub-step, a
+  card in the first flow stage (or one of its substages) finishes 5.8 (`"first card in <stage>"`)
+  — and with it step 5. Otherwise a no-op. Always `:ok`.
+  """
+  @spec observe_card_created(Card.t()) :: :ok
+  def observe_card_created(%Card{board_id: board_id, stage_id: stage_id}),
+    do: observe(board_id, @first_card_step, fn _row -> first_card_change(board_id, stage_id) end)
+
+  # A cheap unlocked check first (most writes happen on boards not sitting on this sub-step),
+  # then the locked re-check and the advance. `change` answers `{status, attrs}` or nil.
+  defp observe(board_id, step_id, change) do
+    if observable?(board_id, step_id) do
+      {:ok, _} = Repo.transact(fn -> {:ok, locked_observe(board_id, step_id, change)} end)
+    end
+
+    :ok
+  end
+
+  defp observable?(board_id, step_id) do
+    Repo.exists?(
+      from(s in BoardSetupStep,
+        where: s.board_id == ^board_id and s.step == ^step_id and s.status not in ^BoardSetupStep.finished_statuses()
+      )
+    )
+  end
+
+  defp locked_observe(board_id, step_id, change) do
+    with {:ok, rows} <- lock(board_id),
+         ^step_id <- rows_reportable_id(rows),
+         {status, attrs} <- change.(rows[step_id]) do
+      apply_advance(rows, step_id, status, attrs)
+    end
+  end
+
+  defp push_change(board_id, row, flow_key) do
+    flows = Repo.all(from(f in Flow, where: f.board_id == ^board_id, select: {f.key, f.enabled}))
+    pushed = Enum.uniq(Map.get(row.data, "pushed", []) ++ [flow_key])
+    total = length(flows)
+    pushed_count = Enum.count(flows, fn {key, _enabled} -> key in pushed end)
+    data = %{"pushed" => pushed}
+
+    if pushed_count == total and Enum.all?(flows, fn {_key, enabled} -> enabled end),
+      do: {:done, %{evidence: "#{total} flows enabled", data: data}},
+      else: {:waiting, %{evidence: "#{pushed_count} of #{total} flows pushed", data: data}}
+  end
+
+  defp first_card_change(board_id, stage_id) do
+    with {first_id, name} <- board_id |> first_flow_stage_query() |> select([_f, s], {s.id, s.name}) |> Repo.one(),
+         true <- stage_id == first_id or Repo.get(Stage, stage_id).parent_id == first_id do
+      {:done, %{evidence: "first card in #{name}"}}
+    else
+      _ -> nil
+    end
+  end
+
   # ---------------------------------------------------------------- internals
 
   # Like `Agents.ensure_seeded!/1`: lock the board row so two callers can't both advance.
@@ -716,9 +877,11 @@ defmodule Relay.Setup do
       data: Map.merge(row.data, attrs["data"] || %{})
     }
 
+    reportable_id = rows_reportable_id(rows)
+
     cond do
-      unchanged?(row, change) -> :ok
-      current_id(rows) != step_id -> {:error, :not_current}
+      unchanged?(row, change) and step_id in [reportable_id, just_finished_id(reportable_id)] -> :ok
+      reportable_id != step_id -> {:error, :not_current}
       true -> write_advance!(rows, row, change)
     end
   end
@@ -734,20 +897,69 @@ defmodule Relay.Setup do
 
     row |> Ecto.Changeset.change(Map.put(change, :completed_at, completed_at)) |> Repo.update!()
 
-    if finishing?, do: activate_next!(rows, row.step, now)
+    if finishing?, do: finish!(rows, row, now)
     Events.broadcast(row.board_id, {:setup_changed, row.board_id})
   end
 
+  # A finished top-level step activates the next one. A finished child activates its next
+  # unfinished sibling; after the last, the parent finishes and the next top-level step activates.
+  defp finish!(rows, %{step: step_id}, now) do
+    case Enum.find(@steps, &(&1.id == step_id)).parent do
+      nil ->
+        activate_next!(rows, step_id, now)
+
+      parent_id ->
+        siblings = @child_ids |> Map.fetch!(parent_id) |> Enum.drop_while(&(&1 != step_id)) |> tl()
+
+        case Enum.find(siblings, &(not finished_status?(rows[&1].status))) do
+          nil ->
+            rows[parent_id]
+            |> Ecto.Changeset.change(status: :done, completed_at: now, evidence: "onboarded #{hhmm(now)}")
+            |> Repo.update!()
+
+            activate_next!(rows, parent_id, now)
+
+          next ->
+            activate!(rows[next], now)
+        end
+    end
+  end
+
+  # Activating a step that has children activates its first child too.
   defp activate_next!(rows, step_id, now) do
     next =
       @top_ids
       |> Enum.drop_while(&(&1 != step_id))
       |> Enum.find(&(rows[&1].status == :pending))
 
-    if next, do: rows[next] |> Ecto.Changeset.change(status: :active, reached_at: now) |> Repo.update!()
+    if next do
+      activate!(rows[next], now)
+      with [first | _] <- Map.get(@child_ids, next), do: activate!(rows[first], now)
+    end
   end
 
+  defp activate!(%{status: :pending} = row, now),
+    do: row |> Ecto.Changeset.change(status: :active, reached_at: now) |> Repo.update!()
+
+  defp activate!(_row, _now), do: :ok
+
   defp current_id(rows), do: Enum.find(@top_ids, &(not finished_status?(rows[&1].status)))
+
+  # The first unfinished child of the current top-level step: derived from finished-ness, not
+  # `:active`, so a board that reached step 5 before sub-steps activated still reports 5.1.
+  # The step walked just before the reportable one (the last step when the checklist is finished):
+  # re-reporting the transition that finished it is a harmless no-op, not a refusal.
+  defp just_finished_id(nil), do: List.last(@walk_ids)
+  defp just_finished_id(reportable_id), do: @walk_ids |> Enum.take_while(&(&1 != reportable_id)) |> List.last()
+
+  defp rows_reportable_id(rows) do
+    current_id = current_id(rows)
+    current_sub_id(rows, current_id) || current_id
+  end
+
+  defp current_sub_id(rows, current_id) do
+    Enum.find(Map.get(@child_ids, current_id, []), &(not finished_status?(rows[&1].status)))
+  end
 
   defp enabled_llm(harness_key) do
     case onboarding_llm(harness_key) do
@@ -805,8 +1017,27 @@ defmodule Relay.Setup do
       board_id: board_id,
       template: created && created.data["template"],
       template_warning: created && created.data["template_warning"],
-      llm: checklist_llm(board_id, rows)
+      llm: checklist_llm(board_id, rows),
+      first_flow_stage: first_flow_stage(board_id)
     })
+  end
+
+  # The name of the top-level stage with the lowest position that holds a flow, enabled or not.
+  defp first_flow_stage(board_id) do
+    board_id
+    |> first_flow_stage_query()
+    |> select([_f, s], s.name)
+    |> Repo.one()
+  end
+
+  defp first_flow_stage_query(board_id) do
+    from(f in Flow,
+      join: s in Stage,
+      on: s.id == f.stage_id,
+      where: f.board_id == ^board_id and is_nil(s.parent_id),
+      order_by: [asc: s.position, asc: s.id],
+      limit: 1
+    )
   end
 
   @doc """
@@ -814,7 +1045,8 @@ defmodule Relay.Setup do
   that step's row (a `Schemas.BoardSetupStep`, a map with `:status` and any of its other fields,
   or a bare status atom; a step with no entry is pending) — and `context`, which carries the
   `:template`, `:template_warning` and onboarding `:llm` (one of `onboarding_llms/0`), plus an
-  optional `:board_id`. `checklist/1` delegates here; Storybook fixtures call it directly.
+  optional `:board_id` and `:first_flow_stage` (nil when absent). `checklist/1` delegates here;
+  Storybook fixtures call it directly.
   """
   @spec preview_checklist(%{optional(String.t()) => map() | atom()}, map()) :: checklist()
   def preview_checklist(rows, %{llm: llm} = context) when is_map(rows) do
@@ -823,6 +1055,7 @@ defmodule Relay.Setup do
     fill = %{
       "%{template}" => to_string(context[:template]),
       "%{llm}" => llm.label,
+      "%{cli}" => llm.cli,
       "%{skill_path}" => to_string(llm.skill_path),
       "%{pointer_file}" => to_string(llm.pointer_file)
     }
@@ -840,6 +1073,7 @@ defmodule Relay.Setup do
       end
 
     current = Enum.find_index(steps, &(not finished_status?(&1.status)))
+    current_id = current && Enum.at(steps, current).id
     done_count = Enum.count(steps, &finished_status?(&1.status))
 
     %{
@@ -847,7 +1081,9 @@ defmodule Relay.Setup do
       template: context[:template],
       template_warning: context[:template_warning],
       llm: llm,
-      current_id: current && Enum.at(steps, current).id,
+      current_id: current_id,
+      current_sub_id: current_id && current_sub_id(rows, current_id),
+      first_flow_stage: context[:first_flow_stage],
       position: if(current, do: current + 1, else: length(steps)),
       done_count: done_count,
       finished?: is_nil(current),

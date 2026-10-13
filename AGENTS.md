@@ -72,11 +72,10 @@ use them.
   interactive session — it asks questions, so never invoke it from a flow node. It checks
   that every flow node still resolves to a real step in this repo and walks you through each
   fix. A flow that names an agent this repo no longer has fails at run time, not at edit time.
-- **Wiring a repo to a board is `/relay-onboard`.** When a repo has no working flow yet — no
-  `.claude/` factory, or a factory and a flow that disagree wholesale — run `/relay-onboard`
-  interactively: it picks a path (seed / adopt / hybrid) with you and loops on `/relay-doctor`
-  until zero errors, then offers to enable the flows. `/relay-doctor` is the narrower tool —
-  reach for it when the repo is already wired and one node broke.
+- **Wiring a repo to a board is `/relay-onboard`.** After the board's install script, run it
+  interactively: it works the board's guided-setup checklist (sub-steps 5.1–5.8) as a resumable
+  loop through `./relay setup status|report`. `/relay-doctor` is for a board with no checklist,
+  or when the repo is already wired and one node broke.
 - **These thoughts are rationalizations — stop and check for a skill instead:** "this is too
   simple," "let me just explore first," "I'll check the files quickly," "the skill is
   overkill," "I already know what that means," "I'll do this one thing first."

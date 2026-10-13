@@ -319,6 +319,68 @@
     },
     "manifest_path": "/api/scaffold"
   },
+  "setup": {
+    "interview_keys": [
+      "id",
+      "label",
+      "question"
+    ],
+    "llm_keys": [
+      "cli",
+      "harness",
+      "label",
+      "skill_path"
+    ],
+    "no_checklist_code": "no_checklist",
+    "not_current_code": "not_current",
+    "not_current_keys": [
+      "code",
+      "current",
+      "message"
+    ],
+    "report_path_example": "/api/setup/steps/5.1",
+    "report_request_keys": [
+      "data",
+      "error",
+      "evidence",
+      "status"
+    ],
+    "report_statuses": [
+      "waiting",
+      "done",
+      "failed",
+      "skipped"
+    ],
+    "status_keys": [
+      "board",
+      "change_decisions",
+      "current",
+      "current_id",
+      "current_sub_id",
+      "done_count",
+      "finished",
+      "first_flow_stage",
+      "interview",
+      "llm",
+      "position",
+      "steps",
+      "template"
+    ],
+    "status_path": "/api/setup",
+    "step_keys": [
+      "actor",
+      "children",
+      "completed_at",
+      "data",
+      "error",
+      "evidence",
+      "id",
+      "parent",
+      "reached_at",
+      "status",
+      "title"
+    ]
+  },
   "stages": {
     "stage_keys": [
       "ai_enabled",

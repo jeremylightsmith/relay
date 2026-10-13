@@ -64,7 +64,14 @@ lays down a starter `.relay/runner.json` and `.relay/prepare-worktree.sh` with
 Your board API key is never written to disk.
 
 Then start Claude Code in the project and run `/relay-onboard`, which
-wires this repo to your board's flows and reviews the starter `.relay/runner.json` with you.
+wires this repo to your board's flows and reviews the starter `.relay/runner.json` with you. It
+works sub-steps 5.1–5.8 of the board's setup checklist, one at a time, reporting each one to
+the board's setup wizard as it goes: pull the flows, confirm what it found in the repo, ask the
+questions the repo can't answer (saved to a committed `.relay/project.md`), agree each proposed
+change with you before writing anything, push the flows back enabled, get Relay's files onto
+your base branch, file any follow-ups as `#setup` cards, and create your first card. Interrupt
+it any time; running it again picks up where it stopped. On a board created before guided
+setup it says so and points you at `/relay-doctor`.
 
 Relay owns exactly five files in your project and updates them as a set:
 

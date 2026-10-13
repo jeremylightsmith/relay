@@ -398,7 +398,8 @@ fourth, setup skill: the board's setup wizard hands out the install command inst
 never user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
 `AGENTS.md`/`CLAUDE.md`, `.relay/runner.json`, flow documents) is out of scope and is never
-served by this surface; wiring those is `/relay-onboard`'s job. The one local exception
+served by this surface; the flow documents and `.relay/runner.json` are wired by
+`/relay-onboard`, which works step 5 of the board's setup checklist (5.1–5.8). The one local exception
 (RE383): when `.relay/runner.json` is missing, `./relay update` renders a starter one from the
 runner's own template — no endpoint serves it — and reports it under the `config` key
 (`created`, `missing` under `--check`, or `present`). It is never overwritten, never part of
@@ -469,6 +470,30 @@ refuses a board still on step 2 (`409 step_2_pending`). A re-run is safe: steps 
 left alone and nothing is duplicated. A board with no checklist still gets the install (its LLM is
 the default agent's), with no checklist writes. `RelayWeb.ApiAuth` assigns `:current_api_key`
 (from `Relay.ApiKeys.authenticate_key/1`) for this.
+
+**Onboarding reports** (RE445). After the install, step 5 is worked by the `/relay-onboard` skill
+through two more board-key routes on `RelayWeb.Api.SetupController`, rendered by
+`RelayWeb.Api.SetupJSON`: `GET /api/setup` answers `{"data": checklist}` — the board name, the
+template, the onboarding LLM, `current_id` / `current_sub_id` / `current`
+(`Relay.Setup.reportable_id/1`, the one step a report may move), `first_flow_stage`, the
+position counts, the 5.3 `interview` catalog, the 5.4 `change_decisions`, and every step (string
+statuses and actors, ISO 8601 datetimes, step 5's sub-steps in `children`). `POST
+/api/setup/steps/:step` takes `{"status": "waiting"|"done"|"failed"|"skipped", "evidence"?,
+"error"?, "data"?}` and calls `Relay.Setup.advance/4`, answering the same body. Refusals: `404
+no_checklist` ("no guided setup on this board"), `409 not_current` with the current step in
+`error.current`, `422 invalid` for a bad body. The board also ticks 5.5 (every flow pushed through
+`PUT /api/flows/:key` and enabled) and 5.8 (a card created in the first flow stage) itself. The
+wire shape is pinned by the `"setup"` section of `test/fixtures/runner_contract.json`.
+
+The skill reaches those routes only through two `./relay` verbs (v91+). `./relay setup status`
+calls `GET /api/setup` and prints the checklist (`--json` / `--field` give it raw).
+`./relay setup report STEP --status S [--evidence] [--error] [--data JSON]` calls `POST
+/api/setup/steps/STEP` with only the fields given. `--status` choices are `SETUP_REPORT_STATUSES`,
+pinned equal to `Relay.Setup.advance_statuses/0` by the contract fixture. `--data` must be a JSON
+object, checked before the request. Exit codes: **0** success; **3**
+(`SETUP_NO_CHECKLIST_EXIT`, used by nothing else) on `404 no_checklist` from either route — the
+skill's signal to stop and point at `/relay-doctor`; **1** on `409 not_current`, with a stderr line
+naming `not_current` and the server's `current` step, and on any other API failure.
 
 **The version is derived, never maintained.** `Relay.Scaffold.version/1` is the first 12 hex
 characters of the sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when
@@ -1946,7 +1971,8 @@ any agent that reads it with a tool, and the probe is what settled it.
 **Shipping caveat for the `relay-*` skills.** The three `relay-*` skills still cannot rely on a
 sibling file — not because of how they load, but because of how they ship: `Relay.Scaffold.items/0`
 names `SKILL.md` only, so a reference file next to one would silently vanish from every scaffolded
-repo (which is why `relay-onboard/SKILL.md` says so). Agents are unaffected: `Relay.Scaffold`
+repo (which is why `test/relay/onboard_skill_test.exs` pins the `relay-onboard` directory to
+`SKILL.md` alone). Agents are unaffected: `Relay.Scaffold`
 ships no agents at all — every agent is the repo's own, per ADR 0010.
 `test/relay/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract, and fails on any `references/` path an agent file names that does not exist (a

@@ -653,6 +653,55 @@ curl -X POST https://relay.example/api/setup/installed \
 
 Errors: `403 wrong_board`, `422 invalid`.
 
+### GET /api/setup
+
+The board's setup checklist, as the `/relay-onboard` skill reads it (RE445). Board key required.
+`current` is the one step a report may move — the current sub-step of step 5 while onboarding.
+
+```
+curl https://relay.example/api/setup -H "Authorization: Bearer $RELAY_API_KEY"
+```
+
+```json
+{ "data": {
+    "board": "Streaks", "template": "Bare minimum",
+    "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
+             "skill_path": ".claude/skills/relay-onboard/SKILL.md" },
+    "current_id": "5", "current_sub_id": "5.1", "current": "5.1",
+    "first_flow_stage": "Plan", "position": 5, "done_count": 4, "finished": false,
+    "interview": [{ "id": "done", "label": "Done means", "question": "What does \"done\" mean for a card: …" }, …],
+    "change_decisions": ["pending", "asking", "accepted", "rejected", "edited"],
+    "steps": [
+      { "id": "5", "parent": null, "title": "Onboard, in Claude Code", "actor": "ai_terminal",
+        "status": "active", "evidence": null, "error": null, "data": {},
+        "reached_at": "2026-10-12T14:11:00Z", "completed_at": null,
+        "children": [{ "id": "5.1", "parent": "5", "status": "active", …, "children": [] }, …] },
+      …
+    ] } }
+```
+
+Errors: `404 no_checklist` ("no guided setup on this board") for a board created without a
+template.
+
+### POST /api/setup/steps/:step
+
+Reports progress on the current step (RE445). Board key required. `status` is one of `waiting`,
+`done`, `failed`, `skipped`; `evidence` and `error` are optional strings (`error` is kept only for
+`failed`); `data` is an optional object merged at the top level into the step's data (5.3 sends
+every `answers` so far, 5.4 the whole `changes` list). `done` / `skipped` move on to the next
+step. Answers the same body as `GET /api/setup`. Repeating the report that just finished a step
+answers 200 and changes nothing.
+
+```
+curl -X POST https://relay.example/api/setup/steps/5.3 \
+  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"status": "waiting", "data": {"answers": {"done": "PR merged"}}}'
+```
+
+Errors: `404 no_checklist`; `409 not_current` ("step 5.1 isn't current; the current step is
+5.3", with the current step in `error.current`); `422 invalid` for an unknown status, a
+non-string `evidence` / `error`, or a non-object `data`.
+
 ---
 
 ## CLI

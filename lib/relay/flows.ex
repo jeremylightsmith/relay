@@ -13,7 +13,7 @@ defmodule Relay.Flows do
   `{:error, changeset}`.
   """
 
-  use Boundary, deps: [Relay.Agents, Relay.Repo, Schemas], exports: [Document, Shape]
+  use Boundary, deps: [Relay.Agents, Relay.Repo, Relay.Setup, Schemas], exports: [Document, Shape]
 
   import Ecto.Query
 
@@ -22,6 +22,7 @@ defmodule Relay.Flows do
   alias Relay.Flows.Document
   alias Relay.Flows.Shape
   alias Relay.Repo
+  alias Relay.Setup
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Flow
@@ -582,9 +583,16 @@ defmodule Relay.Flows do
       result = Repo.transaction(fn -> upsert_document!(board, key, attrs) end)
 
       case result do
-        {:ok, {tag, flow}} -> {:ok, tag, flow}
-        {:error, %Changeset{} = cs} -> {:error, {:invalid, cs}}
-        {:error, reason} -> {:error, reason}
+        {:ok, {tag, flow}} ->
+          # After the commit: a rolled-back push must never tick setup step 5.5.
+          :ok = Setup.observe_flow_push(board.id, flow.key)
+          {:ok, tag, flow}
+
+        {:error, %Changeset{} = cs} ->
+          {:error, {:invalid, cs}}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end

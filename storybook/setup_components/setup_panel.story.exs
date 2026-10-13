@@ -12,11 +12,11 @@ defmodule Storybook.SetupComponents.SetupPanel do
 
   # RE443, card mockup "Wizard — docked left on the empty board, every step state + expert
   # toggle": frames A (key step active), B (LLM pick with the Three-brain warning) and C (install
-  # failed in preflight), plus the expert toggle on. Fixture checklists come from
-  # `Relay.Setup.preview_checklist/2`, the same builder `Relay.Setup.checklist/1` uses, with no
-  # database.
+  # failed in preflight), D (the onboard loop running, RE445), plus the expert toggle on.
+  # Fixture checklists come from `Relay.Setup.preview_checklist/2`, the same builder
+  # `Relay.Setup.checklist/1` uses, with no database.
   def variations do
-    [_pending, active, _waiting, done, failed, _skipped] = BoardSetupStep.statuses()
+    [_pending, active, waiting, done, failed, _skipped] = BoardSetupStep.statuses()
     install = "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh"
 
     [
@@ -53,6 +53,34 @@ defmodule Storybook.SetupComponents.SetupPanel do
           install_command: install,
           checklist:
             checklist(%{"1" => done, "2" => done, "3" => done, "4" => Map.put(install_failure(), :status, failed)})
+        }
+      },
+      %Variation{
+        id: :d_onboard_loop_running,
+        description: "D · onboard loop running, 5.6 waiting on your PR",
+        attributes: %{
+          id: "setup-panel",
+          board_name: "Streaks",
+          board_slug: "streaks",
+          now: ~U[2026-10-12 14:40:00Z],
+          checklist:
+            checklist(%{
+              "1" => done,
+              "2" => done,
+              "3" => done,
+              "4" => done,
+              "5" => %{status: active, reached_at: ~U[2026-10-12 14:28:00Z]},
+              "5.1" => %{status: done, evidence: "2 flows"},
+              "5.2" => %{status: done, evidence: "elixir · mix precommit"},
+              "5.3" => %{status: done, evidence: "9 of 9 answered"},
+              "5.4" => %{status: done, evidence: "dropped screenshots"},
+              "5.5" => %{status: done, evidence: "enabled"},
+              "5.6" => %{
+                status: waiting,
+                evidence: "PR #12 open · checked 14:31",
+                data: %{"pr_url" => "https://github.com/jl/streaks/pull/12", "base" => "main"}
+              }
+            })
         }
       },
       %Variation{

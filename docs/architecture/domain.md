@@ -810,12 +810,30 @@ sharing behavior.
   all 15 (step 1 done with `"<N> stages · <M> flows · HH:MM"` and the template's name and
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
-  `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, position,
-  done_count, finished?, steps}` (the 7 top-level entries; step 5's in `children`); `current/1`
-  is its first unfinished entry. `advance/4` (`:waiting | :done | :failed | :skipped`) is
-  strictly sequential (`{:error, :not_current | :no_checklist | :invalid_status}`), serialized by
-  locking the board row, a no-op on a repeat that changes nothing, and broadcasts
-  `{:setup_changed, board_id}`. `choose_llm/3` (step 2) sets the board default agent to the
+  `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, current_sub_id,
+  first_flow_stage, position, done_count, finished?, steps}` (the 7 top-level entries; step 5's in
+  `children`); `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
+  unfinished child of that entry (nil when it has none) — derived from finished-ness, so a board
+  that reached step 5 before RE445 still reports 5.1 — and `first_flow_stage` the NAME of the
+  lowest-position top-level stage holding a flow. `reportable_id/1` (`current_sub_id ||
+  current_id`) is the one step a report may move. `advance/4` (`:waiting | :done | :failed |
+  :skipped`, `advance_statuses/0`) moves only that step (`{:error, :not_current | :no_checklist |
+  :invalid_status}`) — a parent with children is never advanced directly: activating it activates
+  its first child, finishing a child activates the next, and finishing the last finishes the parent
+  (`"onboarded HH:MM"`) and activates the next top-level step. `data` merges at the top level
+  only. It is serialized by locking the board row, a no-op on a repeat that changes nothing on the
+  reportable step or the one walked just before it (an older finished step is `:not_current`), and
+  broadcasts `{:setup_changed, board_id}` once per change. Step 5's sub-step `data` (RE445): 5.3
+  `answers` (`interview_questions/0` id => answer — `done`, `landing`, `deploy`, `baton`, `ui`,
+  `never_touch`, `warm_up`, `capacity`, `misfits`), 5.4 `changes` (`[%{summary, decision, note}]`,
+  `decision` in `change_decisions/0`), 5.5 `pushed` (flow keys), 5.6 `pr_url` / `base`, and
+  `attempts` on any failed sub-step. Two sub-steps are **board-observed**: `Relay.Flows` calls
+  `observe_flow_push/2` after a committed `upsert_from_document/3` (while 5.5 is current it
+  records the key and finishes 5.5 — `"N flows enabled"` — once every board flow has been pushed
+  and is enabled, else waits on `"P of N flows pushed"`), and `Relay.Cards` calls
+  `observe_card_created/1` after a committed `create_card/3` (while 5.8 is current, a card in
+  `first_flow_stage` or one of its substages finishes 5.8 — `"first card in <stage>"` — and with
+  it step 5). Both always return `:ok`, so setup state never fails a push or a create. `choose_llm/3` (step 2) sets the board default agent to the
   chosen harness (keeping a default already on it, else reusing the board's first agent on it,
   else creating one on its first model) and mints the step-3 key `"Setup · <user>"` via
   `Relay.ApiKeys`; `remint_key/2` mints a fresh one, revoking the old only if it was never used.
@@ -836,7 +854,7 @@ sharing behavior.
   `key` lines. `installed/2` finishes step 4 (`"downloaded HH:MM · <repo_dir> · <branch>"`,
   `data.files`). Steps already past are left alone, so a re-run answers 200 and writes nothing; a
   board with no checklist answers from its default agent's LLM. Depends
-  on Agents, ApiKeys, Events and Repo, never on Boards or Flows (Boards depends on it).
+  on Agents, ApiKeys, Events and Repo, never on Boards, Flows or Cards (all three depend on it).
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
   (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`) are read, so a test overrides them with

@@ -16,7 +16,10 @@ defmodule Relay.SetupTest do
     board
   end
 
-  defp step(board, id), do: board |> Setup.checklist() |> Map.fetch!(:steps) |> Enum.find(&(&1.id == id))
+  # A top-level step or a sub-step, by id.
+  defp step(board, id),
+    do:
+      board |> Setup.checklist() |> Map.fetch!(:steps) |> Enum.flat_map(&[&1 | &1.children]) |> Enum.find(&(&1.id == id))
 
   defp rows(board), do: Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board.id, order_by: s.id))
 
@@ -25,9 +28,12 @@ defmodule Relay.SetupTest do
     %{user: user, board: create!("bare-minimum", user)}
   end
 
-  # Moves the board's checklist to step `id` by finishing every top-level step before it.
+  # Every step a report moves, in order: step 5 is walked through its sub-steps, never directly.
+  @walk ~w(2 3 4 5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8 6 7)
+
+  # Moves the board's checklist to step `id` by finishing every reportable step before it.
   defp advance_to!(board, id) do
-    for prior <- ~w(2 3 4 5 6 7), prior < id, do: {:ok, _} = Setup.advance(board, prior, :done, %{})
+    for prior <- Enum.take_while(@walk, &(&1 != id)), do: {:ok, _} = Setup.advance(board, prior, :done, %{})
     board
   end
 
@@ -66,8 +72,8 @@ defmodule Relay.SetupTest do
       checklist = Setup.checklist(board)
       rows = Map.new(rows(board), &{&1.step, &1})
 
-      assert Setup.preview_checklist(rows, Map.take(checklist, [:board_id, :template, :template_warning, :llm])) ==
-               checklist
+      context = Map.take(checklist, [:board_id, :template, :template_warning, :llm, :first_flow_stage])
+      assert Setup.preview_checklist(rows, context) == checklist
     end
   end
 
@@ -110,7 +116,7 @@ defmodule Relay.SetupTest do
       assert Enum.map(five.children, & &1.id) == ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
       assert Enum.all?(five.children, &(&1.status == :pending))
       assert five.title == "Onboard, in Claude Code"
-      assert String.starts_with?(five.why, "Claude Code reads this checklist")
+      assert String.starts_with?(five.why, "Open claude in your repo and run /relay-onboard.")
     end
 
     test "placeholders resolve against the onboarding LLM" do
@@ -208,19 +214,182 @@ defmodule Relay.SetupTest do
       assert {:ok, _} = Setup.advance(board, "2", :done, %{})
       assert_receive {:setup_changed, ^board_id}
 
-      assert {:error, :not_current} = Setup.advance(board, "5", :done, %{})
+      assert {:error, :not_current} = Setup.advance(board, "5.1", :done, %{})
       refute_receive {:setup_changed, _}
     end
 
-    test "advancing 2–7 to done finishes the checklist", %{board: board} do
-      for id <- ~w(2 3 4 5 6 7), do: assert({:ok, _} = Setup.advance(board, id, :done, %{}))
+    # RE445 scenario 11
+    test "advancing 2, 3, 4, 5.1…5.8, 6, 7 to done finishes the checklist", %{board: board} do
+      for id <- @walk, do: assert({:ok, _} = Setup.advance(board, id, :done, %{}))
 
       checklist = Setup.checklist(board)
       assert checklist.finished?
       assert checklist.current_id == nil
+      assert checklist.current_sub_id == nil
       assert checklist.position == 7
       assert checklist.done_count == 7
       assert Setup.current(board) == nil
+    end
+  end
+
+  describe "advance/4 through step 5's sub-steps (RE445)" do
+    setup :setup_board
+
+    # Scenario 1
+    test "finishing step 4 activates step 5 and its first sub-step", %{board: board} do
+      checklist = board |> advance_to!("5.1") |> Setup.checklist()
+      five = Enum.find(checklist.steps, &(&1.id == "5"))
+      [first | rest] = five.children
+
+      assert five.status == :active
+      assert first.id == "5.1"
+      assert first.status == :active
+      assert first.reached_at
+      assert Enum.map(rest, & &1.id) == ~w(5.2 5.3 5.4 5.5 5.6 5.7 5.8)
+      assert Enum.all?(rest, &(&1.status == :pending))
+      assert checklist.current_id == "5"
+      assert checklist.current_sub_id == "5.1"
+      assert Setup.reportable_id(checklist) == "5.1"
+    end
+
+    # Scenario 2
+    test "finishing a sub-step activates the next and leaves step 5 active", %{board: board} do
+      advance_to!(board, "5.1")
+
+      assert {:ok, cl} = Setup.advance(board, "5.1", :done, %{evidence: "2 flows"})
+      assert %{status: :done, evidence: "2 flows"} = step(board, "5.1")
+      assert step(board, "5.2").status == :active
+      assert step(board, "5").status == :active
+      assert cl.current_sub_id == "5.2"
+      assert cl.position == 5
+    end
+
+    # Scenario 3
+    test "a later sub-step, the parent and the next top-level step are all not current", %{board: board} do
+      advance_to!(board, "5.1")
+      before = rows(board)
+
+      assert Setup.advance(board, "5.2", :done, %{}) == {:error, :not_current}
+      assert Setup.advance(board, "5", :done, %{}) == {:error, :not_current}
+      assert Setup.advance(board, "6", :done, %{}) == {:error, :not_current}
+      assert rows(board) == before
+    end
+
+    test "repeating the just-finished sub-step is a no-op; an older one is not current", %{board: board} do
+      advance_to!(board, "5.3")
+      before = rows(board)
+
+      assert {:ok, _} = Setup.advance(board, "5.2", :done, %{})
+      assert Setup.advance(board, "5.1", :done, %{}) == {:error, :not_current}
+      assert rows(board) == before
+    end
+
+    # Scenario 4
+    test "waiting reports replace the answers map and hold the sub-step", %{board: board} do
+      advance_to!(board, "5.3")
+
+      assert {:ok, _} = Setup.advance(board, "5.3", :waiting, %{data: %{"answers" => %{"done" => "PR merged"}}})
+
+      assert {:ok, _} =
+               Setup.advance(board, "5.3", :waiting, %{
+                 data: %{"answers" => %{"done" => "PR merged", "landing" => "PR into main"}}
+               })
+
+      three = step(board, "5.3")
+      assert three.status == :waiting
+      assert three.data["answers"] == %{"done" => "PR merged", "landing" => "PR into main"}
+      assert step(board, "5").status == :active
+      assert step(board, "5.4").status == :pending
+    end
+
+    # Scenario 5
+    test "a failed sub-step stays current; done then clears the error and moves on", %{board: board} do
+      advance_to!(board, "5.5")
+
+      assert {:ok, cl} =
+               Setup.advance(board, "5.5", :failed, %{
+                 error: "422 flow implement",
+                 evidence: "422 · attempt 3/3",
+                 data: %{"attempts" => 3}
+               })
+
+      five_five = step(board, "5.5")
+      assert five_five.status == :failed
+      assert five_five.error == "422 flow implement"
+      assert five_five.data["attempts"] == 3
+      assert step(board, "5").status == :active
+      assert cl.current_sub_id == "5.5"
+
+      assert {:ok, _} = Setup.advance(board, "5.5", :done, %{})
+      assert step(board, "5.5").error == nil
+      assert step(board, "5.6").status == :active
+    end
+
+    # Scenario 6
+    test "finishing 5.8 finishes step 5 and activates step 6, broadcasting once", %{board: board} do
+      advance_to!(board, "5.8")
+      board_id = board.id
+      Events.subscribe(board_id)
+
+      assert {:ok, cl} = Setup.advance(board, "5.8", :done, %{evidence: "first card in Plan"})
+
+      five = step(board, "5")
+      assert five.status == :done
+      assert five.completed_at
+      assert five.evidence =~ ~r/^onboarded \d\d:\d\d$/
+      assert step(board, "6").status == :active
+      assert cl.current_id == "6"
+      assert cl.current_sub_id == nil
+
+      assert_receive {:setup_changed, ^board_id}
+      refute_receive {:setup_changed, _}
+    end
+
+    # Scenario 7
+    test "repeating the report that finished step 5 changes nothing and broadcasts nothing", %{board: board} do
+      advance_to!(board, "5.8")
+      assert {:ok, _} = Setup.advance(board, "5.8", :done, %{evidence: "first card in Plan"})
+      before = rows(board)
+      Events.subscribe(board.id)
+
+      assert {:ok, _} = Setup.advance(board, "5.8", :done, %{evidence: "first card in Plan"})
+      assert rows(board) == before
+      refute_receive {:setup_changed, _}
+    end
+
+    # Scenario 8
+    test "skipping a sub-step activates the next", %{board: board} do
+      advance_to!(board, "5.2")
+
+      assert {:ok, _} = Setup.advance(board, "5.2", :skipped, %{})
+      assert step(board, "5.2").status == :skipped
+      assert step(board, "5.3").status == :active
+    end
+
+    test "a board already sitting on step 5 with 5.1 still pending reports 5.1 as current", %{board: board} do
+      advance_to!(board, "5.1")
+
+      Repo.update_all(from(s in BoardSetupStep, where: s.board_id == ^board.id and s.step == "5.1"),
+        set: [status: :pending]
+      )
+
+      checklist = Setup.checklist(board)
+      assert checklist.current_sub_id == "5.1"
+      assert {:ok, _} = Setup.advance(board, "5.1", :done, %{})
+      assert step(board, "5.2").status == :active
+    end
+  end
+
+  describe "first_flow_stage" do
+    # Scenario 10
+    test "is the top-level stage with the lowest position that holds a flow" do
+      assert Setup.checklist(create!("bare-minimum")).first_flow_stage == "Plan"
+      assert Setup.checklist(create!("three-brain")).first_flow_stage == "Plan"
+      assert Setup.checklist(create!("design-led")).first_flow_stage == "Design"
+    end
+
+    test "is nil in a preview unless the context passes it" do
+      assert Setup.preview_checklist(%{}, %{llm: Setup.onboarding_llm("claude-code")}).first_flow_stage == nil
     end
   end
 
@@ -342,6 +511,35 @@ defmodule Relay.SetupTest do
       assert Setup.step_id(:install) == "4"
       assert Setup.step_id(:onboard) == "5"
       assert Enum.find(Setup.steps(), &(&1.id == Setup.step_id(:onboard))).actor == :ai_terminal
+    end
+
+    # RE445 task 3: the wizard's answers and changes blocks branch on 5.3 / 5.4 by role.
+    test "step_id/1 names the interview and customize sub-steps" do
+      assert Setup.step_id(:interview) == "5.3"
+      assert Setup.step_id(:customize) == "5.4"
+    end
+
+    # RE445 scenario 9
+    test "interview_questions/0 and change_decisions/0 are the 5.3 and 5.4 closed sets" do
+      questions = Setup.interview_questions()
+
+      assert Enum.map(questions, & &1.id) == ~w(done landing deploy baton ui never_touch warm_up capacity misfits)
+
+      assert Enum.map(questions, & &1.label) ==
+               [
+                 "Done means",
+                 "Changes land",
+                 "Deploy",
+                 "Baton back",
+                 "UI",
+                 "Never touch",
+                 "Warm-up",
+                 "Capacity",
+                 "Misfits"
+               ]
+
+      assert Enum.all?(questions, &(is_binary(&1.question) and String.trim(&1.question) != ""))
+      assert Setup.change_decisions() == ["pending", "asking", "accepted", "rejected", "edited"]
     end
 
     # Scenario 15

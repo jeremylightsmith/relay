@@ -266,6 +266,7 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert four.evidence =~ ~r/^downloaded \d\d:\d\d · ~\/src\/streaks · main$/
       assert four.data["files"] == ["relay", ".claude/skills/relay-onboard/SKILL.md", "relay.md"]
       assert step(board, "5").status == :active
+      assert step(board, "5").children |> hd() |> Map.take([:id, :status]) == %{id: "5.1", status: :active}
       assert_receive {:setup_changed, ^board_id}
 
       before = Setup.checklist(board)
@@ -282,5 +283,144 @@ defmodule RelayWeb.Api.SetupControllerTest do
       bad = installed_body(board, %{"files" => "relay"})
       assert %{"error" => %{"code" => "invalid"}} = conn |> installed(token, bad) |> json_response(422)
     end
+  end
+
+  # RE445: `GET /api/setup` and `POST /api/setup/steps/:step`.
+
+  @walk ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
+
+  # The `setup_board/1` board (step 2 done) with steps 3 and 4 finished and the checklist on
+  # reportable step `id`.
+  defp on_step(%{board: board} = context, id) do
+    for prior <- ~w(3 4) ++ Enum.take_while(@walk, &(&1 != id)), do: {:ok, _} = Setup.advance(board, prior, :done, %{})
+    context
+  end
+
+  defp on_first_sub_step(context), do: on_step(context, "5.1")
+
+  defp status(conn, token), do: conn |> auth(token) |> get(~p"/api/setup")
+  defp report(conn, token, id, body), do: conn |> auth(token) |> post(~p"/api/setup/steps/#{id}", body)
+
+  defp wire_step(body, id),
+    do: body["data"]["steps"] |> Enum.flat_map(&[&1 | &1["children"]]) |> Enum.find(&(&1["id"] == id))
+
+  describe "GET /api/setup" do
+    setup [:setup_board, :on_first_sub_step]
+
+    # Scenario 17
+    test "answers the checklist with step 5's sub-steps, the interview and no token",
+         %{conn: conn, board: board, token: token} do
+      response = status(conn, token)
+      body = json_response(response, 200)
+      data = body["data"]
+
+      assert data["board"] == "Streaks"
+      assert data["current_id"] == "5"
+      assert data["current_sub_id"] == "5.1"
+      assert data["current"] == "5.1"
+      assert data["first_flow_stage"] == "Plan"
+      assert length(data["steps"]) == 7
+
+      five = Enum.find(data["steps"], &(&1["id"] == "5"))
+      assert Enum.map(five["children"], & &1["id"]) == ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
+      assert five["status"] == "active"
+      assert wire_step(body, "5.1")["status"] == "active"
+      assert wire_step(body, "5.2")["status"] == "pending"
+      assert wire_step(body, "4")["status"] == "done"
+      assert length(data["interview"]) == 9
+      assert data["llm"]["harness"] == "claude-code"
+      assert data["change_decisions"] == Setup.change_decisions()
+
+      refute response.resp_body =~ token
+      refute response.resp_body =~ "token"
+      assert board.name == "Streaks"
+    end
+  end
+
+  describe "POST /api/setup/steps/:step" do
+    setup :setup_board
+
+    # Scenario 18
+    test "a done report on the current sub-step moves to the next", %{conn: conn, token: token} = context do
+      on_step(context, "5.1")
+
+      body = conn |> report(token, "5.1", %{"status" => "done", "evidence" => "2 flows"}) |> json_response(200)
+
+      assert body["data"]["current"] == "5.2"
+      assert wire_step(body, "5.1")["evidence"] == "2 flows"
+    end
+
+    # Scenario 19
+    test "a report on a step that isn't current is 409 not_current naming the current one",
+         %{conn: conn, board: board, token: token} = context do
+      on_step(context, "5.3")
+      before = Setup.checklist(board)
+
+      assert %{
+               "error" => %{
+                 "code" => "not_current",
+                 "current" => "5.3",
+                 "message" => "step 5.1 isn't current; the current step is 5.3"
+               }
+             } = conn |> report(token, "5.1", %{"status" => "done"}) |> json_response(409)
+
+      assert Setup.checklist(board) == before
+    end
+
+    # Scenario 20
+    test "a waiting report stores 5.3's answers", %{conn: conn, token: token} = context do
+      on_step(context, "5.3")
+
+      body =
+        conn
+        |> report(token, "5.3", %{"status" => "waiting", "data" => %{"answers" => %{"done" => "PR merged"}}})
+        |> json_response(200)
+
+      assert body["data"]["steps"] |> Enum.at(4) |> Map.fetch!("children") |> Enum.at(2) |> get_in(["data", "answers"]) ==
+               %{"done" => "PR merged"}
+    end
+
+    # Scenario 21
+    test "a failed report keeps the error", %{conn: conn, token: token} = context do
+      on_step(context, "5.5")
+
+      body =
+        conn
+        |> report(token, "5.5", %{"status" => "failed", "error" => "422 flow implement", "data" => %{"attempts" => 3}})
+        |> json_response(200)
+
+      assert %{"status" => "failed", "error" => "422 flow implement"} = wire_step(body, "5.5")
+    end
+
+    # Scenario 22
+    test "a malformed body is 422 invalid and changes nothing", %{conn: conn, board: board, token: token} = context do
+      on_step(context, "5.1")
+      before = Setup.checklist(board)
+
+      for bad <- [
+            %{"status" => "bogus"},
+            %{"status" => "done", "data" => "x"},
+            %{"status" => "done", "evidence" => 5}
+          ] do
+        assert %{"error" => %{"code" => "invalid"}} = conn |> report(token, "5.1", bad) |> json_response(422)
+      end
+
+      assert Setup.checklist(board) == before
+    end
+  end
+
+  # Scenario 23
+  test "a board with no checklist is 404 no_checklist; no bearer is 401", %{conn: conn} do
+    board = insert(:board)
+    {:ok, %{token: token}} = ApiKeys.create_key(board, board.owner)
+    no_checklist = %{"error" => %{"code" => "no_checklist", "message" => "no guided setup on this board"}}
+
+    assert conn |> status(token) |> json_response(404) == no_checklist
+    assert conn |> report(token, "5.1", %{"status" => "done"}) |> json_response(404) == no_checklist
+
+    assert %{"error" => %{"code" => "unauthorized"}} = conn |> get(~p"/api/setup") |> json_response(401)
+
+    assert %{"error" => %{"code" => "unauthorized"}} =
+             conn |> post(~p"/api/setup/steps/5.1", %{"status" => "done"}) |> json_response(401)
   end
 end

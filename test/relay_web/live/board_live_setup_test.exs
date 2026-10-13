@@ -221,6 +221,55 @@ defmodule RelayWeb.BoardLiveSetupTest do
     end
   end
 
+  describe "step 5's onboard loop (RE445)" do
+    defp to_sub!(board, sub_ids) do
+      for step <- ~w(2 3 4) ++ sub_ids, do: {:ok, _} = Setup.advance(board, step, :done, %{})
+      board
+    end
+
+    # RE445 task 3, scenario 10
+    test "a 5.3 answer report re-renders the answers block live", %{conn: conn, user: user} do
+      board = user |> create!("bare-minimum") |> to_sub!(~w(5.1 5.2))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#setup-answers")
+
+      {:ok, _} =
+        Setup.advance(board, "5.3", :waiting, %{
+          data: %{
+            "answers" => %{
+              "done" => "PR merged",
+              "landing" => "PR into main",
+              "deploy" => "stays human",
+              "baton" => "plans + finished code"
+            }
+          }
+        })
+
+      assert view |> text("#setup-answers-count") |> String.trim() == "4 of 9"
+      assert view |> text("#setup-question-next") |> String.trim() == "question 5 of 9 in your terminal…"
+    end
+
+    # RE445 task 3, scenario 11
+    test "the waiting-for-PR block appears on 5.6 waiting and goes once 5.6 is done", %{conn: conn, user: user} do
+      board = user |> create!("bare-minimum") |> to_sub!(~w(5.1 5.2 5.3 5.4 5.5))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#setup-onboard-pr")
+
+      {:ok, _} =
+        Setup.advance(board, "5.6", :waiting, %{
+          evidence: "PR #12 open",
+          data: %{"pr_url" => "https://github.com/jl/streaks/pull/12", "base" => "main"}
+        })
+
+      assert has_element?(view, ~s(#setup-onboard-pr-link[href="https://github.com/jl/streaks/pull/12"]))
+
+      {:ok, _} = Setup.advance(board, "5.6", :done, %{evidence: "on origin/main"})
+
+      refute has_element?(view, "#setup-onboard-pr")
+      assert has_element?(view, ~s(#setup-step-5-6[data-status="done"]))
+    end
+  end
+
   # Scenario 2
   describe "a board with no checklist" do
     test "renders no wizard, chip or mobile checklist", %{conn: conn, user: user} do

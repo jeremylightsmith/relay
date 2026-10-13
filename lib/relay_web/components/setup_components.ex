@@ -14,6 +14,15 @@ defmodule RelayWeb.SetupComponents do
     * `setup_mobile/1` — what a phone sees instead of the columns: "Continue on a computer" and
       the read-only checklist.
 
+  Step 5 (RE445, frames D, F1, F2 and E of the wizard mockup) is the `/relay-onboard` loop: in
+  both modes its sub-steps 5.1–5.8 render as rows with a status glyph (`✓ ▸ ◌ ! ○ –`) and their
+  evidence. While it is current in `:interactive` mode it also shows the minutes since it was
+  reached (`<id>-onboard-elapsed`, read off the `now` attr, default `DateTime.utc_now/0`; it
+  refreshes on every report, no timer), and the block for the current sub-step: waiting for the
+  PR to merge (`<id>-onboard-pr`, a waiting sub-step with a `pr_url`), the failed sub-step
+  (`<id>-onboard-failed`), "Your answers n of 9" while 5.3 or 5.4 is current (`<id>-answers`)
+  and 5.4's proposed changes with their agreement markers (`<id>-changes`).
+
   Whose move it is is the step's colour: `you · here` / `you · terminal` are primary (blue),
   `AI · terminal` is secondary (violet); done is success, failed is error. Theme tokens only.
 
@@ -49,9 +58,11 @@ defmodule RelayWeb.SetupComponents do
   attr :install_command, :string, default: nil, doc: "`Relay.Setup.install_command/2` for this board"
   attr :selected_llm, :string, default: nil, doc: "the harness key the step-2 picker has selected"
   attr :board_slug, :string, default: nil, doc: "for the \"switch the default LLM\" settings link"
+  attr :now, DateTime, default: nil, doc: "the clock step 5's elapsed time reads; nil is `DateTime.utc_now/0`"
 
   def setup_checklist(assigns) do
-    assigns = assign(assigns, :last_id, List.last(assigns.checklist.steps).id)
+    assigns =
+      assign(assigns, last_id: List.last(assigns.checklist.steps).id, now: assigns.now || DateTime.utc_now())
 
     ~H"""
     <ol id={@id} class="flex flex-col">
@@ -67,6 +78,7 @@ defmodule RelayWeb.SetupComponents do
         install_command={@install_command}
         selected_llm={@selected_llm}
         board_slug={@board_slug}
+        now={@now}
       />
     </ol>
     """
@@ -82,15 +94,18 @@ defmodule RelayWeb.SetupComponents do
   attr :install_command, :string, required: true
   attr :selected_llm, :string, required: true
   attr :board_slug, :string, required: true
+  attr :now, DateTime, required: true
 
   defp setup_step(assigns) do
     step = assigns.step
     finished? = step.status in BoardSetupStep.finished_statuses()
+    current? = step.status in BoardSetupStep.current_statuses()
 
     assigns =
       assign(assigns,
         finished?: finished?,
-        current?: step.status in BoardSetupStep.current_statuses(),
+        current?: current?,
+        onboard?: assigns.interactive and current? and step.id == Setup.step_id(:onboard),
         tone: actor_tone(step.actor)
       )
 
@@ -119,6 +134,16 @@ defmodule RelayWeb.SetupComponents do
           >
             {actor_label(@step.actor)}
           </span>
+          <%= if @onboard? and @step.reached_at do %>
+            <span class="flex-1"></span>
+            <span
+              id={"#{@prefix}-onboard-elapsed"}
+              class="font-mono"
+              style={"font-size:10.5px;" <> faint()}
+            >
+              {elapsed_minutes(@step.reached_at, @now)} min
+            </span>
+          <% end %>
         </div>
         <p
           :if={@explain and not @finished? and @step.why}
@@ -134,6 +159,12 @@ defmodule RelayWeb.SetupComponents do
         >
           {@step.read_only_note}
         </p>
+        <.onboard_blocks
+          :if={@onboard?}
+          prefix={@prefix}
+          step={@step}
+          current_sub_id={@checklist.current_sub_id}
+        />
         <.llm_picker
           :if={@interactive and @current? and @step.id == Setup.step_id(:llm)}
           prefix={@prefix}
@@ -167,6 +198,7 @@ defmodule RelayWeb.SetupComponents do
           prefix={@prefix}
           checks={List.wrap(@step.data["checks"])}
         />
+        <.substeps :if={@step.children != []} prefix={@prefix} children={@step.children} />
         <details :if={@explain and @current? and @step.what_this_does != []} class="setup-what">
           <summary
             class="link link-hover flex cursor-pointer list-none items-center gap-1.5"
@@ -178,21 +210,299 @@ defmodule RelayWeb.SetupComponents do
             <li :for={line <- @step.what_this_does}>{line}</li>
           </ul>
         </details>
-        <ul :if={@step.children != []} class="flex flex-col gap-1">
-          <li
-            :for={child <- @step.children}
-            id={step_dom_id(@prefix, child.id)}
-            data-status={child.status}
-            class="flex items-baseline gap-2"
-          >
-            <span class="font-mono" style={"font-size:10.5px;" <> faint()}>{child.id}</span>
-            <span style={"font-size:12px;" <> child_title_style(child.status)}>{child.title}</span>
-          </li>
-        </ul>
       </div>
     </li>
     """
   end
+
+  # ---------------------------------------------------------------- step 5: the onboard loop
+
+  attr :prefix, :string, required: true
+  attr :children, :list, required: true
+
+  defp substeps(assigns) do
+    ~H"""
+    <ul class="mt-0.5 flex flex-col gap-1">
+      <li
+        :for={child <- @children}
+        id={step_dom_id(@prefix, child.id)}
+        data-status={child.status}
+        class="flex min-w-0 items-center gap-2"
+        style="font-size:12.5px"
+      >
+        <span
+          class={["setup-substep-glyph font-mono", child.status == :waiting && "animate-pulse"]}
+          style={"width:12px;font-weight:700;" <> substep_color(child.status)}
+        >
+          {substep_glyph(child.status)}
+        </span>
+        <span
+          class="setup-substep-title-cell flex-none"
+          style={if(child.status == :pending, do: faint(), else: "")}
+        >
+          <span class="font-mono" style={"font-size:10.5px;" <> faint()}>{child.id}</span>
+          <span class="setup-substep-title">{child.title}</span>
+        </span>
+        <span class="flex-1"></span>
+        <span
+          :if={child.evidence}
+          class="setup-substep-evidence truncate font-mono"
+          style={"font-size:10.5px;" <> muted()}
+        >
+          {child.evidence}
+        </span>
+      </li>
+    </ul>
+    """
+  end
+
+  # Step 5's live blocks, interactive only: the waiting-for-PR block (frame D), the failed
+  # sub-step (frame E), the interview answers (F1, F2) and the proposed changes (F2).
+  attr :prefix, :string, required: true
+  attr :step, :map, required: true
+  attr :current_sub_id, :string, required: true
+
+  defp onboard_blocks(assigns) do
+    children = Map.new(assigns.step.children, &{&1.id, &1})
+    current = children[assigns.current_sub_id]
+    interview = children[Setup.step_id(:interview)]
+    customize = children[Setup.step_id(:customize)]
+    current_id = current && current.id
+
+    assigns =
+      assign(assigns,
+        current: current,
+        pr_url: current && current.status == :waiting && current.data["pr_url"],
+        interview: interview,
+        answers: answered(interview),
+        show_answers?: current_id in [Setup.step_id(:interview), Setup.step_id(:customize)],
+        asking?: current_id == Setup.step_id(:interview),
+        changes: if(current_id == Setup.step_id(:customize), do: List.wrap(customize.data["changes"]), else: [])
+      )
+
+    ~H"""
+    <div
+      :if={@pr_url}
+      id={"#{@prefix}-onboard-pr"}
+      class="flex flex-col gap-1 rounded-lg p-2.5"
+      style="background:color-mix(in oklab, var(--color-secondary) 7%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100))"
+    >
+      <span style="font-size:12px;font-weight:600">Waiting for your PR to merge</span>
+      <span style={"font-size:11.5px;" <> muted()}>
+        The runner can't work until these files are on origin/{@current.data["base"]}.
+        <a
+          id={"#{@prefix}-onboard-pr-link"}
+          href={@pr_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="link link-primary"
+        >
+          {String.replace_prefix(@pr_url, "https://", "")}
+        </a>
+      </span>
+    </div>
+    <div
+      :if={@current && @current.status == :failed}
+      id={"#{@prefix}-onboard-failed"}
+      class="flex flex-col gap-1 rounded-lg p-2.5"
+      style="background:color-mix(in oklab, var(--color-error) 7%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100))"
+    >
+      <span style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))">
+        {@current.id} failed {times(@current.data["attempts"] || 1)}, now asking you in the terminal
+      </span>
+      <span :if={@current.error} class="font-mono" style={"font-size:11px;" <> muted()}>
+        {@current.error}
+      </span>
+    </div>
+    <.answers
+      :if={@show_answers? and @answers != []}
+      prefix={@prefix}
+      answers={@answers}
+      asking?={@asking?}
+    />
+    <.changes :if={@changes != []} prefix={@prefix} changes={@changes} />
+    """
+  end
+
+  attr :prefix, :string, required: true
+  attr :answers, :list, required: true, doc: "`[{question, answer}]` in catalog order"
+  attr :asking?, :boolean, required: true, doc: "5.3 is still current: the next question is out"
+
+  defp answers(assigns) do
+    assigns = assign(assigns, total: length(Setup.interview_questions()), count: length(assigns.answers))
+
+    ~H"""
+    <details
+      id={"#{@prefix}-answers"}
+      open
+      class="flex flex-col gap-1 rounded-lg border border-base-300 bg-base-100 px-3 py-2"
+    >
+      <summary
+        class="flex cursor-pointer list-none items-center gap-1.5"
+        style="font-size:12px;font-weight:600"
+      >
+        <span class="font-mono" style={"font-size:10px;" <> faint()}>▾</span>
+        Your answers
+        <span
+          id={"#{@prefix}-answers-count"}
+          class="font-mono"
+          style={"font-size:10.5px;font-weight:400;" <> muted()}
+        >
+          {@count} of {@total}
+        </span>
+      </summary>
+      <div class="mt-1 flex flex-col gap-1">
+        <div
+          :for={{question, answer} <- @answers}
+          id={"#{@prefix}-answer-#{question.id}"}
+          class="grid gap-2"
+          style="grid-template-columns:96px minmax(0,1fr);font-size:12px"
+        >
+          <span style={muted()}>{question.label}</span>
+          <span class="truncate" style="font-weight:500">{answer}</span>
+        </div>
+        <div
+          :if={@asking? and @count < @total}
+          id={"#{@prefix}-question-next"}
+          class="flex items-center gap-1.5 font-mono"
+          style="font-size:10.5px;color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content))"
+        >
+          <span
+            class="animate-pulse"
+            style="width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block"
+          >
+          </span>
+          question {@count + 1} of {@total} in your terminal…
+        </div>
+        <div id={"#{@prefix}-project-md"} class="font-mono" style={"font-size:10.5px;" <> faint()}>
+          → .relay/project.md (committed in 5.6) · copy kept on the board
+        </div>
+      </div>
+    </details>
+    """
+  end
+
+  attr :prefix, :string, required: true
+  attr :changes, :list, required: true, doc: ~S(5.4's `data["changes"]`)
+
+  defp changes(assigns) do
+    rows =
+      for {change, i} <- Enum.with_index(assigns.changes, 1) do
+        {glyph, label, color} = decision_marker(change)
+
+        %{
+          i: i,
+          decision: change["decision"],
+          glyph: glyph,
+          label: label,
+          color: color,
+          faint?: glyph == pending_glyph(),
+          segments: code_segments(change["summary"])
+        }
+      end
+
+    assigns = assign(assigns, rows: rows)
+
+    ~H"""
+    <div
+      id={"#{@prefix}-changes"}
+      class="flex flex-col gap-1.5 rounded-lg px-3 py-2"
+      style="background:color-mix(in oklab, var(--color-secondary) 6%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100))"
+    >
+      <div id={"#{@prefix}-changes-header"} style="font-size:12px;font-weight:600">
+        {length(@changes)} proposed changes · agreeing one at a time
+      </div>
+      <div
+        :for={row <- @rows}
+        id={"#{@prefix}-change-#{row.i}"}
+        data-decision={row.decision}
+        class="flex items-start gap-2"
+        style="font-size:12px"
+      >
+        <span class="setup-change-glyph font-mono" style={"width:12px;font-weight:700;" <> row.color}>
+          {row.glyph}
+        </span>
+        <span
+          class="setup-change-summary min-w-0 flex-1"
+          style={if(row.faint?, do: faint(), else: "")}
+        >
+          <%= for {kind, text} <- row.segments do %>
+            <%= if kind == :code do %>
+              <code class="font-mono">{text}</code>
+            <% else %>
+              {text}
+            <% end %>
+          <% end %>
+        </span>
+        <span class="setup-change-label flex-none font-mono" style={"font-size:10.5px;" <> row.color}>
+          {row.label}
+        </span>
+      </div>
+      <div id={"#{@prefix}-changes-note"} class="font-mono" style={"font-size:10.5px;" <> muted()}>
+        Nothing is changed until all {length(@changes)} are decided. Then only the accepted ones are applied.
+      </div>
+    </div>
+    """
+  end
+
+  # 5.3's answers as `[{question, answer}]`, in catalog order, unanswered questions left out.
+  defp answered(nil), do: []
+
+  defp answered(interview) do
+    answers = interview.data["answers"] || %{}
+
+    for question <- Setup.interview_questions(),
+        answer = answers[question.id],
+        is_binary(answer) and String.trim(answer) != "",
+        do: {question, answer}
+  end
+
+  # Whole minutes since step 5 was reached, at least 1.
+  defp elapsed_minutes(reached_at, now), do: max(div(DateTime.diff(now, reached_at), 60), 1)
+
+  defp times(1), do: "1 time"
+  defp times(n), do: "#{n} times"
+
+  # A change summary split on backticks: odd segments are code. With an odd number of backticks
+  # the last one has no partner and stays literal text.
+  defp code_segments(summary) do
+    parts = String.split(to_string(summary), "`")
+    last = length(parts) - 1
+    paired? = rem(length(parts), 2) == 1
+
+    parts
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {text, ^last} when not paired? -> {:text, "`" <> text}
+      {text, i} when rem(i, 2) == 1 -> {:code, text}
+      {text, _i} -> {:text, text}
+    end)
+  end
+
+  # A 5.4 change's `{glyph, label, colour style}` by its `"decision"` (`Setup.change_decisions/0`).
+  defp decision_marker(%{"decision" => "accepted"}), do: {"✓", "accepted", tone_70("success")}
+  defp decision_marker(%{"decision" => "rejected"}), do: {"✕", "rejected", tone_70("error")}
+  defp decision_marker(%{"decision" => "edited"} = change), do: {"✎", change["note"], tone_70("primary")}
+  defp decision_marker(%{"decision" => "asking"}), do: {"▸", "asking you now", tone_70("secondary")}
+  defp decision_marker(_pending), do: {pending_glyph(), "", @faint}
+
+  defp pending_glyph, do: "○"
+
+  defp substep_glyph(:done), do: "✓"
+  defp substep_glyph(:active), do: "▸"
+  defp substep_glyph(:waiting), do: "◌"
+  defp substep_glyph(:failed), do: "!"
+  defp substep_glyph(:skipped), do: "–"
+  defp substep_glyph(:pending), do: pending_glyph()
+
+  defp substep_color(:done), do: tone_70("success")
+  defp substep_color(:failed), do: tone_70("error")
+  defp substep_color(status) when status in [:active, :waiting], do: tone_70("secondary")
+  defp substep_color(_pending_or_skipped), do: @faint
+
+  defp tone_70(tone), do: "color:color-mix(in oklab, var(--color-#{tone}) 70%, var(--color-base-content))"
+
+  # ---------------------------------------------------------------- steps 2–4
 
   attr :prefix, :string, required: true
   attr :selected, :string, required: true
@@ -418,6 +728,7 @@ defmodule RelayWeb.SetupComponents do
   attr :selected_llm, :string, default: nil
   attr :board_slug, :string, default: nil
   attr :class, :any, default: "flex", doc: "the aside's display classes (BoardLive: `hidden drawer:flex`)"
+  attr :now, DateTime, default: nil, doc: "the clock step 5's elapsed time reads; nil is `DateTime.utc_now/0`"
 
   def setup_panel(assigns) do
     assigns =
@@ -491,6 +802,7 @@ defmodule RelayWeb.SetupComponents do
           install_command={@install_command}
           selected_llm={@selected_llm}
           board_slug={@board_slug}
+          now={@now}
         />
       </div>
       <div
@@ -677,9 +989,6 @@ defmodule RelayWeb.SetupComponents do
   defp title_style(:pending), do: @title <> @faint
   defp title_style(:skipped), do: @title <> @faint
   defp title_style(_status), do: @title
-
-  defp child_title_style(:done), do: ""
-  defp child_title_style(_status), do: @faint
 
   defp tag_style(tone) do
     text = if tone == "secondary", do: 70, else: 65

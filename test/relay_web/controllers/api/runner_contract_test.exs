@@ -302,6 +302,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     [note_image_item] = note_entry["images"]
 
+    # RE445 — `./relay setup status|report` read and move the setup checklist. Captured off the
+    # real routes on a template board sitting on sub-step 5.1; the refusals off the same routes.
+    setup = setup_capture(user, exclusive.conn)
+
     document = %{
       "version" => 15,
       # RE436 — the shared path/condition/reading cases both usage-rule evaluators must pass:
@@ -409,6 +413,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "board_url_line_example" => Scaffold.board_url_line("http://board.test"),
         "manifest" => scaffold_placeholders(scaffold_manifest)
       },
+      "setup" => setup,
       "tasks" => %{
         "create_request" => tasks_create_request,
         "create_response" => task_placeholders(tasks_create_response),
@@ -468,6 +473,18 @@ defmodule RelayWeb.Api.RunnerContractTest do
     assert hd(document["heartbeat"]["request"]["harnesses"])["usage"]["paused"]["reason"] == "limit"
     assert document["claim_request"]["harnesses"] == ["claude-code"]
     refute Map.has_key?(document["vocabulary"], "rate_limit_windows")
+
+    # RE445 — the setup wire ./relay setup builds against.
+    assert document["setup"]["report_statuses"] == ["waiting", "done", "failed", "skipped"]
+    assert document["setup"]["not_current_keys"] == ["code", "current", "message"]
+    assert document["setup"]["report_path_example"] == "/api/setup/steps/5.1"
+
+    assert Enum.all?(
+             ~w(current current_sub_id first_flow_stage interview steps),
+             &(&1 in document["setup"]["status_keys"])
+           )
+
+    assert Enum.all?(~w(children data evidence error status), &(&1 in document["setup"]["step_keys"]))
 
     assert_matches_fixture!(document)
   end
@@ -540,6 +557,56 @@ defmodule RelayWeb.Api.RunnerContractTest do
       |> put_req_header("content-type", "application/json")
 
     %{board: board, flow: flow, conn: conn, next_up: next_up}
+  end
+
+  # A Bare minimum board on setup sub-step 5.1 with its board key: the GET, a 200 report carrying
+  # every request key, a 409 out-of-order report, and a 404 from `no_checklist_conn`'s board.
+  defp setup_capture(user, no_checklist_conn) do
+    {:ok, board} =
+      Relay.Boards.create_board(user, %{name: "Contract setup", slug: "contract-setup", template: "bare-minimum"})
+
+    {:ok, %{token: token}} = Relay.Setup.choose_llm(board, user, "claude-code")
+    for step <- ~w(3 4), do: {:ok, _} = Relay.Setup.advance(board, step, :done, %{})
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> put_req_header("content-type", "application/json")
+
+    status = conn |> get(~p"/api/setup") |> json_response(200) |> Map.fetch!("data")
+    current = status["current"]
+
+    report_request = %{
+      "status" => "failed",
+      "evidence" => "422 · attempt 3/3",
+      "error" => "422",
+      "data" => %{"attempts" => 3}
+    }
+
+    conn |> post(~p"/api/setup/steps/#{current}", Jason.encode!(report_request)) |> json_response(200)
+
+    not_current =
+      conn
+      |> post(~p"/api/setup/steps/#{List.last(Relay.Setup.steps()).id}", Jason.encode!(%{"status" => "done"}))
+      |> json_response(409)
+      |> Map.fetch!("error")
+
+    no_checklist = no_checklist_conn |> get(~p"/api/setup") |> json_response(404) |> Map.fetch!("error")
+    [step | _] = status["steps"]
+
+    %{
+      "status_path" => "/api/setup",
+      "report_path_example" => "/api/setup/steps/#{current}",
+      "status_keys" => status |> Map.keys() |> Enum.sort(),
+      "step_keys" => step |> Map.keys() |> Enum.sort(),
+      "llm_keys" => status["llm"] |> Map.keys() |> Enum.sort(),
+      "interview_keys" => status["interview"] |> hd() |> Map.keys() |> Enum.sort(),
+      "report_request_keys" => report_request |> Map.keys() |> Enum.sort(),
+      "report_statuses" => Enum.map(Relay.Setup.advance_statuses(), &Atom.to_string/1),
+      "not_current_keys" => not_current |> Map.keys() |> Enum.sort(),
+      "no_checklist_code" => no_checklist["code"],
+      "not_current_code" => not_current["code"]
+    }
   end
 
   defp claim_one(ctx, capacity) do

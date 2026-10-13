@@ -63,8 +63,8 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 90
-RUNNER_FINGERPRINT = "6983e8c36b8750dbc96ae09450f67ed0672ff10fc43b7c40c9de15f315c4b1e1"
+RUNNER_VERSION = 91
+RUNNER_FINGERPRINT = "3ebd3b2b7ed633da34a68d1758922a9e2ea1ab857951c547168a6f2fab98a79f"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -6930,6 +6930,105 @@ def cmd_update(args):
     return report
 
 
+# ============================ guided setup (RE445) ============================
+#
+# `relay setup status` / `relay setup report` are the only way /relay-onboard reads and moves the
+# board's guided-setup checklist (GET /api/setup, POST /api/setup/steps/:step). The board never
+# hands out steps: the skill reads the checklist, does the first unmet sub-step, reports it.
+
+# The statuses a report may set — Relay.Setup.advance_statuses/0, pinned by the runner contract
+# fixture (CONTRACT["setup"]["report_statuses"]).
+SETUP_REPORT_STATUSES = ("waiting", "done", "failed", "skipped")
+# Both verbs exit with this on a board that has no checklist (it predates guided setup), so the
+# skill can tell "use /relay-doctor instead" apart from a failed call. Nothing else exits 3.
+SETUP_NO_CHECKLIST_EXIT = 3
+SETUP_GLYPHS = {"done": "✓", "skipped": "–", "failed": "!", "waiting": "◌", "active": "▸",
+                "pending": "○"}
+
+
+def _no_checklist():
+    print("relay: no guided setup on this board", file=sys.stderr)
+    raise SystemExit(SETUP_NO_CHECKLIST_EXIT)
+
+
+def _setup_steps(checklist):
+    """Every step, top-level then its children, in checklist order."""
+    for step in checklist["steps"]:
+        yield step
+        yield from step.get("children") or []
+
+
+def setup_next_line(checklist):
+    if checklist.get("finished"):
+        return None
+    current = checklist.get("current")
+    title = next((s["title"] for s in _setup_steps(checklist) if s["id"] == current), None)
+    return f"Next is {current} ({title})." if title else f"Next is {current}."
+
+
+def setup_step_line(step, indent=""):
+    note = step.get("error") if step["status"] == "failed" else step.get("evidence")
+    line = f"{indent}{SETUP_GLYPHS.get(step['status'], '?')} {step['id']} {step['title']}"
+    return f"{line} · {note}" if note else line
+
+
+def format_setup_checklist(checklist):
+    head = (f"Setup checklist for {checklist['board']}: "
+            f"{checklist['done_count']} of {len(checklist['steps'])} done.")
+    nxt = setup_next_line(checklist)
+    lines = [f"{head} {nxt}" if nxt else head]
+    for step in checklist["steps"]:
+        lines.append(setup_step_line(step))
+        lines.extend(setup_step_line(child, "  ") for child in step.get("children") or [])
+    return "\n".join(lines)
+
+
+def cmd_setup_status(args):
+    resp = api("GET", "/api/setup", soft_404=True)
+    if resp is None:
+        _no_checklist()
+    checklist = resp["data"]
+    emit(args, checklist, format_setup_checklist(checklist))
+
+
+def setup_report_body(args):
+    body = {"status": args.status}
+    if args.evidence is not None:
+        body["evidence"] = args.evidence
+    if args.error is not None:
+        body["error"] = args.error
+    if args.data is not None:
+        try:
+            data = json.loads(read_arg(args.data))
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            die("--data must be a JSON object, e.g. '{\"attempts\": 3}'")
+        body["data"] = data
+    return body
+
+
+def cmd_setup_report(args):
+    if "/" in args.step:
+        die(f"{args.step!r} is not a step id (e.g. 5.1)")
+    body = setup_report_body(args)
+    resp = api("POST", f"/api/setup/steps/{args.step}", body, soft_404=True, soft_conflict=True)
+    if resp is None:
+        _no_checklist()
+    if "error" in resp:
+        err = resp["error"]
+        msg = err.get("message") or "the step can't be reported"
+        current = err.get("current")
+        if current and current not in msg:
+            msg = f"{msg} (the current step is {current})"
+        die(f"{err.get('code', 'conflict')}: {msg}")
+    checklist = resp["data"]
+    line = f"{SETUP_GLYPHS.get(args.status, '?')} {args.step} {args.status}"
+    if args.evidence:
+        line = f"{line} · {args.evidence}"
+    emit(args, checklist, f"{line}\n{setup_next_line(checklist) or 'Setup checklist done.'}")
+
+
 # ============================ argparse ============================
 #
 # RE319 — `relay -h` groups the commands. argparse has no native subcommand groups, so COMMANDS
@@ -6984,6 +7083,7 @@ COMMANDS = (
     ("Runner", "start", "run this machine as a runner: claim node-jobs and run them"),
     ("Runner", "runners", "who is connected, their capacity, and the jobs they hold"),
     ("Runner", "git-fetch", "git fetch with retry (for flow shell nodes)"),
+    ("Setup", "setup", "read the board's guided-setup checklist, or report one step (used by /relay-onboard)"),
     ("Setup", "update", "install or refresh the Relay-owned files from the board"),
     ("Setup", "version", "the git SHA the deployed app was built from (no API key needed)"),
 )
@@ -7232,6 +7332,18 @@ def build_parser():
     add("git-fetch", cmd_git_fetch)
 
     # ---- Setup ----
+    setup = verbs(add("setup", None))
+    verb(setup, "status", cmd_setup_status,
+         "print the board's guided-setup checklist and its current step (exit 3: no checklist)")
+    sr = verb(setup, "report", cmd_setup_report,
+              "report one step's status; refused with not_current unless it is the current step",
+              ("step", "the step id, e.g. 5.1"))
+    sr.add_argument("--status", required=True, choices=SETUP_REPORT_STATUSES,
+                    help="the step's new status")
+    sr.add_argument("--evidence", metavar="TEXT", help="what shows the step happened")
+    sr.add_argument("--error", metavar="TEXT", help="why the step failed")
+    sr.add_argument("--data", metavar="JSON",
+                    help='a JSON object of structured detail: text, "-" for stdin, or @path')
     up = add("update", cmd_update, json_flag=True)
     mode = up.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true",

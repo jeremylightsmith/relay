@@ -1,215 +1,239 @@
 ---
 name: relay-onboard
-description: Use when wiring a repo to a Relay board for the first time, or when a repo's factory and its flows disagree wholesale rather than at one node — seeding the default factory, adopting the repo's existing agents and skills, or a hybrid, looping until `/relay-doctor` reports zero errors. Keywords: onboard, wire up, set up Relay, new project, bootstrap, seed, adopt, factory, green doctor.
+description: Use when wiring a repo to a Relay board for the first time — after the board's install script has run — to work step 5 of the board's guided-setup checklist (sub-steps 5.1–5.8: pull the flows, detect the repo, interview, customize, push, land the files, follow-ups, first card) as a resumable loop through `./relay setup status` and `./relay setup report`. Keywords: onboard, wire up, set up Relay, new project, guided setup, setup checklist, step 5, project.md.
 ---
 
 # Relay Onboard
 
 ## Overview
 
-Onboarding is a **reconcile loop with a real oracle**: change the repo, change the flow, re-run
-the doctor, repeat — until it reports **zero errors**. That is the whole method.
+Onboarding is **a loop over the board's setup checklist**. The board keeps the checklist; you
+read it, do the first sub-step that isn't done, report it, and read it again:
 
-    onboard = reconcile(repo ↔ flow) until /relay-doctor is green
+    loop: ./relay setup status → first unmet sub-step → say what you'll do → do it
+          → ./relay setup report → re-read status
 
-Three legitimate paths, and the human picks one:
+The board is the oracle — it never hands out steps, it only says what is done. Every report
+updates the board's setup wizard live, so the human can watch from the browser.
 
-- **Seed** — take the shipped default flow shape as-is; **author** the agents and skills it
-  names; adjust the gates. (Nothing fetches a factory for you: the scaffold ships `./relay`
-  and the three `relay-*` skills, and ADR 0010 makes every other agent and skill the repo's own.)
-  A seeded factory takes the **migrated shape** from the start — see Phase 3.
-- **Adopt** — keep the repo's existing agents and skills; remap the flow's nodes onto them.
-- **Hybrid** — seed the flow's shape, adopt wherever the repo already has a better artifact.
+**Plain chat.** Talk like a person in the terminal: no boxes, menus, tables or progress bars.
+Before each sub-step, say what you are about to do, using the checklist's numbers (5.1–5.8).
+Ask **one question at a time**, and "skip" always works.
 
-**Green means zero doctor *errors*.** Warnings land in the closing summary as a human checklist;
-they never block and are never chased.
+**Never run this from a flow node.** It asks the human questions; a flow node has nobody to
+answer.
 
-**This skill adds no checks of its own.** `/relay-doctor` owns the check list and the report
-format; onboarding consumes its `ERROR` / `WARNING` / `MIGRATION` lines and its
-`N errors, M warnings, K migrations pending` summary.
-Restating a check here would be a second copy of it, and the copy would drift. The doctor is a
-**skill**, invoked with the `Skill` tool — there is no `relay doctor` subcommand.
+**Blast radius:** Relay's own files only — `./relay`, the onboarding skill file(s), `relay.md`
+and the one pointer line in your LLM's convention file, `.gitignore`, everything under
+`.relay/` (flows, `runner.json`, `prepare-worktree.sh`, `project.md`) — plus the board's flows
+and the cards made in 5.7–5.8. It **never touches app code**: no source, tests, config or
+dependencies of the project itself. If a fix seems to need app code, it becomes a `#setup card`
+instead.
 
-**Never run this from a flow node.** It asks questions and confirms every mutation; a runner has
-nobody to ask.
+**Say "your LLM", never a product name.** This skill is shared by every supported coding
+agent, so it names none of them.
 
-**Blast radius:** `.claude/` files, `.relay/runner.json`, and flow documents.
-**Never** app code, git branches, commits, or cards.
+## Start / resume
 
-**Idempotent and resumable.** Every run starts by running the doctor and does only what is
-missing, so an interrupted session continues instead of restarting. On an already-green repo, say
-"nothing to do" and stop.
+Run `./relay setup status --json` and read the exit code first.
 
-## When to Use
+- **Exit code 3** — the board has no checklist. Print exactly
+  *"This board predates guided setup; use /relay-doctor."* and stop. Write nothing.
+- **`current_id` is before 5** (the board, LLM, key or install step is still pending) — say
+  which step is pending and what the human does there (on the board, or by running the install
+  script), then stop.
+- **`finished` is true, or `current_id` is 6 or 7** — onboarding is done; go to **Close**.
+- **Otherwise** announce:
+  *"Setup checklist for <board>: <done_count> of 7 done. Next is <current>, <what it does>."*
+  and work from `current_sub_id`.
 
-- Wiring Relay into a repo for the first time, right after the board's install command.
-- A repo whose `.claude/` and whose flows have drifted so far apart that the answer is a *path*,
-  not a patch.
-- Before enabling a board's flows for the first time.
+Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe at any point:
+running `/relay-onboard` again resumes at the first unmet sub-step.
 
-Already wired and one node broke? That is `/relay-doctor`, not this.
+The status JSON carries what the loop needs: `board`, `template`, `llm` (`harness`, `label`,
+`cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
+`done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`, and
+`steps` (each with `id`, `title`, `status`, `evidence`, `error`, `data`, `children`).
 
-## Phase 0 — Floor check
+## The loop
 
-Two independent floors. The credential floor is always a **stop** — a skill cannot mint a key.
-The scaffold floor stops only when `./relay` itself is missing; a stale `relay-*` skill
-self-heals via `./relay update` instead.
+1. `./relay setup status --json` → find the current sub-step (`current_sub_id`).
+2. Say what you are about to do.
+3. Do it (the sections below).
+4. Report it:
 
-1. **Scaffold floor** — `./relay` and the three `relay-*` skills must be installed. If
-   `./relay` is missing, stop and hand the human the entry point — step 4 of the board's setup
-   wizard, which shows this command with the board's host and slug filled in:
+       ./relay setup report <step> --status waiting|done|failed|skipped \
+         [--evidence TEXT] [--error TEXT] [--data JSON|@path]
 
-   ```bash
-   curl -fsSL <board>/b/<slug>/install | sh
-   ```
+5. Re-read status and continue.
 
-   If `./relay` is present but any `relay-*` skill is missing or stale, refresh them with the
-   **command**, not the skill — the missing one may *be* `/relay-update`, and the `Skill` tool
-   cannot resolve a name that is not installed:
+Only the current sub-step can be reported. A report out of order exits 1 with `not_current`
+and names the current step on stderr — re-read status and carry on from the step the board
+names. Re-reporting a step that already finished is a harmless no-op.
 
-   ```bash
-   ./relay update --json
-   ```
+## When a step won't go green
 
-   Report the `written` list. A skill file written mid-session is not discoverable until Claude
-   Code restarts, so if this wrote any `SKILL.md`, stop and tell the human to restart the session
-   and re-run `/relay-onboard`. Resume from Phase 1 when the floor is met.
+Diagnose on this machine, fix the cause, retry — **at most 3 attempts**. Say each attempt as it
+happens ("Rejected (1/3): …, retrying"). After the 3rd failure:
 
-   `.relay/runner.json` is **not** part of that floor — it is not a Relay-owned served file —
-   but the `./relay update` you just ran creates a documented starter one when it is missing
-   (report key `config`), so onboarding reviews it rather than authors it. `relay.md` **is**
-   served, so `update` installs it and you never author one.
+1. Report it failed:
 
-2. **Credential floor** — `RELAY_URL` and `RELAY_API_KEY` must be set and `./relay board` must
-   succeed. If not, stop with the checklist: mint a board key at
-   `$RELAY_URL/board/<slug>/settings` → **API keys** (shown once), export both variables, re-run
-   `./relay board`. The doctor cannot run without a reachable board, and a skill cannot mint a
-   key.
+       ./relay setup report <step> --status failed --error "<last error>" \
+         --evidence "<short what> · attempt 3/3" --data '{"attempts": 3}'
 
-## Phase 1 — Detect
+2. Tell the human you are stuck on that step, what you tried, and offer concrete options:
+   **(a) show the diff** of what you changed, **(b) reset and redo** the step (and the step it
+   depends on, if that is the cause), or **(c) skip it and make a #setup card** — report the
+   step `skipped` and create a Backlog card with `--tag setup` describing what is left.
 
-Run `/relay-doctor` (via the `Skill` tool) for the full starting diagnosis. Gather the repo's
-inventory with the runner's own resolver — import it, never re-derive it:
+Never mark a step done that isn't.
 
-```bash
-python3 -c "
-import importlib.machinery, importlib.util, json
-loader = importlib.machinery.SourceFileLoader('relay_runner', 'relay')
-spec = importlib.util.spec_from_file_location('relay_runner', 'relay', loader=loader)
-mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-print(json.dumps(mod.collect_capabilities()))
-"
-```
+## 5.1 Pull the flows
 
-Report the starting state in one block: which flows exist and whether each is enabled, the error
-and warning counts, which nodes fail to resolve and why, and what the repo's `.claude/` actually
-holds. This is the diagnosis the path choice is made from.
+Say you are pulling the board's flows. List them with `./relay flow`, then for each key write
+`./relay flow <key> --json` to `.relay/flows/<key>.json`. Report:
 
-> The **first** doctor run in a session may include its per-node I/O-contract confirmation
-> dialogue. Those confirmations are persisted into the flow by `flow-push`, so later loop
-> iterations do not re-ask. If the doctor starts re-asking on a second pass, that is a bug to
-> report, not to work around.
+    ./relay setup report 5.1 --status done --evidence "<N> flows"
 
-## Phase 2 — Choose the path
+## 5.2 Detect, then confirm
 
-**An explicit user choice, never a hidden inference.** Put the Phase 1 evidence next to the
-options — "the default Code flow names 8 agents; your repo has 2" — and ask for **Seed**,
-**Adopt**, or **Hybrid**.
+Say you'll read the repo and tell the human what you found. Work out: the stack and versions;
+the test, lint and build commands; the one "all green" command; the base branch; CI; and the
+convention files (`AGENTS.md`, the pointer file and similar — flow prompts will point at them).
+Send **one** message: "Here's what I found. Correct anything that's wrong:" with that list.
+Apply corrections, then report:
 
-A new board already carries the shipped `spec` / `plan` / `code` flows, **disabled**. So seed mode
-is a repo-side job plus a gate adjustment, not "author a flow from nothing".
+    ./relay setup report 5.2 --status done --evidence "<stack> · <green command>"
 
-## Phase 3 — Plan
+## 5.3 Interview → .relay/project.md
 
-Show the **whole** plan before mutating anything, and get sign-off on it as a unit:
+Ask only what the repo can't answer. The questions come from status `interview`, in order —
+ids `done`, `landing`, `deploy`, `baton`, `ui`, `never_touch`, `warm_up`, `capacity`,
+`misfits`. Say how many there are, that answers go to `.relay/project.md` (flow prompts read
+it; 5.6 commits it) plus a copy on the board, and that "skip" keeps the default.
 
-- files to create or modify, each with its diff — including a review of `.relay/runner.json`
-  with the human as part of the shown plan: its `capacity`, its `base`, and uncommenting the
-  `worktrees` block when the plan adds `.relay/prepare-worktree.sh` (the file is inside this
-  skill's declared blast radius, so those edits are yours to propose). If it is somehow
-  missing, run `./relay update` to create it — **never hand-write it**. It carries no usage
-  limits: PAUSE AT is set per harness in Settings → Agents;
-- flow changes as a **node-level** diff (node key → what changes);
-- the **verify command**, asked here, once.
+Ask them **one at a time** ("1/9 <question>"). Sharpen a question with what you found in 5.2
+(e.g. the dev server and port for `ui`, the measured cold build time for `warm_up`). "skip"
+records the default as the answer.
 
-**The verify command.** Ask: *"what one command proves this repo is green?"* Propose a detected
-candidate as the default — a `precommit` alias in `mix.exs`, a `check` or `test` target in a
-`Makefile`, a `package.json` script — and let the human override it. Then pull each flow
-(`./relay flow <key> --json`) and replace **every** occurrence of the default's
-`mix precommit` in the nodes' `run` strings: the shell gates that run it *and* the agent prompts
-that name it. Search the pulled document for the literal rather than working from a memorised node
-list — the list changes with the flow. Leave the flow's **shape** alone.
+After **each** answer, report every answer so far (the whole map, every time):
 
-**Adopt mapping is a proposal, not a computation.** For each unresolved node, propose the best
-candidate from the `.claude/` inventory *with the evidence for it*, show the whole mapping at
-once, and iterate until the human is happy. A node with no candidate has exactly two exits, the
-human's choice:
+    ./relay setup report 5.3 --status waiting --data '{"answers": {"done": "merged", "landing": "PR"}}'
 
-- **author one** — write the file the node names: an agent is `.claude/agents/<name>.md` with
-  YAML frontmatter (`name`, `description`, optional `tools`) and a body that IS its system
-  prompt; a skill is `.claude/skills/<name>/SKILL.md` with `name` + `description` frontmatter and
-  the procedure in the body. Keep it to one job, and write the `description` so a reader can tell
-  when it applies — that string is the whole basis for choosing it. Or
-- **drop the node** — remove it from the flow and re-point its edges.
+At the end write `.relay/project.md` in this format — a title, then one section per question
+in catalog order, its `label` as the heading, the question on one italic line, the answer
+beneath it:
 
-**Author the migrated shape.** A planner or task-scoped agent you author for a seeded node starts
-out current: the planner writes the header with `relay plan` and the tasks with
-`relay tasks add`; the agents behind task nodes (`implement`, the reviewers, the fixer) fetch
-their task with `relay task show`. The shipped flows already declare `writes: ["plan", "tasks"]`
-on the plan node and `reads: ["tasks"]` on the task nodes, and `writes` is enforced at run time,
-so a planner that does anything else fails on its first card. The spec for those files is the
-doctor's `tasks-cutover` migration recipe (`/relay-doctor`, **Factory migrations**) — follow it
-there rather than restating it here.
+    # <board> — project notes for Relay
 
-Never auto-map. The user is the authority on their own factory.
+    ## Done means
+    *What does "done" mean for a card: a PR opened, merged, or deployed?*
+    merged
 
-## Phase 4 — Apply → re-check → repeat
+    ## Changes land
+    …
 
-Apply **one** step, re-run `/relay-doctor`, show the delta (`6 errors → 3`), repeat.
+Then report done with the final answers:
 
-- **Small, shown, confirmed, reversible.** Nothing the user has not seen. Every flow push is
-  confirmed node-by-node first — the rule `/relay-doctor` already enforces.
-- **Termination.** Stop at **zero errors**. Also stop when **two consecutive passes** fail to
-  reduce the error count, and say plainly what is left and why: a stall is a report, not a retry
-  loop.
-- **Migrations too.** The loop also runs until the doctor reports no migration pending — each
-  one offered, then applied or skipped by the human. A skipped migration does not block green or
-  enabling; it goes in the closing summary.
-- **Warnings are reported, not chased.** They go in the closing summary as a human checklist
-  ("start `./relay start`", "this agent file is named by no enabled flow").
+    ./relay setup report 5.3 --status done --evidence "9 of 9 answered" --data '{"answers": {…}}'
 
-## Phase 5 — Enable
+## 5.4 Customize: propose, agree one by one, apply
 
-Only once the doctor reports **zero errors**, offer to turn the flows on, taking
-**one confirmation per flow**.
-Show the trigger stages it will pull from, work in, and land on, and say plainly that enabling
-means the board starts pulling real cards into this repo. Then push it:
+From the answers and what you detected, list **every** proposed change up front, numbered.
+Candidates:
 
-```bash
-./relay flow <key> --json > /tmp/<key>.json    # edit: "enabled": true
-./relay flow-push <key> /tmp/<key>.json
-```
+- flow commands and nodes (e.g. the validate command → the "all green" command; drop the
+  screenshot and smoke nodes when there is no UI);
+- `.relay/runner.json` — `capacity`, from the `capacity` answer (how much of the LLM plan
+  Relay may use is set per harness on the board — say so);
+- the `WARM=""` list in `.relay/prepare-worktree.sh`, from the `warm_up` answer;
+- pointers to `.relay/project.md` (and the never-touch list) in flow prompts.
 
-**Never offer to enable a flow that still has errors.** Declining is a first-class outcome — the
-closing summary then says where to turn them on by hand (`$RELAY_URL/board/<slug>/settings`
-→ **Flows**).
+Say you'll go through them one at a time and change **nothing** until every one is decided.
+Report the whole list, each `pending`:
 
-Close with a summary: what changed, what the doctor now reports, any migration the human skipped,
-and the remaining human checklist.
+    ./relay setup report 5.4 --status waiting \
+      --data '{"changes": [{"summary": "validate: `mix test` → `mix precommit`", "decision": "pending", "note": null}]}'
+
+Then for each change in turn: mark it `asking` and report the whole list, ask "(yes / no /
+edit)", record the answer as `accepted`, `rejected` or `edited` (an edit's wording goes in
+`note`), and report the whole list again. Wrap commands and paths in backticks in `summary`.
+
+Nothing on disk changes before the last decision — `git status` stays as it was. Then say you
+are about to write, apply **only** the accepted and edited changes, and report:
+
+    ./relay setup report 5.4 --status done --evidence "<short summary, e.g. dropped screenshots>" \
+      --data '{"changes": [ …every change with its final decision… ]}'
+
+## 5.5 Push the flows back, enabled
+
+Set `"enabled": true` in each `.relay/flows/<key>.json`, then push each one:
+
+    ./relay flow-push <key> .relay/flows/<key>.json
+
+Re-read status — the board ticks 5.5 itself once every board flow has arrived enabled. Say
+"Pushed <N> flows; they're enabled." A rejected push (e.g. a 422 naming a node) is a step that
+won't go green: fix the flow file and retry, at most 3 attempts.
+
+## 5.6 Relay files on origin/<base>
+
+Say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
+wrote — `./relay`, the skill file(s) (status `llm.skill_path`), `relay.md`, the pointer-file
+line, `.gitignore`, `.relay/` including `.relay/project.md` — and **nothing else** (stage those
+paths by name; leave any other change in the tree alone). Then land it the way the `landing`
+answer says: push straight to `<base>`, or push a branch and open a PR.
+
+While it isn't on origin/<base> yet, report waiting with the PR and base:
+
+    ./relay setup report 5.6 --status waiting --evidence "PR #<n> open · checked HH:MM" \
+      --data '{"pr_url": "https://…/pull/<n>", "base": "<base>"}'
+
+Then `git fetch` every 30 s. It is done when origin/<base> contains the commit, **or** every
+file the commit touched is identical on origin/<base> (a squash or rebase merge never contains
+the commit itself):
+
+    git merge-base --is-ancestor <sha> origin/<base> \
+      || git diff --quiet <sha> origin/<base> -- $(git diff-tree --no-commit-id --name-only -r <sha>)
+
+Say that Ctrl-C is safe: running `/relay-onboard` again picks up here. When it lands:
+
+    ./relay setup report 5.6 --status done --evidence "origin/<base> contains <short sha>"
+
+## 5.7 Follow-up cards #setup
+
+Everything deferred or left unresolved along the way (a rejected change worth revisiting, an
+unanswered question, a skipped step) becomes a Backlog card tagged `setup`:
+
+    ./relay create "<title>" --stage Backlog --tag setup --description "<what is left and why>"
+
+(If the board names its first stage something other than Backlog, pass that stage instead.)
+List the cards you made, then report:
+
+    ./relay setup report 5.7 --status done --evidence "<N> #setup cards"
+
+(evidence `"none"` when there was nothing to defer).
+
+## 5.8 First card
+
+Suggest 2–3 small, concrete improvements for this repo (a file or two each), numbered. The
+human picks one or types their own. Create it in the board's first flow stage (status
+`first_flow_stage`):
+
+    ./relay create "<title>" --stage <first_flow_stage> --description "<what and why>"
+
+Re-read status — the board ticks 5.8 itself when the card lands.
+
+## Close
+
+Say that everything but the runner is done, then: *"In a new terminal, run ./relay start"* —
+and that the first card turns violet on the board when an agent picks it up. Exit.
 
 ## Common mistakes
 
-- **Inferring the path** instead of asking. Seed / adopt / hybrid is the human's call.
-- **Auto-mapping an unresolved node** onto the nearest-looking agent. Propose, show, iterate.
-- **Re-implementing a doctor check** — the doctor owns the check list; consume its report.
-- **Chasing warnings** — they never block a green result.
-- **Pushing a flow the user has not seen** — every push is node-level confirmed first.
-- **Enabling a flow with errors outstanding** — a live flow that cannot resolve its nodes fails at
-  run time, on a real card.
-- **Restarting from scratch on a resumed session** — run the doctor first and do only what is
-  missing.
-- **Running this from a flow node** — it is interactive by design.
-- **Touching app code or git** — the blast radius is `.claude/`, `.relay/runner.json`, and
-  flow documents.
-- **Adding a sibling file to this skill's directory** — `Relay.Scaffold.items/0` names `SKILL.md`
-  only, so a reference file would silently vanish from every scaffolded repo.
+- **Redoing finished sub-steps.** Always start from status; a re-run resumes, it never restarts.
+- **Writing during 5.4's agreement.** No file — flows, `runner.json`, the warm-up hook, prompt
+  pointers — changes until the last change is decided.
+- **Reporting a partial list.** 5.3 sends all answers so far; 5.4 sends the whole change list.
+- **Committing more than Relay's files in 5.6.** Stage paths by name; app code is never part of
+  it.
+- **Looping on a broken step.** Three attempts, then report `failed` and ask the human.

@@ -1455,6 +1455,255 @@ class MockupsCommandTest(unittest.TestCase):
         self.assertEqual(set(CONTRACT["mockups"]["card_mockups"][0]), {"url", "caption"})
 
 
+def setup_step(id, title, status="pending", parent=None, evidence=None, error=None, children=()):
+    """One checklist step in exactly the server's shape — keys from CONTRACT["setup"]["step_keys"],
+    so a step key renamed server-side breaks every test that builds one."""
+    values = {"id": id, "parent": parent, "title": title, "actor": "ai_terminal", "status": status,
+              "evidence": evidence, "error": error, "data": {}, "reached_at": None,
+              "completed_at": None, "children": list(children)}
+    keys = CONTRACT["setup"]["step_keys"]
+    missing = sorted(set(keys) - set(values))
+    if missing:
+        raise KeyError(f"setup_step: the server sends step keys {missing} this fixture doesn't fill")
+    return {k: values[k] for k in keys}
+
+
+SETUP_SUB_TITLES = (
+    ("5.1", "Pull flows into .relay/flows/"), ("5.2", "Detect & confirm repo facts"),
+    ("5.3", "Interview → .relay/project.md"), ("5.4", "Customize: propose, agree 1 by 1, apply"),
+    ("5.5", "Push flows back (enabled on arrival)"), ("5.6", "Relay files on origin/main"),
+    ("5.7", "Follow-up cards #setup"), ("5.8", "First card"),
+)
+
+
+def setup_checklist(current="5.1", done_through=0, finished=False):
+    """A checklist (GET /api/setup's `data`) with exactly CONTRACT["setup"]["status_keys"]:
+    steps 1–4 done, step 5 active with its sub-steps up to `done_through` done and the next
+    one active — or, when `finished`, every step done and `current` null."""
+    top_done = [
+        setup_step("1", "Board created", "done", evidence="6 stages · 2 flows · 14:02"),
+        setup_step("2", "Pick your default LLM", "done", evidence="Claude Code"),
+        setup_step("3", "Add your key", "done", evidence="first call 14:05"),
+        setup_step("4", "Install in your repo", "done", evidence="installed"),
+    ]
+    children = []
+    for n, (sid, title) in enumerate(SETUP_SUB_TITLES, start=1):
+        if finished or n <= done_through:
+            status = "done"
+        elif n == done_through + 1:
+            status = "active"
+        else:
+            status = "pending"
+        children.append(setup_step(sid, title, status, parent="5"))
+    rest = "done" if finished else "pending"
+    steps = top_done + [
+        setup_step("5", "Onboard, in Claude Code", "done" if finished else "active", children=children),
+        setup_step("6", "Start the runner", rest),
+        setup_step("7", "Watch an agent pick up your first card", rest),
+    ]
+    values = {"board": "Streaks", "template": "bare_minimum",
+              "llm": {"harness": "claude_code", "label": "Claude Code", "cli": "claude",
+                      "skill_path": ".claude/skills/relay-onboard/SKILL.md"},
+              "current_id": None if finished else "5",
+              "current_sub_id": None if finished else current,
+              "current": None if finished else current,
+              "first_flow_stage": "Plan", "position": 7 if finished else 5,
+              "done_count": 7 if finished else 4, "finished": finished,
+              "interview": [], "change_decisions": ["accepted", "rejected", "edited"], "steps": steps}
+    keys = CONTRACT["setup"]["status_keys"]
+    missing = sorted(set(keys) - set(values))
+    if missing:
+        raise KeyError(f"setup_checklist: the server sends keys {missing} this fixture doesn't fill")
+    return {k: values[k] for k in keys}
+
+
+class SetupCommandTest(unittest.TestCase):
+    """relay setup status | relay setup report STEP --status … (RE445) — the only way the
+    /relay-onboard loop reads and moves the board's guided-setup checklist."""
+
+    NOT_CURRENT = {"error": {"code": "not_current",
+                             "message": "step 5.1 isn't current; the current step is 5.3",
+                             "current": "5.3"}}
+
+    def setUp(self):
+        self._api = relay.api
+        self.addCleanup(setattr, relay, "api", self._api)
+        self.sent = []
+        self.responses = {"GET": {"data": setup_checklist()},
+                          "POST": {"data": setup_checklist(current="5.2", done_through=1)}}
+
+        def fake_api(method, path, body=None, **kwargs):
+            self.sent.append((method, path, body, kwargs))
+            return copy.deepcopy(self.responses[method])
+
+        relay.api = fake_api
+
+    def run_cli(self, *argv):
+        args = relay.build_parser().parse_args(["setup", *argv])
+        return capture(args.func, args)
+
+    def fails(self, *argv):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(err):
+            self.run_cli(*argv)
+        return ctx.exception.code, err.getvalue()
+
+    def bodies(self):
+        return [body for _m, _p, body, _kw in self.sent]
+
+    # 1
+    def test_status_prints_the_summary_line_then_each_step_and_its_children(self):
+        out = self.run_cli("status")
+
+        self.assertEqual([(m, p) for m, p, _b, _kw in self.sent], [("GET", "/api/setup")])
+        lines = out.splitlines()
+        self.assertEqual(lines[0],
+                         "Setup checklist for Streaks: 4 of 7 done. Next is 5.1 (Pull flows into .relay/flows/).")
+        self.assertTrue(any("✓" in l and " 1 " in l and "6 stages · 2 flows · 14:02" in l for l in lines),
+                        out)
+        self.assertTrue(any(l.startswith(" ") and "▸" in l and "5.1" in l for l in lines), out)
+
+    def test_status_shows_each_status_glyph_and_a_failed_step_s_error(self):
+        checklist = setup_checklist()
+        kids = checklist["steps"][4]["children"]
+        kids[1].update(status="skipped")
+        kids[2].update(status="waiting", evidence="2 of 4 answered")
+        kids[3].update(status="failed", error="422 flow implement", evidence="ignored")
+        self.responses["GET"] = {"data": checklist}
+
+        lines = self.run_cli("status").splitlines()
+
+        def line(sid):
+            return next(l for l in lines if f" {sid} " in l)
+        self.assertIn("–", line("5.2"))
+        self.assertIn("◌", line("5.3"))
+        self.assertIn("2 of 4 answered", line("5.3"))
+        self.assertIn("!", line("5.4"))
+        self.assertIn("422 flow implement", line("5.4"))
+        self.assertNotIn("ignored", line("5.4"))
+        self.assertIn("○", line("5.5"))
+
+    # 2
+    def test_status_json_prints_exactly_the_checklist(self):
+        out = self.run_cli("status", "--json")
+        self.assertEqual(json.loads(out), setup_checklist())
+
+    # 3
+    def test_status_field_prints_one_value(self):
+        self.assertEqual(self.run_cli("status", "--field", "current"), "5.1\n")
+
+    # 4
+    def test_status_on_a_board_with_no_checklist_exits_3(self):
+        self.responses["GET"] = None
+        code, err = self.fails("status")
+        self.assertEqual(code, 3)
+        self.assertEqual(relay.SETUP_NO_CHECKLIST_EXIT, 3)
+        self.assertIn("no guided setup on this board", err)
+
+    # 13
+    def test_status_of_a_finished_checklist_has_no_next(self):
+        self.responses["GET"] = {"data": setup_checklist(finished=True)}
+        first = self.run_cli("status").splitlines()[0]
+        self.assertEqual(first, "Setup checklist for Streaks: 7 of 7 done.")
+
+    # 5
+    def test_report_posts_only_the_given_fields_and_prints_the_next_step(self):
+        out = self.run_cli("report", "5.1", "--status", "done", "--evidence", "2 flows")
+
+        self.assertEqual(len(self.sent), 1)
+        method, path, body, kwargs = self.sent[0]
+        self.assertEqual((method, path, body),
+                         ("POST", "/api/setup/steps/5.1", {"status": "done", "evidence": "2 flows"}))
+        self.assertTrue(kwargs.get("soft_404"))
+        self.assertTrue(kwargs.get("soft_conflict"))
+        self.assertIn("✓ 5.1 done · 2 flows", out)
+        self.assertIn("Next is 5.2", out)
+
+    def test_report_of_the_last_step_says_the_checklist_is_done(self):
+        self.responses["POST"] = {"data": setup_checklist(finished=True)}
+        out = self.run_cli("report", "5.8", "--status", "done")
+        self.assertIn("✓ 5.8 done", out)
+        self.assertIn("Setup checklist done.", out)
+        self.assertNotIn("Next is", out)
+
+    # 6
+    def test_report_data_is_parsed_json_inline_or_from_a_file(self):
+        payload = '{"answers": {"done": "PR merged"}}'
+        expected = {"status": "waiting", "data": {"answers": {"done": "PR merged"}}}
+        self.run_cli("report", "5.3", "--status", "waiting", "--data", payload)
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        path = os.path.join(d, "data.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(payload)
+        self.run_cli("report", "5.3", "--status", "waiting", "--data", f"@{path}")
+
+        self.assertEqual(self.bodies(), [expected, expected])
+
+    # 7
+    def test_report_failed_carries_the_error_and_data(self):
+        self.run_cli("report", "5.5", "--status", "failed", "--error", "422 flow implement",
+                     "--data", '{"attempts": 3}')
+        self.assertEqual(self.bodies(),
+                         [{"status": "failed", "error": "422 flow implement", "data": {"attempts": 3}}])
+
+    # 8
+    def test_report_data_that_is_not_a_json_object_dies_before_any_request(self):
+        for bad in ("[1,2]", "not json"):
+            code, err = self.fails("report", "5.3", "--status", "waiting", "--data", bad)
+            self.assertNotEqual(code, 0)
+            self.assertIn("--data", err)
+            self.assertIn("JSON object", err)
+        self.assertEqual(self.sent, [])
+
+    def test_report_step_with_a_slash_dies_before_any_request(self):
+        code, err = self.fails("report", "5/../1", "--status", "done")
+        self.assertNotEqual(code, 0)
+        self.assertIn("5/../1", err)
+        self.assertEqual(self.sent, [])
+
+    # 9
+    def test_report_out_of_order_dies_naming_not_current_and_the_current_step(self):
+        self.responses["POST"] = self.NOT_CURRENT
+        code, err = self.fails("report", "5.1", "--status", "done")
+        self.assertEqual(code, 1)
+        self.assertIn("not_current", err)
+        self.assertIn("5.3", err)
+
+    # 10
+    def test_report_on_a_board_with_no_checklist_exits_3(self):
+        self.responses["POST"] = None
+        code, err = self.fails("report", "5.1", "--status", "done")
+        self.assertEqual(code, 3)
+        self.assertIn("no guided setup on this board", err)
+
+    # 11
+    def test_parser_shape(self):
+        parse = relay.build_parser().parse_args
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            parse(["setup", "report", "5.1", "--status", "bogus"])
+        ns = parse(["setup", "report", "5.1", "--status", "done"])
+        self.assertEqual((ns.step, ns.status), ("5.1", "done"))
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            parse(["setup"])
+
+    # 12
+    def test_matches_the_runner_contract(self):
+        setup = CONTRACT["setup"]
+        self.assertEqual(relay.SETUP_REPORT_STATUSES, tuple(setup["report_statuses"]))
+
+        self.run_cli("status")
+        self.run_cli("report", "5.1", "--status", "done", "--evidence", "e", "--error", "x",
+                     "--data", "{}")
+        (_m1, status_path, _b1, _k1), (_m2, report_path, body, _k2) = self.sent
+        self.assertEqual(status_path, setup["status_path"])
+        self.assertEqual(report_path, setup["report_path_example"])
+        self.assertLessEqual(set(body), set(setup["report_request_keys"]))
+        self.assertIn("current", setup["not_current_keys"])
+        self.assertEqual(self.NOT_CURRENT["error"]["code"], setup["not_current_code"])
+
+
 class ImagesPullTest(unittest.TestCase):
     """relay images REF --pull [DIR] (RE427) — downloads every note image on the card, in
     timeline order then each note's order, into DIR as NN-<slug><ext>."""
