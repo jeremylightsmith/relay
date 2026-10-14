@@ -19,6 +19,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../config.dart';
 import '../board/board_prefs.dart';
+import '../board/last_place.dart';
 import '../boards/current_board.dart';
 import '../push/push_service.dart';
 import 'apple_credential.dart';
@@ -303,11 +304,13 @@ class AuthController extends Notifier<AuthState> {
 
   /// Forget the session everywhere it is held: dio's jar, the webview store, and
   /// the Keychain — plus the remembered current board (RLY-95 / RE376): the next
-  /// account must cold-start on the boards list, not someone else's board.
+  /// account must cold-start on the boards list, not someone else's board —
+  /// and the remembered place (RE452), launch snapshot included.
   Future<void> _clearSession() async {
     await _jar.deleteAll();
     await _store.clear();
     await ref.read(boardPrefsProvider).clear();
+    await ref.read(lastPlaceProvider.notifier).forget();
     try {
       await iaw.CookieManager.instance().deleteAllCookies();
     } catch (e) {

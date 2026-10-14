@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../board/board_prefs.dart';
+import '../board/last_place.dart';
 
 /// Which board the app is in. [restored] is false only until the launch-time
 /// Keychain read lands — the router must not mistake "not read yet" for
@@ -40,6 +41,12 @@ class CurrentBoard extends Notifier<CurrentBoardState> {
 
   BoardPrefs get _prefs => ref.read(boardPrefsProvider);
 
+  /// The remembered stage and card belong to the board being left (RE452).
+  /// The in-memory forget is synchronous; its Keychain write is not awaited, so
+  /// a board switch (a push tap's, say) never waits on a second Keychain item.
+  void _forgetBoardPosition() =>
+      unawaited(ref.read(lastPlaceProvider.notifier).forgetBoardPosition());
+
   /// Completes once the state is [CurrentBoardState.restored] — after the
   /// launch read, or the first explicit switch/clear, whichever comes first.
   Future<void> get ready => _ready.future;
@@ -61,10 +68,14 @@ class CurrentBoard extends Notifier<CurrentBoardState> {
   }
 
   /// Make [slug] the current board app-wide and remember it for next launch.
+  /// A *different* board forgets the remembered stage and card (RE452): they
+  /// belong to the board being left.
   Future<void> switchTo(String slug) async {
+    final changed = slug != state.slug;
     _touched = true;
     state = CurrentBoardState(slug: slug, restored: true);
     _markReady();
+    if (changed) _forgetBoardPosition();
     await _prefs.writeLastBoardSlug(slug);
   }
 
@@ -74,6 +85,7 @@ class CurrentBoard extends Notifier<CurrentBoardState> {
     _touched = true;
     state = const CurrentBoardState(restored: true);
     _markReady();
+    _forgetBoardPosition();
     await _prefs.clear();
   }
 

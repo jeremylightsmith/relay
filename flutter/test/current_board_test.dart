@@ -2,12 +2,19 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/app/tabs.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
 
-ProviderContainer containerWith(BoardPrefs prefs) {
+ProviderContainer containerWith(BoardPrefs prefs, {LastPlaceStore? lastPlace}) {
   final c = ProviderContainer(
-    overrides: [boardPrefsProvider.overrideWithValue(prefs)],
+    overrides: [
+      boardPrefsProvider.overrideWithValue(prefs),
+      lastPlaceStoreProvider.overrideWithValue(
+        lastPlace ?? InMemoryLastPlaceStore(),
+      ),
+    ],
   );
   addTearDown(c.dispose);
   return c;
@@ -96,6 +103,58 @@ void main() {
       expect(prefs.written, 'new-board');
     },
   );
+
+  group('the remembered board position (RE452)', () {
+    const position = LastPlace(
+      tab: AppTab.board,
+      stageId: 5,
+      stageName: 'Spec',
+      cardRef: 'MKT-1',
+    );
+
+    Future<ProviderContainer> onMkt(InMemoryLastPlaceStore store) async {
+      final c = containerWith(InMemoryBoardPrefs('mkt'), lastPlace: store);
+      await c.read(currentBoardProvider.notifier).ready;
+      await c.read(lastPlaceProvider.notifier).ready;
+      return c;
+    }
+
+    test('switching to a different board forgets the stage and card', () async {
+      final store = InMemoryLastPlaceStore(position);
+      final c = await onMkt(store);
+
+      await c.read(currentBoardProvider.notifier).switchTo('dat');
+
+      expect(
+        c.read(lastPlaceProvider).place,
+        const LastPlace(tab: AppTab.board),
+      );
+      expect(store.place, const LastPlace(tab: AppTab.board));
+    });
+
+    test('switching to the same board keeps them', () async {
+      final store = InMemoryLastPlaceStore(position);
+      final c = await onMkt(store);
+
+      await c.read(currentBoardProvider.notifier).switchTo('mkt');
+
+      expect(c.read(lastPlaceProvider).place, position);
+      expect(store.place, position);
+    });
+
+    test('clearing the board forgets the stage and card', () async {
+      final store = InMemoryLastPlaceStore(position);
+      final c = await onMkt(store);
+
+      await c.read(currentBoardProvider.notifier).clear();
+
+      expect(
+        c.read(lastPlaceProvider).place,
+        const LastPlace(tab: AppTab.board),
+      );
+      expect(store.place, const LastPlace(tab: AppTab.board));
+    });
+  });
 
   group('reconcile', () {
     test('keeps a remembered board that is still listed', () async {

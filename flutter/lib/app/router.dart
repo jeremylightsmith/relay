@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +8,7 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/auth/splash_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/board/board_screen.dart';
+import '../features/board/last_place.dart';
 import '../features/boards/choose_board_screen.dart';
 import '../features/boards/current_board.dart';
 import '../features/card/card_nav_context.dart';
@@ -17,11 +20,9 @@ import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
+import 'launch_restorer.dart';
 import 'pending_deep_link.dart';
-
-/// The tab-shell roots. Every one of them is about the current board (RE376), so
-/// the redirect sends a signed-in user with no board to Choose a board instead.
-const _tabRoots = {'/needs-you', '/board', '/settings'};
+import 'tabs.dart';
 
 /// Builds the app's GoRouter. Kept as a plain function so tests can construct the
 /// tab shell directly (ungated). Production wraps it with the auth gate via
@@ -123,7 +124,10 @@ GoRouter buildRouter({
             path: '/board',
             pageBuilder: (context, state) => NoTransitionPage(
               key: state.pageKey,
-              child: BoardScreen(bodyBuilder: boardBodyBuilder),
+              child: BoardScreen(
+                bodyBuilder: boardBodyBuilder,
+                stageId: int.tryParse(state.uri.queryParameters['stage'] ?? ''),
+              ),
             ),
           ),
           GoRoute(
@@ -138,6 +142,10 @@ GoRouter buildRouter({
     ],
   );
 }
+
+/// The launch scaffolding the redirect parks on while auth, the board and the
+/// last place (RE452) are still being read — the only copy.
+const splashLocation = '/splash';
 
 /// Overrides the card screen's webview body. Null in production; tests override it
 /// because flutter_inappwebview has no host-platform implementation (RLY-81), so
@@ -190,13 +198,20 @@ final routerProvider = Provider<GoRouter>((ref) {
   // restore, switch and clear re-run the redirect too.
   ref.listen(currentBoardProvider, (_, _) => refresh.value++);
 
-  return buildRouter(
+  // RE452: the launch read of the last place ends the splash hold below. Only
+  // `restored` matters here — every later write would be a wasted redirect.
+  ref.listen(
+    lastPlaceProvider.select((s) => s.restored),
+    (_, _) => refresh.value++,
+  );
+
+  final router = buildRouter(
     refreshListenable: refresh,
     cardBodyBuilder: ref.watch(cardBodyBuilderProvider),
     boardBodyBuilder: ref.watch(boardBodyBuilderProvider),
     extraRoutes: [
       GoRoute(
-        path: '/splash',
+        path: splashLocation,
         builder: (context, state) => const SplashScreen(),
       ),
       GoRoute(
@@ -216,7 +231,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final board = ref.read(currentBoardProvider);
       final loc = state.matchedLocation;
       final atAuth = loc.startsWith('/welcome');
-      final atSplash = loc == '/splash';
+      final atSplash = loc == splashLocation;
       // GoRouter always matches its `initialLocation` first, on every cold
       // launch, push or no push — so stashing it unconditionally would make
       // `pending` non-null even with nothing to resume, indistinguishable
@@ -229,7 +244,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (auth.restoring) {
         if (atSplash) return null;
         if (!isDefaultLanding) pending.set(state.uri.toString());
-        return '/splash';
+        return splashLocation;
       }
       if (!auth.signedIn) {
         if (atAuth) return null;
@@ -244,7 +259,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Signed in, sitting on scaffolding → resume what the launch was actually
       // for. Nothing pending and this was an interactive sign-in: prime for
       // push permission instead (AUTH-03) — consumed once, so it doesn't fire
-      // again on some later, unrelated visit to this scaffolding.
+      // again on some later, unrelated visit to this scaffolding. Otherwise
+      // reopen the remembered place (RE452) — a push tap, pending above, beats
+      // it — holding the splash until the board and the place are read and a
+      // remembered card is checked, so Needs you never flashes first.
       if (atAuth || atSplash) {
         final resumed = pending.take();
         if (resumed != null) return resumed;
@@ -252,18 +270,47 @@ final routerProvider = Provider<GoRouter>((ref) {
           interactiveSignIn = false;
           return '/push-permission';
         }
-        return board.needsChoice ? '/choose-board' : '/needs-you';
+        if (board.needsChoice) return '/choose-board';
+
+        final restorer = ref.read(launchRestorerProvider);
+        final hold = atSplash ? null : splashLocation;
+        if (!board.restored ||
+            !ref.read(lastPlaceProvider).restored ||
+            restorer.resolving) {
+          return hold;
+        }
+        switch (restorer.takeDestination()) {
+          case RouteTo(:final location):
+            return location;
+          case ResolveCard(:final place):
+            // Never awaited here: the redirect runs on every navigation and is
+            // effectively sync. `resolving` holds the splash meanwhile.
+            unawaited(restorer.resolveCard(place));
+            return hold;
+          case null:
+            return AppTab.needsYou.path;
+        }
       }
       // RE376 §3: the tabs are always about one board. Restored with none (first
       // sign-in, or BoardsController cleared a dead one) → Choose a board; and once
       // a board is chosen (picked, or auto-selected for a one-board user), Choose a
       // board moves on to its Needs you. `restored` keeps the launch-time Keychain
       // read from flashing the picker.
-      if (board.needsChoice && _tabRoots.contains(loc)) return '/choose-board';
+      // The tab-shell roots are all about the current board (RE376).
+      if (board.needsChoice && AppTab.fromPath(loc) != null) {
+        return '/choose-board';
+      }
       if (loc == '/choose-board' && board.slug != null) return '/needs-you';
       return null;
     },
   );
+
+  // RE452: remember the tab and the Board-tab card as the user moves around,
+  // from the delegate (after navigation) — never from the redirect above.
+  ref.onDispose(
+    LastPlaceTracker.attach(router, ref.read(lastPlaceProvider.notifier)),
+  );
+  return router;
 });
 
 /// The route a push payload (RLY-81 §5) deep-links to. Null when the payload carries no

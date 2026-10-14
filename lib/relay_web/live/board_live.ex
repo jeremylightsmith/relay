@@ -448,6 +448,9 @@ defmodule RelayWeb.BoardLive do
                   class="board-pager-chip"
                   data-chip-stage-id={stage.id}
                   data-stage-name={stage.name}
+                  data-sublane-ids={
+                    @sublanes_by_parent |> Map.get(stage.id, []) |> Enum.map_join(",", & &1.id)
+                  }
                   data-ai={to_string(Map.has_key?(@stage_flows, stage.id))}
                   data-collapsed={to_string(collapsed?)}
                 >

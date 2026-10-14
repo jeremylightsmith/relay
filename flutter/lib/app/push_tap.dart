@@ -46,18 +46,11 @@ class PushTapHandler {
     return slug;
   }
 
-  void _toast(String text) {
-    _ref
-        .read(scaffoldMessengerKeyProvider)
-        .currentState
-        ?.showSnackBar(
-          SnackBar(
-            key: const Key('board_switched_toast'),
-            content: Text(text),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-  }
+  void _toast(String text) => showToast(
+    _ref.read(scaffoldMessengerKeyProvider),
+    text,
+    key: const Key('board_switched_toast'),
+  );
 }
 
 final pushTapHandlerProvider = Provider<PushTapHandler>(PushTapHandler.new);

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
@@ -36,6 +37,9 @@ Future<(ScriptedAuthController, ProviderContainer)> pumpGated(
         pushPlatformProvider.overrideWithValue(FakePushPlatform()),
         pushPrefsProvider.overrideWithValue(FakePushPrefs()),
         boardPrefsProvider.overrideWithValue(prefs),
+        // The launch holds the splash until the last place is read (RE452), and
+        // the Keychain channel never answers under fake async — like BoardPrefs.
+        lastPlaceStoreProvider.overrideWithValue(InMemoryLastPlaceStore()),
         boardsRepositoryProvider.overrideWithValue(boards),
         feedRepositoryProvider.overrideWithValue(FakeFeedRepository()),
       ],

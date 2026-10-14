@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../app/tabs.dart';
 import '../app/theme.dart';
 import '../features/boards/boards_controller.dart';
 import '../features/needs_you/feed_controller.dart';
@@ -16,8 +17,6 @@ class MainScaffold extends ConsumerWidget {
   const MainScaffold({super.key, required this.child});
 
   final Widget child;
-
-  static const _tabPaths = ['/needs-you', '/board', '/settings'];
 
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
@@ -45,7 +44,7 @@ class MainScaffold extends ConsumerWidget {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex(context),
         indicatorColor: scheme.primary.withValues(alpha: 0.16),
-        onDestinationSelected: (index) => context.go(_tabPaths[index]),
+        onDestinationSelected: (index) => context.go(AppTab.values[index].path),
         destinations: [
           NavigationDestination(
             key: const Key('nav_needs_you'),

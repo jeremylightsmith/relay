@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
+import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/router.dart';
+import 'package:relay_mobile/app/tabs.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/board/board_screen.dart';
@@ -133,6 +135,23 @@ void main() {
     await tester.tap(find.byKey(const Key('nav_settings')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('settings_log_out')), findsOneWidget);
+  });
+
+  testWidgets('the destinations go to /needs-you, /board, /settings in order', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    final router = GoRouter.of(tester.element(find.byType(NavigationBar)));
+    final seen = <String>[];
+
+    for (final key in ['nav_needs_you', 'nav_board', 'nav_settings']) {
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+      seen.add(router.routerDelegate.currentConfiguration.uri.path);
+    }
+
+    expect(seen, ['/needs-you', '/board', '/settings']);
+    expect(AppTab.values.map((t) => t.path), seen);
   });
 
   testWidgets(

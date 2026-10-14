@@ -75,6 +75,17 @@ defmodule RelayWeb.BoardLivePagerTest do
       assert has_element?(view, "#stage-chip-#{spec.id} .board-pager-chip-count", "1")
     end
 
+    test "a chip lists its sub-lane stage ids, in Review → Done order (RE452)",
+         %{conn: conn, board: board, backlog: backlog} do
+      spec = Enum.find(board.stages, &(is_nil(&1.parent_id) and &1.name == "Spec"))
+      review = Enum.find(board.stages, &(&1.parent_id == spec.id and &1.type == :review))
+      done = Enum.find(board.stages, &(&1.parent_id == spec.id and &1.type == :done))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-chip-#{spec.id}[data-sublane-ids='#{review.id},#{done.id}']")
+      assert has_element?(view, "#stage-chip-#{backlog.id}[data-sublane-ids='']")
+    end
+
     test "a stage a flow works in is marked for the violet dot treatment; one without is not",
          %{conn: conn, board: board} do
       # RE409: AI-ness is derived from flows — the seeded `code` flow works in Code, no flow

@@ -81,6 +81,34 @@ There is no revocation: invalidating a session today means rotating `SECRET_KEY_
 signs out everyone everywhere. Server-side session records and "sign out of all devices" are
 tracked as a separate follow-up.
 
+### On-device state (mobile app)
+
+The Flutter app keeps three Keychain items (`flutter_secure_storage`, `first_unlock`), each
+behind a store interface with an in-memory test double:
+
+| Item | Key | Store | Holds |
+| --- | --- | --- | --- |
+| Session cookie | `relay_session_cookie` | `SessionStore` | the `_relay_key` cookie the launch-time `/me` verify restores and slides |
+| Last board | `relay_last_board_slug` | `BoardPrefs` | the current board's slug (RLY-95 / RE376) |
+| Last place | `relay_last_place` | `LastPlaceStore` | one JSON place (RE452): the tab, the Board tab's stage page, and a card opened from the Board tab (`back=Board`) — written by `LastPlaceTracker` from the router delegate, read once at launch through `LastPlaceController.takeLaunchPlace/0` |
+
+All three are cleared on sign-out and on a dead session (`AuthController._clearSession`).
+Switching to a different board, or clearing it, forgets the last place's stage and card but
+keeps its tab.
+
+On a cold launch the router's redirect holds the splash until the board and the last place are
+read, then reopens the place through `LaunchRestorer` (`flutter/lib/app/launch_restorer.dart`); a
+pending push tap wins, and an interactive sign-in still primes push permission. A remembered card
+is checked with `GET /api/all/cards/:ref?board=<slug>` (3 s bound). If it's live, it reopens silently
+over its current stage. If it was archived, the board opens on the card's stage with the toast
+`<REF> was archived`; a 404 opens the remembered stage with `<REF> was deleted`. On a timeout or
+any other failure, the card opens unverified. A restored stage the board no longer has
+(`relayStageMissing`) toasts `The <Stage> stage no longer exists`, once, and never after a card
+toast. A restored card puts the board webview *under* the pushed card, where the pager's one-shot
+`?stage=` scroll runs with no real layout and drifts. So `BoardScreen` drops `relayStageChanged`
+while a pushed route covers the board, and when the board is revealed it asks the pager to re-show
+the last page seen on screen (else the requested stage) with the `relay:show-stage` window event.
+
 ## PubSub topics
 
 | Topic | Broadcaster | Events | Subscribers |

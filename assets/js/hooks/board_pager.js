@@ -5,13 +5,30 @@
 //
 // Mounted on #board-pager-nav (the chip strip). Pages are the .stage-column
 // sections inside #board-bands, addressed by data-stage-id.
+//
+// RE452 — `?stage=<id>` opens the pager on that stage's page (a sub-lane id resolves
+// to its parent's page), and the active page is reported to the native shell
+// (relayStageChanged) so the app can reopen there; an id not on the board is
+// reported once (relayStageMissing). Both calls are no-ops in a plain browser.
+// The shell can also re-show a stage page later by dispatching
+// `relay:show-stage` ({detail: {stage_id}}) on window: a card restore loads this
+// board UNDER the pushed card, where the one-shot restore scroll runs with no
+// real layout and drifts, so the shell re-applies the page once it is revealed.
 const BoardPager = {
   mounted() {
     this.pager = document.getElementById("board-bands")
     this.mq = window.matchMedia("(min-width: 45rem)") // --breakpoint-drawer
-    this.reportMode = () => this.pushEvent("pager", {active: !this.mq.matches})
+    this.requestedStage = new URLSearchParams(window.location.search).get("stage")
+    // The restore scrolls in the reply: turning the pager on re-streams collapsed
+    // strips as full compact pages, shifting every later page — scrolling before
+    // that patch lands would drift a page or two off.
+    this.reportMode = () =>
+      this.pushEvent("pager", {active: !this.mq.matches}, () => this.restoreStage())
     this.mq.addEventListener("change", this.reportMode)
     this.reportMode()
+
+    this.onShowStage = e => this.showStage(String(e.detail?.stage_id))
+    window.addEventListener("relay:show-stage", this.onShowStage)
 
     // Scroll position → active chip: the snap page covering ≥60% of the pager
     // viewport is the active one.
@@ -80,6 +97,7 @@ const BoardPager = {
     this.observer.disconnect()
     this.pagerObserver.disconnect()
     this.mq.removeEventListener("change", this.reportMode)
+    window.removeEventListener("relay:show-stage", this.onShowStage)
   },
 
   observePages() {
@@ -93,6 +111,61 @@ const BoardPager = {
     if (this.activeId === stageId) return
     this.activeId = stageId
     this.markActive()
+    this.reportStage(stageId)
+  },
+
+  // Once per mount: scroll to the `?stage=` page, or report the id missing.
+  restoreStage() {
+    if (this.stageRestored) return
+    this.stageRestored = true
+    const wanted = this.requestedStage
+    if (!wanted) return
+
+    const chip = this.chipFor(wanted)
+    if (!chip) {
+      if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler("relayStageMissing", {stage_id: Number(wanted)})
+      }
+      return
+    }
+    this.scrollToChip(chip)
+  },
+
+  // The shell's `relay:show-stage`: jump to that stage's page. Again a frame or two
+  // later — the webview is mid-reveal and its layout may still be settling.
+  showStage(stageId) {
+    const chip = this.chipFor(stageId)
+    if (!chip) return
+    this.scrollToChip(chip)
+    requestAnimationFrame(() => requestAnimationFrame(() => this.scrollToChip(chip)))
+  },
+
+  // The chip with that id, else the chip whose sub-lanes include it.
+  chipFor(stageId) {
+    const chips = Array.from(this.el.querySelectorAll("[data-chip-stage-id]"))
+    return (
+      chips.find(c => c.dataset.chipStageId === stageId) ||
+      chips.find(c => (c.dataset.sublaneIds || "").split(",").includes(stageId))
+    )
+  },
+
+  scrollToChip(chip) {
+    this.pager
+      .querySelector(`.stage-column[data-stage-id="${chip.dataset.chipStageId}"]`)
+      ?.scrollIntoView({behavior: "instant", block: "nearest", inline: "start"})
+  },
+
+  // The page showing changed: tell the native shell (top-level stage, chip's name).
+  reportStage(stageId) {
+    if (!window.flutter_inappwebview) return
+    const chip = this.el.querySelector(`[data-chip-stage-id="${stageId}"]`)
+    const board = this.el.querySelector("#board-switch-board, #board-create-card")?.dataset.board
+    if (!chip || !board) return
+    window.flutter_inappwebview.callHandler("relayStageChanged", {
+      board: board,
+      stage_id: Number(stageId),
+      stage_name: chip.dataset.stageName,
+    })
   },
 
   markActive() {

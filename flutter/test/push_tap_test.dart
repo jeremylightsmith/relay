@@ -7,6 +7,7 @@ import 'package:relay_mobile/api/api_client.dart';
 import 'package:relay_mobile/app/router.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
@@ -64,6 +65,9 @@ pumpLaunch(
         pushPlatformProvider.overrideWithValue(platform),
         pushPrefsProvider.overrideWithValue(FakePushPrefs()),
         boardPrefsProvider.overrideWithValue(prefs),
+        // The launch holds the splash until the last place is read (RE452), and
+        // the Keychain channel never answers under fake async — like BoardPrefs.
+        lastPlaceStoreProvider.overrideWithValue(InMemoryLastPlaceStore()),
         boardsRepositoryProvider.overrideWithValue(
           FakeBoardsRepository(
             boards: [

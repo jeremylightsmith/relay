@@ -8,7 +8,9 @@ import 'package:relay_mobile/config.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/auth/http_providers.dart';
 import 'package:relay_mobile/features/auth/session_store.dart';
+import 'package:relay_mobile/app/tabs.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
@@ -21,11 +23,15 @@ ProviderContainer containerWith({
   required SessionStore store,
   required StubAdapter adapter,
   BoardPrefs? boardPrefs,
+  LastPlaceStore? lastPlace,
 }) {
   final container = ProviderContainer(
     overrides: [
       sessionStoreProvider.overrideWithValue(store),
       boardPrefsProvider.overrideWithValue(boardPrefs ?? InMemoryBoardPrefs()),
+      lastPlaceStoreProvider.overrideWithValue(
+        lastPlace ?? InMemoryLastPlaceStore(),
+      ),
       pushPlatformProvider.overrideWithValue(FakePushPlatform()),
       // The real dio, minus the socket: same jar + interceptor, stubbed adapter.
       dioProvider.overrideWith(
@@ -214,5 +220,53 @@ void main() {
     await container.read(currentBoardProvider.notifier).ready;
 
     expect(container.read(currentBoardProvider).needsChoice, isTrue);
+  });
+
+  group('the last place (RE452)', () {
+    const place = LastPlace(
+      tab: AppTab.board,
+      stageId: 5,
+      stageName: 'Spec',
+      cardRef: 'RE1',
+    );
+
+    test('signing out forgets it, launch place included', () async {
+      final lastPlace = InMemoryLastPlaceStore(place);
+      final container = containerWith(
+        store: InMemorySessionStore('cookie-value'),
+        adapter: StubAdapter(body: {'success': true, 'user': _user}),
+        lastPlace: lastPlace,
+      );
+      await restore(container);
+
+      await container.read(authProvider.notifier).signOut();
+
+      expect(lastPlace.place, isNull);
+      expect(
+        container.read(lastPlaceProvider.notifier).takeLaunchPlace(),
+        isNull,
+      );
+    });
+
+    test('a stored cookie that /me rejects forgets it too', () async {
+      final lastPlace = InMemoryLastPlaceStore(place);
+      final container = containerWith(
+        store: InMemorySessionStore('stale-cookie'),
+        adapter: StubAdapter(
+          statusCode: 401,
+          body: {'success': false, 'error': 'Not signed in'},
+        ),
+        lastPlace: lastPlace,
+      );
+
+      final state = await restore(container);
+
+      expect(state.status, AuthStatus.signedOut);
+      expect(lastPlace.place, isNull);
+      expect(
+        container.read(lastPlaceProvider.notifier).takeLaunchPlace(),
+        isNull,
+      );
+    });
   });
 }
