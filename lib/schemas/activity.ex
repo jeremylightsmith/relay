@@ -41,6 +41,8 @@ defmodule Schemas.Activity do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @types [
     :created,
     :moved,

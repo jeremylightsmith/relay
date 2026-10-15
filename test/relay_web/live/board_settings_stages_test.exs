@@ -311,7 +311,7 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
 
       assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
-               "That stage still holds 1 live and 0 archived card(s) — move them out first."
+               "That stage still holds 1 card(s) — move them out first."
 
       refute has_element?(view, "#flash-error")
       assert has_element?(view, "#stage-#{code.id}-delete-panel")
@@ -329,9 +329,67 @@ defmodule RelayWeb.BoardSettingsStagesTest do
       view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
 
       assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
-               "That stage still holds 1 live and 0 archived card(s) — move them out first."
+               "That stage still holds 1 card(s) — move them out first."
 
       assert Boards.get_stage(board, code.id)
+    end
+
+    test "RE453-1. deleting a stage holding only an archived card re-homes it, attributed to the user",
+         %{conn: conn, board: board, user: user} do
+      code = stage_named(board, "Code")
+      plan = stage_named(board, "Plan")
+      card = insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      refute has_element?(view, "#stage-#{code.id}-delete-refusal")
+      refute has_element?(view, "#stage-#{code.id}-row")
+      assert Boards.get_stage(board, code.id) == nil
+
+      card = Repo.reload!(card)
+      assert card.stage_id == plan.id
+      assert card.archived_at
+
+      assert [%{type: :moved, actor_type: :user, user_id: user_id} | _] = Relay.Activity.list_activity(card)
+      assert user_id == user.id
+    end
+
+    test "RE453-2. a live card still refuses the delete and leaves the archived card in place",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      archived = insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 card(s) — move them out first."
+
+      assert Boards.get_stage(board, code.id)
+      assert Repo.reload!(archived).stage_id == code.id
+    end
+
+    test "RE453-3. turning off a lane holding an archived card re-homes it to the parent, attributed to the user",
+         %{conn: conn, board: board, user: user} do
+      code = stage_named(board, "Code")
+      {:ok, review} = Boards.enable_lane(code, :review)
+      card = insert(:card, stage: review, status: :in_review, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      render_click(view, "toggle_lane", %{"stage-id" => "#{code.id}", "lane" => "review"})
+
+      refute has_element?(view, "#flash-error")
+      assert Boards.sublanes(code) == []
+
+      card = Repo.reload!(card)
+      assert card.stage_id == code.id
+
+      assert [%{type: :moved, actor_type: :user, user_id: user_id} | _] = Relay.Activity.list_activity(card)
+      assert user_id == user.id
     end
 
     test "6. confirming the only remaining stage shows the refusal in the panel", %{conn: conn, board: board} do

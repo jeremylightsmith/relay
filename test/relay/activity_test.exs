@@ -235,6 +235,26 @@ defmodule Relay.ActivityTest do
     end
   end
 
+  describe "log/3 (RE453)" do
+    test "broadcast: false persists the entry without a timeline broadcast", %{card: card} do
+      :ok = Relay.Events.subscribe(card.board_id)
+
+      assert {:ok, %Schemas.Activity{type: :moved} = entry} =
+               Activity.log(card, %{type: :moved, actor: :agent, meta: %{}}, broadcast: false)
+
+      assert Repo.get!(Schemas.Activity, entry.id).card_id == card.id
+      refute_receive {:timeline_appended, _, _}
+    end
+
+    test "log/2 still broadcasts the timeline entry", %{card: card} do
+      :ok = Relay.Events.subscribe(card.board_id)
+      card_id = card.id
+
+      assert {:ok, _} = Activity.log(card, %{type: :moved, actor: :agent, meta: %{}})
+      assert_receive {:timeline_appended, ^card_id, _}
+    end
+  end
+
   describe "list_timeline/1" do
     test "merges comments and activity chronologically with users preloaded", %{card: card, user: user} do
       c1 = insert(:comment, card: card, user: user, body: "First", inserted_at: ~U[2026-07-07 10:00:10Z])

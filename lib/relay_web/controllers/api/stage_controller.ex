@@ -82,6 +82,7 @@ defmodule RelayWeb.Api.StageController do
     with {:ok, stage} <- fetch_stage(conn, id),
          {:ok, lane} <- parse_lane(lane),
          :ok <- main_stage(stage),
+         # Board-key authed, no user: a re-homed archived card's :moved entry takes the :agent default.
          {:ok, result} <- Boards.disable_lane(stage, lane) do
       render(conn, :lane, lane: Atom.to_string(lane), disabled: result == :disabled)
     end
@@ -89,6 +90,7 @@ defmodule RelayWeb.Api.StageController do
 
   def delete(conn, %{"id" => id}) do
     with {:ok, stage} <- fetch_stage(conn, id),
+         # Board-key authed, no user: a re-homed archived card's :moved entry takes the :agent default.
          {:ok, deleted} <- Boards.delete_stage(stage) do
       render_stage(conn, deleted)
     end

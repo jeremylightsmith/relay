@@ -1533,7 +1533,7 @@ defmodule RelayWeb.BoardSettingsLive do
 
     result =
       if lane_on?(socket.assigns.lane_map, stage.id, lane) do
-        Boards.disable_lane(stage, lane)
+        Boards.disable_lane(stage, lane, current_actor(socket))
       else
         Boards.enable_lane(stage, lane)
       end
@@ -1617,7 +1617,7 @@ defmodule RelayWeb.BoardSettingsLive do
         {:noreply, socket |> close_panel() |> refresh_stages()}
 
       stage ->
-        case Boards.delete_stage(stage) do
+        case Boards.delete_stage(stage, current_actor(socket)) do
           {:ok, _stage} -> {:noreply, socket |> close_panel() |> refresh_stages()}
           {:error, reason} -> {:noreply, assign(socket, :panel_error, Boards.stage_refusal_message(reason))}
         end
@@ -2138,6 +2138,9 @@ defmodule RelayWeb.BoardSettingsLive do
 
     "display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;cursor:pointer;background:#{bg};border:1px solid #{border};"
   end
+
+  # A stage or lane removed here re-homes its archived cards; their :moved entry names this user.
+  defp current_actor(socket), do: {:user, socket.assigns.current_scope.user.id}
 
   # Ids in the DOM come from this user's own board rows.
   defp find_stage(socket, stage_id) do

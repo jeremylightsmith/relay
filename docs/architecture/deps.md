@@ -39,6 +39,7 @@ flowchart LR
     ApiKeys --> Repo
     Attachments --> Boards
     Attachments --> Repo
+    Boards --> Activity
     Boards --> Agents
     Boards --> Events
     Boards --> Flows

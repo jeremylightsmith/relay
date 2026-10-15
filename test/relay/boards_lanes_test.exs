@@ -99,12 +99,34 @@ defmodule Relay.BoardsLanesTest do
       assert {:error, :public_intake} = Boards.disable_lane(parent, :review)
     end
 
-    test "an archived card keeps the lane non-empty" do
+    test "an archived card is re-homed to the parent, attributed to the deleting user (RE453)" do
+      user = insert(:user)
       parent = main_stage()
       {:ok, review} = Boards.enable_lane(parent, :review)
-      insert(:card, stage: review, archived_at: DateTime.utc_now(:second))
+      card = insert(:card, stage: review, status: :in_review, archived_at: DateTime.utc_now(:second))
+
+      assert {:ok, :disabled} = Boards.disable_lane(parent, :review, {:user, user.id})
+      assert Boards.sublanes(parent) == []
+
+      reloaded = Relay.Repo.reload!(card)
+      assert reloaded.stage_id == parent.id
+      assert reloaded.archived_at
+      assert reloaded.status == :working
+
+      assert [%{type: :moved, actor_type: :user, user_id: user_id, meta: meta}] = Relay.Activity.list_activity(card)
+      assert user_id == user.id
+      assert %{"from_stage" => "Code · Review", "to_stage" => "Code"} = meta
+    end
+
+    test "a live card refuses and leaves the archived card in the lane (RE453)" do
+      parent = main_stage()
+      {:ok, review} = Boards.enable_lane(parent, :review)
+      insert(:card, stage: review)
+      archived = insert(:card, stage: review, archived_at: DateTime.utc_now(:second))
 
       assert {:error, :not_empty} = Boards.disable_lane(parent, :review)
+      assert [%{type: :review}] = Boards.sublanes(parent)
+      assert Relay.Repo.reload!(archived).stage_id == review.id
     end
   end
 

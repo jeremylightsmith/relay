@@ -4,11 +4,12 @@ defmodule Relay.Boards do
   Cards arrive in MMF 03 (`Relay.Cards`).
   """
 
-  use Boundary, deps: [Relay.Agents, Relay.Events, Relay.Flows, Relay.Repo, Relay.Setup, Schemas]
+  use Boundary, deps: [Relay.Activity, Relay.Agents, Relay.Events, Relay.Flows, Relay.Repo, Relay.Setup, Schemas]
 
   import Ecto.Query
 
   alias Ecto.Changeset
+  alias Relay.Activity
   alias Relay.Boards.Templates
   alias Relay.Events
   alias Relay.Flows
@@ -701,21 +702,36 @@ defmodule Relay.Boards do
   Disables `parent`'s `lane` sub-lane. Returns `{:ok, :disabled}` when the
   child is removed, `{:ok, :not_enabled}` when there is nothing to remove.
   Refuses — writing and broadcasting nothing — in this order: the lane holds
-  any card, archived included (`:not_empty`); it is the board's public intake stage
+  a live (non-archived) card (`:not_empty`); it is the board's public intake stage
   (`:public_intake`). Flows are not consulted: a flow sits on a main stage, and its drop-off is
   worked out from board order (RE429). Render a refusal with `stage_refusal_message/1`.
+
+  Archived cards never block: in the same transaction as the delete they are re-homed to
+  `parent`, still archived, with a `:moved` entry attributed to `actor` (`:agent | {:user, id}`,
+  default `:agent`) — see `delete_stage/2` (RE453).
   """
-  def disable_lane(%Stage{} = parent, lane) when lane in @sublane_types do
+  @spec disable_lane(Stage.t(), :review | :done, :agent | {:user, integer()}) ::
+          {:ok, :disabled | :not_enabled} | {:error, :not_empty | :public_intake}
+  def disable_lane(%Stage{} = parent, lane, actor \\ :agent) when lane in @sublane_types do
     case get_sublane(parent, lane) do
       nil ->
         {:ok, :not_enabled}
 
       %Stage{} = child ->
-        with :ok <- refuse_any_card(child),
-             :ok <- refuse_public_intake(parent.board_id, [child.id]) do
-          {:ok, _} = Repo.delete(child)
-          broadcast_stages_changed({:ok, :disabled}, parent.board_id)
-        end
+        remove_lane(parent, child, actor)
+    end
+  end
+
+  defp remove_lane(%Stage{} = parent, %Stage{} = child, actor) do
+    with :ok <- refuse_live_card(child),
+         :ok <- refuse_public_intake(parent.board_id, [child.id]) do
+      fn ->
+        rehome_archived_cards([child], parent, parent, actor)
+        delete_or_rollback(child)
+        :disabled
+      end
+      |> Repo.transaction()
+      |> broadcast_stages_changed(parent.board_id)
     end
   end
 
@@ -1021,35 +1037,54 @@ defmodule Relay.Boards do
   nilified by its FK. Refuses — writing and broadcasting nothing — in this order:
 
     1. the board's only main stage → `:last_stage`;
-    2. the stage or a substage holds cards, archived included →
-       `{:not_empty, %{live: n, archived: n}}`;
+    2. the stage or a substage holds live (non-archived) cards → `{:not_empty, %{live: n}}`;
     3. the stage or a substage is the board's public intake stage → `:public_intake`.
 
-  A substage is `{:error, :not_a_main_stage}` (only `disable_lane/2` removes one). Render a
+  Archived cards never block (RE453). Once every refusal has passed, the archived cards in the
+  stage and its substages are **re-homed** in the same transaction as the delete — to the
+  nearest surviving main stage before it in board order (the one after it when it is first).
+  Each stays archived, takes `Schemas.Stage.arrival_status/2` for the target's type, is appended
+  after the target's highest card position, and gets one `:moved` entry attributed to `actor`
+  (`:agent | {:user, id}`, default `:agent`) — announced by nothing but the one
+  `{:stages_changed, board_id}` after the commit.
+
+  A substage is `{:error, :not_a_main_stage}` (only `disable_lane/3` removes one). Render a
   refusal with `stage_refusal_message/1`.
   """
-  def delete_stage(%Stage{parent_id: nil} = stage) do
-    ids = [stage.id | stage |> sublanes() |> Enum.map(& &1.id)]
+  @spec delete_stage(Stage.t(), :agent | {:user, integer()}) ::
+          {:ok, Stage.t()}
+          | {:error, :last_stage | {:not_empty, %{live: pos_integer()}} | :public_intake | :not_a_main_stage}
+  def delete_stage(stage, actor \\ :agent)
+
+  def delete_stage(%Stage{parent_id: nil} = stage, actor) do
+    lanes = sublanes(stage)
+    ids = [stage.id | Enum.map(lanes, & &1.id)]
 
     with :ok <- refuse_last_stage(stage),
-         :ok <- refuse_cards(ids),
+         :ok <- refuse_live_cards(ids),
          :ok <- refuse_public_intake(stage.board_id, ids) do
-      {:ok, deleted} = Repo.delete(stage)
-      broadcast_stages_changed({:ok, deleted}, stage.board_id)
+      target = rehome_target(stage)
+
+      fn ->
+        rehome_archived_cards([stage | lanes], stage, target, actor)
+        delete_or_rollback(stage)
+      end
+      |> Repo.transaction()
+      |> broadcast_stages_changed(stage.board_id)
     end
   end
 
-  def delete_stage(%Stage{}), do: {:error, :not_a_main_stage}
+  def delete_stage(%Stage{}, _actor), do: {:error, :not_a_main_stage}
 
   @doc """
   The ONE human sentence for every stage refusal `create_stage/2`, `place_stage/2`,
-  `update_stage/2`, `delete_stage/1`, `enable_lane/2` and `disable_lane/2` return — rendered by both Board
+  `update_stage/2`, `delete_stage/2`, `enable_lane/2` and `disable_lane/3` return — rendered by both Board
   Settings and the REST API (the `Relay.Cards.dependency_error_message/1` precedent).
   """
   def stage_refusal_message(:last_stage), do: "A board needs at least one stage."
 
-  def stage_refusal_message({:not_empty, %{live: live, archived: archived}}),
-    do: "That stage still holds #{live} live and #{archived} archived card(s) — move them out first."
+  def stage_refusal_message({:not_empty, %{live: live}}),
+    do: "That stage still holds #{live} card(s) — move them out first."
 
   def stage_refusal_message(:not_empty), do: "That lane still has cards — move them out first."
 
@@ -1068,20 +1103,71 @@ defmodule Relay.Boards do
     if length(main_stages(board_id)) == 1, do: {:error, :last_stage}, else: :ok
   end
 
-  defp refuse_cards(stage_ids) do
-    {live, archived} =
-      Repo.one(
-        from c in Card,
-          where: c.stage_id in ^stage_ids,
-          select: {filter(count(c.id), is_nil(c.archived_at)), filter(count(c.id), not is_nil(c.archived_at))}
+  defp refuse_live_cards(stage_ids) do
+    live = Repo.aggregate(from(c in Card, where: c.stage_id in ^stage_ids and is_nil(c.archived_at)), :count)
+
+    if live > 0, do: {:error, {:not_empty, %{live: live}}}, else: :ok
+  end
+
+  defp refuse_live_card(%Stage{id: id}) do
+    if Repo.exists?(from c in Card, where: c.stage_id == ^id and is_nil(c.archived_at)),
+      do: {:error, :not_empty},
+      else: :ok
+  end
+
+  # RE453 — where a deleted main stage's archived cards go: the nearest surviving main stage
+  # before it in board order, else the one after it (`:last_stage` guarantees one exists).
+  defp rehome_target(%Stage{} = stage) do
+    {before, [_deleted | after_it]} = stage.board_id |> main_stages() |> Enum.split_while(&(&1.id != stage.id))
+    List.last(before) || hd(after_it)
+  end
+
+  # RE453 — moves the archived cards in `from_stages` (all under the main stage `top`) to
+  # `target`, inside the caller's transaction and before the stage DELETE (the `cards.stage_id`
+  # FK cascades). Positions append after the target's highest, archived included, in their old
+  # order; the status takes the one arrival rule; each card gets one `:moved` entry, unbroadcast
+  # — the caller's single `{:stages_changed, _}` is the only announcement. Display names are
+  # resolved here, while the stage rows still exist.
+  defp rehome_archived_cards(from_stages, %Stage{} = top, %Stage{} = target, actor) do
+    from_names = Map.new(from_stages, &{&1.id, stage_display_name(&1, top)})
+    to_name = stage_display_name(target)
+    from_ids = Map.keys(from_names)
+
+    base = Repo.one(from c in Card, where: c.stage_id == ^target.id, select: max(c.position)) || 0
+
+    from(c in Card, where: c.stage_id in ^from_ids and not is_nil(c.archived_at), order_by: [c.position, c.id])
+    |> Repo.all()
+    |> Enum.with_index(base + 1)
+    |> Enum.each(fn {card, position} ->
+      card
+      |> Changeset.change(
+        stage_id: target.id,
+        position: position,
+        status: Stage.arrival_status(card.status, target.type)
       )
-
-    if live + archived > 0, do: {:error, {:not_empty, %{live: live, archived: archived}}}, else: :ok
+      |> Repo.update()
+      |> ok_or_rollback()
+      |> Activity.log(
+        %{
+          type: :moved,
+          actor: actor,
+          meta: %{
+            "from_stage" => Map.fetch!(from_names, card.stage_id),
+            "to_stage" => to_name,
+            "from_stage_id" => card.stage_id,
+            "to_stage_id" => target.id
+          }
+        },
+        broadcast: false
+      )
+      |> ok_or_rollback()
+    end)
   end
 
-  defp refuse_any_card(%Stage{id: id}) do
-    if Repo.exists?(from c in Card, where: c.stage_id == ^id), do: {:error, :not_empty}, else: :ok
-  end
+  defp delete_or_rollback(%Stage{} = stage), do: stage |> Repo.delete() |> ok_or_rollback()
+
+  defp ok_or_rollback({:ok, value}), do: value
+  defp ok_or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   defp refuse_public_intake(board_id, stage_ids) do
     if Repo.exists?(from b in Board, where: b.id == ^board_id and b.public_intake_stage_id in ^stage_ids),

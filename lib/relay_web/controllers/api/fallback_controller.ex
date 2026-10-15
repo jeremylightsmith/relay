@@ -108,8 +108,8 @@ defmodule RelayWeb.Api.FallbackController do
   # RE384 — the stage guard rails. Every sentence comes from `Relay.Boards.stage_refusal_message/1`,
   # the one rendering Board Settings shares. Losing cards or breaking the board is a 409 conflict
   # with the board's current state; a request that names the wrong kind of stage is a 422.
-  def call(conn, {:error, {:not_empty, %{live: live, archived: archived}} = reason}),
-    do: stage_refusal(conn, :conflict, "not_empty", reason, %{live: live, archived: archived})
+  def call(conn, {:error, {:not_empty, %{live: live}} = reason}),
+    do: stage_refusal(conn, :conflict, "not_empty", reason, %{live: live})
 
   # RE429 — a stage holding a flow can't become a non-work type.
   def call(conn, {:error, {:holds_flow, %{flow: key}} = reason}),

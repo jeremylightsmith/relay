@@ -1,9 +1,13 @@
 defmodule Relay.BoardsStageConfigTest do
   use Relay.DataCase, async: true
 
+  import Ecto.Query
+
+  alias Relay.Activity
   alias Relay.Boards
   alias Relay.Flows
   alias Relay.Repo
+  alias Schemas.Card
   alias Schemas.CardOwner
 
   defp seeded_board do
@@ -227,7 +231,7 @@ defmodule Relay.BoardsStageConfigTest do
       code = stage_named(board, "Code")
       insert(:card, stage: code)
 
-      assert {:error, {:not_empty, %{live: 1, archived: 0}}} = Boards.delete_stage(code)
+      assert {:error, {:not_empty, %{live: 1}}} = Boards.delete_stage(code)
       assert Boards.get_stage(board, code.id)
     end
 
@@ -237,7 +241,7 @@ defmodule Relay.BoardsStageConfigTest do
       {:ok, child} = Boards.enable_lane(code, :review)
       insert(:card, stage: child)
 
-      assert {:error, {:not_empty, %{live: 1, archived: 0}}} = Boards.delete_stage(code)
+      assert {:error, {:not_empty, %{live: 1}}} = Boards.delete_stage(code)
       assert Boards.get_stage(board, code.id)
       assert Boards.get_stage(board, child.id)
     end
@@ -420,15 +424,7 @@ defmodule Relay.BoardsStageConfigTest do
       assert Boards.get_stage(board, deploy.id) == nil
     end
 
-    test "archived cards count" do
-      board = seeded_board()
-      code = stage_named(board, "Code")
-      archived_card(code)
-
-      assert {:error, {:not_empty, %{live: 0, archived: 1}}} = Boards.delete_stage(code)
-    end
-
-    test "counts live and archived cards across the stage and its substages" do
+    test "counts only live cards across the stage and its substages" do
       board = seeded_board()
       code = stage_named(board, "Code")
       {:ok, review} = Boards.enable_lane(code, :review)
@@ -436,7 +432,7 @@ defmodule Relay.BoardsStageConfigTest do
       insert(:card, stage: code)
       archived_card(review)
 
-      assert {:error, {:not_empty, %{live: 2, archived: 1}}} = Boards.delete_stage(code)
+      assert {:error, {:not_empty, %{live: 2}}} = Boards.delete_stage(code)
     end
 
     test "16. deleting a stage deletes its flow; run history keeps the flow key (RE429)" do
@@ -492,6 +488,17 @@ defmodule Relay.BoardsStageConfigTest do
       assert {:error, :public_intake} = Boards.delete_stage(deploy)
     end
 
+    test "a public intake refusal moves no archived card (RE453)" do
+      board = seeded_board()
+      next_up = stage_named(board, "Next up")
+      card = archived_card(next_up)
+      {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: next_up.id})
+
+      assert {:error, :public_intake} = Boards.delete_stage(next_up)
+      assert Repo.reload!(card).stage_id == next_up.id
+      assert Activity.list_activity(card) == []
+    end
+
     test "a reject-to target may be deleted and the reference is nilified" do
       board = seeded_board()
       plan = stage_named(board, "Plan")
@@ -516,12 +523,141 @@ defmodule Relay.BoardsStageConfigTest do
     end
   end
 
+  describe "delete_stage/2 re-homes archived cards (RE453)" do
+    defp archived_in(stage, attrs \\ []),
+      do: insert(:card, Keyword.merge([stage: stage, archived_at: DateTime.utc_now(:second)], attrs))
+
+    defp newest_activity(card), do: card |> Activity.list_activity() |> List.first()
+
+    test "1. an archived card moves to the previous main stage, attributed to the user" do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = stage_named(board, "Code")
+      plan = stage_named(board, "Plan")
+      card = archived_in(code, status: :working)
+
+      assert {:ok, _} = Boards.delete_stage(code, {:user, user.id})
+      assert Boards.get_stage(board, code.id) == nil
+
+      reloaded = Repo.reload!(card)
+      assert reloaded.stage_id == plan.id
+      assert reloaded.archived_at
+      assert reloaded.status == :working
+
+      assert %{type: :moved, actor_type: :user, user_id: user_id, meta: meta} = newest_activity(card)
+      assert user_id == user.id
+
+      assert meta == %{
+               "from_stage" => "Code",
+               "to_stage" => "Plan",
+               "from_stage_id" => code.id,
+               "to_stage_id" => plan.id
+             }
+    end
+
+    test "2. the status snaps to the target's type and the default actor is the agent" do
+      board = seeded_board()
+      deploy = stage_named(board, "Deploy")
+      review = stage_named(board, "Review")
+      card = archived_in(deploy, status: :working)
+
+      assert {:ok, _} = Boards.delete_stage(deploy)
+
+      reloaded = Repo.reload!(card)
+      assert reloaded.stage_id == review.id
+      assert reloaded.status == :in_review
+      assert %{type: :moved, actor_type: :agent} = newest_activity(card)
+    end
+
+    test "3. the first main stage re-homes to the one after it" do
+      board = seeded_board()
+      backlog = stage_named(board, "Backlog")
+      next_up = stage_named(board, "Next up")
+      card = archived_in(backlog, status: :ready)
+
+      assert {:ok, _} = Boards.delete_stage(backlog)
+
+      reloaded = Repo.reload!(card)
+      assert reloaded.stage_id == next_up.id
+      assert reloaded.archived_at
+      assert reloaded.status == :ready
+    end
+
+    test "4. substage cards re-home too, appended after the target's existing positions" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      plan = stage_named(board, "Plan")
+      {:ok, code_review} = Boards.enable_lane(code, :review)
+      {:ok, code_done} = Boards.enable_lane(code, :done)
+      insert(:card, stage: plan, position: 5)
+      in_review = archived_in(code_review)
+      in_done = archived_in(code_done)
+
+      assert {:ok, _} = Boards.delete_stage(code)
+
+      [r, d] = Enum.map([in_review, in_done], &Repo.reload!/1)
+      assert r.stage_id == plan.id
+      assert d.stage_id == plan.id
+      assert r.position != d.position
+      assert r.position > 5
+      assert d.position > 5
+      assert %{"from_stage" => "Code · Review"} = newest_activity(in_review).meta
+    end
+
+    test "5. a live card refuses and moves no archived card" do
+      board = seeded_board()
+      code = stage_named(board, "Code")
+      {:ok, code_review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: code)
+      archived_main = archived_in(code)
+      archived_sub = archived_in(code_review)
+
+      assert Boards.delete_stage(code) == {:error, {:not_empty, %{live: 1}}}
+      assert Boards.get_stage(board, code.id)
+      assert Boards.get_stage(board, code_review.id)
+      assert Repo.reload!(archived_main).stage_id == code.id
+      assert Repo.reload!(archived_sub).stage_id == code_review.id
+      assert Activity.list_activity(archived_main) == []
+      assert Activity.list_activity(archived_sub) == []
+    end
+
+    test "6. a re-homed card restores into its new stage" do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = stage_named(board, "Code")
+      plan = stage_named(board, "Plan")
+      card = archived_in(code, status: :working)
+      {:ok, _} = Boards.delete_stage(code, {:user, user.id})
+
+      assert {:ok, _} = Relay.Cards.unarchive_card(Repo.reload!(card), :agent)
+
+      restored = Repo.reload!(card)
+      assert restored.archived_at == nil
+      assert restored.stage_id == plan.id
+      assert card.id in Repo.all(from c in Card, where: c.stage_id == ^plan.id and is_nil(c.archived_at), select: c.id)
+    end
+
+    test "7. broadcasts stages_changed once and no timeline entry" do
+      board = seeded_board()
+      board_id = board.id
+      code = stage_named(board, "Code")
+      archived_in(code)
+      :ok = Relay.Events.subscribe(board_id)
+
+      assert {:ok, _} = Boards.delete_stage(code)
+
+      assert_receive {:stages_changed, ^board_id}
+      refute_receive {:stages_changed, ^board_id}
+      refute_receive {:timeline_appended, _, _}
+    end
+  end
+
   describe "stage_refusal_message/1 (RE384)" do
     test "renders every refusal reason" do
       assert Boards.stage_refusal_message(:last_stage) == "A board needs at least one stage."
 
-      assert Boards.stage_refusal_message({:not_empty, %{live: 2, archived: 1}}) ==
-               "That stage still holds 2 live and 1 archived card(s) — move them out first."
+      assert Boards.stage_refusal_message({:not_empty, %{live: 2}}) ==
+               "That stage still holds 2 card(s) — move them out first."
 
       assert Boards.stage_refusal_message(:not_empty) == "That lane still has cards — move them out first."
 
@@ -576,7 +712,7 @@ defmodule Relay.BoardsStageConfigTest do
       board = seeded_board()
       :ok = Relay.Events.subscribe(board.id)
       code = stage_named(board, "Code")
-      insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      insert(:card, stage: code)
       {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: stage_named(board, "Next up").id})
 
       {:error, {:not_empty, _}} = Boards.delete_stage(code)

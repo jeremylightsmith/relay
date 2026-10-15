@@ -61,7 +61,7 @@ defmodule Relay.Activity do
 
     changeset
     |> insert_with_images(card, image_ids)
-    |> broadcast_appended(card)
+    |> broadcast_appended(card, true)
   end
 
   defp split_origin(nil), do: {nil, nil}
@@ -129,9 +129,16 @@ defmodule Relay.Activity do
   `%{}`), and optional `:text` (the rendered line for `:action` rows —
   RLY-148's Retry writes `"retry requested"`; defaults to nil) — returning
   `{:ok, activity}` with the actor preloaded or `{:error, changeset}`.
+
+  `opts`: `broadcast:` (default `true`) — `false` inserts the row but skips the
+  `{:timeline_appended, card_id, entry}` broadcast, for a caller logging inside its own
+  transaction that must announce nothing until (or unless) it commits (RE453's stage-delete
+  re-home).
   """
-  def log(%Card{} = card, %{type: type, actor: actor} = attrs) do
+  @spec log(Card.t(), map(), keyword()) :: {:ok, Schemas.Activity.t()} | {:error, Ecto.Changeset.t()}
+  def log(%Card{} = card, %{type: type, actor: actor} = attrs, opts \\ []) do
     {actor_type, user_id} = split_actor(actor)
+    broadcast? = Keyword.get(opts, :broadcast, true)
 
     %Schemas.Activity{
       card_id: card.id,
@@ -144,7 +151,7 @@ defmodule Relay.Activity do
     |> Schemas.Activity.changeset()
     |> Repo.insert()
     |> preload_user()
-    |> broadcast_appended(card)
+    |> broadcast_appended(card, broadcast?)
   end
 
   @doc """
@@ -252,12 +259,12 @@ defmodule Relay.Activity do
   # MMF 18: announce the new timeline entry to every open board session.
   # Receivers apply the payload struct directly (no DB re-read), so this
   # is safe even when the log happens inside a caller's transaction.
-  defp broadcast_appended({:ok, entry} = result, %Card{} = card) do
+  defp broadcast_appended({:ok, entry} = result, %Card{} = card, true) do
     Events.broadcast(card.board_id, {:timeline_appended, card.id, entry})
     result
   end
 
-  defp broadcast_appended({:error, _changeset} = result, _card), do: result
+  defp broadcast_appended(result, _card, _broadcast?), do: result
 
   defp split_actor(:agent), do: {:agent, nil}
   defp split_actor({:user, user_id}) when is_integer(user_id), do: {:user, user_id}

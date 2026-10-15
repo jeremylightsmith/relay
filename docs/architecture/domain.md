@@ -48,14 +48,22 @@ sharing behavior.
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
   attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
-  an anchor the same way (`reorder_stage/2` stays the ↑/↓ step). `delete_stage/1` refuses, in
-  order: the last main stage (`:last_stage`), any card in the stage or its substages —
-  archived included — (`{:not_empty, %{live:, archived:}}`), and the public intake stage
-  (`:public_intake`). A flow never blocks a delete (RE429): the stage's flow goes with it
+  an anchor the same way (`reorder_stage/2` stays the ↑/↓ step). `delete_stage/2` refuses, in
+  order: the last main stage (`:last_stage`), any **live** card in the stage or its substages
+  (`{:not_empty, %{live: n}}`), and the public intake stage (`:public_intake`). Archived cards
+  never block (RE453): once every refusal has passed, they are **re-homed** in the same
+  transaction as the delete (before it — `cards.stage_id` cascades) to the nearest surviving
+  main stage before the deleted one in board order (the one after it when it is first), staying
+  archived, snapped by `Schemas.Stage.arrival_status/2`, appended after the target's highest
+  card position, each with one `:moved` activity (the `Relay.Cards` meta keys) attributed to the
+  optional `actor` (default `:agent`) and logged with `Activity.log/3`'s `broadcast: false` — the
+  one `{:stages_changed, board_id}` after the commit is the only announcement (hence `Boards`'s
+  boundary dep on `Relay.Activity`). A flow never blocks a delete (RE429): the stage's flow goes with it
   (`flows.stage_id on_delete: :delete_all`; its runs keep `flow_key`, `flow_id` is nilified),
-  and a reject-to target is nilified by the FK. `disable_lane/2` refuses the same for the lane
-  alone (bare `:not_empty`). Changing a flow-holding stage to a non-work type
-  (`Relay.Cards.update_stage/2`) is `{:holds_flow, %{stage:, flow:}}`; a substage passed to `delete_stage/1` / `place_stage/2` / `enable_lane/2` is
+  and a reject-to target is nilified by the FK. `disable_lane/3` refuses the same for the lane
+  alone (bare `:not_empty`, live cards only) and re-homes the lane's archived cards to its parent
+  the same way. Changing a flow-holding stage to a non-work type
+  (`Relay.Cards.update_stage/2`) is `{:holds_flow, %{stage:, flow:}}`; a substage passed to `delete_stage/2` / `place_stage/2` / `enable_lane/2` is
   `:not_a_main_stage`. `stage_refusal_message/1` is the one rendering of every refusal (Settings
   flash and API alike). A stage's **type** changes only through `Relay.Cards.update_stage/2`,
   which wraps `update_stage/2` and re-snaps resident cards when the type changed (it lives in
@@ -63,7 +71,7 @@ sharing behavior.
   Over REST (`RelayWeb.Api.StageController`, any board key): `GET|POST /api/stages`,
   `PATCH|DELETE /api/stages/:id`, `POST /api/stages/:id/place`, and
   `PUT|DELETE /api/stages/:id/substages/:lane`; the refusals map to 409 (`last_stage`,
-  `not_empty` with `live`/`archived` counts, `holds_flow` with `flow`, `public_intake`)
+  `not_empty` with the `live` count, `holds_flow` with `flow`, `public_intake`)
   and 422 (`invalid_anchor`, `not_a_main_stage`), each with `stage_refusal_message/1`'s sentence.
   The stage JSON's `ai_enabled` key is read-only, derived from `Flows.ai_stage_ids/1` (RE409);
   a create/update body naming `ai_enabled` (any value) is 422 `invalid_request` and writes nothing.

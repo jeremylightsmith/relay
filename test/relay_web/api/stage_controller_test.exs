@@ -416,17 +416,25 @@ defmodule RelayWeb.Api.StageControllerTest do
     end
 
     # Scenario 19
-    test "refuses a stage holding an archived card, with counts", %{conn: conn, board: board} do
-      insert(:card, stage: stage_named(board, "Code"), archived_at: DateTime.utc_now(:second))
+    test "refuses a stage holding a live card, with the live count", %{conn: conn, board: board} do
+      insert(:card, stage: stage_named(board, "Code"))
 
       assert conn |> delete(~p"/api/stages/#{stage_named(board, "Code").id}") |> json_response(409) == %{
                "error" => %{
                  "code" => "not_empty",
-                 "message" => "That stage still holds 0 live and 1 archived card(s) — move them out first.",
-                 "live" => 0,
-                 "archived" => 1
+                 "message" => "That stage still holds 1 card(s) — move them out first.",
+                 "live" => 1
                }
              }
+    end
+
+    # RE453 — archived cards re-home instead of blocking.
+    test "deletes a stage holding only an archived card, re-homing it", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      card = insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+
+      assert conn |> delete(~p"/api/stages/#{code.id}") |> json_response(200) |> get_in(["data", "name"]) == "Code"
+      assert Repo.reload!(card).stage_id == stage_named(board, "Plan").id
     end
 
     # RE429 scenario 35 — deleting a stage deletes its flow, enabled or not.
