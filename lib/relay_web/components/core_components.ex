@@ -7926,6 +7926,7 @@ defmodule RelayWeb.CoreComponents do
                 </div>
                 <div
                   id={"#{@id}-scroll"}
+                  phx-hook="PreserveScroll"
                   style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}
                 >
                   <div
@@ -8099,6 +8100,7 @@ defmodule RelayWeb.CoreComponents do
                 <div
                   id={"sublane-#{sub.id}-cards"}
                   phx-update="stream"
+                  phx-hook="PreserveScroll"
                   data-stage-id={sub.id}
                   class="stage-cards stage-drop"
                   style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"

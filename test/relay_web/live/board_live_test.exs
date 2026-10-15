@@ -2457,6 +2457,27 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#sublane-#{review.id}-cards", card.title)
     end
 
+    # RE454 — the client keeps each lane's scrollTop across a card-move restream. The hook only
+    # reads and restores scroll position, so LiveView still owns the lanes' DOM: no
+    # phx-update="ignore", and the sub-lane body stays the stream container.
+    test "both lane scroll bodies mount the PreserveScroll hook", %{conn: conn, code: code, board: board} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+      review = code |> Boards.sublanes() |> hd()
+      # An empty sub-lane renders collapsed (no scroll body), so give it a card too.
+      insert(:card, stage: review, title: "In review", position: 1, ref_number: 2)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      main = ~s([id$="-scroll"][phx-hook="PreserveScroll"])
+      sub = ~s(#sublane-#{review.id}-cards[phx-hook="PreserveScroll"])
+
+      assert has_element?(view, main)
+      assert has_element?(view, sub)
+      assert has_element?(view, ~s(#{sub}[phx-update="stream"]))
+      refute has_element?(view, ~s(#{main}[phx-update="ignore"]))
+      refute has_element?(view, ~s(#{sub}[phx-update="ignore"]))
+    end
+
     defp card_ref(card), do: "MY#{card.ref_number}"
   end
 
