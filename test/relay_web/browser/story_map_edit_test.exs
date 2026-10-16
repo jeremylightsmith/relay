@@ -38,6 +38,7 @@ defmodule RelayWeb.Browser.StoryMapEditTest do
       |> visit("/dev/login")
       |> assert_has("body .phx-connected")
       |> visit("/board/#{board.slug}/story-map")
+      |> assert_has("body .phx-connected")
       |> assert_has("#story-map-grid")
       # Escape cancels and writes nothing. The input opens pre-filled with the current name, so
       # select-all before typing — a real user replaces it too, they don't append to it.

@@ -10,6 +10,8 @@ defmodule Storybook.SetupComponents.SetupPanel do
   # The panel's controls use the page-wide `setup-` ids, so each variation gets its own iframe.
   def container, do: {:iframe, style: "height: 980px;"}
 
+  # RE456 adds the peeks, card mockup "Peek — finished steps expand in place, stay done": frame A
+  # (step 4 open) and frame B (steps 2, 3, 5, 6 and 1 open).
   # RE446 adds the payoff variation and D (connect a machine), card mockup "Payoff — first card turns violet, Settings →
   # Setup, connect a machine", frame A's panel.
   # RE443, card mockup "Wizard — docked left on the empty board, every step state + expert
@@ -97,6 +99,38 @@ defmodule Storybook.SetupComponents.SetupPanel do
         }
       },
       %Variation{
+        id: :peek_a_install,
+        description: "Peek A · the reopened finished panel, step 4 open: the install command again (RE456)",
+        attributes: %{
+          id: "setup-panel",
+          board_name: "acme-web",
+          board_slug: "acme-web",
+          install_command: "curl -fsSL https://relayboard.fly.dev/b/acme-web/install | sh",
+          checklist: payoff_checklist(key_hint: key_hint()),
+          peeks: MapSet.new([Relay.Setup.step_id(:install)])
+        }
+      },
+      %Variation{
+        id: :peek_b_many,
+        description: "Peek B · steps 1, 2, 3, 5 and 6 open: the LLM switch, the masked key, the commands (RE456)",
+        attributes: %{
+          id: "setup-panel",
+          board_name: "acme-web",
+          board_slug: "acme-web",
+          install_command: "curl -fsSL https://relayboard.fly.dev/b/acme-web/install | sh",
+          selected_llm: "codex",
+          checklist: payoff_checklist(key_hint: key_hint()),
+          peeks:
+            MapSet.new([
+              hd(Relay.Setup.steps()).id,
+              Relay.Setup.step_id(:llm),
+              Relay.Setup.step_id(:key),
+              Relay.Setup.step_id(:onboard),
+              Relay.Setup.step_id(:runner)
+            ])
+        }
+      },
+      %Variation{
         id: :d_connect_a_machine,
         description: "D · connect a machine: Sam's member note, the board-wide steps skipped, 2 of 6 (RE446)",
         attributes: %{
@@ -140,8 +174,11 @@ defmodule Storybook.SetupComponents.SetupPanel do
     }
   end
 
+  # Step 3's key as the board keeps it: its prefix and last four (RE456's masked line).
+  defp key_hint, do: %{token_prefix: "k7f2q9", last_four: "3a9c"}
+
   # Every step done, setup taking 40 minutes from the board's creation to the first claim.
-  defp payoff_checklist do
+  defp payoff_checklist(opts \\ []) do
     [_pending, _active, _waiting, done, _failed, _skipped] = BoardSetupStep.statuses()
     runner = Relay.Setup.step_id(:runner)
     claim = Relay.Setup.step_id(:first_claim)
@@ -159,7 +196,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
         data: %{"card_ref" => "STR1", "card_id" => 1, "runner" => "jl-mbp", "machine" => "jl-mbp", "verb" => "planning"}
       }
     })
-    |> checklist()
+    |> checklist(opts)
   end
 
   # An unsaved connect (RE446, frame D): `Relay.Setup.connect_skips/0` skipped, step 3 active and
@@ -189,7 +226,8 @@ defmodule Storybook.SetupComponents.SetupPanel do
     Relay.Setup.preview_checklist(states, %{
       template: Keyword.get(opts, :template, "Bare minimum"),
       template_warning: Keyword.get(opts, :warning),
-      llm: Relay.Setup.onboarding_llm("claude-code")
+      llm: Relay.Setup.onboarding_llm("claude-code"),
+      key_hint: Keyword.get(opts, :key_hint)
     })
   end
 end

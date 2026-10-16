@@ -911,7 +911,16 @@ sharing behavior.
   Mint a new key". In that state `remint_key/2` also succeeds: under the board lock it reopens
   step 3 (`:active`, evidence and `completed_at` cleared, `saved` dropped), puts step 4 back to
   `:pending` (`reached_at` cleared), revokes the unused key, mints a fresh one and broadcasts
-  once; otherwise it is `{:error, :not_current}` unless step 3 is current. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
+  once. Once step 3 is confirmed (`data.machine` set by the first authed call or a preflight —
+  RE456's peek) `remint_key/2` re-keys in place: no step's status, evidence or timestamps move,
+  only step 3's `key_id` (and a machine's `api_key_id`) points at the new key; it is
+  `{:error, :not_current}` only while step 3 is pending. `switch_llm/3` (RE456, board scope)
+  changes the default LLM after step 2 finished (`{:error, :not_finished}` before): it makes the
+  harness the default agent as `choose_llm/3` does and rewrites step 2's `data.llm` (so its title
+  and the checklist's `llm` follow), never minting a key or moving a step; the same harness is a
+  no-op, a change broadcasts `{:setup_changed, board_id}` once. Every board or machine checklist
+  carries `key_hint` — `%{token_prefix, last_four}` of step 3's key, nil before one or once it
+  was revoked — so the wizard can show the masked key without a DB call. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
   `step_id/1` (`:llm | :key | :install | :onboard | :interview | :customize | :runner |
   :first_claim`) names the catalog id of the steps a surface
   renders specially, so `RelayWeb.SetupComponents` (the wizard panel, chip and phones' read-only

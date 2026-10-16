@@ -117,6 +117,12 @@ defmodule RelayWeb.BoardLive do
   Mounting mints nothing; the first "Mint my key" (`"setup_mint_key"`) calls
   `Relay.Setup.connect_machine/2`, later ones `Relay.Setup.remint_key/2` on that machine. Close
   setup there only patches back to the board.
+
+  RE456: a finished step can be peeked at. `:setup_peeks` is this socket's set of open top-level
+  step ids (never persisted or broadcast; reset when the panel switches mode), toggled by
+  `"setup_toggle_peek"`. Step 2's peek switches the default LLM (`"setup_switch_llm"`,
+  `Relay.Setup.switch_llm/3`) and step 3's re-mints the key in place; the shown-once key then
+  survives `{:setup_changed, _}` while step 3's peek is open, and closing that peek drops it.
   """
 
   use RelayWeb, :live_view
@@ -148,6 +154,7 @@ defmodule RelayWeb.BoardLive do
   alias RelayWeb.StoryMapGrid
   alias Schemas.Attachment
   alias Schemas.Board
+  alias Schemas.BoardSetupStep
   alias Schemas.Card
   alias Schemas.Comment
   alias Schemas.Run
@@ -188,6 +195,9 @@ defmodule RelayWeb.BoardLive do
   # RE198 — how many search rows the header popover shows before it says "keep typing". A
   # popover, not a page: eight rows is what fits without becoming a second board.
   @search_result_limit 8
+
+  # The flash when a setup action lands after the checklist moved on (another tab, the runner).
+  @setup_moved_on "Setup has moved on since this page loaded. Try again from the current step."
 
   # RE362 — the drawer's multiline markdown editors whose unsaved text is kept as a draft, each
   # mapped to its {editing flag, form} assigns. The ONE definition of the drafted-field set:
@@ -345,6 +355,7 @@ defmodule RelayWeb.BoardLive do
             token={@setup_token}
             install_command={@setup_install_command}
             selected_llm={@setup_llm_selected}
+            peeks={@setup_peeks}
           />
           <div id="board" phx-hook="BoardDnD" class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div
@@ -1267,6 +1278,7 @@ defmodule RelayWeb.BoardLive do
       |> assign(:setup_install_command, Setup.install_command(RelayWeb.Endpoint.url(), board.slug))
       |> assign(:setup_minimized, false)
       |> assign(:setup_llm_selected, recommended_llm())
+      |> assign(:setup_peeks, MapSet.new())
       |> assign(:setup_hide_explanations, socket.assigns.current_scope.user.setup_explanations_hidden)
       |> assign(:archived_count, Cards.count_archived_cards(board))
       |> assign(:archived_open, false)
@@ -1510,12 +1522,13 @@ defmodule RelayWeb.BoardLive do
       setup_connect_mode: true,
       setup_connect: Setup.connect_checklist(board, scope.user),
       setup_token: nil,
+      setup_peeks: MapSet.new(),
       setup_minimized: false
     )
   end
 
   defp assign_setup_connect(socket, false),
-    do: assign(socket, setup_connect_mode: false, setup_connect: nil, setup_token: nil)
+    do: assign(socket, setup_connect_mode: false, setup_connect: nil, setup_token: nil, setup_peeks: MapSet.new())
 
   # The connect checklist re-read: its machine's once minted, else the member's latest unfinished
   # machine or a fresh preview.
@@ -1536,7 +1549,7 @@ defmodule RelayWeb.BoardLive do
   defp assign_connect_key(socket, {:error, _reason}) do
     socket
     |> assign(:setup_connect, read_setup_connect(socket.assigns))
-    |> put_flash(:error, "Setup has moved on since this page loaded. Try again from the current step.")
+    |> put_flash(:error, @setup_moved_on)
   end
 
   defp recommended_llm, do: Enum.find(Setup.onboarding_llms(), & &1.recommended?).harness
@@ -1555,7 +1568,47 @@ defmodule RelayWeb.BoardLive do
   defp assign_setup_key(socket, {:error, _reason}) do
     socket
     |> assign(:setup, Setup.checklist(socket.assigns.board))
-    |> put_flash(:error, "Setup has moved on since this page loaded. Try again from the current step.")
+    |> put_flash(:error, @setup_moved_on)
+  end
+
+  # The shown panel's checklist: the connect's in connect mode, else the board's.
+  defp shown_setup(%{setup_connect_mode: true, setup_connect: connect}), do: connect
+  defp shown_setup(%{setup: setup}), do: setup
+
+  defp setup_step_finished?(nil, _id), do: false
+
+  defp setup_step_finished?(%{steps: steps}, id),
+    do: Enum.any?(steps, &(&1.id == id and &1.status in BoardSetupStep.finished_statuses()))
+
+  # RE456 — the shown-once key stays while step 3 is current, or while its finished step's peek is
+  # open (a key re-minted there).
+  defp keep_setup_token?(shown, peeks) do
+    key = Setup.step_id(:key)
+    (shown && shown.current_id == key) || (MapSet.member?(peeks, key) and setup_step_finished?(shown, key))
+  end
+
+  defp setup_top_ids, do: for(%{parent: nil, id: id} <- Setup.steps(), do: id)
+
+  defp toggle_setup_peek(socket, id) do
+    peeks = socket.assigns.setup_peeks
+    shown = shown_setup(socket.assigns)
+
+    if MapSet.member?(peeks, id),
+      do: socket |> assign(:setup_peeks, MapSet.delete(peeks, id)) |> closed_setup_peek(shown, id),
+      else: socket |> assign(:setup_peeks, MapSet.put(peeks, id)) |> opened_setup_peek(shown, id)
+  end
+
+  # Step 2's peek starts on the current default, so its switch button starts disabled.
+  defp opened_setup_peek(socket, %{llm: %{harness: harness}}, id) do
+    if id == Setup.step_id(:llm), do: assign(socket, :setup_llm_selected, harness), else: socket
+  end
+
+  defp opened_setup_peek(socket, _shown, _id), do: socket
+
+  # Closing a finished step 3's peek drops the key re-minted there.
+  defp closed_setup_peek(socket, shown, id) do
+    key = Setup.step_id(:key)
+    if id == key and setup_step_finished?(shown, key), do: assign(socket, :setup_token, nil), else: socket
   end
 
   # RLY-234 / RE400 — the drawer's ‹ › cluster: server-driven on the web board drawer, or native
@@ -1770,7 +1823,7 @@ defmodule RelayWeb.BoardLive do
         story_map_rename_start story_map_rename_change story_map_rename_submit
         story_map_rename_cancel story_map_delete story_map_reorder
         talk_send talk_stop talk_clear talk_slash
-        setup_choose_llm setup_mint_key setup_key_saved
+        setup_choose_llm setup_mint_key setup_key_saved setup_toggle_peek setup_switch_llm
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1787,6 +1840,25 @@ defmodule RelayWeb.BoardLive do
   def handle_event("setup_choose_llm", %{"llm" => harness}, socket) do
     %{board: board, current_scope: scope} = socket.assigns
     {:noreply, assign_setup_key(socket, Setup.choose_llm(board, scope.user, harness))}
+  end
+
+  # RE456 — a finished step's peek, per socket: no domain call, nothing persisted or broadcast.
+  # Opening step 2's starts its picker on the current default; closing a finished step 3's drops
+  # the key re-minted there. Anything but a top-level step id is ignored.
+  def handle_event("setup_toggle_peek", %{"step" => id}, socket) do
+    if id in setup_top_ids(), do: {:noreply, toggle_setup_peek(socket, id)}, else: {:noreply, socket}
+  end
+
+  def handle_event("setup_switch_llm", %{"llm" => harness}, socket) do
+    %{board: board, current_scope: scope} = socket.assigns
+
+    case Setup.switch_llm(board, scope.user, harness) do
+      {:ok, checklist} ->
+        {:noreply, assign(socket, setup: checklist, setup_llm_selected: harness)}
+
+      {:error, _reason} ->
+        {:noreply, socket |> assign(:setup, Setup.checklist(board)) |> put_flash(:error, @setup_moved_on)}
+    end
   end
 
   def handle_event("setup_mint_key", _params, %{assigns: %{setup_connect_mode: true, setup_connect: %{}}} = socket),
@@ -3733,7 +3805,7 @@ defmodule RelayWeb.BoardLive do
     setup = Setup.checklist(socket.assigns.board)
     connect = if socket.assigns.setup_connect_mode, do: read_setup_connect(socket.assigns)
     shown = if socket.assigns.setup_connect_mode, do: connect, else: setup
-    token = if shown && shown.current_id == Setup.step_id(:key), do: socket.assigns.setup_token
+    token = if keep_setup_token?(shown, socket.assigns.setup_peeks), do: socket.assigns.setup_token
 
     {:noreply, assign(socket, setup: setup, setup_connect: connect, setup_token: token)}
   end

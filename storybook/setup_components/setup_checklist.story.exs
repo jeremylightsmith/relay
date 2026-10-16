@@ -10,7 +10,8 @@ defmodule Storybook.SetupComponents.SetupChecklist do
   # RE443, card mockups "Wizard — docked left on the empty board, every step state + expert
   # toggle" and "Mobile — read-only checklist, continue on a computer"; RE445 adds step 5's frames
   # D, F1, F2 and E; RE455 adds step 3's "I've saved it — next" and "Lost it?" (card mockup "B — step
-  # 3: explicit “I've saved it — next” button"). Fixture checklists come
+  # 3: explicit “I've saved it — next” button"); RE456 adds a finished checklist with step 3's peek
+  # open (card mockup "Peek — finished steps expand in place, stay done"). Fixture checklists come
   # from `Relay.Setup.preview_checklist/2`, the same builder `Relay.Setup.checklist/1` uses, with
   # no database.
   def variations do
@@ -49,6 +50,21 @@ defmodule Storybook.SetupComponents.SetupChecklist do
             }),
           install_command: "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh",
           board_slug: "streaks"
+        }
+      },
+      %Variation{
+        id: :peek_key_reminted,
+        description: "Finished, step 3's peek open (RE456): the masked key, a new one shown once, no \"I've saved it\"",
+        attributes: %{
+          id: "setup-story-peek",
+          checklist:
+            Relay.Setup.preview_checklist(Map.new(Relay.Setup.steps(), &{&1.id, done}), %{
+              template: "Bare minimum",
+              llm: Relay.Setup.onboarding_llm("claude-code"),
+              key_hint: %{token_prefix: "k7f2q9", last_four: "3a9c"}
+            }),
+          token: "relay_8e1d0c7b6a5f_fedcba9876543210fedcba9876543210",
+          peeks: MapSet.new([Relay.Setup.step_id(:key)])
         }
       },
       %Variation{

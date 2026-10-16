@@ -242,6 +242,21 @@ defmodule Relay.SetupConnectTest do
     assert Repo.get(ApiKey, old_key_id) == nil
   end
 
+  # RE456 scenario 13
+  test "remint_key/2 re-keys a machine whose step 3 was confirmed, and its key_hint follows" do
+    %{board: board} = board_past_step_2()
+    sam = insert(:user, name: "Sam")
+    %{machine: machine} = connect!(board, sam)
+    {:ok, _} = Setup.advance(machine, "3", :done, %{data: %{"machine" => "sam-mbp"}})
+
+    assert {:ok, %{token: token}} = Setup.remint_key(machine, sam)
+
+    {:ok, new_key} = ApiKeys.authenticate_key(token)
+    assert entry(Setup.machine_checklist(machine), "3").status == :done
+    assert Repo.reload!(machine).api_key_id == new_key.id
+    assert Setup.machine_checklist(machine).key_hint.last_four == new_key.last_four
+  end
+
   # RE455 scenario 11
   test "key_saved/1 finishes a machine's step 3, and remint_key/2 reopens it with a fresh key" do
     %{board: board} = board_past_step_2()

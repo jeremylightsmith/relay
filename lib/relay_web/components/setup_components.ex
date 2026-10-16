@@ -9,10 +9,11 @@ defmodule RelayWeb.SetupComponents do
       3's shown-once key, step 4's install command and preflight checks) or `:read_only` mode
       (no controls; each unfinished step shows its `read_only_note`).
     * `setup_panel/1` — the docked-left wizard: header, progress, expert toggle,
-      `how_relay_works/1`, the interactive checklist and a footer.
+      `how_relay_works/1`, the interactive checklist (its `peeks` passed through) and a footer.
     * `setup_chip/1` — the top-bar `Setup · <position> of <total>` chip, `Setup · done` once
       the checklist is finished.
-    * `setup_done_box/1` — the "You're set up" box atop a finished panel (RE446): Close setup
+    * `setup_done_box/1` — the "You're set up" box atop a finished panel (RE446; RE456 points at
+      the peeks: "Need a command again? Open any step below; it stays done."): Close setup
       (`"setup_close"`) and Connect another machine (`"setup_connect_another"`).
     * `setup_callout/1` — the payoff callout (RE446, card mockup "Payoff — first card turns
       violet, Settings → Setup, connect a machine", frame A): "An agent has the baton", pinned
@@ -38,6 +39,17 @@ defmodule RelayWeb.SetupComponents do
   (`<id>-onboard-failed`), "Your answers n of 9" while 5.3 or 5.4 is current (`<id>-answers`)
   and 5.4's proposed changes with their agreement markers (`<id>-changes`).
 
+  Peek at a finished step (RE456, card mockup "Peek — finished steps expand in place, stay
+  done"): in `:interactive` mode every finished step but a connect's skipped ones has its title
+  row as a toggle (`<id>-step-<n>-peek-toggle`, `"setup_toggle_peek"`, `%{"step" => n}`). A step
+  whose id is in the `peeks` attr opens a peek box (`<id>-step-<n>-peek`) under its evidence with
+  its why, What this does and what it showed while it was current: step 2's picker with the
+  `current` badge (`<id>-llm-<harness>-current`) and `<id>-switch-llm`; step 3's masked key
+  (`<id>-key-masked`, from the checklist's `key_hint`), a freshly minted one shown once and
+  `<id>-mint-key`; step 4's install command and rerun note (`<id>-install-rerun`); step 5's
+  `<id>-onboard-command`; step 6's `<id>-runner-command` and `<id>-runner-restart`. A peek never
+  moves the step.
+
   Whose move it is is the step's colour: `you · here` / `you · terminal` are primary (blue),
   `AI · terminal` is secondary (violet); done is success, failed is error. Theme tokens only.
 
@@ -46,8 +58,9 @@ defmodule RelayWeb.SetupComponents do
   can both be on the page. Events, all handled by `RelayWeb.BoardLive`: `"setup_select_llm"`
   (the LLM form's `phx-change`, `%{"llm" => harness}`), `"setup_choose_llm"`
   (`%{"llm" => harness}`), `"setup_mint_key"` (also step 3's "Lost it? Mint a new key" while
-  `Relay.Setup.key_unconfirmed?/1`), `"setup_key_saved"` (step 3's "I've saved it — next", RE455),
-  `"setup_toggle_explanations"`,
+  `Relay.Setup.key_unconfirmed?/1`, and its peek's "Mint a new key"), `"setup_key_saved"` (step 3's "I've saved it — next", RE455),
+  `"setup_toggle_peek"` (`%{"step" => id}`), `"setup_switch_llm"` (step 2's peek,
+  `%{"llm" => harness}`), `"setup_toggle_explanations"`,
   `"setup_minimize"`, `"setup_open"`, `"setup_close"`, `"setup_callout_watch"` and
   `"setup_connect_another"`.
 
@@ -66,6 +79,13 @@ defmodule RelayWeb.SetupComponents do
   # tests and smoke address.
   @panel_prefix "setup"
 
+  # The steps whose peek carries controls, by `Relay.Setup.step_id/1` role (RE456).
+  @peek_roles [:llm, :key, :install, :onboard, :runner]
+
+  # What step 5 and step 6 have you run.
+  @onboard_command "/relay-onboard"
+  @runner_command "./relay start"
+
   # ---------------------------------------------------------------- checklist
 
   attr :id, :string, required: true, doc: "the list's DOM id, and the prefix of every id inside it"
@@ -77,6 +97,10 @@ defmodule RelayWeb.SetupComponents do
   attr :selected_llm, :string, default: nil, doc: "the harness key the step-2 picker has selected"
   attr :board_slug, :string, default: nil, doc: "for the \"switch the default LLM\" settings link"
   attr :now, DateTime, default: nil, doc: "the clock step 5's elapsed time reads; nil is `DateTime.utc_now/0`"
+
+  attr :peeks, MapSet,
+    default: MapSet.new(),
+    doc: "the top-level step ids whose peek is open (RE456); ignored for a step that isn't peekable"
 
   def setup_checklist(assigns) do
     assigns =
@@ -97,6 +121,7 @@ defmodule RelayWeb.SetupComponents do
         selected_llm={@selected_llm}
         board_slug={@board_slug}
         now={@now}
+        peeks={@peeks}
       />
     </ol>
     """
@@ -113,6 +138,7 @@ defmodule RelayWeb.SetupComponents do
   attr :selected_llm, :string, required: true
   attr :board_slug, :string, required: true
   attr :now, DateTime, required: true
+  attr :peeks, MapSet, required: true
 
   defp setup_step(assigns) do
     step = assigns.step
@@ -120,10 +146,15 @@ defmodule RelayWeb.SetupComponents do
     current? = step.status in BoardSetupStep.current_statuses()
 
     connect_skipped? = assigns.checklist.connect? and step.status == :skipped
+    # A finished step can be peeked at (RE456): its title row toggles a box with what it showed
+    # while it was current. Never in read-only mode, never a step a connect skipped.
+    peekable? = assigns.interactive and finished? and not connect_skipped?
 
     assigns =
       assign(assigns,
         finished?: finished?,
+        peekable?: peekable?,
+        open?: peekable? and MapSet.member?(assigns.peeks, step.id),
         current?: current?,
         onboard?: assigns.interactive and current? and step.id == Setup.step_id(:onboard),
         tone: actor_tone(step.actor),
@@ -155,7 +186,31 @@ defmodule RelayWeb.SetupComponents do
         class={["flex min-w-0 flex-1 flex-col gap-1.5", not @last && "pb-4"]}
         style="padding-top:2px"
       >
-        <div class="flex flex-wrap items-center gap-2">
+        <button
+          :if={@peekable?}
+          type="button"
+          id={"#{step_dom_id(@prefix, @step.id)}-peek-toggle"}
+          phx-click="setup_toggle_peek"
+          phx-value-step={@step.id}
+          aria-expanded={to_string(@open?)}
+          class={[
+            "-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-0.5 text-left hover:bg-base-200",
+            @open? && "bg-base-200"
+          ]}
+        >
+          <span style={title_style(@step.status)}>{@step.title}</span>
+          <span :if={@open?} class="setup-actor-tag font-mono" style={tag_style(@tone)}>
+            {actor_label(@step.actor)}
+          </span>
+          <span class="flex-1"></span>
+          <span class="flex" style={muted()}>
+            <.icon
+              name={if(@open?, do: "hero-chevron-down", else: "hero-chevron-right")}
+              class="size-3.5"
+            />
+          </span>
+        </button>
+        <div :if={not @peekable?} class="flex flex-wrap items-center gap-2">
           <span style={title_style(@step.status)}>{@step.title}</span>
           <span
             :if={@step.status != :done}
@@ -243,27 +298,191 @@ defmodule RelayWeb.SetupComponents do
         >
           {@step.evidence}
         </div>
+        <.peek
+          :if={@open?}
+          prefix={@prefix}
+          step={@step}
+          checklist={@checklist}
+          explain={@explain}
+          token={@token}
+          install_command={@install_command}
+          selected_llm={@selected_llm}
+        />
         <.preflight_checks
           :if={@interactive and @current? and @step.id == Setup.step_id(:install)}
           prefix={@prefix}
           checks={List.wrap(@step.data["checks"])}
         />
         <.substeps :if={@children != []} prefix={@prefix} children={@children} />
-        <details :if={@explain and @current? and @step.what_this_does != []} class="setup-what">
-          <summary
-            class="link link-hover flex cursor-pointer list-none items-center gap-1.5"
-            style="font-size:12px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content))"
-          >
-            <span class="font-mono" style={"font-size:10px;" <> faint()}>▸</span> What this does
-          </summary>
-          <ul class="mt-1.5 flex list-disc flex-col gap-1 pl-5" style={"font-size:12px;" <> muted()}>
-            <li :for={line <- @step.what_this_does}>{line}</li>
-          </ul>
-        </details>
+        <.what_this_does :if={@explain and @current?} lines={@step.what_this_does} />
       </div>
     </li>
     """
   end
+
+  attr :lines, :list, required: true
+
+  defp what_this_does(assigns) do
+    ~H"""
+    <details :if={@lines != []} class="setup-what">
+      <summary
+        class="link link-hover flex cursor-pointer list-none items-center gap-1.5"
+        style="font-size:12px;color:color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content))"
+      >
+        <span class="font-mono" style={"font-size:10px;" <> faint()}>▸</span> What this does
+      </summary>
+      <ul class="mt-1.5 flex list-disc flex-col gap-1 pl-5" style={"font-size:12px;" <> muted()}>
+        <li :for={line <- @lines}>{line}</li>
+      </ul>
+    </details>
+    """
+  end
+
+  # ---------------------------------------------------------------- peek (RE456)
+
+  # A finished step's peek, card mockup "Peek — finished steps expand in place, stay done": a
+  # header, the why line and What this does (when explanations show) around the step's controls.
+  # It changes nothing about the step: the ids inside reuse the current-step ids, safe because a
+  # step is never both current and finished.
+  attr :prefix, :string, required: true
+  attr :step, :map, required: true
+  attr :checklist, :map, required: true
+  attr :explain, :boolean, required: true
+  attr :token, :string, required: true
+  attr :install_command, :string, required: true
+  attr :selected_llm, :string, required: true
+
+  defp peek(assigns) do
+    assigns = assign(assigns, role: Enum.find(@peek_roles, &(Setup.step_id(&1) == assigns.step.id)))
+
+    ~H"""
+    <div
+      id={"#{step_dom_id(@prefix, @step.id)}-peek"}
+      class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-3 mt-1"
+      style="box-shadow:inset 3px 0 0 color-mix(in oklab, var(--color-success) 55%, var(--color-base-100))"
+    >
+      <div class="flex items-center gap-1.5 font-mono" style={"font-size:10px;" <> faint()}>
+        <.icon name="hero-eye" class="size-3" /> still done · nothing here changes your progress
+      </div>
+      <p
+        :if={@explain and @step.why}
+        class="setup-why"
+        style={"font-size:12.5px;line-height:1.45;" <> muted()}
+      >
+        {@step.why}
+      </p>
+      <.peek_controls
+        role={@role}
+        prefix={@prefix}
+        checklist={@checklist}
+        token={@token}
+        install_command={@install_command}
+        selected_llm={@selected_llm}
+      />
+      <.what_this_does :if={@explain} lines={@step.what_this_does} />
+    </div>
+    """
+  end
+
+  attr :role, :atom, required: true, doc: "the step's `Relay.Setup.step_id/1` role, nil for steps 1 and 7"
+  attr :prefix, :string, required: true
+  attr :checklist, :map, required: true
+  attr :token, :string, required: true
+  attr :install_command, :string, required: true
+  attr :selected_llm, :string, required: true
+
+  defp peek_controls(%{role: :llm} = assigns) do
+    ~H"""
+    <.llm_picker
+      prefix={@prefix}
+      selected={@selected_llm}
+      current={@checklist.llm && @checklist.llm.harness}
+    />
+    """
+  end
+
+  defp peek_controls(%{role: :key} = assigns) do
+    ~H"""
+    <div
+      :if={@checklist.key_hint}
+      class="flex flex-col gap-1.5 rounded-lg border border-base-300 bg-base-200 p-2.5"
+    >
+      <div style="font-size:12px;font-weight:600">Where it went</div>
+      <div
+        id={"#{@prefix}-key-masked"}
+        class="flex items-stretch overflow-hidden rounded-lg border border-base-300 bg-base-100"
+      >
+        <code
+          class="min-w-0 flex-1 px-3 py-2 font-mono"
+          style="font-size:12px;word-break:break-all"
+        >
+          {masked_key(@checklist.key_hint)}
+        </code>
+      </div>
+      <div style={"font-size:11.5px;" <> muted()}>
+        Masked: the board keeps only a hash, so there's nothing to copy.
+      </div>
+    </div>
+    <.key_box :if={@token} prefix={@prefix} token={@token} saved_button={false} />
+    <button
+      type="button"
+      id={"#{@prefix}-mint-key"}
+      phx-click="setup_mint_key"
+      class="btn btn-sm self-start"
+    >
+      Mint a new key
+    </button>
+    <div style={"font-size:11.5px;" <> muted()}>
+      Lost it? Mint a new one. A key a runner already used keeps working until you revoke it in
+      Board settings → API keys.
+    </div>
+    """
+  end
+
+  defp peek_controls(%{role: :install} = assigns) do
+    ~H"""
+    <.install_command prefix={@prefix} install_command={@install_command} />
+    <div
+      id={"#{@prefix}-install-rerun"}
+      class="flex items-start gap-2 rounded-lg bg-base-200 px-2.5 py-2"
+      style="font-size:12px"
+    >
+      <span class="flex" style={muted()}>
+        <.icon name="hero-arrow-path" class="size-3.5 mt-0.5 shrink-0" />
+      </span>
+      <span>
+        Safe to run again: rewrites <code class="font-mono">./relay</code>
+        and the skill, keeps <code class="font-mono">runner.json</code>
+        and <code class="font-mono">prepare-worktree.sh</code>
+      </span>
+    </div>
+    """
+  end
+
+  defp peek_controls(%{role: :onboard} = assigns) do
+    ~H"""
+    <.code_row id={"#{@prefix}-onboard-command"} text={onboard_command()} label="Copy command" />
+    """
+  end
+
+  defp peek_controls(%{role: :runner} = assigns) do
+    ~H"""
+    <.code_row id={"#{@prefix}-runner-command"} text={runner_command()} label="Copy command" />
+    <div id={"#{@prefix}-runner-restart"} style={"font-size:11.5px;" <> muted()}>
+      Restart it after changing env vars or updating ./relay.
+    </div>
+    """
+  end
+
+  # Steps 1 and 7 have nothing to do again: their peek is the why and What this does.
+  defp peek_controls(assigns), do: ~H""
+
+  # Step 3's key as the board knows it: the prefix and the last four, never the token.
+  defp masked_key(%{token_prefix: prefix, last_four: last_four}),
+    do: "export RELAY_API_KEY=relay_#{prefix}_••••#{last_four}"
+
+  defp onboard_command, do: @onboard_command
+  defp runner_command, do: @runner_command
 
   # ---------------------------------------------------------------- step 5: the onboard loop
 
@@ -564,9 +783,16 @@ defmodule RelayWeb.SetupComponents do
   attr :prefix, :string, required: true
   attr :selected, :string, required: true
 
+  attr :current, :string,
+    default: nil,
+    doc: "the board's default harness in a finished step 2's peek (RE456): badges its row and offers a switch"
+
   defp llm_picker(assigns) do
     llms = Setup.onboarding_llms()
-    selected = Enum.find(llms, &(&1.harness == assigns.selected)) || Enum.find(llms, & &1.recommended?)
+
+    selected =
+      Enum.find(llms, &(&1.harness == assigns.selected)) || Enum.find(llms, &(&1.harness == assigns.current)) ||
+        Enum.find(llms, & &1.recommended?)
 
     assigns = assign(assigns, llms: llms, selected: selected, form: to_form(%{"llm" => selected.harness}))
 
@@ -607,12 +833,20 @@ defmodule RelayWeb.SetupComponents do
               {llm.cli}
             </code>
             <span :if={not llm.enabled?} class="badge badge-ghost badge-xs">coming soon</span>
+            <span
+              :if={@current == llm.harness}
+              id={"#{@prefix}-llm-#{llm.harness}-current"}
+              class="badge badge-ghost badge-xs"
+            >
+              current
+            </span>
           </span>
           <span style={"font-size:11.5px;" <> muted()}>{llm.blurb}</span>
         </span>
       </label>
     </.form>
     <button
+      :if={is_nil(@current)}
       type="button"
       id={"#{@prefix}-use-llm"}
       phx-click="setup_choose_llm"
@@ -621,12 +855,36 @@ defmodule RelayWeb.SetupComponents do
     >
       Use {@selected.label}
     </button>
+    <%= if @current do %>
+      <button
+        type="button"
+        id={"#{@prefix}-switch-llm"}
+        phx-click="setup_switch_llm"
+        phx-value-llm={@selected.harness}
+        disabled={@selected.harness == @current}
+        class={
+          if(@selected.harness == @current,
+            do: "btn btn-sm self-start",
+            else: "btn btn-primary btn-sm self-start"
+          )
+        }
+      >
+        {if(@selected.harness == @current,
+          do: "#{@selected.label} is the default",
+          else: "Switch to #{@selected.label}"
+        )}
+      </button>
+      <div style={"font-size:11.5px;" <> muted()}>
+        The step stays done; its title follows the new default.
+      </div>
+    <% end %>
     """
   end
 
   attr :prefix, :string, required: true
   attr :token, :string, required: true
   attr :unsaved, :boolean, default: false, doc: "an unsaved connect: nothing minted yet"
+  attr :saved_button, :boolean, default: true, doc: ~s(the "I've saved it — next" button; a peek has none)
 
   defp key_box(%{token: nil, unsaved: true} = assigns) do
     ~H"""
@@ -674,6 +932,7 @@ defmodule RelayWeb.SetupComponents do
       </div>
     </div>
     <button
+      :if={@saved_button}
       type="button"
       id={"#{@prefix}-key-saved"}
       phx-click="setup_key_saved"
@@ -726,15 +985,7 @@ defmodule RelayWeb.SetupComponents do
         </.link>.
       </div>
     </div>
-    <.code_row
-      :if={@install_command}
-      id={"#{@prefix}-install-command"}
-      text={@install_command}
-      label="Copy install command"
-    />
-    <div style={"font-size:11.5px;" <> muted()}>
-      Run it at the root of your repo. It checks first, then tells you everything it's about to write.
-    </div>
+    <.install_command prefix={@prefix} install_command={@install_command} />
     <div
       id={"#{@prefix}-then"}
       class="flex items-start gap-2 rounded-lg bg-base-200 px-2.5 py-2"
@@ -748,8 +999,26 @@ defmodule RelayWeb.SetupComponents do
       </span>
       <span>
         Open <code class="font-mono">{@llm.cli}</code>
-        in the same folder and run <code class="font-mono">/relay-onboard</code>.
+        in the same folder and run <code class="font-mono">{onboard_command()}</code>.
       </span>
+    </div>
+    """
+  end
+
+  # Step 4's install command and where to run it: the current step's and its peek's.
+  attr :prefix, :string, required: true
+  attr :install_command, :string, required: true
+
+  defp install_command(assigns) do
+    ~H"""
+    <.code_row
+      :if={@install_command}
+      id={"#{@prefix}-install-command"}
+      text={@install_command}
+      label="Copy install command"
+    />
+    <div style={"font-size:11.5px;" <> muted()}>
+      Run it at the root of your repo. It checks first, then tells you everything it's about to write.
     </div>
     """
   end
@@ -809,6 +1078,7 @@ defmodule RelayWeb.SetupComponents do
   attr :class, :any, default: "flex", doc: "the aside's display classes (BoardLive: `hidden drawer:flex`)"
   attr :now, DateTime, default: nil, doc: "the clock step 5's elapsed time reads; nil is `DateTime.utc_now/0`"
   attr :user_name, :string, default: nil, doc: "who is signed in (name or email), for a connect's member note"
+  attr :peeks, MapSet, default: MapSet.new(), doc: "the top-level step ids whose peek is open (RE456)"
 
   def setup_panel(assigns) do
     assigns =
@@ -895,6 +1165,7 @@ defmodule RelayWeb.SetupComponents do
           selected_llm={@selected_llm}
           board_slug={@board_slug}
           now={@now}
+          peeks={@peeks}
         />
       </div>
       <div
@@ -1100,8 +1371,7 @@ defmodule RelayWeb.SetupComponents do
         You're set up.{elapsed(@checklist.elapsed_minutes)}
       </span>
       <span style={"font-size:12.5px;" <> muted()}>
-        This panel closes on its own once you've seen the card. Reopen it any time from Board
-        settings → Setup.
+        Need a command again? Open any step below; it stays done.
       </span>
       <div class="flex gap-2 pt-1">
         <button type="button" id="setup-close" phx-click="setup_close" class="btn btn-sm btn-primary">

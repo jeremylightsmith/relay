@@ -21,6 +21,8 @@ defmodule Relay.SetupTest do
     do:
       board |> Setup.checklist() |> Map.fetch!(:steps) |> Enum.flat_map(&[&1 | &1.children]) |> Enum.find(&(&1.id == id))
 
+  defp top_statuses(board), do: board |> Setup.checklist() |> Map.fetch!(:steps) |> Map.new(&{&1.id, &1.status})
+
   defp rows(board), do: Repo.all(from(s in BoardSetupStep, where: s.board_id == ^board.id, order_by: s.id))
 
   defp setup_board(_) do
@@ -67,13 +69,26 @@ defmodule Relay.SetupTest do
       assert checklist.llm == llm
     end
 
+    # RE456 scenario 12
     test "checklist/1 is preview_checklist/2 over the board's rows" do
-      board = create!("bare-minimum")
+      user = insert(:user)
+      board = create!("bare-minimum", user)
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
       checklist = Setup.checklist(board)
       rows = Map.new(rows(board), &{&1.step, &1})
 
-      context = Map.take(checklist, [:board_id, :template, :template_warning, :llm, :first_flow_stage])
+      context = Map.take(checklist, [:board_id, :template, :template_warning, :llm, :first_flow_stage, :key_hint])
+      assert %{token_prefix: _, last_four: _} = context.key_hint
       assert Setup.preview_checklist(rows, context) == checklist
+    end
+
+    # RE456 scenario 12
+    test "carries the context's key_hint, nil without one" do
+      llm = Setup.onboarding_llm("claude-code")
+      hint = %{token_prefix: "k7f2q9", last_four: "3a9c"}
+
+      assert Setup.preview_checklist(%{"1" => :done}, %{llm: llm, key_hint: hint}).key_hint == hint
+      assert Setup.preview_checklist(%{"1" => :done}, %{llm: llm}).key_hint == nil
     end
   end
 
@@ -469,6 +484,101 @@ defmodule Relay.SetupTest do
     end
   end
 
+  describe "switch_llm/3" do
+    setup :setup_board
+
+    # RE456 scenario 1
+    test "switches the default LLM of a finished step 2 without moving progress", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      before = Setup.checklist(board)
+      two_before = step(board, "2")
+
+      assert {:ok, checklist} = Setup.switch_llm(board, user, "codex")
+
+      assert Agents.default_agent(board).harness.key == "codex"
+      two = step(board, "2")
+      assert two.status == :done
+      assert two.title == "Default LLM: Codex"
+      assert two.data["llm"] == "codex"
+      assert two.evidence == two_before.evidence
+      assert two.completed_at == two_before.completed_at
+      assert checklist.current_id == "3"
+      assert checklist.position == before.position
+      assert checklist.done_count == before.done_count
+      assert length(ApiKeys.list_keys(board)) == 1
+    end
+
+    # RE456 scenario 2
+    test "broadcasts once on a change and not at all on a repeat", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      board_id = board.id
+      Events.subscribe(board_id)
+
+      assert {:ok, _} = Setup.switch_llm(board, user, "codex")
+      assert_receive {:setup_changed, ^board_id}
+      refute_receive {:setup_changed, _}
+
+      assert {:ok, _} = Setup.switch_llm(board, user, "codex")
+      refute_receive {:setup_changed, _}
+    end
+
+    # RE456 scenario 3
+    test "refuses while step 2 is unfinished", %{board: board, user: user} do
+      harness = Agents.default_agent(board).harness.key
+
+      assert Setup.switch_llm(board, user, "codex") == {:error, :not_finished}
+      assert Agents.default_agent(board).harness.key == harness
+    end
+
+    # RE456 scenario 4
+    test "refuses a disabled or unknown LLM", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+
+      assert Setup.switch_llm(board, user, "gemini-cli") == {:error, :disabled_llm}
+      assert Setup.switch_llm(board, user, "nope") == {:error, :unknown_llm}
+      assert step(board, "2").data["llm"] == "claude-code"
+    end
+
+    # RE456 scenario 5
+    test "on a finished setup it stays finished and step 5 names the new LLM", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      advance_to!(board, "7")
+      {:ok, _} = Setup.advance(board, "7", :done, %{})
+      statuses = top_statuses(board)
+
+      assert {:ok, checklist} = Setup.switch_llm(board, user, "codex")
+      assert checklist.finished? == true
+      assert top_statuses(board) == statuses
+      assert Enum.find(checklist.steps, &(&1.id == "5")).title == "Onboard, in Codex"
+    end
+  end
+
+  describe "checklist key_hint" do
+    setup :setup_board
+
+    # RE456 scenario 11
+    test "is step 3's key prefix and last four", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      [k] = ApiKeys.list_keys(board)
+
+      assert Setup.checklist(board).key_hint == %{token_prefix: k.token_prefix, last_four: k.last_four}
+    end
+
+    # RE456 scenario 11
+    test "is nil before step 3 has a key", %{board: board} do
+      assert Setup.checklist(board).key_hint == nil
+    end
+
+    # RE456 scenario 11
+    test "is nil once step 3's key was revoked", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      [k] = ApiKeys.list_keys(board)
+      {:ok, _} = ApiKeys.revoke(k)
+
+      assert Setup.checklist(board).key_hint == nil
+    end
+  end
+
   describe "remint_key/2" do
     setup :setup_board
 
@@ -523,19 +633,33 @@ defmodule Relay.SetupTest do
       assert ApiKeys.authenticate(old) == :error
     end
 
-    # RE455 scenario 5
-    test "refuses once step 3 was confirmed by the install script", %{board: board, user: user} do
+    # RE456 scenario 6 (replaces RE455 scenario 5, which refused)
+    test "re-keys a step 3 confirmed by the install script without moving progress", %{board: board, user: user} do
       {:ok, _} = Setup.choose_llm(board, user, "claude-code")
       {:ok, _} = Setup.advance(board, "3", :done, %{data: %{"machine" => "jl-mbp"}})
-      keys = length(ApiKeys.list_keys(board))
+      before = step(board, "3")
+      install_before = step(board, "4")
 
-      assert Setup.remint_key(board, user) == {:error, :not_current}
-      assert length(ApiKeys.list_keys(board)) == keys
+      assert {:ok, %{token: new, checklist: c}} = Setup.remint_key(board, user)
+
+      three = step(board, "3")
+      assert three.status == :done
+      assert three.evidence == before.evidence
+      assert three.completed_at == before.completed_at
+      assert three.reached_at == before.reached_at
+      assert step(board, "4").status == :active
+      assert step(board, "4").reached_at == install_before.reached_at
+      assert c.current_id == "4"
+
+      assert {:ok, new_key} = ApiKeys.authenticate_key(new)
+      assert three.data["key_id"] == new_key.id
+      assert three.data["key_id"] != before.data["key_id"]
+      assert {:ok, _} = ApiKeys.authenticate(new)
     end
 
-    # RE455 scenario 6
-    test "refuses once a saved step 3 was confirmed by a preflight", %{board: board, user: user} do
-      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+    # RE456 scenario 7 (replaces RE455 scenario 6, which refused)
+    test "re-keys a saved step 3 confirmed by a preflight, revoking the unused key", %{board: board, user: user} do
+      {:ok, %{token: old}} = Setup.choose_llm(board, user, "claude-code")
       {:ok, _} = Setup.key_saved(board)
       key_id = step(board, "3").data["key_id"]
 
@@ -544,10 +668,49 @@ defmodule Relay.SetupTest do
           set: [data: %{"saved" => true, "machine" => "jl-mbp", "key_id" => key_id}]
         )
 
-      keys = length(ApiKeys.list_keys(board))
+      three_before = step(board, "3")
+      four_before = step(board, "4")
 
-      assert Setup.remint_key(board, user) == {:error, :not_current}
-      assert length(ApiKeys.list_keys(board)) == keys
+      assert {:ok, %{token: new}} = Setup.remint_key(board, user)
+
+      three = step(board, "3")
+
+      assert Map.take(three, [:status, :evidence, :completed_at, :reached_at]) ==
+               Map.take(three_before, [:status, :evidence, :completed_at, :reached_at])
+
+      assert three.data["saved"] == true
+      assert three.data["machine"] == "jl-mbp"
+
+      assert Map.take(step(board, "4"), [:status, :evidence, :reached_at]) ==
+               Map.take(four_before, [:status, :evidence, :reached_at])
+
+      assert ApiKeys.authenticate(old) == :error
+      assert {:ok, _} = ApiKeys.authenticate(new)
+      assert [_one] = ApiKeys.list_keys(board)
+    end
+
+    # RE456 scenario 8
+    test "a confirmed step 3 whose key was used keeps the old key", %{board: board, user: user} do
+      {:ok, %{token: old}} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.advance(board, "3", :done, %{data: %{"machine" => "jl-mbp"}})
+      {:ok, _} = ApiKeys.authenticate(old)
+
+      assert {:ok, %{token: new}} = Setup.remint_key(board, user)
+      assert {:ok, _} = ApiKeys.authenticate(old)
+      assert {:ok, _} = ApiKeys.authenticate(new)
+      assert length(ApiKeys.list_keys(board)) == 2
+    end
+
+    # RE456 scenario 9
+    test "re-keys a finished setup and it stays finished", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      advance_to!(board, "7")
+      {:ok, _} = Setup.advance(board, "7", :done, %{})
+
+      assert {:ok, %{checklist: c}} = Setup.remint_key(board, user)
+      assert c.finished? == true
+      assert c.position == 7
+      assert c.done_count == 7
     end
   end
 

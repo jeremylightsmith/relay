@@ -141,6 +141,7 @@ defmodule Relay.Setup do
           started_at: DateTime.t() | nil,
           finished_at: DateTime.t() | nil,
           elapsed_minutes: non_neg_integer() | nil,
+          key_hint: %{token_prefix: String.t(), last_four: String.t()} | nil,
           steps: [entry()]
         }
 
@@ -903,7 +904,8 @@ defmodule Relay.Setup do
   @doc """
   The checklist of a board — or of one connected machine (RE446) — every placeholder resolved: its
   template, the onboarding LLM, where it stands (`current_id`, `position`, `done_count`,
-  `finished?`) and the 7 top-level entries (step 5's sub-steps in its `children`). A machine's
+  `finished?`), step 3's masked key (`key_hint`: its `token_prefix` and `last_four`, nil before a
+  key or once it was revoked) and the 7 top-level entries (step 5's sub-steps in its `children`). A machine's
   checklist is a connect (`connect?: true`, see `connect_machine/2`). nil when there is none.
   """
   @spec checklist(Board.t() | SetupMachine.t() | integer()) :: checklist() | nil
@@ -1190,6 +1192,39 @@ defmodule Relay.Setup do
   end
 
   @doc """
+  Step 2, after it finished (RE456's peek): makes `harness_key`'s LLM the board's default agent the
+  way `choose_llm/3` does and records it as step 2's `data["llm"]` — so step 2's title and the
+  checklist's `llm` follow — without touching any step's status, evidence or `completed_at` and
+  without minting a key. The board's own checklist only. Picking the LLM step 2 already holds is a
+  no-op (no write, no broadcast); a change broadcasts `{:setup_changed, board_id}` once.
+  `{:error, :not_finished}` until step 2 is done or skipped.
+  """
+  @spec switch_llm(Board.t(), User.t(), String.t()) ::
+          {:ok, checklist()} | {:error, :not_finished | :no_checklist | :unknown_llm | :disabled_llm}
+  def switch_llm(%Board{} = board, _user, harness_key) do
+    scope = {board.id, nil}
+
+    Repo.transact(fn ->
+      with {:ok, rows} <- lock(scope),
+           :ok <- llm_step_finished(rows[@llm_step]),
+           {:ok, llm} <- enabled_llm(harness_key) do
+        :ok = write_llm!(board, rows[@llm_step], llm)
+        {:ok, scoped_checklist(scope)}
+      end
+    end)
+  end
+
+  defp llm_step_finished(%{status: status}), do: if(finished_status?(status), do: :ok, else: {:error, :not_finished})
+
+  defp write_llm!(_board, %{data: %{"llm" => harness}}, %{harness: harness}), do: :ok
+
+  defp write_llm!(board, row, llm) do
+    :ok = make_default!(board, llm)
+    row |> Ecto.Changeset.change(data: Map.put(row.data, "llm", llm.harness)) |> Repo.update!()
+    Events.broadcast(board.id, {:setup_changed, board.id})
+  end
+
+  @doc """
   Step 3, on the user's say-so ("I've saved it — next", RE455): finishes the board's or a connected
   machine's step 3 as saved but not yet confirmed (`data["saved"]`), which activates step 4. The
   install script's first authed call confirms it later (`preflight/2`). `{:error, :not_current}`
@@ -1224,8 +1259,11 @@ defmodule Relay.Setup do
   connected machine's (which also moves `machine.api_key_id`). The previous setup key is revoked
   when it was never used; a key a runner already used stays. Returns the raw token once.
 
-  Allowed while step 3 is current, or while it is saved but unconfirmed (`key_unconfirmed?/1`):
-  then step 3 reopens (active, its `"saved"` mark dropped) and step 4 goes back to pending.
+  Allowed while step 3 is current, or once it is done. Saved but unconfirmed
+  (`key_unconfirmed?/1`), step 3 reopens (active, its `"saved"` mark dropped) and step 4 goes back
+  to pending. Confirmed — by the install script's first authed call or a preflight (RE456) — no
+  step moves: only step 3's `key_id` (and a machine's `api_key_id`) points at the new key; its
+  evidence stays as history. `{:error, :not_current}` while step 3 is still pending.
   """
   @spec remint_key(Board.t() | SetupMachine.t(), User.t()) ::
           {:ok, %{checklist: checklist(), token: String.t()}} | {:error, :not_current}
@@ -1243,19 +1281,20 @@ defmodule Relay.Setup do
     end)
   end
 
-  # Step 3 can be re-keyed while it is current, or while it is saved but unconfirmed.
+  # Step 3 can be re-keyed while it is current, or once it is done (saved, or confirmed).
   defp lock_rekeyable(scope) do
     with {:ok, rows} <- lock(scope),
-         true <- current_id(rows) == @key_step or rows_key_unconfirmed?(rows) do
+         true <- current_id(rows) == @key_step or rows[@key_step].status == :done do
       {:ok, rows}
     else
       _ -> {:error, :not_current}
     end
   end
 
-  # Only steps 3 and 4 move: step 4 can't have advanced without a preflight, which confirms step 3.
+  # Only a saved-but-unconfirmed step 3 reopens, and only steps 3 and 4 move: step 4 can't have
+  # advanced without a preflight, which confirms step 3. A confirmed step 3 re-keys in place.
   defp reopen_saved_key!(rows) do
-    if current_id(rows) != @key_step, do: reopen_key_step!(rows)
+    if rows_key_unconfirmed?(rows), do: reopen_key_step!(rows)
   end
 
   defp reopen_key_step!(rows) do
@@ -1692,13 +1731,31 @@ defmodule Relay.Setup do
     :ok
   end
 
-  defp build({board_id, nil}, rows), do: build(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
+  defp build({board_id, nil}, rows) do
+    context = board_context(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
+    preview_checklist(rows, Map.put(context, :key_hint, key_hint(board_id, rows)))
+  end
 
-  defp build({board_id, machine_id}, rows),
-    do: preview_checklist(rows, Map.put(connect_context(board_id, read_rows({board_id, nil})), :machine_id, machine_id))
+  defp build({board_id, machine_id}, rows) do
+    context =
+      board_id
+      |> connect_context(read_rows({board_id, nil}))
+      |> Map.merge(%{machine_id: machine_id, key_hint: key_hint(board_id, rows)})
 
+    preview_checklist(rows, context)
+  end
+
+  # The admin list's build: no per-board key lookup, so no `key_hint`.
   defp build(board_id, rows, llm, first_flow_stage),
     do: preview_checklist(rows, board_context(board_id, rows, llm, first_flow_stage))
+
+  # Step 3's key, masked: its prefix and last four. nil before a key, or once it was revoked.
+  defp key_hint(board_id, %{@key_step => %{data: %{"key_id" => key_id}}}) when not is_nil(key_id) do
+    with %ApiKey{} = key <- Repo.get_by(ApiKey, id: key_id, board_id: board_id),
+         do: %{token_prefix: key.token_prefix, last_four: key.last_four}
+  end
+
+  defp key_hint(_board_id, _rows), do: nil
 
   defp board_context(board_id, board_rows, llm, first_flow_stage) do
     created = board_rows[@created_step]
@@ -1840,8 +1897,8 @@ defmodule Relay.Setup do
   that step's row (a `Schemas.BoardSetupStep`, a map with `:status` and any of its other fields,
   or a bare status atom; a step with no entry is pending) — and `context`, which carries the
   `:template`, `:template_warning` and onboarding `:llm` (one of `onboarding_llms/0`), plus an
-  optional `:board_id` and `:first_flow_stage` (nil when absent). `checklist/1` delegates here;
-  Storybook fixtures call it directly.
+  optional `:board_id`, `:first_flow_stage` and `:key_hint` (`%{token_prefix, last_four}` of step
+  3's key; nil when absent). `checklist/1` delegates here; Storybook fixtures call it directly.
 
   A connect (RE446) passes `connect?: true`, the `:board_name` (`%{board}`), the board's step-7
   row as `:board_claim` and the `:machine_id` (nil for an unsaved preview): each step's
@@ -1903,6 +1960,7 @@ defmodule Relay.Setup do
       started_at: started_at,
       finished_at: finished_at,
       elapsed_minutes: elapsed_minutes(started_at, finished_at),
+      key_hint: context[:key_hint],
       steps: steps
     }
   end

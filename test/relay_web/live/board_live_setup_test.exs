@@ -337,7 +337,7 @@ defmodule RelayWeb.BoardLiveSetupTest do
 
       done = text(view, "#setup-panel #setup-done")
       assert done =~ "You're set up. #{checklist.elapsed_minutes} minutes."
-      assert done =~ "Reopen it any time from Board settings → Setup."
+      assert done =~ "Need a command again? Open any step below; it stays done."
       assert view |> text("#setup-done #setup-close") |> String.trim() == "Close setup"
       assert view |> text("#setup-done #setup-connect-another") |> String.trim() == "➕ Connect another machine"
       assert text(view, "#setup-panel") =~ "#{checklist.total} of #{checklist.total}"
@@ -543,6 +543,233 @@ defmodule RelayWeb.BoardLiveSetupTest do
 
       assert render_hook(view, "setup_key_saved", %{}) =~ "This board is archived (read-only)."
       assert Setup.checklist(board).current_id == Setup.step_id(:key)
+    end
+  end
+
+  describe "peek at finished steps (RE456)" do
+    defp open_peek!(view, id) do
+      view |> element("#setup-step-#{id}-peek-toggle") |> render_click()
+      view
+    end
+
+    # `finished!/1` walks step 3 with empty attrs, so it has no key: mint one (step 3 is confirmed,
+    # so this re-keys in place) to give the peek a masked line.
+    defp keyed!(user) do
+      %{board: board} = finished = finished!(user)
+      {:ok, _} = Setup.remint_key(board, user)
+      finished
+    end
+
+    defp step_key(board) do
+      %{data: %{"key_id" => key_id}} = Enum.find(Setup.checklist(board).steps, &(&1.id == Setup.step_id(:key)))
+      Enum.find(ApiKeys.list_keys(board), &(&1.id == key_id))
+    end
+
+    defp masked(view), do: view |> text("#setup-key-masked") |> String.trim()
+
+    # Scenario 1
+    test "a finished step's toggle opens its peek without moving progress", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      progress = attr(view, "#setup-panel progress", "value")
+      chip = text(view, "#setup-chip")
+      before = Setup.checklist(board)
+
+      open_peek!(view, "4")
+
+      assert text(view, "#setup-step-4-peek") =~ "still done · nothing here changes your progress"
+      assert has_element?(view, ~s(#setup-step-4[data-status="done"]))
+      assert attr(view, "#setup-step-4-peek-toggle", "aria-expanded") == "true"
+      assert progress == "100"
+      assert attr(view, "#setup-panel progress", "value") == progress
+      assert chip =~ "Setup · done"
+      assert text(view, "#setup-chip") == chip
+      assert Setup.checklist(board) == before
+    end
+
+    # Scenario 2
+    test "step 4's peek gives back the install command", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      open_peek!(view, "4")
+
+      assert text(view, "#setup-step-4-peek #setup-install-command code") =~
+               Setup.install_command(RelayWeb.Endpoint.url(), board.slug)
+
+      assert has_element?(view, "#setup-install-command-copy")
+
+      assert text(view, "#setup-install-rerun") =~
+               "Safe to run again: rewrites ./relay and the skill, keeps runner.json and prepare-worktree.sh"
+
+      refute has_element?(view, "#setup-then")
+    end
+
+    # Scenario 3
+    test "peeks open independently and a second click closes only that one", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      ids = ~w(1 2 3 5 6 7)
+
+      for id <- ids, do: open_peek!(view, id)
+      for id <- ids, do: assert(has_element?(view, "#setup-step-#{id}-peek"))
+
+      open_peek!(view, "1")
+
+      refute has_element?(view, "#setup-step-1-peek")
+      for id <- tl(ids), do: assert(has_element?(view, "#setup-step-#{id}-peek"))
+    end
+
+    # Scenario 4
+    test "an open peek survives a {:setup_changed, _} re-render", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      open_peek!(view, "4")
+
+      send(view.pid, {:setup_changed, board.id})
+      render(view)
+
+      assert has_element?(view, "#setup-step-4-peek")
+    end
+
+    # Scenario 5
+    test "a toggle for a non-step or a sub-step id is ignored", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert render_hook(view, "setup_toggle_peek", %{"step" => "9"}) =~ "setup-panel"
+      assert render_hook(view, "setup_toggle_peek", %{"step" => "5.1"}) =~ "setup-panel"
+
+      refute has_element?(view, ~s([id$="-peek"]))
+    end
+
+    # Scenario 6
+    test "step 3's peek shows the board's key masked, with nothing to copy", %{conn: conn, user: user} do
+      %{board: board} = keyed!(user)
+      key = step_key(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      open_peek!(view, "3")
+
+      assert masked(view) =~ ~r/^export RELAY_API_KEY=relay_[^_]+_••••\w{4}$/
+      assert masked(view) == "export RELAY_API_KEY=relay_#{key.token_prefix}_••••#{key.last_four}"
+      refute has_element?(view, "#setup-key-masked button")
+    end
+
+    # Scenario 7
+    test "minting a new key in step 3's peek shows it and moves no step", %{conn: conn, user: user} do
+      %{board: board} = keyed!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      open_peek!(view, "3")
+
+      view |> element("#setup-mint-key") |> render_click()
+
+      assert text(view, "#setup-step-3-peek #setup-key-box") =~ "export RELAY_API_KEY=relay_"
+      assert {:ok, _key} = view |> token_in() |> ApiKeys.authenticate()
+      for id <- top_ids(), do: assert(has_element?(view, ~s(#setup-step-#{id}[data-status="done"])))
+      assert has_element?(view, "#setup-done")
+      assert String.ends_with?(masked(view), step_key(board).last_four)
+    end
+
+    # Scenario 8
+    test "the re-minted key stays while step 3's peek is open, and closing it drops the key",
+         %{conn: conn, user: user} do
+      %{board: board} = keyed!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      open_peek!(view, "3")
+      view |> element("#setup-mint-key") |> render_click()
+      token = token_in(view)
+
+      send(view.pid, {:setup_changed, board.id})
+      render(view)
+
+      assert token_in(view) == token
+
+      view |> open_peek!("3") |> open_peek!("3")
+
+      refute has_element?(view, "#setup-key-box")
+    end
+
+    # Scenario 9
+    test "step 2's peek switches the default LLM and step 2 stays done", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      progress = attr(view, "#setup-panel progress", "value")
+      open_peek!(view, "2")
+
+      assert text(view, "#setup-llm-claude-code-current") =~ "current"
+      assert has_element?(view, "#setup-switch-llm[disabled]")
+
+      view |> element("#setup-llm-form") |> render_change(%{"llm" => "codex"})
+      view |> element("#setup-switch-llm") |> render_click()
+
+      assert text(view, "#setup-step-2") =~ "Default LLM: Codex"
+      assert has_element?(view, ~s(#setup-step-2[data-status="done"]))
+      assert attr(view, "#setup-panel progress", "value") == progress
+      assert Agents.default_agent(board).harness.key == "codex"
+      assert has_element?(view, "#setup-llm-codex-current")
+      assert has_element?(view, "#setup-switch-llm[disabled]")
+    end
+
+    test "a switch that setup has moved past flashes and re-reads the checklist", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert render_hook(view, "setup_switch_llm", %{"llm" => "gemini-cli"}) =~ @moved_on
+      assert Agents.default_agent(board).harness.key == "claude-code"
+    end
+
+    # Scenario 10
+    test "a reopened finished setup says any step can be opened again", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, _} = Setup.close(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      {:ok, _} = Setup.reopen(board)
+
+      assert text(view, "#setup-done") =~ "Need a command again? Open any step below; it stays done."
+      refute text(view, "#setup-done") =~ "Reopen it any time"
+    end
+
+    # Scenario 11
+    test "an archived board refuses the switch and the peek", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, _} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert render_hook(view, "setup_switch_llm", %{"llm" => "codex"}) =~ "This board is archived (read-only)."
+      assert render_hook(view, "setup_toggle_peek", %{"step" => "4"}) =~ "This board is archived (read-only)."
+
+      assert Agents.default_agent(board).harness.key == "claude-code"
+      refute has_element?(view, "#setup-step-4-peek")
+    end
+
+    # Scenario 12
+    test "mid-setup, the key stays on screen while step 3 is current", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      token = view |> pick!("claude-code") |> token_in()
+
+      send(view.pid, {:setup_changed, board.id})
+      render(view)
+
+      assert token_in(view) == token
+    end
+
+    # Scenario 13
+    test "switching to connect mode and back resets the peeks", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      open_peek!(view, "4")
+
+      view |> element("#setup-connect-another") |> render_click()
+      assert_patch(view, "/board/#{board.slug}?setup=connect")
+
+      refute has_element?(view, ~s(#setup-panel [id$="-peek"]))
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, ~s(#setup-panel [id$="-peek"]))
     end
   end
 
