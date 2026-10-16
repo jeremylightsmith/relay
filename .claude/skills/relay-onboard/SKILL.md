@@ -52,19 +52,12 @@ Run `./relay setup status --json` and read the exit code first.
 Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe at any point:
 running `/relay-onboard` again resumes at the first unmet sub-step.
 
-<<<<<<< HEAD
 The status JSON carries what the loop needs: `board`, `connect`, `template`, `llm` (`harness`,
 `label`, `cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
-`done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`, and
-`steps` (each with `id`, `title`, `status`, `evidence`, `error`, `data`, `children`).
-=======
-The status JSON carries what the loop needs: `board`, `template`, `llm` (`harness`, `label`,
-`cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
 `done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`,
 `referenced_files` (`[{kind, name, paths, used_by: [{flow, node}]}]`, the agent and skill files
 the board's flows name), `missing_file_resolutions`, and `steps` (each with `id`, `title`,
 `status`, `evidence`, `error`, `data`, `children`).
->>>>>>> 9f745cf7 (RE447 Onboard: list and resolve a copied board's missing repo files at 5.1 / 5.4)
 
 ## Connecting another machine
 
