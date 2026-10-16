@@ -63,8 +63,8 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 91
-RUNNER_FINGERPRINT = "3ebd3b2b7ed633da34a68d1758922a9e2ea1ab857951c547168a6f2fab98a79f"
+RUNNER_VERSION = 92
+RUNNER_FINGERPRINT = "a96d2bfd7bf319455b42921174665dd1cc9ac968402b75fb994e170a3cdd2a0e"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -2057,6 +2057,14 @@ def cmd_mockups(args):
 # own start point (`git checkout -B {branch} origin/main`), and changing this does not touch it.
 DEFAULT_BASE = "origin/main"
 
+# RE457: where this project's LLM reads its skills, and the file it reads first that points at
+# relay.md. Overridable per project with `"skill_dir"` / `"pointer_file"` in .relay/runner.json
+# (pinned to CONTRACT["setup"]["runner_config_defaults"]). DEFAULT_SKILL_DIR is ALSO the
+# manifest's canonical skill dir: /api/scaffold always serves the skills under it, and
+# local_scaffold_path() maps them into the project's own.
+DEFAULT_SKILL_DIR = ".claude/skills"
+DEFAULT_POINTER_FILE = "CLAUDE.md"
+
 
 def _name_part(s):
     """One segment of a runner name, safe for a DOM id, a filename and a log line."""
@@ -2225,6 +2233,9 @@ def runner_config_defaults():
         "poll_timeout": 25,
         "heartbeat_interval": 15,
         "max_retained_failed": 3,
+        # RE457: the project's LLM layout — read by project_layout(), not by the runner loop.
+        "skill_dir": DEFAULT_SKILL_DIR,
+        "pointer_file": DEFAULT_POINTER_FILE,
         # RE339: the per-worktree lifecycle hooks, `{"prepare": path, "cleanup": path}`. Each
         # falls back to its default file (PREPARE_HOOK_DEFAULT / CLEANUP_HOOK_DEFAULT); the
         # flat top-level `prepare` is a deprecated alias for `worktrees.prepare`.
@@ -2298,9 +2309,11 @@ def _starter_key(lines, comments, key, value, last=False):
         lines.append(f"  {json.dumps(key)}: {json.dumps(value)}{comma}")
 
 
-def render_runner_config(namespace, base=None):
+def render_runner_config(namespace, base=None, layout=None):
     """The full commented starter runner.json for `namespace`, its `base` set to `base` when
-    given (RE443, `relay update --base REF`) else the default. Strict JSON once the full-line
+    given (RE443, `relay update --base REF`) else the default. `layout` (RE457) holds whichever
+    of `skill_dir` / `pointer_file` were given; each becomes a key after `base`, and one not
+    given is omitted so its default applies. Strict JSON once the full-line
     `//` comments are stripped, and still strict JSON with the three `worktrees` lines
     uncommented (the key before them keeps its comma; their closer carries one). Never writes
     a `name`: the file is tracked, and a pinned name would recreate the RE305 collision."""
@@ -2323,6 +2336,11 @@ def render_runner_config(namespace, base=None):
                          "a repo on `master`,",
                          "a fork tracking `upstream/main`, etc."],
                  "base", base or d["base"])
+    comment = ["This project's LLM skill dir / pointer file; `./relay update "
+               "--skill-dir/--pointer-file` changes them."]
+    for key, value in (layout or {}).items():
+        _starter_key(lines, comment, key, value)
+        comment = []
     _starter_key(lines, ["Scratch cache handed to worktree hooks as RELAY_CACHE_DIR."],
                  "cache_dir", f"~/.cache/relay/{namespace}")
     lines += [
@@ -2349,10 +2367,11 @@ def render_runner_config(namespace, base=None):
     return "\n".join(lines) + "\n"
 
 
-def ensure_runner_config(check, base=None):
+def ensure_runner_config(check, base=None, layout=None):
     """Create the starter .relay/runner.json if it is missing (RE383): `"present"` (left
     byte-identical, always), `"missing"` (`--check`: nothing written) or `"created"`. `base`
-    (RE443's `--base REF`) only shapes a file this call creates.
+    (RE443's `--base REF`) and `layout` (RE457's `--skill-dir` / `--pointer-file`) only shape a
+    file this call creates.
 
     The path is resolved from ROOT at CALL time, not RUNNER_CONFIG_PATH (computed at import),
     so a repointed ROOT — every UpdateTest — never reads or writes this checkout's file. The
@@ -2363,7 +2382,7 @@ def ensure_runner_config(check, base=None):
     if check:
         return "missing"
     try:
-        _write_file(path, render_runner_config(default_namespace(), base), "644")
+        _write_file(path, render_runner_config(default_namespace(), base, layout), "644")
     except OSError as e:
         die(f"could not write {path}: {e}")
     return "created"
@@ -6604,6 +6623,12 @@ SCAFFOLD_PATH = "/api/scaffold"        # pinned to test/fixtures/runner_contract
 SCAFFOLD_STATE_REL = os.path.join(".relay", "scaffold.json")
 RUNNER_REL = "relay"             # the ONE item that goes through RE185's installer
 GUIDE_REL = "relay.md"                 # the agent-facing guide; plain content, written verbatim
+# RE457: the line the project's pointer file carries so its LLM finds relay.md. Pinned to
+# CONTRACT["setup"]["pointer_line"] — the board's install script appends the same line.
+POINTER_LINE = "Working Relay cards from this repo: see [relay.md](relay.md)."
+PROJECT_LAYOUT_KEYS = ("skill_dir", "pointer_file")
+LAYOUT_UPDATE_FAILED = (f'could not update {RUNNER_CONFIG_REL} — set "skill_dir"/"pointer_file" '
+                        "in it by hand")
 
 
 def _fetch(url, timeout=30):
@@ -6660,6 +6685,53 @@ def local_scaffold_version():
         return None
     version = state.get("version") if isinstance(state, dict) else None
     return version if isinstance(version, str) else None
+
+
+def project_layout():
+    """The project's LLM layout (RE457): `{"skill_dir": str, "pointer_file": str}` from
+    .relay/runner.json, each falling back to runner_config_defaults() when the file or key is
+    missing. Read from ROOT at CALL time (see ensure_runner_config) so a repointed ROOT never
+    reads this checkout's file. Invalid JSON and a non-string value die: guessing a skill dir
+    would install the skills somewhere the project's LLM never looks."""
+    defaults = runner_config_defaults()
+    layout = {k: defaults[k] for k in PROJECT_LAYOUT_KEYS}
+    path = os.path.join(ROOT, RUNNER_CONFIG_REL)
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.loads(strip_json_comments(f.read()))
+    except FileNotFoundError:
+        return layout
+    except json.JSONDecodeError as e:
+        die(f"{path} is not valid JSON: {e}")
+    if not isinstance(cfg, dict):
+        die(f"{path} is not a JSON object")
+    for key in PROJECT_LAYOUT_KEYS:
+        if key in cfg:
+            if not isinstance(cfg[key], str):
+                die(f'{RUNNER_CONFIG_REL}: "{key}" must be a string')
+            layout[key] = cfg[key]
+    return layout
+
+
+def local_scaffold_path(rel, skill_dir):
+    """Where manifest path `rel` lives in this project (RE457): a skill under the manifest's
+    canonical DEFAULT_SKILL_DIR moves under `skill_dir`; every other item (`./relay`,
+    `relay.md`) is returned unchanged. The fetch URL always keeps the manifest path."""
+    prefix = DEFAULT_SKILL_DIR + "/"
+    return skill_dir + "/" + rel[len(prefix):] if rel.startswith(prefix) else rel
+
+
+def moved_skills(items, old_dir, new_dir):
+    """`{old local path: new local path}` for every manifest skill whose copy EXISTS under
+    `old_dir` and whose path differs under `new_dir`, in manifest order — what an LLM switch
+    (RE457) leaves behind. Only Relay's own files, never the rest of the old skill dir."""
+    moves = {}
+    for item in items:
+        old = local_scaffold_path(item["path"], old_dir)
+        new = local_scaffold_path(item["path"], new_dir)
+        if os.path.normpath(old) != os.path.normpath(new) and os.path.isfile(_safe_path(old)):
+            moves[old] = new
+    return moves
 
 
 def write_scaffold_state(version):
@@ -6722,8 +6794,11 @@ def remove_obsolete(paths):
     return removed
 
 
-def scaffold_status():
+def scaffold_status(skill_dir=None):
     """The ONE comparison behind both `--check` and apply.
+
+    Skills are compared, and reported, at their LOCAL path under `skill_dir` (RE457) — the
+    project's own (project_layout) unless an LLM switch passes its new one.
 
     **The work list is the verdict.** Every item is hashed against the manifest on every run,
     and `current` is simply "nothing to write" — never a version comparison. The five files
@@ -6751,15 +6826,18 @@ def scaffold_status():
     update writes every item except its own path at mode 644, so the upgrade from bin/relay
     leaves exactly that state, and the reinstall through `install_runner` is what restores 0o755.
     """
+    if skill_dir is None:
+        skill_dir = project_layout()["skill_dir"]
     manifest = fetch_scaffold_manifest()
     served, local = manifest["version"], local_scaffold_version()
-    missing = [i["path"] for i in manifest["items"]
-               if not os.path.exists(_safe_path(i["path"]))]
-    changed = [i["path"] for i in manifest["items"]
-               if _scaffold_sha256_file(i["path"]) != manifest_sha(i)
-               or (i["path"] == RUNNER_REL and not os.access(_safe_path(i["path"]), os.X_OK))]
+    paths = [(i, local_scaffold_path(i["path"], skill_dir)) for i in manifest["items"]]
+    missing = [rel for _i, rel in paths if not os.path.exists(_safe_path(rel))]
+    changed = [rel for i, rel in paths
+               if _scaffold_sha256_file(rel) != manifest_sha(i)
+               or (rel == RUNNER_REL and not os.access(_safe_path(rel), os.X_OK))]
     return {"served_version": served, "local_version": local, "current": not changed,
-            "missing": missing, "changed": changed, "items": manifest["items"]}
+            "missing": missing, "changed": changed, "items": manifest["items"],
+            "skill_dir": skill_dir}
 
 
 # RE443: the manifest's `relay` item carries the sha of the BAKED bytes the board serves in
@@ -6785,7 +6863,9 @@ def _scaffold_sha256_file(rel):
 
 
 def install_scaffold(status):
-    """Write every changed item and record the served version. Returns the paths written.
+    """Write every changed item. Returns the LOCAL paths written (RE457: a skill lands under
+    `status["skill_dir"]`, fetched from its manifest path). cmd_update records the served
+    version once the whole apply is done.
 
     Each body is checked against the manifest's sha256 before it touches disk, and `./relay`
     additionally goes through RE185's verified installer (`verify_runner_source` +
@@ -6799,7 +6879,8 @@ def install_scaffold(status):
     written = []
     for item in status["items"]:
         rel = item["path"]
-        if rel not in status["changed"]:
+        local = local_scaffold_path(rel, status["skill_dir"])
+        if local not in status["changed"]:
             continue
         url = base + "/" + rel.lstrip("/")
         try:
@@ -6811,7 +6892,7 @@ def install_scaffold(status):
             die(f"{rel} does not match the manifest sha256 — refusing to write it")
         # install_runner() mkstemps NEXT TO the target and does not create directories, so a
         # first-ever install into a bare project needs the target's directory to exist first.
-        os.makedirs(os.path.dirname(_safe_path(rel)) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(_safe_path(local)) or ".", exist_ok=True)
         if rel == RUNNER_REL:
             result = verify_runner_source(body, url)
             if result is None:
@@ -6820,24 +6901,99 @@ def install_scaffold(status):
             if not install_runner(source, version, _safe_path(rel)):
                 die(f"could not write {rel}")
         else:
-            _write_file(_safe_path(rel), body.decode("utf-8"), "644")
-        written.append(rel)
-    write_scaffold_state(status["served_version"])
+            _write_file(_safe_path(local), body.decode("utf-8"), "644")
+        written.append(local)
     return written
+
+
+def append_pointer(rel):
+    """Append POINTER_LINE to `rel` unless a line already equals it exactly, on a line of its
+    own (a `\n` first when the file lacks a trailing one), creating the file if absent — the
+    install script's has_line/append_line. Returns whether it wrote."""
+    path = _safe_path(rel)
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        text = ""
+    if POINTER_LINE in text.splitlines():
+        return False
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(("\n" if text and not text.endswith("\n") else "") + POINTER_LINE + "\n")
+    return True
+
+
+def _rewrite_layout_keys(text, changes):
+    """`text` (a runner.json) with each key in `changes` set (RE457): an existing `"key": "…"`
+    line has just its value replaced; a missing key is inserted on its own line right after the
+    opening `{` line. Every other byte, comments included, is kept. Dies with
+    LAYOUT_UPDATE_FAILED unless the result re-parses to the old object with only those keys
+    changed — the file is the user's, and a rewrite we cannot prove is not one to write."""
+    try:
+        cfg = json.loads(strip_json_comments(text))
+        lines = text.splitlines(keepends=True)
+        missing = []
+        for key, value in changes.items():
+            pattern = re.compile(r'^(\s*' + re.escape(json.dumps(key))
+                                 + r'\s*:\s*)"(?:[^"\\]|\\.)*"')
+            hit = next((n for n, ln in enumerate(lines)
+                        if not ln.lstrip().startswith("//") and pattern.match(ln)), None)
+            if hit is None:
+                missing.append(key)
+                continue
+            m = pattern.match(lines[hit])
+            lines[hit] = m.group(1) + json.dumps(value) + lines[hit][m.end():]
+        if missing:
+            opening = next(n for n, ln in enumerate(lines) if ln.lstrip().startswith("{"))
+            newline = lines[opening][len(lines[opening].rstrip("\r\n")):] or "\n"
+            inserted = [f"  {json.dumps(k)}: {json.dumps(changes[k])}"
+                        + ("" if n == len(missing) - 1 and not cfg else ",") + newline
+                        for n, k in enumerate(missing)]
+            lines[opening + 1:opening + 1] = inserted
+        new = "".join(lines)
+        if json.loads(strip_json_comments(new)) != {**cfg, **changes}:
+            raise ValueError("re-parse mismatch")
+    except (ValueError, StopIteration):
+        die(LAYOUT_UPDATE_FAILED)
+    return new
+
+
+def plan_layout_update(old, new):
+    """What an LLM switch does to .relay/runner.json (RE457), decided BEFORE anything is
+    written: `("missing", None)` (no file — the starter is created with the new layout),
+    `("present", None)` (no key changes) or `("update", new_text)`. Dies on a rewrite that
+    cannot be proven, so a switch never moves the skills and then fails on the config."""
+    path = os.path.join(ROOT, RUNNER_CONFIG_REL)
+    changes = {k: new[k] for k in PROJECT_LAYOUT_KEYS if new[k] != old[k]}
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return "missing", None
+    if not changes:
+        return "present", None
+    return "update", _rewrite_layout_keys(text, changes)
 
 
 def _format_config(report):
     """The runner.json line for format_scaffold (RE383) — empty when the file was present."""
-    verb = {"created": "created", "missing": "would create"}.get(report.get("config"))
+    config = report.get("config")
+    if config in ("updated", "would update"):
+        return [f"  {config} {RUNNER_CONFIG_REL}"]
+    verb = {"created": "created", "missing": "would create"}.get(config)
     if not verb:
         return []
     return [f'  {verb} {RUNNER_CONFIG_REL} (namespace "{default_namespace()}")']
 
 
-def format_scaffold(report):
+def format_scaffold(report, moves=None):
+    """The human report. `moves` maps each removed path to where it moved — an LLM switch's
+    skills (RE457); anything not in it is the legacy bin/relay, which moved to ./relay."""
+    moves = moves or {}
     lines = [f"scaffold: served {report['served_version']} · "
              f"local {report['local_version'] or '(none)'}"]
-    if report["current"]:
+    if report["current"] and not report["written"]:
         lines.append("  this project is current — nothing to do.")
         return "\n".join(lines + _format_config(report))
     verb = "updated" if report["applied"] else "would change"
@@ -6847,7 +7003,8 @@ def format_scaffold(report):
         lines += [f"    {p}" for p in paths]
     removals = report["removed"] if report["applied"] else report["obsolete"]
     removal_verb = "removed" if report["applied"] else "would remove"
-    lines += [f"  {removal_verb} {p} (moved to ./{RUNNER_REL})" for p in removals]
+    lines += [f"  {removal_verb} {p} (moved to {moves.get(p, './' + RUNNER_REL)})"
+              for p in removals]
     if not report["applied"]:
         lines.append("  nothing written (--check). Run `./relay update` to apply.")
     return "\n".join(lines + _format_config(report))
@@ -6859,11 +7016,17 @@ def format_starter(report):
                       f"  {report['hook']} {PREPARE_HOOK_DEFAULT}"])
 
 
+def layout_flags(args):
+    """The `--skill-dir` / `--pointer-file` values given, keyed like runner.json (RE457)."""
+    return {k: getattr(args, k, None) for k in PROJECT_LAYOUT_KEYS
+            if getattr(args, k, None) is not None}
+
+
 def update_starter_only(args):
     """`relay update --starter-only` (RE443): only the two user-owned starter files — the runner
     config (`base` from `--base`) and the generic prepare hook — each only if missing. No network
     and no scaffold work, so it needs no board and is not refused in the Relay app repo."""
-    report = {"config": ensure_runner_config(False, args.base),
+    report = {"config": ensure_runner_config(False, args.base, layout_flags(args)),
               "hook": ensure_prepare_hook(),
               "applied": True}
     emit(args, report, lambda: print(format_starter(report)))
@@ -6896,26 +7059,47 @@ def cmd_update(args):
     stays scaffold-only — and the app-repo refusal does not cover it, since it overwrites nothing.
     `--base REF` (RE443) sets the `base` of a runner.json this creates.
 
-    `--starter-only` (RE443) writes just the user-owned starter files: see update_starter_only."""
+    `--starter-only` (RE443) writes just the user-owned starter files: see update_starter_only.
+
+    `--skill-dir` / `--pointer-file` without `--starter-only` SWITCH the project to another LLM's
+    layout (RE457): the skills are compared and installed under the new dir, Relay's three skill
+    files under the old one become `obsolete` (removed on apply), the changed runner.json keys
+    are rewritten in place, and POINTER_LINE is appended to the new pointer file. Every path and
+    the runner.json rewrite are checked before anything is written; the app-repo refusal
+    applies unchanged."""
     if args.starter_only:
         return update_starter_only(args)
-    status = scaffold_status()
-    obsolete = obsolete_scaffold()
+    flags = layout_flags(args)
+    old = project_layout()
+    new = {**old, **flags}
+    if flags:
+        for key in PROJECT_LAYOUT_KEYS:
+            _safe_path(new[key])
+    status = scaffold_status(new["skill_dir"])
+    moves = moved_skills(status["items"], old["skill_dir"], new["skill_dir"])
+    plan, config_text = plan_layout_update(old, new) if flags else (None, None)
+    obsolete = obsolete_scaffold() + list(moves)
     written, removed = [], []
     if not args.check:
-        if status["changed"] and in_relay_app_repo() and not args.force:
+        # An LLM switch's removals are sources here too, so they trip the same refusal.
+        touched = len(status["changed"]) + len(moves)
+        if touched and in_relay_app_repo() and not args.force:
             die("refusing to install into the Relay app repo: these five files are the SOURCE "
                 "here, not installed copies, and the board serves whatever was last deployed — "
-                f"applying would revert {len(status['changed'])} of them to it. "
+                f"applying would revert {touched} of them to it. "
                 "Use `./relay update --check` to see the difference, or --force if you really "
                 "mean to overwrite the sources.")
         if status["changed"]:
             written = install_scaffold(status)
-        elif status["local_version"] != status["served_version"]:
-            write_scaffold_state(status["served_version"])
         removed = remove_obsolete(obsolete)
     # RE383: user-owned, so it sits after the scaffold work and outside the app-repo refusal.
-    config = ensure_runner_config(args.check, args.base)
+    config = _apply_layout(args, plan, config_text, new) if flags else \
+        ensure_runner_config(args.check, args.base)
+    if flags and not args.check and append_pointer(new["pointer_file"]):
+        written.append(new["pointer_file"])
+    if not args.check and (status["changed"]
+                           or status["local_version"] != status["served_version"]):
+        write_scaffold_state(status["served_version"])
     report = {"served_version": status["served_version"],
               "local_version": status["local_version"],
               "current": status["current"] and not obsolete,
@@ -6925,9 +7109,28 @@ def cmd_update(args):
               "applied": not args.check,
               "written": written,
               "removed": removed,
-              "config": config}
-    emit(args, report, lambda: print(format_scaffold(report)))
+              "config": config,
+              "skill_dir": new["skill_dir"]}
+    emit(args, report, lambda: print(format_scaffold(report, moves)))
     return report
+
+
+def _apply_layout(args, plan, config_text, layout):
+    """Carry out plan_layout_update's verdict for an LLM switch (RE457): the report's `config`
+    — `created` / `missing` (no file yet), `updated` / `would update`, or `present`."""
+    if plan == "missing":
+        return ensure_runner_config(args.check, args.base, layout)
+    if plan == "present":
+        return "present"
+    if args.check:
+        return "would update"
+    path = os.path.join(ROOT, RUNNER_CONFIG_REL)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(config_text)
+    except OSError as e:
+        die(f"could not write {path}: {e}")
+    return "updated"
 
 
 # ============================ guided setup (RE445) ============================
@@ -7356,6 +7559,14 @@ def build_parser():
                          f"(default {DEFAULT_BASE})")
     up.add_argument("--force", action="store_true",
                     help="install even into the Relay app repo, where these five files are the source")
+    up.add_argument("--skill-dir", metavar="DIR",
+                    help="the project's LLM skill dir — with --starter-only, recorded in a "
+                         f"{RUNNER_CONFIG_REL} this creates; otherwise switches the skills to it "
+                         f"(default {DEFAULT_SKILL_DIR})")
+    up.add_argument("--pointer-file", metavar="FILE",
+                    help="the file the project's LLM reads first, pointed at relay.md — with "
+                         f"--starter-only, recorded in a {RUNNER_CONFIG_REL} this creates; "
+                         f"otherwise switches to it (default {DEFAULT_POINTER_FILE})")
     add("version", cmd_version, json_flag=True)
 
     _add_command_groups(p, sub)

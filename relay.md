@@ -70,6 +70,7 @@ or `@path`.
 | `./relay flow code --json` · `./relay flow-push code code.json` | Pull · push a flow |
 | `./relay setup status` · `./relay setup report 5.1 --status done --evidence "…"` | Guided-setup checklist · report its current step (`--error`, `--data JSON`) |
 | `./relay update` | Refresh `./relay`, the `relay-*` skills and this file (prefer `/relay-update`) |
+| `./relay update --skill-dir DIR --pointer-file FILE` | Switch this project to another LLM: move the `relay-*` skills to `DIR`, point `FILE` at this guide, record both in `.relay/runner.json` |
 
 ## Working inside a flow
 

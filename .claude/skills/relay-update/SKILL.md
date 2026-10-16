@@ -17,6 +17,10 @@ Relay owns exactly five files in your project:
 | doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
 | onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |
 
+The three skills live under the project's `skill_dir` (`"skill_dir"` in `.relay/runner.json`,
+default `.claude/skills`; Codex projects use `.agents/skills`), so the paths above are the
+Claude Code ones.
+
 Your board serves them at `$RELAY_URL/api/scaffold` (first installed by the
 `curl -fsSL <board>/b/<slug>/install | sh` command from the board's setup wizard). They are **never user-edited**, so an
 update overwrites them unconditionally — there is nothing of yours to lose, and no diff to
@@ -30,10 +34,16 @@ know what would change, ask the command.
 
 - A Relay release shipped and this project has not picked it up.
 - A run was refused with `runner_outdated`, or the Runners view shows an `OUTDATED` badge.
-- One of the six files above is missing, was deleted, or was edited — `update` repairs all
-  three the same way, because none of them is yours to change.
+- One of the five files above is missing, was deleted, or was edited — `update` repairs all
+  five the same way, because none of them is yours to change.
 
-**Never run this in the Relay app repo itself.** There these six files are the *source*, not
+- Switching this project to another LLM: `./relay update --skill-dir <dir> --pointer-file <file>`
+  (e.g. `--skill-dir .agents/skills --pointer-file AGENTS.md` for Codex). It moves the `relay-*`
+  skills, records both keys in `.relay/runner.json` and appends the `relay.md` pointer line to
+  the new pointer file. Commit the result. When a board's default LLM moves, its Settings →
+  Agents flash names the exact values.
+
+**Never run this in the Relay app repo itself.** There these five files are the *source*, not
 installed copies, and because publishing is coupled to deploying (ADR 0010) the board serves
 whatever was last deployed — so an update reverts local work to it. `./relay update` refuses
 there without `--force`; `--check` is still fine and still tells you the truth.
@@ -105,5 +115,6 @@ Skip it when step 1's `--check` said current — you stopped there and nothing c
 
 ## Blast radius
 
-The six files above, `.relay/scaffold.json`, and one commit if the human asked for one. Never
+The five files above, `.relay/scaffold.json` — plus, for an LLM switch, the two
+`.relay/runner.json` keys and the pointer-file line — and one commit if the human asked for one. Never
 app code, never other `.claude/` files, never a branch, never a push, never a card.

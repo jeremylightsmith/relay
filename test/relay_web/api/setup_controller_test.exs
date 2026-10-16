@@ -84,13 +84,23 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert body["fix"] == nil
       assert body["fix_command"] == nil
 
+      # RE457 scenario 10
       assert body["llm"] == %{
                "harness" => "claude-code",
                "label" => "Claude Code",
                "cli" => "claude",
+               "skill_dir" => ".claude/skills",
                "skill_path" => ".claude/skills/relay-onboard/SKILL.md",
                "pointer_file" => "CLAUDE.md"
              }
+
+      assert body["relay_files"] == [
+               ".claude/skills/relay-doctor/SKILL.md",
+               ".claude/skills/relay-onboard/SKILL.md",
+               ".claude/skills/relay-update/SKILL.md",
+               "relay",
+               "relay.md"
+             ]
 
       ids = Enum.map(body["checks"], & &1["id"])
       assert ids == Enum.map(Setup.preflight_checks(), & &1.id) ++ ["cli", "key"]
@@ -108,6 +118,20 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert step(board, "4").status == :waiting
       assert step(board, "4").evidence =~ ~r/^preflight passed \d\d:\d\d · jl-mbp$/
       assert [_ | _] = step(board, "4").data["checks"]
+    end
+
+    # RE457 scenario 11
+    test "a Codex board's preflight answers the .agents/skills dir and relay files", %{conn: conn, user: user} do
+      board = create!(user)
+      {:ok, %{token: token}} = Setup.choose_llm(board, user, "codex")
+      clis = %{"claude" => nil, "codex" => "/usr/bin/codex", "gemini" => nil}
+
+      body = conn |> preflight(token, preflight_body(board, %{"clis" => clis})) |> json_response(200)
+
+      assert body["ok"] == true
+      assert body["llm"]["skill_dir"] == ".agents/skills"
+      assert ".agents/skills/relay-update/SKILL.md" in body["relay_files"]
+      refute Enum.any?(body["relay_files"], &String.starts_with?(&1, ".claude/"))
     end
 
     # Scenario 4
@@ -374,6 +398,17 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert wire_step(body, "4")["status"] == "done"
       assert length(data["interview"]) == 9
       assert data["llm"]["harness"] == "claude-code"
+
+      # RE457 scenario 12
+      assert data["llm"] == %{
+               "harness" => "claude-code",
+               "label" => "Claude Code",
+               "cli" => "claude",
+               "skill_dir" => ".claude/skills",
+               "skill_path" => ".claude/skills/relay-onboard/SKILL.md",
+               "pointer_file" => "CLAUDE.md"
+             }
+
       assert data["change_decisions"] == Setup.change_decisions()
 
       refute response.resp_body =~ token

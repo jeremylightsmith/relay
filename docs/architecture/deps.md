@@ -80,6 +80,7 @@ flowchart LR
     Setup --> ApiKeys
     Setup --> Events
     Setup --> Repo
+    Setup --> Scaffold
     StoryMap --> Cards
     StoryMap --> Events
     StoryMap --> Repo

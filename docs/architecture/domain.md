@@ -843,11 +843,14 @@ sharing behavior.
   created from a template" to "an agent picked up the first card". Owns the ONE step catalog
   (`steps/0`, in order 1–5, 5.1–5.8, 6, 7: `id`, `parent`, `title`, `done_title`, `actor` —
   `actors/0` = `:you_here | :you_terminal | :ai_terminal` — `why`, `what_this_does`,
-  `read_only_note`; strings carry `%{template}` / `%{llm}` / `%{skill_path}` / `%{pointer_file}`
+  `read_only_note`; strings carry `%{template}` / `%{llm}` / `%{skill_dir}` / `%{skill_path}` / `%{pointer_file}`
   placeholders that only `checklist/1` resolves) and the onboarding LLMs (`onboarding_llms/0`,
   `onboarding_llm/1`: `harness` / `label` read from `Relay.Agents.seed_harnesses/0`, plus `cli`,
-  `blurb`, `install`, `skill_path`, `pointer_file`, `recommended?`, `enabled?` — Gemini CLI is
-  disabled). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
+  `blurb`, `install`, `skill_dir`, `skill_path`, `pointer_file`, `recommended?`, `enabled?` — Gemini
+  CLI is disabled; `skill_path` is derived from `skill_dir`, and Claude Code's `skill_dir` is
+  `Relay.Scaffold.skill_dir/0`). It is also the ONE Elixir definition of the `relay.md` pointer
+  line (`pointer_line/0`) and of the default-LLM switch flash (`llm_switch_notice/2`, RE457: the
+  `./relay update --skill-dir … --pointer-file …` command, or nil when the skill dir is unchanged). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
   all 15 (step 1 done with `"<N> stages · <M> flows · HH:MM"` and the template's name and
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
@@ -924,7 +927,8 @@ sharing behavior.
   and marks step 4 `:waiting`
   (`"preflight passed HH:MM · <machine>"`, `data.checks`) or `:failed` (the first failure's
   `headline` as `error`, plus `checks` / `headline` / `fix` / `fix_command` in `data`); it answers
-  the board name, the onboarding LLM and every check with its fix text. `preflight_checks/0` is
+  the board name, the onboarding LLM, `relay_files` (`Relay.Scaffold.items/1` over the LLM's
+  `skill_dir`, RE457) and every check with its fix text. `preflight_checks/0` is
   the ONE list of the script's local check ids and labels (`git_repo`, `remote`,
   `default_branch`, `python3`), whose fix texts live beside it; the server adds the `cli` and
   `key` lines. `installed/2` finishes step 4 (`"downloaded HH:MM · <repo_dir> · <branch>"`,

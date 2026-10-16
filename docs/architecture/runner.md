@@ -393,7 +393,10 @@ Unauthenticated because the board's install script (`/b/<slug>/install`) downloa
 before anything has authenticated, and because these files were published openly regardless.
 
 **Exactly five files are Relay-owned** (`Relay.Scaffold.items/0`): `./relay`, the three
-`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`, and `relay.md`. (RE443 retired the
+`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`, and `relay.md`. `.claude/skills` is the
+manifest's canonical skill dir (`Relay.Scaffold.skill_dir/0`, RE457, the ONE Elixir definition);
+`Relay.Scaffold.items/1` maps the skill items to another LLM's dir (`.agents/skills` for Codex)
+without changing the served manifest. (RE443 retired the
 fourth, setup skill: the board's setup wizard hands out the install command instead.) They are
 never user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
@@ -406,13 +409,32 @@ runner's own template — no endpoint serves it — and reports it under the `co
 the scaffold version or manifest, never touched by auto-update, and not behind the in-app-repo
 `--force` refusal. `--base REF` sets the `base` of a runner.json the update creates.
 
-**`./relay update --starter-only [--base REF]`** (RE443) writes **only** the user-owned starter
+**The project's LLM layout** (RE457). `.relay/runner.json` carries two optional, user-owned
+keys: `skill_dir` (default `.claude/skills`) and `pointer_file` (default `CLAUDE.md`) — the
+defaults are `./relay`'s `DEFAULT_SKILL_DIR` / `DEFAULT_POINTER_FILE`, pinned against the board by
+`setup.runner_config_defaults` in the runner contract fixture, as `./relay`'s `POINTER_LINE` is by
+`setup.pointer_line` (`Relay.Setup.pointer_line/0`). The manifest keeps its canonical
+`.claude/skills/…` paths; `./relay update` maps every item under `.claude/skills/` to
+`<skill_dir>/…` (`local_scaffold_path`) for its comparison, its install and its report — a skill
+is still **fetched** from its manifest path but written, hashed and reported at the local one, and
+the report carries `skill_dir`. `./relay update --skill-dir DIR --pointer-file FILE` (either flag
+alone works) **switches** an existing project to another LLM's layout: it rewrites only those two
+runner.json keys in place, installs the skills under the new dir, removes Relay's three old skill
+files (reported as `obsolete`, `removed` on apply — never anything else in the old dir), and
+appends the pointer line to the new pointer file (listed in `written`). It commits nothing; every
+path and the runner.json rewrite are checked before anything is written, and the app-repo
+refusal applies. With `--starter-only`, the same flags only set the two keys of a runner.json it
+creates. Board Settings → Agents shows the switch command as a flash when "Make default" moves the
+board to an LLM with another skill dir (`Relay.Setup.llm_switch_notice/2`); the board never
+changes repo files.
+
+**`./relay update --starter-only [--base REF] [--skill-dir DIR --pointer-file FILE]`** (RE443) writes **only** the user-owned starter
 files, each only when missing: that `.relay/runner.json` and a generic
 `.relay/prepare-worktree.sh` (mode 755, `render_prepare_hook()` — the copy-from-cache-or-main-
 checkout warm-up, generalized over a `WARM=""` list the project fills in; empty, it copies
 nothing and exits 0). No network, no scaffold work, not refused in the Relay app repo, never an
 overwrite. Report: `{"config": "created"|"present", "hook": "created"|"present", "applied":
-true}`. The install script runs it after laying down the scaffold.
+true}`. The install script runs it right after downloading `./relay`, before `./relay update`.
 
 **The served `./relay` carries its board's URL** (RE443). The committed file has a placeholder
 line `BOARD_URL = ""` right after `RUNNER_FINGERPRINT`; `ScaffoldController.show/2` serves it
@@ -453,16 +475,26 @@ as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
    `default_branch` — `origin/HEAD`, else the current branch; `python3`) and `command -v` for each
    onboarding CLI, using only `curl git python3 uname mktemp mkdir chmod mv rm cat grep printf`;
 2. `POST /api/setup/preflight` (board key) — the key's first authed call, which ticks setup step 3
-   and marks step 4 `waiting` or `failed` with the fix text. It prints the board's answer, one
+   and marks step 4 `waiting` or `failed` with the fix text. The answer's `llm` carries
+   `harness` / `label` / `cli` / `skill_dir` / `skill_path` / `pointer_file`, and (RE457) its
+   `relay_files` is `Relay.Scaffold.items(llm.skill_dir)`, the five Relay-owned paths under that
+   LLM's skill dir. It prints the board's answer, one
    `ok`/`!!` line per check; on any failure, the fixes and `fix_command`, then exits 1 having
    written nothing;
-3. downloads `relay`, the onboarding skill and `relay.md` from `/api/scaffold/*path` into a temp
-   dir and moves them into place only once all arrived (`./relay`, the LLM's `skill_path`,
-   `relay.md`), appends the `relay.md` pointer line to the LLM's `pointer_file` and the three
-   `.gitignore` entries — each only if absent — and runs `./relay update --starter-only --base
-   origin/<branch>`;
-4. `POST /api/setup/installed` (board key), which finishes step 4 and activates step 5, then
-   prints `Next: open <cli> here and run /relay-onboard`.
+3. (RE457) prints a "Writing:" preview — one line per `relay_files` path, then the pointer file
+   (only when its line is absent), `.relay/runner.json`, `.relay/prepare-worktree.sh` and
+   `.gitignore (+N lines)` — and downloads **only** `relay` from `/api/scaffold/relay` (to a temp
+   dir, then `./relay`, mode 755). It appends the pointer line (`Relay.Setup.pointer_line/0`,
+   rendered into the script) to the LLM's `pointer_file` and the three `.gitignore` entries —
+   each only if absent — then runs `./relay update --starter-only --base origin/<branch>
+   --skill-dir <llm.skill_dir> --pointer-file <llm.pointer_file>` and `RELAY_URL=<board>
+   ./relay update --json`, which lays down `relay.md`, the three skills under `skill_dir` and
+   `.relay/scaffold.json`, every body checked against the manifest's sha256. A failed update is
+   recovered by re-running the install;
+4. `POST /api/setup/installed` (board key) with `files`: `relay`, then every other path in the
+   update report's `written` (once, in report order), then the pointer file, `.relay/runner.json`,
+   `.relay/prepare-worktree.sh` and `.gitignore`. That finishes step 4 and activates step 5; the
+   script then prints `Next: open <cli> here and run /relay-onboard`.
 
 The key travels only in the `Authorization` header and is never written to a file. Both
 `/api/setup/*` endpoints refuse a key from another board (`403 wrong_board`); preflight also
@@ -478,7 +510,9 @@ board's, and a board key never touches a machine's.
 through two more board-key routes on `RelayWeb.Api.SetupController`, rendered by
 `RelayWeb.Api.SetupJSON`: `GET /api/setup` answers `{"data": checklist}` — the board name,
 `connect` (true for a connected machine's checklist, RE446: the skill then does 5.1 and a
-pull-only 5.6 check), the template, the onboarding LLM, `current_id` / `current_sub_id` / `current`
+pull-only 5.6 check), the template, the onboarding LLM (`llm`: `cli`, `harness`, `label`,
+`pointer_file`, `skill_dir`, `skill_path` — pinned as `setup.llm_keys` in the runner contract
+fixture, beside RE457's `setup.pointer_line` and `setup.runner_config_defaults`), `current_id` / `current_sub_id` / `current`
 (`Relay.Setup.reportable_id/1`, the one step a report may move), `first_flow_stage`, the
 position counts, the 5.3 `interview` catalog, the 5.4 `change_decisions` and
 `missing_file_resolutions` (`Relay.Setup.missing_file_resolutions/0`), `referenced_files` (RE447:

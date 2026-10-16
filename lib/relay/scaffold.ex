@@ -3,8 +3,8 @@ defmodule Relay.Scaffold do
   The five Relay-owned files the board serves at `/api/scaffold`, and the build that produces
   them (RE304, ADR 0010).
 
-  These files are Relay's, never a user's: a project's `./relay`, its three `relay-*` skills,
-  and `relay.md`. (A fourth, setup skill was retired by RE443 for the board's setup wizard and
+  These files are Relay's, never a user's: a project's `./relay`, the `relay-*` skills under
+  `skill_dir/0`, and `relay.md`. (A fourth, setup skill was retired by RE443 for the board's setup wizard and
   its install command.) That is what lets `./relay update` overwrite them unconditionally — no
   provenance ledger, no per-file diff prompt.
 
@@ -37,12 +37,16 @@ defmodule Relay.Scaffold do
 
   use Boundary, deps: []
 
+  # The manifest's canonical skill directory (RE457) — the ONE Elixir definition of the literal.
+  # A project on another LLM keeps its skills elsewhere; `items/1` maps to that directory.
+  @skill_dir ".claude/skills"
+
   # The ONE definition of what is Relay-owned. Sorted, because the version derivation and the
   # manifest ordering both depend on a stable order and this is where that order is decided.
   @items [
-    ".claude/skills/relay-doctor/SKILL.md",
-    ".claude/skills/relay-onboard/SKILL.md",
-    ".claude/skills/relay-update/SKILL.md",
+    "#{@skill_dir}/relay-doctor/SKILL.md",
+    "#{@skill_dir}/relay-onboard/SKILL.md",
+    "#{@skill_dir}/relay-update/SKILL.md",
     "relay",
     "relay.md"
   ]
@@ -63,6 +67,24 @@ defmodule Relay.Scaffold do
   @doc "The Relay-owned paths, sorted. Nothing else is ever served or updated."
   @spec items() :: [String.t()]
   def items, do: @items
+
+  @doc ~S(The manifest's canonical skill directory, `".claude/skills"`: every skill item lives under it.)
+  @spec skill_dir() :: String.t()
+  def skill_dir, do: @skill_dir
+
+  @doc """
+  `items/0` with every skill item moved from `skill_dir/0` to `dir`, in `items/0`'s order; every
+  other path unchanged. The served manifest never changes — this is the project-side view of it.
+  """
+  @spec items(String.t()) :: [String.t()]
+  def items(dir) when is_binary(dir) do
+    prefix = @skill_dir <> "/"
+
+    Enum.map(@items, fn
+      ^prefix <> rest -> dir <> "/" <> rest
+      path -> path
+    end)
+  end
 
   @doc "Where the built scaffold lives inside the running app."
   @spec root() :: String.t()

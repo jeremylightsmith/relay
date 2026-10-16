@@ -10222,9 +10222,11 @@ class UpdateTest(unittest.TestCase):
 
     # ---- helpers ----
 
-    def args(self, check=False, force=False, starter_only=False, base=None):
+    def args(self, check=False, force=False, starter_only=False, base=None, skill_dir=None,
+             pointer_file=None):
         return argparse.Namespace(check=check, force=force, json=False, field=None,
-                                  starter_only=starter_only, base=base)
+                                  starter_only=starter_only, base=base, skill_dir=skill_dir,
+                                  pointer_file=pointer_file)
 
     def path(self, rel):
         return os.path.join(self.tmp, rel)
@@ -10776,6 +10778,288 @@ class UpdateTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             relay.build_parser().parse_args(["init"])
 
+    # ---- RE457: skill_dir / pointer_file and the LLM switch ----
+
+    SWITCH_RUNNER_JSON = ('// note\n'
+                          '{\n'
+                          '  "namespace": "streaks",\n'
+                          '  "capacity": {"shared_clean": 3}\n'
+                          '}\n')
+
+    def skill_paths(self, skill_dir):
+        return [f"{skill_dir}/{s}/SKILL.md" for s in sorted(self.SKILLS)]
+
+    def snapshot(self):
+        """Every file under the temp ROOT, path -> bytes, so "nothing on disk changed" is one
+        equality."""
+        files = {}
+        for dirpath, _dirs, names in os.walk(self.tmp):
+            for name in names:
+                full = os.path.join(dirpath, name)
+                with open(full, "rb") as f:
+                    files[os.path.relpath(full, self.tmp)] = f.read()
+        return files
+
+    def config(self):
+        return json.loads(relay.strip_json_comments(self._read(relay.RUNNER_CONFIG_REL)))
+
+    def switch(self, **kw):
+        return capture_ret(relay.cmd_update, self.args(**kw))
+
+    def make_switchable(self):
+        """Scenario 8's starting state: a current Claude project, a commented runner.json, an
+        unrelated user skill and no AGENTS.md."""
+        self.make_current()
+        self.write_local(relay.RUNNER_CONFIG_REL, self.SWITCH_RUNNER_JSON)
+        self.write_local(".claude/skills/my-skill/SKILL.md", "mine\n")
+
+    # scenario 1
+    def test_update_installs_skills_under_the_configured_skill_dir(self):
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"skill_dir": ".agents/skills"}\n')
+
+        report = capture_ret(relay.cmd_update, self.args())
+
+        for skill in self.SKILLS:
+            rel = f".agents/skills/{skill}/SKILL.md"
+            self.assertEqual(self._read(rel), self.served[f".claude/skills/{skill}/SKILL.md"])
+        self.assertFalse(os.path.exists(self.path(".claude")))
+        self.assertEqual(sorted(report["written"]),
+                         sorted(self.skill_paths(".agents/skills")
+                                + [relay.RUNNER_REL, relay.GUIDE_REL]))
+        with open(self.path(".relay/scaffold.json")) as f:
+            self.assertEqual(json.load(f)["version"], self.manifest()["version"])
+
+    # scenario 2
+    def test_a_mapped_install_then_checks_current(self):
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"skill_dir": ".agents/skills"}\n')
+        capture_ret(relay.cmd_update, self.args())
+        for rel in self.skill_paths(".agents/skills"):
+            self.assertTrue(os.path.exists(self.path(rel)), rel)
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertIs(report["current"], True)
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["changed"], [])
+
+    # scenario 3 (acceptance criterion 3)
+    def test_a_project_without_skill_dir_behaves_as_before(self):
+        self.make_current()
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"namespace": "streaks"}\n')
+
+        for report in (capture_ret(relay.cmd_update, self.args(check=True)),
+                       capture_ret(relay.cmd_update, self.args())):
+            self.assertIs(report["current"], True)
+            self.assertEqual(report["missing"], [])
+            self.assertEqual(report["changed"], [])
+        self.assertFalse(os.path.exists(self.path(".agents")))
+
+    # scenario 4
+    def test_check_compares_against_the_configured_skill_dir(self):
+        self.make_current()
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"skill_dir": ".agents/skills"}\n')
+
+        report = capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertEqual(report["missing"], self.skill_paths(".agents/skills"))
+        self.assertEqual(report["changed"], self.skill_paths(".agents/skills"))
+
+    # scenario 5
+    def test_starter_only_records_skill_dir_and_pointer_file(self):
+        capture_ret(relay.update_starter_only,
+                    self.args(starter_only=True, base="origin/main",
+                              skill_dir=".agents/skills", pointer_file="AGENTS.md"))
+
+        config = self.config()
+        self.assertEqual(config["skill_dir"], ".agents/skills")
+        self.assertEqual(config["pointer_file"], "AGENTS.md")
+        self.assertEqual(config["base"], "origin/main")
+
+    # scenario 6
+    def test_starter_only_omits_skill_dir_and_pointer_file_when_not_given(self):
+        capture_ret(relay.update_starter_only, self.args(starter_only=True))
+
+        config = self.config()
+        self.assertNotIn("skill_dir", config)
+        self.assertNotIn("pointer_file", config)
+
+    # scenario 7
+    def test_starter_only_leaves_an_existing_runner_json_byte_identical(self):
+        original = '// mine\n{"namespace": "x",   "odd":  [1, 2]}\n'
+        self.write_local(relay.RUNNER_CONFIG_REL, original)
+
+        capture_ret(relay.update_starter_only,
+                    self.args(starter_only=True, skill_dir=".agents/skills",
+                              pointer_file="AGENTS.md"))
+
+        self.assertEqual(self._read(relay.RUNNER_CONFIG_REL), original)
+
+    # scenario 8 (acceptance criterion 4)
+    def test_switch_moves_the_skills_records_the_layout_and_points_the_new_file(self):
+        self.make_switchable()
+
+        report = self.switch(skill_dir=".agents/skills", pointer_file="AGENTS.md")
+
+        for rel in self.skill_paths(".agents/skills") + ["AGENTS.md"]:
+            self.assertIn(rel, report["written"])
+        self.assertEqual(report["removed"], [".claude/skills/relay-doctor/SKILL.md",
+                                             ".claude/skills/relay-onboard/SKILL.md",
+                                             ".claude/skills/relay-update/SKILL.md"])
+        for skill in self.SKILLS:
+            self.assertFalse(os.path.exists(self.path(f".claude/skills/{skill}")), skill)
+        self.assertEqual(self._read(".claude/skills/my-skill/SKILL.md"), "mine\n")
+        self.assertEqual(self._read("AGENTS.md").splitlines().count(relay.POINTER_LINE), 1)
+        config = self.config()
+        self.assertEqual(config["skill_dir"], ".agents/skills")
+        self.assertEqual(config["pointer_file"], "AGENTS.md")
+        self.assertEqual(config["namespace"], "streaks")
+        self.assertEqual(config["capacity"], {"shared_clean": 3})
+        new = self._read(relay.RUNNER_CONFIG_REL)
+        self.assertIn("// note\n", new)
+        inserted = {'  "skill_dir": ".agents/skills",', '  "pointer_file": "AGENTS.md",'}
+        kept = [ln for ln in new.splitlines(keepends=True) if ln.rstrip("\n") not in inserted]
+        self.assertEqual(len(new.splitlines()) - len(kept), 2)
+        self.assertEqual("".join(kept), self.SWITCH_RUNNER_JSON)
+        self.assertEqual(report["config"], "updated")
+
+    # scenario 9
+    def test_switch_is_idempotent(self):
+        self.make_switchable()
+        self.switch(skill_dir=".agents/skills", pointer_file="AGENTS.md")
+        config, pointer = self._read(relay.RUNNER_CONFIG_REL), self._read("AGENTS.md")
+
+        report = self.switch(skill_dir=".agents/skills", pointer_file="AGENTS.md")
+
+        self.assertEqual(report["written"], [])
+        self.assertEqual(report["removed"], [])
+        self.assertEqual(self._read(relay.RUNNER_CONFIG_REL), config)
+        self.assertEqual(self._read("AGENTS.md"), pointer)
+        self.assertEqual(pointer.splitlines().count(relay.POINTER_LINE), 1)
+
+    # scenario 10
+    def test_switch_rewrites_only_the_value_of_an_existing_key(self):
+        self.make_current()
+        original = ('{\n'
+                    '  "namespace": "streaks",\n'
+                    '  "skill_dir": ".claude/skills",\n'
+                    '  "base": "origin/main"\n'
+                    '}\n')
+        self.write_local(relay.RUNNER_CONFIG_REL, original)
+
+        self.switch(skill_dir=".agents/skills")
+
+        before, after = original.splitlines(), self._read(relay.RUNNER_CONFIG_REL).splitlines()
+        self.assertEqual(len(before), len(after))
+        diff = [(a, b) for a, b in zip(before, after) if a != b]
+        self.assertEqual(diff, [('  "skill_dir": ".claude/skills",',
+                                 '  "skill_dir": ".agents/skills",')])
+
+    # scenario 11
+    def test_switch_removes_only_relays_file_from_a_skill_directory(self):
+        self.make_current()
+        self.write_local(".claude/skills/relay-onboard/notes.md", "my notes\n")
+
+        self.switch(skill_dir=".agents/skills")
+
+        self.assertFalse(os.path.exists(self.path(".claude/skills/relay-onboard/SKILL.md")))
+        self.assertTrue(os.path.isdir(self.path(".claude/skills/relay-onboard")))
+        self.assertEqual(self._read(".claude/skills/relay-onboard/notes.md"), "my notes\n")
+
+    # scenario 12
+    def test_switch_check_reports_and_writes_nothing(self):
+        self.make_switchable()
+        before = self.snapshot()
+
+        report = self.switch(check=True, skill_dir=".agents/skills", pointer_file="AGENTS.md")
+
+        self.assertEqual(report["changed"], self.skill_paths(".agents/skills"))
+        self.assertEqual(report["obsolete"], self.skill_paths(".claude/skills"))
+        self.assertEqual(report["config"], "would update")
+        self.assertIs(report["current"], False)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(os.path.exists(self.path(".agents")))
+        self.assertFalse(os.path.exists(self.path("AGENTS.md")))
+
+    # scenario 13
+    def test_switch_is_refused_in_the_relay_app_repo(self):
+        self.make_current()
+        self._make_app_repo()
+        before = self.snapshot()
+
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.switch(skill_dir=".agents/skills", pointer_file="AGENTS.md")
+
+        self.assertEqual(self.snapshot(), before)
+
+    def test_a_switch_that_would_only_remove_source_skills_is_refused_in_the_app_repo(self):
+        self.make_current()
+        for skill in self.SKILLS:
+            self.write_local(f".agents/skills/{skill}/SKILL.md",
+                             self.served[f".claude/skills/{skill}/SKILL.md"])
+        self._make_app_repo()
+        before = self.snapshot()
+
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.switch(skill_dir=".agents/skills")
+
+        self.assertEqual(self.snapshot(), before)
+
+    # scenario 14
+    def test_switch_to_a_dir_outside_the_root_dies_before_writing(self):
+        self.make_current()
+        before = self.snapshot()
+
+        with contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as cm:
+            self.switch(skill_dir="../outside")
+
+        self.assertIn("escapes the project root", cm.exception.msg)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.tmp), "outside")))
+
+    # scenario 15
+    def test_switch_appends_the_pointer_on_its_own_line(self):
+        self.make_current()
+        self.write_local("AGENTS.md", "# Agents")
+
+        self.switch(pointer_file="AGENTS.md")
+
+        self.assertEqual(self._read("AGENTS.md"), "# Agents\n" + relay.POINTER_LINE + "\n")
+
+    # scenario 16
+    def test_a_non_string_skill_dir_dies(self):
+        self.write_local(relay.RUNNER_CONFIG_REL, '{"skill_dir": 5}\n')
+
+        with contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as cm:
+            capture_ret(relay.cmd_update, self.args(check=True))
+
+        self.assertIn('"skill_dir" must be a string', cm.exception.msg)
+
+    # scenario 17
+    def test_switch_report_names_where_each_skill_moved(self):
+        self.make_switchable()
+
+        out = capture(relay.cmd_update, self.args(skill_dir=".agents/skills",
+                                                  pointer_file="AGENTS.md"))
+
+        self.assertIn("removed .claude/skills/relay-doctor/SKILL.md "
+                      "(moved to .agents/skills/relay-doctor/SKILL.md)", out)
+
+    # scenario 19
+    def test_skill_dir_and_pointer_file_are_registered(self):
+        args = relay.build_parser().parse_args(
+            ["update", "--skill-dir", ".agents/skills", "--pointer-file", "AGENTS.md", "--check"])
+        self.assertEqual(args.skill_dir, ".agents/skills")
+        self.assertEqual(args.pointer_file, "AGENTS.md")
+        self.assertIs(args.check, True)
+        starter = relay.build_parser().parse_args(
+            ["update", "--starter-only", "--skill-dir", ".agents/skills",
+             "--pointer-file", "AGENTS.md"])
+        self.assertIs(starter.starter_only, True)
+        self.assertEqual(starter.skill_dir, ".agents/skills")
+        self.assertEqual(starter.pointer_file, "AGENTS.md")
+
 
 class ScaffoldContractTest(unittest.TestCase):
     """RE304: /api/scaffold is app↔runner wire, so the fixture pins it (RLY-176/AGENTS.md)."""
@@ -10816,6 +11100,19 @@ class ScaffoldContractTest(unittest.TestCase):
     def test_the_raw_file_route_is_the_base_plus_the_item_path(self):
         self.assertEqual(relay.scaffold_base("http://x") + "/" + relay.RUNNER_REL,
                          "http://x" + self.scaffold["file_path_example"])
+
+    # RE457 scenario 18: the runner.json layout defaults and the pointer line are the board's.
+    def test_the_project_layout_defaults_and_pointer_line_are_the_boards(self):
+        setup = CONTRACT["setup"]
+        defaults = relay.runner_config_defaults()
+        for key in ("skill_dir", "pointer_file"):
+            self.assertEqual(defaults[key], setup["runner_config_defaults"][key], key)
+        self.assertEqual(relay.POINTER_LINE, setup["pointer_line"])
+        skills = [i["path"] for i in self.scaffold["manifest"]["items"]
+                  if i["path"] not in (relay.RUNNER_REL, relay.GUIDE_REL)]
+        self.assertEqual(len(skills), 3)
+        for path in skills:
+            self.assertTrue(path.startswith(relay.DEFAULT_SKILL_DIR + "/"), path)
 
 
 class RunsAndRunnersRenderingTest(unittest.TestCase):

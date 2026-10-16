@@ -88,6 +88,33 @@ defmodule Relay.ScaffoldTest do
     end
   end
 
+  describe "skill_dir/0 and items/1 (RE457)" do
+    # Scenario 1
+    test "skill_dir/0 is .claude/skills and every skill item lives under it" do
+      assert Scaffold.skill_dir() == ".claude/skills"
+
+      skills = Scaffold.items() -- ["relay", "relay.md"]
+      assert length(skills) == 3
+      assert Enum.all?(skills, &String.starts_with?(&1, ".claude/skills/relay-"))
+    end
+
+    # Scenario 2
+    test "items/1 maps the skill items to another skill dir, keeping order" do
+      assert Scaffold.items(".agents/skills") == [
+               ".agents/skills/relay-doctor/SKILL.md",
+               ".agents/skills/relay-onboard/SKILL.md",
+               ".agents/skills/relay-update/SKILL.md",
+               "relay",
+               "relay.md"
+             ]
+    end
+
+    # Scenario 3
+    test "items/1 with the canonical skill dir is items/0" do
+      assert Scaffold.items(".claude/skills") == Scaffold.items()
+    end
+  end
+
   describe "bake_board_url/2 and board_url_line/1 (RE443)" do
     test "bakes the URL into the BOARD_URL line" do
       assert Scaffold.bake_board_url("x\nBOARD_URL = \"\"\ny\n", "https://relay.test") ==

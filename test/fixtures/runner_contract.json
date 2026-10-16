@@ -329,6 +329,8 @@
       "cli",
       "harness",
       "label",
+      "pointer_file",
+      "skill_dir",
       "skill_path"
     ],
     "no_checklist_code": "no_checklist",
@@ -338,6 +340,7 @@
       "current",
       "message"
     ],
+    "pointer_line": "Working Relay cards from this repo: see [relay.md](relay.md).",
     "report_path_example": "/api/setup/steps/5.1",
     "report_request_keys": [
       "data",
@@ -351,6 +354,10 @@
       "failed",
       "skipped"
     ],
+    "runner_config_defaults": {
+      "pointer_file": "CLAUDE.md",
+      "skill_dir": ".claude/skills"
+    },
     "status_keys": [
       "board",
       "change_decisions",

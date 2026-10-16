@@ -125,6 +125,23 @@ value, and the line is masked out of the runner fingerprint. Everything else in 
 derived version rule, the unconditional overwrite — is unchanged; the manifest shape changes
 only by that one additive key on the `relay` item.
 
+## Amendment (2026-10-16) — skills mapped to a project's `skill_dir`; the install runs `./relay update` (RE457)
+
+The manifest's skill paths stay `.claude/skills/relay-{update,doctor,onboard}/SKILL.md`: that is
+the **canonical** skill dir (`Relay.Scaffold.skill_dir/0`), and `GET /api/scaffold` serves the
+same manifest to every project. A project records its LLM's layout in `.relay/runner.json` —
+`skill_dir` (default `.claude/skills`; Codex uses `.agents/skills`) and `pointer_file` (default
+`CLAUDE.md`) — and the **runner** maps every `.claude/skills/…` item to `<skill_dir>/…` when it
+compares, installs and reports. `./relay update --skill-dir DIR --pointer-file FILE` switches an
+existing project's layout. The served bytes, the manifest shape and the derived version rule are
+unchanged.
+
+The board's install script no longer hand-fetches three files. It downloads only `./relay`, runs
+`./relay update --starter-only` with the board LLM's `--skill-dir` / `--pointer-file`, then
+`./relay update`, which installs all five files and `.relay/scaffold.json` through the one code
+path that already verifies every body against the manifest's sha256. A failed update is
+recovered by re-running the install.
+
 ## Alternatives considered
 
 **Keep `relay-config`, automate the publish from CI.** Removes the forgotten-publish failure but

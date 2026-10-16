@@ -5,7 +5,7 @@ defmodule Relay.Setup do
 
   This module owns the step **catalog** (`steps/0`), the ONE list of step ids, titles, actors,
   *why* and *what this does* lines; every surface renders from it through `checklist/1`, the only
-  place the `%{template}`, `%{llm}`, `%{cli}`, `%{skill_path}` and `%{pointer_file}` placeholders
+  place the `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}` and `%{pointer_file}` placeholders
   resolve. It also owns the onboarding LLMs (`onboarding_llms/0`) step 2 offers.
 
   Storage is one `Schemas.BoardSetupStep` row per `(board, catalog id)`, inserted by `start/2`
@@ -51,7 +51,7 @@ defmodule Relay.Setup do
   them: it counts stages, flows and cards with `Relay.Repo` queries.
   """
 
-  use Boundary, deps: [Relay.Agents, Relay.ApiKeys, Relay.Events, Relay.Repo, Schemas]
+  use Boundary, deps: [Relay.Agents, Relay.ApiKeys, Relay.Events, Relay.Repo, Relay.Scaffold, Schemas]
 
   import Ecto.Query
 
@@ -59,6 +59,7 @@ defmodule Relay.Setup do
   alias Relay.ApiKeys
   alias Relay.Events
   alias Relay.Repo
+  alias Relay.Scaffold
   alias Schemas.ApiKey
   alias Schemas.Board
   alias Schemas.BoardSetupStep
@@ -92,6 +93,7 @@ defmodule Relay.Setup do
           cli: String.t(),
           blurb: String.t(),
           install: String.t() | nil,
+          skill_dir: String.t() | nil,
           skill_path: String.t() | nil,
           pointer_file: String.t() | nil,
           recommended?: boolean(),
@@ -238,11 +240,10 @@ defmodule Relay.Setup do
                connect_title: "Install on this machine",
                short: "install",
                actor: :you_terminal,
-               why:
-                 "Puts the runner and the onboarding skill in your repo. It's a script you run, not a file you set up.",
+               why: "Puts the runner and the Relay skills in your repo. It's a script you run, not a file you set up.",
                what_this_does: [
                  "./relay — the runner and CLI, with this board's URL baked in",
-                 "%{skill_path} — the onboarding skill",
+                 "%{skill_dir}/relay-onboard, relay-update and relay-doctor — the Relay skills",
                  "relay.md, plus one line in %{pointer_file} pointing at it",
                  ".relay/runner.json — runner settings, base set to your default branch (kept if present)",
                  ".relay/prepare-worktree.sh — the warm-up hook, empty until onboarding fills it (kept if present)",
@@ -415,13 +416,14 @@ defmodule Relay.Setup do
   @advance_statuses [:waiting, :done, :failed, :skipped]
 
   # Onboarding facts per harness key; `harness` and `label` come from `Agents.seed_harnesses/0`.
-  # This map is the only place the per-CLI skill directory and pointer file are written.
+  # This map is the only place the per-CLI skill directory and pointer file are written;
+  # `skill_path` is derived from `skill_dir` by `onboarding_llms/0`, never stored here.
   @llm_facts %{
     "claude-code" => %{
       cli: "claude",
       blurb: "Recommended. Best tested with Relay's flows.",
       install: "npm install -g @anthropic-ai/claude-code",
-      skill_path: ".claude/skills/relay-onboard/SKILL.md",
+      skill_dir: Scaffold.skill_dir(),
       pointer_file: "CLAUDE.md",
       recommended?: true,
       enabled?: true
@@ -430,7 +432,7 @@ defmodule Relay.Setup do
       cli: "codex",
       blurb: "OpenAI's CLI.",
       install: "npm install -g @openai/codex",
-      skill_path: ".agents/skills/relay-onboard/SKILL.md",
+      skill_dir: ".agents/skills",
       pointer_file: "AGENTS.md",
       recommended?: false,
       enabled?: true
@@ -439,7 +441,7 @@ defmodule Relay.Setup do
       cli: "gemini",
       blurb: "Google's CLI.",
       install: nil,
-      skill_path: nil,
+      skill_dir: nil,
       pointer_file: nil,
       recommended?: false,
       enabled?: false
@@ -454,7 +456,7 @@ defmodule Relay.Setup do
 
   @doc """
   The ONE step catalog, in order `1, 2, 3, 4, 5, 5.1 … 5.8, 6, 7`. Sub-steps carry `parent: "5"`.
-  Strings may hold `%{template}`, `%{llm}`, `%{cli}`, `%{skill_path}` and `%{pointer_file}`,
+  Strings may hold `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}` and `%{pointer_file}`,
   resolved only by `checklist/1`.
   """
   @spec steps() :: [step()]
@@ -523,13 +525,44 @@ defmodule Relay.Setup do
   @spec onboarding_llms() :: [llm()]
   def onboarding_llms do
     for %{key: key, name: name} <- Agents.seed_harnesses(), facts = @llm_facts[key], not is_nil(facts) do
-      Map.merge(%{harness: key, label: name}, facts)
+      Map.merge(%{harness: key, label: name, skill_path: skill_path(facts.skill_dir)}, facts)
     end
   end
+
+  defp skill_path(nil), do: nil
+  defp skill_path(skill_dir), do: "#{skill_dir}/relay-onboard/SKILL.md"
 
   @doc "The onboarding LLM for a harness key, or nil."
   @spec onboarding_llm(String.t() | nil) :: llm() | nil
   def onboarding_llm(harness_key), do: Enum.find(onboarding_llms(), &(&1.harness == harness_key))
+
+  @doc ~S"""
+  The one line a project's pointer file (`CLAUDE.md`, `AGENTS.md`) carries to `relay.md`. The ONE
+  Elixir definition; the install script renders it and the runner contract fixture pins it.
+  """
+  @spec pointer_line() :: String.t()
+  def pointer_line, do: "Working Relay cards from this repo: see [relay.md](relay.md)."
+
+  @doc """
+  The flash a board shows when its default agent moves from harness `previous` to `next` (RE457):
+  the `./relay update --skill-dir … --pointer-file …` command that moves the repo's Relay skills.
+  `nil` when `next` is no onboarding LLM, has no skill dir, or keeps `previous`'s skill dir — a
+  `previous` that is nil or no onboarding LLM counts as the default LLM's. The board never changes
+  repo files; this only tells the human what to run.
+  """
+  @spec llm_switch_notice(String.t() | nil, String.t() | nil) :: String.t() | nil
+  def llm_switch_notice(previous, next) do
+    old = onboarding_llm(previous) || onboarding_llm(Agents.default_harness_key())
+
+    case onboarding_llm(next) do
+      %{skill_dir: dir} = llm when is_binary(dir) and dir != old.skill_dir ->
+        "Your board's default LLM is now #{llm.label}. In your repo run " <>
+          "./relay update --skill-dir #{dir} --pointer-file #{llm.pointer_file} and commit the result."
+
+      _ ->
+        nil
+    end
+  end
 
   @doc ~S(The step-4 install command: `"curl -fsSL <base_url>/b/<slug>/install | sh"`, base_url's trailing `/` trimmed.)
   @spec install_command(String.t(), String.t()) :: String.t()
@@ -582,7 +615,8 @@ defmodule Relay.Setup do
          %{
            ok: is_nil(failed),
            board: board.name,
-           llm: Map.take(llm, [:harness, :label, :cli, :skill_path, :pointer_file]),
+           llm: Map.take(llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file]),
+           relay_files: Scaffold.items(llm.skill_dir),
            checks: checks
          },
          failure
@@ -1825,6 +1859,7 @@ defmodule Relay.Setup do
       "%{template}" => to_string(context[:template]),
       "%{llm}" => llm.label,
       "%{cli}" => llm.cli,
+      "%{skill_dir}" => to_string(llm.skill_dir),
       "%{skill_path}" => to_string(llm.skill_path),
       "%{pointer_file}" => to_string(llm.pointer_file),
       "%{board}" => to_string(context[:board_name])

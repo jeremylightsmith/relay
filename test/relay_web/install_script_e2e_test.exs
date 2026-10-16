@@ -19,9 +19,14 @@ defmodule RelayWeb.InstallScriptE2ETest do
   @tools ~w(curl git python3 uname mktemp mkdir chmod mv rm cat grep printf)
 
   @ignores [".claude/worktrees/", "/tmp/", ".envrc.local"]
-  @pointer "Working Relay cards from this repo: see [relay.md](relay.md)."
 
-  setup %{tmp_dir: tmp} do
+  # RE457: every Relay-owned file `./relay update` lays down, skills under the LLM's skill dir.
+  @codex_files ~w(.agents/skills/relay-onboard/SKILL.md .agents/skills/relay-update/SKILL.md
+                  .agents/skills/relay-doctor/SKILL.md relay relay.md .relay/scaffold.json)
+  @claude_files ~w(.claude/skills/relay-onboard/SKILL.md .claude/skills/relay-update/SKILL.md
+                   .claude/skills/relay-doctor/SKILL.md relay relay.md .relay/scaffold.json)
+
+  setup %{tmp_dir: tmp} = tags do
     home = Path.join(tmp, "home")
     tmpdir = Path.join(tmp, "tmp")
     bin = Path.join(tmp, "bin")
@@ -57,17 +62,28 @@ defmodule RelayWeb.InstallScriptE2ETest do
     {:ok, board} =
       Boards.create_board(user, %{name: "Streaks", slug: unique_slug("streaks"), template: "bare-minimum"})
 
-    {:ok, %{token: token}} = Setup.choose_llm(board, user, "codex")
+    {:ok, %{token: token}} = Setup.choose_llm(board, user, Map.get(tags, :llm, "codex"))
     {:ok, {_ip, port}} = RelayWeb.Endpoint.server_info(:http)
+    base = "http://127.0.0.1:#{port}"
 
     script = Path.join(tmp, "install.sh")
-    File.write!(script, InstallScript.render("http://127.0.0.1:#{port}", board.slug))
+    File.write!(script, InstallScript.render(base, board.slug))
 
     env =
       git_env ++
         [{"PATH", bin}, {"TMPDIR", tmpdir}, {"RELAY_URL", nil}, {"RELAY_API_KEY", token}, {"PYTHONPATH", nil}]
 
-    %{board: board, user: user, token: token, repo: repo, bin: bin, script: script, env: env, git_env: git_env}
+    %{
+      board: board,
+      user: user,
+      token: token,
+      repo: repo,
+      bin: bin,
+      base: base,
+      script: script,
+      env: env,
+      git_env: git_env
+    }
   end
 
   # Scenario 11
@@ -78,13 +94,83 @@ defmodule RelayWeb.InstallScriptE2ETest do
     assert out =~ "!!  codex on PATH"
     assert out =~ "npm install -g @openai/codex"
     assert git_status(ctx) == ""
+    refute File.exists?(Path.join(ctx.repo, "relay"))
     assert step(ctx.board, "3").status == :done
     assert step(ctx.board, "4").status == :failed
   end
 
+  # RE457 scenario 1 (acceptance criterion 2)
+  test "a Codex install lays down every Relay file under .agents/skills via ./relay update", ctx do
+    stub_cli!(ctx, "codex")
+
+    {out, status} = run_script(ctx)
+
+    assert status == 0, out
+    for rel <- @codex_files, do: assert(File.exists?(Path.join(ctx.repo, rel)), "#{rel} missing\n#{out}")
+    refute File.exists?(Path.join(ctx.repo, ".claude/skills"))
+
+    assert %{"skill_dir" => ".agents/skills", "pointer_file" => "AGENTS.md", "base" => "origin/main"} =
+             decode_commented_json!(file(ctx, ".relay/runner.json"))
+
+    assert count_lines(file(ctx, "AGENTS.md"), Setup.pointer_line()) == 1
+    assert out =~ "  .agents/skills/relay-update/SKILL.md"
+  end
+
+  # RE457 scenario 2
+  test "after a Codex install the project reports current", ctx do
+    stub_cli!(ctx, "codex")
+    {out, 0} = run_script(ctx)
+
+    {check_out, status} = update_check(ctx)
+
+    assert status == 0, out <> check_out
+    assert %{"current" => true, "local_version" => version} = decode_report!(check_out)
+    assert is_binary(version)
+  end
+
+  # RE457 scenario 3 (acceptance criterion 1)
+  @tag llm: "claude-code"
+  test "a Claude install lays down every Relay file under .claude/skills and reports current", ctx do
+    stub_cli!(ctx, "claude")
+
+    {out, status} = run_script(ctx)
+
+    assert status == 0, out
+    for rel <- @claude_files, do: assert(File.exists?(Path.join(ctx.repo, rel)), "#{rel} missing\n#{out}")
+    assert count_lines(file(ctx, "CLAUDE.md"), Setup.pointer_line()) == 1
+    assert %{"skill_dir" => ".claude/skills"} = decode_commented_json!(file(ctx, ".relay/runner.json"))
+
+    {check_out, 0} = update_check(ctx)
+    assert %{"current" => true, "local_version" => version} = decode_report!(check_out)
+    assert is_binary(version)
+
+    assert out |> String.trim_trailing() |> String.ends_with?("Next: open claude here and run /relay-onboard")
+  end
+
+  # RE457 scenario 4
+  test "the installed report lists every file once, relay first", ctx do
+    stub_cli!(ctx, "codex")
+
+    {out, 0} = run_script(ctx)
+
+    four = step(ctx.board, "4")
+    files = four.data["files"]
+    assert ["relay" | _] = files, out
+
+    for rel <-
+          ~w(.agents/skills/relay-onboard/SKILL.md .agents/skills/relay-update/SKILL.md
+             .agents/skills/relay-doctor/SKILL.md relay.md AGENTS.md .relay/runner.json
+             .relay/prepare-worktree.sh .gitignore),
+        do: assert(rel in files, "#{rel} not in #{inspect(files)}")
+
+    assert files == Enum.uniq(files)
+    assert four.status == :done
+    assert step(ctx.board, "5").status == :active
+  end
+
   # Scenario 12
   test "with the CLI present: writes the Relay files, never the key, and ticks step 4", ctx do
-    stub_codex!(ctx)
+    stub_cli!(ctx, "codex")
 
     {out, status} = run_script(ctx)
 
@@ -95,7 +181,7 @@ defmodule RelayWeb.InstallScriptE2ETest do
 
     assert File.exists?(Path.join(ctx.repo, ".agents/skills/relay-onboard/SKILL.md"))
     assert File.exists?(Path.join(ctx.repo, "relay.md"))
-    assert count_lines(file(ctx, "AGENTS.md"), @pointer) == 1
+    assert count_lines(file(ctx, "AGENTS.md"), Setup.pointer_line()) == 1
     assert %{"base" => "origin/main"} = decode_commented_json!(file(ctx, ".relay/runner.json"))
     assert executable?(ctx, ".relay/prepare-worktree.sh")
 
@@ -114,7 +200,7 @@ defmodule RelayWeb.InstallScriptE2ETest do
 
   # Scenario 13
   test "a second run duplicates no line and keeps an edited runner.json", ctx do
-    stub_codex!(ctx)
+    stub_cli!(ctx, "codex")
     {out, 0} = run_script(ctx)
 
     runner_json = Path.join(ctx.repo, ".relay/runner.json")
@@ -125,7 +211,7 @@ defmodule RelayWeb.InstallScriptE2ETest do
 
     assert status == 0, out <> out2
     assert File.read!(runner_json) == edited
-    assert count_lines(file(ctx, "AGENTS.md"), @pointer) == 1
+    assert count_lines(file(ctx, "AGENTS.md"), Setup.pointer_line()) == 1
 
     gitignore = file(ctx, ".gitignore")
     for entry <- @ignores, do: assert(count_lines(gitignore, entry) == 1)
@@ -140,7 +226,7 @@ defmodule RelayWeb.InstallScriptE2ETest do
       Boards.create_board(other_user, %{name: "Other", slug: unique_slug("other"), template: "bare-minimum"})
 
     {:ok, %{token: other_token}} = Setup.choose_llm(other, other_user, "codex")
-    stub_codex!(ctx)
+    stub_cli!(ctx, "codex")
 
     {out, status} = run_script(%{ctx | env: List.keystore(ctx.env, "RELAY_API_KEY", 0, {"RELAY_API_KEY", other_token})})
 
@@ -174,10 +260,27 @@ defmodule RelayWeb.InstallScriptE2ETest do
     System.cmd(System.find_executable("sh"), [ctx.script], cd: ctx.repo, env: ctx.env, stderr_to_stdout: true)
   end
 
-  defp stub_codex!(ctx) do
-    codex = Path.join(ctx.bin, "codex")
-    File.write!(codex, "#!/bin/sh\necho 'codex 0.0.0-test'\n")
-    File.chmod!(codex, 0o755)
+  defp stub_cli!(ctx, name) do
+    cli = Path.join(ctx.bin, name)
+    File.write!(cli, "#!/bin/sh\necho '#{name} 0.0.0-test'\n")
+    File.chmod!(cli, 0o755)
+  end
+
+  defp update_check(ctx) do
+    System.cmd(Path.join(ctx.bin, "python3"), ["./relay", "update", "--check", "--json"],
+      cd: ctx.repo,
+      env: List.keystore(ctx.env, "RELAY_URL", 0, {"RELAY_URL", ctx.base}),
+      stderr_to_stdout: true
+    )
+  end
+
+  # `./relay` logs `[relay] …` to stdout, so the report starts at the first `{` line.
+  defp decode_report!(out) do
+    out
+    |> String.split("\n")
+    |> Enum.drop_while(&(not String.starts_with?(&1, "{")))
+    |> Enum.join("\n")
+    |> Jason.decode!()
   end
 
   defp git!(dir, env, args) do

@@ -119,12 +119,15 @@ defmodule Relay.SetupTest do
       assert String.starts_with?(five.why, "Open claude in your repo and run /relay-onboard.")
     end
 
+    # RE457 scenario 9
     test "placeholders resolve against the onboarding LLM" do
       four = step(create!("bare-minimum"), "4")
 
-      assert ".claude/skills/relay-onboard/SKILL.md — the onboarding skill" in four.what_this_does
+      assert ".claude/skills/relay-onboard, relay-update and relay-doctor — the Relay skills" in four.what_this_does
+      refute Enum.any?(four.what_this_does, &(&1 =~ "— the onboarding skill"))
       assert "relay.md, plus one line in CLAUDE.md pointing at it" in four.what_this_does
       refute Enum.any?(four.what_this_does, &(&1 =~ "%{"))
+      assert String.starts_with?(four.why, "Puts the runner and the Relay skills in your repo.")
     end
 
     # Scenario 10 (warning half)
@@ -615,6 +618,47 @@ defmodule Relay.SetupTest do
       assert for(%{enabled?: false, harness: h} <- llms, do: h) == ["gemini-cli"]
       assert Setup.onboarding_llm("codex").pointer_file == "AGENTS.md"
       assert Setup.onboarding_llm("nope") == nil
+    end
+
+    # RE457 scenario 4
+    test "onboarding_llm/1 carries each LLM's skill_dir and derives skill_path from it" do
+      claude = Setup.onboarding_llm("claude-code")
+      assert claude.skill_dir == ".claude/skills"
+      assert claude.skill_path == ".claude/skills/relay-onboard/SKILL.md"
+      assert claude.pointer_file == "CLAUDE.md"
+
+      codex = Setup.onboarding_llm("codex")
+      assert codex.skill_dir == ".agents/skills"
+      assert codex.skill_path == ".agents/skills/relay-onboard/SKILL.md"
+
+      gemini = Setup.onboarding_llm("gemini-cli")
+      assert gemini.skill_dir == nil
+      assert gemini.skill_path == nil
+    end
+
+    # RE457 scenario 5
+    test "pointer_line/0 is the relay.md pointer line" do
+      assert Setup.pointer_line() == "Working Relay cards from this repo: see [relay.md](relay.md)."
+    end
+
+    # RE457 scenario 6
+    test "llm_switch_notice/2 from Claude Code to Codex names the codex update command" do
+      assert Setup.llm_switch_notice("claude-code", "codex") ==
+               "Your board's default LLM is now Codex. In your repo run ./relay update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
+    end
+
+    # RE457 scenario 7
+    test "llm_switch_notice/2 from Codex to Claude Code names the claude update command" do
+      assert Setup.llm_switch_notice("codex", "claude-code") ==
+               "Your board's default LLM is now Claude Code. In your repo run ./relay update --skill-dir .claude/skills --pointer-file CLAUDE.md and commit the result."
+    end
+
+    # RE457 scenario 8
+    test "llm_switch_notice/2 is nil when the skill dir doesn't change or there is none" do
+      assert Setup.llm_switch_notice("claude-code", "claude-code") == nil
+      assert Setup.llm_switch_notice("claude-code", "gemini-cli") == nil
+      assert Setup.llm_switch_notice("claude-code", "my-custom-harness") == nil
+      assert Setup.llm_switch_notice(nil, "claude-code") == nil
     end
 
     # Scenario 14

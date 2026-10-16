@@ -23,7 +23,7 @@ defmodule RelayWeb.Api.SetupJSON do
         board: board.name,
         connect: checklist.connect?,
         template: checklist.template,
-        llm: Map.take(checklist.llm, [:harness, :label, :cli, :skill_path]),
+        llm: Map.take(checklist.llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file]),
         current_id: checklist.current_id,
         current_sub_id: checklist.current_sub_id,
         current: Setup.reportable_id(checklist),

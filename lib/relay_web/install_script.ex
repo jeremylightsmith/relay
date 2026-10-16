@@ -9,7 +9,9 @@ defmodule RelayWeb.InstallScript do
   passes `RelayWeb.Endpoint.url/0`, never the request's Host) and a slug the controller already
   checked against `Schemas.Board.slug_format/0`, both single-quoted for `sh` regardless. The
   local check ids come from `Relay.Setup.preflight_checks/0` and the CLIs it looks for from
-  `Relay.Setup.onboarding_llms/0`, so the script never re-types either list.
+  `Relay.Setup.onboarding_llms/0`, so the script never re-types either list; the `relay.md` pointer
+  line comes from `Relay.Setup.pointer_line/0`. It downloads only `./relay` and lets
+  `./relay update` lay down the other Relay files under the LLM's skill dir (RE457).
   """
 
   alias Relay.Setup
@@ -29,7 +31,8 @@ defmodule RelayWeb.InstallScript do
       slug: slug,
       check_ids: Enum.map(Setup.preflight_checks(), & &1.id),
       clis: Enum.map(Setup.onboarding_llms(), &sh_quote(&1.cli)),
-      python3_fix: Setup.python3_fix()
+      python3_fix: Setup.python3_fix(),
+      pointer_line: Setup.pointer_line()
     )
   end
 

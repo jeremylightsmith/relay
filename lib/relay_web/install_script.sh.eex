@@ -5,18 +5,19 @@
 #
 #   curl -fsSL <%= @base_url %>/b/<%= @slug %>/install | sh
 #
-# It checks first and writes nothing until the checks pass. Then it writes ./relay, the
-# onboarding skill, relay.md (+ one pointer line), the starter .relay/ files and .gitignore
-# entries. Nothing is committed. RELAY_API_KEY is sent only as an Authorization header and is
-# never written to a file. Plain POSIX sh: only curl git python3 uname mktemp mkdir chmod mv rm
-# cat grep printf.
+# It checks first and writes nothing until the checks pass. Then it downloads only ./relay,
+# appends one pointer line to the LLM's pointer file and the .gitignore entries, and lets
+# `./relay update --starter-only` write the starter .relay/ files and `./relay update` lay down
+# relay.md, the Relay skills under the LLM's skill dir and .relay/scaffold.json (RE457). Nothing
+# is committed. RELAY_API_KEY is sent only as an Authorization header and is never written to a
+# file. Plain POSIX sh: only curl git python3 uname mktemp mkdir chmod mv rm cat grep printf.
 
 set -u
 set -f
 
 BASE=<%= sh_quote(@base_url) %>
 SLUG=<%= sh_quote(@slug) %>
-POINTER='Working Relay cards from this repo: see [relay.md](relay.md).'
+POINTER=<%= sh_quote(@pointer_line) %>
 IGNORES='.claude/worktrees/ /tmp/ .envrc.local'
 NL='
 '
@@ -183,43 +184,34 @@ report
 [ "$(field ok)" = true ] || exit 1
 
 cli=$(field llm.cli)
-skill_path=$(field llm.skill_path)
+skill_dir=$(field llm.skill_dir)
 pointer_file=$(field llm.pointer_file)
 
 pointer_note=
-has_line "$POINTER" "$pointer_file" || pointer_note=" (+1 line in $pointer_file)"
+has_line "$POINTER" "$pointer_file" || pointer_note=" (+1 line)"
 missing=0
 for line in $IGNORES; do
   has_line "$line" .gitignore || missing=$((missing + 1))
 done
 
 say "Writing:"
-say "  ./relay"
-say "  $skill_path"
-say "  relay.md$pointer_note"
+printf '%s' "$resp" | py 'import json, sys
+for path in json.load(sys.stdin)["relay_files"]:
+    print("  " + path)'
+[ -z "$pointer_note" ] || say "  $pointer_file$pointer_note"
 say "  .relay/runner.json"
 say "  .relay/prepare-worktree.sh"
 say "  .gitignore (+$missing lines)"
 
-# ---- download everything first; move into place only once all of it arrived
+# ---- only ./relay is fetched by hand; `./relay update` lays down the rest, each body checked
+# against the manifest's sha256
 work=$(mktemp -d "${TMPDIR:-/tmp}/relay-install.XXXXXX") || fail "Couldn't make a temp dir. Nothing was written."
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' INT TERM
 
-fetch() {
-  curl -fsS -o "$work/$2" "$BASE/api/scaffold/$1" ||
-    fail "Couldn't download $1 from the board. Nothing was written."
-}
+curl -fsS -o "$work/relay" "$BASE/api/scaffold/relay" ||
+  fail "Couldn't download relay from the board. Nothing was written."
 
-fetch relay relay
-fetch .claude/skills/relay-onboard/SKILL.md skill
-fetch relay.md relay.md
-
-case $skill_path in
-  */*) mkdir -p "${skill_path%/*}" ;;
-esac
-mv "$work/skill" "$skill_path"
-mv "$work/relay.md" relay.md
 mv "$work/relay" ./relay
 chmod 755 ./relay
 
@@ -228,14 +220,31 @@ for line in $IGNORES; do
   append_line "$line" .gitignore
 done
 
-out=$(python3 ./relay update --starter-only --base "origin/$branch" 2>&1) || {
+out=$(python3 ./relay update --starter-only --base "origin/$branch" \
+  --skill-dir "$skill_dir" --pointer-file "$pointer_file" 2>&1) || {
   say "$out"
   fail "./relay update --starter-only failed."
 }
 
-files=$(printf '%s,%s,%s,%s,%s,%s,%s' "$(json_str relay)" "$(json_str "$skill_path")" \
-  "$(json_str relay.md)" "$(json_str "$pointer_file")" "$(json_str .relay/runner.json)" \
-  "$(json_str .relay/prepare-worktree.sh)" "$(json_str .gitignore)")
+update_out=$(RELAY_URL="$BASE" python3 ./relay update --json) || {
+  say "$update_out"
+  fail "./relay update failed — run the same command again."
+}
+
+# relay first, then every other file the update wrote (in its order, once), then the rest. The
+# report's JSON starts at its first `{` line: ./relay logs `[relay] …` to stdout.
+written=$(printf '%s' "$update_out" | py 'import json, sys
+lines = sys.stdin.read().splitlines()
+start = next(i for i, l in enumerate(lines) if l.startswith("{"))
+seen = ["relay"]
+for path in json.loads("\n".join(lines[start:]))["written"]:
+    if path not in seen:
+        seen.append(path)
+sys.stdout.write(",".join(json.dumps(p) for p in seen))') ||
+  fail "./relay update failed — run the same command again."
+
+files=$(printf '%s,%s,%s,%s,%s' "$written" "$(json_str "$pointer_file")" \
+  "$(json_str .relay/runner.json)" "$(json_str .relay/prepare-worktree.sh)" "$(json_str .gitignore)")
 
 body=$(printf '{"slug":%s,"machine":%s,"repo_dir":%s,"branch":%s,"files":[%s]}' \
   "$(json_str "$SLUG")" "$(json_str "$machine")" "$(json_str "$repo_dir")" \

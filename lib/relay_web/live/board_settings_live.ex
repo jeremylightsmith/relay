@@ -1829,8 +1829,12 @@ defmodule RelayWeb.BoardSettingsLive do
 
   def handle_event("agent_make_default", %{"id" => id}, socket) do
     board = socket.assigns.board
-    {:ok, board} = Agents.set_default_agent(board, Agents.get_agent!(board, id))
-    {:noreply, socket |> assign(:board, board) |> refresh_agents()}
+    agent = Agents.get_agent!(board, id)
+    previous = Agents.default_agent(board)
+    {:ok, board} = Agents.set_default_agent(board, agent)
+    notice = Setup.llm_switch_notice(previous && previous.harness.key, agent.harness.key)
+
+    {:noreply, socket |> assign(:board, board) |> refresh_agents() |> flash_switch_notice(notice)}
   end
 
   def handle_event("agent_delete", _params, %{assigns: %{agent_panel: {:edit, agent}}} = socket) do
@@ -1977,6 +1981,10 @@ defmodule RelayWeb.BoardSettingsLive do
 
   # The picked harness is server state — the form never chooses it.
   defp agent_params(params, harness), do: Map.put(params, "harness_id", harness.id)
+
+  # RE457: the board never moves the repo's skills; it tells the human the one command that does.
+  defp flash_switch_notice(socket, nil), do: socket
+  defp flash_switch_notice(socket, notice), do: put_flash(socket, :info, notice)
 
   defp close_agent_panel(socket) do
     socket

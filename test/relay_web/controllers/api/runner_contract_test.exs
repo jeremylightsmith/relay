@@ -486,6 +486,15 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     assert Enum.all?(~w(children data evidence error status), &(&1 in document["setup"]["step_keys"]))
 
+    # RE457 — the runner.json defaults and the relay.md pointer line ./relay asserts against.
+    assert document["setup"]["llm_keys"] == ~w(cli harness label pointer_file skill_dir skill_path)
+    assert document["setup"]["pointer_line"] == "Working Relay cards from this repo: see [relay.md](relay.md)."
+
+    assert document["setup"]["runner_config_defaults"] == %{
+             "pointer_file" => "CLAUDE.md",
+             "skill_dir" => ".claude/skills"
+           }
+
     assert_matches_fixture!(document)
   end
 
@@ -605,7 +614,14 @@ defmodule RelayWeb.Api.RunnerContractTest do
       "report_statuses" => Enum.map(Relay.Setup.advance_statuses(), &Atom.to_string/1),
       "not_current_keys" => not_current |> Map.keys() |> Enum.sort(),
       "no_checklist_code" => no_checklist["code"],
-      "not_current_code" => not_current["code"]
+      "not_current_code" => not_current["code"],
+      # RE457 — what ./relay writes into a runner.json it creates, and the relay.md pointer line.
+      "pointer_line" => Relay.Setup.pointer_line(),
+      "runner_config_defaults" =>
+        Relay.Agents.default_harness_key()
+        |> Relay.Setup.onboarding_llm()
+        |> Map.take([:skill_dir, :pointer_file])
+        |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
     }
   end
 

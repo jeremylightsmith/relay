@@ -190,6 +190,42 @@ defmodule RelayWeb.BoardSettingsAgentsTest do
     refute has_element?(view, "#agent-row-#{opus.id}-default")
     assert has_element?(view, "#agent-row-#{opus.id}-make-default", "Make default")
     assert Agents.default_agent(board).name == "Claude Sonnet"
+    refute has_element?(view, "#flash-info")
+  end
+
+  describe "RE457: Make default across skill dirs flashes the switch command" do
+    test "moving to Codex names the .agents/skills switch", %{conn: conn, board: board} do
+      view = open(conn, board)
+      add_agent(view, harness(board, "Codex"), "gpt-6-sol", "Codex Sol")
+      sol = agent(board, "Codex Sol")
+
+      view |> element("#agent-row-#{sol.id}-make-default") |> render_click()
+
+      assert has_element?(
+               view,
+               "#flash-info",
+               "Your board's default LLM is now Codex. In your repo run " <>
+                 "./relay update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
+             )
+
+      assert Agents.default_agent(board).name == "Codex Sol"
+    end
+
+    test "moving back to Claude names the .claude/skills switch", %{conn: conn, board: board} do
+      view = open(conn, board)
+      add_agent(view, harness(board, "Codex"), "gpt-6-sol", "Codex Sol")
+      sol = agent(board, "Codex Sol")
+      opus = agent(board, "Claude Opus")
+      view |> element("#agent-row-#{sol.id}-make-default") |> render_click()
+
+      view |> element("#agent-row-#{opus.id}-make-default") |> render_click()
+
+      assert has_element?(
+               view,
+               "#flash-info",
+               "./relay update --skill-dir .claude/skills --pointer-file CLAUDE.md"
+             )
+    end
   end
 
   describe "8. deleting an agent" do

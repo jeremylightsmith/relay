@@ -53,7 +53,7 @@ Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe 
 running `/relay-onboard` again resumes at the first unmet sub-step.
 
 The status JSON carries what the loop needs: `board`, `connect`, `template`, `llm` (`harness`,
-`label`, `cli`, `skill_path`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
+`label`, `cli`, `skill_dir`, `skill_path`, `pointer_file`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
 `done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`,
 `referenced_files` (`[{kind, name, paths, used_by: [{flow, node}]}]`, the agent and skill files
 the board's flows name), `missing_file_resolutions`, and `steps` (each with `id`, `title`,
@@ -68,9 +68,11 @@ and first-card sub-steps are already `skipped`. Only 5.1 and 5.6 are left.
 - Announce *"Setup checklist for <board>: <done_count> of 6 done. Next is <current>, <what it
   does>."*
 - Do **5.1** exactly as written.
-- At **5.6**, do **not** commit, push or open a PR. `git fetch`, then check that `./relay`,
-  `relay.md` and the skill file (status `llm.skill_path`) all exist on origin/<base>
-  (`git cat-file -e origin/<base>:<path>` for each). If they all do:
+- At **5.6**, do **not** commit, push or open a PR. `git fetch`, then check that every
+  Relay-owned file exists on origin/<base> — `relay`, `relay.md`, `.relay/scaffold.json`,
+  `<llm.skill_dir>/relay-onboard/SKILL.md`, `<llm.skill_dir>/relay-update/SKILL.md` and
+  `<llm.skill_dir>/relay-doctor/SKILL.md` (status `llm.skill_dir`) — with
+  `git cat-file -e origin/<base>:<path>` for **each** of the six. If they all do:
 
       ./relay setup report 5.6 --status done --evidence "origin/<base> has the Relay files"
 
@@ -264,8 +266,10 @@ won't go green: fix the flow file and retry, at most 3 attempts.
 ## 5.6 Relay files on origin/<base>
 
 Say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
-wrote — `./relay`, the skill file(s) (status `llm.skill_path`), `relay.md`, the pointer-file
-line, `.gitignore`, `.relay/` including `.relay/project.md`, and any `.claude/agents/*.md`,
+wrote — the Relay-owned files `./relay`, `relay.md`, `.relay/scaffold.json` and the three skills
+`<llm.skill_dir>/relay-onboard/SKILL.md`, `<llm.skill_dir>/relay-update/SKILL.md` and
+`<llm.skill_dir>/relay-doctor/SKILL.md` (status `llm.skill_dir`); the pointer-file line (status
+`llm.pointer_file`), `.gitignore`, `.relay/` including `.relay/project.md`; and any `.claude/agents/*.md`,
 `.claude/skills/*/SKILL.md` or `.claude/commands/*.md` file 5.4 wrote for a missing file — and
 **nothing else** (stage those
 paths by name; leave any other change in the tree alone). Then land it the way the `landing`
