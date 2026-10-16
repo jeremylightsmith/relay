@@ -24,7 +24,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
     [
       %Variation{
         id: :a_key_step,
-        description: "A · key step active, the key shown once",
+        description: "A · key step active, the key shown once with \"I've saved it — next\"",
         attributes: %{
           id: "setup-panel",
           board_name: "Streaks",

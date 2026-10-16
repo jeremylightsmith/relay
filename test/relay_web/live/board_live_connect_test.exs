@@ -240,4 +240,34 @@ defmodule RelayWeb.BoardLiveConnectTest do
     refute has_element?(view, "#setup-panel")
     refute has_element?(view, "#setup-chip")
   end
+
+  # RE455 scenario 11
+  test "I've saved it opens a connect's step 4; Lost it? re-mints its key", %{conn: conn, board: board, sam: sam} do
+    {:ok, view, _html} = live(conn, connect_url(board))
+    mint!(view)
+    first_key_id = sam_machine(sam).api_key_id
+
+    assert has_element?(view, "#setup-key-saved")
+    view |> element("#setup-key-saved") |> render_click()
+
+    assert attr(view, step_dom(Setup.step_id(:install)), "data-status") == "active"
+    assert has_element?(view, "#setup-install-command")
+    assert has_element?(view, "#setup-key-lost")
+
+    view |> element("#setup-key-lost") |> render_click()
+
+    assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+    assert sam_machine(sam).api_key_id != first_key_id
+  end
+
+  test "I've saved it on an unsaved connect saves nothing and flashes", %{conn: conn, board: board, sam: sam} do
+    {:ok, view, _html} = live(conn, connect_url(board))
+    refute has_element?(view, "#setup-key-saved")
+
+    assert render_hook(view, "setup_key_saved", %{}) =~
+             "Setup has moved on since this page loaded. Try again from the current step."
+
+    assert Repo.all(from(m in SetupMachine, where: m.user_id == ^sam.id)) == []
+    assert text(view, "#setup-mint-key") == "Mint my key"
+  end
 end

@@ -495,6 +495,113 @@ defmodule Relay.SetupTest do
     test "refuses while step 2 is current", %{board: board, user: user} do
       assert Setup.remint_key(board, user) == {:error, :not_current}
     end
+
+    # RE455 scenario 4
+    test "reopens a saved-but-unconfirmed step 3 with a fresh key", %{board: board, user: user} do
+      {:ok, %{token: old}} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.key_saved(board)
+
+      assert {:ok, %{token: new, checklist: checklist}} = Setup.remint_key(board, user)
+      assert new != old
+      assert checklist.current_id == "3"
+
+      assert [new_key] = ApiKeys.list_keys(board)
+      key = step(board, "3")
+      assert key.status == :active
+      assert key.evidence == nil
+      assert key.completed_at == nil
+      refute Map.has_key?(key.data, "saved")
+      assert key.data["key_id"] == new_key.id
+
+      install = step(board, "4")
+      assert install.status == :pending
+      assert install.reached_at == nil
+
+      assert ApiKeys.authenticate(old) == :error
+    end
+
+    # RE455 scenario 5
+    test "refuses once step 3 was confirmed by the install script", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.advance(board, "3", :done, %{data: %{"machine" => "jl-mbp"}})
+      keys = length(ApiKeys.list_keys(board))
+
+      assert Setup.remint_key(board, user) == {:error, :not_current}
+      assert length(ApiKeys.list_keys(board)) == keys
+    end
+
+    # RE455 scenario 6
+    test "refuses once a saved step 3 was confirmed by a preflight", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.key_saved(board)
+      key_id = step(board, "3").data["key_id"]
+
+      {1, _} =
+        Repo.update_all(from(s in BoardSetupStep, where: s.board_id == ^board.id and s.step == "3"),
+          set: [data: %{"saved" => true, "machine" => "jl-mbp", "key_id" => key_id}]
+        )
+
+      keys = length(ApiKeys.list_keys(board))
+
+      assert Setup.remint_key(board, user) == {:error, :not_current}
+      assert length(ApiKeys.list_keys(board)) == keys
+    end
+  end
+
+  describe "key_saved/1" do
+    setup :setup_board
+
+    # RE455 scenario 1
+    test "finishes step 3 on the user's say-so and opens step 4", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      Events.subscribe(board.id)
+
+      assert {:ok, checklist} = Setup.key_saved(board)
+      assert checklist.current_id == "4"
+
+      key = step(board, "3")
+      assert key.status == :done
+      assert key.evidence =~ ~r/^saved \d\d:\d\d · confirmed when the install script calls in$/
+      assert key.data["saved"] == true
+      assert step(board, "4").status == :active
+
+      board_id = board.id
+      assert_receive {:setup_changed, ^board_id}
+    end
+
+    # RE455 scenario 2
+    test "is refused while step 2 is current", %{board: board} do
+      assert Setup.key_saved(board) == {:error, :not_current}
+      assert step(board, "3").status == :pending
+    end
+  end
+
+  describe "key_unconfirmed?/1" do
+    setup :setup_board
+
+    # RE455 scenario 3
+    test "is false while step 3 is current", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      refute Setup.key_unconfirmed?(Setup.checklist(board))
+    end
+
+    test "is true once the key is saved", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.key_saved(board)
+      assert Setup.key_unconfirmed?(Setup.checklist(board))
+    end
+
+    test "is false when step 3 finished without being saved", %{board: board} do
+      advance_to!(board, "4")
+      refute Setup.key_unconfirmed?(Setup.checklist(board))
+    end
+
+    test "is false once step 4 is no longer current", %{board: board, user: user} do
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Setup.key_saved(board)
+      {:ok, _} = Setup.advance(board, "4", :done, %{})
+      refute Setup.key_unconfirmed?(Setup.checklist(board))
+    end
   end
 
   describe "catalog" do

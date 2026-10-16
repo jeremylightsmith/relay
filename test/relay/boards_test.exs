@@ -243,6 +243,14 @@ defmodule Relay.BoardsTest do
       assert board.key == "RL"
     end
 
+    test "takes the key from `key` when given, else derives it from the name with an RL fallback (RE455)" do
+      user = insert(:user)
+
+      assert {:ok, %{key: "RL"}} = Boards.create_board(user, %{name: "9"})
+      assert {:ok, %{key: "AC"}} = Boards.create_board(user, %{name: "Acme Checkout"})
+      assert {:ok, %{key: "QX"}} = Boards.create_board(user, %{name: "Acme Checkout", key: "qx"})
+    end
+
     test "de-duplicates the derived slug against existing boards" do
       user = insert(:user)
       {:ok, first} = Boards.create_board(user, %{name: "Ops"})

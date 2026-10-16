@@ -1,7 +1,8 @@
 defmodule RelayWeb.BoardsLiveTemplatePickerTest do
   @moduledoc """
   RE442: "New board" on `/boards` opens a three-template picker instead of creating Relay's
-  fixed board, and creates "Untitled board" from whichever template is chosen.
+  fixed board, and creates a board from whichever template is chosen — RE455: under the board
+  name and card key typed at the top of the picker.
   """
   use RelayWeb.ConnCase, async: true
 
@@ -68,7 +69,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
     assert has_element?(view, "#template-radio-bare-minimum[checked]")
     refute has_element?(view, "#template-radio-design-led[checked]")
-    assert has_element?(view, "#template-picker-create", "Create board from Bare minimum")
+    assert has_element?(view, "#template-picker-create .pending-idle", "Create board")
   end
 
   test "2. the New board tile opens the picker without creating a board", %{conn: conn} do
@@ -88,7 +89,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
     view |> element("#template-picker-form") |> render_change(%{"template" => "three-brain"})
 
-    assert has_element?(view, "#template-picker-create", "Create board from Three-brain")
+    assert has_element?(view, "#template-picker-create .pending-idle", "Create board")
     assert has_element?(view, "#template-card-three-brain.border-primary")
     refute has_element?(view, "#template-card-bare-minimum.border-primary")
     assert has_element?(view, "#template-radio-three-brain[checked]")
@@ -107,17 +108,20 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     refute has_element?(view, "#template-warning-design-led")
   end
 
-  test "5. submitting creates Untitled board from the template and opens the board (RE443: the setup wizard lives there)",
+  test "5. (RE455 14) submitting creates the named, keyed board from the template and opens it (RE443: the setup wizard lives there)",
        %{conn: conn} do
     view = open_picker(conn)
 
     assert {:error, {:live_redirect, %{to: to}}} =
-             view |> element("#template-picker-form") |> render_submit(%{"template" => "design-led"})
+             view
+             |> element("#template-picker-form")
+             |> render_submit(%{"template" => "design-led", "name" => "Acme Checkout", "key" => "AC"})
 
     assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)$}, to)
 
     board = Repo.get_by!(Board, slug: slug)
-    assert board.name == "Untitled board"
+    assert board.name == "Acme Checkout"
+    assert board.key == "AC"
 
     main_stages =
       board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.map(& &1.name)
@@ -144,7 +148,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     assert has_element?(view, "#template-picker")
     assert has_element?(view, "#template-radio-design-led[checked]")
     refute has_element?(view, "#template-radio-bare-minimum[checked]")
-    assert has_element?(view, "#template-picker-create", "Create board from Design-led")
+    assert has_element?(view, "#template-picker-create .pending-idle", "Create board")
   end
 
   test "8. an unknown ?template= leaves the picker closed", %{conn: conn} do
@@ -206,6 +210,113 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     assert has_element?(view, "#template-example-three-brain")
   end
 
+  describe "RE455: board name + card key up front" do
+    defp change(view, params), do: view |> element("#template-picker-form") |> render_change(params)
+
+    defp identity_text(view) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query("#template-picker-identity") |> LazyHTML.text()
+    end
+
+    test "9. the picker opens with an empty name and key, Create disabled, and no Untitled board", %{conn: conn} do
+      view = open_picker(conn)
+
+      assert has_element?(view, ~s(#template-picker-name[value=""]))
+      assert has_element?(view, ~s(#template-picker-key[value=""]))
+      assert has_element?(view, "#template-picker-create[disabled]")
+      refute render(view) =~ "Untitled board"
+    end
+
+    test "10. the key follows the name until the user edits it", %{conn: conn} do
+      view = open_picker(conn)
+
+      change(view, %{"template" => "bare-minimum", "name" => "Zeta Rollout", "key" => "", "_target" => ["name"]})
+      assert has_element?(view, ~s(#template-picker-key[value="ZE"]))
+
+      change(view, %{"name" => "Zeta Rollout", "key" => "QX", "_target" => ["key"]})
+      change(view, %{"name" => "Alpha", "key" => "QX", "_target" => ["name"]})
+      assert has_element?(view, ~s(#template-picker-key[value="QX"]))
+      assert has_element?(view, ~s(#template-picker-name[value="Alpha"]))
+    end
+
+    test "11. clearing the key does not turn derivation back on", %{conn: conn} do
+      view = open_picker(conn)
+
+      change(view, %{"name" => "Zeta", "key" => "ZE", "_target" => ["key"]})
+      change(view, %{"name" => "Zeta", "key" => "", "_target" => ["key"]})
+      change(view, %{"name" => "Bravo", "key" => "", "_target" => ["name"]})
+
+      assert has_element?(view, ~s(#template-picker-key[value=""]))
+      assert has_element?(view, "#template-picker-key-hint", "Needs 2 letters")
+    end
+
+    test "12. the server sanitizes a typed key to its letters, upper-cased", %{conn: conn} do
+      view = open_picker(conn)
+
+      change(view, %{"name" => "", "key" => "a1c", "_target" => ["key"]})
+
+      assert has_element?(view, ~s(#template-picker-key[value="AC"]))
+    end
+
+    test "13. a name with one letter derives a one-letter key, never RL", %{conn: conn} do
+      view = open_picker(conn)
+
+      change(view, %{"name" => "A1", "key" => "", "_target" => ["name"]})
+
+      assert has_element?(view, ~s(#template-picker-key[value="A"]))
+      assert has_element?(view, "#template-picker-key-hint", "Needs 2 letters")
+      assert has_element?(view, "#template-picker-create[disabled]")
+      refute has_element?(view, ~s(#template-picker-key[value="RL"]))
+      refute identity_text(view) =~ "RL"
+    end
+
+    test "16. a key the server rejects keeps the picker open with the error inline", %{conn: conn, user: user} do
+      view = open_picker(conn)
+      before = length(Boards.list_boards(user))
+
+      view
+      |> element("#template-picker-form")
+      |> render_submit(%{"template" => "bare-minimum", "name" => "Acme", "key" => "A"})
+
+      assert length(Boards.list_boards(user)) == before
+      assert has_element?(view, "#template-picker")
+      assert has_element?(view, "#template-picker-key-hint", "must be exactly 2 letters")
+      assert has_element?(view, ~s(#template-picker-name[value="Acme"]))
+    end
+
+    # Scenario 16 names "can't be blank", but `Schemas.Board.changeset/2` casts with
+    # `empty_values: []`, so a trimmed-blank name fails its length rule instead — the message
+    # Board settings shows for the same input. The picker shows whatever the changeset says.
+    test "16b. a blank name the server rejects shows its message under the name and keeps the view alive", %{
+      conn: conn,
+      user: user
+    } do
+      view = open_picker(conn)
+      before = length(Boards.list_boards(user))
+
+      view
+      |> element("#template-picker-form")
+      |> render_submit(%{"template" => "bare-minimum", "name" => "   ", "key" => "AC"})
+
+      assert length(Boards.list_boards(user)) == before
+      assert texts(view, "#template-picker-name-hint") == ["should be at least 1 character(s)"]
+      assert has_element?(view, "#template-picker-name.input-error")
+      assert render(view) =~ "template-picker"
+    end
+
+    test "17. Cancel resets the name and key for the next open", %{conn: conn} do
+      view = open_picker(conn)
+      change(view, %{"name" => "Acme Checkout", "key" => "AC", "_target" => ["key"]})
+      assert has_element?(view, ~s(#template-picker-key[value="AC"]))
+
+      view |> element("#template-picker-cancel") |> render_click()
+      view |> element("#top-bar-new-board") |> render_click()
+
+      assert has_element?(view, ~s(#template-picker-name[value=""]))
+      assert has_element?(view, ~s(#template-picker-key[value=""]))
+      assert has_element?(view, "#template-picker-create[disabled]")
+    end
+  end
+
   describe "RE447: the 4th option, copy from a board I have access to" do
     setup %{user: user} do
       {:ok, relay} = Boards.create_board(user, %{name: "Relay", slug: unique_slug("relay")})
@@ -251,7 +362,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       refute has_element?(view, "#copy-source-#{relay.slug}")
 
       select_copy(view, %{"copy_from" => acme.slug})
-      assert has_element?(view, "#template-picker-create", "Copy Acme web's stages and flows")
+      assert has_element?(view, "#template-picker-create .pending-idle", "Copy Acme web")
     end
 
     test "9. a default board's flows name .claude/agents files, so the picker warns with +N more", %{
@@ -270,7 +381,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       assert String.ends_with?(names, "+#{length(files) - 5} more")
     end
 
-    test "10. submitting the copy creates a plain copy of Relay and opens it", %{
+    test "10. (RE455 15) submitting the copy creates a plain copy of Relay under the typed name and key", %{
       conn: conn,
       user: user,
       relay: relay
@@ -278,14 +389,24 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       view = open_picker(conn)
       select_copy(view, %{"copy_from" => relay.slug})
 
+      # Nothing is pre-filled from the copy source.
+      assert has_element?(view, ~s(#template-picker-name[value=""]))
+      assert has_element?(view, ~s(#template-picker-key[value=""]))
+
       assert {:error, {:live_redirect, %{to: to}}} =
                view
                |> element("#template-picker-form")
-               |> render_submit(%{"template" => TemplatePickerComponents.copy_option(), "copy_from" => relay.slug})
+               |> render_submit(%{
+                 "template" => TemplatePickerComponents.copy_option(),
+                 "copy_from" => relay.slug,
+                 "name" => "Copy Test",
+                 "key" => "CT"
+               })
 
       assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)$}, to)
       copy = Boards.get_board(user, slug)
-      assert copy.name == "Untitled board"
+      assert copy.name == "Copy Test"
+      assert copy.key == "CT"
 
       main_names = fn board ->
         board |> Boards.list_stages() |> Enum.filter(&is_nil(&1.parent_id)) |> Enum.map(& &1.name)

@@ -45,7 +45,9 @@ defmodule RelayWeb.SetupComponents do
   `<id>-key-box`, `<id>-install-command`, …), so the panel (`id="setup"`) and the mobile view
   can both be on the page. Events, all handled by `RelayWeb.BoardLive`: `"setup_select_llm"`
   (the LLM form's `phx-change`, `%{"llm" => harness}`), `"setup_choose_llm"`
-  (`%{"llm" => harness}`), `"setup_mint_key"`, `"setup_toggle_explanations"`,
+  (`%{"llm" => harness}`), `"setup_mint_key"` (also step 3's "Lost it? Mint a new key" while
+  `Relay.Setup.key_unconfirmed?/1`), `"setup_key_saved"` (step 3's "I've saved it — next", RE455),
+  `"setup_toggle_explanations"`,
   `"setup_minimize"`, `"setup_open"`, `"setup_close"`, `"setup_callout_watch"` and
   `"setup_connect_another"`.
 
@@ -222,6 +224,18 @@ defmodule RelayWeb.SetupComponents do
         >
           <span>{evidence_glyph(@step.status)} {@step.evidence}</span>
         </div>
+        <button
+          :if={
+            @interactive and @step.id == Setup.step_id(:key) and Setup.key_unconfirmed?(@checklist)
+          }
+          type="button"
+          id={"#{@prefix}-key-lost"}
+          phx-click="setup_mint_key"
+          class="link link-hover text-[11.5px] self-start"
+          style={muted()}
+        >
+          Lost it? Mint a new key
+        </button>
         <div
           :if={@connect_skipped? and @step.evidence}
           class="setup-evidence font-mono"
@@ -659,6 +673,14 @@ defmodule RelayWeb.SetupComponents do
         1Password. Relay never writes it to disk.
       </div>
     </div>
+    <button
+      type="button"
+      id={"#{@prefix}-key-saved"}
+      phx-click="setup_key_saved"
+      class="btn btn-primary btn-sm self-start"
+    >
+      I've saved it — next
+    </button>
     """
   end
 

@@ -7,12 +7,18 @@ defmodule RelayWeb.BoardsLive do
   tile's star button (`toggle_star`) sets the user's personal star and
   reorders the grid in place without navigating. "New board" opens the template picker
   (RE442, `RelayWeb.TemplatePickerComponents`; `?template=<slug>` opens it preselected), whose
-  submit creates "Untitled board" from the chosen template and opens the board, where its setup
-  wizard (RE443) waits. The picker's 4th option (RE447) copies instead: it lists
-  `Boards.copy_sources/1` (loaded once at mount), and its submit creates "Untitled board" as a
-  plain copy of the chosen board (`Boards.create_board/2`'s `copy_from`); a board the user
-  can't copy flashes the same refusal as an unknown one. Loads fresh on navigate (no realtime —
-  out of scope).
+  submit creates a board from the chosen template and opens the board, where its setup wizard
+  (RE443) waits. The picker's 4th option (RE447) copies instead: it lists
+  `Boards.copy_sources/1` (loaded once at mount), and its submit creates a plain copy of the
+  chosen board (`Boards.create_board/2`'s `copy_from`); a board the user can't copy flashes the
+  same refusal as an unknown one.
+
+  RE455: both paths create the board under the **Board name** and **Card key** typed at the top
+  of the picker. The key follows the name (`Schemas.Board.key_from_name/1`, no fallback) until
+  the user edits the key — clearing it doesn't turn derivation back on — and every typed key is
+  sanitized with the same function. A name or key `Boards.create_board/2` rejects keeps the
+  picker open with the changeset's messages inline. Opening or closing the picker resets them.
+  Loads fresh on navigate (no realtime — out of scope).
   """
 
   use RelayWeb, :live_view
@@ -23,6 +29,7 @@ defmodule RelayWeb.BoardsLive do
   alias RelayWeb.CoreComponents
   alias RelayWeb.TemplatePickerComponents
   alias RelayWeb.TimeAgo
+  alias Schemas.Board
 
   @copy_refused "That board isn't available to copy. Pick another."
 
@@ -197,6 +204,10 @@ defmodule RelayWeb.BoardsLive do
         copy_sources={@copy_sources}
         copy_from={@picker_copy_from}
         copy_query={@picker_copy_query}
+        name={@picker_name}
+        key={@picker_key}
+        show_required={@picker_touched?}
+        errors={@picker_errors}
       />
     </Layouts.app>
     """
@@ -220,7 +231,8 @@ defmodule RelayWeb.BoardsLive do
      |> assign(:picker_template, hd(templates).slug)
      |> assign(:copy_sources, copy_sources)
      |> assign(:picker_copy_from, copy_sources |> List.first(%{}) |> Map.get(:slug))
-     |> assign(:picker_copy_query, "")}
+     |> assign(:picker_copy_query, "")
+     |> reset_identity()}
   end
 
   # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
@@ -239,25 +251,30 @@ defmodule RelayWeb.BoardsLive do
 
   @impl true
   def handle_event("open_template_picker", _params, socket) do
-    {:noreply, assign(socket, :picker_open?, true)}
+    {:noreply, socket |> assign(:picker_open?, true) |> reset_identity()}
   end
 
   def handle_event("close_template_picker", _params, socket) do
-    {:noreply, assign(socket, :picker_open?, false)}
+    {:noreply, socket |> assign(:picker_open?, false) |> reset_identity()}
   end
 
   # RE447: the copy card's change also carries its search text and chosen source; a
-  # `copy_from` that isn't one of @copy_sources keeps the previous choice.
-  def handle_event("select_template", %{"template" => slug} = params, socket) do
-    if known_template?(socket, slug) or slug == TemplatePickerComponents.copy_option() do
-      {:noreply,
-       socket
-       |> assign(:picker_template, slug)
-       |> assign(:picker_copy_query, params["copy_query"] || socket.assigns.picker_copy_query)
-       |> assign(:picker_copy_from, copy_source_or(socket, params["copy_from"]))}
-    else
-      {:noreply, socket}
-    end
+  # `copy_from` that isn't one of @copy_sources keeps the previous choice. An unknown template
+  # slug is ignored, but RE455's name and key always update.
+  def handle_event("select_template", params, socket) do
+    slug = params["template"]
+
+    socket =
+      if known_template?(socket, slug) or slug == TemplatePickerComponents.copy_option() do
+        socket
+        |> assign(:picker_template, slug)
+        |> assign(:picker_copy_query, params["copy_query"] || socket.assigns.picker_copy_query)
+        |> assign(:picker_copy_from, copy_source_or(socket, params["copy_from"]))
+      else
+        socket
+      end
+
+    {:noreply, update_identity(socket, params)}
   end
 
   # The submitted radio wins; a submit without one falls back to the selected assign — for
@@ -265,12 +282,18 @@ defmodule RelayWeb.BoardsLive do
   # form) flashes and leaves the picker open. A copy source isn't pre-filtered here: the
   # domain's membership check refuses a board the user isn't in exactly as it refuses one
   # that doesn't exist, so both read the same flash.
+  # RE455: the typed name and key travel as typed; `Schemas.Board.changeset/2` is the authority.
   def handle_event("create_from_template", params, socket) do
     slug = params["template"] || socket.assigns.picker_template
+    name = params["name"] || socket.assigns.picker_name
+    key = params["key"] || socket.assigns.picker_key
+
+    socket = assign(socket, picker_name: name, picker_key: key, picker_touched?: true)
+    identity = %{name: name, key: key}
 
     if slug == TemplatePickerComponents.copy_option(),
-      do: create_board(socket, %{copy_from: params["copy_from"] || socket.assigns.picker_copy_from}),
-      else: create_board(socket, %{template: slug})
+      do: create_board(socket, Map.put(identity, :copy_from, params["copy_from"] || socket.assigns.picker_copy_from)),
+      else: create_board(socket, Map.put(identity, :template, slug))
   end
 
   # RE395: sets the negation of the tile's current star (set_starred/3 sets, it doesn't
@@ -285,6 +308,38 @@ defmodule RelayWeb.BoardsLive do
     end
 
     {:noreply, assign(socket, :boards, load_boards(user))}
+  end
+
+  defp reset_identity(socket) do
+    assign(socket,
+      picker_name: "",
+      picker_key: "",
+      picker_key_touched?: false,
+      picker_touched?: false,
+      picker_errors: %{}
+    )
+  end
+
+  # RE455: a change aimed at the key marks it touched (derivation stays off from then on, even
+  # once it's cleared); until then the key follows the name. Either way it's sanitized to its
+  # letters with the one `Board.key_from_name/1` the domain derives with. LiveView never patches
+  # the focused input, so the `CardKeyInput` hook filters while typing.
+  defp update_identity(socket, params) do
+    name = params["name"] || socket.assigns.picker_name
+    key_touched? = socket.assigns.picker_key_touched? or params["_target"] == ["key"]
+
+    key =
+      if key_touched?,
+        do: Board.key_from_name(params["key"] || socket.assigns.picker_key),
+        else: Board.key_from_name(name)
+
+    assign(socket,
+      picker_name: name,
+      picker_key: key,
+      picker_key_touched?: key_touched?,
+      picker_touched?: true,
+      picker_errors: %{}
+    )
   end
 
   defp known_template?(socket, slug), do: Enum.any?(socket.assigns.templates, &(&1.slug == slug))
@@ -302,7 +357,7 @@ defmodule RelayWeb.BoardsLive do
   defp create_board(socket, attrs) do
     user = socket.assigns.current_scope.user
 
-    case Boards.create_board(user, Map.put(attrs, :name, "Untitled board")) do
+    case Boards.create_board(user, attrs) do
       # RE443: a new board opens on the board itself, where its setup wizard lives.
       {:ok, board} ->
         {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
@@ -312,6 +367,20 @@ defmodule RelayWeb.BoardsLive do
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, @copy_refused)}
+
+      # RE455: name/key messages show inline under their fields; anything else (in practice
+      # nothing — the slug always derives) flashes. The picker stays open either way.
+      {:error, %Ecto.Changeset{} = changeset} ->
+        errors =
+          changeset
+          |> Ecto.Changeset.traverse_errors(&CoreComponents.translate_error/1)
+          |> Map.take([:name, :key])
+
+        socket = assign(socket, :picker_errors, errors)
+
+        if errors == %{},
+          do: {:noreply, put_flash(socket, :error, "Couldn't create that board. Check the name and key.")},
+          else: {:noreply, socket}
     end
   end
 

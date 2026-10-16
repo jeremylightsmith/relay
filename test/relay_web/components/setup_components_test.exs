@@ -501,4 +501,99 @@ defmodule RelayWeb.SetupComponentsTest do
       assert text =~ ~r/^JL Signed in as Jeremy Lightsmith, a member of Streaks\./
     end
   end
+
+  describe ~s{step 3's "I've saved it — next" and "Lost it?" (RE455)} do
+    @saved_evidence "saved 14:02 · confirmed when the install script calls in"
+
+    defp key_doc(rows, opts) do
+      {context, opts} = Keyword.pop(opts, :context, %{})
+      context = Map.merge(%{template: "Bare minimum", llm: Setup.onboarding_llm("claude-code")}, context)
+      checklist = Setup.preview_checklist(rows, context)
+
+      (&SetupComponents.setup_checklist/1)
+      |> render_component(Keyword.merge([id: "setup", checklist: checklist], opts))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp key_active, do: %{"1" => :done, "2" => :done, "3" => :active}
+
+    defp key_saved(data \\ %{"saved" => true}),
+      do: %{"1" => :done, "2" => :done, "3" => %{status: :done, evidence: @saved_evidence, data: data}, "4" => :active}
+
+    defp nodes(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.to_list()
+
+    defp one(doc, selector) do
+      [node] = nodes(doc, selector)
+      node
+    end
+
+    defp attr_of(node, name), do: node |> LazyHTML.attribute(name) |> List.first()
+
+    defp text_of(node), do: node |> LazyHTML.text() |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    # Scenario 1
+    test "the shown-once key has an \"I've saved it — next\" button after the key box" do
+      doc = key_doc(key_active(), token: "relay_abc_123")
+
+      assert nodes(doc, "#setup-key-box") != []
+      button = one(doc, "#setup-key-saved")
+      assert attr_of(button, "class") == "btn btn-primary btn-sm self-start"
+      assert attr_of(button, "type") == "button"
+      assert attr_of(button, "phx-click") == "setup_key_saved"
+      assert text_of(button) == "I've saved it — next"
+
+      ids = doc |> LazyHTML.query("#setup-key-box, #setup-key-saved") |> LazyHTML.attribute("id")
+      assert ids == ["setup-key-box", "setup-key-saved"]
+    end
+
+    # Scenario 2
+    test "no button without a token: the mint control shows instead" do
+      doc = key_doc(key_active(), token: nil)
+      assert nodes(doc, "#setup-key-saved") == []
+      assert nodes(doc, "#setup-mint-key") != []
+    end
+
+    # Scenario 2
+    test "an unsaved connect has no \"I've saved it\" button" do
+      doc = key_doc(key_active(), token: nil, context: %{connect?: true, machine_id: nil})
+      assert nodes(doc, "#setup-key-saved") == []
+      assert nodes(doc, "#setup-mint-key") != []
+    end
+
+    # Scenario 3
+    test "a saved-unconfirmed step 3 offers \"Lost it? Mint a new key\" under its evidence" do
+      doc = key_doc(key_saved(), install_command: "curl -fsSL http://x/b/s/install | sh")
+
+      lost = one(doc, "#setup-key-lost")
+      assert text_of(lost) == "Lost it? Mint a new key"
+      assert attr_of(lost, "phx-click") == "setup_mint_key"
+      assert attr_of(lost, "class") == "link link-hover text-[11.5px] self-start"
+      assert attr_of(lost, "style") =~ "color:color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+
+      assert doc |> one("#setup-step-3 .setup-evidence") |> text_of() == "✓ " <> @saved_evidence
+
+      assert doc |> one("#setup-step-3 > div:nth-child(2) > div:first-child > span:first-child") |> text_of() ==
+               "Key in your environment"
+
+      assert nodes(doc, "#setup-install-command") != []
+    end
+
+    # Scenario 4
+    test "no \"Lost it?\" once the install confirmed the key" do
+      doc = key_doc(key_saved(%{"saved" => true, "machine" => "jl-mbp"}), install_command: "curl x | sh")
+      assert nodes(doc, "#setup-key-lost") == []
+    end
+
+    # Scenario 4
+    test "no \"Lost it?\" for a step 3 confirmed the old way" do
+      doc = key_doc(key_saved(%{}), install_command: "curl x | sh")
+      assert nodes(doc, "#setup-key-lost") == []
+    end
+
+    # Scenario 4
+    test "no \"Lost it?\" in read-only mode" do
+      doc = key_doc(key_saved(), mode: :read_only)
+      assert nodes(doc, "#setup-key-lost") == []
+    end
+  end
 end

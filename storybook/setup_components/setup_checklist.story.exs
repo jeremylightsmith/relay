@@ -9,7 +9,8 @@ defmodule Storybook.SetupComponents.SetupChecklist do
 
   # RE443, card mockups "Wizard — docked left on the empty board, every step state + expert
   # toggle" and "Mobile — read-only checklist, continue on a computer"; RE445 adds step 5's frames
-  # D, F1, F2 and E. Fixture checklists come
+  # D, F1, F2 and E; RE455 adds step 3's "I've saved it — next" and "Lost it?" (card mockup "B — step
+  # 3: explicit “I've saved it — next” button"). Fixture checklists come
   # from `Relay.Setup.preview_checklist/2`, the same builder `Relay.Setup.checklist/1` uses, with
   # no database.
   def variations do
@@ -23,11 +24,31 @@ defmodule Storybook.SetupComponents.SetupChecklist do
       },
       %Variation{
         id: :key_shown,
-        description: "Step 3 active, the shown-once key on screen",
+        description: "Step 3 active, the shown-once key on screen and \"I've saved it — next\" under it",
         attributes: %{
           id: "setup-story-key",
           checklist: checklist(%{"1" => done, "2" => done, "3" => active}),
           token: "relay_9f3a2b1c4d5e_0123456789abcdef0123456789abcdef"
+        }
+      },
+      %Variation{
+        id: :key_saved,
+        description: "Step 3 saved but unconfirmed (RE455): \"Lost it? Mint a new key\" under its evidence, step 4 open",
+        attributes: %{
+          id: "setup-story-saved",
+          checklist:
+            checklist(%{
+              "1" => done,
+              "2" => done,
+              "3" => %{
+                status: done,
+                evidence: "saved 14:02 · confirmed when the install script calls in",
+                data: %{"saved" => true}
+              },
+              "4" => active
+            }),
+          install_command: "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh",
+          board_slug: "streaks"
         }
       },
       %Variation{

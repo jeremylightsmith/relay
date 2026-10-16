@@ -279,10 +279,13 @@ defmodule Relay.Boards do
   end
 
   @doc """
-  Creates a board for `user`: validates `name`, derives a unique `slug` and a
-  `key` from the name, sets `owner_id` programmatically, and seeds it — all in one transaction.
+  Creates a board for `user`: validates `name`, derives a unique `slug` from the name, takes
+  the `key` from `:key` when given (else derives it from the name via
+  `Schemas.Board.key_from_name/1`, falling back to "RL"), sets `owner_id` programmatically, and
+  seeds it — all in one transaction. A name or key `Schemas.Board.changeset/2` rejects is
+  `{:error, changeset}`, inserting nothing.
   External callers pass a name (`%{name: ...}` / `%{"name" => ...}`) and, optionally, a
-  `template` slug (`:template` / `"template"`, one of `Relay.Boards.Templates.slugs/0`).
+  `key` and a `template` slug (`:template` / `"template"`, one of `Relay.Boards.Templates.slugs/0`).
 
   - **No template** (absent or nil): the default 8-stage pipeline, the three story-map
     releases (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
@@ -1416,10 +1419,11 @@ defmodule Relay.Boards do
 
   defp fetch_name(attrs), do: attrs[:name] || attrs["name"] || ""
 
-  # Card-ref key: the first two A–Z letters of the name, uppercased; falls back to "RL" when the
-  # name yields fewer than two letters. Refs resolve per-board, so a shared key is harmless.
+  # Card-ref key: `Board.key_from_name/1` (the first two A–Z letters of the name, uppercased);
+  # falls back to "RL" when the name yields fewer than two letters. Refs resolve per-board, so a
+  # shared key is harmless.
   defp derive_key(name) do
-    case name |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z]/, "") |> String.slice(0, 2) do
+    case Board.key_from_name(name) do
       <<_::binary-size(2)>> = key -> key
       _ -> "RL"
     end

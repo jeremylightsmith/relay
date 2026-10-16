@@ -80,6 +80,35 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
             selected: RelayWeb.TemplatePickerComponents.copy_option(),
             copy_sources: []
           }
+        },
+        # RE455, card mockup "A — name + card key, required, at the top of the New board picker".
+        %Variation{
+          id: :identity_empty,
+          description: "Just opened — name and key empty, Create disabled",
+          attributes: %{templates: templates, selected: "design-led", name: "", key: ""}
+        },
+        %Variation{
+          id: :identity_filled,
+          description: "Name and key filled — the key previews its refs, Create names the board",
+          attributes: %{templates: templates, selected: "design-led", name: "Acme Checkout", key: "AC"}
+        },
+        %Variation{
+          id: :identity_incomplete,
+          description: "One-letter key — Needs 2 letters, Create disabled",
+          attributes: %{templates: templates, selected: "design-led", name: "Acme Checkout", key: "A"}
+        },
+        %Variation{
+          id: :copy_identity_required,
+          description: "Copy selected after interacting — name and key still required, never pre-filled",
+          attributes: %{
+            templates: templates,
+            selected: RelayWeb.TemplatePickerComponents.copy_option(),
+            copy_from: "relay",
+            copy_sources: [%{slug: "relay", name: "Relay", key: "RE", stages: 9, flows: 14, files: []}],
+            name: "",
+            key: "",
+            show_required: true
+          }
         }
       ]
   end

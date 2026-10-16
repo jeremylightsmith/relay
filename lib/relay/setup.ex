@@ -35,10 +35,13 @@ defmodule Relay.Setup do
 
   `choose_llm/3` (step 2) sets the board's default agent and mints the step-3 board key;
   `remint_key/2` replaces it. The raw token is returned to the caller once and never stored.
+  `key_saved/1` (RE455) finishes step 3 on the user's say-so, saved but not yet confirmed;
+  `key_unconfirmed?/1` says when that is still so, and `remint_key/2` then reopens step 3.
 
   The install handshake (`GET /b/:slug/install`) reports through `preflight/2` and `installed/2`:
-  the key's first authed call ticks step 3, the preflight result marks step 4 waiting or failed
-  (with the fix text from `preflight_checks/0`'s catalog), and the written files finish step 4.
+  the key's first authed call ticks step 3 — or confirms a saved one, in the same transaction —
+  the preflight result marks step 4 waiting or failed (with the fix text from
+  `preflight_checks/0`'s catalog), and the written files finish step 4.
 
   `list_for_admin/1` derives one progress row per checklist board (current step, time on it,
   total time, last evidence or error, stuck after `stuck_after/0`) from one query, for the
@@ -555,8 +558,9 @@ defmodule Relay.Setup do
 
   Answers the board's name, the onboarding LLM, every check with its fix text (the local ones, then
   `cli` and `key`), and the first failure's `headline` / `fix` / `fix_command`. On a board with a
-  checklist it ticks step 3 (the key's first authed call) and marks step 4 `:waiting` or `:failed`;
-  a step already past is left alone. Refuses a key from another board (`:wrong_board`), a board
+  checklist it ticks step 3 (the key's first authed call) — or confirms a step 3 `key_saved/1`
+  finished, rewriting its evidence and merging `data["machine"]` — and marks step 4 `:waiting` or
+  `:failed`; a step already past is left alone. Refuses a key from another board (`:wrong_board`), a board
   still on step 1–2 (`:step_2_pending`) and a malformed request (`:invalid`), writing nothing.
   """
   @spec preflight(ApiKey.t(), map()) :: {:ok, map()} | {:error, :wrong_board | :step_2_pending | :invalid}
@@ -742,25 +746,54 @@ defmodule Relay.Setup do
   # Step 3 ticks on the key's first authed call; then step 4 records the result. A step already
   # past is left alone, and `advance/4` writes nothing for a repeat that changes nothing.
   defp record_preflight(target, @key_step, result, failure) do
-    evidence = ["first authed call #{hhmm(now())}", "key …#{result.key.last_four}", result.machine]
-
     _ =
       advance(target, @key_step, :done, %{
-        evidence: Enum.join(minted_for(target) ++ evidence, " · "),
+        evidence: key_evidence(target, result),
         data: %{"machine" => result.machine}
       })
 
-    record_preflight(target, @install_step, result, failure)
+    record_install(target, result, failure)
   end
 
-  defp record_preflight(target, @install_step, %{failed: nil} = result, _failure) do
+  # On step 4, a step 3 the user saved (`key_saved/1`) but no install has confirmed is confirmed
+  # first — under the board lock, in step 4's transaction, so a remint can't reopen it in between.
+  # Step 3 stays done (`completed_at` untouched); step 4's advance broadcasts the change.
+  defp record_preflight(target, @install_step, result, failure) do
+    Repo.transact(fn ->
+      with {:ok, rows} <- lock(scope(target)) do
+        confirm_saved_key!(rows, target, result)
+        record_install(target, result, failure)
+      end
+    end)
+  end
+
+  defp record_preflight(_target, _step_id, _result, _failure), do: :ok
+
+  defp key_evidence(target, result),
+    do:
+      Enum.join(
+        minted_for(target) ++ ["first authed call #{hhmm(now())}", "key …#{result.key.last_four}", result.machine],
+        " · "
+      )
+
+  defp confirm_saved_key!(rows, target, result) do
+    if rows_key_unconfirmed?(rows) do
+      row = rows[@key_step]
+
+      row
+      |> Ecto.Changeset.change(evidence: key_evidence(target, result), data: Map.put(row.data, "machine", result.machine))
+      |> Repo.update!()
+    end
+  end
+
+  defp record_install(target, %{failed: nil} = result, _failure) do
     advance(target, @install_step, :waiting, %{
       evidence: "preflight passed #{hhmm(now())} · #{result.machine}",
       data: %{"checks" => result.checks}
     })
   end
 
-  defp record_preflight(target, @install_step, %{failed: failed} = result, failure) do
+  defp record_install(target, %{failed: failed} = result, failure) do
     detail = if String.trim(failed["detail"]) == "", do: failed["label"], else: failed["detail"]
 
     advance(target, @install_step, :failed, %{
@@ -774,8 +807,6 @@ defmodule Relay.Setup do
       }
     })
   end
-
-  defp record_preflight(_target, _step_id, _result, _failure), do: :ok
 
   # A machine's step-3 evidence names whose key it is: the board's own key is the board's.
   defp minted_for(%SetupMachine{} = machine) do
@@ -1125,9 +1156,42 @@ defmodule Relay.Setup do
   end
 
   @doc """
+  Step 3, on the user's say-so ("I've saved it — next", RE455): finishes the board's or a connected
+  machine's step 3 as saved but not yet confirmed (`data["saved"]`), which activates step 4. The
+  install script's first authed call confirms it later (`preflight/2`). `{:error, :not_current}`
+  unless step 3 is the reportable step.
+  """
+  @spec key_saved(Board.t() | SetupMachine.t()) :: {:ok, checklist()} | {:error, :not_current | :no_checklist}
+  def key_saved(target) when is_struct(target, Board) or is_struct(target, SetupMachine) do
+    advance(target, @key_step, :done, %{
+      evidence: "saved #{hhmm(now())} · confirmed when the install script calls in",
+      data: %{"saved" => true}
+    })
+  end
+
+  @doc """
+  True while step 3 is saved (`key_saved/1`) but the install script hasn't called in with the key
+  yet, and step 4 is still current — when "Lost it? Mint a new key" (`remint_key/2`) applies.
+  """
+  @spec key_unconfirmed?(checklist()) :: boolean()
+  def key_unconfirmed?(%{current_id: current_id, steps: steps}) do
+    %{status: status, data: data} = Enum.find(steps, &(&1.id == @key_step))
+    key_unconfirmed?(current_id, status, data)
+  end
+
+  # The ONE reading of step 3's `"saved"` / `"machine"` data keys, for a checklist and locked rows.
+  defp key_unconfirmed?(@install_step, :done, %{"saved" => true} = data), do: is_nil(data["machine"])
+  defp key_unconfirmed?(_current_id, _status, _data), do: false
+
+  defp rows_key_unconfirmed?(rows), do: key_unconfirmed?(current_id(rows), rows[@key_step].status, rows[@key_step].data)
+
+  @doc """
   Step 3: mints a fresh board key in `user`'s name and points step 3 at it — the board's, or a
   connected machine's (which also moves `machine.api_key_id`). The previous setup key is revoked
   when it was never used; a key a runner already used stays. Returns the raw token once.
+
+  Allowed while step 3 is current, or while it is saved but unconfirmed (`key_unconfirmed?/1`):
+  then step 3 reopens (active, its `"saved"` mark dropped) and step 4 goes back to pending.
   """
   @spec remint_key(Board.t() | SetupMachine.t(), User.t()) ::
           {:ok, %{checklist: checklist(), token: String.t()}} | {:error, :not_current}
@@ -1135,13 +1199,39 @@ defmodule Relay.Setup do
     {board_id, _machine_id} = scope = scope(target)
 
     Repo.transact(fn ->
-      with {:ok, rows} <- lock_current(scope, @key_step) do
+      with {:ok, rows} <- lock_rekeyable(scope) do
+        reopen_saved_key!(rows)
         :ok = revoke_unused_key(board_id, rows[@key_step])
         token = mint_key!(scope, target_board(target), user)
         :ok = Events.broadcast(board_id, {:setup_changed, board_id})
         {:ok, %{checklist: scoped_checklist(scope), token: token}}
       end
     end)
+  end
+
+  # Step 3 can be re-keyed while it is current, or while it is saved but unconfirmed.
+  defp lock_rekeyable(scope) do
+    with {:ok, rows} <- lock(scope),
+         true <- current_id(rows) == @key_step or rows_key_unconfirmed?(rows) do
+      {:ok, rows}
+    else
+      _ -> {:error, :not_current}
+    end
+  end
+
+  # Only steps 3 and 4 move: step 4 can't have advanced without a preflight, which confirms step 3.
+  defp reopen_saved_key!(rows) do
+    if current_id(rows) != @key_step, do: reopen_key_step!(rows)
+  end
+
+  defp reopen_key_step!(rows) do
+    key = rows[@key_step]
+
+    key
+    |> Ecto.Changeset.change(status: :active, evidence: nil, completed_at: nil, data: Map.delete(key.data, "saved"))
+    |> Repo.update!()
+
+    rows[@install_step] |> Ecto.Changeset.change(status: :pending, reached_at: nil, evidence: nil) |> Repo.update!()
   end
 
   defp target_board(%Board{} = board), do: board

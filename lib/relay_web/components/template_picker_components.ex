@@ -4,14 +4,24 @@ defmodule RelayWeb.TemplatePickerComponents do
   template cards"): a modal of radio cards, one per `Relay.Boards.templates/0` entry, each
   showing the template's main-stage strip (type glyph + name, a ring on stages with a Review
   sub-lane, never a WIP limit), blurb, facts row and optional warning, over a footer whose
-  primary button reads "Create board from <name>".
+  primary button reads "Create <board name>" ("Create board" while the name is blank).
+
+  **Identity row** (RE455, card mockup "A — name + card key, required, at the top of the New
+  board picker"): above a "Start from" label and the cards, a **Board name** input (`name`,
+  `maxlength` from `Schemas.Board.name_max_length/0`) and a 2-letter **Card key** input (`key`,
+  the `CardKeyInput` hook upper-cases and filters it while typing) with its hint and, once the
+  key is complete, a "Cards will be XX1, XX2, XX3…" preview. Both are required for every option:
+  the primary button stays disabled until the name is non-blank and the key matches
+  `Schemas.Board.key_format/0` (and, on the copy option, a source exists). An incomplete key —
+  or a blank one once `show_required` is set — reads "Needs 2 letters"; a blank name with
+  `show_required` reads "Required"; a server changeset message in `errors` replaces either hint.
 
   Selection is the caller's assign (`selected`): the radios' `checked` and the selected card's
   border both come from it, so what's shown and what's submitted can't disagree. Events, all
   handled by `RelayWeb.BoardsLive`:
 
-    * `"select_template"` — the form's `phx-change`, `%{"template" => slug_or_copy}` plus,
-      while the copy card is selected, `"copy_query"` and `"copy_from"`
+    * `"select_template"` — the form's `phx-change`, `%{"template" => slug_or_copy, "name" =>
+      name, "key" => key}` plus, while the copy card is selected, `"copy_query"` and `"copy_from"`
     * `"create_from_template"` — the form's `phx-submit`, the same fields
     * `"close_template_picker"` — Cancel, ✕, a scrim click or Escape
 
@@ -25,18 +35,21 @@ defmodule RelayWeb.TemplatePickerComponents do
   it is selected it reveals a search box (`copy_query`, filtering `copy_sources` by name or key,
   case-insensitively), one `copy_from` radio row per `Relay.Boards.copy_sources/1` board
   (`N stages · M flows`), an amber warning naming the first five `.claude/` files the chosen
-  board's flows reference (`+N more` past that), and a button reading "Copy <board>'s stages
-  and flows" — disabled when there is no board to copy. Its outer element is a `<div>`, not a
+  board's flows reference (`+N more` past that), and a button reading "Copy <board>" ("Copy a
+  board" — and disabled — when there is no board to copy). Its outer element is a `<div>`, not a
   `<label>`, because each source row is a label; the left column is a
   `<label for="template-radio-copy">`, so clicks in the search box or on a row never touch the
   `template` radio.
 
   Story: `storybook/template_picker_components/template_picker.story.exs` — one variation per
-  template selection, `:with_examples`, and the copy variations `:copy_selected` and
-  `:copy_no_boards`.
+  template selection, `:with_examples`, the copy variations `:copy_selected` and
+  `:copy_no_boards`, and the identity variations `:identity_empty`, `:identity_filled`,
+  `:identity_incomplete` and `:copy_identity_required`.
   """
 
   use RelayWeb, :html
+
+  alias Schemas.Board
 
   @copy_option "copy"
 
@@ -65,17 +78,33 @@ defmodule RelayWeb.TemplatePickerComponents do
     default: %{},
     doc: "`Relay.Boards.example_boards/0` — template slug => example board name; only these cards link to one"
 
+  attr :name, :string, default: "", doc: "the Board name field's value"
+  attr :key, :string, default: "", doc: "the Card key field's value"
+
+  attr :show_required, :boolean,
+    default: false,
+    doc: "the user has interacted, so a blank name / incomplete key reads as an error"
+
+  attr :errors, :map,
+    default: %{},
+    doc: "server changeset messages, `%{name: [String.t()], key: [String.t()]}`"
+
   def template_picker(assigns) do
     copy? = assigns.selected == @copy_option
     source = Enum.find(assigns.copy_sources, &(&1.slug == assigns.copy_from))
+    name = assigns.name |> to_string() |> String.trim()
+    key_complete? = Regex.match?(Board.key_format(), to_string(assigns.key))
 
     assigns =
       assign(assigns,
         form: to_form(%{"template" => assigns.selected}),
         copy?: copy?,
         source: source,
-        create_label: create_label(copy?, source, selected_name(assigns.templates, assigns.selected)),
-        create_disabled?: copy? and is_nil(source)
+        key_complete?: key_complete?,
+        name_hint: name_hint(name, assigns.show_required, assigns.errors),
+        key_hint: key_hint(to_string(assigns.key), key_complete?, assigns.show_required, assigns.errors),
+        create_label: create_label(copy?, source, name),
+        create_disabled?: name == "" or not key_complete? or (copy? and is_nil(source))
       )
 
     ~H"""
@@ -93,7 +122,7 @@ defmodule RelayWeb.TemplatePickerComponents do
             <div class="flex flex-col gap-1">
               <h2 id={"#{@id}-title"} class="font-semibold tracking-tight text-[20px]">New board</h2>
               <p class="text-[13.5px] text-base-content/55 max-w-[640px]">
-                Start from a template. You get its stages and flows. Every prompt lives inside its flow, so it works in any repo with no
+                Name it, pick its card key, then start from a template or copy a board. You get its stages and flows. Every prompt lives inside its flow, so it works in any repo with no
                 <span class="font-mono">.claude/</span>
                 setup.
               </p>
@@ -116,6 +145,22 @@ defmodule RelayWeb.TemplatePickerComponents do
             phx-change="select_template"
             phx-submit="create_from_template"
           >
+            <.identity_row
+              id={@id}
+              name={@name}
+              key={@key}
+              key_complete?={@key_complete?}
+              name_hint={@name_hint}
+              key_hint={@key_hint}
+            />
+
+            <div
+              id={"#{@id}-start-from"}
+              class="px-5 pb-2 text-[12px] font-semibold text-base-content/80"
+            >
+              Start from
+            </div>
+
             <div id={"#{@id}-grid"} class="grid gap-4 px-5 pb-4 grid-cols-1 md:grid-cols-3">
               <.template_card
                 :for={t <- @templates}
@@ -156,6 +201,94 @@ defmodule RelayWeb.TemplatePickerComponents do
       </div>
     </div>
     """
+  end
+
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :key, :string, required: true
+  attr :key_complete?, :boolean, required: true
+  attr :name_hint, :any, required: true, doc: "nil, or `{:error, message}`"
+  attr :key_hint, :any, required: true, doc: "`{:ok, message}` or `{:error, message}`"
+
+  # Raw inputs (like the copy search box) so the mockup's label / hint markup is exact.
+  defp identity_row(assigns) do
+    ~H"""
+    <div id={"#{@id}-identity"} class="flex flex-col sm:flex-row gap-4 px-5 pb-4">
+      <label class="flex flex-col gap-1.5 flex-1 sm:max-w-[420px]">
+        <span class="text-[12px] font-semibold text-base-content/80">Board name</span>
+        <input
+          type="text"
+          id={"#{@id}-name"}
+          name="name"
+          value={@name}
+          maxlength={Board.name_max_length()}
+          placeholder="e.g. Acme Checkout"
+          autocomplete="off"
+          autofocus
+          class={["input input-sm w-full bg-base-100", @name_hint && "input-error"]}
+        />
+        <span :if={@name_hint} id={"#{@id}-name-hint"} class="text-[11.5px] text-error">
+          {elem(@name_hint, 1)}
+        </span>
+      </label>
+      <label class="flex flex-col gap-1.5 w-full sm:w-[150px]">
+        <span class="text-[12px] font-semibold text-base-content/80">Card key</span>
+        <input
+          type="text"
+          id={"#{@id}-key"}
+          name="key"
+          value={@key}
+          maxlength="2"
+          placeholder="AC"
+          autocomplete="off"
+          autocapitalize="characters"
+          phx-hook="CardKeyInput"
+          class={[
+            "input input-sm w-full bg-base-100 font-mono uppercase tracking-[0.15em]",
+            match?({:error, _}, @key_hint) && "input-error"
+          ]}
+        />
+        <span
+          id={"#{@id}-key-hint"}
+          class={[
+            "text-[11.5px]",
+            if(match?({:error, _}, @key_hint), do: "text-error", else: "text-base-content/50")
+          ]}
+        >
+          {elem(@key_hint, 1)}
+        </span>
+      </label>
+      <div
+        :if={@key_complete?}
+        id={"#{@id}-key-preview"}
+        class="flex flex-col justify-end pb-1.5 text-[12px] text-base-content/55"
+      >
+        <span>
+          Cards will be <span class="font-mono text-base-content/80">{@key}1, {@key}2, {@key}3…</span>
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  # A server message wins; otherwise a blank name only reads "Required" once the user has
+  # interacted.
+  defp name_hint(name, show_required?, errors) do
+    case Map.get(errors, :name, []) do
+      [message | _] -> {:error, message}
+      [] -> if show_required? and name == "", do: {:error, "Required"}
+    end
+  end
+
+  # A key is only ever incomplete (the hook and `Board.key_from_name/1` keep it to letters):
+  # non-empty-but-short is an error at once, empty only once the user has interacted.
+  defp key_hint(key, key_complete?, show_required?, errors) do
+    case Map.get(errors, :key, []) do
+      [message | _] -> {:error, message}
+      [] when key_complete? -> {:ok, "2 letters · A–Z"}
+      [] when key != "" or show_required? -> {:error, "Needs 2 letters"}
+      [] -> {:ok, "2 letters · A–Z"}
+    end
   end
 
   attr :template, :map, required: true
@@ -405,9 +538,10 @@ defmodule RelayWeb.TemplatePickerComponents do
     """
   end
 
-  defp create_label(true = _copy?, nil = _source, _template_name), do: "Copy a board's stages and flows"
-  defp create_label(true, source, _template_name), do: "Copy #{source.name}'s stages and flows"
-  defp create_label(false, _source, template_name), do: "Create board from #{template_name}"
+  defp create_label(true = _copy?, nil = _source, _name), do: "Copy a board"
+  defp create_label(true, source, _name), do: "Copy #{source.name}"
+  defp create_label(false, _source, "" = _name), do: "Create board"
+  defp create_label(false, _source, name), do: "Create #{name}"
 
   defp filter_sources(sources, query) do
     case query |> to_string() |> String.trim() |> String.downcase() do
@@ -435,13 +569,6 @@ defmodule RelayWeb.TemplatePickerComponents do
     names = Enum.map(shown, & &1.name)
     names = if rest == [], do: names, else: names ++ ["+#{length(rest)} more"]
     Enum.join(names, " · ")
-  end
-
-  defp selected_name(templates, slug) do
-    case Enum.find(templates, &(&1.slug == slug)) do
-      nil -> ""
-      template -> template.name
-    end
   end
 
   # A "skill" is a flow node bound to a `.claude/` agent; every template's prompts are inline,

@@ -87,4 +87,40 @@ defmodule Schemas.BoardTest do
       assert Board.archived?(%Board{archived_at: ~U[2026-07-08 00:00:00Z]})
     end
   end
+
+  describe "key_from_name/1 (RE455)" do
+    test "upcases and keeps the first two A–Z letters, with no fallback" do
+      assert Board.key_from_name("acme checkout") == "AC"
+      assert Board.key_from_name("A1") == "A"
+      assert Board.key_from_name("a1c") == "AC"
+      assert Board.key_from_name("42") == ""
+      assert Board.key_from_name(nil) == ""
+      assert Board.key_from_name("Zeta Rollout") == "ZE"
+    end
+  end
+
+  describe "key_format/0 and name_max_length/0 (RE455)" do
+    test "key_format/0 matches exactly two upper-case letters" do
+      assert Regex.match?(Board.key_format(), "AC")
+      refute Regex.match?(Board.key_format(), "A")
+      refute Regex.match?(Board.key_format(), "ABC")
+      refute Regex.match?(Board.key_format(), "ac")
+    end
+
+    test "name_max_length/0 is 80" do
+      assert Board.name_max_length() == 80
+    end
+
+    test "changeset/2 still rejects a key that normalizes to one letter" do
+      changeset = Board.changeset(%Board{owner_id: 1}, %{name: "Acme", slug: "acme", key: "a1"})
+
+      assert "must be exactly 2 letters" in errors_on(changeset).key
+    end
+
+    test "changeset/2 still rejects an 81-character name" do
+      changeset = Board.changeset(%Board{owner_id: 1}, %{name: String.duplicate("a", 81), slug: "acme", key: "AC"})
+
+      assert errors_on(changeset).name != []
+    end
+  end
 end

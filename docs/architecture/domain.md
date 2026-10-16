@@ -45,6 +45,16 @@ sharing behavior.
   (`Setup.start/2`'s `:evidence` override; `Setup` may not call `Flows`, so the label is passed
   in). `copy_sources/1` lists what "New board" can copy from — `list_boards/1`'s boards, each
   with its main-stage and flow counts and `Flows.referenced_files/1` of its flows.
+  **Board name + card key (RE455):** `create_board/2` takes the card key from `key` when given,
+  else derives it from the name via `Schemas.Board.key_from_name/1` (the first two A–Z letters,
+  upper-cased) with an "RL" fallback when that yields fewer than two; the slug still derives
+  from the name. `Schemas.Board` owns the rules once — `key_from_name/1`, `key_format/0`
+  (`[A-Z]{2}`) and `name_max_length/0` (80) — and its changeset stays the authority; a rejected
+  name or key is `{:error, changeset}`, inserting nothing. The New board picker
+  (`RelayWeb.BoardsLive`) requires a name and a complete key for every option, templates and
+  copy alike: the key follows the name (no fallback) until the user edits it, the
+  `CardKeyInput` hook filters it while typing, both are passed through to `create_board/2`, and
+  a changeset error keeps the picker open with the message under its field.
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
   attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
@@ -890,7 +900,15 @@ sharing behavior.
   else creating one on its first model) and mints the step-3 key `"Setup · <user>"` via
   `Relay.ApiKeys`; `remint_key/2` mints a fresh one, revoking the old only if it was never used.
   Both return `{:ok, %{checklist, token}}` — the raw token exists only there; step 3's `data`
-  holds `key_id`. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
+  holds `key_id`. Step 3 finishes either on the key's first authed call (below) or, first, on the
+  user's say-so: `key_saved/1` ("I've saved it — next", RE455) advances it `:done` with
+  `"saved HH:MM · confirmed when the install script calls in"` and `data.saved`, activating
+  step 4. `key_unconfirmed?/1` (a checklist) is true exactly while step 4 is current and step 3 is
+  done, saved and has no `data.machine` — the ONE reading of those keys, which gates "Lost it?
+  Mint a new key". In that state `remint_key/2` also succeeds: under the board lock it reopens
+  step 3 (`:active`, evidence and `completed_at` cleared, `saved` dropped), puts step 4 back to
+  `:pending` (`reached_at` cleared), revokes the unused key, mints a fresh one and broadcasts
+  once; otherwise it is `{:error, :not_current}` unless step 3 is current. `install_command/2` builds step 4's `curl … /b/<slug>/install | sh`.
   `step_id/1` (`:llm | :key | :install | :onboard | :interview | :customize | :runner |
   :first_claim`) names the catalog id of the steps a surface
   renders specially, so `RelayWeb.SetupComponents` (the wizard panel, chip and phones' read-only
@@ -900,7 +918,10 @@ sharing behavior.
   handshake reports through `preflight/2` and `installed/2`, each taking the authenticated
   `Schemas.ApiKey` (board preloaded) and the script's JSON: `preflight/2` checks the key's board
   owns the request's `slug` (`:wrong_board`) and that step 2 is done (`:step_2_pending`), ticks
-  step 3 (`"first authed call HH:MM · key …<last_four> · <machine>"`) and marks step 4 `:waiting`
+  step 3 (`"first authed call HH:MM · key …<last_four> · <machine>"`, `data.machine`) — or, when
+  step 3 was saved but is unconfirmed, confirms it in step 4's transaction (rewriting its evidence
+  to that same form and merging `data.machine`, leaving it `:done` and its `completed_at` as is) —
+  and marks step 4 `:waiting`
   (`"preflight passed HH:MM · <machine>"`, `data.checks`) or `:failed` (the first failure's
   `headline` as `error`, plus `checks` / `headline` / `fix` / `fix_command` in `data`); it answers
   the board name, the onboarding LLM and every check with its fix text. `preflight_checks/0` is

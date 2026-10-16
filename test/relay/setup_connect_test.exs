@@ -242,6 +242,30 @@ defmodule Relay.SetupConnectTest do
     assert Repo.get(ApiKey, old_key_id) == nil
   end
 
+  # RE455 scenario 11
+  test "key_saved/1 finishes a machine's step 3, and remint_key/2 reopens it with a fresh key" do
+    %{board: board} = board_past_step_2()
+    sam = insert(:user, name: "Sam")
+    %{machine: machine} = connect!(board, sam)
+    old_key_id = machine.api_key_id
+
+    assert {:ok, saved} = Setup.key_saved(machine)
+    assert saved.current_id == "4"
+    assert entry(saved, "3").status == :done
+    assert entry(saved, "3").data["saved"] == true
+
+    # `connect!/2` authenticated the token, which stamps `last_used_at`; make it never-used again.
+    Repo.update_all(from(k in ApiKey, where: k.id == ^old_key_id), set: [last_used_at: nil])
+
+    assert {:ok, %{token: token, checklist: c}} = Setup.remint_key(machine, sam)
+    assert entry(c, "3").status == :active
+
+    machine = Repo.get!(SetupMachine, machine.id)
+    {:ok, new_key} = ApiKeys.authenticate_key(token)
+    assert machine.api_key_id == new_key.id
+    assert Repo.get(ApiKey, old_key_id) == nil
+  end
+
   # Scenario 11
   test "machines/1 lists the board's own setup, then each machine with person, key, harnesses and progress" do
     %{board: board, owner: owner, owner_key: owner_key} = board_past_step_2()

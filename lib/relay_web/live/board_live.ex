@@ -106,6 +106,11 @@ defmodule RelayWeb.BoardLive do
   columns below it. `{:setup_changed, _}` re-reads only the checklist. The shown-once step-3 key
   lives only in `:setup_token`, never persisted, broadcast or put in the URL.
 
+  RE455: the key stays on screen until "I've saved it — next" (`"setup_key_saved"`,
+  `Relay.Setup.key_saved/1` on the board or the connect's machine) finishes step 3 and drops
+  `:setup_token`; "Lost it? Mint a new key" is `"setup_mint_key"` again, which reopens step 3 while
+  the key is saved but unconfirmed.
+
   RE446 adds connect a machine: `?setup=connect` (read in `handle_params/3`, beside any `?card=`)
   puts the panel in connect mode, showing this member's `Relay.Setup.connect_checklist/2` in
   `:setup_connect` whatever the board's own `closed?`, with the board's chip and callout hidden.
@@ -1765,7 +1770,7 @@ defmodule RelayWeb.BoardLive do
         story_map_rename_start story_map_rename_change story_map_rename_submit
         story_map_rename_cancel story_map_delete story_map_reorder
         talk_send talk_stop talk_clear talk_slash
-        setup_choose_llm setup_mint_key
+        setup_choose_llm setup_mint_key setup_key_saved
       ) do
     {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
   end
@@ -1790,6 +1795,31 @@ defmodule RelayWeb.BoardLive do
   def handle_event("setup_mint_key", _params, socket) do
     %{board: board, current_scope: scope} = socket.assigns
     {:noreply, assign_setup_key(socket, Setup.remint_key(board, scope.user))}
+  end
+
+  # RE455 — "I've saved it — next" finishes step 3 (saved, unconfirmed) and drops the shown-once key
+  # in the reply itself: the `{:setup_changed, _}` broadcast lands after it. An unsaved connect has
+  # no machine (and no key on screen) to save.
+  def handle_event("setup_key_saved", _params, %{assigns: %{setup_connect_mode: true, setup_connect: %{}}} = socket) do
+    %{board: board, setup_connect: connect} = socket.assigns
+
+    case connect do
+      %{machine_id: nil} ->
+        {:noreply, assign_connect_key(socket, {:error, :not_current})}
+
+      %{machine_id: id} ->
+        case Setup.key_saved(%SetupMachine{id: id, board_id: board.id}) do
+          {:ok, checklist} -> {:noreply, assign(socket, setup_connect: checklist, setup_token: nil)}
+          {:error, _reason} = error -> {:noreply, assign_connect_key(socket, error)}
+        end
+    end
+  end
+
+  def handle_event("setup_key_saved", _params, socket) do
+    case Setup.key_saved(socket.assigns.board) do
+      {:ok, checklist} -> {:noreply, assign(socket, setup: checklist, setup_token: nil)}
+      {:error, _reason} = error -> {:noreply, assign_setup_key(socket, error)}
+    end
   end
 
   def handle_event("setup_toggle_explanations", _params, socket) do

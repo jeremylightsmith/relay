@@ -56,8 +56,8 @@ defmodule Schemas.Board do
     |> update_change(:name, &String.trim/1)
     |> update_change(:key, &normalize_key/1)
     |> validate_required([:name, :slug, :key])
-    |> validate_length(:name, min: 1, max: 80)
-    |> validate_format(:key, ~r/\A[A-Z]{2}\z/, message: "must be exactly 2 letters")
+    |> validate_length(:name, min: 1, max: name_max_length())
+    |> validate_format(:key, key_format(), message: "must be exactly 2 letters")
     |> validate_format(:slug, slug_format(), message: "must be lowercase letters, numbers, and hyphens")
     |> unique_constraint(:slug)
   end
@@ -66,9 +66,27 @@ defmodule Schemas.Board do
   @spec slug_format() :: Regex.t()
   def slug_format, do: ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
 
+  @doc "The card-ref key format — exactly two upper-case letters (RE455: the New board picker checks it too)."
+  @spec key_format() :: Regex.t()
+  def key_format, do: ~r/\A[A-Z]{2}\z/
+
+  @doc "The longest board name `changeset/2` accepts (RE455: the New board picker's `maxlength`)."
+  @spec name_max_length() :: pos_integer()
+  def name_max_length, do: 80
+
+  @doc """
+  A card key from a board name: upper-cased, only A–Z kept, the first two. Possibly fewer than
+  two letters and never a fallback — `"A1"` -> `"A"`, `"42"` -> `""`, `nil` -> `""`. The New board
+  picker (RE455) derives and sanitizes its key with it; `Relay.Boards` adds its own "RL" fallback.
+  """
+  @spec key_from_name(String.t() | nil) :: String.t()
+  def key_from_name(name), do: name |> letters_only() |> String.slice(0, 2)
+
   # Upcase, then keep only A–Z. `validate_format/3` above enforces the "exactly 2" rule on the
   # normalized value, so "rl" -> "RL", "R1" -> "R" (rejected), "abc" -> "ABC" (rejected).
-  defp normalize_key(key), do: key |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z]/, "")
+  defp normalize_key(key), do: letters_only(key)
+
+  defp letters_only(value), do: value |> to_string() |> String.upcase() |> String.replace(~r/[^A-Z]/, "")
 
   @doc """
   Changeset for the RLY-69 public-board settings — the enable toggle and the intake

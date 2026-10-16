@@ -212,6 +212,51 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert %{"error" => %{"code" => "unauthorized"}} =
                conn |> post(~p"/api/setup/preflight", preflight_body(board)) |> json_response(401)
     end
+
+    # RE455 scenario 7
+    test "a saved step 3 is confirmed by the preflight, which also leaves step 4 waiting",
+         %{conn: conn, board: board, token: token} do
+      {:ok, _} = Setup.key_saved(board)
+      saved_at = step(board, "3").completed_at
+
+      body = conn |> preflight(token, preflight_body(board)) |> json_response(200)
+      assert body["ok"] == true
+
+      three = step(board, "3")
+      assert three.status == :done
+      assert three.completed_at == saved_at
+      assert three.evidence =~ ~r/^first authed call \d\d:\d\d · key …\w{4} · jl-mbp$/
+      assert three.data["machine"] == "jl-mbp"
+
+      four = step(board, "4")
+      assert four.status == :waiting
+      assert four.evidence =~ ~r/^preflight passed \d\d:\d\d · jl-mbp$/
+      assert Setup.key_unconfirmed?(Setup.checklist(board)) == false
+    end
+
+    # RE455 scenario 8
+    test "a failing preflight still confirms a saved step 3 and fails step 4",
+         %{conn: conn, board: board, token: token} do
+      {:ok, _} = Setup.key_saved(board)
+
+      failing = preflight_body(board, %{"checks" => checks(%{"git_repo" => %{"ok" => false}})})
+      conn |> preflight(token, failing) |> json_response(200)
+
+      three = step(board, "3")
+      assert three.evidence =~ ~r/^first authed call /
+      assert three.data["machine"] == "jl-mbp"
+      assert step(board, "4").status == :failed
+    end
+
+    # RE455 scenario 9
+    test "a step 3 a preflight already confirmed is not rewritten by the next one",
+         %{conn: conn, board: board, token: token} do
+      conn |> preflight(token, preflight_body(board)) |> json_response(200)
+      evidence = step(board, "3").evidence
+
+      conn |> preflight(token, preflight_body(board, %{"machine" => "other-box"})) |> json_response(200)
+      assert step(board, "3").evidence == evidence
+    end
   end
 
   # Scenario 7
@@ -518,6 +563,21 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert body["ok"] == true
       three = machine_step(machine, "3")
       assert three.status == :done
+      assert three.evidence =~ ~r/^minted for Sam · first authed call \d\d:\d\d · key …\w{4} · sam-linux$/
+      assert three.data["machine"] == "sam-linux"
+      assert machine_step(machine, "4").status == :waiting
+      assert {step(board, "3"), step(board, "4")} == board_before
+    end
+
+    # RE455 scenario 10
+    test "a preflight confirms the machine's saved step 3, not the board's",
+         %{conn: conn, board: board, machine: machine, sam_token: sam_token} do
+      {:ok, _} = Setup.key_saved(machine)
+      board_before = {step(board, "3"), step(board, "4")}
+
+      conn |> preflight(sam_token, preflight_body(board, %{"machine" => "sam-linux"})) |> json_response(200)
+
+      three = machine_step(machine, "3")
       assert three.evidence =~ ~r/^minted for Sam · first authed call \d\d:\d\d · key …\w{4} · sam-linux$/
       assert three.data["machine"] == "sam-linux"
       assert machine_step(machine, "4").status == :waiting

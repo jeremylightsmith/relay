@@ -149,7 +149,7 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert present?(doc, ~s(#copy-source-radio-relay[name="copy_from"][value="relay"][checked]))
     refute present?(doc, "#copy-source-radio-acme[checked]")
 
-    assert text(doc, "#template-picker-create") =~ "Copy Relay's stages and flows"
+    assert text(doc, "#template-picker-create .pending-idle") == "Copy Relay"
     refute present?(doc, "#template-copy-warning")
   end
 
@@ -214,6 +214,112 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     doc = copy_picker(copy_from: nil, copy_sources: [])
 
     assert present?(doc, "#template-picker-create[disabled]")
-    assert text(doc, "#template-picker-create") =~ "Copy a board's stages and flows"
+    assert text(doc, "#template-picker-create .pending-idle") == "Copy a board"
+  end
+
+  # RE455 — board name + card key, required, at the top of the picker (card mockup A).
+
+  defp identity_picker(attrs) do
+    (&TemplatePickerComponents.template_picker/1)
+    |> render_component(Keyword.merge([templates: Relay.Boards.templates(), selected: "bare-minimum"], attrs))
+    |> LazyHTML.from_fragment()
+  end
+
+  defp squish(doc, selector), do: doc |> text(selector) |> String.split() |> Enum.join(" ")
+  defp attr(doc, selector, name), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute(name)
+
+  test "RE455 4. empty, the identity row sits above Start from and the grid, and Create is disabled" do
+    doc = identity_picker(name: "", key: "", show_required: false)
+
+    assert present?(doc, "#template-picker-identity ~ #template-picker-start-from ~ #template-picker-grid")
+    assert text(doc, "#template-picker-start-from") == "Start from"
+
+    name = classes(doc, "#template-picker-name")
+    for c <- ~w(input input-sm w-full bg-base-100), do: assert(c in name)
+    assert attr(doc, "#template-picker-name", "maxlength") == ["80"]
+    assert attr(doc, "#template-picker-name", "name") == ["name"]
+
+    key = classes(doc, "#template-picker-key")
+    for c <- ~w(font-mono uppercase tracking-[0.15em]), do: assert(c in key)
+    refute "input-error" in key
+    assert attr(doc, "#template-picker-key", "maxlength") == ["2"]
+    assert attr(doc, "#template-picker-key", "autocapitalize") == ["characters"]
+    assert attr(doc, "#template-picker-key", "phx-hook") == ["CardKeyInput"]
+    assert attr(doc, "#template-picker-key", "name") == ["key"]
+
+    assert text(doc, "#template-picker-key-hint") == "2 letters · A–Z"
+    assert "text-base-content/50" in classes(doc, "#template-picker-key-hint")
+
+    refute present?(doc, "#template-picker-key-preview")
+    refute present?(doc, "#template-picker-name-hint")
+    assert present?(doc, "#template-picker-create[disabled]")
+
+    assert squish(doc, "#template-picker-title + p") =~
+             ~r/^Name it, pick its card key, then start from a template or copy a board\./
+  end
+
+  test "RE455 5. a name and a complete key preview the refs and enable Create <name>" do
+    doc = identity_picker(name: "Acme Checkout", key: "AC")
+
+    assert squish(doc, "#template-picker-key-preview") == "Cards will be AC1, AC2, AC3…"
+
+    span = LazyHTML.query(doc, "#template-picker-key-preview span.font-mono")
+    assert String.trim(LazyHTML.text(span)) == "AC1, AC2, AC3…"
+    assert "text-base-content/80" in (span |> LazyHTML.attribute("class") |> hd() |> String.split())
+
+    assert text(doc, "#template-picker-create .pending-idle") == "Create Acme Checkout"
+    refute present?(doc, "#template-picker-create[disabled]")
+  end
+
+  test "RE455 5b. a blank name labels the button Create board" do
+    doc = identity_picker(name: "  ", key: "AC")
+
+    assert text(doc, "#template-picker-create .pending-idle") == "Create board"
+    assert present?(doc, "#template-picker-create[disabled]")
+  end
+
+  test "RE455 6. a one-letter key reads Needs 2 letters in error and keeps Create disabled" do
+    doc = identity_picker(name: "Acme Checkout", key: "A")
+
+    assert text(doc, "#template-picker-key-hint") == "Needs 2 letters"
+    assert "text-error" in classes(doc, "#template-picker-key-hint")
+    assert "input-error" in classes(doc, "#template-picker-key")
+    refute present?(doc, "#template-picker-key-preview")
+    assert present?(doc, "#template-picker-create[disabled]")
+  end
+
+  test "RE455 7. copy with show_required and empty fields flags both and keeps Copy <source> disabled" do
+    doc =
+      copy_picker(copy_from: "relay", copy_sources: [@relay], name: "", key: "", show_required: true)
+
+    assert text(doc, "#template-picker-name-hint") == "Required"
+    assert "text-error" in classes(doc, "#template-picker-name-hint")
+    assert "input-error" in classes(doc, "#template-picker-name")
+    assert text(doc, "#template-picker-key-hint") == "Needs 2 letters"
+    assert text(doc, "#template-picker-create .pending-idle") == "Copy Relay"
+    assert present?(doc, "#template-picker-create[disabled]")
+
+    filled = copy_picker(copy_from: "relay", copy_sources: [@relay], name: "Copy Test", key: "CT")
+    refute present?(filled, "#template-picker-create[disabled]")
+    assert text(filled, "#template-picker-create .pending-idle") == "Copy Relay"
+
+    none = copy_picker(copy_from: nil, copy_sources: [], name: "Copy Test", key: "CT")
+    assert text(none, "#template-picker-create .pending-idle") == "Copy a board"
+    assert present?(none, "#template-picker-create[disabled]")
+  end
+
+  test "RE455 8. a server key error replaces the key hint" do
+    doc = identity_picker(name: "Acme", key: "AC", errors: %{key: ["must be exactly 2 letters"]})
+
+    assert text(doc, "#template-picker-key-hint") == "must be exactly 2 letters"
+    assert "text-error" in classes(doc, "#template-picker-key-hint")
+  end
+
+  test "RE455 8b. a server name error shows under the name" do
+    doc = identity_picker(name: "", key: "AC", errors: %{name: ["can't be blank"]})
+
+    assert text(doc, "#template-picker-name-hint") == "can't be blank"
+    assert "text-error" in classes(doc, "#template-picker-name-hint")
+    assert "input-error" in classes(doc, "#template-picker-name")
   end
 end

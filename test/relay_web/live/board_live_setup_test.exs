@@ -442,6 +442,110 @@ defmodule RelayWeb.BoardLiveSetupTest do
     end
   end
 
+  describe "step 3's \"I've saved it — next\" (RE455)" do
+    @moved_on "Setup has moved on since this page loaded. Try again from the current step."
+
+    defp key_shown!(conn, user) do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      {board, pick!(view, "claude-code")}
+    end
+
+    defp save_key!(view) do
+      view |> element("#setup-key-saved") |> render_click()
+      view
+    end
+
+    # Scenario 5
+    test "the shown key waits on \"I've saved it\": step 3 stays current and step 4 stays shut",
+         %{conn: conn, user: user} do
+      {_board, view} = key_shown!(conn, user)
+
+      assert has_element?(view, "#setup-key-box")
+      assert has_element?(view, "#setup-key-saved")
+      assert has_element?(view, "#setup-key-line-copy")
+      assert has_element?(view, ~s(#setup-step-3[data-status="active"]))
+      refute has_element?(view, "#setup-install-command")
+    end
+
+    # Scenario 6
+    test "\"I've saved it\" finishes step 3 and opens step 4 with the install command",
+         %{conn: conn, user: user} do
+      {board, view} = key_shown!(conn, user)
+      save_key!(view)
+
+      assert has_element?(view, ~s(#setup-step-3[data-status="done"]))
+      refute has_element?(view, "#setup-key-box")
+      assert has_element?(view, "#setup-key-lost")
+      assert has_element?(view, ~s(#setup-step-4[data-status="active"]))
+      assert text(view, "#setup-install-command") =~ "/b/#{board.slug}/install | sh"
+      assert text(view, "#setup-step-3 .setup-evidence") =~ "confirmed when the install script calls in"
+    end
+
+    # Scenario 7
+    test "\"Lost it?\" reopens step 3 with a fresh key and kills the first", %{conn: conn, user: user} do
+      {_board, view} = key_shown!(conn, user)
+      first = token_in(view)
+      save_key!(view)
+
+      view |> element("#setup-key-lost") |> render_click()
+
+      assert has_element?(view, ~s(#setup-step-3[data-status="active"]))
+      assert token_in(view) != first
+      assert has_element?(view, "#setup-key-saved")
+      refute has_element?(view, "#setup-install-command")
+      assert ApiKeys.authenticate(first) == :error
+    end
+
+    # Scenario 8
+    test "the install's first authed call confirms the key live and removes \"Lost it?\"",
+         %{conn: conn, user: user} do
+      {board, view} = key_shown!(conn, user)
+      save_key!(view)
+
+      step3 = Enum.find(Setup.checklist(board).steps, &(&1.id == Setup.step_id(:key)))
+      key = Schemas.ApiKey |> Repo.get!(step3.data["key_id"]) |> Repo.preload(:board)
+
+      body = %{
+        "slug" => board.slug,
+        "machine" => "jl-mbp",
+        "repo_dir" => "~/src/streaks",
+        "remote" => "git@github.com:jl/streaks.git",
+        "branch" => "main",
+        "checks" => for(%{id: id} <- Setup.preflight_checks(), do: %{"id" => id, "ok" => true, "detail" => id}),
+        "clis" => %{"claude" => "/usr/bin/claude", "codex" => nil, "gemini" => nil}
+      }
+
+      assert {:ok, _answer} = Setup.preflight(key, body)
+
+      refute has_element?(view, "#setup-key-lost")
+      assert text(view, "#setup-step-3 .setup-evidence") =~ "first authed call"
+    end
+
+    # Scenario 9
+    test "\"I've saved it\" after setup moved on flashes and keeps the view", %{conn: conn, user: user} do
+      {board, view} = key_shown!(conn, user)
+      {:ok, _} = Setup.key_saved(board)
+      {:ok, _} = Setup.advance(board, Setup.step_id(:install), :done, %{})
+
+      assert render_hook(view, "setup_key_saved", %{}) =~ @moved_on
+      # Still alive: a crashed view would raise here.
+      assert render(view) =~ @moved_on
+      assert has_element?(view, ~s(#setup-step-3[data-status="done"]))
+    end
+
+    # Scenario 10
+    test "an archived board refuses \"I've saved it\"", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      {:ok, _} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert render_hook(view, "setup_key_saved", %{}) =~ "This board is archived (read-only)."
+      assert Setup.checklist(board).current_id == Setup.step_id(:key)
+    end
+  end
+
   # Scenario 2
   describe "a board with no checklist" do
     test "renders no wizard, chip or mobile checklist", %{conn: conn, user: user} do
