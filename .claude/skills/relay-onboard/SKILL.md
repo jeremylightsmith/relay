@@ -272,12 +272,20 @@ won't go green: fix the flow file and retry, at most 3 attempts.
 
 ## 5.6 Relay files on origin/<base>
 
-Say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
+**First, run `/relay-doctor`** (invoke the skill) now that the flows are on the board. It checks
+that every node resolves to a real agent, skill, command or binary in this repo, so a broken
+binding shows up here and not as the first card's failed run. Fix its errors with the human the
+way it walks you through them; files it writes land in the commit below, and a flow it changes
+goes back with `./relay flow-push`. Two of its warnings are expected at this point and need no
+fix: no runner is online yet (that's step 6), and the board has no run history to audit. Anything
+the human chooses to leave becomes a 5.7 card.
+
+Then say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
 wrote — the Relay-owned files `./relay`, `relay.md`, `.relay/scaffold.json` and the three skills
 `<llm.skill_dir>/relay-onboard/SKILL.md`, `<llm.skill_dir>/relay-update/SKILL.md` and
 `<llm.skill_dir>/relay-doctor/SKILL.md` (status `llm.skill_dir`); the pointer-file line (status
 `llm.pointer_file`), `.gitignore`, `.relay/` including `.relay/project.md`; and any `.claude/agents/*.md`,
-`.claude/skills/*/SKILL.md` or `.claude/commands/*.md` file 5.4 wrote for a missing file — and
+`.claude/skills/*/SKILL.md` or `.claude/commands/*.md` file 5.4 or the doctor wrote — and
 **nothing else** (stage those
 paths by name; leave any other change in the tree alone). Then land it the way the `landing`
 answer says: push straight to `<base>`, or push a branch and open a PR.
@@ -300,7 +308,7 @@ Say that Ctrl-C is safe: running `/relay-onboard` again picks up here. When it l
 
 ## 5.7 Follow-up cards #setup
 
-Everything deferred or left unresolved along the way (a rejected change worth revisiting, an
+Everything deferred or left unresolved along the way (a rejected change worth revisiting, a doctor finding left alone, an
 unanswered question, a skipped step) becomes a Backlog card tagged `setup`:
 
     ./relay create "<title>" --stage Backlog --tag setup --description "<what is left and why>"
