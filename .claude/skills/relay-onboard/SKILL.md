@@ -20,6 +20,12 @@ updates the board's setup wizard live, so the human can watch from the browser.
 Before each sub-step, say what you are about to do, using the checklist's numbers (5.1–5.8).
 Ask **one question at a time**, and "skip" always works.
 
+**Every pause ends on its question.** When you stop for the human, the last line of the
+message is the question, and it says which reply moves on, e.g. *"Is that right? Say yes and
+I'll go on to 5.3, or tell me what to change."* Nothing comes after it: no notes, no "one thing
+stood out". Put those above the question. When the reply comes, report the step and carry on
+with the loop in the same turn.
+
 **Never run this from a flow node.** It asks the human questions; a flow node has nobody to
 answer.
 
@@ -140,8 +146,9 @@ aren't in this repo: <names>; we'll sort each one out at 5.4" — and report the
 Say you'll read the repo and tell the human what you found. Work out: the stack and versions;
 the test, lint and build commands; the one "all green" command; the base branch; CI; and the
 convention files (`AGENTS.md`, the pointer file and similar — flow prompts will point at them).
-Send **one** message: "Here's what I found. Correct anything that's wrong:" with that list.
-Apply corrections, then report:
+Send **one** message: "Here's what I found:", then the list, then any notes (e.g. a flow
+command that's wrong for this repo, to fix at 5.4), and **end** with *"Is that right? Say yes
+and I'll go on to 5.3, or tell me what to change."* Apply corrections, then report:
 
     ./relay setup report 5.2 --status done --evidence "<stack> · <green command>"
 
@@ -308,7 +315,8 @@ List the cards you made, then report:
 ## 5.8 First card
 
 Suggest 2–3 small, concrete improvements for this repo (a file or two each), numbered. The
-human picks one or types their own. Create it in the board's first flow stage (status
+human picks one or types their own; end with *"Which one? Give me a number, or describe your
+own."* Create it in the board's first flow stage (status
 `first_flow_stage`):
 
     ./relay create "<title>" --stage <first_flow_stage> --description "<what and why>"
@@ -322,6 +330,8 @@ and that the first card turns violet on the board when an agent picks it up. Exi
 
 ## Common mistakes
 
+- **Burying the question.** A pause whose last line isn't the question leaves the human
+  unsure you're waiting, or what reply moves on.
 - **Redoing finished sub-steps.** Always start from status; a re-run resumes, it never restarts.
 - **Listing proposals before the missing files.** On a copied board 5.4 resolves each missing
   file first.
