@@ -3,8 +3,9 @@ defmodule RelayWeb.FlowEditorLive do
   Full-page flow editor. Holds an in-memory working copy (plain maps mirroring the embeds),
   validates inline against Schemas.Flow.changeset/2 after every edit (RLY-131 graph rules),
   and saves via Relay.Flows.save_definition/2 behind a Save-as-v(n+1) confirm modal. Matches
-  docs/designs/Relay Flow Editor.dc.html. Read-only members (archived board) see the graph and
-  inspector with every mutating control disabled.
+  docs/designs/Relay Flow Editor.dc.html. Read-only members (archived board) can still select nodes
+  and edges to inspect them — Expand-to-read of a node's main field included (RE459) — with
+  every mutating control disabled and the prompt sheet's Edit mode refused.
 
   RE429: the trigger bar is one Stage select (`Relay.Flows.assignable_stages/2` — free main
   work stages plus the flow's own) and two read-only derived read-outs, pulls-from and
@@ -45,6 +46,7 @@ defmodule RelayWeb.FlowEditorLive do
          |> assign(:selected, nil)
          |> assign(:modal, nil)
          |> assign(:connecting, nil)
+         |> assign(:prompt_sheet, nil)
          |> load_flow(flow)}
     end
   end
@@ -67,6 +69,7 @@ defmodule RelayWeb.FlowEditorLive do
     |> assign(:errors, [])
     |> assign(:selected, nil)
     |> assign(:connecting, nil)
+    |> assign(:prompt_sheet, nil)
     |> assign(:diff, Flows.diff_from_default(flow))
     |> validate_working()
   end
@@ -128,14 +131,24 @@ defmodule RelayWeb.FlowEditorLive do
       flow.isolation != working.isolation
   end
 
-  # ---- events (read-only guard first) ----
+  # ---- events (read-only guards first) ----
+  # Selecting a node or edge stays allowed on an archived board (RE459) so the read-only
+  # inspector and Expand-to-read are reachable; `connect_edge` stays guarded, so connect mode
+  # (and `select_node`'s connect-target clauses) can never engage there. The prompt sheet may
+  # open and close in Read, but never enter Edit — the generic guard ignores params, so that
+  # refusal is its own clause ahead of it.
 
   @impl true
+  def handle_event(event, %{"mode" => "edit"}, %{assigns: %{read_only?: true}} = socket)
+      when event in ~w(open_prompt_sheet prompt_sheet_mode) do
+    {:noreply, put_read_only_flash(socket)}
+  end
+
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket)
-      when event in ~w(validate_trigger save confirm_save discard edit_node_field select_node
-                        select_edge rename_node add_node connect_edge delete_selected
-                        delete_start_edge edit_edge open_diff open_reset confirm_reset) do
-    {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+      when event in ~w(validate_trigger save confirm_save discard edit_node_field rename_node
+                        add_node connect_edge delete_selected delete_start_edge edit_edge
+                        open_diff open_reset confirm_reset) do
+    {:noreply, put_read_only_flash(socket)}
   end
 
   # ---- selection, including "connect edge" mode (first click sets from, second sets to) ----
@@ -157,11 +170,11 @@ defmodule RelayWeb.FlowEditorLive do
       end)
 
     index = length(socket.assigns.working.edges) - 1
-    {:noreply, socket |> assign(:connecting, nil) |> assign(:selected, {:edge, index})}
+    {:noreply, socket |> assign(:connecting, nil) |> assign(:selected, {:edge, index}) |> assign(:prompt_sheet, nil)}
   end
 
   def handle_event("select_node", %{"key" => key}, socket) do
-    {:noreply, assign(socket, :selected, {:node, key})}
+    {:noreply, socket |> assign(:selected, {:node, key}) |> assign(:prompt_sheet, nil)}
   end
 
   def handle_event("select_edge", _params, %{assigns: %{connecting: connecting}} = socket) when not is_nil(connecting) do
@@ -169,7 +182,7 @@ defmodule RelayWeb.FlowEditorLive do
   end
 
   def handle_event("select_edge", %{"index" => i}, socket) do
-    {:noreply, assign(socket, :selected, {:edge, String.to_integer(i)})}
+    {:noreply, socket |> assign(:selected, {:edge, String.to_integer(i)}) |> assign(:prompt_sheet, nil)}
   end
 
   def handle_event("connect_edge", _params, %{assigns: %{connecting: nil}} = socket) do
@@ -186,6 +199,29 @@ defmodule RelayWeb.FlowEditorLive do
 
   def handle_event("close_modal", _params, socket) do
     {:noreply, assign(socket, :modal, nil)}
+  end
+
+  # ---- the main field's full-height Read/Edit sheet (RE459) ----
+  # Always about the *selected* work node; a control node (fan_out / fan_in) has no main field.
+  # The mode is matched explicitly — never atomize user input. Opening clears connect mode so
+  # the canvas's Esc binding and the sheet's are never live together.
+  def handle_event("open_prompt_sheet", %{"mode" => mode}, socket) when mode in ["read", "edit"] do
+    if prompt_sheet_node?(socket.assigns) do
+      {:noreply, socket |> assign(:prompt_sheet, sheet_mode(mode)) |> assign(:connecting, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("prompt_sheet_mode", %{"mode" => mode}, %{assigns: %{prompt_sheet: open}} = socket)
+      when mode in ["read", "edit"] and not is_nil(open) do
+    {:noreply, assign(socket, :prompt_sheet, sheet_mode(mode))}
+  end
+
+  def handle_event("prompt_sheet_mode", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close_prompt_sheet", _params, socket) do
+    {:noreply, assign(socket, :prompt_sheet, nil)}
   end
 
   # The trigger bar's one field (RE429). Matched explicitly — never atomize user input.
@@ -264,14 +300,16 @@ defmodule RelayWeb.FlowEditorLive do
     {:noreply,
      socket
      |> apply_working(fn w -> %{w | nodes: w.nodes ++ [node]} end)
-     |> assign(:selected, {:node, key})}
+     |> assign(:selected, {:node, key})
+     |> assign(:prompt_sheet, nil)}
   end
 
   def handle_event("delete_selected", _params, %{assigns: %{selected: {:edge, i}}} = socket) do
     {:noreply,
      socket
      |> apply_working(fn w -> %{w | edges: List.delete_at(w.edges, i)} end)
-     |> assign(:selected, nil)}
+     |> assign(:selected, nil)
+     |> assign(:prompt_sheet, nil)}
   end
 
   def handle_event("delete_selected", _params, %{assigns: %{selected: {:node, key}}} = socket) do
@@ -279,7 +317,8 @@ defmodule RelayWeb.FlowEditorLive do
       {:noreply,
        socket
        |> apply_working(fn w -> %{w | nodes: Enum.reject(w.nodes, &(&1.key == key))} end)
-       |> assign(:selected, nil)}
+       |> assign(:selected, nil)
+       |> assign(:prompt_sheet, nil)}
     else
       {:noreply, socket}
     end
@@ -312,7 +351,10 @@ defmodule RelayWeb.FlowEditorLive do
     end
   end
 
+  # The sheet closes first, so its Esc and the save modal's Esc are never live together.
   def handle_event("save", _params, socket) do
+    socket = assign(socket, :prompt_sheet, nil)
+
     cond do
       socket.assigns.errors != [] ->
         {:noreply, socket}
@@ -488,7 +530,7 @@ defmodule RelayWeb.FlowEditorLive do
           id="flow-editor-canvas"
           class="flex"
           style="flex:1;overflow:hidden;"
-          phx-window-keydown={if @connecting, do: "cancel_connect"}
+          phx-window-keydown={if @connecting && !@prompt_sheet, do: "cancel_connect"}
           phx-key="escape"
         >
           <div style="flex:1;overflow:auto;background:var(--color-base-200);padding:16px;">
@@ -497,7 +539,7 @@ defmodule RelayWeb.FlowEditorLive do
               edges={@working.edges}
               layout={@layout}
               selected={@selected}
-              interactive?={!@read_only?}
+              interactive?={true}
               lands_on={stage_label(neighbours(@working, @stages).lands_on)}
               connecting_target?={connecting_target?(@connecting)}
               llm={@llm}
@@ -688,6 +730,15 @@ defmodule RelayWeb.FlowEditorLive do
         </div>
       </div>
 
+      <%!-- RE459: the selected node's main field, full height. The node is the working copy's,
+      so Read shows unsaved edits. --%>
+      <FlowEditorComponents.prompt_sheet
+        :if={@prompt_sheet && @selected_node && @selected_node.type not in Flow.Node.control_types()}
+        node={@selected_node}
+        mode={@prompt_sheet}
+        read_only?={@read_only?}
+      />
+
       <FlowEditorComponents.diff_modal :if={@modal == :diff} diff={@diff} />
       <FlowEditorComponents.reset_confirm_modal
         :if={@modal == :reset}
@@ -777,6 +828,18 @@ defmodule RelayWeb.FlowEditorLive do
     loops = Enum.count(working.edges, &Schemas.Flow.Edge.loop?/1)
     "#{nodes} nodes · #{edges} edges · #{loops} loops"
   end
+
+  defp put_read_only_flash(socket), do: put_flash(socket, :error, "This board is archived (read-only).")
+
+  defp prompt_sheet_node?(%{working: working, selected: selected}) do
+    case selected_node(working, selected) do
+      nil -> false
+      node -> node.type not in Flow.Node.control_types()
+    end
+  end
+
+  defp sheet_mode("read"), do: :read
+  defp sheet_mode("edit"), do: :edit
 
   defp selected_node(working, {:node, key}), do: Enum.find(working.nodes, &(&1.key == key))
   defp selected_node(_working, _selected), do: nil

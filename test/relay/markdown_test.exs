@@ -302,6 +302,115 @@ defmodule Relay.MarkdownTest do
     end
   end
 
+  describe "to_prompt_html/2" do
+    @chip_ref ~s(<span class="prompt-placeholder">{ref}</span>)
+
+    defp prompt(text, mode) do
+      {:safe, html} = Markdown.to_prompt_html(text, mode)
+      html
+    end
+
+    test "chips a {placeholder} in a markdown paragraph" do
+      html = prompt("Post to card {ref} now", :markdown)
+
+      assert html =~ "<p>Post to card #{@chip_ref} now</p>"
+    end
+
+    test "chips placeholders inside inline code" do
+      html = prompt("Run `{relay} result {ref}`", :markdown)
+
+      assert html =~
+               ~s(<code><span class="prompt-placeholder">{relay}</span> result #{@chip_ref}</code>)
+    end
+
+    test "chips a placeholder inside a fenced code block" do
+      html = prompt("```\nbin/ship {ref}\n```", :markdown)
+      [pre] = Regex.run(~r{<pre.*</pre>}s, html)
+
+      assert pre =~ @chip_ref
+    end
+
+    test "chips a dotted placeholder" do
+      assert prompt("see {prior.detail}", :markdown) =~
+               ~s(<span class="prompt-placeholder">{prior.detail}</span>)
+    end
+
+    test ":code renders an escaped, whitespace-preserving pre/code block with chips" do
+      html = prompt("set -e\nbin/ship_to_main.sh \"{ref}\" --x <y>", :code)
+
+      assert String.starts_with?(html, ~s(<pre class="prompt-code"><code>))
+      assert html =~ @chip_ref
+      assert html =~ "&lt;y&gt;"
+      assert html =~ "set -e\nbin/ship_to_main.sh"
+      refute html =~ "<p>"
+    end
+
+    test ":code does not parse markdown" do
+      html = prompt("**bold** {ref}", :code)
+
+      assert html =~ "**bold**"
+      refute html =~ "<strong>"
+    end
+
+    test "JSON braces, blank braces and capitalised names are not placeholders" do
+      text = ~s(payload {"a": 1} and { } and {Ref})
+
+      refute prompt(text, :markdown) =~ "prompt-placeholder"
+      refute prompt(text, :code) =~ "prompt-placeholder"
+    end
+
+    test "a placeholder inside a link URL stays out of the href and title" do
+      html = prompt("[open](https://x.test/{ref}/y)", :markdown)
+      a = html |> LazyHTML.from_fragment() |> LazyHTML.query("a")
+      [href] = LazyHTML.attribute(a, "href")
+      [title] = LazyHTML.attribute(a, "title")
+
+      assert href =~ "{ref}" or href =~ "%7Bref%7D"
+      refute href =~ "<span"
+      refute title =~ "<span"
+
+      attribute_values = ~r/="[^"]*"/ |> Regex.scan(html) |> List.flatten()
+      refute Enum.any?(attribute_values, &(&1 =~ "prompt-placeholder"))
+      refute html =~ "prompt-placeholder"
+    end
+
+    test ":markdown sanitizes before chipping" do
+      html = prompt("hi <script>alert('x')</script> {ref}", :markdown)
+
+      refute html =~ "<script"
+      refute html =~ "alert('x')"
+      assert html =~ @chip_ref
+    end
+
+    test ":code escapes raw HTML" do
+      html = prompt("<script>alert(1)</script>", :code)
+
+      assert html =~ "&lt;script&gt;"
+      refute html =~ "<script"
+    end
+
+    test "nil and blank render to an empty safe string in both modes" do
+      assert Markdown.to_prompt_html(nil, :markdown) == {:safe, ""}
+      assert Markdown.to_prompt_html(nil, :code) == {:safe, ""}
+      assert Markdown.to_prompt_html("", :markdown) == {:safe, ""}
+      assert Markdown.to_prompt_html("", :code) == {:safe, ""}
+    end
+
+    test "always returns a Phoenix.HTML safe value" do
+      for mode <- [:markdown, :code], text <- ["plain", "# h {ref}", "a <b> {x.y}"] do
+        assert {:safe, html} = Markdown.to_prompt_html(text, mode)
+        assert is_binary(html)
+      end
+    end
+
+    test "to_html/1 never chips placeholders (card path unchanged)" do
+      {:safe, html} = Markdown.to_html("Post to card {ref} now")
+
+      refute html =~ "prompt-placeholder"
+      assert html =~ "{ref}"
+    end
+  end
+
   describe "to_plain/1 (RE279)" do
     test "strips emphasis and inline code markers" do
       assert Markdown.to_plain("**Which scope** should `board` search cover?") ==

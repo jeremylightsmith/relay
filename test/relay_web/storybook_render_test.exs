@@ -15,6 +15,18 @@ defmodule RelayWeb.StorybookRenderTest do
     end
   end
 
+  test "GET /storybook/flow_editor/prompt_preview renders the preview variations (RE459)", %{conn: conn} do
+    html = conn |> get("/storybook/flow_editor/prompt_preview") |> html_response(200)
+    assert html =~ ~s(id="inspector-prompt-preview")
+    assert html =~ ~s(id="inspector-prompt-add")
+    assert html =~ "prompt-placeholder"
+  end
+
+  test "GET /storybook/flow_editor/prompt_sheet renders each sheet variation (RE459)", %{conn: conn} do
+    html = conn |> get("/storybook/flow_editor/prompt_sheet") |> html_response(200)
+    for id <- ~w(read edit read_only shell), do: assert(html =~ "variation_id=#{id}")
+  end
+
   test "17. GET /storybook/template_picker_components/template_picker renders the picker (RE442)", %{conn: conn} do
     html = conn |> get("/storybook/template_picker_components/template_picker") |> html_response(200)
     assert html =~ "Start from"

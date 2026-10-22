@@ -206,13 +206,15 @@ defmodule RelayWeb.FlowEditorLiveTest do
     assert has_element?(view, "#inspector-delete-guard", "Referenced by")
   end
 
+  # RE459 scenario 23: the inspector's textarea moved into the Edit sheet.
   test "editing the run prompt in the inspector marks the flow dirty", %{conn: conn, board: board} do
     {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
     view |> element(~s([data-node="implement"])) |> render_click()
+    view |> element("#inspector-prompt-edit") |> render_click()
 
     view
-    |> element("#inspector-node-form")
-    |> render_change(%{"field" => "run", "value" => "new prompt"})
+    |> element("#prompt-sheet-form")
+    |> render_change(%{"key" => "implement", "field" => "run", "value" => "new prompt"})
 
     assert has_element?(view, "#flow-editor-unsaved-bar")
   end
@@ -1204,6 +1206,310 @@ defmodule RelayWeb.FlowEditorLiveTest do
       view |> element(~s([data-node="validate"])) |> render_click()
 
       refute has_element?(view, "#inspector-inline-tag")
+    end
+  end
+
+  describe "long prompts (RE459)" do
+    defp code_editor(conn, board) do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view
+    end
+
+    defp select!(view, key), do: view |> element(~s([data-node="#{key}"])) |> render_click()
+
+    defp open_sheet(view, key, mode) do
+      select!(view, key)
+      view |> element("#inspector-prompt-#{if mode == :edit, do: "edit", else: "expand"}") |> render_click()
+      view
+    end
+
+    defp trimmed(view, sel) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(sel) |> LazyHTML.text() |> String.trim()
+    end
+
+    defp lv_assigns(view), do: :sys.get_state(view.pid).socket.assigns
+
+    defp first_shell_key(view), do: Enum.find(lv_assigns(view).working.nodes, &(&1.type == :shell)).key
+
+    # Scenario 13
+    test "the post node's inspector shows a rendered preview and its count, not a textarea",
+         %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+
+      refute has_element?(view, "#flow-inspector textarea")
+      assert trimmed(view, "#inspector-prompt-count") == "1,880 chars · 9 lines"
+      assert has_element?(view, "#inspector-prompt-preview-body .prompt-placeholder")
+    end
+
+    # Scenario 14
+    test "Expand opens the sheet in Read", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-read")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 14 (the preview box itself)
+    test "clicking the preview box opens the sheet in Read", %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+      view |> element("#inspector-prompt-preview") |> render_click()
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-read")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 15
+    test "Edit opens the sheet in Edit", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+      assert has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 16
+    test "an edit in the sheet dirties the working copy, shows in Read, and Done closes",
+         %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "new prompt {ref}"})
+
+      assert has_element?(view, "#flow-editor-version-chip", "Editing · unsaved")
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+      assert Enum.find(lv_assigns(view).working.nodes, &(&1.key == "post")).run == "new prompt {ref}"
+
+      view |> element("#prompt-sheet-mode-read") |> render_click()
+      assert has_element?(view, "#prompt-sheet-read", "new prompt")
+      assert has_element?(view, "#prompt-sheet-read .prompt-placeholder", "{ref}")
+
+      # Done lives in the Edit footer only, so step back to Edit to reach it.
+      view |> element("#prompt-sheet-mode-edit") |> render_click()
+      view |> element("#prompt-sheet-done") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+      assert trimmed(view, "#inspector-prompt-count") == "16 chars · 1 line"
+    end
+
+    # Scenario 17
+    test "Esc closes the sheet without touching connect mode or the modal", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      render_keydown(view, "close_prompt_sheet", %{"key" => "Escape"})
+
+      refute has_element?(view, "#prompt-sheet")
+      assert lv_assigns(view).connecting == nil
+      assert lv_assigns(view).modal == nil
+    end
+
+    # Scenario 17 (Esc exclusivity: the canvas's cancel_connect binding is off while the sheet is open)
+    test "opening the sheet clears connect mode and the canvas drops its Esc binding",
+         %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+      view |> element("#toolbar-connect-edge") |> render_click()
+      assert has_element?(view, ~s(#flow-editor-canvas[phx-window-keydown="cancel_connect"]))
+
+      render_click(view, "open_prompt_sheet", %{"mode" => "read"})
+
+      assert has_element?(view, "#prompt-sheet")
+      assert lv_assigns(view).connecting == nil
+      refute has_element?(view, "#flow-editor-canvas[phx-window-keydown]")
+    end
+
+    # Scenario 18
+    test "the overlay and ✕ each close the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      view |> element("#prompt-sheet-overlay") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+
+      view |> element("#inspector-prompt-expand") |> render_click()
+      assert has_element?(view, "#prompt-sheet")
+      view |> element("#prompt-sheet-close") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 19
+    test "selecting another node closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      select!(view, "implement")
+
+      refute has_element?(view, "#prompt-sheet")
+      assert has_element?(view, ~s(#inspector-node-name[value="implement"]))
+    end
+
+    # Scenario 20
+    test "Discard closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "changed"})
+
+      view |> element("#flow-editor-discard") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 20
+    test "selecting an edge closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      render_click(view, "select_edge", %{"index" => "0"})
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 21
+    test "a shell node's sheet renders its command as a code block under COMMAND", %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      open_sheet(view, first_shell_key(view), :read)
+      assert has_element?(view, "#prompt-sheet-read pre.prompt-code")
+      assert has_element?(view, "#prompt-sheet-panel header", "COMMAND")
+    end
+
+    # Scenario 22
+    test "Save closes the sheet before the save modal, and the saved version holds the edit",
+         %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "new prompt {ref}"})
+
+      view |> element("#flow-editor-save") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#flow-save-modal")
+
+      view |> element("#flow-save-confirm") |> render_click()
+      saved = Flows.get_flow(board, "code")
+      assert saved.version == 2
+      assert Enum.find(saved.nodes, &(&1.key == "post")).run == "new prompt {ref}"
+    end
+  end
+
+  describe "archived board: read-only prompts (RE459)" do
+    @read_only_flash "This board is archived (read-only)."
+
+    setup %{conn: conn, board: board} do
+      {:ok, board} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      %{board: board, view: view}
+    end
+
+    defp working(view), do: :sys.get_state(view.pid).socket.assigns.working
+
+    defp counts(view) do
+      w = working(view)
+      {length(w.nodes), length(w.edges)}
+    end
+
+    defp post_run(view), do: Enum.find(working(view).nodes, &(&1.key == "post")).run
+
+    defp open_read_only_sheet(view) do
+      view |> element(~s([data-node="post"])) |> render_click()
+      view |> element("#inspector-prompt-expand") |> render_click()
+      view
+    end
+
+    # Scenario 1
+    test "a node is selectable and its inspector is read-only, with no Edit path", %{view: view} do
+      html = view |> element(~s([data-node="post"])) |> render_click()
+
+      assert has_element?(view, "#inspector-node-name[disabled]")
+      assert has_element?(view, "#inspector-delete-node[disabled]")
+      assert has_element?(view, "#inspector-prompt-expand")
+      refute has_element?(view, "#inspector-prompt-edit")
+      refute html =~ "archived (read-only)"
+    end
+
+    # Scenario 2
+    test "Expand opens a READ-ONLY sheet with no mode toggle, Done or textarea", %{view: view} do
+      open_read_only_sheet(view)
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-readonly-badge", "READ-ONLY")
+      refute has_element?(view, "#prompt-sheet-mode-read")
+      refute has_element?(view, "#prompt-sheet-mode-edit")
+      refute has_element?(view, "#prompt-sheet-done")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 3
+    test "opening the sheet in edit mode is refused with the read-only flash", %{view: view} do
+      view |> element(~s([data-node="post"])) |> render_click()
+
+      html = render_click(view, "open_prompt_sheet", %{"mode" => "edit"})
+
+      assert html =~ @read_only_flash
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 4
+    test "switching the open read-only sheet to edit is refused and it stays in read", %{view: view} do
+      open_read_only_sheet(view)
+
+      html = render_click(view, "prompt_sheet_mode", %{"mode" => "edit"})
+
+      assert html =~ @read_only_flash
+      assert :sys.get_state(view.pid).socket.assigns.prompt_sheet == :read
+    end
+
+    # Scenario 5
+    test "Esc closes the read-only sheet", %{view: view} do
+      open_read_only_sheet(view)
+
+      render_keydown(view, "close_prompt_sheet", %{"key" => "Escape"})
+
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 6
+    test "connect, add and delete are still refused and change nothing", %{view: view} do
+      before = counts(view)
+
+      assert render_click(view, "connect_edge", %{}) =~ @read_only_flash
+      assert :sys.get_state(view.pid).socket.assigns.connecting == nil
+      assert render_click(view, "add_node", %{"type" => "agent"}) =~ @read_only_flash
+
+      view |> element(~s([data-node="post"])) |> render_click()
+      assert render_click(view, "delete_selected", %{}) =~ @read_only_flash
+
+      assert counts(view) == before
+    end
+
+    # Scenario 7
+    test "a node field edit is refused and leaves the working copy alone", %{view: view} do
+      before = post_run(view)
+
+      html = render_click(view, "edit_node_field", %{"key" => "post", "field" => "run", "value" => "x"})
+
+      assert html =~ @read_only_flash
+      assert post_run(view) == before
+    end
+
+    # Scenario 8
+    test "an edge is selectable and its inspector controls are disabled", %{view: view} do
+      html = render_click(view, "select_edge", %{"index" => "0"})
+
+      refute html =~ @read_only_flash
+      assert has_element?(view, "#inspector-edge-kind")
+      assert has_element?(view, "#inspector-edge-outcome[disabled]")
+      assert has_element?(view, "#inspector-edge-when[disabled]")
+      refute has_element?(view, "#inspector-delete-edge:not([disabled])")
+    end
+  end
+
+  describe "editable board: the edit-mode refusal only fires when read-only (RE459)" do
+    # Scenario 9
+    test "open_prompt_sheet in edit mode opens the textarea", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="post"])) |> render_click()
+
+      render_click(view, "open_prompt_sheet", %{"mode" => "edit"})
+
+      assert has_element?(view, "#prompt-sheet-textarea")
     end
   end
 end

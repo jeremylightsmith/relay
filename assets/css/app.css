@@ -400,6 +400,40 @@
   padding: 0.3em 0.6em;
 }
 
+/* --- RE459 flow-editor prompt rendering (Relay.Markdown.to_prompt_html/2). A `{placeholder}`
+   token is a violet (AI) chip inline in prose and code; a shell command / gate condition is a
+   verbatim, wrapping code block. --- */
+.prompt-placeholder {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--color-secondary) 12%, var(--color-base-100));
+  color: color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));
+}
+.prompt-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  padding: 12px 14px;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--color-base-200);
+}
+/* The inspector's clamped preview (~12 lines at 12.5px x 1.55). The PromptClamp hook sets
+   data-overflow only when the text overflows, so the fade (the .task-body-clamped mask idiom)
+   never dims a prompt that fits. */
+.prompt-preview {
+  max-height: 228px;
+  overflow: hidden;
+  position: relative;
+}
+.prompt-preview[data-overflow] {
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
+}
+
 /* Rendered images — screenshots posted by agents (comments, spec, plan, AI result) and
    docs-site images. RLY-157: without a cap a 2560px screenshot renders at its natural
    width and blows out the card drawer column. `cursor: zoom-in` is the ONLY visual hint

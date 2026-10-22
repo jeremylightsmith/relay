@@ -320,6 +320,13 @@ sharing behavior.
   node emphasises its incident edges client-side via the
   `FlowFocus` hook (`assets/js/hooks/flow_focus.js`, reading the graph's `data-adjacency`); a
   selected node gets the same emphasis server-side (RE333).
+  A work node's main field (agent RUN PROMPT, shell COMMAND, gate CONDITION) shows in the
+  inspector as a rendered, clamped preview (`Relay.Markdown.to_prompt_html/2`, `{placeholder}`
+  chips, the `PromptClamp` hook's fade) whose Expand opens `FlowEditorComponents.prompt_sheet/1`,
+  a full-height right-edge Read/Edit sheet over the selected node (`@prompt_sheet`, Edit posting
+  the same `edit_node_field`) (RE459). On an archived board the editor graph stays selectable
+  (`interactive?` is always on) so the read-only inspector and Expand-to-read are reachable, while
+  every mutating event — and the sheet's Edit mode — is refused with the read-only flash.
   **Requirements (RLY-182):** `Flows.node_requirements/1` is a pure graph read — the agent
   and skill names a flow's nodes name, with no runner knowledge. It lives here rather than
   in Runs because `Flows` may not depend on `Runs` (a boundary cycle the compiler rejects);

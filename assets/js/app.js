@@ -40,6 +40,7 @@ import SubmitOnDatalistPick from "./hooks/submit_on_datalist_pick"
 import FlowFocus from "./hooks/flow_focus"
 import CodeBlockCopy from "./hooks/code_block_copy"
 import BrowserNotify from "./hooks/browser_notify"
+import PromptClamp from "./hooks/prompt_clamp"
 import initImageLightbox from "./image_lightbox"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
@@ -71,6 +72,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     FlowFocus,
     CodeBlockCopy,
     BrowserNotify,
+    PromptClamp,
   },
 })
 

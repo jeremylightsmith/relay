@@ -1,12 +1,14 @@
 defmodule Relay.Markdown do
   @moduledoc """
-  Renders markdown to sanitized HTML for two audiences:
+  Renders markdown to sanitized HTML for three audiences:
 
     * card long-form markdown (`description`, `spec`, `plan`) for display in the card drawer —
       `to_html/1`.
     * the public docs site (`priv/docs/*.md`) — `to_docs_html/1`, which additionally adds
       heading ids and GitHub-style alert callouts so pages can carry an "on this page" table of
       contents; `table_of_contents/1` extracts that TOC from the raw markdown.
+    * a flow node's prompt in the flow editor — `to_prompt_html/2`, which renders it as card
+      markdown or as an escaped code block and chips its `{placeholder}` tokens (RE459).
 
   MDEx renders the markdown with raw-HTML pass-through (`unsafe: true`) and then
   runs its HTML sanitizer (`MDEx.Document.default_sanitize_options/0`), so any
@@ -33,20 +35,67 @@ defmodule Relay.Markdown do
 
   @card_extension [table: true, autolink: true]
 
-  def to_html(markdown) when is_binary(markdown) do
+  def to_html(markdown) when is_binary(markdown), do: {:safe, card_html(markdown)}
+
+  defp card_html(markdown) do
+    markdown
+    |> MDEx.parse_document!(extension: @card_extension)
+    |> MDEx.Document.update_nodes(MDEx.Link, &decorate_link/1)
+    |> MDEx.to_html!(
+      render: [unsafe: true],
+      extension: @card_extension,
+      sanitize: MDEx.Document.default_sanitize_options()
+    )
+    |> open_web_links_in_new_tab()
+  end
+
+  # The one copy of the flow-prompt placeholder grammar: `{ref}`, `{relay}`, `{prior.detail}`.
+  # A lowercase identifier plus zero or more `.segment`s, so JSON (`{"a": 1}`), `{ }`, `{}` and
+  # `{Ref}` are never mistaken for one.
+  @placeholder ~r/\{[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*\}/
+
+  # One whole tag of ammonia's serialized output. Attribute values are always double-quoted
+  # with `"` escaped inside them, but may hold a raw `>` (a URL in `title`), so a quoted value
+  # is consumed as a unit. Text runs escape `<` and `>`, so a `<` can only open a tag.
+  @html_tag ~r/<[^>"]*(?:"[^"]*"[^>"]*)*>/
+
+  @doc """
+  Render a flow node's prompt (an agent prompt, a shell command, a gate condition) for the
+  flow editor, with every `{placeholder}` token wrapped in a
+  `<span class="prompt-placeholder">` chip.
+
+    * `:markdown` — exactly `to_html/1`'s sanitized output, then chipped.
+    * `:code` — the text HTML-escaped verbatim inside `<pre class="prompt-code"><code>`
+      (never parsed as markdown), then chipped.
+
+  Chips are added *after* sanitizing, and only to text between tags — never inside an
+  attribute such as a link's `href` or `title` — so the chip markup is ours alone. `nil` and
+  `""` render to an empty (safe) string in both modes.
+  """
+  @spec to_prompt_html(String.t() | nil, :markdown | :code) :: Phoenix.HTML.safe()
+  def to_prompt_html(text, mode) when text in [nil, ""] and mode in [:markdown, :code], do: {:safe, ""}
+
+  def to_prompt_html(text, :markdown) when is_binary(text) do
     html =
-      markdown
-      |> MDEx.parse_document!(extension: @card_extension)
-      |> MDEx.Document.update_nodes(MDEx.Link, &decorate_link/1)
-      |> MDEx.to_html!(
-        render: [unsafe: true],
-        extension: @card_extension,
-        sanitize: MDEx.Document.default_sanitize_options()
-      )
-      |> open_web_links_in_new_tab()
+      text
+      |> card_html()
+      |> String.split(@html_tag, include_captures: true)
+      |> Enum.map_join(&chip_text_run/1)
 
     {:safe, html}
   end
+
+  def to_prompt_html(text, :code) when is_binary(text) do
+    {:safe, escaped} = Phoenix.HTML.html_escape(text)
+    escaped = escaped |> IO.iodata_to_binary() |> chip_placeholders()
+
+    {:safe, ~s(<pre class="prompt-code"><code>) <> escaped <> "</code></pre>"}
+  end
+
+  defp chip_text_run("<" <> _ = tag), do: tag
+  defp chip_text_run(text), do: chip_placeholders(text)
+
+  defp chip_placeholders(text), do: Regex.replace(@placeholder, text, ~s(<span class="prompt-placeholder">\\0</span>))
 
   @doc """
   The GitHub tree URL for `branch` when `pr_url` is a GitHub pull request URL, else `nil`.

@@ -164,28 +164,7 @@ defmodule RelayWeb.FlowEditorComponents do
       <.node_header node={@node} referenced_count={@referenced_count} read_only?={@read_only?} />
 
       <div style="padding:16px 18px;display:flex;flex-direction:column;gap:18px;">
-        <div style="display:flex;flex-direction:column;gap:7px;">
-          <%!-- RE442: an agent node with no subagent runs its prompt as written — the template
-          flows' "no skills" shape — so say so rather than leave SUBAGENT reading as unset. --%>
-          <div class="flex items-center gap-2">
-            <.meta_label>
-              {main_label(@node.type)}
-            </.meta_label>
-            <.inline_prompt_tag
-              :if={Schemas.Flow.Node.inline_prompt?(@node)}
-              id="inspector-inline-tag"
-            />
-          </div>
-          <form id="inspector-node-form" phx-change="edit_node_field">
-            <input type="hidden" name="key" value={@node.key} />
-            <input type="hidden" name="field" value="run" />
-            <textarea
-              name="value"
-              disabled={@read_only?}
-              style="width:100%;border:1px solid var(--color-field-border);background:var(--color-base-100);border-radius:8px;padding:10px 11px;font-size:12px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 85%, transparent);font-family:ui-monospace,monospace;white-space:pre-wrap;min-height:96px;"
-            >{@node.run}</textarea>
-          </form>
-        </div>
+        <.prompt_preview node={@node} read_only?={@read_only?} />
 
         <%!-- Which subagent this node dispatches to (`.claude/agents/<name>.md`); blank means the
         default agent runs the inline prompt. Empty submit clears it back to nil (cast_node_value). --%>
@@ -460,6 +439,287 @@ defmodule RelayWeb.FlowEditorComponents do
     </div>
     """
   end
+
+  # ---- main text field: inspector preview + full-height Read/Edit sheet (RE459) ----
+
+  @doc """
+  The inspector's main text field (RUN PROMPT / COMMAND / CONDITION) as a rendered, clamped
+  preview: a count, `⤢ Expand` (opens `prompt_sheet/1` in Read) and, unless read-only,
+  `✎ Edit` (opens it in Edit). An empty field is a dashed "Add a …" box when editable and a
+  muted "No …" line when read-only. The `PromptClamp` hook marks the body `data-overflow` so
+  the fade shows only when the text actually overflows the clamp.
+  """
+  attr :node, :map, required: true, doc: "a work node (`key`, `type`, `run`)"
+  attr :read_only?, :boolean, default: false
+
+  def prompt_preview(assigns) do
+    assigns = assign(assigns, :empty?, assigns.node.run in [nil, ""])
+
+    ~H"""
+    <div style="display:flex;flex-direction:column;gap:7px;">
+      <%!-- RE442: an agent node with no subagent runs its prompt as written — the template
+      flows' "no skills" shape — so say so rather than leave SUBAGENT reading as unset. --%>
+      <div class="flex items-center gap-2">
+        <.meta_label>
+          {main_label(@node.type)}
+        </.meta_label>
+        <.inline_prompt_tag
+          :if={Schemas.Flow.Node.inline_prompt?(@node)}
+          id="inspector-inline-tag"
+        />
+        <span class="flex-1"></span>
+        <span
+          :if={!@empty?}
+          id="inspector-prompt-count"
+          class="text-base-content/60 font-mono"
+          style="font-size:10.5px;"
+        >
+          {prompt_count(@node.run)}
+        </span>
+      </div>
+
+      <%= cond do %>
+        <% !@empty? -> %>
+          <%!-- A div, not a <button>: block markdown can't legally sit inside a button. --%>
+          <div
+            id="inspector-prompt-preview"
+            role="button"
+            tabindex="0"
+            phx-click="open_prompt_sheet"
+            phx-value-mode="read"
+            title="Open the full prompt"
+            class="text-left border border-base-300 rounded-lg hover:border-base-content/30 bg-base-100 cursor-zoom-in"
+            style="padding:10px 12px;"
+          >
+            <div
+              id="inspector-prompt-preview-body"
+              phx-hook="PromptClamp"
+              class={["prompt-preview", prompt_mode(@node.type) == :markdown && "md"]}
+              style="font-size:12.5px;"
+            >
+              {Relay.Markdown.to_prompt_html(@node.run, prompt_mode(@node.type))}
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              id="inspector-prompt-expand"
+              type="button"
+              phx-click="open_prompt_sheet"
+              phx-value-mode="read"
+              class="btn btn-sm btn-outline flex-1"
+            >
+              ⤢ Expand
+            </button>
+            <button
+              :if={!@read_only?}
+              id="inspector-prompt-edit"
+              type="button"
+              phx-click="open_prompt_sheet"
+              phx-value-mode="edit"
+              class="btn btn-sm btn-ghost"
+            >
+              ✎ Edit
+            </button>
+          </div>
+        <% !@read_only? -> %>
+          <div
+            id="inspector-prompt-add"
+            role="button"
+            tabindex="0"
+            phx-click="open_prompt_sheet"
+            phx-value-mode="edit"
+            class="border border-dashed border-base-300 rounded-lg hover:border-base-content/30 text-base-content/60 cursor-pointer"
+            style="padding:10px 12px;font-size:12.5px;"
+          >
+            Add a {main_noun(@node.type)}…
+          </div>
+        <% true -> %>
+          <span id="inspector-prompt-empty" class="text-base-content/60" style="font-size:12.5px;">
+            No {main_noun(@node.type)}
+          </span>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  The full-height, right-edge Read/Edit sheet for a work node's main text field — the card
+  drawer's `drawer drawer-end` pattern, not a centered dialog. Read renders the text with
+  `Relay.Markdown.to_prompt_html/2`; Edit is a raw textarea posting the existing
+  `edit_node_field` event, so edits land in the working copy exactly as the inspector's did.
+  A read-only sheet always renders Read.
+  """
+  attr :node, :map, required: true, doc: "the working-copy node (`key`, `type`, `run`)"
+  attr :mode, :atom, values: [:read, :edit], required: true
+  attr :read_only?, :boolean, default: false
+
+  def prompt_sheet(assigns) do
+    assigns =
+      assigns
+      |> assign(:mode, if(assigns.read_only?, do: :read, else: assigns.mode))
+      |> assign(:markdown?, prompt_mode(assigns.node.type) == :markdown)
+
+    ~H"""
+    <div
+      id="prompt-sheet"
+      class="drawer drawer-end"
+      phx-window-keydown="close_prompt_sheet"
+      phx-key="escape"
+    >
+      <input
+        id="prompt-sheet-toggle"
+        type="checkbox"
+        class="drawer-toggle"
+        checked
+        tabindex="-1"
+        aria-hidden="true"
+      />
+      <div class="drawer-side z-40">
+        <div id="prompt-sheet-overlay" class="drawer-overlay" phx-click="close_prompt_sheet">
+          <span class="sr-only">Close</span>
+        </div>
+        <aside
+          id="prompt-sheet-panel"
+          class="drawer-panel flex h-dvh w-full flex-col overflow-hidden bg-base-100 shadow-xl border-l border-base-300 md:w-[min(1180px,90vw)]"
+        >
+          <header class="flex items-center gap-3 flex-wrap border-b border-base-300 p-5">
+            <span style={type_badge_style(@node.type)}>{type_tag(@node.type)}</span>
+            <span class="font-semibold" style="font-size:16px;">{@node.key}</span>
+            <.meta_label>{main_label(@node.type)}</.meta_label>
+            <span class="flex-1"></span>
+            <span
+              id="prompt-sheet-count"
+              class="font-mono text-base-content/60"
+              style="font-size:11px;"
+            >
+              {prompt_count(@node.run)}
+            </span>
+            <div :if={!@read_only?} class="join">
+              <button
+                id="prompt-sheet-mode-read"
+                type="button"
+                phx-click="prompt_sheet_mode"
+                phx-value-mode="read"
+                class={["join-item btn btn-sm", @mode == :read && "btn-active"]}
+              >
+                Read
+              </button>
+              <button
+                id="prompt-sheet-mode-edit"
+                type="button"
+                phx-click="prompt_sheet_mode"
+                phx-value-mode="edit"
+                class={["join-item btn btn-sm", @mode == :edit && "btn-active"]}
+              >
+                Edit
+              </button>
+            </div>
+            <span
+              :if={@read_only?}
+              id="prompt-sheet-readonly-badge"
+              class="badge badge-sm badge-ghost font-mono"
+            >
+              READ-ONLY
+            </span>
+            <button
+              id="prompt-sheet-close"
+              type="button"
+              phx-click="close_prompt_sheet"
+              aria-label="Close"
+              title="Close (Esc)"
+              class="btn btn-sm btn-ghost btn-circle"
+            >
+              ✕
+            </button>
+          </header>
+
+          <div
+            :if={@mode == :read}
+            id="prompt-sheet-read"
+            style="flex:1;overflow-y:auto;padding:32px 28px;"
+          >
+            <div
+              class={@markdown? && "md"}
+              style="max-width:720px;margin:0 auto;font-size:14px;line-height:1.65;"
+            >
+              {Relay.Markdown.to_prompt_html(@node.run, prompt_mode(@node.type))}
+            </div>
+          </div>
+
+          <div
+            :if={@mode == :edit}
+            style="flex:1;display:flex;flex-direction:column;gap:10px;padding:20px 28px;min-height:0;"
+          >
+            <form
+              id="prompt-sheet-form"
+              phx-change="edit_node_field"
+              style="flex:1;display:flex;flex-direction:column;min-height:0;"
+            >
+              <input type="hidden" name="key" value={@node.key} />
+              <input type="hidden" name="field" value="run" />
+              <textarea
+                id="prompt-sheet-textarea"
+                name="value"
+                class="textarea w-full"
+                spellcheck="false"
+                style="flex:1;resize:none;font-family:ui-monospace,monospace;font-size:13px;line-height:1.6;padding:14px 16px;"
+              >{@node.run}</textarea>
+            </form>
+          </div>
+
+          <footer
+            class="flex items-center gap-3 flex-wrap bg-base-200"
+            style="padding:12px 28px;border-top:1px solid var(--color-base-300);font-size:12px;"
+          >
+            <span :if={@mode == :read} class="text-base-content/65">
+              Placeholders like <span class="prompt-placeholder">{"{ref}"}</span>
+              are filled in at run time.
+            </span>
+            <span :if={@mode == :edit} class="text-base-content/65">
+              {if @markdown?, do: "Markdown. "}Edits go to the working copy, same as the inspector —
+              <strong>Save</strong>
+              publishes the flow.
+            </span>
+            <span class="flex-1"></span>
+            <span class="font-mono text-base-content/50" style="font-size:11px;">Esc to close</span>
+            <button
+              :if={@mode == :edit}
+              id="prompt-sheet-done"
+              type="button"
+              phx-click="close_prompt_sheet"
+              class="btn btn-sm btn-primary"
+            >
+              Done
+            </button>
+          </footer>
+        </aside>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The main field's count read-out, e.g. `"1,880 chars · 9 lines"` — the singular at exactly 1,
+  and `"0 chars · 0 lines"` for `nil` / `""`. Shared by the inspector and the sheet header.
+  """
+  @spec prompt_count(String.t() | nil) :: String.t()
+  def prompt_count(text) when text in [nil, ""], do: "0 chars · 0 lines"
+
+  def prompt_count(text) when is_binary(text) do
+    chars = String.length(text)
+    lines = length(:binary.matches(text, "\n")) + 1
+    "#{thousands(chars)} #{plural(chars, "char")} · #{lines} #{plural(lines, "line")}"
+  end
+
+  @doc "How a node type's main field renders: an agent prompt is markdown, everything else code."
+  @spec prompt_mode(atom()) :: :markdown | :code
+  def prompt_mode(:agent), do: :markdown
+  def prompt_mode(_type), do: :code
+
+  defp thousands(n), do: n |> Integer.to_string() |> String.replace(~r/\B(?=(\d{3})+(?!\d))/, ",")
+
+  defp plural(1, noun), do: noun
+  defp plural(_n, noun), do: noun <> "s"
 
   # ---- shared node header (type badge, Delete node, NODE NAME, delete guard) ----
 
@@ -1180,6 +1440,11 @@ defmodule RelayWeb.FlowEditorComponents do
   defp main_label(:shell), do: "COMMAND"
   defp main_label(:gate), do: "CONDITION"
   defp main_label(_), do: "RUN PROMPT"
+
+  # The empty-field noun ("Add a …" / "No …"), beside main_label/1.
+  defp main_noun(:shell), do: "command"
+  defp main_noun(:gate), do: "condition"
+  defp main_noun(_), do: "prompt"
 
   # Omitted entirely when the node declares neither, so today's undeclared flows look unchanged.
   defp contract?(node), do: node.reads != [] or node.writes != []
