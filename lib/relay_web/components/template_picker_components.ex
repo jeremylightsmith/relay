@@ -161,7 +161,10 @@ defmodule RelayWeb.TemplatePickerComponents do
               Start from
             </div>
 
-            <div id={"#{@id}-grid"} class="grid gap-4 px-5 pb-4 grid-cols-1 md:grid-cols-3">
+            <div
+              id={"#{@id}-grid"}
+              class={["grid gap-4 px-5 pb-4 grid-cols-1", md_columns(length(@templates)).grid]}
+            >
               <.template_card
                 :for={t <- @templates}
                 template={t}
@@ -169,6 +172,7 @@ defmodule RelayWeb.TemplatePickerComponents do
                 example={Map.get(@examples, t.slug)}
               />
               <.copy_card
+                span={md_columns(length(@templates)).span}
                 selected?={@copy?}
                 sources={@copy_sources}
                 source={@source}
@@ -392,6 +396,11 @@ defmodule RelayWeb.TemplatePickerComponents do
     """
   end
 
+  # Tailwind only ships classes it sees spelled out, so each column count is written in full.
+  defp md_columns(2), do: %{grid: "md:grid-cols-2", span: "md:col-span-2"}
+  defp md_columns(_count), do: %{grid: "md:grid-cols-3", span: "md:col-span-3"}
+
+  attr :span, :string, required: true, doc: "the `md:col-span-*` class spanning the template row"
   attr :selected?, :boolean, required: true
   attr :sources, :list, required: true
   attr :source, :map, default: nil, doc: "the selected source row, or nil"
@@ -404,7 +413,8 @@ defmodule RelayWeb.TemplatePickerComponents do
     <div
       id="template-card-copy"
       class={[
-        "md:col-span-3 flex flex-col md:flex-row gap-4 rounded-[14px] bg-base-100 p-4 cursor-pointer",
+        @span,
+        "flex flex-col md:flex-row gap-4 rounded-[14px] bg-base-100 p-4 cursor-pointer",
         if(@selected?, do: "border-2 border-primary", else: "border border-base-300 m-px")
       ]}
       style={

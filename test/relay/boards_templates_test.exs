@@ -49,6 +49,7 @@ defmodule Relay.BoardsTemplatesTest do
       assert Templates.get("three-brain").warning == "Needs runners signed in to Claude Code, Codex and Gemini CLI"
       assert Templates.get("nope") == nil
       assert Boards.templates() == Templates.all()
+      assert Enum.map(Boards.offered_templates(), & &1.slug) == ["bare-minimum", "design-led"]
     end
 
     # Scenario 3

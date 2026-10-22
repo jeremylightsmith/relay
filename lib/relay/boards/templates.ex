@@ -40,6 +40,8 @@ defmodule Relay.Boards.Templates do
 
   @templates_dir Path.expand("../../../docs/designs/templates", __DIR__)
   @slugs ~w(bare-minimum design-led three-brain)
+  # Hidden from "New board" for now; still seeded as a public example and creatable by slug.
+  @not_offered ~w(three-brain)
 
   for slug <- @slugs do
     @external_resource Path.join(@templates_dir, "#{slug}.json")
@@ -92,6 +94,10 @@ defmodule Relay.Boards.Templates do
   @doc "Every template, in `slugs/0` order."
   @spec all() :: [template()]
   def all, do: @all
+
+  @doc "The templates \"New board\" offers, in `slugs/0` order: every template but `@not_offered`."
+  @spec offered() :: [template()]
+  def offered, do: Enum.reject(@all, &(&1.slug in @not_offered))
 
   @doc "The template with `slug`, or nil."
   @spec get(String.t()) :: template() | nil

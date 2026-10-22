@@ -26,6 +26,8 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert "grid-cols-1" in grid
     assert "md:grid-cols-3" in grid
 
+    assert "md:col-span-3" in classes(doc, "#template-card-copy")
+
     assert "sm:max-w-[1080px]" in classes(doc, "#template-picker-panel")
 
     create = classes(doc, "#template-picker-create")
@@ -48,6 +50,21 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert "border-base-300" in unselected
     assert "m-px" in unselected
     refute "border-primary" in unselected
+  end
+
+  test "two templates stretch across two columns, the copy card spanning both" do
+    doc =
+      (&TemplatePickerComponents.template_picker/1)
+      |> render_component(templates: Relay.Boards.offered_templates(), selected: "bare-minimum")
+      |> LazyHTML.from_fragment()
+
+    grid = classes(doc, "#template-picker-grid")
+    assert "md:grid-cols-2" in grid
+    refute "md:grid-cols-3" in grid
+
+    copy = classes(doc, "#template-card-copy")
+    assert "md:col-span-2" in copy
+    refute "md:col-span-3" in copy
   end
 
   test "each radio posts its slug under the name template" do

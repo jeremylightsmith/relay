@@ -1,6 +1,6 @@
 defmodule RelayWeb.BoardsLiveTemplatePickerTest do
   @moduledoc """
-  RE442: "New board" on `/boards` opens a three-template picker instead of creating Relay's
+  RE442: "New board" on `/boards` opens a template picker instead of creating Relay's
   fixed board, and creates a board from whichever template is chosen — RE455: under the board
   name and card key typed at the top of the picker.
   """
@@ -29,7 +29,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     view
   end
 
-  # The three template cards; RE447's 4th card (`#template-card-copy`) is a copy option, not a
+  # The template cards; RE447's 4th card (`#template-card-copy`) is a copy option, not a
   # template.
   @template_cards ~s{#template-picker [id^="template-card-"]:not(#template-card-copy)}
 
@@ -53,7 +53,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.count()
   end
 
-  test "1. the top-bar New board opens the picker on three cards, Bare minimum selected", %{conn: conn} do
+  test "1. the top-bar New board opens the picker on the offered cards, Bare minimum selected", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/boards")
     refute has_element?(view, "#template-picker")
 
@@ -63,8 +63,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
     assert card_ids(view) == [
              "template-card-bare-minimum",
-             "template-card-design-led",
-             "template-card-three-brain"
+             "template-card-design-led"
            ]
 
     assert has_element?(view, "#template-radio-bare-minimum[checked]")
@@ -79,7 +78,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     view |> element("#new-board-button") |> render_click()
 
     assert has_element?(view, "#template-picker")
-    assert view |> card_ids() |> length() == 3
+    assert view |> card_ids() |> length() == 2
     assert has_element?(view, "#template-radio-bare-minimum[checked]")
     assert Repo.aggregate(Board, :count) == before
   end
@@ -87,25 +86,22 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
   test "3. selecting a template relabels the button and moves the selected border", %{conn: conn} do
     view = open_picker(conn)
 
-    view |> element("#template-picker-form") |> render_change(%{"template" => "three-brain"})
+    view |> element("#template-picker-form") |> render_change(%{"template" => "design-led"})
 
     assert has_element?(view, "#template-picker-create .pending-idle", "Create board")
-    assert has_element?(view, "#template-card-three-brain.border-primary")
+    assert has_element?(view, "#template-card-design-led.border-primary")
     refute has_element?(view, "#template-card-bare-minimum.border-primary")
-    assert has_element?(view, "#template-radio-three-brain[checked]")
+    assert has_element?(view, "#template-radio-design-led[checked]")
   end
 
-  test "4. only Three-brain carries a warning", %{conn: conn} do
+  test "4. Three-brain is hidden for now: no card, and ?template=three-brain leaves the picker closed",
+       %{conn: conn} do
     view = open_picker(conn)
+    refute has_element?(view, "#template-card-three-brain")
+    refute has_element?(view, ~s([id^="template-warning-"]))
 
-    assert has_element?(
-             view,
-             "#template-warning-three-brain",
-             "Needs runners signed in to Claude Code, Codex and Gemini CLI"
-           )
-
-    refute has_element?(view, "#template-warning-bare-minimum")
-    refute has_element?(view, "#template-warning-design-led")
+    {:ok, view, _html} = live(conn, ~p"/boards?template=three-brain")
+    refute has_element?(view, "#template-picker")
   end
 
   test "5. (RE455 14) submitting creates the named, keyed board from the template and opens it (RE443: the setup wizard lives there)",
@@ -165,14 +161,13 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     refute picker_text =~ ~r/wip/i
     refute picker_text =~ ~r/default board/i
 
-    for template <- Boards.templates() do
+    for template <- Boards.offered_templates() do
       names = texts(view, "#template-stages-#{template.slug} > span:not(.template-arrow)")
       assert names == Enum.map(template.stages, & &1.name)
       refute Enum.any?(names, &String.contains?(&1, ":"))
     end
 
     assert count(view, "#template-stages-design-led .template-review-marker") == 2
-    assert count(view, "#template-stages-three-brain .template-review-marker") == 1
     assert count(view, "#template-stages-bare-minimum .template-review-marker") == 0
 
     assert has_element?(view, ~s(#template-stages-design-led .template-review-marker[title="has a Review sub-lane"]))
@@ -183,7 +178,6 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
 
     assert texts(view, "#template-facts-bare-minimum > span") == ["6 stages", "2 flows", "0 skills"]
     assert texts(view, "#template-facts-design-led > span") == ["8 stages", "3 flows", "0 skills"]
-    assert texts(view, "#template-facts-three-brain > span") == ["6 stages", "2 flows", "0 skills"]
   end
 
   test "11. with no seeded examples, no card links to a public example (RE444)", %{conn: conn} do
@@ -207,7 +201,6 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
     assert link |> LazyHTML.query(".sr-only") |> LazyHTML.text() |> String.trim() == "(opens in a new window)"
 
     assert has_element?(view, "#template-example-design-led")
-    assert has_element?(view, "#template-example-three-brain")
   end
 
   describe "RE455: board name + card key up front" do
@@ -344,7 +337,7 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       assert has_element?(view, "#copy-source-#{acme.slug}")
       refute has_element?(view, "#copy-source-#{secret.slug}")
 
-      for template <- Boards.templates() do
+      for template <- Boards.offered_templates() do
         assert has_element?(view, "#template-card-#{template.slug}")
       end
     end

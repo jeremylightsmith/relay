@@ -217,7 +217,7 @@ defmodule RelayWeb.BoardsLive do
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     boards = load_boards(user)
-    templates = Boards.templates()
+    templates = Boards.offered_templates()
     copy_sources = Boards.copy_sources(user)
 
     {:ok,

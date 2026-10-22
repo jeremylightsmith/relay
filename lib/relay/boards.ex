@@ -372,9 +372,13 @@ defmodule Relay.Boards do
     end
   end
 
-  @doc "The starter board templates \"New board\" offers, in picker order (`Relay.Boards.Templates.all/0`)."
+  @doc "Every starter board template, in picker order (`Relay.Boards.Templates.all/0`)."
   @spec templates() :: [Templates.template()]
   def templates, do: Templates.all()
+
+  @doc "The starter board templates \"New board\" offers, in picker order (`Relay.Boards.Templates.offered/0`)."
+  @spec offered_templates() :: [Templates.template()]
+  def offered_templates, do: Templates.offered()
 
   defp fetch_template(attrs) do
     case Map.get(attrs, :template) || Map.get(attrs, "template") do
