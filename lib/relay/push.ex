@@ -28,13 +28,13 @@ defmodule Relay.Push do
 
   # The alert sound, by filename. It must ship in the iOS app bundle (the Runner
   # target's Copy Bundle Resources); otherwise iOS plays the default sound.
-  @sound "jobs_done.caf"
+  @sound "keys_jingle.caf"
 
   @doc "The notification sound file every push names (bundled in the iOS app)."
   def sound, do: @sound
 
-  @doc "The web-playable copy of the same horn, served by `Plug.Static` (RE399)."
-  def web_sound_path, do: "/sounds/jobs_done.mp3"
+  @doc "The web-playable copy of the same sound, served by `Plug.Static` (RE399)."
+  def web_sound_path, do: "/sounds/keys_jingle.mp3"
 
   @notification_statuses Card.awaiting_human_statuses()
 

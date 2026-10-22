@@ -47,7 +47,7 @@ defmodule Relay.Push.TriggerTest do
       assert payload["aps"]["alert"]["body"] == "#{board.key}#{card.ref_number}: #{card.title}"
       assert payload["card_ref"] == "#{board.key}#{card.ref_number}"
       assert payload["board_slug"] == board.slug
-      assert payload["aps"]["sound"] == "jobs_done.caf"
+      assert payload["aps"]["sound"] == "keys_jingle.caf"
       assert payload["aps"]["badge"] == 1
     end
 
