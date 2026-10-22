@@ -513,7 +513,8 @@ through two more board-key routes on `RelayWeb.Api.SetupController`, rendered by
 pull-only 5.6 check), the template, the onboarding LLM (`llm`: `cli`, `harness`, `label`,
 `pointer_file`, `skill_dir`, `skill_path` — pinned as `setup.llm_keys` in the runner contract
 fixture, beside RE457's `setup.pointer_line` and `setup.runner_config_defaults`), `current_id` / `current_sub_id` / `current`
-(`Relay.Setup.reportable_id/1`, the one step a report may move), `first_flow_stage`, the
+(`Relay.Setup.reportable_id/1`, the one step a report may move), `first_flow_stage`, `first_card_stage` (the
+column that flow pulls from, where 5.8's first card goes), the
 position counts, the 5.3 `interview` catalog, the 5.4 `change_decisions` and
 `missing_file_resolutions` (`Relay.Setup.missing_file_resolutions/0`), `referenced_files` (RE447:
 the `.claude/` agent and skill files the board's flows name, with their repo `paths` and `used_by`
@@ -525,7 +526,7 @@ resolves each at the start of 5.4, reporting `missing files k of N resolved`), a
 "error"?, "data"?}` and calls `Relay.Setup.advance/4`, answering the same body. Refusals: `404
 no_checklist` ("no guided setup on this board"), `409 not_current` with the current step in
 `error.current`, `422 invalid` for a bad body. The board also ticks 5.5 (every flow pushed through
-`PUT /api/flows/:key` and enabled) and 5.8 (a card created in the first flow stage) itself. The
+`PUT /api/flows/:key` and enabled) and 5.8 (a card created in `first_card_stage`, or in the first flow stage) itself. The
 wire shape is pinned by the `"setup"` section of `test/fixtures/runner_contract.json`.
 
 The skill reaches those routes only through two `./relay` verbs (v91+). `./relay setup status`

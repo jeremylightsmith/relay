@@ -113,19 +113,28 @@ defmodule Relay.SetupObserveTest do
 
   describe "observe_card_created/1 via create_card/3" do
     # Scenario 15
-    test "a card in the first flow stage finishes 5.8 and step 5; one in Backlog doesn't" do
+    test "a card in the stage the first flow pulls from finishes 5.8 and step 5; one further right doesn't" do
       board = board_on!("5.8")
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Backlog"), %{title: "x"})
+      assert {:ok, _} = Cards.create_card(stage(board, "Implement"), %{title: "x"})
       assert step(board, "5.8").status == :active
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Plan"), %{title: "Show the longest streak"})
+      assert {:ok, _} = Cards.create_card(stage(board, "Backlog"), %{title: "Show the longest streak"})
 
       five_eight = step(board, "5.8")
       assert five_eight.status == :done
-      assert five_eight.evidence == "first card in Plan"
+      assert five_eight.evidence == "first card in Backlog"
       assert step(board, "5").status == :done
       assert step(board, "6").status == :active
+    end
+
+    test "a card in the first flow stage itself still finishes 5.8" do
+      board = board_on!("5.8")
+
+      assert {:ok, _} = Cards.create_card(stage(board, "Plan"), %{title: "Show the longest streak"})
+
+      assert step(board, "5.8").status == :done
+      assert step(board, "5.8").evidence == "first card in Plan"
     end
 
     # Scenario 16

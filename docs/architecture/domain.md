@@ -177,7 +177,7 @@ sharing behavior.
   a stage holds zero or one flows, disabled ones included) and `on_delete: :delete_all`
   (deleting a stage deletes its flow; `runs.flow_id` is nilified, `runs.flow_key` kept).
   Where it **pulls from** (pickup) and **lands on** (drop-off) are never stored: they are worked
-  out from board order (`Schemas.Stage.order_stages/1`) by `Relay.Flows.neighbours/2` — the
+  out from board order (`Schemas.Stage.order_stages/1`) by `Schemas.Stage.neighbours/2` (via `Relay.Flows.neighbours/2`) — the
   stage immediately before it, and the stage immediately after it (its own first substage when it
   has one, else the next main stage), `nil` at either end. `neighbours/1` is the DB convenience
   the engine asks at the moment it needs the answer (drop-off is resolved when the run lands);
@@ -862,7 +862,7 @@ sharing behavior.
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
   `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, current_sub_id,
-  first_flow_stage, position, done_count, finished?, total, closed?, callout, started_at,
+  first_flow_stage, first_card_stage, position, done_count, finished?, total, closed?, callout, started_at,
   finished_at, elapsed_minutes, steps}` (the 7 top-level entries; step 5's in `children`). The
   payoff keys (RE446) come from the rows alone, so `preview_checklist/2` carries them too: `total`
   is the top-level step count (7), `started_at` step 1's `completed_at`, `finished_at` step 7's
@@ -872,7 +872,10 @@ sharing behavior.
   card and its `data["callout_dismissed_at"]` is absent; `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
   unfinished child of that entry (nil when it has none) — derived from finished-ness, so a board
   that reached step 5 before RE445 still reports 5.1 — and `first_flow_stage` the NAME of the
-  lowest-position top-level stage holding a flow. `reportable_id/1` (`current_sub_id ||
+  lowest-position top-level stage holding a flow, and `first_card_stage` the NAME of the stage that
+  flow pulls its cards from (`Schemas.Stage.neighbours/2`, which `Relay.Flows.neighbours/2`
+  delegates to; both are worked out from ONE stages query, also for `list_for_admin/1`).
+  `reportable_id/1` (`current_sub_id ||
   current_id`) is the one step a report may move. `advance/4` (`:waiting | :done | :failed |
   :skipped`, `advance_statuses/0`) moves only that step (`{:error, :not_current | :no_checklist |
   :invalid_status}`) — a parent with children is never advanced directly: activating it activates
@@ -889,7 +892,7 @@ sharing behavior.
   records the key and finishes 5.5 — `"N flows enabled"` — once every board flow has been pushed
   and is enabled, else waits on `"P of N flows pushed"`), and `Relay.Cards` calls
   `observe_card_created/1` after a committed `create_card/3` (while 5.8 is current, a card in
-  `first_flow_stage` or one of its substages finishes 5.8 — `"first card in <stage>"` — and with
+  `first_card_stage`, `first_flow_stage` or one of its substages finishes 5.8 — `"first card in <stage>"` — and with
   it step 5). Both always return `:ok`, so setup state never fails a push or a create. Steps 6
   and 7 are board-observed the same way (RE446): `RelayWeb.Api.NodeJobController.heartbeat/2`
   calls `observe_heartbeat/2` with the authed `Schemas.ApiKey` and the post-upsert
@@ -951,7 +954,7 @@ sharing behavior.
   `data.files`). Steps already past are left alone, so a re-run answers 200 and writes nothing; a
   board with no checklist answers from its default agent's LLM.
   `list_for_admin/0,1` (RE448) returns one progress row per board with a checklist, newest board
-  first, from a constant two queries (steps joined to their board and left-joined to its owner, plus every board's first flow stage, each
+  first, from a constant two queries (steps joined to their board and left-joined to its owner, plus every board's stages, each flagged when it holds a flow, for its first flow and first card stage; each
   checklist built by `preview_checklist/2`): `board_id`, `name`, `slug`, `owner_email`,
   `inserted_at`, `template`, `llm` (step 2's label, nil before), `current` (`id` / `title` /
   `status` / `actor` — step 5's first current sub-step while on step 5, step 7 once finished),

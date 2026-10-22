@@ -144,6 +144,26 @@ defmodule Schemas.Stage do
   def lane_word(:done), do: "Done"
 
   @doc """
+  Where a flow working in stage `stage_id` picks cards up and drops them off (RE429), worked
+  out from board order: `stages` is the board's stages already in `Schemas.Stage.order_stages/1`
+  order, substages included. `pulls_from` is the stage immediately before it, `lands_on` the
+  stage immediately after it — its own first substage (Review before Done) when it has one,
+  otherwise the next main stage. `nil` at either end of the board; both `nil` for a stage id
+  not in the list. Returns the elements passed in (structs or maps), not ids. Pure.
+
+  The ONE source of the pulls-from / lands-on rule (AGENTS.md): `Relay.Flows.neighbours/2`
+  delegates here, and `Relay.Setup` reads where the first flow pulls its cards from.
+  """
+  @spec neighbours(integer(), [t() | map()]) :: %{pulls_from: t() | map() | nil, lands_on: t() | map() | nil}
+  def neighbours(stage_id, stages) when is_list(stages) do
+    case Enum.find_index(stages, &(&1.id == stage_id)) do
+      nil -> %{pulls_from: nil, lands_on: nil}
+      0 -> %{pulls_from: nil, lands_on: Enum.at(stages, 1)}
+      index -> %{pulls_from: Enum.at(stages, index - 1), lands_on: Enum.at(stages, index + 1)}
+    end
+  end
+
+  @doc """
   Orders an in-memory stage list hierarchically: main stages (`parent_id == nil`) by
   `position`, each immediately followed by its substages in `sublane_rank/1` order
   (Review before Done). Children whose parent is not in the list are appended at the end
@@ -151,7 +171,7 @@ defmodule Schemas.Stage do
   with `:id`, `:parent_id`, `:position` and `:type`.
 
   The ONE board-order rule: `Relay.Boards.order_stages/1` delegates here, and
-  `Relay.Flows.neighbours/2` reads a list in this order.
+  `neighbours/2` reads a list in this order.
   """
   @spec order_stages([t() | map()]) :: [t() | map()]
   def order_stages(stages) when is_list(stages) do

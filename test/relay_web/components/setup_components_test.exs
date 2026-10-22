@@ -874,4 +874,30 @@ defmodule RelayWeb.SetupComponentsTest do
       assert squish(only(doc, "#setup-done")) =~ "Need a command again? Open any step below; it stays done."
     end
   end
+
+  describe "step 6 shows its command while current" do
+    defp runner_doc(opts \\ []) do
+      rows = Setup.steps() |> Enum.filter(&(&1.id < "6")) |> Map.new(&{&1.id, :done}) |> Map.put("6", :active)
+      checklist = Setup.preview_checklist(rows, %{template: "Bare minimum", llm: Setup.onboarding_llm("claude-code")})
+
+      (&SetupComponents.setup_checklist/1)
+      |> render_component(Keyword.merge([id: "setup", checklist: checklist], opts))
+      |> LazyHTML.from_fragment()
+    end
+
+    defp runner_nodes(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.to_list()
+
+    test "the current step 6 shows ./relay start in a code row with a copy button" do
+      doc = runner_doc()
+
+      [code] = runner_nodes(doc, "#setup-step-6 #setup-runner-command code")
+      assert code |> LazyHTML.text() |> String.trim() == "./relay start"
+      assert runner_nodes(doc, "#setup-runner-command-copy") != []
+    end
+
+    test "read-only mode shows no runner command" do
+      doc = runner_doc(mode: :read_only)
+      assert runner_nodes(doc, "#setup-runner-command") == []
+    end
+  end
 end

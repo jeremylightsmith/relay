@@ -77,7 +77,17 @@ defmodule Relay.SetupTest do
       checklist = Setup.checklist(board)
       rows = Map.new(rows(board), &{&1.step, &1})
 
-      context = Map.take(checklist, [:board_id, :template, :template_warning, :llm, :first_flow_stage, :key_hint])
+      context =
+        Map.take(checklist, [
+          :board_id,
+          :template,
+          :template_warning,
+          :llm,
+          :first_flow_stage,
+          :first_card_stage,
+          :key_hint
+        ])
+
       assert %{token_prefix: _, last_four: _} = context.key_hint
       assert Setup.preview_checklist(rows, context) == checklist
     end
@@ -420,6 +430,18 @@ defmodule Relay.SetupTest do
 
     test "is nil in a preview unless the context passes it" do
       assert Setup.preview_checklist(%{}, %{llm: Setup.onboarding_llm("claude-code")}).first_flow_stage == nil
+    end
+  end
+
+  describe "first_card_stage" do
+    test "is the stage the first flow pulls its cards from" do
+      assert Setup.checklist(create!("bare-minimum")).first_card_stage == "Backlog"
+      assert Setup.checklist(create!("three-brain")).first_card_stage == "Backlog"
+      assert Setup.checklist(create!("design-led")).first_card_stage == "Next up"
+    end
+
+    test "is nil in a preview unless the context passes it" do
+      assert Setup.preview_checklist(%{}, %{llm: Setup.onboarding_llm("claude-code")}).first_card_stage == nil
     end
   end
 
@@ -1065,7 +1087,7 @@ defmodule Relay.SetupTest do
 
       assert length(Setup.list_for_admin(@now)) == 3
       assert_received {:query, "board_setup_steps"}
-      assert_received {:query, "flows"}
+      assert_received {:query, "stages"}
       refute_received {:query, _}
     end
   end

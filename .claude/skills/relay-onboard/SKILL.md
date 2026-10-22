@@ -59,7 +59,7 @@ Never redo a sub-step that is already `done` or `skipped`. Interrupting is safe 
 running `/relay-onboard` again resumes at the first unmet sub-step.
 
 The status JSON carries what the loop needs: `board`, `connect`, `template`, `llm` (`harness`,
-`label`, `cli`, `skill_dir`, `skill_path`, `pointer_file`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`,
+`label`, `cli`, `skill_dir`, `skill_path`, `pointer_file`), `current_id`, `current_sub_id`, `current`, `first_flow_stage`, `first_card_stage`,
 `done_count`, `finished`, `interview` (`[{id, label, question}]`), `change_decisions`,
 `referenced_files` (`[{kind, name, paths, used_by: [{flow, node}]}]`, the agent and skill files
 the board's flows name), `missing_file_resolutions`, and `steps` (each with `id`, `title`,
@@ -316,10 +316,11 @@ List the cards you made, then report:
 
 Suggest 2–3 small, concrete improvements for this repo (a file or two each), numbered. The
 human picks one or types their own; end with *"Which one? Give me a number, or describe your
-own."* Create it in the board's first flow stage (status
-`first_flow_stage`):
+own."* Create it in the column the board's first flow pulls from (status `first_card_stage`,
+e.g. Backlog, or Next up on a design-led board), not in the flow stage itself, so the flow picks
+it up:
 
-    ./relay create "<title>" --stage <first_flow_stage> --description "<what and why>"
+    ./relay create "<title>" --stage "<first_card_stage>" --description "<what and why>"
 
 Re-read status — the board ticks 5.8 itself when the card lands.
 

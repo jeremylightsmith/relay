@@ -367,6 +367,7 @@
       "current_sub_id",
       "done_count",
       "finished",
+      "first_card_stage",
       "first_flow_stage",
       "interview",
       "llm",

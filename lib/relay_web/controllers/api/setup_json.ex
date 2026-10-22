@@ -28,6 +28,7 @@ defmodule RelayWeb.Api.SetupJSON do
         current_sub_id: checklist.current_sub_id,
         current: Setup.reportable_id(checklist),
         first_flow_stage: checklist.first_flow_stage,
+        first_card_stage: checklist.first_card_stage,
         position: checklist.position,
         done_count: checklist.done_count,
         finished: checklist.finished?,

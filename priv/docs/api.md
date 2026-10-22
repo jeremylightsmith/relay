@@ -672,7 +672,7 @@ curl https://relay.example/api/setup -H "Authorization: Bearer $RELAY_API_KEY"
     "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
              "skill_path": ".claude/skills/relay-onboard/SKILL.md" },
     "current_id": "5", "current_sub_id": "5.1", "current": "5.1",
-    "first_flow_stage": "Plan", "position": 5, "done_count": 4, "finished": false,
+    "first_flow_stage": "Plan", "first_card_stage": "Backlog", "position": 5, "done_count": 4, "finished": false,
     "interview": [{ "id": "done", "label": "Done means", "question": "What does \"done\" mean for a card: …" }, …],
     "change_decisions": ["pending", "asking", "accepted", "rejected", "edited"],
     "missing_file_resolutions": ["stub", "inline", "drop", "path"],

@@ -269,6 +269,12 @@ defmodule RelayWeb.SetupComponents do
           install_command={@install_command}
           board_slug={@board_slug}
         />
+        <.code_row
+          :if={@interactive and @current? and @step.id == Setup.step_id(:runner)}
+          id={"#{@prefix}-runner-command"}
+          text={runner_command()}
+          label="Copy command"
+        />
         <div
           :if={@step.evidence && evidence_glyph(@step.status)}
           class={[

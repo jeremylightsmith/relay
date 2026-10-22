@@ -25,7 +25,8 @@ defmodule Relay.Setup do
   `Relay.Flows` calls `observe_flow_push/2` after a committed flow push (5.5 finishes once every
   board flow has been pushed and is enabled) and `Relay.Cards` calls `observe_card_created/1`
   after a committed create (5.8 finishes on a card in `first_flow_stage`, the top-level stage
-  with the lowest position that holds a flow). Both are no-ops unless that sub-step is current.
+  with the lowest position that holds a flow, or in `first_card_stage`, the stage that flow pulls
+  its cards from). Both are no-ops unless that sub-step is current.
 
   Steps 6 and 7 (RE446) are board-observed too: the runner heartbeat calls `observe_heartbeat/2`
   (step 6, the machine and its harness sign-in) and `Relay.Runs.claim_next_job/4` calls
@@ -131,6 +132,7 @@ defmodule Relay.Setup do
           current_id: String.t() | nil,
           current_sub_id: String.t() | nil,
           first_flow_stage: String.t() | nil,
+          first_card_stage: String.t() | nil,
           position: 1..7,
           done_count: 0..7,
           finished?: boolean(),
@@ -1453,12 +1455,17 @@ defmodule Relay.Setup do
       else: {:waiting, %{evidence: "#{pushed_count} of #{total} flows pushed", data: data}}
   end
 
+  # 5.8's card goes where the first flow pulls from; one created in the first flow stage itself
+  # (or a substage of it) still counts, for a skill copy that predates `first_card_stage`.
   defp first_card_change(board_id, stage_id) do
-    with {first_id, name} <- board_id |> first_flow_stage_query() |> select([_f, s], {s.id, s.name}) |> Repo.one(),
-         true <- stage_id == first_id or Repo.get(Stage, stage_id).parent_id == first_id do
-      {:done, %{evidence: "first card in #{name}"}}
-    else
-      _ -> nil
+    %{flow: flow, card: card, stages: stages} = board_id |> first_stages() |> Map.fetch!(board_id)
+    created = Enum.find(stages, &(&1.id == stage_id))
+
+    cond do
+      is_nil(flow) or is_nil(created) -> nil
+      card && card.id == stage_id -> {:done, %{evidence: "first card in #{card.name}"}}
+      stage_id == flow.id or created.parent_id == flow.id -> {:done, %{evidence: "first card in #{flow.name}"}}
+      true -> nil
     end
   end
 
@@ -1732,7 +1739,7 @@ defmodule Relay.Setup do
   end
 
   defp build({board_id, nil}, rows) do
-    context = board_context(board_id, rows, checklist_llm(board_id, rows), first_flow_stage(board_id))
+    context = board_context(board_id, rows, checklist_llm(board_id, rows), board_first_stages(board_id))
     preview_checklist(rows, Map.put(context, :key_hint, key_hint(board_id, rows)))
   end
 
@@ -1746,8 +1753,7 @@ defmodule Relay.Setup do
   end
 
   # The admin list's build: no per-board key lookup, so no `key_hint`.
-  defp build(board_id, rows, llm, first_flow_stage),
-    do: preview_checklist(rows, board_context(board_id, rows, llm, first_flow_stage))
+  defp build(board_id, rows, llm, firsts), do: preview_checklist(rows, board_context(board_id, rows, llm, firsts))
 
   # Step 3's key, masked: its prefix and last four. nil before a key, or once it was revoked.
   defp key_hint(board_id, %{@key_step => %{data: %{"key_id" => key_id}}}) when not is_nil(key_id) do
@@ -1757,7 +1763,7 @@ defmodule Relay.Setup do
 
   defp key_hint(_board_id, _rows), do: nil
 
-  defp board_context(board_id, board_rows, llm, first_flow_stage) do
+  defp board_context(board_id, board_rows, llm, %{flow: flow, card: card}) do
     created = board_rows[@created_step]
 
     %{
@@ -1765,14 +1771,15 @@ defmodule Relay.Setup do
       template: created && created.data["template"],
       template_warning: created && created.data["template_warning"],
       llm: llm,
-      first_flow_stage: first_flow_stage
+      first_flow_stage: flow && flow.name,
+      first_card_stage: card && card.name
     }
   end
 
   # A connect reads the board's template, LLM and name, and its step 7 for the board-wide evidence.
   defp connect_context(board_id, board_rows) do
     board_id
-    |> board_context(board_rows, checklist_llm(board_id, board_rows), first_flow_stage(board_id))
+    |> board_context(board_rows, checklist_llm(board_id, board_rows), board_first_stages(board_id))
     |> Map.merge(%{
       connect?: true,
       board_name: Repo.one!(from(b in Board, where: b.id == ^board_id, select: b.name)),
@@ -1800,50 +1807,55 @@ defmodule Relay.Setup do
     end)
   end
 
-  # The name of the top-level stage with the lowest position that holds a flow, enabled or not.
-  defp first_flow_stage(board_id) do
-    board_id
-    |> first_flow_stage_query()
-    |> select([_f, s], s.name)
-    |> Repo.one()
-  end
-
   defp admin_rows(groups, now) do
-    stages = first_flow_stages(Enum.map(groups, fn [{_step, board} | _] -> board.board_id end))
+    firsts = first_stages(Enum.map(groups, fn [{_step, board} | _] -> board.board_id end))
 
     Enum.map(groups, fn [{_step, board} | _] = steps ->
-      admin_row(board, Map.new(steps, fn {step, _board} -> {step.step, step} end), stages[board.board_id], now)
+      admin_row(board, Map.new(steps, fn {step, _board} -> {step.step, step} end), firsts[board.board_id], now)
     end)
   end
 
-  # `first_flow_stage/1` for many boards in ONE query: board id => stage name.
-  defp first_flow_stages(board_ids) do
-    from(f in Flow,
-      join: s in Stage,
-      on: s.id == f.stage_id,
-      where: f.board_id in ^board_ids and is_nil(s.parent_id),
-      order_by: [desc: s.position, desc: s.id],
-      select: {f.board_id, s.name}
+  defp board_first_stages(board_id), do: board_id |> first_stages() |> Map.fetch!(board_id)
+
+  # For each board, in ONE query: `flow`, the top-level stage with the lowest position that holds
+  # a flow (enabled or not), and `card`, the stage that flow pulls its cards from
+  # (`Schemas.Stage.neighbours/2`), which is where 5.8's first card goes. Both nil without a flow;
+  # `stages` is the board in order.
+  defp first_stages(board_ids) do
+    board_ids = List.wrap(board_ids)
+    blank = Map.new(board_ids, &{&1, %{flow: nil, card: nil, stages: []}})
+
+    from(s in Stage,
+      left_join: f in Flow,
+      on: f.stage_id == s.id,
+      where: s.board_id in ^board_ids,
+      select: %{
+        id: s.id,
+        board_id: s.board_id,
+        name: s.name,
+        parent_id: s.parent_id,
+        position: s.position,
+        type: s.type,
+        flow?: not is_nil(f.id)
+      }
     )
     |> Repo.all()
-    |> Map.new()
+    |> Enum.group_by(& &1.board_id)
+    |> Enum.reduce(blank, fn {board_id, stages}, acc -> Map.put(acc, board_id, firsts(Stage.order_stages(stages))) end)
   end
 
-  defp first_flow_stage_query(board_id) do
-    from(f in Flow,
-      join: s in Stage,
-      on: s.id == f.stage_id,
-      where: f.board_id == ^board_id and is_nil(s.parent_id),
-      order_by: [asc: s.position, asc: s.id],
-      limit: 1
-    )
+  defp firsts(stages) do
+    case Enum.find(stages, &(&1.flow? and is_nil(&1.parent_id))) do
+      nil -> %{flow: nil, card: nil, stages: stages}
+      flow -> %{flow: flow, card: Stage.neighbours(flow.id, stages).pulls_from, stages: stages}
+    end
   end
 
   # No per-board default-agent lookup (a query per board): before step 2 the placeholders read
   # the default harness's LLM.
-  defp admin_row(board, rows, first_flow_stage, now) do
+  defp admin_row(board, rows, firsts, now) do
     picked = picked_llm(rows)
-    checklist = build(board.board_id, rows, picked || onboarding_llm(Agents.default_harness_key()), first_flow_stage)
+    checklist = build(board.board_id, rows, picked || onboarding_llm(Agents.default_harness_key()), firsts)
     finished? = checklist.finished?
     [first | _] = checklist.steps
 
@@ -1897,7 +1909,7 @@ defmodule Relay.Setup do
   that step's row (a `Schemas.BoardSetupStep`, a map with `:status` and any of its other fields,
   or a bare status atom; a step with no entry is pending) — and `context`, which carries the
   `:template`, `:template_warning` and onboarding `:llm` (one of `onboarding_llms/0`), plus an
-  optional `:board_id`, `:first_flow_stage` and `:key_hint` (`%{token_prefix, last_four}` of step
+  optional `:board_id`, `:first_flow_stage`, `:first_card_stage` and `:key_hint` (`%{token_prefix, last_four}` of step
   3's key; nil when absent). `checklist/1` delegates here; Storybook fixtures call it directly.
 
   A connect (RE446) passes `connect?: true`, the `:board_name` (`%{board}`), the board's step-7
@@ -1951,6 +1963,7 @@ defmodule Relay.Setup do
       current_id: current_id,
       current_sub_id: current_id && current_sub_id(rows, current_id),
       first_flow_stage: context[:first_flow_stage],
+      first_card_stage: context[:first_card_stage],
       position: position(connect?, current, done_count, length(tally)),
       done_count: done_count,
       finished?: is_nil(current),
