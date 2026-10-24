@@ -4,8 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/plan_paused.dart';
 import '../../app/theme.dart';
 import '../../widgets/headered_sheet.dart';
+import '../voice/dictation_text_controller.dart';
 import '../voice/mic_button.dart';
-import '../voice/voice_transcriber.dart';
+import '../voice/voice_engines.dart';
 import 'board_api.dart';
 
 /// The `relayCreateCard` bridge payload (RLY-126 · BOARD-04): which board the
@@ -55,7 +56,7 @@ Future<void> showNewCardSheet(
   BuildContext context,
   CreateCardRequest request, {
   SubmitCreateCard? submit,
-  VoiceTranscriber? transcriber,
+  VoiceEngines? voice,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -66,17 +67,14 @@ Future<void> showNewCardSheet(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
     // HeaderedSheet owns the keyboard inset — no extra padding here.
-    builder: (_) => NewCardSheet(
-      request: request,
-      submit: submit,
-      transcriber: transcriber,
-    ),
+    builder: (_) =>
+        NewCardSheet(request: request, submit: submit, voice: voice),
   );
 }
 
 /// BOARD-04 · Create card, laid out as card mockup "B — primary action in the
 /// sheet header" (RE434): a fixed Cancel | New card | Add header over a
-/// scrolling body of title, uncapped description with the RLY-99 dictation mic,
+/// scrolling body of title, uncapped description with the RE467 dictation mic,
 /// and a STAGE chip row — so a long description never hides Add. The card lands
 /// in the picked stage; the board webview updates by itself via LiveView
 /// realtime.
@@ -85,7 +83,7 @@ class NewCardSheet extends ConsumerStatefulWidget {
     super.key,
     required this.request,
     this.submit,
-    this.transcriber,
+    this.voice,
   });
 
   final CreateCardRequest request;
@@ -93,8 +91,9 @@ class NewCardSheet extends ConsumerStatefulWidget {
   /// Test seam; null → the real [BoardApi] via [boardApiProvider].
   final SubmitCreateCard? submit;
 
-  /// Forwarded to the description [MicButton] (test seam, as in RLY-99 hosts).
-  final VoiceTranscriber? transcriber;
+  /// Forwarded to the description [MicButton] (test seam; null → the
+  /// platform engines).
+  final VoiceEngines? voice;
 
   @override
   ConsumerState<NewCardSheet> createState() => _NewCardSheetState();
@@ -102,7 +101,8 @@ class NewCardSheet extends ConsumerStatefulWidget {
 
 class _NewCardSheetState extends ConsumerState<NewCardSheet> {
   final TextEditingController _title = TextEditingController();
-  final TextEditingController _description = TextEditingController();
+  final DictationTextController _description = DictationTextController();
+  final FocusNode _descriptionFocus = FocusNode();
   late String _stage = widget.request.current;
   bool _submitting = false;
   String? _error;
@@ -113,6 +113,7 @@ class _NewCardSheetState extends ConsumerState<NewCardSheet> {
   void dispose() {
     _title.dispose();
     _description.dispose();
+    _descriptionFocus.dispose();
     super.dispose();
   }
 
@@ -212,6 +213,7 @@ class _NewCardSheetState extends ConsumerState<NewCardSheet> {
                   child: TextField(
                     key: const Key('new_card_description'),
                     controller: _description,
+                    focusNode: _descriptionFocus,
                     minLines: 2,
                     // No cap: the description grows and the body scrolls.
                     maxLines: null,
@@ -228,7 +230,8 @@ class _NewCardSheetState extends ConsumerState<NewCardSheet> {
                   padding: const EdgeInsets.only(top: 4),
                   child: MicButton(
                     controller: _description,
-                    transcriber: widget.transcriber,
+                    focusNode: _descriptionFocus,
+                    voice: widget.voice,
                   ),
                 ),
               ],

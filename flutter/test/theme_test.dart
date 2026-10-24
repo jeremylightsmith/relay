@@ -62,6 +62,27 @@ void main() {
     ); // oklch(0.50 0.14 292)
   });
 
+  test('dictation drafts are relayAILight at 40% alpha (RE467)', () {
+    expect(RelayTheme.relayDictationDraft, const Color(0x66795EC9));
+    expect(
+      RelayTheme.relayDictationDraft.toARGB32() & 0x00FFFFFF,
+      RelayTheme.relayAILight.toARGB32() & 0x00FFFFFF,
+    );
+    expect(RelayTheme.relayDictationDraft.toARGB32() >> 24, 0x66);
+  });
+
+  test('dictation reds and the toolbar background (RE467)', () {
+    // relayReject at 15% — the mockup's bg-error/15 behind the active mic.
+    expect(RelayTheme.relayMicActiveFill, const Color(0x26DB6656));
+    expect(RelayTheme.relayMicActiveBorder, RelayTheme.relayRejectBorder);
+    expect(RelayTheme.relayMicActiveGlyph, RelayTheme.relayReject);
+    expect(RelayTheme.relayDictationStop, RelayTheme.relayReject);
+    // relayReject at 70% — the mockup's bg-error/70 waveform bars.
+    expect(RelayTheme.relayDictationWave, const Color(0xB3DB6656));
+    // daisyUI light base-200, oklch(0.985 0.004 250).
+    expect(RelayTheme.relayDictationToolbarBg, const Color(0xFFF8FAFD));
+  });
+
   test('the NEEDS INPUT pill is the artboard oklch trio, converted', () {
     // INPUT-01's pill (Relay Mobile.dc.html ~line 329) — the same three tokens as the
     // web's #needs-input-panel, so the two surfaces stay recognizably one feature.

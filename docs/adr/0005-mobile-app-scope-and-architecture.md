@@ -61,8 +61,8 @@ refinement of ADR 0001 or a partial supersede is an **open decision** (see below
   direction); work resumes immediately.
 - **Review → approve or reject** — approve to advance, or reject with a reason. Neither is a
   blind tap; both require supporting context first (§4).
-- **Text entry is voice-first** — tap-to-speak, transcribed on-device (Whisper); type if
-  preferred.
+- **Text entry is voice-first** — tap-to-speak, transcribed on-device (Apple
+  SpeechTranscriber / Whisper); type if preferred.
 - **Secondary (supported, not the point):** hand a card to the AI, move a card between
   stages, comment/reply, reply by voice, search, reassign.
 
@@ -78,7 +78,7 @@ Neither extreme: a pure webview wrapper can't push or handle screenshots well; a
 rebuild duplicates the product and doubles every change.
 - **Layer 1 — Native shell (Flutter; iOS-first, Android parked, RLY-103):** push, tab bar & navigation, inbox list,
   approve/reject bar, sheets & in-app browser, screenshot viewer, biometrics/share, voice
-  (Whisper).
+  on-device (Apple SpeechTranscriber / Whisper).
 - **Layer 2 — Web content (reused LiveView):** card body, spec & plan docs, responsive board
   columns, comment threads, live app preview.
 - **Layer 0 — Shared core:** one API & data model, same auth session, realtime sync (web ⇄
@@ -137,8 +137,11 @@ surfaces.
   Layer 1; a webview could not tell Flutter the answer landed (no JS↔native bridge), and
   F3's embed mode is board-scoped, so there is no standalone card-body URL to load.
   (RLY-89, decided at Spec:Review.)
-- **Voice:** **voice-first entry is V1** (not Later), **on-device Whisper** (not OS dictation).
-  (RLY-99)
+- **Voice:** **voice-first entry is V1** (not Later) (RLY-99), as **on-device dictation
+  into the field, with Apple SpeechTranscriber on iOS 26+ and WhisperKit as the fallback,
+  still not OS keyboard dictation (RE467)**. Words stream in at the cursor while the
+  keyboard stays up; a slim toolbar above the keyboard carries the timer and a red stop.
+  RLY-99's record-then-transcribe voice sheet is retired.
 - **@mentions:** don't exist yet; comments-only @mentions is a **separate cross-cutting
   feature** (RLY-82) that unblocks F5's deferred @mention push trigger.
 - **Notification settings:** **skipped for now** — quiet hours rely on **OS Do-Not-Disturb**;
@@ -164,7 +167,7 @@ The hybrid shipped as a Flutter app (`flutter/`, iOS-first). Current state:
 - New-card sheet (RLY-126).
 - Board switcher (RE376 list, RE396 star, RE406 mute).
 - Settings.
-- Voice sheet (on-device Whisper).
+- Voice dictation into the field (keyboard toolbar; Apple SpeechTranscriber on iOS 26+, WhisperKit fallback — RE467).
 
 The board switcher, new-card sheet and settings were added after the card breakdown above;
 they are in-scope native surfaces under this ADR.

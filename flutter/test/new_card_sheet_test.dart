@@ -7,6 +7,10 @@ import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_api.dart';
 import 'package:relay_mobile/features/board/new_card_sheet.dart';
+import 'package:relay_mobile/features/voice/voice_engines.dart';
+import 'package:relay_mobile/features/voice/voice_transcriber.dart';
+
+import 'support/fake_voice_transcriber.dart';
 
 const request = CreateCardRequest(
   board: 'relay',
@@ -86,14 +90,18 @@ Future<void> pumpHost(
   WidgetTester tester, {
   CreateCardRequest req = request,
   SubmitCreateCard? submit,
+  VoiceEngines? voice,
+  List<NavigatorObserver> observers = const [],
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       child: MaterialApp(
+        navigatorObservers: observers,
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () => showNewCardSheet(context, req, submit: submit),
+              onPressed: () =>
+                  showNewCardSheet(context, req, submit: submit, voice: voice),
               child: const Text('open'),
             ),
           ),
@@ -103,6 +111,15 @@ Future<void> pumpHost(
   );
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
+}
+
+/// Records every route pushed, so a test can prove no extra sheet appeared.
+class _PushLog extends NavigatorObserver {
+  final List<Route<dynamic>> pushed = [];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      pushed.add(route);
 }
 
 void main() {
@@ -485,5 +502,43 @@ void main() {
     expect(find.text(planPausedMessage), findsOneWidget);
     expect(find.text("This board's plan is paused."), findsNothing);
     expect(_submitButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('dictating the description lands in the submitted card — no '
+      'voice sheet (RE467)', (tester) async {
+    final calls = <Map<String, String?>>[];
+    final fake = FakeVoiceTranscriber(
+      transcript: 'Rename it before spec',
+      preference: VoiceEngine.whisper,
+    );
+    final log = _PushLog();
+    await pumpHost(
+      tester,
+      submit: _recording(calls),
+      voice: fake.engines,
+      observers: [log],
+    );
+    final pushedBeforeDictation = List.of(log.pushed);
+
+    await tester.enterText(
+      find.byKey(const Key('new_card_title')),
+      'Board copy',
+    );
+    await tester.tap(find.bySemanticsLabel('Dictate'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('dictation_stop')));
+    await tester.pumpAndSettle();
+    await tester.tap(_submitKey);
+    await tester.pumpAndSettle();
+
+    expect(calls.single['description'], 'Rename it before spec');
+    expect(calls.single['title'], 'Board copy');
+    expect(
+      log.pushed.whereType<ModalBottomSheetRoute<dynamic>>(),
+      hasLength(1),
+      reason: 'only the new-card sheet itself',
+    );
+    expect(log.pushed, pushedBeforeDictation);
   });
 }

@@ -80,12 +80,27 @@ class RelayTheme {
     0xFF6750AB,
   ); //  mic · violet glyph  (oklch 0.50 0.14 292)
 
-  // --- Voice · Whisper (RLY-99) — the review sheet's provenance line ---
-  // A deliberately darker green than relayDone: 9.5px monospace on white needs
-  // the contrast. The artboard's own value, converted oklch → sRGB.
-  static const Color relayVoiceTranscribed = Color(
-    0xFF0B7643,
-  ); // transcribed · green (oklch 0.5 0.12 155)
+  // --- Dictation (RE467) — Apple's volatile draft words in the field ---
+  // relayAILight at 40% alpha: the AI's violet, faded until the words are final.
+  static const Color relayDictationDraft = Color(
+    0x66795EC9,
+  ); // dictation draft · violet 40% (relayAILight @ 0x66)
+
+  // --- Dictation (RE467) — the red of "the mic is listening" ---
+  // The card mockup draws the active mic, the toolbar's stop and its waveform in
+  // daisyUI's error red; on mobile that red is relayReject.
+  static const Color relayMicActiveFill = Color(
+    0x26DB6656,
+  ); // active mic fill · relayReject @ 15% (mockup bg-error/15)
+  static const Color relayMicActiveBorder = relayRejectBorder;
+  static const Color relayMicActiveGlyph = relayReject; // mockup text-error
+  static const Color relayDictationStop = relayReject; // mockup bg-error
+  static const Color relayDictationWave = Color(
+    0xB3DB6656,
+  ); // waveform bars · relayReject @ 70% (mockup bg-error/70)
+  static const Color relayDictationToolbarBg = Color(
+    0xFFF8FAFD,
+  ); // keyboard toolbar · daisyUI light base-200 (oklch 0.985 0.004 250)
 
   // --- New-card sheet chips · BOARD-04 in docs/designs/Relay Mobile.dc.html (RLY-126) ---
   static const Color relayChipSelectedBg = Color(

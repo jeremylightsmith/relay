@@ -9,7 +9,7 @@ import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/reject_note_screen.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
-import 'package:relay_mobile/features/voice/voice_transcriber.dart';
+import 'package:relay_mobile/features/voice/voice_engines.dart';
 
 import 'review_queue_test.dart' show FakeDecisionApi, FakeFeedRepository, row;
 import 'support/fake_auth.dart';
@@ -23,7 +23,7 @@ FilledButton _sendButton(WidgetTester tester) =>
 
 GoRouter _router({
   String initialLocation = '/cards/RLY-A',
-  VoiceTranscriber? transcriber,
+  VoiceEngines? voice,
 }) => GoRouter(
   initialLocation: initialLocation,
   routes: [
@@ -46,7 +46,7 @@ GoRouter _router({
       builder: (c, s) => RejectNoteScreen(
         cardRef: s.pathParameters['ref']!,
         boardSlug: s.uri.queryParameters['board'] ?? '',
-        transcriber: transcriber,
+        voice: voice,
       ),
     ),
   ],
@@ -65,7 +65,7 @@ Future<GoRouter> pumpReject(
   FakeAuthController? auth,
   String initialLocation = '/cards/RLY-A',
   bool seedQueue = true,
-  VoiceTranscriber? transcriber,
+  VoiceEngines? voice,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -81,10 +81,7 @@ Future<GoRouter> pumpReject(
         .enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
   }
 
-  final router = _router(
-    initialLocation: initialLocation,
-    transcriber: transcriber,
-  );
+  final router = _router(initialLocation: initialLocation, voice: voice);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -204,24 +201,20 @@ void main() {
       },
     );
 
-    testWidgets('tapping the mic dictates into the note and never submits', (
-      tester,
-    ) async {
+    testWidgets('dictating into the note enables Send back and never '
+        'submits (RE467)', (tester) async {
       final api = FakeDecisionApi();
-      final fake = FakeVoiceTranscriber(
-        transcript: 'not quite, the copy is wrong',
-      );
-      await pumpReject(tester, api: api, transcriber: fake);
+      final fake = FakeVoiceTranscriber();
+      await pumpReject(tester, api: api, voice: fake.engines);
 
       expect(_sendButton(tester).onPressed, isNull, reason: 'empty note');
 
       await tester.tap(find.byKey(const Key('reject_mic')));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-      await tester.tap(find.byKey(const Key('voice_stop')));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(find.byKey(const Key('voice_use')));
+      fake.emitResult('not quite, the copy is wrong', isFinal: true);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('dictation_stop')));
       await tester.pumpAndSettle();
 
       final input = tester.widget<TextField>(_input);
@@ -229,7 +222,7 @@ void main() {
       expect(
         api.rejected,
         isEmpty,
-        reason: '"Use this" fills; the human still sends (D6)',
+        reason: 'dictation fills; the human still sends (D6)',
       );
       expect(
         _sendButton(tester).onPressed,

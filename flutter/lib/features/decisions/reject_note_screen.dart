@@ -4,8 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/plan_paused.dart';
 import '../../app/theme.dart';
+import '../voice/dictation_text_controller.dart';
 import '../voice/mic_button.dart';
-import '../voice/voice_transcriber.dart';
+import '../voice/voice_engines.dart';
 import 'review_queue.dart';
 
 /// CORE-07 "Reject · note required" (docs/designs/Relay Mobile.dc.html — the artboard
@@ -23,21 +24,23 @@ class RejectNoteScreen extends ConsumerStatefulWidget {
     super.key,
     required this.cardRef,
     required this.boardSlug,
-    this.transcriber,
+    this.voice,
   });
 
   final String cardRef;
   final String boardSlug;
 
-  /// Structural seam for tests; null → the real WhisperKit-backed engine.
-  final VoiceTranscriber? transcriber;
+  /// Structural seam for tests; null → the platform engines (Apple
+  /// SpeechTranscriber, WhisperKit fallback).
+  final VoiceEngines? voice;
 
   @override
   ConsumerState<RejectNoteScreen> createState() => _RejectNoteScreenState();
 }
 
 class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
-  final _controller = TextEditingController();
+  final _controller = DictationTextController();
+  final _focus = FocusNode();
 
   @override
   void initState() {
@@ -55,6 +58,7 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -114,7 +118,8 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
                     const _BodyCopy(),
                     _NoteField(
                       controller: _controller,
-                      transcriber: widget.transcriber,
+                      focusNode: _focus,
+                      voice: widget.voice,
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8), // artboard margin-top:8px
@@ -238,12 +243,14 @@ class _BodyCopy extends StatelessWidget {
 class _NoteField extends StatelessWidget {
   const _NoteField({
     required this.controller,
-    required this.transcriber,
+    required this.focusNode,
+    required this.voice,
     required this.onChanged,
   });
 
-  final TextEditingController controller;
-  final VoiceTranscriber? transcriber;
+  final DictationTextController controller;
+  final FocusNode focusNode;
+  final VoiceEngines? voice;
   final ValueChanged<String> onChanged;
 
   @override
@@ -268,6 +275,7 @@ class _NoteField extends StatelessWidget {
             child: TextField(
               key: const Key('reject_note_input'),
               controller: controller,
+              focusNode: focusNode,
               onChanged: onChanged,
               maxLines: null,
               autofocus: true,
@@ -287,7 +295,8 @@ class _NoteField extends StatelessWidget {
             child: MicButton(
               key: const Key('reject_mic'),
               controller: controller,
-              transcriber: transcriber,
+              focusNode: focusNode,
+              voice: voice,
               onInserted: onChanged,
             ),
           ),
