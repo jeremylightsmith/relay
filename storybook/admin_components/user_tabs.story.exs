@@ -5,7 +5,7 @@ defmodule Storybook.AdminComponents.UserTabs do
   def function, do: &RelayWeb.AdminComponents.user_tabs/1
   def render_source, do: :function
 
-  # RE462, card mockup "Billing screens — pricing section, Billing page, past-due and read-only
+  # RE462 / RE463, card mockup "Billing screens — pricing section, Billing page, past-due and read-only
   # board, superadmin, iOS status", §4: the `/admin/users` tab bar.
   def variations do
     [
@@ -14,6 +14,11 @@ defmodule Storybook.AdminComponents.UserTabs do
         id: :promo_codes,
         description: "On /admin/users/promo-codes",
         attributes: %{active: :promo_codes}
+      },
+      %Variation{
+        id: :renewals,
+        description: "On /admin/users/renewals",
+        attributes: %{active: :renewals}
       }
     ]
   end

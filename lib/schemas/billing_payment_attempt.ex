@@ -17,7 +17,7 @@ defmodule Schemas.BillingPaymentAttempt do
   @statuses [:pending, :succeeded, :failed, :unknown, :not_charged]
   @open_statuses [:pending, :unknown]
   @kinds [:trial_end, :renewal, :returned]
-  @sources [:clock, :card_saved]
+  @sources [:clock, :card_saved, :admin]
 
   schema "billing_payment_attempts" do
     field :status, Ecto.Enum, values: @statuses
@@ -63,7 +63,11 @@ defmodule Schemas.BillingPaymentAttempt do
   @spec kinds() :: [:trial_end | :renewal | :returned]
   def kinds, do: @kinds
 
-  @doc "What opened an attempt: the billing clock, or a card being saved."
-  @spec sources() :: [:clock | :card_saved]
+  @doc """
+  What opened an attempt: the billing clock, a card being saved, or the superadmin's "Retry charge
+  now" (RE463). Only a `:clock` decline sends the card-declined email or counts toward the grace
+  day's one retry.
+  """
+  @spec sources() :: [:clock | :card_saved | :admin]
   def sources, do: @sources
 end

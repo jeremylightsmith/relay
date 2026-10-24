@@ -43,11 +43,14 @@ defmodule Mix.Tasks.Relay.GenVocabTest do
       end
     end
 
-    test "the registry covers all nineteen closed sets" do
+    test "the registry covers all twenty-two closed sets" do
       labels = GenVocab.vocabularies() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
       assert labels == [
+               "Billing admin action",
+               "Billing admin refusal",
                "Billing attempt kind",
+               "Billing attempt outcome",
                "Billing attempt source",
                "Billing attempt status",
                "Billing notice kind",

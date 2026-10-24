@@ -20,7 +20,6 @@ defmodule Relay.Accounts do
   alias Relay.Accounts.GoogleTokenValidator
   alias Relay.Billing
   alias Relay.Repo
-  alias Schemas.Membership
   alias Schemas.User
   alias Schemas.UserApiToken
 
@@ -38,35 +37,6 @@ defmodule Relay.Accounts do
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) when is_binary(email) do
     Repo.one(from u in User, where: fragment("lower(?)", u.email) == ^String.downcase(email), limit: 1)
-  end
-
-  @doc """
-  Every user for the superadmin `/admin/users` table (RE353), newest first
-  (`inserted_at desc, id desc`), with `board_count` = the user's membership rows. Unscoped on
-  purpose: the gate is the `/admin` route (`RelayWeb.Auth.require_superadmin`), not this
-  context. One query (aggregate subquery, no N+1).
-  """
-  def list_users_for_admin do
-    board_counts =
-      from m in Membership,
-        where: not is_nil(m.user_id),
-        group_by: m.user_id,
-        select: %{user_id: m.user_id, n: count(m.id)}
-
-    Repo.all(
-      from u in User,
-        left_join: bc in subquery(board_counts),
-        on: bc.user_id == u.id,
-        order_by: [desc: u.inserted_at, desc: u.id],
-        select: %{
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          provider: u.provider,
-          inserted_at: u.inserted_at,
-          board_count: coalesce(bc.n, 0)
-        }
-    )
   end
 
   @doc """

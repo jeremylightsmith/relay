@@ -5,7 +5,14 @@ defmodule RelayWeb.Admin.AdminPagesTest do
 
   alias Schemas.Scope
 
-  @paths ["/admin", "/admin/boards", "/admin/users", "/admin/users/promo-codes", "/admin/onboarding"]
+  @paths [
+    "/admin",
+    "/admin/boards",
+    "/admin/users",
+    "/admin/users/promo-codes",
+    "/admin/users/renewals",
+    "/admin/onboarding"
+  ]
 
   defp log_in_superadmin(%{conn: conn}) do
     admin = insert(:user, email: hd(Scope.superadmin_emails()))
@@ -106,7 +113,7 @@ defmodule RelayWeb.Admin.AdminPagesTest do
   describe "/admin/users as the superadmin" do
     setup :log_in_superadmin
 
-    test "lists every user newest first with provider, board count and created date", %{
+    test "lists every user newest first with board count and created date", %{
       conn: conn,
       user: admin
     } do
@@ -125,7 +132,6 @@ defmodule RelayWeb.Admin.AdminPagesTest do
       row = "#admin-user-#{grace.id}"
       assert has_element?(view, row, "Grace Hopper")
       assert has_element?(view, row, "grace@example.com")
-      assert has_element?(view, row, "google")
       assert has_element?(view, row, "2020-03-04")
       assert view |> element("#{row}-boards") |> render() =~ ~r/>\s*1\s*</
 

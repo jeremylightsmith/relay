@@ -1,7 +1,8 @@
 defmodule Relay.Billing.Charging do
   @moduledoc """
   The one charging path (RE460, ADR 0012), called only from `Relay.Billing`: the clock's
-  first charges and renewals, a card being saved, and resolving answers we never got. A port of
+  first charges and renewals, a card being saved, the superadmin's retry (`admin_retry/2`,
+  RE463), and resolving answers we never got. A port of
   Throughway's `through_attempt` lifecycle — three steps, Stripe outside any transaction:
 
     1. **open** (tx 1): lock the account row (`FOR UPDATE`), re-derive the decision on the
@@ -43,17 +44,27 @@ defmodule Relay.Billing.Charging do
   @spec pending_overdue_minutes() :: 10
   def pending_overdue_minutes, do: @pending_overdue_minutes
 
-  @doc "The attempt facts `Standing.of/3` reads for `account`."
+  @doc "The attempt facts `Standing.of/3` reads for `account` (looks up its declined attempts; `facts/2`)."
   @spec facts(BillingAccount.t() | nil) :: Standing.facts()
   def facts(%BillingAccount{paid_through: nil, id: id} = account) do
-    %{
-      first_charge_declined?:
-        Repo.exists?(from p in BillingPaymentAttempt, where: p.billing_account_id == ^id and p.status == :failed),
-      next_charge_free?: next_charge_free?(account)
-    }
+    facts(
+      account,
+      Repo.exists?(from p in BillingPaymentAttempt, where: p.billing_account_id == ^id and p.status == :failed)
+    )
   end
 
-  def facts(_account), do: %{first_charge_declined?: false, next_charge_free?: false}
+  def facts(account), do: facts(account, false)
+
+  @doc """
+  Pure: the facts `Standing.of/3` reads for `account`, given whether it has ≥ 1 `:failed` attempt
+  (`declined?`). A paid account, or no account, has neither fact.
+  """
+  @spec facts(BillingAccount.t() | nil, boolean()) :: Standing.facts()
+  def facts(%BillingAccount{paid_through: nil} = account, declined?) when is_boolean(declined?),
+    do: %{first_charge_declined?: declined?, next_charge_free?: next_charge_free?(account)}
+
+  def facts(_account, declined?) when is_boolean(declined?),
+    do: %{first_charge_declined?: false, next_charge_free?: false}
 
   defp next_charge_free?(account), do: Billing.next_charge(account).amount_cents == 0
 
@@ -106,9 +117,18 @@ defmodule Relay.Billing.Charging do
       )
 
     :ok = Billing.broadcast_changed(setup.user_id)
-    charged = through_attempt(account_id, &card_saved_decision(&1, today))
+    charged = through_attempt(account_id, &pay_now_decision(&1, today, :card_saved))
     {:ok, %{account: Repo.get!(BillingAccount, account_id), charged: charged}}
   end
+
+  @doc """
+  The superadmin's "Retry charge now" (RE463) on account `account_id`: the card-saved rule —
+  a past-due account renews, a paused one (any pause but a hold) pays a fresh month from
+  `today` — recorded as an `:admin` attempt. `:none` when an attempt is open or there is no card.
+  An `:admin` decline sends no email and never spends the clock's grace-day retry.
+  """
+  @spec admin_retry(pos_integer(), Date.t()) :: outcome()
+  def admin_retry(account_id, %Date{} = today), do: through_attempt(account_id, &pay_now_decision(&1, today, :admin))
 
   @doc """
   Asks Stripe about every `:unknown` attempt and every `:pending` one older than
@@ -200,16 +220,17 @@ defmodule Relay.Billing.Charging do
     end
   end
 
-  # The card-saved decision, on the locked row with the card already stored.
-  defp card_saved_decision(account, today) do
+  # The pay-now decision, on the locked row: a card being saved (`:card_saved`, the card already
+  # stored) or the superadmin's retry (`:admin`) — one rule, recorded under its source.
+  defp pay_now_decision(account, today, source) do
     if open_attempt?(account.id) or not Standing.card_on_file?(account) do
       :none
     else
       case Standing.of(account, facts(account), today) do
-        {:past_due, _until} -> renewal(account, :card_saved)
+        {:past_due, _until} -> renewal(account, source)
         # A hold pauses until lifted, whatever the card; any other pause returns on a fresh month.
         {:paused, :hold} -> :none
-        {:paused, _trial_ended_unpaid_or_cancelled} -> fresh_month(:returned, :card_saved, today)
+        {:paused, _trial_ended_unpaid_or_cancelled} -> fresh_month(:returned, source, today)
         _no_charge -> :none
       end
     end

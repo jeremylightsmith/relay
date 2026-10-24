@@ -13,8 +13,11 @@ what each term *means*; the sections below say what each value *does*.
 <!-- BEGIN generated: vocabularies -->
 | Vocabulary | Values | Owner |
 | --- | --- | --- |
+| Billing admin action | `comp` · `uncomp` · `hold` · `lift_hold` · `extend` · `retry_charge` | `Schemas.BillingAdminEntry.actions/0` |
+| Billing admin refusal | `already_comped` · `not_comped` · `reason_required` · `already_held` · `not_held` · `invalid_days` · `no_paid_through` · `not_retryable` | `Relay.Billing.admin_refusals/0` |
 | Billing attempt kind | `trial_end` · `renewal` · `returned` | `Schemas.BillingPaymentAttempt.kinds/0` |
-| Billing attempt source | `clock` · `card_saved` | `Schemas.BillingPaymentAttempt.sources/0` |
+| Billing attempt outcome | `paid` · `declined` · `unknown` · `not_charged` | `Relay.Billing.attempt_outcomes/0` |
+| Billing attempt source | `clock` · `card_saved` · `admin` | `Schemas.BillingPaymentAttempt.sources/0` |
 | Billing attempt status | `pending` · `succeeded` · `failed` · `unknown` · `not_charged` | `Schemas.BillingPaymentAttempt.statuses/0` |
 | Billing notice kind | `trial_ending` · `card_declined` · `paused` | `Schemas.BillingNotice.kinds/0` |
 | Billing pause reason | `trial_ended` · `unpaid` · `cancelled` · `hold` | `Relay.Billing.Standing.pause_reasons/0` |
@@ -45,6 +48,12 @@ sets by `Schemas.BillingPaymentAttempt`, whose `open_statuses/0` (pending · unk
 once-per-period. The promo refusal row (RE462) is owned by
 `Relay.Billing.promo_refusals/0`, listed in the order `Relay.Billing.redeem_code/3` checks them —
 first match wins, so an account that already holds a code is `already_redeemed` whatever it typed.
+The admin rows (RE463) are the superadmin's side panel on `/admin/users`: each admin action
+(`Schemas.BillingAdminEntry.actions/0`) writes one append-only `billing_admin_entries` row; a
+refused one answers one of `Relay.Billing.admin_refusals/0` and writes nothing. The attempt
+outcome row is how the admin pages read an attempt's status — `Relay.Billing.attempt_outcome/1`
+is the one status → outcome map (pending and unknown both read `unknown`) — and the attempt
+source `admin` marks a "Retry charge now" charge, which never sends the card-declined email.
 
 These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
 vocabularies — isolation class (`Schemas.Flow.isolation_classes/0`), node type and edge condition

@@ -406,4 +406,20 @@ defmodule Relay.Billing.ChargingTest do
     assert Billing.brand_label("jcb") == "Jcb"
     assert Billing.brand_label(nil) == "Card"
   end
+
+  describe "facts/2" do
+    test "a never-paid account with a declined attempt and no promo: declined, not free" do
+      assert Charging.facts(%BillingAccount{paid_through: nil}, true) ==
+               %{first_charge_declined?: true, next_charge_free?: false}
+    end
+
+    test "a paid account has neither fact" do
+      assert Charging.facts(%BillingAccount{paid_through: ~D[2026-06-30]}, true) ==
+               %{first_charge_declined?: false, next_charge_free?: false}
+    end
+
+    test "no account has neither fact" do
+      assert Charging.facts(nil, true) == %{first_charge_declined?: false, next_charge_free?: false}
+    end
+  end
 end

@@ -14,6 +14,7 @@ defmodule Schemas do
       ApiKey,
       Attachment,
       BillingAccount,
+      BillingAdminEntry,
       BillingNotice,
       BillingPaymentAttempt,
       Board,

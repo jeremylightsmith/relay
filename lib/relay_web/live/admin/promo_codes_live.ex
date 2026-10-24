@@ -69,7 +69,7 @@ defmodule RelayWeb.Admin.PromoCodesLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide>
       <div class="mx-auto max-w-5xl px-4 py-8">
         <.link
           navigate={~p"/admin"}

@@ -4,19 +4,36 @@ defmodule Relay.Billing do
   one price a month, up front from their own billing date, after a no-card trial. A board's
   standing is its owner's; a paused owner's boards are read-only.
 
-  Owns `Schemas.BillingAccount` (one per user), `Schemas.BillingPaymentAttempt` and
-  `Schemas.BillingNotice` (one per billing email sent), the pure
+  Owns `Schemas.BillingAccount` (one per user), `Schemas.BillingPaymentAttempt`,
+  `Schemas.BillingNotice` (one per billing email sent) and `Schemas.BillingAdminEntry` (the
+  superadmin's history, one per admin action), the pure
   rules (`Relay.Billing.Standing`, `Relay.Billing.Periods`), the charging path
   (`Relay.Billing.Charging`, through the `Relay.Billing.Payments` seam), the Stripe webhook
   verifier (`Relay.Billing.Webhook`), the hourly `Relay.Billing.Clock`, and the
   `billing:<user_id>` PubSub topic (`{:billing_changed, user_id}`, broadcast when a plan is
-  cancelled or resumed, a card is saved, a promo code is redeemed, or a payment opens or settles).
+  cancelled or resumed, a card is saved, a promo code is redeemed, a payment opens or settles, or the
+  superadmin comps, un-comps, holds, lifts a hold, extends or retries the charge).
 
   **Promo codes** (RE462): owns `Schemas.PromoCode`. An account redeems at most one code, ever
   (`redeem_code/3`, refused with one of `promo_refusals/0`); redeeming stores the code and
   `promo_months_left = months` on the account. The superadmin creates, lists and disables codes
   (`create_promo_code/1`, `list_promo_codes/0`, `disable_promo_code/2`); disabling stops new
   redemptions and never touches accounts that already hold the code.
+
+  **Admin read model** (RE463): `list_admin_users/1` — every user with their board counts and
+  billing standing for `/admin/users`, in one query, standing derived in memory — and its pure
+  helpers `admin_plan/2` (closed set `admin_plans/0`), `admin_summary/1` (`paying_plans/0`) and
+  `format_dollars/1`. It reads `Schemas.User`, `Schemas.Board` and `Schemas.Membership` directly.
+
+  **Admin writes** (RE463): `admin_comp/3`, `admin_uncomp/3`, `admin_hold/4`, `admin_lift_hold/3`,
+  `admin_extend/5` and `admin_retry_charge/3` delegate to the internal `Relay.Billing.Admin`. Each
+  `{:ok, _}` writes exactly one `Schemas.BillingAdminEntry` (by the superadmin `actor`, a
+  `%Schemas.User{}` handed in by the web layer) and broadcasts; each refusal (`admin_refusals/0`)
+  writes and broadcasts nothing. The retry charges through `Relay.Billing.Charging` as an
+  `:admin` attempt. `admin_detail/2` is the row side panel's read model (payment history with
+  `attempt_outcome/1`, admin history, `stripe_customer_url/1`). `renewal_log/1` is the
+  **Renewals** tab's read model: every payment attempt across accounts, newest first, filterable
+  by outcome, capped at `renewal_log_limit/0` rows, in one query.
 
   **One off switch:** `enabled?/0` (`:billing_enabled`, read through `Relay.Config`). Off — a
   self-hosted install — nothing is paused or noticed and no trial is started.
@@ -32,6 +49,7 @@ defmodule Relay.Billing do
 
   import Ecto.Query
 
+  alias Relay.Billing.Admin
   alias Relay.Billing.Charging
   alias Relay.Billing.Notifier
   alias Relay.Billing.Payments
@@ -39,8 +57,10 @@ defmodule Relay.Billing do
   alias Relay.Billing.Standing
   alias Relay.Repo
   alias Schemas.BillingAccount
+  alias Schemas.BillingAdminEntry
   alias Schemas.BillingPaymentAttempt
   alias Schemas.Board
+  alias Schemas.Membership
   alias Schemas.PromoCode
   alias Schemas.User
 
@@ -49,6 +69,28 @@ defmodule Relay.Billing do
   @pubsub Relay.PubSub
   @default_price_cents 2000
   @promo_refusals [:already_redeemed, :unknown, :disabled, :expired, :full]
+  @paying_plans [:active, :past_due]
+  @admin_refusals [
+    :already_comped,
+    :not_comped,
+    :reason_required,
+    :already_held,
+    :not_held,
+    :invalid_days,
+    :no_paid_through,
+    :not_retryable
+  ]
+  # The ONE attempt status → admin outcome map; `attempt_outcome/1` and `attempt_statuses_for/1` read it.
+  @attempt_outcomes [:paid, :declined, :unknown, :not_charged]
+  @outcome_of_status %{
+    pending: :unknown,
+    succeeded: :paid,
+    failed: :declined,
+    unknown: :unknown,
+    not_charged: :not_charged
+  }
+  @renewal_log_limit 500
+  @stripe_dashboard "https://dashboard.stripe.com"
   @brand_labels %{"visa" => "Visa", "mastercard" => "Mastercard", "amex" => "Amex", "discover" => "Discover"}
 
   @doc "True when billing is switched on (`:billing_enabled` is exactly `true`)."
@@ -308,6 +350,471 @@ defmodule Relay.Billing do
       %PromoCode{} = promo_code ->
         {:ok, promo_code}
     end
+  end
+
+  @typedoc "A user's plan on `/admin/users`: their standing's kind, or `:member_only` when they own no boards."
+  @type admin_plan :: :trial | :active | :past_due | :cancelled | :comped | :paused | :member_only
+
+  @typedoc "One `/admin/users` row (`list_admin_users/1`)."
+  @type admin_user :: %{
+          id: pos_integer(),
+          name: String.t() | nil,
+          email: String.t(),
+          inserted_at: DateTime.t(),
+          board_count: non_neg_integer(),
+          owned_board_count: non_neg_integer(),
+          member_count: non_neg_integer(),
+          account: BillingAccount.t() | nil,
+          standing: Standing.t(),
+          plan: admin_plan(),
+          paid_through_shown: Date.t() | nil,
+          rate_cents: non_neg_integer() | nil,
+          code_label: String.t() | nil
+        }
+
+  @doc "Every admin plan: the standing kinds (`Standing.kinds/0`), then `:member_only`."
+  @spec admin_plans() :: [admin_plan()]
+  def admin_plans, do: Standing.kinds() ++ [:member_only]
+
+  @doc "The admin plans that pay: they count as paying, and toward the monthly total, in `admin_summary/1`."
+  @spec paying_plans() :: [:active | :past_due]
+  def paying_plans, do: @paying_plans
+
+  @doc "A user's admin plan: `:member_only` when they own no boards, else `Standing.kind/1` of their standing."
+  @spec admin_plan(Standing.t(), non_neg_integer()) :: admin_plan()
+  def admin_plan(_standing, 0), do: :member_only
+  def admin_plan(standing, owned_board_count) when is_integer(owned_board_count), do: Standing.kind(standing)
+
+  @doc """
+  Every user for the superadmin `/admin/users` table (RE353, RE463), newest first
+  (`inserted_at desc, id desc`), with their billing standing on `today`. `board_count` counts the
+  user's memberships; `owned_board_count` the boards they own; `member_count` the distinct people
+  on those boards, the owner included (0 when they own none). `plan` is `admin_plan/2`;
+  `paid_through_shown` is the trial end for a trial and `paid_through` otherwise; `rate_cents` is
+  the next charge (`next_charge/1`), 0 when comped; `code_label` reads `"<code> <used>/<months>"`.
+  A member-only row has no paid through, rate or code.
+
+  Unscoped on purpose: the gate is the `/admin` route. **One query** — counts and declined
+  attempts come from aggregate subqueries, the account and its promo code from left joins — and
+  the standing is derived in memory (`Charging.facts/2`, `Standing.of/3`), never per user.
+  """
+  @spec list_admin_users(Date.t()) :: [admin_user()]
+  def list_admin_users(%Date{} = today) do
+    from(u in User,
+      left_join: bc in subquery(membership_counts()),
+      on: bc.user_id == u.id,
+      left_join: ob in subquery(owned_board_counts()),
+      on: ob.owner_id == u.id,
+      left_join: a in BillingAccount,
+      on: a.user_id == u.id,
+      left_join: p in PromoCode,
+      on: p.id == a.promo_code_id,
+      left_join: d in subquery(declined_accounts()),
+      on: d.billing_account_id == a.id,
+      order_by: [desc: u.inserted_at, desc: u.id],
+      select: %{
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        inserted_at: u.inserted_at,
+        board_count: coalesce(bc.n, 0),
+        owned_board_count: coalesce(ob.n, 0),
+        member_count: coalesce(ob.members, 0),
+        account: a,
+        promo_code: p,
+        declined?: not is_nil(d.billing_account_id)
+      }
+    )
+    |> Repo.all()
+    |> Enum.map(&admin_user(&1, today))
+  end
+
+  defp membership_counts do
+    from m in Membership,
+      where: not is_nil(m.user_id),
+      group_by: m.user_id,
+      select: %{user_id: m.user_id, n: count(m.id)}
+  end
+
+  # Per owner: boards owned, and the distinct people on them — every other member, plus the owner.
+  defp owned_board_counts do
+    from b in Board,
+      left_join: m in Membership,
+      on: m.board_id == b.id and m.user_id != b.owner_id,
+      group_by: b.owner_id,
+      select: %{owner_id: b.owner_id, n: count(b.id, :distinct), members: count(m.user_id, :distinct) + 1}
+  end
+
+  defp declined_accounts do
+    from p in BillingPaymentAttempt,
+      where: p.status == :failed,
+      distinct: true,
+      select: %{billing_account_id: p.billing_account_id}
+  end
+
+  defp admin_user(row, today) do
+    {promo_code, row} = Map.pop!(row, :promo_code)
+    {declined?, row} = Map.pop!(row, :declined?)
+    account = row.account && %{row.account | promo_code: promo_code}
+    standing = Standing.of(account, Charging.facts(account, declined?), today)
+    plan = admin_plan(standing, row.owned_board_count)
+
+    Map.merge(row, %{
+      account: account,
+      standing: standing,
+      plan: plan,
+      paid_through_shown: paid_through_shown(plan, account),
+      rate_cents: rate_cents(plan, account),
+      code_label: code_label(plan, account)
+    })
+  end
+
+  defp paid_through_shown(:member_only, _account), do: nil
+  defp paid_through_shown(_plan, nil), do: nil
+  defp paid_through_shown(:trial, account), do: account.trial_ends_on
+  defp paid_through_shown(_plan, account), do: account.paid_through
+
+  defp rate_cents(:member_only, _account), do: nil
+  defp rate_cents(:comped, _account), do: 0
+  defp rate_cents(_plan, account), do: next_charge(account).amount_cents
+
+  defp code_label(:member_only, _account), do: nil
+
+  defp code_label(_plan, %BillingAccount{promo_code: %PromoCode{code: code, months: months}, promo_months_left: left}),
+    do: "#{code} #{months - left}/#{months}"
+
+  defp code_label(_plan, _account), do: nil
+
+  @doc """
+  The `/admin/users` summary line, from its rows (pure): `users` rows; `paying` rows on one of
+  `paying_plans/0`; `mrr_cents` the sum of those rows' `rate_cents`; `in_trial` rows on `:trial`.
+  """
+  @spec admin_summary([admin_user()]) :: %{
+          users: non_neg_integer(),
+          paying: non_neg_integer(),
+          mrr_cents: non_neg_integer(),
+          in_trial: non_neg_integer()
+        }
+  def admin_summary(rows) when is_list(rows) do
+    paying = Enum.filter(rows, &(&1.plan in @paying_plans))
+
+    %{
+      users: length(rows),
+      paying: length(paying),
+      mrr_cents: paying |> Enum.map(& &1.rate_cents) |> Enum.sum(),
+      in_trial: Enum.count(rows, &(&1.plan == :trial))
+    }
+  end
+
+  @doc ~S'Formats cents as dollars, dropping whole-dollar cents and grouping thousands: `1000` → `"$10"`, `1250` → `"$12.50"`, `125000` → `"$1,250"`.'
+  @spec format_dollars(non_neg_integer()) :: String.t()
+  def format_dollars(cents) when is_integer(cents) and cents >= 0 do
+    dollars = cents |> div(100) |> Integer.to_string() |> group_thousands()
+
+    case rem(cents, 100) do
+      0 -> "$#{dollars}"
+      rest -> "$#{dollars}.#{rest |> Integer.to_string() |> String.pad_leading(2, "0")}"
+    end
+  end
+
+  defp group_thousands(digits) do
+    digits
+    |> String.reverse()
+    |> String.graphemes()
+    |> Enum.chunk_every(3)
+    |> Enum.map_join(",", &Enum.join/1)
+    |> String.reverse()
+  end
+
+  @typedoc "Why an admin write refused — one of `admin_refusals/0`."
+  @type admin_refusal ::
+          :already_comped
+          | :not_comped
+          | :reason_required
+          | :already_held
+          | :not_held
+          | :invalid_days
+          | :no_paid_through
+          | :not_retryable
+
+  @doc "Every refusal an admin write (`admin_comp/3` … `admin_retry_charge/3`) can answer."
+  @spec admin_refusals() :: [admin_refusal()]
+  def admin_refusals, do: @admin_refusals
+
+  @doc """
+  Comps `user_id`'s account (creating it, with a trial, if missing), recording one `:comp` entry
+  by `actor` and broadcasting. Refused with `:already_comped`.
+  """
+  @spec admin_comp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :already_comped}
+  defdelegate admin_comp(user_id, actor, today), to: Admin, as: :comp
+
+  @doc """
+  Un-comps the account — its standing is then derived as usual (a never-paid account past its
+  trial is `{:paused, :trial_ended}`, one past `paid_through` + grace `{:paused, :unpaid}`).
+  Records one `:uncomp` entry and broadcasts. Refused with `:not_comped`.
+  """
+  @spec admin_uncomp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_comped}
+  defdelegate admin_uncomp(user_id, actor, today), to: Admin, as: :uncomp
+
+  @doc """
+  Holds the account (`held_on: today`, `hold_reason:` the trimmed reason) — `{:paused, :hold}`
+  until lifted, and never charged meanwhile. Records one `:hold` entry with the reason and
+  broadcasts. Refused with `:reason_required` (blank) or `:already_held`.
+  """
+  @spec admin_hold(pos_integer(), User.t(), String.t() | nil, Date.t()) ::
+          {:ok, BillingAccount.t()} | {:error, :reason_required | :already_held}
+  defdelegate admin_hold(user_id, actor, reason, today), to: Admin, as: :hold
+
+  @doc "Lifts the hold (clears `held_on` and `hold_reason`), records one `:lift_hold` entry and broadcasts. Refused with `:not_held`."
+  @spec admin_lift_hold(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_held}
+  defdelegate admin_lift_hold(user_id, actor, today), to: Admin, as: :lift_hold
+
+  @doc """
+  Moves `paid_through` on by `days` (1..`admin_extend_max_days/0`); the billing day is untouched
+  and nothing is charged. Records one `:extend` entry (days, reason, `paid_through` before and
+  after) and broadcasts. Checked in order: `:invalid_days`, `:reason_required`, `:no_paid_through`.
+  """
+  @spec admin_extend(pos_integer(), User.t(), integer(), String.t() | nil, Date.t()) ::
+          {:ok, BillingAccount.t()} | {:error, :invalid_days | :reason_required | :no_paid_through}
+  defdelegate admin_extend(user_id, actor, days, reason, today), to: Admin, as: :extend
+
+  @doc "The most days one `admin_extend/5` may add."
+  @spec admin_extend_max_days() :: 365
+  defdelegate admin_extend_max_days, to: Admin, as: :extend_max_days
+
+  @doc """
+  Charges the account now through the one charging path, as an `:admin` attempt (the card-saved
+  rule: a past-due account renews, a paused one pays a fresh month), when `admin_retryable?/2`
+  holds on a fresh read. Records one `:retry_charge` entry and broadcasts. Refused with
+  `:not_retryable`. An admin decline sends no email and never spends the clock's grace retry.
+  """
+  @spec admin_retry_charge(pos_integer(), User.t(), Date.t()) ::
+          {:ok, :paid | :declined | :unknown | :none} | {:error, :not_retryable}
+  defdelegate admin_retry_charge(user_id, actor, today), to: Admin, as: :retry_charge
+
+  @doc "True when the superadmin may retry the charge: a card on file, and past due or paused for any reason but a hold."
+  @spec admin_retryable?(BillingAccount.t() | nil, Standing.t()) :: boolean()
+  def admin_retryable?(nil, _standing), do: false
+
+  def admin_retryable?(%BillingAccount{} = account, standing) do
+    Standing.card_on_file?(account) and
+      case standing do
+        {:past_due, _until} -> true
+        {:paused, reason} -> reason != :hold
+        _other -> false
+      end
+  end
+
+  @typedoc "What a payment attempt came to, as the admin pages show it (`attempt_outcomes/0`)."
+  @type attempt_outcome :: :paid | :declined | :unknown | :not_charged
+
+  @doc "Every attempt outcome, in display order."
+  @spec attempt_outcomes() :: [attempt_outcome()]
+  def attempt_outcomes, do: @attempt_outcomes
+
+  @doc "An attempt status's outcome: succeeded → paid, failed → declined, pending or unknown → unknown, not charged → not charged."
+  @spec attempt_outcome(:pending | :succeeded | :failed | :unknown | :not_charged) :: attempt_outcome()
+  def attempt_outcome(status), do: Map.fetch!(@outcome_of_status, status)
+
+  @doc "The attempt statuses that come to `outcome` (the inverse of `attempt_outcome/1`), in `BillingPaymentAttempt.statuses/0` order."
+  @spec attempt_statuses_for(attempt_outcome()) :: [:pending | :succeeded | :failed | :unknown | :not_charged]
+  def attempt_statuses_for(outcome) when outcome in @attempt_outcomes,
+    do: Enum.filter(BillingPaymentAttempt.statuses(), &(@outcome_of_status[&1] == outcome))
+
+  @doc """
+  The Stripe dashboard page of a customer — the test-mode dashboard while `:stripe_secret_key`
+  is a test key (`sk_test_…`). Nil for no customer.
+  """
+  @spec stripe_customer_url(String.t() | nil) :: String.t() | nil
+  def stripe_customer_url(nil), do: nil
+
+  def stripe_customer_url(customer_id) when is_binary(customer_id) do
+    case Relay.Config.get(:stripe_secret_key) do
+      "sk_test_" <> _rest -> "#{@stripe_dashboard}/test/customers/#{customer_id}"
+      _live_or_unset -> "#{@stripe_dashboard}/customers/#{customer_id}"
+    end
+  end
+
+  @typedoc "The `/admin/users` side panel's view of one user (`admin_detail/2`)."
+  @type admin_detail :: %{
+          user_id: pos_integer(),
+          name: String.t() | nil,
+          email: String.t(),
+          standing: Standing.t(),
+          plan: admin_plan(),
+          comped?: boolean(),
+          held?: boolean(),
+          hold_reason: String.t() | nil,
+          trial_ends_on: Date.t() | nil,
+          paid_through: Date.t() | nil,
+          billing_day: integer() | nil,
+          card: nil | %{brand_label: String.t(), last4: String.t()},
+          code_label: String.t() | nil,
+          retryable?: boolean(),
+          stripe_url: String.t() | nil,
+          attempts: [
+            %{
+              id: pos_integer(),
+              date: Date.t(),
+              period_start: Date.t(),
+              period_end: Date.t(),
+              amount_cents: non_neg_integer(),
+              outcome: attempt_outcome(),
+              stripe_payment_intent_id: String.t() | nil
+            }
+          ],
+          entries: [
+            %{
+              id: pos_integer(),
+              action: atom(),
+              reason: String.t() | nil,
+              days: integer() | nil,
+              actor_email: String.t() | nil,
+              inserted_at: DateTime.t()
+            }
+          ]
+        }
+
+  @doc """
+  The `/admin/users` side panel for `user_id` on `today` (RE463): the billing facts, the plan
+  (`admin_plan/2`), whether a retry is allowed, the Stripe link, every payment attempt and every
+  admin history entry, newest first. Nil for an unknown user.
+  """
+  @spec admin_detail(pos_integer(), Date.t()) :: admin_detail() | nil
+  def admin_detail(user_id, %Date{} = today) when is_integer(user_id) do
+    case Repo.get(User, user_id) do
+      nil -> nil
+      %User{} = user -> build_admin_detail(user, today)
+    end
+  end
+
+  defp build_admin_detail(user, today) do
+    account = user |> get_account() |> Repo.preload(:promo_code)
+    standing = Standing.of(account, facts(account), today)
+    plan = admin_plan(standing, Repo.aggregate(from(b in Board, where: b.owner_id == ^user.id), :count))
+
+    %{
+      user_id: user.id,
+      name: user.name,
+      email: user.email,
+      standing: standing,
+      plan: plan,
+      comped?: (account && account.comped) || false,
+      held?: not is_nil(account && account.held_on),
+      hold_reason: account && account.hold_reason,
+      trial_ends_on: account && account.trial_ends_on,
+      paid_through: account && account.paid_through,
+      billing_day: account && account.billing_day,
+      card: account |> card() |> admin_card(),
+      code_label: code_label(plan, account),
+      retryable?: admin_retryable?(account, standing),
+      stripe_url: stripe_customer_url(account && account.stripe_customer_id),
+      attempts: admin_attempts(account),
+      entries: admin_entries(account)
+    }
+  end
+
+  defp admin_card(nil), do: nil
+  defp admin_card(card), do: Map.take(card, [:brand_label, :last4])
+
+  defp admin_attempts(nil), do: []
+
+  defp admin_attempts(%BillingAccount{id: id}) do
+    from(p in BillingPaymentAttempt,
+      where: p.billing_account_id == ^id,
+      order_by: [desc: p.inserted_at, desc: p.id]
+    )
+    |> Repo.all()
+    |> Enum.map(fn p ->
+      %{
+        id: p.id,
+        date: attempt_date(p),
+        period_start: p.period_start,
+        period_end: p.period_end,
+        amount_cents: p.amount_cents,
+        outcome: attempt_outcome(p.status),
+        stripe_payment_intent_id: p.stripe_payment_intent_id
+      }
+    end)
+  end
+
+  # THE date an attempt shows on the admin pages: when it settled, else when it opened.
+  defp attempt_date(%BillingPaymentAttempt{resolved_at: resolved_at, inserted_at: inserted_at}),
+    do: DateTime.to_date(resolved_at || inserted_at)
+
+  @typedoc "One line of the cross-account renewal log (`renewal_log/1`)."
+  @type renewal_row :: %{
+          id: pos_integer(),
+          date: Date.t(),
+          user: %{id: pos_integer(), name: String.t() | nil, email: String.t()},
+          period_start: Date.t(),
+          period_end: Date.t(),
+          amount_cents: non_neg_integer(),
+          code: String.t() | nil,
+          outcome: attempt_outcome(),
+          stripe_payment_intent_id: String.t() | nil
+        }
+
+  @doc "The most rows `renewal_log/1` returns."
+  @spec renewal_log_limit() :: 500
+  def renewal_log_limit, do: @renewal_log_limit
+
+  @doc """
+  Every payment attempt across accounts for the superadmin's **Renewals** tab (RE463), newest
+  first (`inserted_at desc, id desc`), at most `renewal_log_limit/0` rows, in one query. Nil
+  lists every outcome; an outcome keeps the attempts whose status is in
+  `attempt_statuses_for/1`. `code` is the promo code text the attempt recorded when it opened
+  (ADR 0012), not the account's current code. Unscoped on purpose: the gate is the `/admin` route.
+  """
+  @spec renewal_log(attempt_outcome() | nil) :: [renewal_row()]
+  def renewal_log(outcome) when is_nil(outcome) or outcome in @attempt_outcomes do
+    from(p in BillingPaymentAttempt,
+      join: a in BillingAccount,
+      on: a.id == p.billing_account_id,
+      join: u in User,
+      on: u.id == a.user_id,
+      order_by: [desc: p.inserted_at, desc: p.id],
+      limit: @renewal_log_limit,
+      select: {p, %{id: u.id, name: u.name, email: u.email}}
+    )
+    |> where_outcome(outcome)
+    |> Repo.all()
+    |> Enum.map(fn {p, user} ->
+      %{
+        id: p.id,
+        date: attempt_date(p),
+        user: user,
+        period_start: p.period_start,
+        period_end: p.period_end,
+        amount_cents: p.amount_cents,
+        code: p.promo_code,
+        outcome: attempt_outcome(p.status),
+        stripe_payment_intent_id: p.stripe_payment_intent_id
+      }
+    end)
+  end
+
+  defp where_outcome(query, nil), do: query
+  defp where_outcome(query, outcome), do: where(query, [p], p.status in ^attempt_statuses_for(outcome))
+
+  defp admin_entries(nil), do: []
+
+  defp admin_entries(%BillingAccount{id: id}) do
+    Repo.all(
+      from e in BillingAdminEntry,
+        left_join: u in User,
+        on: u.id == e.actor_id,
+        where: e.billing_account_id == ^id,
+        order_by: [desc: e.inserted_at, desc: e.id],
+        select: %{
+          id: e.id,
+          action: e.action,
+          reason: e.reason,
+          days: e.days,
+          actor_email: u.email,
+          inserted_at: e.inserted_at
+        }
+    )
   end
 
   @typedoc "What the Billing page shows (`summary/2`)."

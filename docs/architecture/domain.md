@@ -524,10 +524,11 @@ sharing behavior.
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
   nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star).
   `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
-  `list_users_for_admin/0` (every user with a board count, newest first) backs the
-  superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
-  That page's header carries the `Users | Promo codes` tab bar (`RelayWeb.AdminComponents.user_tabs/1`,
-  RE462); the **Promo codes** tab is `/admin/users/promo-codes` (see Billing).
+  The superadmin-only `/admin/users` page (RE353) reads `Relay.Billing.list_admin_users/1`
+  (RE463 moved its row query out of Accounts, which no longer has an admin user list).
+  That page's header carries the `Users | Promo codes | Renewals` tab bar
+  (`RelayWeb.AdminComponents.user_tabs/1`, RE462/RE463); the **Promo codes** tab is
+  `/admin/users/promo-codes` and the **Renewals** tab `/admin/users/renewals` (see Billing).
   When billing is on (`Relay.Billing.enabled?/0`), the insert branch of
   `upsert_user_from_provider/2` starts the new user's 30-day trial (`Relay.Billing.ensure_trial/2`,
   RE460) and then redeems the sign-up link's `opts[:promo_code]` (`Relay.Billing.redeem_code/3`,
@@ -639,6 +640,50 @@ sharing behavior.
   (`%{enabled, standing: Standing.kind/1, through}`, served on the Accounts native auth body,
   RE466), short-circuiting to `%{enabled: false, standing: nil, through: nil}` with no query while
   disabled.
+  **Admin read model (RE463):** `list_admin_users/1` is every user for `/admin/users`, newest
+  first (`inserted_at desc, id desc`), in **one query** — aggregate subqueries for `board_count`
+  (memberships), `owned_board_count` and `member_count` (the distinct people on the boards a user
+  owns, the owner included, invites excluded), a left-joined account + promo code, and a
+  `:failed`-attempt subquery for the declined fact — with standing derived in memory
+  (`Charging.facts/2`, the pure half of `facts/1`, then `Standing.of/3`), never per user. Each row
+  adds `plan` (`admin_plan/2`: `:member_only` for a user who owns no boards, else
+  `Standing.kind/1`; the closed set is `admin_plans/0`), `paid_through_shown` (the trial end for a
+  trial, else `paid_through`), `rate_cents` (`next_charge/1`, 0 when comped) and `code_label`
+  (`"RELAYCONF 1/3"` — months used / months); a member-only row has none of the three.
+  `admin_summary/1` (pure) is the page's summary line: users, paying (`paying_plans/0` =
+  active + past due), `mrr_cents` (their rates summed) and in trial; `format_dollars/1` renders it
+  (`$10`, `$12.50`, `$1,250`). `RelayWeb.Admin.UsersLive` shows them as the Members / Plan
+  (`RelayWeb.AdminComponents.plan_badge/1`, which owns the plan → badge class/label map) / Paid
+  through / Rate / Code columns, a snapshot at mount re-read after each admin write.
+  **Admin writes (RE463):** `admin_comp/3`, `admin_uncomp/3`, `admin_hold/4`,
+  `admin_lift_hold/3`, `admin_extend/5` and `admin_retry_charge/3` are `defdelegate`s to the
+  internal `Relay.Billing.Admin` (not exported). The actor is the signed-in superadmin's
+  `%Schemas.User{}`, handed in by the web layer (Billing never calls Accounts). Each write runs
+  `ensure_trial/2`, then one transaction that locks the account `FOR UPDATE`, checks it, changes
+  it and writes **exactly one** `Schemas.BillingAdminEntry` through the one private writer, then
+  broadcasts `{:billing_changed, user_id}` after commit; a refusal (`admin_refusals/0`) writes and
+  broadcasts nothing. Comp / uncomp flip `comped` (no stored state: un-comping lets
+  `Standing.of/3` derive the rest — paused until they pay); hold sets `held_on` + the trimmed
+  `hold_reason` (required) — `{:paused, :hold}`, never charged; lift clears both; extend adds
+  1..`admin_extend_max_days/0` (365) days to `paid_through` with a required reason, billing day
+  untouched, no attempt. **Retry charge now** is allowed only when `admin_retryable?/2` (a card
+  on file, and past due or paused for anything but a hold) holds on a fresh read, and charges
+  through `Charging.admin_retry/2` — the card-saved decision, parameterised by source, recorded
+  as an `:admin` attempt (`Schemas.BillingPaymentAttempt.sources/0`); Charging owns its own
+  transactions, so the `:retry_charge` entry is written after it returns. An `:admin` decline
+  sends no card-declined email and never spends the clock's grace-day retry (both count only
+  `:clock` attempts). `Schemas.BillingAdminEntry` (`billing_admin_entries`, append-only):
+  `billing_account_id` (`on_delete: :delete_all`), `actor_id` (`on_delete: :nilify_all`),
+  `action` (`actions/0`), `reason`, `days`, `paid_through_before` / `_after`, `inserted_at`.
+  `admin_detail/2` is the side panel's read (nil for an unknown user): the facts, `plan`,
+  `card` (`%{brand_label, last4}`), `code_label`, `retryable?`, `stripe_url`
+  (`stripe_customer_url/1` — the `/test/` dashboard for an `sk_test_` key), every attempt newest
+  first with its `attempt_outcome/1` (the one status → outcome map, closed set
+  `attempt_outcomes/0`, inverted by `attempt_statuses_for/1`), and every entry newest first with
+  the actor's email. `RelayWeb.Admin.UsersLive` opens it at `/admin/users?user=<id>` (a row click
+  patches there) as a right-hand panel with the actions (`data-confirm` on each), hold / extend
+  forms, payment history (`RelayWeb.AdminComponents.outcome_badge/1`) and admin history; refusal
+  copy lives only in `UsersLive.refusal_message/1`.
   **On the web:** `RelayWeb.BillingLive` (`/account/billing`, the avatar menu's **Billing** item —
   both only while enabled; the route 404s otherwise) renders `summary/2` by
   `Relay.Billing.Standing.kind/1` (`Standing` is exported for that), starts the trial a
@@ -659,7 +704,16 @@ sharing behavior.
   `used / —`, Expires or `never`), **New code** (`"new_code"` → a `change_promo_code/2` form,
   `"validate"`, `"create"` → `create_promo_code/1`) and **Disable** (`"disable"` →
   `disable_promo_code/2` at `DateTime.utc_now(:second)`); the list is a plain assign re-read
-  after each write — no stream, no PubSub.
+  after each write — no stream, no PubSub. The **Renewals** tab (`RelayWeb.Admin.RenewalsLive`,
+  `/admin/users/renewals` in the same live_session, RE463) is read-only — the clock is automatic,
+  so there is no "run billing" button: a stream of `renewal_log/1` — every payment attempt across
+  accounts, newest first (`inserted_at desc, id desc`), at most `renewal_log_limit/0` (500) rows,
+  in **one query** (attempt joined to its account and user) — each row the date (`resolved_at`'s,
+  else `inserted_at`'s — the same helper as `admin_detail/2`'s attempts), the user, the period,
+  the amount, the promo code text the attempt recorded, its `attempt_outcome/1` and the Stripe
+  PaymentIntent id. `?outcome=` (matched against `attempt_outcomes/0`'s names, never turned into
+  an atom; anything else means all) filters to the statuses in `attempt_statuses_for/1`, a patch
+  that re-streams with `reset: true`.
   `BoardLive` reads `board_notice/1` into its read-only mode — a paused board is the archived
   board's read-only mode (`read_only?` guard, `#read-only-banner` with billing copy) plus no card
   opening and no Board settings link (`BoardSettingsLive` redirects back on `board_paused?/1`);

@@ -50,6 +50,14 @@ defmodule Relay.Factory do
     }
   end
 
+  def billing_admin_entry_factory do
+    %Schemas.BillingAdminEntry{
+      action: :comp,
+      billing_account: build(:billing_account),
+      actor: build(:user)
+    }
+  end
+
   def billing_notice_factory do
     %Schemas.BillingNotice{
       kind: :trial_ending,
