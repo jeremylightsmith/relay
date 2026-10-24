@@ -71,10 +71,13 @@ defmodule Relay.Agents do
     %{
       key: "codex",
       name: "Codex",
-      command: "codex exec --json --model {model} --cd {worktree} [-c model_reasoning_effort={effort}] {prompt}",
+      # Headless: never ask for approval, write anywhere in the worktree, and reach the network.
+      command:
+        "codex exec --json --model {model} --cd {worktree} -c approval_policy=never -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true [-c model_reasoning_effort={effort}] {prompt}",
       # The `visibility: "list"` entries of codex-cli 0.160.0's ~/.codex/models_cache.json (2026-10-09).
       models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-      resume_command: "codex exec resume --json --model {model} {session} {prompt}",
+      resume_command:
+        "codex exec resume --json --model {model} -c approval_policy=never -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true {session} {prompt}",
       session_id_path: ".thread_id",
       signed_in_check: "codex login status",
       # RE436 — `codex exec --json` prints no usage, but every session's rollout file logs a

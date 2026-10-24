@@ -44,4 +44,15 @@ png mark-color 1024 "$E/brand/mark-color-1024.png"
 png mark-white 1024 "$E/brand/mark-white-1024.png"
 png mark-mono 1024 "$E/brand/mark-mono-1024.png"
 
+# The Phoenix app's own copies (priv/static): the header logo pair, the bare mark, favicon.ico.
+# 128px files are shown at ~23px, so they use the heavier-seam small mark.
+P=../../priv/static
+png app-icon-small 128 "$P/images/logo_light_128.png"
+png app-icon 512 "$P/images/logo_light_512.png"
+png app-icon-small-dark 128 "$P/images/logo_dark_128.png"
+png app-icon-dark 512 "$P/images/logo_dark_512.png"
+png mark-color-small 128 "$P/images/logo_transparent_128.png"
+png mark-color 512 "$P/images/logo_transparent_512.png"
+cp "$E/web/favicon.ico" "$P/favicon.ico"
+
 echo "Exported $(find "$E" -type f | wc -l | tr -d ' ') files to docs/brand/$E"

@@ -86,6 +86,8 @@ def main():
     write("app-icon-small.svg", svg(small, bg=WHITE))
     # iOS 18 dark variant: same mark on the board's ink.
     write("app-icon-dark.svg", svg(full, bg=INK))
+    write("app-icon-small-dark.svg", svg(small, bg=INK))
+    write("mark-color-small.svg", svg(small))
     # iOS 18 tinted variant: grayscale on black; iOS tints it.
     write("app-icon-tinted.svg", svg(mark(WHITE, GRAY, GRAY), bg="#000000"))
     # Browser favicon: rounded tile, heavier seams and ropes.
