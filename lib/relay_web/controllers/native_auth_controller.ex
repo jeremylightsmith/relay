@@ -12,6 +12,7 @@ defmodule RelayWeb.NativeAuthController do
   alias Relay.Accounts
   alias Relay.Accounts.AppleTokenValidator
   alias Relay.Accounts.GoogleTokenValidator
+  alias Relay.Billing
   alias RelayWeb.Auth
   alias RelayWeb.Feedback
 
@@ -127,9 +128,16 @@ defmodule RelayWeb.NativeAuthController do
 
   # The 200 body of sign-in and me/2, built once so the responses cannot drift.
   # `feedback_url` (RE397) drives the native Settings "Suggest an idea" row; it sits
-  # beside `user`, not inside it, and is `null` when unset.
+  # beside `user`, not inside it, and is `null` when unset. `billing` (RE466) drives the
+  # Settings ACCOUNT › Plan row: `Relay.Billing.native_status/2`, also beside `user`.
   defp success_json(conn, user, token) do
-    %{success: true, user: user_json(user), token: token, feedback_url: Feedback.url(conn.assigns)}
+    %{
+      success: true,
+      user: user_json(user),
+      token: token,
+      feedback_url: Feedback.url(conn.assigns),
+      billing: Billing.native_status(user, Date.utc_today())
+    }
   end
 
   # Shared by sign-in and me/2 so the responses cannot drift.

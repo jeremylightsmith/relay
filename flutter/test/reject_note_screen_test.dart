@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
@@ -328,6 +329,30 @@ void main() {
     expect(find.text('card RLY-B'), findsNothing, reason: 'must not advance');
     expect(_sendButton(tester).onPressed, isNotNull, reason: 'retryable');
   });
+
+  testWidgets(
+    'RE466: a plan_paused refusal shows the read-only notice inline and stays',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed('plan_paused', "This board's plan is paused."),
+      );
+      await pumpReject(tester, api: api);
+
+      await tester.enterText(_input, 'Please revise');
+      await tester.pump();
+      await tester.tap(_send);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<Text>(find.byKey(const Key('reject_plan_paused'))).data,
+        planPausedMessage,
+      );
+      expect(_input, findsOneWidget, reason: 'the screen does not pop');
+      expect(find.text('Please revise'), findsOneWidget);
+      expect(find.text('card RLY-B'), findsNothing);
+      expect(find.byKey(const Key('reject_error')), findsNothing);
+    },
+  );
 
   testWidgets(
     'a 401 mid-note follows the same policy as approve: signed out, no dead-end error',

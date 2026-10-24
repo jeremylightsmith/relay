@@ -512,6 +512,37 @@ defmodule Relay.Billing do
   defp full_price_from(months_left, nil, %Date{} = renews_on, day), do: Periods.renewal_after(renews_on, day, months_left)
   defp full_price_from(_months_left, _first_charge_on, _renews_on, _billing_day), do: nil
 
+  @typedoc "The plan status the native app's Settings shows (`native_status/2`)."
+  @type native_status :: %{
+          enabled: boolean(),
+          standing: :trial | :active | :past_due | :cancelled | :comped | :paused | nil,
+          through: Date.t() | nil
+        }
+
+  @doc """
+  The plan status the native app shows `user` on `today` (RE466): the standing's kind and the
+  date the plan runs through. `through` is `trial_ends_on` for a trial (nil before the backfill),
+  `paid_through` while active or past due, `access_until` once cancelled, and nil when comped or
+  paused. With billing disabled it is `%{enabled: false, standing: nil, through: nil}`, read
+  without touching the database.
+  """
+  @spec native_status(User.t() | pos_integer(), Date.t()) :: native_status()
+  def native_status(user, %Date{} = today) do
+    if enabled?() do
+      account = get_account(user)
+      standing = Standing.of(account, facts(account), today)
+      %{enabled: true, standing: Standing.kind(standing), through: through(standing, account)}
+    else
+      %{enabled: false, standing: nil, through: nil}
+    end
+  end
+
+  defp through(:trial, account), do: account && account.trial_ends_on
+  defp through(:active, account), do: account.paid_through
+  defp through({:past_due, _grace_until}, account), do: account.paid_through
+  defp through({:cancelled, access_until}, _account), do: access_until
+  defp through(_comped_or_paused, _account), do: nil
+
   defp card(account) do
     if account && Standing.card_on_file?(account) do
       %{

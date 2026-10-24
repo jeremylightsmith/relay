@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/board/board_api.dart';
 import 'package:relay_mobile/features/board/new_card_sheet.dart';
@@ -460,5 +461,29 @@ void main() {
       find.descendant(of: _body, matching: find.text('server says no')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('RE466: a plan_paused refusal shows the read-only copy inline', (
+    tester,
+  ) async {
+    Future<CreateCardResult> fake({
+      required String board,
+      required String stage,
+      required String title,
+      String? description,
+    }) async =>
+        const CreateCardFailed('plan_paused', "This board's plan is paused.");
+
+    await pumpHost(tester, submit: fake);
+
+    await tester.enterText(find.byKey(const Key('new_card_title')), 'x');
+    await tester.pump();
+    await tester.tap(_submitKey);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('new_card_title')), findsOneWidget);
+    expect(find.text(planPausedMessage), findsOneWidget);
+    expect(find.text("This board's plan is paused."), findsNothing);
+    expect(_submitButton(tester).onPressed, isNotNull);
   });
 }

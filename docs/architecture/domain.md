@@ -510,10 +510,16 @@ sharing behavior.
   against Apple's JWKS (RS256 pinned, then `iss`/`aud`/`exp`, a SHA-256 nonce bound to the raw
   nonce the app sends, and a verified email). They back the two native endpoints
   `POST /api/auth/native/google` and `POST /api/auth/native/apple`, which share one sign-in tail
-  (same session cookie and `{success, user, token, feedback_url}` body); `GET /api/auth/native/me`
+  (same session cookie and `{success, user, token, feedback_url, billing}` body); `GET /api/auth/native/me`
   returns the same shape. `feedback_url` is `RELAY_FEEDBACK_URL` (`null` when unset or blank), read
   only via `RelayWeb.Feedback` — the native Settings "Suggest an idea" row and the web account
-  menu's "Suggest an idea" link both use it (RE397). Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
+  menu's "Suggest an idea" link both use it (RE397). `billing` (RE466) is
+  `Relay.Billing.native_status/2`, beside `user` rather than inside it:
+  `{"enabled": bool, "standing": "trial"|"active"|"past_due"|"cancelled"|"comped"|"paused"|null,
+  "through": "YYYY-MM-DD"|null}`. It feeds the native Settings ACCOUNT › Plan row (status only, no
+  purchase UI). `through` is `trial_ends_on` for a trial, `paid_through` while active or past due,
+  `access_until` once cancelled, and `null` when comped or paused. Billing disabled sends
+  `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
   nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star).
@@ -629,7 +635,10 @@ sharing behavior.
   keeps an earlier `disabled_at`; never touches accounts holding the code). **The amount** is
   `next_charge/1` (via `discounted_cents/2`: `price × (100 − percent) / 100`, half-up to the
   cent) — the one function the charging path and `summary/2` both call; a disabled code still
-  discounts an account that holds it.
+  discounts an account that holds it. `native_status/2` is the native app's read
+  (`%{enabled, standing: Standing.kind/1, through}`, served on the Accounts native auth body,
+  RE466), short-circuiting to `%{enabled: false, standing: nil, through: nil}` with no query while
+  disabled.
   **On the web:** `RelayWeb.BillingLive` (`/account/billing`, the avatar menu's **Billing** item —
   both only while enabled; the route 404s otherwise) renders `summary/2` by
   `Relay.Billing.Standing.kind/1` (`Standing` is exported for that), starts the trial a
@@ -655,6 +664,9 @@ sharing behavior.
   board's read-only mode (`read_only?` guard, `#read-only-banner` with billing copy) plus no card
   opening and no Board settings link (`BoardSettingsLive` redirects back on `board_paused?/1`);
   past due shows `#billing-past-due-banner` to the owner only, the board staying editable.
+  Embedded in the native app (`@embed`, RE466) both banners keep their copy but drop the
+  **Update card** link (`#billing-paused-update-card`, `#billing-past-due-update-card`): the app
+  carries no purchase UI and no link to outside payment.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
   per board (typically one per machine), each authenticating as Relay AI on its board.
   `list_keys/1` (oldest first), board-scoped `get_key!/2`, `create_key/3` (blank name →

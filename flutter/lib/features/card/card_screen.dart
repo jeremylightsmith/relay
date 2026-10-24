@@ -5,7 +5,9 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/plan_paused.dart';
 import '../../app/embedded_webview.dart';
+import '../../app/theme.dart';
 import '../../config.dart';
 import '../decisions/review_queue.dart';
 import 'card_nav_context.dart';
@@ -383,16 +385,47 @@ class _CardScreenState extends ConsumerState<CardScreen> {
   /// the web stepper inside the body, so rendering nothing there is correct.
   Widget? _actionBar() {
     final inFlight = ref.watch(reviewQueueProvider.select((s) => s.inFlight));
+    final planPaused = ref.watch(
+      reviewQueueProvider.select((s) => s.planPaused),
+    );
     return switch (widget.kind) {
       // Disabling while a POST is in flight is the visible half of the
       // double-tap guard (the queue's inFlight short-circuit is the
       // authoritative half). Approve/reject are irreversible — no domain
       // undo — so both go quiet together.
-      'in_review' => CardReviewBar(
-        onApprove: inFlight ? null : _approve,
-        onReject: inFlight ? null : _reject,
+      //
+      // RE466: a plan_paused refusal is explained right above the bar it
+      // refused — never as the snackbar + Retry (it sets no queue error).
+      'in_review' => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (planPaused) const _PlanPausedNotice(),
+          CardReviewBar(
+            onApprove: inFlight ? null : _approve,
+            onReject: inFlight ? null : _reject,
+          ),
+        ],
       ),
       _ => null,
     };
+  }
+}
+
+/// RE466: "this board is read-only" over the review bar, in the blocked-amber
+/// text the needs-input pill uses — a paused plan is a block, not an error.
+class _PlanPausedNotice extends StatelessWidget {
+  const _PlanPausedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      key: Key('card_plan_paused'),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Text(
+        planPausedMessage,
+        style: TextStyle(fontSize: 13, color: RelayTheme.relayNeedsInputText),
+      ),
+    );
   }
 }

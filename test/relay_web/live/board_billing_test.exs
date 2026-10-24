@@ -209,4 +209,54 @@ defmodule RelayWeb.BoardBillingTest do
     assert banner =~ "Your plan is paused, so this board is read-only."
     refute banner =~ "This board is archived and read-only."
   end
+
+  describe "embedded in the native app (RE466)" do
+    test "a paused owner's banner keeps its copy but drops Update card", %{
+      conn: conn,
+      user: user,
+      board: board,
+      today: today
+    } do
+      paused!(user, today)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      assert has_element?(view, "#read-only-banner b", "Your plan is paused, so this board is read-only.")
+      refute has_element?(view, "#billing-paused-update-card")
+      refute view |> element("#read-only-banner") |> render() =~ ~s(href="/account/billing")
+    end
+
+    test "a past-due owner's banner keeps its copy but drops Update card", %{
+      conn: conn,
+      user: user,
+      board: board,
+      today: today
+    } do
+      past_due!(user, today)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1")
+
+      assert has_element?(
+               view,
+               "#billing-past-due-banner",
+               "Your card was declined. Update it today to keep your boards editable."
+             )
+
+      refute has_element?(view, "#billing-past-due-update-card")
+      refute view |> element("#billing-past-due-banner") |> render() =~ ~s(href="/account/billing")
+    end
+
+    test "outside the app the paused banner still offers Update card", %{
+      conn: conn,
+      user: user,
+      board: board,
+      today: today
+    } do
+      paused!(user, today)
+
+      {:ok, plain, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(plain, ~s(#billing-paused-update-card[href="/account/billing"]), "Update card")
+
+      {:ok, left_embed, _html} = live(conn, ~p"/board/#{board.slug}?embed=0")
+      assert has_element?(left_embed, ~s(#billing-paused-update-card[href="/account/billing"]), "Update card")
+    end
+  end
 end

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
@@ -278,6 +279,55 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Retry'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'RE466: a plan_paused refusal explains itself inline — no snackbar, no Retry',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed('plan_paused', "This board's plan is paused."),
+      );
+      await pumpCardHost(tester, api: api);
+
+      await tester.tap(find.byKey(const Key('card_approve')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('card_plan_paused')),
+          matching: find.text(planPausedMessage),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('card_body_RLY-A')),
+        findsOneWidget,
+        reason: 'the card did not move',
+      );
+      expect(api.approved, ['RLY-A'], reason: 'no retry loop');
+    },
+  );
+
+  testWidgets(
+    'RE466: a network failure still gets the snackbar + Retry, not the paused notice',
+    (tester) async {
+      final api = FakeDecisionApi(
+        const DecisionFailed(
+          'network',
+          'Network error — could not reach Relay.',
+        ),
+      );
+      await pumpCardHost(tester, api: api);
+
+      await tester.tap(find.byKey(const Key('card_approve')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.byKey(const Key('card_plan_paused')), findsNothing);
     },
   );
 

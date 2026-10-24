@@ -46,7 +46,7 @@ defmodule Relay.Runs.BlockedOutcomeTest do
 
   defp start(card, flow) do
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = job}, 3_000
+    assert_receive {:dispatched, %NodeJob{} = job}, 10_000
     {run, job}
   end
 

@@ -12,6 +12,7 @@ import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/auth/http_providers.dart';
 import 'package:relay_mobile/features/auth/session_store.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
+import 'package:relay_mobile/features/settings/plan_status.dart';
 
 import 'support/fake_push_platform.dart';
 import 'support/stub_adapter.dart';
@@ -118,4 +119,37 @@ void main() {
       expect(state.feedbackUrl, isNull);
     },
   );
+
+  test('a restored session carries billing status from /me (RE466)', () async {
+    final adapter = StubAdapter(
+      body: {
+        'success': true,
+        'user': _user,
+        'token': 'relayu_abc_def',
+        'billing': {
+          'enabled': true,
+          'standing': 'active',
+          'through': '2026-05-03',
+        },
+      },
+    );
+    final container = containerWith(adapter, persisted: 'cookie-value');
+
+    final state = await restore(container);
+
+    expect(state.billing!.standing, PlanStanding.active);
+    expect(state.billing!.through, DateTime(2026, 5, 3));
+  });
+
+  test('an old server with no billing key restores with it null', () async {
+    final adapter = StubAdapter(
+      body: {'success': true, 'user': _user, 'token': 'relayu_abc_def'},
+    );
+    final container = containerWith(adapter, persisted: 'cookie-value');
+
+    final state = await restore(container);
+
+    expect(state.signedIn, isTrue);
+    expect(state.billing, isNull);
+  });
 }

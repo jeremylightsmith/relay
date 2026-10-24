@@ -457,4 +457,61 @@ defmodule RelayWeb.NativeAuthControllerTest do
       refute Map.has_key?(body, "feedback_url")
     end
   end
+
+  describe "billing on the success body (RE466)" do
+    test "GET /me carries the owner's billing standing at the top level, not inside user", %{conn: conn} do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      today = Date.utc_today()
+      insert(:billing_account, user: user, paid_through: Date.add(today, 10), billing_day: today.day)
+
+      body = conn |> log_in_user(user) |> get(~p"/api/auth/native/me") |> json_response(200)
+
+      assert body["billing"] == %{
+               "enabled" => true,
+               "standing" => "active",
+               "through" => Date.to_iso8601(Date.add(today, 10))
+             }
+
+      refute Map.has_key?(body["user"], "billing")
+    end
+
+    test "GET /me carries a disabled billing object when billing is off", %{conn: conn} do
+      user = insert(:user)
+
+      body = conn |> log_in_user(user) |> get(~p"/api/auth/native/me") |> json_response(200)
+
+      assert body["billing"] == %{"enabled" => false, "standing" => nil, "through" => nil}
+    end
+
+    test "POST /google carries the new user's trial", %{conn: conn} do
+      Process.put(:billing_enabled, true)
+      stub_google(@tokeninfo)
+
+      body = conn |> post(~p"/api/auth/native/google", %{id_token: "tok"}) |> json_response(200)
+
+      assert %{"enabled" => true, "standing" => "trial"} = body["billing"]
+    end
+
+    test "POST /apple carries the billing object", %{conn: conn} do
+      key = signing_key()
+      stub_jwks(key, "test-kid")
+      token = apple_token(key, "test-kid", %{})
+
+      body =
+        conn
+        |> post(~p"/api/auth/native/apple", %{identity_token: token, nonce: "raw-nonce-1"})
+        |> json_response(200)
+
+      assert body["billing"] == %{"enabled" => false, "standing" => nil, "through" => nil}
+    end
+
+    test "a 401 body carries no billing", %{conn: conn} do
+      Process.put(:billing_enabled, true)
+
+      body = conn |> get(~p"/api/auth/native/me") |> json_response(401)
+
+      refute Map.has_key?(body, "billing")
+    end
+  end
 end

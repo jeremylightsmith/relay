@@ -15,7 +15,8 @@ class CreateCardOk extends CreateCardResult {
 }
 
 /// The server (or the network) refused. [code] is one of the FallbackController
-/// codes — `missing_title`, `invalid_stage`, `not_found`, `unauthorized` — or the
+/// codes — `missing_title`, `invalid_stage`, `not_found`, `unauthorized`,
+/// `plan_paused` (402, `planPausedCode` in `api/plan_paused.dart`) — or the
 /// synthetic `network` for a transport failure.
 class CreateCardFailed extends CreateCardResult {
   const CreateCardFailed(this.code, this.message);

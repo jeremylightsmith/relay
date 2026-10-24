@@ -148,6 +148,33 @@ void main() {
     );
   });
 
+  test('a successful Apple sign-in carries billing status (RE466)', () async {
+    final adapter = StubAdapter(
+      body: {
+        'success': true,
+        'user': {'id': 1, 'name': 'Alice Apple', 'email': 'alice@example.com'},
+        'token': 'relayu_x',
+        'billing': {
+          'enabled': true,
+          'standing': 'trial',
+          'through': '2026-04-03',
+        },
+      },
+      headers: {
+        'set-cookie': ['_relay_key=apple-cookie; Path=/'],
+      },
+    );
+    final container = containerWith(
+      store: InMemorySessionStore(),
+      adapter: adapter,
+      apple: FakeAppleRequest(),
+    );
+
+    await (await ready(container)).signInWithApple();
+
+    expect(container.read(authProvider).billing!.label, 'Trial · ends Apr 3');
+  });
+
   test('a cancelled Apple sheet signs out silently, with no request', () async {
     final adapter = StubAdapter();
     final container = containerWith(

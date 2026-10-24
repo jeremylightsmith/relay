@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/plan_paused.dart';
 import '../../app/theme.dart';
 import '../voice/mic_button.dart';
 import '../voice/voice_transcriber.dart';
@@ -118,6 +119,17 @@ class _RejectNoteScreenState extends ConsumerState<RejectNoteScreen> {
                     ),
                     const SizedBox(height: 8), // artboard margin-top:8px
                     const _Hint(),
+                    if (queueState.planPaused) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        planPausedMessage,
+                        key: Key('reject_plan_paused'),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: RelayTheme.relayReject,
+                        ),
+                      ),
+                    ],
                     if (queueState.error != null) ...[
                       const SizedBox(height: 12),
                       Text(

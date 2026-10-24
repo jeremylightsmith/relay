@@ -16,7 +16,8 @@ class DecisionOk extends DecisionResult {
 
 /// The server (or the network) refused. [code] is one of F4's FallbackController
 /// codes — `not_in_review`, `missing_note`, `ambiguous_ref`, `not_found`,
-/// `unauthorized` — or the synthetic `network` for a transport failure.
+/// `unauthorized`, `plan_paused` (402, `planPausedCode` in `api/plan_paused.dart`) — or the synthetic
+/// `network` for a transport failure.
 class DecisionFailed extends DecisionResult {
   const DecisionFailed(this.code, this.message);
 

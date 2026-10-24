@@ -164,6 +164,79 @@ defmodule Relay.BillingTest do
     assert Billing.standing(account.user_id, ~D[2026-08-12]) == :trial
   end
 
+  describe "native_status/2" do
+    test "billing disabled answers enabled: false with no standing or through" do
+      user = insert(:user)
+      insert(:billing_account, user: user, paid_through: ~D[2026-05-03])
+
+      assert Billing.native_status(user, ~D[2026-05-01]) == %{enabled: false, standing: nil, through: nil}
+    end
+
+    test "a trial runs through trial_ends_on" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      insert(:billing_account, user: user, trial_ends_on: ~D[2026-04-03], paid_through: nil)
+
+      assert Billing.native_status(user, ~D[2026-03-20]) == %{enabled: true, standing: :trial, through: ~D[2026-04-03]}
+    end
+
+    test "a user with no billing account is a trial with no through" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+
+      assert Billing.native_status(user, Date.utc_today()) == %{enabled: true, standing: :trial, through: nil}
+      assert Billing.native_status(user.id, Date.utc_today()) == %{enabled: true, standing: :trial, through: nil}
+    end
+
+    test "an active plan runs through paid_through" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      insert(:billing_account, user: user, paid_through: ~D[2026-05-03])
+
+      assert Billing.native_status(user, ~D[2026-04-20]) == %{enabled: true, standing: :active, through: ~D[2026-05-03]}
+    end
+
+    test "a past-due plan inside the grace reports paid_through" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      insert(:billing_account, user: user, paid_through: ~D[2026-05-03])
+
+      assert Billing.native_status(user, ~D[2026-05-04]) ==
+               %{enabled: true, standing: :past_due, through: ~D[2026-05-03]}
+    end
+
+    test "a cancelled plan runs through access_until" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+
+      insert(:billing_account,
+        user: user,
+        paid_through: ~D[2026-05-03],
+        cancelled_on: ~D[2026-04-10],
+        access_until: ~D[2026-05-03]
+      )
+
+      assert Billing.native_status(user, ~D[2026-04-20]) ==
+               %{enabled: true, standing: :cancelled, through: ~D[2026-05-03]}
+    end
+
+    test "a comped plan has no through" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      insert(:billing_account, user: user, comped: true, paid_through: ~D[2026-05-03])
+
+      assert Billing.native_status(user, ~D[2026-08-01]) == %{enabled: true, standing: :comped, through: nil}
+    end
+
+    test "a paused plan has no through" do
+      Process.put(:billing_enabled, true)
+      user = insert(:user)
+      insert(:billing_account, user: user, paid_through: ~D[2026-05-03])
+
+      assert Billing.native_status(user, ~D[2026-05-20]) == %{enabled: true, standing: :paused, through: nil}
+    end
+  end
+
   test "a user with no account stands in :trial" do
     assert Billing.standing(insert(:user), ~D[2026-08-12]) == :trial
     assert Standing.paused?(Billing.standing(insert(:user), ~D[2026-08-12])) == false

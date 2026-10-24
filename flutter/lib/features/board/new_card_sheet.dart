@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/plan_paused.dart';
 import '../../app/theme.dart';
 import '../../widgets/headered_sheet.dart';
 import '../voice/mic_button.dart';
@@ -132,6 +133,12 @@ class _NewCardSheetState extends ConsumerState<NewCardSheet> {
       case CreateCardOk():
         // The board webview picks the new card up via LiveView realtime.
         Navigator.of(context).pop();
+      // RE466: our own read-only copy, not the server's terse message.
+      case CreateCardFailed(code: planPausedCode):
+        setState(() {
+          _submitting = false;
+          _error = planPausedMessage;
+        });
       case CreateCardFailed(:final message):
         setState(() {
           _submitting = false;

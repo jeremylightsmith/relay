@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
+import '../../api/plan_paused.dart';
 import '../auth/auth_controller.dart';
 import '../boards/current_board.dart';
 import '../card/card_screen.dart';
@@ -62,6 +63,7 @@ class ReviewQueueState {
     this.banner,
     this.error,
     this.inFlight = false,
+    this.planPaused = false,
   });
 
   final List<QueueItem> items;
@@ -79,6 +81,12 @@ class ReviewQueueState {
   /// undo, so this is the double-tap guard (RLY-100 revisits mis-tap protection).
   final bool inFlight;
 
+  /// RE466: the last decision was refused because the board's plan is paused.
+  /// Deliberately *not* [error]: the card screen's snackbar + Retry fires on
+  /// [error], and retrying a paused board only loops. The decision surfaces
+  /// render [planPausedMessage] inline instead.
+  final bool planPaused;
+
   QueueItem? get current =>
       index >= 0 && index < items.length ? items[index] : null;
 
@@ -88,6 +96,7 @@ class ReviewQueueState {
     String? banner,
     String? error,
     bool? inFlight,
+    bool? planPaused,
     bool clearBanner = false,
     bool clearError = false,
   }) => ReviewQueueState(
@@ -96,6 +105,7 @@ class ReviewQueueState {
     banner: clearBanner ? null : (banner ?? this.banner),
     error: clearError ? null : (error ?? this.error),
     inFlight: inFlight ?? this.inFlight,
+    planPaused: planPaused ?? this.planPaused,
   );
 }
 
@@ -150,7 +160,7 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
       return null;
     }
 
-    state = state.copyWith(inFlight: true, clearError: true);
+    state = state.copyWith(inFlight: true, planPaused: false, clearError: true);
     try {
       final result = await ref
           .read(decisionApiProvider)
@@ -190,7 +200,7 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
       return null;
     }
 
-    state = state.copyWith(inFlight: true, clearError: true);
+    state = state.copyWith(inFlight: true, planPaused: false, clearError: true);
     try {
       final result = await ref
           .read(decisionApiProvider)
@@ -218,6 +228,12 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
       // The token expired or was revoked; the router sends a signed-out user to /welcome.
       case DecisionFailed(code: 'unauthorized'):
         await ref.read(authProvider.notifier).signOut();
+        return null;
+      // RE466: the board's plan is paused — the surfaces explain it inline.
+      // No error (so no snackbar + Retry loop), no reconcile, no advance: the
+      // card still needs you once the plan resumes.
+      case DecisionFailed(code: planPausedCode):
+        state = state.copyWith(planPaused: true);
         return null;
       case DecisionFailed(:final message):
         state = state.copyWith(error: message);
@@ -301,7 +317,10 @@ class ReviewQueue extends Notifier<ReviewQueueState> {
     return banner;
   }
 
-  void clearError() => state = state.copyWith(clearError: true);
+  /// Also clears [ReviewQueueState.planPaused]: both are "the last decision
+  /// failed" notices, so the reject screen's fresh-visit reset covers both.
+  void clearError() =>
+      state = state.copyWith(planPaused: false, clearError: true);
 }
 
 final reviewQueueProvider = NotifierProvider<ReviewQueue, ReviewQueueState>(

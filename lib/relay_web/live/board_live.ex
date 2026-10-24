@@ -374,6 +374,7 @@ defmodule RelayWeb.BoardLive do
                     Nothing's been deleted. Pay to pick up where you left off.
                   </span>
                   <.link
+                    :if={not @embed}
                     navigate={~p"/account/billing"}
                     id="billing-paused-update-card"
                     class="btn btn-warning btn-sm"
@@ -397,7 +398,8 @@ defmodule RelayWeb.BoardLive do
                   </.button>
               <% end %>
             </div>
-            <%!-- RE460 — past due: the board stays editable; only its owner is told to pay. --%>
+            <%!-- RE460 — past due: the board stays editable; only its owner is told to pay. Embedded in
+                 the native app (RE466) there is no Update card: the app sells nothing. --%>
             <div
               :if={@billing_notice == :past_due and @board_owner?}
               id="billing-past-due-banner"
@@ -408,6 +410,7 @@ defmodule RelayWeb.BoardLive do
                 Your card was declined. Update it today to keep your boards editable.
               </span>
               <.link
+                :if={not @embed}
                 navigate={~p"/account/billing"}
                 id="billing-past-due-update-card"
                 class="btn btn-sm"

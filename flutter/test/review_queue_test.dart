@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/api/api_client.dart';
+import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
@@ -431,6 +432,100 @@ void main() {
       );
     },
   );
+
+  group('RE466: a plan_paused refusal', () {
+    const paused = DecisionFailed(
+      planPausedCode,
+      "This board's plan is paused.",
+    );
+
+    test('stays put and flags planPaused instead of an error', () async {
+      final h = harness(api: FakeDecisionApi(paused));
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+
+      final dest = await queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
+
+      expect(dest, isNull);
+      final state = h.container.read(reviewQueueProvider);
+      expect(state.planPaused, isTrue);
+      expect(state.error, isNull, reason: 'no generic snackbar + Retry');
+      expect(state.index, 0);
+      expect(state.inFlight, isFalse);
+    });
+
+    test('a fresh approve clears planPaused as soon as it starts', () async {
+      final fake = FakeDecisionApi(paused);
+      final h = harness(api: fake);
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+      await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+      expect(h.container.read(reviewQueueProvider).planPaused, isTrue);
+
+      // The plan resumed: the next attempt goes through.
+      fake.result = const DecisionOk({});
+      final pending = queue.approveCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+      );
+      expect(
+        h.container.read(reviewQueueProvider).planPaused,
+        isFalse,
+        reason: 'cleared when the approve starts, not when it lands',
+      );
+      await pending;
+      expect(h.container.read(reviewQueueProvider).planPaused, isFalse);
+      expect(fake.approved, ['RLY-A', 'RLY-A']);
+    });
+
+    test('a fresh reject clears planPaused as soon as it starts', () async {
+      final fake = FakeDecisionApi(paused);
+      final h = harness(api: fake);
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+      await queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'fix it',
+      );
+      expect(h.container.read(reviewQueueProvider).planPaused, isTrue);
+
+      fake.result = const DecisionOk({});
+      final pending = queue.rejectCurrent(
+        cardRef: 'RLY-A',
+        boardSlug: 'relay',
+        note: 'fix it',
+      );
+      expect(h.container.read(reviewQueueProvider).planPaused, isFalse);
+      await pending;
+    });
+
+    test('clearError also clears planPaused', () async {
+      final h = harness(api: FakeDecisionApi(paused));
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A'), row('RLY-B')], atRef: 'RLY-A');
+      await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+      expect(h.container.read(reviewQueueProvider).planPaused, isTrue);
+
+      queue.clearError();
+
+      expect(h.container.read(reviewQueueProvider).planPaused, isFalse);
+    });
+
+    test('enter starts a fresh walk with planPaused reset', () async {
+      final h = harness(api: FakeDecisionApi(paused));
+      final queue = h.container.read(reviewQueueProvider.notifier);
+      queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+      await queue.approveCurrent(cardRef: 'RLY-A', boardSlug: 'relay');
+
+      queue.enter(rows: [row('RLY-A')], atRef: 'RLY-A');
+
+      expect(h.container.read(reviewQueueProvider).planPaused, isFalse);
+    });
+  });
 
   test('a 401 signs out — the router does the rest', () async {
     final h = harness(

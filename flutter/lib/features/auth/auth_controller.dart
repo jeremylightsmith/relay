@@ -22,6 +22,7 @@ import '../board/board_prefs.dart';
 import '../board/last_place.dart';
 import '../boards/current_board.dart';
 import '../push/push_service.dart';
+import '../settings/plan_status.dart';
 import 'apple_credential.dart';
 import 'auth_errors.dart';
 import 'http_providers.dart';
@@ -48,6 +49,7 @@ class AuthState {
     this.token,
     this.method,
     this.feedbackUrl,
+    this.billing,
   });
 
   final AuthStatus status;
@@ -72,6 +74,12 @@ class AuthState {
   /// persisted: the server sends it on every sign-in and every /me, so a
   /// restored launch gets it from /me.
   final String? feedbackUrl;
+
+  /// Where the owner's plan stands, for Settings' status-only ACCOUNT › Plan
+  /// row (RE466) — the server's `billing`, null when the server predates it.
+  /// Set only on the two success paths and, like [feedbackUrl], **not**
+  /// persisted: a restored launch gets it from /me.
+  final PlanStatus? billing;
 
   bool get signedIn => status == AuthStatus.signedIn;
   bool get signingIn => status == AuthStatus.signingIn;
@@ -127,6 +135,7 @@ class AuthController extends Notifier<AuthState> {
           user: Map<String, dynamic>.from(resp.data['user'] as Map),
           token: resp.data['token'] as String?,
           feedbackUrl: resp.data['feedback_url'] as String?,
+          billing: PlanStatus.fromJson(resp.data['billing']),
         );
         return;
       }
@@ -237,6 +246,7 @@ class AuthController extends Notifier<AuthState> {
       user: Map<String, dynamic>.from(resp.data['user'] as Map),
       token: resp.data['token'] as String?,
       feedbackUrl: resp.data['feedback_url'] as String?,
+      billing: PlanStatus.fromJson(resp.data['billing']),
     );
   }
 
