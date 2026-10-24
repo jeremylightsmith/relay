@@ -23,6 +23,12 @@ defmodule Relay.BillingTest do
     assert Billing.topic(42) == "billing:42"
   end
 
+  test "format_cents/1 renders dollars with two-digit cents" do
+    assert Billing.format_cents(2000) == "$20.00"
+    assert Billing.format_cents(5) == "$0.05"
+    assert Billing.format_cents(123_456) == "$1234.56"
+  end
+
   describe "ensure_trial/2" do
     test "creates the account with a trial ending 30 days out" do
       user = insert(:user)

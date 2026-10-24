@@ -212,7 +212,7 @@ defmodule Relay.Billing.ClockTest do
     account = account(:visa_4242, %{trial_ends_on: ~D[2026-04-03]})
     insert(:user)
 
-    assert Billing.run_clock(~D[2026-04-04]) == %{backfilled: 0, resolved: 0, charged: 0}
+    assert Billing.run_clock(~D[2026-04-04]) == %{backfilled: 0, resolved: 0, charged: 0, notified: 0}
     assert attempts(account) == []
   end
 

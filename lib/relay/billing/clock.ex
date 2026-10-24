@@ -2,7 +2,7 @@ defmodule Relay.Billing.Clock do
   @moduledoc """
   The billing clock (RE460, ADR 0012): an hourly ticker that runs `Relay.Billing.run_clock/2`
   for today's UTC date — the launch backfill, resolving unanswered charges, first charges after a
-  trial and renewals — with `final_pass?` from `final_pass_hour/0` on, so a declined renewal gets
+  trial and renewals, then the once-only billing emails (`Relay.Billing.Notifier.notify_due/1`) — with `final_pass?` from `final_pass_hour/0` on, so a declined renewal gets
   its one retry at the end of its grace day.
 
   - Every tick takes a Postgres advisory lock (`lock_key/0`) inside `Repo.checkout/1`, so a

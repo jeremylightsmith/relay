@@ -86,7 +86,7 @@ defmodule RelayWeb.BillingLive do
           >
             <div class="flex justify-between">
               <span>First charge, {date(@summary.first_charge_on)}</span>
-              <span class="font-mono">{money(@summary.amount_cents)}</span>
+              <span class="font-mono">{Billing.format_cents(@summary.amount_cents)}</span>
             </div>
           </div>
 
@@ -136,7 +136,7 @@ defmodule RelayWeb.BillingLive do
                 <tr :for={payment <- @summary.payments} id={"billing-payment-#{payment.id}"}>
                   <td class="font-mono">{date(payment.paid_on)}</td>
                   <td>{date(payment.period_start)} – {date(payment.period_end)}</td>
-                  <td class="text-right font-mono">{money(payment.amount_cents)}</td>
+                  <td class="text-right font-mono">{Billing.format_cents(payment.amount_cents)}</td>
                   <td class="text-right">
                     <a
                       :if={payment.receipt_url}
@@ -267,10 +267,6 @@ defmodule RelayWeb.BillingLive do
   defp access_until({:cancelled, %Date{} = access_until}), do: access_until
 
   defp date(%Date{} = date), do: Calendar.strftime(date, "%b %-d")
-
-  defp money(cents) when is_integer(cents) do
-    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
-  end
 
   defp expiry(%{exp_month: month, exp_year: year}) do
     "#{month |> Integer.to_string() |> String.pad_leading(2, "0")}/#{year |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"

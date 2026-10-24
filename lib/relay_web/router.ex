@@ -311,6 +311,8 @@ defmodule RelayWeb.Router do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: RelayWeb.Telemetry
+      # Billing emails delivered to Swoosh's Local adapter (RE464).
+      forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
 
     scope "/" do

@@ -94,6 +94,9 @@ config :relay, billing_payments: Relay.Billing.Payments.Local
 # Enable dev routes (dashboard, storybook)
 config :relay, dev_routes: true
 
+# Billing emails (RE464): delivered to Swoosh's Local adapter — read them at /dev/mailbox.
+config :relay, mail_enabled: true
+
 # RLY-133: per-board schedulers run in dev; the engine stays Noop until a real
 # adapter onto Relay.Runs's run-execution engine is wired up.
 config :relay, runs_auto_start: true

@@ -54,6 +54,8 @@ defmodule Relay.MixProject do
       {:heroicons,
        github: "tailwindlabs/heroicons", tag: "v2.2.0", sparse: "optimized", app: false, compile: false, depth: 1},
       {:req, "~> 0.5"},
+      # Billing emails (RE464): Resend over Swoosh.ApiClient.Req in prod, Local + /dev/mailbox in dev.
+      {:swoosh, "~> 1.19"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},

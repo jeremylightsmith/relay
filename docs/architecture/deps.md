@@ -41,6 +41,7 @@ flowchart LR
     Attachments --> Boards
     Attachments --> Repo
     Billing --> Config
+    Billing --> Mailer
     Billing --> Repo
     Boards --> Activity
     Boards --> Agents
@@ -110,6 +111,7 @@ flowchart LR
 | `bandit` | HTTP server |
 | `boundary` | compile-time layer enforcement (ADR 0002) |
 | `req` (+ its `finch`) | the only sanctioned HTTP client; a dedicated h2 Finch pool exists for APNs |
+| `swoosh` | billing emails (RE464) through `Relay.Mailer`; Resend adapter in prod over `Swoosh.ApiClient.Req` (no hackney), Local + `/dev/mailbox` in dev, Test adapter in test |
 | `ueberauth` + `ueberauth_google` | Google sign-in |
 | `jose` | APNs JWT signing; Apple identity-token verification |
 | `esbuild`, `tailwind` (+ daisyUI in `assets/`) | asset pipeline; daisyUI is the component kit |

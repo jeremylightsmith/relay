@@ -50,6 +50,14 @@ config :phoenix, :json_library, Jason
 # adapter; prod overrides to S3 (Tigris) in config/runtime.exs.
 config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.Local
 
+# Billing emails (RE464): `Relay.Mailer` (Swoosh). Off unless switched on — `:mail_enabled` is read
+# through `Relay.Config.get/2`, and a disabled notifier only logs what it would have sent. Dev
+# delivers to the Local adapter (browse it at /dev/mailbox), test to the Test adapter, and prod
+# to Resend once config/runtime.exs sees RESEND_API_KEY + MAIL_FROM. `:app_url` is the absolute
+# origin email links point at (the domain may not reach `RelayWeb.Endpoint.url/0`). No hackney:
+# only prod makes HTTP calls, through `Swoosh.ApiClient.Req` (config/prod.exs).
+config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
+
 # Push (RLY-81). The Log adapter is the default so dev runs — and the whole
 # trigger→recipient→dispatch pipeline is exercisable — without Apple credentials.
 # config/runtime.exs swaps in the real APNS adapter in prod when creds are present.
@@ -89,10 +97,17 @@ config :relay,
   ecto_repos: [Relay.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+config :relay,
+  mail_enabled: false,
+  mail_from: "Relay <billing@localhost>",
+  app_url: "http://localhost:4000"
+
 # Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start
 # of a per-board scheduler) and bound to the real Relay.Runs adapter (RLY-136 / W11).
 # NoopEngine stays in the tree — W8's scheduler tests still inject it directly.
 config :relay, runs_auto_start: false, runs_engine: Relay.Runs.Scheduler.RunsEngine
+
+config :swoosh, :api_client, false
 
 # Configure tailwind (the version is required)
 config :tailwind,

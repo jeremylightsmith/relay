@@ -50,7 +50,8 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Billing pause reason", {Standing, :pause_reasons}},
     {"Billing attempt status", {Schemas.BillingPaymentAttempt, :statuses}},
     {"Billing attempt kind", {Schemas.BillingPaymentAttempt, :kinds}},
-    {"Billing attempt source", {Schemas.BillingPaymentAttempt, :sources}}
+    {"Billing attempt source", {Schemas.BillingPaymentAttempt, :sources}},
+    {"Billing notice kind", {Schemas.BillingNotice, :kinds}}
   ]
 
   @impl Mix.Task

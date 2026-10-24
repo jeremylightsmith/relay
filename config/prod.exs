@@ -26,5 +26,9 @@ config :relay, RelayWeb.Endpoint,
 # adapter onto Relay.Runs's run-execution engine is wired up.
 config :relay, runs_auto_start: true
 
+# Billing emails (RE464): Resend is called over Req (no hackney), and the Local adapter's
+# in-memory mailbox is never started in prod.
+config :swoosh, api_client: Swoosh.ApiClient.Req, local: false
+
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.

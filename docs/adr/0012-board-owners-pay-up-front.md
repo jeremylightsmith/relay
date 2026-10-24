@@ -54,12 +54,19 @@ next month. If the owner hasn't paid, every board they own is paused. There is n
 9. **One off switch.** `Relay.Billing.enabled?/0` (`BILLING_ENABLED`, which needs both Stripe
    keys outside dev). Off — a self-hosted install — there is no clock, nothing is paused, no
    trial starts, no billing page, no banner and no 402.
+10. **Three emails, each once** (RE464). The clock sends **trial ending** two days before
+    `trial_ends_on` to an owner with no card who is not comped; **card declined** on the first
+    declined clock attempt of a period (its retry sends nothing more); **paused** on the first
+    pass that finds the plan paused for `trial_ended` or `unpaid`. Each is recorded in
+    `billing_notices` (unique per account, kind and period) before it is sent, so a re-run, a
+    second node or a retry never sends it twice. No email for cancel, hold or comp; payment
+    receipts stay with Stripe (`receipt_email`).
 
 ## Consequences
 
 - One rule set, ported from Throughway ADR 0014, means one place to reason about money; the
   rules are pure (`Standing`, `Periods`) and table-tested.
-- `Relay.Billing` must stay a leaf (Config, Repo, Schemas only), because `Relay.Accounts` (trial
+- `Relay.Billing` must stay a leaf (Config, `Relay.Mailer`, Repo, Schemas only), because `Relay.Accounts` (trial
   at sign-up) and `Relay.Runs` (the scheduler's pause) depend on it.
 - Owning the clock means owning its failure modes: double charges are prevented by the
   idempotency key and the one-open-attempt index, not by Stripe's subscription engine, and an

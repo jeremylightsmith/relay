@@ -526,8 +526,8 @@ sharing behavior.
 - **Billing** (`Relay.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md)) — a
   board owner pays one monthly price (`price_cents/0`, `:billing_price_cents`, default 2000) up
   front from their own billing date, after a 30-day no-card trial. **A board's standing is its
-  owner's** (`boards.owner_id`). Owns `Schemas.BillingAccount` (one per user) and
-  `Schemas.BillingPaymentAttempt`. Standing is **derived, never stored**:
+  owner's** (`boards.owner_id`). Owns `Schemas.BillingAccount` (one per user),
+  `Schemas.BillingPaymentAttempt` and `Schemas.BillingNotice` (one per email sent, RE464). Standing is **derived, never stored**:
   `Relay.Billing.Standing.of/3` (pure) maps an account, the fact `first_charge_declined?` (≥ 1
   `:failed` attempt and `paid_through` nil) and today to `:trial | :active | :comped |
   {:past_due, until} | {:cancelled, access_until} | {:paused, reason}` — in order: no account or
@@ -546,8 +546,25 @@ sharing behavior.
   (`on_conflict: :nothing` on `user_id`, then an `update_all … where is_nil(trial_ends_on)`), so
   it never moves a date. `cancel/2` keeps access through `trial_ends_on` / `paid_through`;
   `resume/2` clears the cancellation (billing date unchanged); both broadcast
-  `{:billing_changed, user_id}` on `billing:<user_id>`. Depends on Config, Repo and Schemas
-  only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards or Runs.
+  `{:billing_changed, user_id}` on `billing:<user_id>`. Depends on Config, Mailer, Repo and
+  Schemas only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards or Runs.
+  **Emails (RE464):** `Relay.Billing.Notifier` builds the trial-ending, card-declined and
+  plan-paused emails (plain text + minimal escaped HTML, each linking to `billing_url/0` =
+  `:app_url` + `/account/billing`, never `RelayWeb`), `deliver/1`s them through `Relay.Mailer`
+  only while `:mail_enabled` (via `Relay.Config`) is `true` — otherwise it logs what it would have
+  sent — and `dispatch/1` runs a delivery under `Relay.Billing.TaskSupervisor` (inline in test),
+  never raising into the caller. `notify_due/1`, the clock's last step, sends each email **at most
+  once per account and period**: it inserts a `billing_notices` row (`on_conflict: :nothing` on
+  the `billing_notices_once` unique index) outside any transaction and dispatches only when the
+  insert created the row. **Trial ending** (period `trial_ends_on`) — a never-paid, uncomped,
+  unheld, uncancelled account with no card on file, from `trial_notice_days_before/0` (2) days
+  before its trial ends through its last day; **card declined** (period `period_start`) — a
+  `:failed` clock attempt for a period begun within the last `grace_days/0` (its retry shares the
+  period; a card-saved decline sends nothing); **paused** — `{:paused, :trial_ended}` (period
+  `trial_ends_on + 1`) or `{:paused, :unpaid}` (period `paid_through + 1`), candidates
+  pre-filtered in SQL before `Standing.of/3`. Nothing for cancel, hold or comp; receipts stay
+  with Stripe. Notices are recorded even with mail off, so enabling a provider never sends a
+  backlog. Each notice is isolated (rescued and logged).
   **Payments seam:** `Relay.Billing.Payments` is a behaviour (`create_setup_checkout/3`,
   `fetch_setup/1`, `charge/5`, `find_payment/3`) resolved by `impl/0` (`:billing_payments` via
   `Relay.Config`): `Payments.Stripe` — `Req` against `api.stripe.com/v1`, bearer
@@ -572,8 +589,9 @@ sharing behavior.
   paused for `:trial_ended` / `:unpaid` / `:cancelled` → `:returned`, a fresh month from today;
   anything else → no charge. `run_clock/2` (driven hourly by `Relay.Billing.Clock`) backfills a
   trial for every user without one, resolves every `:unknown` attempt and every `:pending` one
-  older than `Charging.pending_overdue_minutes/0` (10) through `find_payment/3`, then charges each
-  due account in isolation; a no-op while disabled. `setup_checkout_url/2` starts Checkout (setup
+  older than `Charging.pending_overdue_minutes/0` (10) through `find_payment/3`, charges each
+  due account in isolation, then notifies (`Notifier.notify_due/1`), answering
+  `%{backfilled:, resolved:, charged:, notified:}`; a no-op answering zeros while disabled. `setup_checkout_url/2` starts Checkout (setup
   mode) and stores the new Stripe customer; `handle_webhook_event/1` completes a setup from the
   verified Stripe webhook; `summary/2` is the Billing page's read (standing, trial days left, first
   charge, renewal, card, succeeded payments newest first).
@@ -1066,10 +1084,14 @@ sharing behavior.
   never mints on mount, and routes "Mint my key" to `connect_machine/2` (then `remint_key/2` on
   that machine). Depends
   on Agents, ApiKeys, Events and Repo, never on Boards, Flows or Cards (all three depend on it).
+- **Mailer** (`Relay.Mailer`, RE464) — the Swoosh mailer, a leaf boundary: Local adapter in dev
+  (`/dev/mailbox`), Test in test, Resend in prod once `RESEND_API_KEY` + `MAIL_FROM` are set.
+  Called only through `Relay.Billing.Notifier.deliver/1`.
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
   (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`, and billing's `:billing_enabled`,
-  `:billing_payments`, `:billing_price_cents`, `:stripe_secret_key`, `:stripe_webhook_secret`) are
+  `:billing_payments`, `:billing_price_cents`, `:stripe_secret_key`, `:stripe_webhook_secret`, and
+  billing email's `:mail_enabled`) are
   read, so a test overrides them with
   `Process.put/2` instead of mutating app/OS env (RE419, ADR 0009 rule 1).
 
@@ -1122,6 +1144,7 @@ erDiagram
     User ||--o{ DeviceToken : "push"
     User ||--o| BillingAccount : "pays (RE460)"
     BillingAccount ||--o{ BillingPaymentAttempt : "charges"
+    BillingAccount ||--o{ BillingNotice : "emails (RE464)"
     Card ||--o{ Vote : upvotes
     User ||--o{ Vote : cast
     Card ||--o| TalkSession : "one Talk session"
@@ -1144,7 +1167,10 @@ called: `status` / `kind` / `source` (`Ecto.Enum`s owned by `statuses/0`, `kinds
 `sources/0`), `amount_cents` (check > 0), the period it pays for, a unique `idempotency_key`,
 `paid_through_before`, Stripe's ids and the outcome. At most one attempt per account is open
 (`open_statuses/0` = pending / unknown), enforced by the partial unique index
-`billing_payment_attempts_one_open_per_account`.
+`billing_payment_attempts_one_open_per_account`. A `BillingNotice` (`billing_notices`, cascade on
+account delete, RE464) is one billing email sent: `kind` (`Schemas.BillingNotice.kinds/0`) and
+`period_key`, unique per account by the index `billing_notices_once`, inserted before the email
+goes out so each is sent at most once per period.
 
 A `BoardSetupStep` (`board_setup_steps`, owned by `Relay.Setup`, RE443) is one step of a board's
 setup checklist — or, with `machine_id` set (RE446), of one connected machine's: the board's own

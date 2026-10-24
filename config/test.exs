@@ -26,6 +26,12 @@ config :phoenix_test,
     ecto_sandbox_stop_owner_delay: 50
   ]
 
+# Billing emails (RE464): the Test adapter messages the delivering process (and its `$callers`),
+# and `async: false` runs `Relay.Billing.Notifier.dispatch/1` inline in the test process — so
+# `Swoosh.TestAssertions` see deliveries. A test silences mail with `Process.put(:mail_enabled, false)`.
+config :relay, Relay.Billing.Notifier, async: false
+config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
+
 # Push (RLY-81): the Test adapter messages the caller, and `async: false` runs
 # dispatch inline in the test process — so deliveries land in the test's mailbox
 # and DB reads stay on the test's sandbox connection.
@@ -89,6 +95,7 @@ config :relay,
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.
 config :relay, dev_routes: true
+config :relay, mail_enabled: true
 
 # Share the test's DB transaction with the browser session (see the SQL sandbox
 # plug in RelayWeb.Endpoint, compiled only when this flag is set).

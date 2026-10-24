@@ -4,7 +4,8 @@ defmodule Relay.Billing do
   one price a month, up front from their own billing date, after a no-card trial. A board's
   standing is its owner's; a paused owner's boards are read-only.
 
-  Owns `Schemas.BillingAccount` (one per user) and `Schemas.BillingPaymentAttempt`, the pure
+  Owns `Schemas.BillingAccount` (one per user), `Schemas.BillingPaymentAttempt` and
+  `Schemas.BillingNotice` (one per billing email sent), the pure
   rules (`Relay.Billing.Standing`, `Relay.Billing.Periods`), the charging path
   (`Relay.Billing.Charging`, through the `Relay.Billing.Payments` seam), the Stripe webhook
   verifier (`Relay.Billing.Webhook`), the hourly `Relay.Billing.Clock`, and the
@@ -14,16 +15,19 @@ defmodule Relay.Billing do
   **One off switch:** `enabled?/0` (`:billing_enabled`, read through `Relay.Config`). Off — a
   self-hosted install — nothing is paused or noticed and no trial is started.
 
-  **Depends on `Relay.Config`, `Relay.Repo` and `Schemas` only** — `Relay.Accounts` (trial at
-  sign-up) and `Relay.Runs` call in, so a back-dependency would be a boundary cycle. A board id is
-  resolved to its owner by reading `Schemas.Board.owner_id` directly.
+  **Depends on `Relay.Config`, `Relay.Mailer`, `Relay.Repo` and `Schemas` only** — `Relay.Accounts`
+  (trial at sign-up) and `Relay.Runs` call in, so a back-dependency would be a boundary cycle.
+  Billing emails (`Relay.Billing.Notifier`, RE464) — trial ending, card declined, plan paused, each
+  once per account and period, sent by `run_clock/2`'s last step — go out through the leaf
+  `Relay.Mailer`. A board id is resolved to its owner by reading `Schemas.Board.owner_id` directly.
   """
 
-  use Boundary, deps: [Relay.Config, Relay.Repo, Schemas], exports: [Standing]
+  use Boundary, deps: [Relay.Config, Relay.Mailer, Relay.Repo, Schemas], exports: [Standing]
 
   import Ecto.Query
 
   alias Relay.Billing.Charging
+  alias Relay.Billing.Notifier
   alias Relay.Billing.Payments
   alias Relay.Billing.Standing
   alias Relay.Repo
@@ -45,6 +49,12 @@ defmodule Relay.Billing do
   @doc "The monthly price, in cents."
   @spec price_cents() :: pos_integer()
   def price_cents, do: Relay.Config.get(:billing_price_cents, @default_price_cents)
+
+  @doc ~S'Formats an amount in cents as dollars: `2000` → `"$20.00"`, `5` → `"$0.05"`.'
+  @spec format_cents(non_neg_integer()) :: String.t()
+  def format_cents(cents) when is_integer(cents) and cents >= 0 do
+    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
+  end
 
   @doc "The PubSub topic a user's billing changes are broadcast on."
   @spec topic(pos_integer()) :: String.t()
@@ -257,22 +267,26 @@ defmodule Relay.Billing do
   The billing clock for `today` (`Relay.Billing.Clock` runs it hourly), in order: (a) backfill —
   a trial for every user without one; (b) resolve — ask Stripe about every unknown attempt and
   every pending one older than `Charging.pending_overdue_minutes/0`; (c) charge — every account
-  due a first charge, a renewal or (`final_pass?: true`, the day's last run) its one retry. A
-  no-op answering zeros while billing is disabled.
+  due a first charge, a renewal or (`final_pass?: true`, the day's last run) its one retry; (d)
+  notify — `Relay.Billing.Notifier.notify_due/1` records and sends the trial-ending,
+  card-declined and plan-paused emails due today, each once per account and period. A no-op
+  answering zeros while billing is disabled.
   """
   @spec run_clock(Date.t(), final_pass?: boolean(), now: DateTime.t()) :: %{
           backfilled: non_neg_integer(),
           resolved: non_neg_integer(),
-          charged: non_neg_integer()
+          charged: non_neg_integer(),
+          notified: non_neg_integer()
         }
   def run_clock(%Date{} = today, opts \\ []) do
     if enabled?() do
       backfilled = backfill(today)
       resolved = Charging.resolve_open(Keyword.get(opts, :now, DateTime.utc_now()))
       charged = Charging.charge_due(today, Keyword.get(opts, :final_pass?, false))
-      %{backfilled: backfilled, resolved: resolved, charged: charged}
+      notified = Notifier.notify_due(today)
+      %{backfilled: backfilled, resolved: resolved, charged: charged, notified: notified}
     else
-      %{backfilled: 0, resolved: 0, charged: 0}
+      %{backfilled: 0, resolved: 0, charged: 0, notified: 0}
     end
   end
 

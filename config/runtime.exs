@@ -27,6 +27,12 @@ if config_env() != :test do
   config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
 end
 
+# Billing emails (RE464): dev mail links point at the port the dev server actually binds. Prod
+# overrides this with the public origin below.
+if config_env() == :dev do
+  config :relay, app_url: "http://localhost:#{System.get_env("PORT", "4003")}"
+end
+
 # Google OAuth credentials. Dev reads these from .envrc.local (direnv);
 # prod from `fly secrets set`. Test uses static dummies from
 # config/test.exs, which this must not override with nils.
@@ -108,6 +114,19 @@ if config_env() == :prod do
       """
 
   host = System.get_env("PHX_HOST") || "example.com"
+  mail_blank? = fn value -> is_nil(value) or String.trim(value) == "" end
+  resend_api_key = System.get_env("RESEND_API_KEY")
+  mail_from = System.get_env("MAIL_FROM")
+
+  # Billing emails (RE464). Links in mail point at the public origin. Mail is sent through Resend
+  # only when both RESEND_API_KEY and MAIL_FROM are set; otherwise it stays disabled and
+  # `Relay.Billing.Notifier` just logs what it would have sent.
+  config :relay, app_url: "https://#{host}"
+
+  if not mail_blank?.(resend_api_key) and not mail_blank?.(mail_from) do
+    config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Resend, api_key: resend_api_key
+    config :relay, mail_enabled: true, mail_from: mail_from
+  end
 
   tigris_endpoint =
     URI.parse(System.get_env("AWS_ENDPOINT_URL_S3") || "https://fly.storage.tigris.dev")

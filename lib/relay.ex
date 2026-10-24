@@ -36,6 +36,7 @@ defmodule Relay do
       Flows,
       Flows.Document,
       Flows.Shape,
+      Mailer,
       Markdown,
       Members,
       Presence,

@@ -50,6 +50,14 @@ defmodule Relay.Factory do
     }
   end
 
+  def billing_notice_factory do
+    %Schemas.BillingNotice{
+      kind: :trial_ending,
+      period_key: Date.utc_today(),
+      billing_account: build(:billing_account)
+    }
+  end
+
   def membership_factory do
     %Schemas.Membership{
       email: sequence(:membership_email, &"member#{&1}@example.com"),
