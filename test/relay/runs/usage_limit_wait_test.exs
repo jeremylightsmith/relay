@@ -23,6 +23,9 @@ defmodule Relay.Runs.UsageLimitWaitTest do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Relay.Cards.create_card(stage, %{title: "Limited"})
     start_engine!()
+    # The boot-resume task can list a run this test starts and adopt it in `:attach` first, so
+    # `start_run`'s own dispatch finds the server already up and nothing is dispatched.
+    await_engine_boot!()
     %{board: board, flow: flow, card: card}
   end
 

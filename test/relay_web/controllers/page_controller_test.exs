@@ -348,11 +348,16 @@ defmodule RelayWeb.PageControllerTest do
             "Everything in self-host, run by us",
             "Upgrades, backups, iOS & Android push",
             "invited members are free",
-            "Cancel anytime. Data is never deleted.",
-            "Have a code? Add it on sign-up or later in Billing."
+            "Cancel anytime. Data is never deleted."
           ] do
         assert text =~ snippet, "expected #pricing-cloud to contain #{inspect(snippet)}"
       end
+    end
+
+    test "the pricing section does not mention promo codes", %{conn: conn} do
+      text = conn |> pricing_doc() |> LazyHTML.query("#pricing") |> pricing_text()
+
+      refute text =~ "Have a code?", "expected #pricing not to mention \"Have a code?\""
     end
 
     test "the two CTAs link the README and the free trial sign-up", %{conn: conn} do

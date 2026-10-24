@@ -137,38 +137,61 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ ~s(href="/docs/billing")
   end
 
-  test "the billing page has every section heading", %{conn: conn} do
+  test "the billing page has the six customer FAQ headings", %{conn: conn} do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
     for heading <- [
           "Self-host or Relay Cloud",
-          "Your trial",
-          "Paying",
-          "If a card fails",
-          "Paused means read-only",
+          "Your free trial",
+          "What you pay",
+          "If a payment fails",
           "Cancelling",
-          "Promo codes",
           "On iOS"
         ] do
       assert html =~ heading, "expected /docs/billing to have the heading #{inspect(heading)}"
     end
   end
 
-  test "the billing page states the decided rules", %{conn: conn} do
+  test "the billing page states the decided terms", %{conn: conn} do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
-    for needle <- ["402 plan_paused", "BILLING_ENABLED", "MIT", "30 days", "$20", "RELAYCONF"] do
+    for needle <- [
+          "MIT",
+          "30 days",
+          "$20",
+          "unlimited boards",
+          "invited members are free",
+          ~s(href="https://github.com/jeremylightsmith/relay#readme")
+        ] do
       assert html =~ needle, "expected /docs/billing to mention #{inspect(needle)}"
     end
 
     assert html =~ ~r/no refunds/i
   end
 
-  test "the billing page's state diagram reaches the Mermaid renderer", %{conn: conn} do
+  test "the billing page leaves out promo codes and developer details", %{conn: conn} do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
-    assert html =~ ~s(class="language-mermaid")
-    assert html =~ "stateDiagram-v2"
+    for term <- ["402", "plan_paused", "BILLING_ENABLED", "Stripe", "RELAYCONF", "proration"] do
+      refute html =~ term, "expected /docs/billing not to mention #{inspect(term)}"
+    end
+
+    refute html =~ ~r/promo/i, "expected /docs/billing not to mention \"promo\""
+  end
+
+  test "the billing page has no state diagram", %{conn: conn} do
+    html = conn |> get(~p"/docs/billing") |> html_response(200)
+
+    refute html =~ ~s(class="language-mermaid"), "expected /docs/billing to have no Mermaid block"
+    refute html =~ "stateDiagram", "expected /docs/billing not to mention \"stateDiagram\""
+  end
+
+  test "the billing page drops the old headings", %{conn: conn} do
+    html = conn |> get(~p"/docs/billing") |> html_response(200)
+
+    for heading <- ["Paused means read-only", "If a card fails", "Promo codes"] do
+      refute html =~ heading, "expected /docs/billing not to have the heading #{inspect(heading)}"
+    end
   end
 
   test "the Setup page is gone: it is now /docs/authentication and /docs/setup is a 404",
