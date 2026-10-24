@@ -23,6 +23,8 @@ defmodule Mix.Tasks.Relay.GenVocab do
   use Mix.Task
   use Boundary, check: [in: false, out: false]
 
+  alias Relay.Billing.Standing
+
   @doc_path "docs/architecture/state.md"
 
   @begin_marker "<!-- BEGIN generated: vocabularies -->"
@@ -43,7 +45,12 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Stage type", {Schemas.Stage, :types}},
     {"Setup step status", {Schemas.BoardSetupStep, :statuses}},
     {"Talk turn status", {Schemas.TalkTurn, :statuses}},
-    {"Talk event kind", {Schemas.TalkEvent, :kinds}}
+    {"Talk event kind", {Schemas.TalkEvent, :kinds}},
+    {"Billing standing kind", {Standing, :kinds}},
+    {"Billing pause reason", {Standing, :pause_reasons}},
+    {"Billing attempt status", {Schemas.BillingPaymentAttempt, :statuses}},
+    {"Billing attempt kind", {Schemas.BillingPaymentAttempt, :kinds}},
+    {"Billing attempt source", {Schemas.BillingPaymentAttempt, :sources}}
   ]
 
   @impl Mix.Task

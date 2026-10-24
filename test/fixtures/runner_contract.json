@@ -91,6 +91,12 @@
         "required": "<required-version>",
         "running": "<running-version>"
       }
+    },
+    "plan_paused": {
+      "error": {
+        "code": "plan_paused",
+        "message": "<message>"
+      }
     }
   },
   "claim_request": {

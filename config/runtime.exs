@@ -51,6 +51,40 @@ if config_env() != :test do
   end
 end
 
+# Billing (RE460, ADR 0012). BILLING_ENABLED=true turns it on only with both Stripe keys set,
+# charging through Stripe at STRIPE_PRICE_CENTS (default: `Relay.Billing.price_cents/0`). Dev alone may switch it on with
+# no Stripe keys, charging through the in-process Local adapter. Unset → off (self-host).
+# Test configures billing in config/test.exs and turns it on per test; never here.
+if config_env() != :test do
+  blank? = fn value -> is_nil(value) or String.trim(value) == "" end
+  stripe_secret_key = System.get_env("STRIPE_SECRET_KEY")
+  stripe_webhook_secret = System.get_env("STRIPE_WEBHOOK_SECRET")
+
+  cond do
+    System.get_env("BILLING_ENABLED") != "true" ->
+      :ok
+
+    not blank?.(stripe_secret_key) and not blank?.(stripe_webhook_secret) ->
+      # Only an explicit STRIPE_PRICE_CENTS is written; unset falls through to the one default
+      # in `Relay.Billing.price_cents/0`.
+      price_cents = System.get_env("STRIPE_PRICE_CENTS")
+
+      config :relay,
+        billing_enabled: true,
+        billing_payments: Relay.Billing.Payments.Stripe,
+        stripe_secret_key: stripe_secret_key,
+        stripe_webhook_secret: stripe_webhook_secret
+
+      if not blank?.(price_cents), do: config(:relay, billing_price_cents: String.to_integer(price_cents))
+
+    config_env() == :dev ->
+      config :relay, billing_enabled: true, billing_payments: Relay.Billing.Payments.Local
+
+    true ->
+      :ok
+  end
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

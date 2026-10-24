@@ -20,6 +20,7 @@ defmodule Relay.Runs do
     deps: [
       Relay.Activity,
       Relay.Agents,
+      Relay.Billing,
       Relay.Boards,
       Relay.Cards,
       Relay.Config,

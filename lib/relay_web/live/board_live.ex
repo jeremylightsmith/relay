@@ -131,6 +131,7 @@ defmodule RelayWeb.BoardLive do
   alias Relay.Activity
   alias Relay.AgentLog
   alias Relay.Attachments
+  alias Relay.Billing
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
@@ -291,6 +292,7 @@ defmodule RelayWeb.BoardLive do
           <.icon name="hero-command-line" class="size-5" />
         </button>
         <.link
+          :if={@billing_notice != :paused}
           navigate={~p"/board/#{@board.slug}/settings"}
           id="board-settings-link"
           title="Board settings"
@@ -364,17 +366,54 @@ defmodule RelayWeb.BoardLive do
               class="mx-4 mb-2 mt-2 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5 action-group"
               style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
             >
-              <.icon name="hero-archive-box" class="size-4" />
-              <span class="flex-1">This board is archived and read-only.</span>
-              <.button
-                type="button"
-                id="restore-board-button"
-                phx-click="restore_board"
+              <%= cond do %>
+                <% @billing_notice == :paused and @board_owner? -> %>
+                  <.icon name="hero-credit-card" class="size-4" />
+                  <span class="flex-1">
+                    <b>Your plan is paused, so this board is read-only.</b>
+                    Nothing's been deleted. Pay to pick up where you left off.
+                  </span>
+                  <.link
+                    navigate={~p"/account/billing"}
+                    id="billing-paused-update-card"
+                    class="btn btn-warning btn-sm"
+                  >
+                    Update card
+                  </.link>
+                <% @billing_notice == :paused -> %>
+                  <.icon name="hero-credit-card" class="size-4" />
+                  <span class="flex-1">This board's owner's plan is paused.</span>
+                <% true -> %>
+                  <.icon name="hero-archive-box" class="size-4" />
+                  <span class="flex-1">This board is archived and read-only.</span>
+                  <.button
+                    type="button"
+                    id="restore-board-button"
+                    phx-click="restore_board"
+                    class="btn btn-sm"
+                    pending="Restoring…"
+                  >
+                    Restore
+                  </.button>
+              <% end %>
+            </div>
+            <%!-- RE460 — past due: the board stays editable; only its owner is told to pay. --%>
+            <div
+              :if={@billing_notice == :past_due and @board_owner?}
+              id="billing-past-due-banner"
+              class="mx-4 mb-2 mt-2 flex flex-wrap items-center gap-3 rounded-lg px-4 py-2.5 text-sm sm:mx-5"
+              style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+            >
+              <span class="flex-1">
+                Your card was declined. Update it today to keep your boards editable.
+              </span>
+              <.link
+                navigate={~p"/account/billing"}
+                id="billing-past-due-update-card"
                 class="btn btn-sm"
-                pending="Restoring…"
               >
-                Restore
-              </.button>
+                Update card
+              </.link>
             </div>
             <RunComponents.stopped_work_banner
               :if={@stopped_work}
@@ -1192,6 +1231,8 @@ defmodule RelayWeb.BoardLive do
     if live? do
       Events.subscribe(board.id)
       Runs.subscribe(board.id)
+      # RE460 — the board's standing is its OWNER's, so this is the owner's topic, not the viewer's.
+      if Billing.enabled?(), do: Billing.subscribe(board.owner_id)
       :timer.send_interval(@health_tick_ms, self(), :health_tick)
     end
 
@@ -1265,7 +1306,7 @@ defmodule RelayWeb.BoardLive do
       |> assign_stalled()
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
-      |> assign(:read_only?, Board.archived?(board))
+      |> assign_read_only(board)
       # RE443 — the setup wizard: the board's checklist (nil when it has none), the shown-once
       # step-3 key (socket-only, never persisted or broadcast), whether this socket minimized
       # the panel, the step-2 picker's selection and the user's expert toggle.
@@ -1366,7 +1407,8 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    ref = card_ref(socket.assigns.live_action, params)
+    # RE460 — a paused board opens no card (the native card host included).
+    ref = if socket.assigns.billing_notice == :paused, do: nil, else: card_ref(socket.assigns.live_action, params)
     previous_ref = selected_ref(socket)
     previous_card = socket.assigns[:selected_card]
 
@@ -1825,7 +1867,7 @@ defmodule RelayWeb.BoardLive do
         talk_send talk_stop talk_clear talk_slash
         setup_choose_llm setup_mint_key setup_key_saved setup_toggle_peek setup_switch_llm
       ) do
-    {:noreply, put_flash(socket, :error, "This board is archived (read-only).")}
+    {:noreply, put_flash(socket, :error, read_only_flash(socket.assigns.billing_notice))}
   end
 
   # RE443 — the setup wizard. The picker's selection is per socket; choosing it (step 2) and
@@ -2005,6 +2047,11 @@ defmodule RelayWeb.BoardLive do
   # RLY-94 — in embed mode a card tap escapes the webview: the shell pushes the
   # native CardScreen (BOARD-03) instead of the in-webview drawer opening. On web
   # (non-embed) the drawer keeps working at every width.
+  # RE460 — a paused board opens no card.
+  def handle_event("select_card", _params, %{assigns: %{billing_notice: :paused}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("select_card", %{"ref" => ref}, %{assigns: %{embed: true}} = socket) do
     {:noreply, push_card_tap(socket, ref)}
   end
@@ -3721,6 +3768,19 @@ defmodule RelayWeb.BoardLive do
      |> assign(:run_flush_pending?, false)}
   end
 
+  # RE460 — the owner's standing changed (paid, card saved, cancelled): re-derive the read-only
+  # mode and banners in place. A board that just paused closes its open drawer.
+  def handle_info({:billing_changed, _user_id}, socket) do
+    socket = assign_read_only(socket, socket.assigns.board)
+
+    if socket.assigns.billing_notice == :paused and not is_nil(socket.assigns.selected_card) and
+         socket.assigns.live_action != :card do
+      {:noreply, push_patch(socket, to: board_path(socket.assigns))}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # RLY-10 — a board rename (this or another session): retitle live. The
   # broadcast board carries no preloaded stages, so merge just the name onto
   # the already-loaded @board (the open drawer reads @board.stages).
@@ -3731,7 +3791,7 @@ defmodule RelayWeb.BoardLive do
      socket
      |> assign(:board, updated)
      |> assign(:page_title, board.name)
-     |> assign(:read_only?, Board.archived?(updated))}
+     |> assign_read_only(updated)}
   end
 
   # RLY-32: a member was removed elsewhere — eject the affected session's open
@@ -4992,6 +5052,21 @@ defmodule RelayWeb.BoardLive do
     |> assign(:paused_stage_ids, MapSet.new(paused, & &1.stage_id))
   end
 
+  # RE460 — the ONE writer of the read-only mode: an archived board, or one whose owner's plan is
+  # paused (`Relay.Billing.board_notice/1`, always nil while billing is disabled). Every path that
+  # (re)loads the board calls this, so a rename or archive in another tab can't un-pause it.
+  defp assign_read_only(socket, board) do
+    notice = Billing.board_notice(board)
+
+    socket
+    |> assign(:billing_notice, notice)
+    |> assign(:board_owner?, board.owner_id == socket.assigns.current_scope.user.id)
+    |> assign(:read_only?, Board.archived?(board) or notice == :paused)
+  end
+
+  defp read_only_flash(:paused), do: "This board's plan is paused (read-only)."
+  defp read_only_flash(_notice), do: "This board is archived (read-only)."
+
   defp reload_board(socket) do
     board = Boards.get_board!(socket.assigns.current_scope.user, socket.assigns.board.slug)
     cards_by_stage = board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
@@ -4999,7 +5074,7 @@ defmodule RelayWeb.BoardLive do
     socket =
       socket
       |> assign(:board, board)
-      |> assign(:read_only?, Board.archived?(board))
+      |> assign_read_only(board)
       |> assign(:stage_groups, group_stages(board.stages))
       |> assign(:stage_flows, Flows.stage_flows(board))
       # RE429 — pulls-from / lands-on are derived from board order at read time, so a reorder,

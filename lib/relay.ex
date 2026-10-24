@@ -25,6 +25,8 @@ defmodule Relay do
       Agents,
       ApiKeys,
       Attachments,
+      Billing,
+      Billing.Standing,
       BoardWatch,
       Boards,
       Cards,

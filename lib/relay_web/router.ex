@@ -33,8 +33,15 @@ defmodule RelayWeb.Router do
     plug ApiLogger
   end
 
+  # RE460: Stripe's webhook — JSON, no session, no CSRF; the Stripe-Signature is the auth.
+  pipeline :webhook do
+    plug :accepts, ["json"]
+  end
+
   pipeline :api_auth do
     plug RelayWeb.ApiAuth
+    # RE460: after ApiAuth — it reads :current_board, and a bad key must still be 401.
+    plug RelayWeb.Plugs.RequireActivePlan
   end
 
   pipeline :api_user_auth do
@@ -93,6 +100,9 @@ defmodule RelayWeb.Router do
             RelayWeb.BrowserNotify
           ] do
       live "/boards", BoardsLive
+      # RE460 — the board owner's plan: trial, card, payments, cancel/resume. 404 while billing
+      # is disabled (a self-hosted install).
+      live "/account/billing", BillingLive
       # RE370 legacy mockup link (RelayWeb.attachment_view_path/1): a membership-scoped redirect to
       # BoardLive's same-tab mockup viewer, /board/:slug?card=<ref>&mockup=<id> (RE380).
       live "/attachments/:id/view", MockupViewerLive
@@ -214,6 +224,12 @@ defmodule RelayWeb.Router do
     get "/b/:slug/install", InstallController, :show
   end
 
+  scope "/webhooks", RelayWeb do
+    pipe_through :webhook
+
+    post "/stripe", StripeWebhookController, :create
+  end
+
   scope "/api", RelayWeb.Api do
     pipe_through :api
 
@@ -312,6 +328,8 @@ defmodule RelayWeb.Router do
       pipe_through :browser
 
       get "/login", DevLoginController, :create
+      # RE460: Local payments' stand-in for Stripe Checkout.
+      get "/billing-checkout", DevBillingCheckoutController, :show
     end
   end
 end

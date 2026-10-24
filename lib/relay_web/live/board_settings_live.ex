@@ -60,6 +60,7 @@ defmodule RelayWeb.BoardSettingsLive do
   alias Phoenix.LiveView.JS
   alias Relay.Agents
   alias Relay.ApiKeys
+  alias Relay.Billing
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Events
@@ -1253,6 +1254,18 @@ defmodule RelayWeb.BoardSettingsLive do
   def mount(%{"slug" => slug}, _session, socket) do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
+    # RE460 — a paused owner's board has no Board settings (the board hides the link too).
+    if Billing.board_paused?(board) do
+      {:ok,
+       socket
+       |> put_flash(:error, "This board's plan is paused.")
+       |> push_navigate(to: ~p"/board/#{board.slug}")}
+    else
+      mount_settings(socket, board)
+    end
+  end
+
+  defp mount_settings(socket, board) do
     if connected?(socket), do: Events.subscribe(board.id)
 
     {:ok,

@@ -219,4 +219,32 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
       assert Boards.get_or_create_default_board(user).key == board.key
     end
   end
+
+  # RE460 — a paused owner's board has no Board settings: the route redirects back to the board.
+  describe "a paused board (scenario 20)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      Process.put(:billing_enabled, true)
+      %{board: Boards.get_or_create_default_board(user), today: Date.utc_today()}
+    end
+
+    test "redirects to the board with the paused flash", %{conn: conn, user: user, board: board, today: today} do
+      insert(:billing_account, user: user, paid_through: Date.add(today, -10), billing_day: today.day)
+
+      slug = board.slug
+
+      assert {:error, {:live_redirect, %{to: to, flash: %{"error" => "This board's plan is paused."}}}} =
+               live(conn, ~p"/board/#{slug}/settings")
+
+      assert to == "/board/#{slug}"
+    end
+
+    test "an active board's settings mount as before", %{conn: conn, user: user, board: board, today: today} do
+      insert(:billing_account, user: user, paid_through: Date.add(today, 10), billing_day: today.day)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+      assert has_element?(view, "#general-pane")
+    end
+  end
 end

@@ -11,11 +11,14 @@ defmodule Relay.Accounts do
   the bearer tokens the native app uses for its JSON calls.
   """
 
-  use Boundary, deps: [Relay.Config, Relay.Repo, Schemas], exports: [GoogleTokenValidator, AppleTokenValidator]
+  use Boundary,
+    deps: [Relay.Billing, Relay.Config, Relay.Repo, Schemas],
+    exports: [GoogleTokenValidator, AppleTokenValidator]
 
   import Ecto.Query
 
   alias Relay.Accounts.GoogleTokenValidator
+  alias Relay.Billing
   alias Relay.Repo
   alias Schemas.Membership
   alias Schemas.User
@@ -78,7 +81,8 @@ defmodule Relay.Accounts do
     2. otherwise a match on the normalized email (`User.normalize_email/1`) signs
        in that existing user, keeping its `provider` / `provider_uid` and
        refreshing only non-nil `:name` / `:avatar_url`;
-    3. otherwise a new `%User{provider:, provider_uid:}` is inserted.
+    3. otherwise a new `%User{provider:, provider_uid:}` is inserted, and — when
+       `Relay.Billing.enabled?/0` — its billing trial starts (RE460).
 
   A nil claim never wipes a stored value. `opts[:name]` is a fallback display
   name used only when inserting and only when `claims.name` is nil.
@@ -102,8 +106,17 @@ defmodule Relay.Accounts do
         %User{provider: provider, provider_uid: provider_uid}
         |> User.changeset(profile)
         |> Repo.insert()
+        |> start_trial()
     end
   end
+
+  # RE460: a new user's billing trial starts at sign-up — only when billing is switched on.
+  defp start_trial({:ok, user}) do
+    if Billing.enabled?(), do: {:ok, _account} = Billing.ensure_trial(user, Date.utc_today())
+    {:ok, user}
+  end
+
+  defp start_trial(error), do: error
 
   # Lookup steps 1 and 2: provider_uid (unscoped by provider on purpose), then normalized email.
   defp find_existing(%{provider_uid: provider_uid} = claims) do

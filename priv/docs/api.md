@@ -31,6 +31,7 @@ actor). Requests without a valid key get `401 unauthorized`.
 | HTTP | code | when |
 | --- | --- | --- |
 | 401 | `unauthorized` | missing/invalid `Authorization` bearer key |
+| 402 | `plan_paused` | the board's owner's plan is paused; reads and writes are refused until it is paid |
 | 404 | `not_found` | no card/stage matches the ref/id |
 | 400 | `invalid` | malformed body or unusable field values |
 | 422 | `not_gated` | approve/reject on a card whose stage is not an approval gate |

@@ -167,6 +167,32 @@ defmodule RelayWeb.Api.RunnerContractTest do
       |> post(~p"/api/node-jobs/claim?wait=0", Jason.encode!(outdated_body))
       |> json_response(409)
 
+    # RE460 — the plan_paused refusal is wire too: ./relay branches on its `code` to tell a
+    # paused board from a job or a hard error. Captured off the real claim route from a third
+    # board whose own owner is paused, with billing on only for this one request.
+    paused_owner = insert(:user)
+    paused = board_with_flow(paused_owner, "Contract P", "CP", :shared_clean, agent_node())
+    paused_today = Date.utc_today()
+
+    insert(:billing_account,
+      user: paused_owner,
+      paid_through: Date.add(paused_today, -10),
+      billing_day: paused_today.day
+    )
+
+    Process.put(:billing_enabled, true)
+
+    plan_paused_refusal =
+      paused.conn
+      |> post(~p"/api/node-jobs/claim?wait=0", Jason.encode!(claim_body(%{"shared_clean" => 1})))
+      |> json_response(402)
+
+    Process.delete(:billing_enabled)
+
+    assert plan_paused_refusal == %{
+             "error" => %{"code" => RelayWeb.PlanPaused.code(), "message" => RelayWeb.PlanPaused.message()}
+           }
+
     # RE304: /api/scaffold is app↔runner wire now (`./relay update` reads it), so it is
     # pinned here like every other transport — a renamed key breaks CI instead of breaking a
     # project's bootstrap. Captured off the real route, unauthenticated like the runner's own
@@ -386,7 +412,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
         "exclusive_shell" => normalize(exclusive_shell),
         "resumed_agent" => normalize(resumed_agent)
       },
-      "claim_refused" => %{"outdated" => normalize_refusal(outdated_refusal)},
+      "claim_refused" => %{
+        "outdated" => normalize_refusal(outdated_refusal),
+        "plan_paused" => normalize_paused_refusal(plan_paused_refusal)
+      },
       "outcome" => %{
         "request" => normalize(outcome_request),
         "response" => normalize(outcome_response)
@@ -675,6 +704,9 @@ defmodule RelayWeb.Api.RunnerContractTest do
         Map.merge(error, %{"required" => "<required-version>", "running" => "<running-version>", "message" => "<message>"})
     }
   end
+
+  # The paused refusal's message is prose; the contract is the code and the key set.
+  defp normalize_paused_refusal(%{"error" => error}), do: %{"error" => Map.put(error, "message", "<message>")}
 
   # Task ids are serial and would churn the fixture; the contract is the key set and the
   # values that are deterministic (titles, bodies, done, position).

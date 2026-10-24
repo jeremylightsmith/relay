@@ -76,6 +76,15 @@ config :relay, :google_tokeninfo_req_options, plug: {Req.Test, Relay.Accounts.Go
 # outside the test sandbox.
 config :relay, :start_runs_supervisor, false
 
+# Billing (RE460): off by default — a test switches it on with `Process.put(:billing_enabled, true)`.
+# Fake Stripe keys and a Req.Test plug, so no test ever reaches real Stripe.
+config :relay,
+  billing_enabled: false,
+  billing_payments: Relay.Billing.Payments.Local,
+  stripe_secret_key: "sk_test_fake",
+  stripe_webhook_secret: "whsec_test_fake",
+  stripe_req_options: [plug: {Req.Test, Relay.Billing.Payments.Stripe}]
+
 # Compile dev-only routes (GET /dev/login, LiveDashboard, storybook) into
 # the test router so tests and the acceptance smoke can authenticate
 # without real Google. Never enabled in prod.

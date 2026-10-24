@@ -50,9 +50,12 @@ defmodule RelayWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # RE460: `RawBodyReader` keeps the raw body for the Stripe webhook only — its signature covers
+  # the exact bytes the JSON parser consumes.
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
+    body_reader: {RelayWeb.RawBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

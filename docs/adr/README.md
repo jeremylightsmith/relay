@@ -20,6 +20,7 @@ that supersedes the old one (update the old one's status to `Superseded by NNNN`
 | [0009](0009-test-isolation.md) | Test isolation: process-tree dependencies and explicit sandbox ownership | Accepted (2026-08-07) |
 | [0010](0010-serving-the-scaffold-from-the-app.md) | The board serves the scaffold | Accepted (2026-08-10) |
 | [0011](0011-simplifying-the-factory.md) | Simplifying the factory: the task is the unit of record | Proposed (2026-09-24) |
+| [0012](0012-board-owners-pay-up-front.md) | Board owners pay up front, on their own billing date | Accepted (2026-10-24) |
 
 ## Format
 

@@ -1,0 +1,18 @@
+<main id="dev-checkout" class="mx-auto max-w-md p-8">
+  <div class="card bg-base-100 border border-base-300">
+    <div class="card-body gap-4">
+      <h1 class="card-title">Dev checkout</h1>
+      <p class="text-base-content/65 text-sm">
+        A stand-in for Stripe Checkout. Pick how saving the card goes.
+      </p>
+      <div class="card-actions">
+        <a id="dev-checkout-succeed" href={@succeed} class="btn btn-primary">
+          Succeed — Visa 4242
+        </a>
+        <a id="dev-checkout-decline" href={@decline} class="btn btn-outline">
+          Decline — Visa 0341
+        </a>
+      </div>
+    </div>
+  </div>
+</main>

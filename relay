@@ -63,8 +63,8 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 92
-RUNNER_FINGERPRINT = "a96d2bfd7bf319455b42921174665dd1cc9ac968402b75fb994e170a3cdd2a0e"
+RUNNER_VERSION = 93
+RUNNER_FINGERPRINT = "2ac8e7ba32b34bcf95111e10400dc6c1e4497ff715f07dbf5ae6b6f6fc66fcea"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -264,11 +264,13 @@ def _retryable(method, err, idempotent=False):
 
 
 def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True,
-             idempotent=False, retry_budget_s=None, *, decode):
+             idempotent=False, retry_budget_s=None, soft_paused=False, *, decode):
     """The request/retry core api(), api_bytes() and api_download() share: bearer auth, the RE336
     timeout, the `_retryable` retries and die-on-error. A successful response is handed to
     `decode` (which reads its body, and headers if it needs them); the soft_404
     (None) and soft_conflict (the 409 body) verdicts are returned as they always were.
+    A 402 `plan_paused` (RE460) is a verdict too, never retried: `soft_paused` returns
+    `{"plan_paused": True}` silently, otherwise it die()s with plan_paused_message().
     `retry_budget_s` (RE449) opts one call into retrying a transient failure past
     API_MAX_ATTEMPTS for up to that many seconds; None keeps the API_MAX_ATTEMPTS bound."""
     url = relay_url().rstrip("/") + path
@@ -315,11 +317,17 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
                         return json.loads(e.read())
                     except Exception:
                         return {"error": {"code": "conflict"}}
+                raw = e.read()
+                if e.code == 402 and _error_code(raw) == PLAN_PAUSED_CODE:
+                    retries.settled(attempt, answered=True)
+                    if soft_paused:
+                        return {"plan_paused": True}
+                    die(plan_paused_message())
                 if retries.again(attempt, e, f"API {e.code}"):
                     continue
                 retries.settled(attempt, answered=False)
                 try:
-                    msg = json.loads(e.read())["error"]["message"]
+                    msg = json.loads(raw)["error"]["message"]
                 except Exception:
                     msg = f"HTTP {e.code}"
                 die(f"API {e.code}: {msg}")
@@ -332,15 +340,34 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
         return result
 
 
+# RE460 — the server's 402 refusal code for a board whose owner's plan is paused. Mirrors
+# RelayWeb.PlanPaused.code/0; pinned by runner_contract.json's claim_refused.plan_paused.
+PLAN_PAUSED_CODE = "plan_paused"
+
+
+def plan_paused_message():
+    """What a paused board's 402 tells the person: the fact and where to fix it."""
+    return ("This board's plan is paused. Manage billing at "
+            f"{relay_url().rstrip('/')}/account/billing")
+
+
+def _error_code(raw):
+    """`error.code` of a JSON error body, or None when it isn't one."""
+    try:
+        return json.loads(raw)["error"]["code"]
+    except Exception:
+        return None
+
+
 def _json_or_empty(raw):
     return json.loads(raw) if raw else {}
 
 
 def api(method, path, body=None, soft_404=False, soft_conflict=False, timeout=None, auth=True,
-        idempotent=False, retry_budget_s=None):
+        idempotent=False, retry_budget_s=None, soft_paused=False):
     return _request(method, path, body, soft_404=soft_404, soft_conflict=soft_conflict,
                     timeout=timeout, auth=auth, idempotent=idempotent,
-                    retry_budget_s=retry_budget_s,
+                    retry_budget_s=retry_budget_s, soft_paused=soft_paused,
                     decode=lambda resp: _json_or_empty(resp.read()))
 
 
@@ -640,11 +667,13 @@ class RunnerHeartbeat:
                        heartbeat_body(self.runner, self.capacity, self.running_fn(),
                                       self.held_fn(), send, self._harnesses_with_usage(),
                                       sessions=self.sessions_fn()),
-                       soft_404=True) or {}
+                       soft_404=True, soft_paused=True) or {}
         except (Exception, SystemExit) as e:      # api() die()s on HTTP/network error
             self._beat_failed(e)
             return
         self._beat_ok()
+        if resp.get("plan_paused"):
+            return      # RE460: the board refused it 402 — a landed beat with nothing to act on
         try:
             # Only a SUCCESSFUL post advances the stored hash: a failed POST must leave it
             # alone so the next beat retries.
@@ -4495,12 +4524,13 @@ def claim_node_job(runner, capacity, timeout, running=(), held=(), harnesses=Non
     """Long-poll claim: hold one request open (advertising free `capacity` per isolation class)
     up to `timeout`s. Returns a job dict, or None on a 204/empty body or a read timeout — both
     mean 'no work', not an error (§7). Returns outdated_refusal(required) when the server
-    refuses this runner's version (409 runner_outdated, RLY-184). `harnesses` rides through to
+    refuses this runner's version (409 runner_outdated, RLY-184), and `{"plan_paused": True}`
+    when the board's plan is paused (402 plan_paused, RE460). `harnesses` rides through to
     `claim_body` (RE436)."""
     try:
         resp = api("POST", "/api/node-jobs/claim",
                    claim_body(runner, capacity, running, held, harnesses),
-                   soft_conflict=True, timeout=timeout)
+                   soft_conflict=True, soft_paused=True, timeout=timeout)
     except socket.timeout:
         return None
     error = resp.get("error") if isinstance(resp, dict) else None
@@ -6325,6 +6355,7 @@ def cmd_start(args):
             log(f"failed to report rejection for {job_id}: {e}", kind="error")
 
     outdated = False        # RLY-184: one-way — nothing in-process can pick up new code
+    plan_paused = False     # RE460: two-way — paying lifts it, and the next claim says so
     required_version = None
     idle_log = IdleLog()    # RE305: throttles the two "nothing is happening" lines
     pause_logged = set()    # RE436: harness keys whose pause was logged (one line in, one out)
@@ -6470,6 +6501,22 @@ def cmd_start(args):
             if args.once:
                 break
             continue
+        if isinstance(job, dict) and job.get("plan_paused"):
+            # RE460: the board's plan is paused. Keep polling (paying lifts it) but say so once,
+            # and wait between claims — the 402 answers instantly, so without the wait this
+            # would be a hot loop.
+            if not plan_paused:
+                plan_paused = True
+                log("PAUSED: " + plan_paused_message() + " — claiming nothing; will keep polling.",
+                    kind="error")
+            if args.once:
+                break
+            wake.wait(poll_timeout)
+            wake.clear()
+            continue
+        if plan_paused:
+            plan_paused = False
+            log("plan active again — claiming resumed")
         if job is None:                             # long-poll timeout / 204 → re-poll
             # `cap` here is FREE capacity — exactly the number the claim just advertised, which
             # is the right one to print beside "the board offered nothing". (The startup line's

@@ -11,8 +11,10 @@ defmodule Relay.Config do
   falls through to the existing source — `Application.get_env(:relay, key, default)` or
   `System.get_env("GIT_SHA")` — and behavior is unchanged.
 
-  Only the values tests actually vary are routed here: `:apple_client_ids`, `:runs_auto_start`
-  and `:git_sha`. Boot-time reads stay plain `Application.get_env/3`.
+  Only the values tests actually vary are routed here: `:apple_client_ids`, `:runs_auto_start`,
+  `:git_sha`, and billing's `:billing_enabled`, `:billing_payments`, `:billing_price_cents`,
+  `:stripe_secret_key` and `:stripe_webhook_secret` (RE460). Boot-time reads stay plain
+  `Application.get_env/3`.
 
   Two rules the lookup imposes:
 

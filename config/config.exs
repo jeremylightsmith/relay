@@ -77,6 +77,14 @@ config :relay, RelayWeb.Endpoint,
 config :relay, :apple_client_ids, ["com.jeremylightsmith.Relay"]
 config :relay, :runs_dispatcher, Relay.Runs.NoopDispatcher
 
+# Billing (RE460, ADR 0012): off unless switched on — a self-hosted install never bills.
+# config/runtime.exs turns it on from BILLING_ENABLED (+ Stripe keys); tests turn it on with
+# `Process.put(:billing_enabled, true)`. All are read through `Relay.Config.get/2`; the monthly
+# price's default lives once, in `Relay.Billing.price_cents/0` (STRIPE_PRICE_CENTS overrides it).
+config :relay,
+  billing_enabled: false,
+  billing_payments: Relay.Billing.Payments.Stripe
+
 config :relay,
   ecto_repos: [Relay.Repo],
   generators: [timestamp_type: :utc_datetime]

@@ -30,6 +30,7 @@ verifies it's current).
 flowchart LR
     Markdown
     Presence
+    Accounts --> Billing
     Accounts --> Config
     Accounts --> Repo
     Activity --> Events
@@ -39,6 +40,8 @@ flowchart LR
     ApiKeys --> Repo
     Attachments --> Boards
     Attachments --> Repo
+    Billing --> Config
+    Billing --> Repo
     Boards --> Activity
     Boards --> Agents
     Boards --> Events
@@ -68,6 +71,7 @@ flowchart LR
     Push --> Repo
     Runs --> Activity
     Runs --> Agents
+    Runs --> Billing
     Runs --> Boards
     Runs --> Cards
     Runs --> Config

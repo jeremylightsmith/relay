@@ -13,6 +13,11 @@ what each term *means*; the sections below say what each value *does*.
 <!-- BEGIN generated: vocabularies -->
 | Vocabulary | Values | Owner |
 | --- | --- | --- |
+| Billing attempt kind | `trial_end` · `renewal` · `returned` | `Schemas.BillingPaymentAttempt.kinds/0` |
+| Billing attempt source | `clock` · `card_saved` | `Schemas.BillingPaymentAttempt.sources/0` |
+| Billing attempt status | `pending` · `succeeded` · `failed` · `unknown` · `not_charged` | `Schemas.BillingPaymentAttempt.statuses/0` |
+| Billing pause reason | `trial_ended` · `unpaid` · `cancelled` · `hold` | `Relay.Billing.Standing.pause_reasons/0` |
+| Billing standing kind | `trial` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Relay.Billing.Standing.kinds/0` |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
@@ -27,6 +32,12 @@ what each term *means*; the sections below say what each value *does*.
 | Talk event kind | `user` · `tool` · `out` · `error` | `Schemas.TalkEvent.kinds/0` |
 | Talk turn status | `queued` · `claimed` · `done` · `stopped` · `failed` | `Schemas.TalkTurn.statuses/0` |
 <!-- END generated: vocabularies -->
+
+The five **Billing** rows (RE460) are a board owner's plan, not a card's motion: the standing kinds
+and pause reasons are owned by the pure `Relay.Billing.Standing` (standing is derived from a
+`Schemas.BillingAccount`'s facts and never stored — see [`domain.md`](domain.md)), and the attempt
+sets by `Schemas.BillingPaymentAttempt`, whose `open_statuses/0` (pending · unknown) is the
+"at most one open attempt per account" subset.
 
 These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
 vocabularies — isolation class (`Schemas.Flow.isolation_classes/0`), node type and edge condition

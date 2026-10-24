@@ -2,6 +2,7 @@ defmodule Relay.AccountsTest do
   use Relay.DataCase, async: true
 
   alias Relay.Accounts
+  alias Relay.Billing
   alias Schemas.Scope
   alias Schemas.User
   alias Ueberauth.Auth.Extra
@@ -150,6 +151,45 @@ defmodule Relay.AccountsTest do
       assert second.email == "grace@navy.example"
       assert second.avatar_url == "https://example.com/new.png"
       assert Repo.aggregate(User, :count) == 1
+    end
+
+    test "with billing enabled, a new user starts a 30-day trial" do
+      Process.put(:billing_enabled, true)
+
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"})
+
+      assert Billing.get_account(user).trial_ends_on == Date.add(Date.utc_today(), Billing.Standing.trial_days())
+    end
+
+    test "with billing disabled, a new user gets no billing account" do
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"})
+
+      assert Billing.get_account(user) == nil
+    end
+
+    test "a returning user's profile refresh creates no billing account" do
+      Process.put(:billing_enabled, true)
+      existing = insert(:user, provider_uid: "u-old", email: "old@example.com")
+
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-old", email: "old@example.com"})
+
+      assert user.id == existing.id
+      assert Billing.get_account(user) == nil
+    end
+
+    test "a returning user's profile refresh leaves an existing billing account unchanged" do
+      Process.put(:billing_enabled, true)
+      existing = insert(:user, provider_uid: "u-old", email: "old@example.com")
+      account = insert(:billing_account, user: existing, trial_ends_on: ~D[2026-01-01])
+
+      assert {:ok, _user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-old", name: "New Name"})
+
+      assert Billing.get_account(existing) == Repo.get!(Schemas.BillingAccount, account.id)
+      assert Billing.get_account(existing).trial_ends_on == ~D[2026-01-01]
     end
 
     test "normalizes the provider email casing/whitespace" do

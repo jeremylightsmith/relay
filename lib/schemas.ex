@@ -13,6 +13,8 @@ defmodule Schemas do
       Agent,
       ApiKey,
       Attachment,
+      BillingAccount,
+      BillingPaymentAttempt,
       Board,
       BoardSetupStep,
       Card,

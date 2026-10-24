@@ -87,6 +87,10 @@ config :relay, RelayWeb.Endpoint,
     ]
   ]
 
+# Billing (RE460): dev charges through the in-process Local payments adapter, so the app can be
+# smoked with `BILLING_ENABLED=true` and no Stripe account (see config/runtime.exs).
+config :relay, billing_payments: Relay.Billing.Payments.Local
+
 # Enable dev routes (dashboard, storybook)
 config :relay, dev_routes: true
 

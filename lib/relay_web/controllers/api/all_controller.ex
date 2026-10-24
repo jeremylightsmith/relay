@@ -10,6 +10,7 @@ defmodule RelayWeb.Api.AllController do
   use RelayWeb, :controller
 
   alias Relay.Activity
+  alias Relay.Billing
   alias Relay.Boards
   alias Relay.Cards
   alias RelayWeb.Api.BoardListJSON
@@ -23,6 +24,7 @@ defmodule RelayWeb.Api.AllController do
   # same Cards.create_card/3 the web composer uses, attributed to the signed-in human.
   def create(conn, params) do
     with {:ok, board} <- resolve_board(conn.assigns.current_user, params["board"]),
+         :ok <- writable(board),
          {:ok, stage} <- resolve_intake_stage(board, params["stage"]),
          {:ok, attrs} <- create_attrs(params),
          {:ok, card} <- Cards.create_card(stage, attrs, conn.assigns.actor) do
@@ -90,6 +92,7 @@ defmodule RelayWeb.Api.AllController do
 
   def approve(conn, %{"ref" => ref} = params) do
     with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
+         :ok <- writable(board),
          {:ok, card} <- Cards.approve(card, conn.assigns.actor) do
       render_card(conn, board, card)
     end
@@ -98,6 +101,7 @@ defmodule RelayWeb.Api.AllController do
   def reject(conn, %{"ref" => ref} = params) do
     with {:ok, note} <- reject_note(params),
          {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
+         :ok <- writable(board),
          {:ok, card} <- Cards.reject(card, note, conn.assigns.actor) do
       render_card(conn, board, card)
     end
@@ -105,11 +109,16 @@ defmodule RelayWeb.Api.AllController do
 
   def answer(conn, %{"ref" => ref} = params) do
     with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
+         :ok <- writable(board),
          {:ok, answer} <- compose(card, params),
          {:ok, card} <- Cards.answer_input(card, answer, conn.assigns.actor) do
       render_card(conn, board, card)
     end
   end
+
+  # RE460 — a paused owner's board takes no writes from the app (reads still work); the
+  # fallback turns this into RelayWeb.PlanPaused's 402.
+  defp writable(board), do: if(Billing.board_paused?(board), do: {:error, :plan_paused}, else: :ok)
 
   # Board by slug among the user's boards. Unknown slug, no membership, or a missing
   # param are all the same 404 — don't leak existence (Cards.resolve_ref/3's posture).

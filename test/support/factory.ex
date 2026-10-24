@@ -26,6 +26,30 @@ defmodule Relay.Factory do
     }
   end
 
+  def billing_account_factory do
+    %Schemas.BillingAccount{
+      trial_ends_on: Date.add(Date.utc_today(), 30),
+      user: build(:user)
+    }
+  end
+
+  def billing_payment_attempt_factory do
+    today = Date.utc_today()
+
+    %Schemas.BillingPaymentAttempt{
+      status: :pending,
+      kind: :renewal,
+      source: :clock,
+      amount_cents: Relay.Billing.price_cents(),
+      period_start: today,
+      period_end: today |> Date.shift(month: 1) |> Date.add(-1),
+      billing_day: today.day,
+      attempt_number: 1,
+      idempotency_key: sequence(:idempotency_key, &"billing-attempt-#{&1}"),
+      billing_account: build(:billing_account)
+    }
+  end
+
   def membership_factory do
     %Schemas.Membership{
       email: sequence(:membership_email, &"member#{&1}@example.com"),

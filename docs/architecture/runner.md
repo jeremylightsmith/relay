@@ -644,6 +644,17 @@ that stays server-side.
   at a job boundary, so being refused is normally self-healing. The fail-stop below is unchanged
   and remains the floor: when auto-update is off, refused, or does not take, the runner still
   stops loudly.
+- **Paused plan (RE460).** When billing is on and the board's owner's plan is paused, every
+  board-key `/api/*` call — claim and heartbeat included — is refused **402 `plan_paused`**
+  (`RelayWeb.PlanPaused`, sent by `RelayWeb.Plugs.RequireActivePlan`), and the board's
+  `Scheduler.Server` dispatches nothing. `./relay` mirrors the code as `PLAN_PAUSED_CODE` (pinned
+  by `claim_refused.plan_paused` in the contract fixture) and never retries the 402. A one-shot
+  command exits 1 with `relay: This board's plan is paused. Manage billing at
+  <board>/account/billing`. `relay start` claims with `soft_paused=True`: it logs one
+  `PAUSED: …` line on the transition, waits `poll_timeout` between claims (the 402 answers
+  instantly, so this is what keeps it from hot-looping), and logs `plan active again — claiming
+  resumed` on the first claim reply that isn't paused. The heartbeat also posts with
+  `soft_paused=True`, so a refused beat counts as landed and starts no failure streak.
 - `POST /api/node-jobs/:id/outcome` (`.outcome/2`) — `Relay.Runs.get_claimed_job/2` (board-
   scoped) returns a three-way result: a `claimed` job runs
   `Relay.Runs.report_outcome/2` against the closed outcome set (422 `unknown_outcome` on a bad

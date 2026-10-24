@@ -9828,6 +9828,138 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
                          {"shared_clean": 2, "exclusive": 0})
 
 
+class PlanPausedRequestTest(unittest.TestCase):
+    """RE460: a paused board answers every board-key call 402 `plan_paused`. A one-shot command
+    dies with a message that says where to fix it; a caller that opts in (`soft_paused`) gets a
+    marker instead. The 402 is a verdict, so it is never retried. The body comes from the
+    contract fixture — never re-typed here."""
+
+    def setUp(self):
+        self._urlopen = relay.urllib.request.urlopen
+        self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
+        saved = {k: os.environ.get(k) for k in ("RELAY_URL", "RELAY_API_KEY")}
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in saved.items()])
+        os.environ["RELAY_URL"] = "http://example.test/"
+        os.environ["RELAY_API_KEY"] = "k"
+        self.calls = 0
+
+    def _raise_402(self, body):
+        payload = json.dumps(body).encode()
+
+        def fake_urlopen(req, **kw):
+            self.calls += 1
+            raise urllib.error.HTTPError(req.full_url, 402, "Payment Required", {}, io.BytesIO(payload))
+
+        relay.urllib.request.urlopen = fake_urlopen
+
+    def test_a_plan_paused_402_dies_once_with_the_billing_link(self):
+        self._raise_402(CONTRACT["claim_refused"]["plan_paused"])
+        expected = "This board's plan is paused. Manage billing at http://example.test/account/billing"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(relay.Died) as cm:
+                relay.api("GET", "/api/board")
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(cm.exception.msg, expected)
+        self.assertEqual(err.getvalue(), f"relay: {expected}\n")
+        self.assertEqual(self.calls, 1)
+
+    def test_soft_paused_returns_a_marker_and_prints_nothing(self):
+        self._raise_402(CONTRACT["claim_refused"]["plan_paused"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            resp = relay.api("GET", "/api/board", soft_paused=True)
+        self.assertEqual(resp, {"plan_paused": True})
+        self.assertEqual(err.getvalue(), "")
+
+    def test_a_402_with_another_code_keeps_the_generic_api_error(self):
+        self._raise_402({"error": {"code": "something_else", "message": "Pay up"}})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(relay.Died) as cm:
+                relay.api("GET", "/api/board")
+        self.assertEqual(cm.exception.msg, "API 402: Pay up")
+
+
+class ClaimPlanPausedTest(unittest.TestCase):
+    """RE460: claim_node_job hands the loop a `plan_paused` marker rather than die()ing."""
+
+    def setUp(self):
+        self.addCleanup(setattr, relay, "api", relay.api)
+
+    def test_a_paused_claim_returns_the_marker_and_asked_for_it_softly(self):
+        seen = {}
+        relay.api = lambda *a, **kw: seen.update(kw) or {"plan_paused": True}
+        result = relay.claim_node_job({"name": "box"}, {"shared_clean": 1}, 1)
+        self.assertEqual(result, {"plan_paused": True})
+        self.assertTrue(seen["soft_paused"])
+
+
+class ExecuteLoopPlanPausedTest(unittest.TestCase):
+    """RE460: a paused board leaves `relay start` running — one PAUSED line, a poll_timeout wait
+    between claims (no hot loop on an instant 402), and one line when the plan is active again."""
+
+    def setUp(self):
+        ExecuteLoopOutdatedTest.setUp(self)
+        load = relay.load_runner_config
+        relay.load_runner_config = lambda: {**load(), "poll_timeout": 0.05}
+
+    _interrupt_after = ExecuteLoopOutdatedTest._interrupt_after
+
+    def paused_lines(self):
+        return [(m, kind) for m, kind in self.logs if m.startswith("PAUSED: This board's plan is paused.")]
+
+    def test_a_paused_board_logs_once_waits_between_claims_and_keeps_running(self):
+        calls = []
+        relay.claim_node_job = lambda *a, **k: calls.append(1) or {"plan_paused": True}
+        self._interrupt_after(0.3)
+
+        result = relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+
+        self.assertIsNone(result)
+        (line,) = self.paused_lines()
+        self.assertEqual(line[1], "error")
+        self.assertLessEqual(len(calls), 8)
+
+    def test_the_first_unpaused_claim_announces_resumption_once(self):
+        replies = [{"plan_paused": True}, {"plan_paused": True}]
+        relay.claim_node_job = lambda *a, **k: replies.pop(0) if replies else None
+        self._interrupt_after(0.3)
+
+        relay.cmd_start(argparse.Namespace(once=False, dry_run=False, interval=None, name=None))
+
+        messages = [m for m, _kind in self.logs]
+        paused = [i for i, m in enumerate(messages) if m.startswith("PAUSED: ")]
+        resumed = [i for i, m in enumerate(messages) if m == "plan active again — claiming resumed"]
+        self.assertEqual(len(paused), 1, self.logs)
+        self.assertEqual(len(resumed), 1, self.logs)
+        self.assertLess(paused[0], resumed[0])
+
+
+class HeartbeatPlanPausedTest(unittest.TestCase):
+    """RE460: the heartbeat to a paused board is refused 402 every beat. That is a landed beat
+    with nothing to act on — not a failure streak in the runner feed."""
+
+    def setUp(self):
+        for name in ("api", "log", "collect_capabilities"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        relay.log = lambda msg, **k: None
+        relay.collect_capabilities = lambda: {"agents": [], "skills": []}
+
+    def test_a_paused_reply_is_not_a_failed_beat(self):
+        seen = {}
+        relay.api = lambda *a, **kw: seen.update(kw) or {"plan_paused": True}
+        hb = relay.RunnerHeartbeat({"name": "b", "host": "h"}, lambda: [], lambda jid: None, interval=15)
+        failed = []
+        hb._beat_failed = failed.append
+
+        hb._beat()
+
+        self.assertEqual(failed, [])
+        self.assertTrue(seen["soft_paused"])
+
+
 class RealGitWorktreeTest(unittest.TestCase):
     """RLY-173, and a deliberate change of testing style.
 

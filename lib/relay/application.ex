@@ -40,6 +40,9 @@ defmodule Relay.Application do
         # RLY-112: ages :action chatter out after 14 days. Its first sweep is one
         # interval away, so booting never touches the DB.
         Relay.Activity.Pruner,
+        # RE460: the hourly billing clock (charges, retries, resolves unknown answers, backfills
+        # trials). Only ticks when billing is on — never in test or on a self-hosted install.
+        {Relay.Billing.Clock, enabled: Relay.Billing.enabled?()},
         # Push dispatch runs off the caller's process so a status change never waits
         # on (or fails because of) Apple (RLY-81).
         {Task.Supervisor, name: Relay.Push.TaskSupervisor},

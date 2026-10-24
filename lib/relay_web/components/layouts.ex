@@ -5,6 +5,7 @@ defmodule RelayWeb.Layouts do
   """
   use RelayWeb, :html
 
+  alias Relay.Billing
   alias Schemas.Scope
 
   # Embed all files in layouts/* within this module.
@@ -129,6 +130,11 @@ defmodule RelayWeb.Layouts do
           class="menu dropdown-content z-50 mt-2 w-60 rounded-box bg-base-100 p-2 shadow"
         >
           {render_slot(@menu_items)}
+          <li :if={Billing.enabled?()}>
+            <.link navigate={~p"/account/billing"} id="billing-link">
+              <.icon name="hero-credit-card" class="size-4" /> Billing
+            </.link>
+          </li>
           <li :if={Scope.superadmin?(@current_scope)}>
             <.link navigate={~p"/admin"} id="admin-link">
               <.icon name="hero-shield-check" class="size-4" /> Admin

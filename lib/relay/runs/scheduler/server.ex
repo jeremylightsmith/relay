@@ -157,7 +157,13 @@ defmodule Relay.Runs.Scheduler.Server do
       %{state | settled?: false}
   end
 
+  # RE460 — a paused owner's board gets no new runs: no snapshot, no dispatch, no marking. Left
+  # unsettled so the next tick re-checks, which is how paying lifts the pause.
   defp do_reconcile(state) do
+    if Relay.Billing.board_paused?(state.board_id), do: %{state | settled?: false}, else: plan_and_apply(state)
+  end
+
+  defp plan_and_apply(state) do
     {snapshot, cards_by_id} = build_snapshot(state)
     plan = Scheduler.plan(snapshot)
     Enum.each(plan.dispatches, &dispatch(&1, state.engine))

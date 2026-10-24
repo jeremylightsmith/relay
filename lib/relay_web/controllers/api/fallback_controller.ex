@@ -22,6 +22,10 @@ defmodule RelayWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: changeset_message(changeset))
   end
 
+  # RE460 — an /api/all write on a board whose owner's plan is paused: the same 402 body the
+  # board-key plug sends (RelayWeb.PlanPaused owns it).
+  def call(conn, {:error, :plan_paused}), do: RelayWeb.PlanPaused.send_refusal(conn)
+
   def call(conn, {:error, :invalid_request}) do
     conn
     |> put_status(:bad_request)
