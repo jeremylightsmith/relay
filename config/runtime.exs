@@ -114,6 +114,13 @@ if config_env() == :prod do
       """
 
   host = System.get_env("PHX_HOST") || "example.com"
+
+  # Other hostnames that serve this same app (comma-separated), e.g. a second domain pointed at
+  # it. They're only accepted as LiveView socket origins; every absolute URL the app generates
+  # (install scripts, mail links, the runner's board URL) still uses PHX_HOST.
+  extra_hosts =
+    "PHX_EXTRA_HOSTS" |> System.get_env("") |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+
   mail_blank? = fn value -> is_nil(value) or String.trim(value) == "" end
   resend_api_key = System.get_env("RESEND_API_KEY")
   mail_from = System.get_env("MAIL_FROM")
@@ -180,6 +187,7 @@ if config_env() == :prod do
 
   config :relay, RelayWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
+    check_origin: Enum.map([host | extra_hosts], &"//#{&1}"),
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.

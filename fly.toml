@@ -12,6 +12,7 @@ kill_signal = 'SIGTERM'
 
 [env]
   PHX_HOST = 'relayboard.fly.dev'
+  PHX_EXTRA_HOSTS = 'hamaca.app,www.hamaca.app'
   RELAY_FEEDBACK_URL = 'https://relayboard.fly.dev/board/relay/public'
   PORT = '8080'
   ECTO_IPV6 = 'true'
