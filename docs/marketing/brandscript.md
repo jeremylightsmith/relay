@@ -8,7 +8,7 @@ Research behind it: [competitive-landscape.md](competitive-landscape.md). Icon a
 ## The name and the picture
 
 **Hamaca** is Spanish for hammock. It's also the original Taíno word that English "hammock"
-comes from. The picture is **directing the planes from the hammock**: rest that's fully in command.
+comes from. The line is **Hammock Driven Development**: rest that's fully in command.
 You're relaxed, and you're running the whole operation.
 
 Two feelings sit under the name:
@@ -106,7 +106,7 @@ calmly, from wherever you are.
 
 ## Taglines to test
 
-- Direct the planes from the hammock.
+- Hammock Driven Development.
 - Your agents work. Your phone lights up when it's your move.
 - Ship from anywhere. Decide from your phone.
 - A software factory you can see at a glance.
