@@ -50,6 +50,22 @@ defmodule Relay.Release do
     end
   end
 
+  @doc """
+  The stages and flows of the example board for each template in `slugs`
+  (`Relay.Boards.template_parts/1`), as `%{slug => parts}` — what `prod pull-demo-flows` writes
+  back into `docs/designs/templates/<slug>.json`. Raises `ArgumentError` for a template with no
+  example board. A read, so `rpc` on the live node like `seed_examples/2`.
+  """
+  @spec example_template_parts([String.t()]) :: %{String.t() => %{String.t() => [map()]}}
+  def example_template_parts(slugs) when is_list(slugs) do
+    Map.new(slugs, fn slug ->
+      case Relay.Boards.get_example_board(slug) do
+        {:ok, board} -> {slug, Relay.Boards.template_parts(board)}
+        :error -> raise ArgumentError, "no example board for template #{inspect(slug)}"
+      end
+    end)
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

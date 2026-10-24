@@ -116,6 +116,51 @@ seed-examples() {
   flyctl ssh console -a "$APP" -C "/app/bin/relay rpc \"$expr\""
 }
 
+# @cmd Pull Pantry's and Streaks' stages and flows into their board templates.
+#
+# Reads the live example boards (Relay.Release.example_template_parts/1) and rewrites the
+# "stages" and "flows" of docs/designs/templates/design-led.json (Pantry) and
+# bare-minimum.json (Streaks) via bin/pull_demo_flows.py. Nodes lose any agent (`llm`), so they
+# run on the new board's default. The picker copy, the template's agents, the example-board
+# JSON under templates/examples/ and the boards' cards are left alone. Only touches local
+# files, so there is nothing to confirm; review the diff, commit, and deploy to ship it.
+#
+# The parts come back on one `DEMO_PARTS {json}` line: `fly ssh console -C` exits 0 even when
+# the remote command dies, so no such line means it failed. ~s()/~w() keep double quotes out of
+# the expression, which is itself double-quoted for the remote command.
+pull-demo-flows() {
+  need flyctl "Install it and run 'fly auth login'."
+  need python3 "Install Python 3."
+  local expr='IO.puts(~s(DEMO_PARTS ) <> Jason.encode!(Relay.Release.example_template_parts(~w(design-led bare-minimum))))'
+  local out parts
+  out="$(flyctl ssh console -a "$APP" -C "/app/bin/relay rpc \"$expr\"")"
+  parts="$(printf '%s\n' "$out" | tr -d '\r' | sed -n 's/^DEMO_PARTS //p')"
+  [[ -n "$parts" ]] || {
+    printf '%s\n' "$out" >&2
+    echo "No DEMO_PARTS line in the output above, so nothing was written." >&2
+    exit 1
+  }
+  printf '%s\n' "$parts" | python3 bin/pull_demo_flows.py docs/designs/templates
+
+  if git diff --quiet -- docs/designs/templates; then
+    echo "The templates already match Pantry and Streaks. Nothing to do."
+    return
+  fi
+  git --no-pager diff --stat -- docs/designs/templates
+  cat <<'EOF'
+
+Next:
+  1. Check the changes:
+       git diff docs/designs/templates
+  2. Check the templates and example boards still load (a stage or flow the example JSON
+     names but the board no longer has fails here):
+       mix test test/relay/boards_templates_test.exs test/relay/boards_template_export_test.exs test/relay/examples_test.exs
+  3. Commit, push and merge to main.
+  4. Deploy, so "New board" uses the new templates:
+       bin/deploy_fly.sh
+EOF
+}
+
 command -v argc >/dev/null || {
   echo "argc not found on PATH. It is pinned in mise.toml — run 'mise install'." >&2
   exit 1

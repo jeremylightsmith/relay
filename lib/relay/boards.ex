@@ -372,6 +372,36 @@ defmodule Relay.Boards do
     end
   end
 
+  @doc """
+  `board`'s stages and flows in the shape of a template file's `"stages"` and `"flows"`
+  (`docs/designs/templates/*.json`), JSON-ready — so a template can be pulled back from the
+  example board built from it (`Relay.Release.example_template_parts/1`, `prod
+  pull-demo-flows`). Main stages in board order with their sub-lane types; each flow's
+  `Relay.Flows.Document` without `version` and `enabled`, which a template's flows never set, in
+  board order of the stage it works in. Agents are not carried, and neither is a node's `llm`:
+  every pulled node runs on the new board's default agent.
+  """
+  @spec template_parts(Board.t()) :: %{String.t() => [map()]}
+  def template_parts(%Board{} = board) do
+    %{
+      "stages" =>
+        for %Stage{parent_id: nil} = main <- list_stages(board) do
+          %{
+            "name" => main.name,
+            "category" => Atom.to_string(main.category),
+            "type" => Atom.to_string(main.type),
+            "wip_limit" => main.wip_limit,
+            "sublanes" => for(lane <- sublanes(main), do: Atom.to_string(lane.type))
+          }
+        end,
+      "flows" =>
+        for flow <- Enum.sort_by(Flows.list_flows(board), &{&1.stage.position, &1.key}) do
+          doc = flow |> Flows.Document.encode() |> Map.drop(["version", "enabled"])
+          Map.update!(doc, "nodes", fn nodes -> Enum.map(nodes, &Map.delete(&1, "llm")) end)
+        end
+    }
+  end
+
   @doc "Every starter board template, in picker order (`Relay.Boards.Templates.all/0`)."
   @spec templates() :: [Templates.template()]
   def templates, do: Templates.all()

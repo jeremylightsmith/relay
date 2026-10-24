@@ -162,7 +162,8 @@ defmodule Relay.MixProject do
         "cmd --cd vendor/dagre_ex env MIX_ENV=test mix do deps.get + precommit",
         "test",
         "cmd python3 bin/test_relay.py",
-        "cmd python3 bin/test_deploy.py"
+        "cmd python3 bin/test_deploy.py",
+        "cmd python3 bin/test_pull_demo_flows.py"
       ]
     ]
   end

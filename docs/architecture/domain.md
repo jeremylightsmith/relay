@@ -22,6 +22,14 @@ sharing behavior.
   Three-brain's `claude_plan` / `gpt_plan` / `gemini_plan`, RE443) — and Review's `reject_to` =
   Plan; never cards. The template path also starts the board's setup checklist
   (`Relay.Setup.start/2`, same transaction); the default path does not.
+  The reverse direction: `Boards.template_parts/1` renders a live board's main stages (with
+  sub-lane types) and its flows (`Flows.Document`, minus `version` / `enabled` and every node's
+  `llm`, in trigger-stage order) as a template file's `"stages"` / `"flows"`; a board created
+  from a template whose nodes name no agent round-trips to its file. `prod pull-demo-flows` reads Pantry's and Streaks' through
+  `Relay.Release.example_template_parts/1` (`bin/relay rpc`) and writes them into
+  `design-led.json` / `bare-minimum.json` with `bin/pull_demo_flows.py`, keeping the picker
+  copy, the template's agents and the files' hand formatting; it never touches the example-board
+  JSON or cards.
   **Bare minimum**: Backlog · Plan (+Done) · Implement · Review · Deploy · Done, flows `plan`
   and `implement`. **Design-led**: Backlog · Next up · Design (+Review, +Done) · Plan (+Review,
   +Done) · Code · Review · Deploy · Done, flows `design`, `plan` and `code`. **Three-brain**:
