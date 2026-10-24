@@ -48,6 +48,7 @@ defmodule Mix.Tasks.Relay.GenVocab do
     {"Talk event kind", {Schemas.TalkEvent, :kinds}},
     {"Billing standing kind", {Standing, :kinds}},
     {"Billing pause reason", {Standing, :pause_reasons}},
+    {"Billing promo refusal", {Relay.Billing, :promo_refusals}},
     {"Billing attempt status", {Schemas.BillingPaymentAttempt, :statuses}},
     {"Billing attempt kind", {Schemas.BillingPaymentAttempt, :kinds}},
     {"Billing attempt source", {Schemas.BillingPaymentAttempt, :sources}},

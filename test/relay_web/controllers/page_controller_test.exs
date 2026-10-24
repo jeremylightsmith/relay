@@ -411,6 +411,23 @@ defmodule RelayWeb.PageControllerTest do
     end
   end
 
+  describe "GET / with a sign-up code (scenario 9)" do
+    test "stashes the code in the session", %{conn: conn} do
+      conn = get(conn, ~p"/?code=RELAYCONF")
+      assert get_session(conn, :signup_promo_code) == "RELAYCONF"
+    end
+
+    test "ignores a blank code", %{conn: conn} do
+      conn = get(conn, "/?code=%20%20")
+      assert get_session(conn, :signup_promo_code) == nil
+    end
+
+    test "ignores a code over 64 bytes", %{conn: conn} do
+      conn = get(conn, ~p"/?code=#{String.duplicate("A", 65)}")
+      assert get_session(conn, :signup_promo_code) == nil
+    end
+  end
+
   describe "GET / when logged in" do
     setup :register_and_log_in_user
 

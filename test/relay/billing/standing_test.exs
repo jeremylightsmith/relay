@@ -6,8 +6,10 @@ defmodule Relay.Billing.StandingTest do
 
   @today ~D[2026-08-12]
   @card "pm_card_visa"
-  @no_decline %{first_charge_declined?: false}
-  @declined %{first_charge_declined?: true}
+  @no_decline %{first_charge_declined?: false, next_charge_free?: false}
+  @declined %{first_charge_declined?: true, next_charge_free?: false}
+  @free %{first_charge_declined?: false, next_charge_free?: true}
+  @free_but_declined %{first_charge_declined?: true, next_charge_free?: true}
 
   # {label, account, facts, expected standing on @today}
   @rows [
@@ -19,6 +21,10 @@ defmodule Relay.Billing.StandingTest do
      %BillingAccount{trial_ends_on: ~D[2026-08-11], card_payment_method_id: @card}, @no_decline, :trial},
     {"trial over, card on file, first charge declined",
      %BillingAccount{trial_ends_on: ~D[2026-08-11], card_payment_method_id: @card}, @declined, {:paused, :trial_ended}},
+    {"trial over, no card, next charge free, awaiting first charge", %BillingAccount{trial_ends_on: ~D[2026-08-11]},
+     @free, :trial},
+    {"trial over, no card, next charge free, first charge declined", %BillingAccount{trial_ends_on: ~D[2026-08-11]},
+     @free_but_declined, {:paused, :trial_ended}},
     {"paid through today", %BillingAccount{paid_through: ~D[2026-08-12]}, @no_decline, :active},
     {"paid through yesterday (grace)", %BillingAccount{paid_through: ~D[2026-08-11]}, @no_decline,
      {:past_due, ~D[2026-08-12]}},

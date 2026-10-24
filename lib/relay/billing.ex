@@ -10,7 +10,13 @@ defmodule Relay.Billing do
   (`Relay.Billing.Charging`, through the `Relay.Billing.Payments` seam), the Stripe webhook
   verifier (`Relay.Billing.Webhook`), the hourly `Relay.Billing.Clock`, and the
   `billing:<user_id>` PubSub topic (`{:billing_changed, user_id}`, broadcast when a plan is
-  cancelled or resumed, a card is saved, or a payment opens or settles).
+  cancelled or resumed, a card is saved, a promo code is redeemed, or a payment opens or settles).
+
+  **Promo codes** (RE462): owns `Schemas.PromoCode`. An account redeems at most one code, ever
+  (`redeem_code/3`, refused with one of `promo_refusals/0`); redeeming stores the code and
+  `promo_months_left = months` on the account. The superadmin creates, lists and disables codes
+  (`create_promo_code/1`, `list_promo_codes/0`, `disable_promo_code/2`); disabling stops new
+  redemptions and never touches accounts that already hold the code.
 
   **One off switch:** `enabled?/0` (`:billing_enabled`, read through `Relay.Config`). Off — a
   self-hosted install — nothing is paused or noticed and no trial is started.
@@ -29,17 +35,20 @@ defmodule Relay.Billing do
   alias Relay.Billing.Charging
   alias Relay.Billing.Notifier
   alias Relay.Billing.Payments
+  alias Relay.Billing.Periods
   alias Relay.Billing.Standing
   alias Relay.Repo
   alias Schemas.BillingAccount
   alias Schemas.BillingPaymentAttempt
   alias Schemas.Board
+  alias Schemas.PromoCode
   alias Schemas.User
 
   require Logger
 
   @pubsub Relay.PubSub
   @default_price_cents 2000
+  @promo_refusals [:already_redeemed, :unknown, :disabled, :expired, :full]
   @brand_labels %{"visa" => "Visa", "mastercard" => "Mastercard", "amex" => "Amex", "discover" => "Discover"}
 
   @doc "True when billing is switched on (`:billing_enabled` is exactly `true`)."
@@ -55,6 +64,36 @@ defmodule Relay.Billing do
   def format_cents(cents) when is_integer(cents) and cents >= 0 do
     "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
   end
+
+  @doc """
+  `price_cents` with `percent_off` taken off: `price × (100 − percent) / 100`, rounded half-up to
+  the cent. Only `next_charge/1` calls it — nothing else computes a discounted price.
+  """
+  @spec discounted_cents(pos_integer(), 1..100) :: non_neg_integer()
+  def discounted_cents(price_cents, percent_off)
+      when is_integer(price_cents) and price_cents > 0 and percent_off in 1..100,
+      do: div(price_cents * (100 - percent_off) + 50, 100)
+
+  @typedoc "What the account's next charge comes to, and the promo code (text and percent) it applies."
+  @type next_charge :: %{amount_cents: non_neg_integer(), promo_code: String.t() | nil, percent_off: 1..100 | nil}
+
+  @doc """
+  **The** amount function: what `account`'s next charge comes to. While it holds a promo code
+  with `promo_months_left > 0`, the code's percent off `price_cents/0` (`discounted_cents/2`) —
+  even if the code has since been disabled; otherwise the full price with no code.
+  `Relay.Billing.Charging` opens every attempt at this amount and `summary/2` previews it.
+  """
+  @spec next_charge(BillingAccount.t() | nil) :: next_charge()
+  def next_charge(%BillingAccount{promo_code_id: promo_code_id, promo_months_left: months_left} = account)
+      when is_integer(promo_code_id) and months_left > 0 do
+    %PromoCode{code: code, percent_off: percent_off} = promo_code(account)
+    %{amount_cents: discounted_cents(price_cents(), percent_off), promo_code: code, percent_off: percent_off}
+  end
+
+  def next_charge(_account), do: %{amount_cents: price_cents(), promo_code: nil, percent_off: nil}
+
+  defp promo_code(%BillingAccount{promo_code: %PromoCode{} = promo_code}), do: promo_code
+  defp promo_code(%BillingAccount{promo_code_id: id}), do: Repo.get!(PromoCode, id)
 
   @doc "The PubSub topic a user's billing changes are broadcast on."
   @spec topic(pos_integer()) :: String.t()
@@ -156,13 +195,132 @@ defmodule Relay.Billing do
     end
   end
 
+  @typedoc "Why `redeem_code/3` refused a code — one of `promo_refusals/0`."
+  @type promo_refusal :: :already_redeemed | :unknown | :disabled | :expired | :full
+
+  @doc "Every promo refusal, in the order `redeem_code/3` checks them (first match wins)."
+  @spec promo_refusals() :: [promo_refusal()]
+  def promo_refusals, do: @promo_refusals
+
+  @doc """
+  Redeems a promo code (trimmed, case-insensitive) on `user`'s account, creating the account and
+  its trial first (`ensure_trial/2`). In one transaction the account row and then the code row
+  are locked `FOR UPDATE` (always account, then code), so two redemptions can't both take a
+  code's last slot. Refused, first match wins: the account already holds a code
+  (`:already_redeemed`); no such code, or a blank one (`:unknown`); `disabled_at` set
+  (`:disabled`); `today` after `expires_on` (`:expired` — the expiry day itself redeems);
+  `max_redemptions` accounts already hold it (`:full`). Otherwise stores the code and
+  `promo_months_left = months`, then broadcasts. A refusal writes and broadcasts nothing.
+  """
+  @spec redeem_code(User.t() | pos_integer(), String.t() | nil, Date.t()) ::
+          {:ok, BillingAccount.t()} | {:error, promo_refusal()}
+  def redeem_code(user, code, %Date{} = today) do
+    {:ok, %BillingAccount{id: account_id}} = ensure_trial(user, today)
+
+    redeemed =
+      Repo.transact(fn ->
+        account = Repo.one!(from a in BillingAccount, where: a.id == ^account_id, lock: "FOR UPDATE")
+        promo_code = lock_promo_code(normalize_code(code))
+
+        with :ok <- redeemable(account, promo_code, today) do
+          account
+          |> Ecto.Changeset.change(promo_code_id: promo_code.id, promo_months_left: promo_code.months)
+          |> Repo.update()
+        end
+      end)
+
+    with {:ok, account} <- redeemed do
+      :ok = broadcast_changed(account.user_id)
+      {:ok, account}
+    end
+  end
+
+  defp normalize_code(code) when is_binary(code) do
+    case code |> String.trim() |> String.upcase() do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_code(nil), do: nil
+
+  defp lock_promo_code(nil), do: nil
+  defp lock_promo_code(code), do: Repo.one(from p in PromoCode, where: p.code == ^code, lock: "FOR UPDATE")
+
+  # The checks run in `promo_refusals/0`'s order.
+  defp redeemable(account, promo_code, today) do
+    cond do
+      account.promo_code_id -> {:error, :already_redeemed}
+      is_nil(promo_code) -> {:error, :unknown}
+      promo_code.disabled_at -> {:error, :disabled}
+      promo_code.expires_on && Date.after?(today, promo_code.expires_on) -> {:error, :expired}
+      promo_code.max_redemptions && redemptions(promo_code.id) >= promo_code.max_redemptions -> {:error, :full}
+      true -> :ok
+    end
+  end
+
+  defp redemptions(promo_code_id),
+    do: Repo.aggregate(from(a in BillingAccount, where: a.promo_code_id == ^promo_code_id), :count)
+
+  @doc """
+  Every promo code for the superadmin, newest first (`inserted_at desc, id desc`), with `used` =
+  how many billing accounts hold it. Unscoped on purpose: the gate is the `/admin` route. One
+  query (aggregate subquery, no N+1).
+  """
+  @spec list_promo_codes() :: [%{promo_code: PromoCode.t(), used: non_neg_integer()}]
+  def list_promo_codes do
+    used =
+      from a in BillingAccount,
+        where: not is_nil(a.promo_code_id),
+        group_by: a.promo_code_id,
+        select: %{promo_code_id: a.promo_code_id, n: count(a.id)}
+
+    Repo.all(
+      from p in PromoCode,
+        left_join: u in subquery(used),
+        on: u.promo_code_id == p.id,
+        order_by: [desc: p.inserted_at, desc: p.id],
+        select: %{promo_code: p, used: coalesce(u.n, 0)}
+    )
+  end
+
+  @doc "A changeset for a promo code form (`Schemas.PromoCode.changeset/2`)."
+  @spec change_promo_code(PromoCode.t(), map()) :: Ecto.Changeset.t()
+  def change_promo_code(%PromoCode{} = promo_code, attrs), do: PromoCode.changeset(promo_code, attrs)
+
+  @doc "Creates a promo code from admin input (`Schemas.PromoCode.changeset/2`)."
+  @spec create_promo_code(map()) :: {:ok, PromoCode.t()} | {:error, Ecto.Changeset.t()}
+  def create_promo_code(attrs), do: %PromoCode{} |> PromoCode.changeset(attrs) |> Repo.insert()
+
+  @doc """
+  Disables a promo code at `at`, stopping new redemptions; accounts that already hold it keep
+  their remaining months. An already disabled code keeps its original `disabled_at`.
+  """
+  @spec disable_promo_code(pos_integer(), DateTime.t()) :: {:ok, PromoCode.t()} | {:error, :not_found}
+  def disable_promo_code(id, %DateTime{} = at) do
+    case Repo.get(PromoCode, id) do
+      nil ->
+        {:error, :not_found}
+
+      %PromoCode{disabled_at: nil} = promo_code ->
+        promo_code |> Ecto.Changeset.change(disabled_at: DateTime.truncate(at, :second)) |> Repo.update()
+
+      %PromoCode{} = promo_code ->
+        {:ok, promo_code}
+    end
+  end
+
   @typedoc "What the Billing page shows (`summary/2`)."
   @type summary :: %{
           standing: Standing.t(),
           trial_ends_on: Date.t() | nil,
           trial_days_left: integer() | nil,
           first_charge_on: Date.t() | nil,
-          amount_cents: pos_integer(),
+          amount_cents: non_neg_integer(),
+          full_price_cents: pos_integer(),
+          promo:
+            nil
+            | %{code: String.t(), percent_off: 1..100, months_left: non_neg_integer(), full_price_from: Date.t() | nil},
           paid_through: Date.t() | nil,
           renews_on: Date.t() | nil,
           card: nil | %{brand_label: String.t(), last4: String.t(), exp_month: integer(), exp_year: integer()},
@@ -172,7 +330,7 @@ defmodule Relay.Billing do
               paid_on: Date.t(),
               period_start: Date.t(),
               period_end: Date.t(),
-              amount_cents: pos_integer(),
+              amount_cents: non_neg_integer(),
               receipt_url: String.t() | nil
             }
           ],
@@ -302,29 +460,57 @@ defmodule Relay.Billing do
     |> Enum.count(fn user_id -> match?({:ok, _account}, ensure_trial(user_id, today)) end)
   end
 
-  @doc "What the Billing page shows for `user` on `today`."
+  @doc """
+  What the Billing page shows for `user` on `today`. `amount_cents` is the next charge
+  (`next_charge/1`), `full_price_cents` the undiscounted price. `promo` is nil unless the
+  account holds a code; its `full_price_from` is the first charge date back at full price — the
+  first charge (a trial) or the renewal (active) `months_left` periods on — and nil when no
+  months are left or in any other standing.
+  """
   @spec summary(User.t(), Date.t()) :: summary()
   def summary(%User{} = user, %Date{} = today) do
-    account = get_account(user)
+    account = user |> get_account() |> Repo.preload(:promo_code)
     standing = Standing.of(account, facts(account), today)
     trial_ends_on = account && account.trial_ends_on
     paid_through = account && account.paid_through
     trial? = standing == :trial and not is_nil(trial_ends_on)
+    first_charge_on = if(trial?, do: Date.add(trial_ends_on, 1))
+    renews_on = if(standing == :active, do: Periods.next_renewal(paid_through))
 
     %{
       standing: standing,
       trial_ends_on: trial_ends_on,
       trial_days_left: if(trial?, do: Date.diff(trial_ends_on, today)),
-      first_charge_on: if(trial?, do: Date.add(trial_ends_on, 1)),
-      amount_cents: price_cents(),
+      first_charge_on: first_charge_on,
+      amount_cents: next_charge(account).amount_cents,
+      full_price_cents: price_cents(),
+      promo: promo(account, first_charge_on, renews_on),
       paid_through: paid_through,
-      renews_on: if(standing == :active, do: Relay.Billing.Periods.next_renewal(paid_through)),
+      renews_on: renews_on,
       card: card(account),
       payments: payments(account),
       cancellable?: Standing.cancellable?(standing),
       resumable?: Standing.resumable?(standing)
     }
   end
+
+  defp promo(%BillingAccount{promo_code: %PromoCode{} = promo_code} = account, first_charge_on, renews_on) do
+    months_left = account.promo_months_left
+
+    %{
+      code: promo_code.code,
+      percent_off: promo_code.percent_off,
+      months_left: months_left,
+      full_price_from: full_price_from(months_left, first_charge_on, renews_on, account.billing_day)
+    }
+  end
+
+  defp promo(_account, _first_charge_on, _renews_on), do: nil
+
+  defp full_price_from(0, _first_charge_on, _renews_on, _billing_day), do: nil
+  defp full_price_from(months_left, %Date{} = first, nil, _day), do: Periods.renewal_after(first, first.day, months_left)
+  defp full_price_from(months_left, nil, %Date{} = renews_on, day), do: Periods.renewal_after(renews_on, day, months_left)
+  defp full_price_from(_months_left, _first_charge_on, _renews_on, _billing_day), do: nil
 
   defp card(account) do
     if account && Standing.card_on_file?(account) do

@@ -38,6 +38,7 @@ defmodule Schemas do
       Membership,
       NodeExecution,
       NodeJob,
+      PromoCode,
       Release,
       Run,
       RunBranch,

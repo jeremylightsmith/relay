@@ -25,6 +25,22 @@ defmodule Relay.Billing.PeriodsTest do
     end
   end
 
+  describe "renewal_after/3" do
+    test "is the start of the period n periods later, on the billing day" do
+      assert Periods.renewal_after(~D[2026-04-04], 4, 3) == ~D[2026-07-04]
+      assert Periods.renewal_after(~D[2026-11-15], 15, 2) == ~D[2027-01-15]
+    end
+
+    test "clamps a billing day past the month's end to its last day" do
+      assert Periods.renewal_after(~D[2026-01-31], 31, 1) == ~D[2026-02-28]
+      assert Periods.renewal_after(~D[2026-01-31], 31, 2) == ~D[2026-03-31]
+    end
+
+    test "zero periods later is the start itself" do
+      assert Periods.renewal_after(~D[2026-04-04], 4, 0) == ~D[2026-04-04]
+    end
+  end
+
   test "next_renewal/1 is the day after paid_through" do
     assert Periods.next_renewal(~D[2026-05-03]) == ~D[2026-05-04]
   end

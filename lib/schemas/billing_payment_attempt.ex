@@ -6,7 +6,8 @@ defmodule Schemas.BillingPaymentAttempt do
   index `billing_payment_attempts_one_open_per_account` — so an answer we did not get blocks
   further charges until it is resolved. `idempotency_key` is unique and is the key the charge is
   sent to Stripe with. `paid_through_before` is the account's `paid_through` when the attempt
-  opened.
+  opened. `promo_code` / `promo_percent_off` are the code text and percent the attempt applied
+  (RE462), nil when it carried none — a 100% code records a $0 attempt.
 
   `billing_account_id` is set programmatically on the struct, never cast from input.
   """
@@ -36,6 +37,8 @@ defmodule Schemas.BillingPaymentAttempt do
     field :decline_reason, :string
     field :error, :string
     field :resolved_at, :utc_datetime
+    field :promo_code, :string
+    field :promo_percent_off, :integer
 
     belongs_to :billing_account, Schemas.BillingAccount
 

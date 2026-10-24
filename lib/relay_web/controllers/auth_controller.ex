@@ -12,6 +12,10 @@ defmodule RelayWeb.AuthController do
   so that pass through is a no-op. Only a same-app relative path is accepted (starts
   with `/`, not `//`, no scheme/host) to rule out an open redirect; anything else is
   dropped and `callback` falls back to `~p"/board"`.
+
+  A promo sign-up link (RE462): `RelayWeb.PageController.home/2` stashes `/?code=` in the
+  session as `:signup_promo_code`; `callback` hands it to
+  `Relay.Accounts.upsert_user_from_google/2`, which redeems it only for a new user.
   """
 
   use RelayWeb, :controller
@@ -33,9 +37,13 @@ defmodule RelayWeb.AuthController do
   end
 
   def callback(%{assigns: %{ueberauth_auth: auth}} = conn, _params) do
+    # Both read before `Auth.log_in_user/3` renews (clears) the session. The promo code is the
+    # session stash from a `/?code=` sign-up link — never `params["code"]`, which here is
+    # Google's authorization code.
     return_to = get_session(conn, :user_return_to)
+    promo_code = get_session(conn, :signup_promo_code)
 
-    case Accounts.upsert_user_from_google(auth) do
+    case Accounts.upsert_user_from_google(auth, promo_code: promo_code) do
       {:ok, user} ->
         conn
         |> put_flash(:info, "Signed in as #{user.email}")

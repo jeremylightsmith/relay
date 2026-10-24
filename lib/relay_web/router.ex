@@ -163,6 +163,7 @@ defmodule RelayWeb.Router do
       live "/boards", BoardsLive
       live "/onboarding", OnboardingLive
       live "/users", UsersLive
+      live "/users/promo-codes", PromoCodesLive
       live "/api", ApiLive
     end
   end

@@ -18,6 +18,7 @@ what each term *means*; the sections below say what each value *does*.
 | Billing attempt status | `pending` · `succeeded` · `failed` · `unknown` · `not_charged` | `Schemas.BillingPaymentAttempt.statuses/0` |
 | Billing notice kind | `trial_ending` · `card_declined` · `paused` | `Schemas.BillingNotice.kinds/0` |
 | Billing pause reason | `trial_ended` · `unpaid` · `cancelled` · `hold` | `Relay.Billing.Standing.pause_reasons/0` |
+| Billing promo refusal | `already_redeemed` · `unknown` · `disabled` · `expired` · `full` | `Relay.Billing.promo_refusals/0` |
 | Billing standing kind | `trial` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Relay.Billing.Standing.kinds/0` |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
@@ -34,14 +35,16 @@ what each term *means*; the sections below say what each value *does*.
 | Talk turn status | `queued` · `claimed` · `done` · `stopped` · `failed` | `Schemas.TalkTurn.statuses/0` |
 <!-- END generated: vocabularies -->
 
-The six **Billing** rows (RE460, RE464) are a board owner's plan, not a card's motion: the standing
+The **Billing** rows (RE460, RE462, RE464) are a board owner's plan, not a card's motion: the standing
 kinds and pause reasons are owned by the pure `Relay.Billing.Standing` (standing is derived from a
 `Schemas.BillingAccount`'s facts and never stored — see [`domain.md`](domain.md)), the attempt
 sets by `Schemas.BillingPaymentAttempt`, whose `open_statuses/0` (pending · unknown) is the
 "at most one open attempt per account" subset, and the notice kinds by
 `Schemas.BillingNotice.kinds/0` — one `billing_notices` row per email sent, the unique index
 `billing_notices_once` on `(billing_account_id, kind, period_key)` making each email
-once-per-period.
+once-per-period. The promo refusal row (RE462) is owned by
+`Relay.Billing.promo_refusals/0`, listed in the order `Relay.Billing.redeem_code/3` checks them —
+first match wins, so an account that already holds a code is `already_redeemed` whatever it typed.
 
 These are the *runtime* vocabularies, not every closed set in the codebase. The flow-**definition**
 vocabularies — isolation class (`Schemas.Flow.isolation_classes/0`), node type and edge condition

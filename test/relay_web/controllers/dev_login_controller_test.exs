@@ -1,6 +1,7 @@
 defmodule RelayWeb.DevLoginControllerTest do
   use RelayWeb.ConnCase, async: true
 
+  alias Relay.Billing
   alias Relay.Repo
   alias Schemas.User
 
@@ -33,5 +34,25 @@ defmodule RelayWeb.DevLoginControllerTest do
   test "GET /dev/login rejects a protocol-relative return_to", %{conn: conn} do
     conn = get(conn, "/dev/login?return_to=//evil.com")
     assert redirected_to(conn) == ~p"/board"
+  end
+
+  describe "GET /dev/login with a sign-up code (scenario 15)" do
+    setup do
+      Process.put(:billing_enabled, true)
+      %{relayconf: insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)}
+    end
+
+    test "redeems the session's code for the dev user", %{conn: conn, relayconf: relayconf} do
+      conn |> Plug.Test.init_test_session(signup_promo_code: "RELAYCONF") |> get(~p"/dev/login")
+
+      assert Billing.get_account(Repo.get_by!(User, provider: "dev")).promo_code_id == relayconf.id
+    end
+
+    test "with no session code the dev user holds none", %{conn: conn} do
+      get(conn, ~p"/dev/login")
+
+      account = Billing.get_account(Repo.get_by!(User, provider: "dev"))
+      assert is_nil(account) or is_nil(account.promo_code_id)
+    end
   end
 end

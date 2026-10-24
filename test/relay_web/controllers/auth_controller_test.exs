@@ -1,6 +1,7 @@
 defmodule RelayWeb.AuthControllerTest do
   use RelayWeb.ConnCase, async: true
 
+  alias Relay.Billing
   alias Relay.Members
   alias Relay.Repo
   alias Schemas.Membership
@@ -154,6 +155,54 @@ defmodule RelayWeb.AuthControllerTest do
         |> get(~p"/auth/google/callback")
 
       assert redirected_to(conn) == ~p"/board"
+    end
+  end
+
+  describe "GET /auth/google/callback with a sign-up code" do
+    setup do
+      Process.put(:billing_enabled, true)
+      %{relayconf: insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)}
+    end
+
+    defp sign_up(conn, code, path \\ ~p"/auth/google/callback") do
+      conn
+      |> Plug.Test.init_test_session(signup_promo_code: code)
+      |> assign(:ueberauth_auth, google_auth())
+      |> get(path)
+    end
+
+    test "a new user's account holds the code (scenario 10)", %{conn: conn, relayconf: relayconf} do
+      conn = sign_up(conn, "relayconf")
+
+      account = Billing.get_account(Repo.get_by!(User, provider_uid: "google-uid-123"))
+      assert account.promo_code_id == relayconf.id
+      assert account.promo_months_left == 3
+      assert redirected_to(conn) == ~p"/board"
+    end
+
+    test "an unknown code never fails sign-up (scenario 11)", %{conn: conn} do
+      conn = sign_up(conn, "NOPE")
+
+      assert redirected_to(conn) == ~p"/board"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Signed in as ada@example.com"
+      assert Billing.get_account(Repo.get_by!(User, provider_uid: "google-uid-123")).promo_code_id == nil
+    end
+
+    test "an existing user redeems nothing (scenario 12)", %{conn: conn} do
+      existing = insert(:user, provider_uid: "google-uid-123", email: "ada@example.com")
+      {:ok, _account} = Billing.ensure_trial(existing, Date.utc_today())
+
+      sign_up(conn, "RELAYCONF")
+
+      assert Billing.get_account(existing).promo_code_id == nil
+    end
+
+    test "the OAuth ?code= is never read as a promo code (scenario 13)", %{conn: conn, relayconf: relayconf} do
+      insert(:promo_code, code: "GOOGLE-OAUTH-CODE")
+
+      sign_up(conn, "RELAYCONF", ~p"/auth/google/callback?code=google-oauth-code")
+
+      assert Billing.get_account(Repo.get_by!(User, provider_uid: "google-uid-123")).promo_code_id == relayconf.id
     end
   end
 

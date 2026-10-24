@@ -12,8 +12,9 @@ defmodule Relay.Billing.Standing do
     3. `comped` → `:comped`;
     4. `cancelled_on` set → `{:cancelled, access_until}` through `access_until`, then
        `{:paused, :cancelled}`;
-    5. never paid: `:trial` through `trial_ends_on`, and after it while a card is on file and the
-       first charge has not been declined (awaiting the clock); else `{:paused, :trial_ended}`;
+    5. never paid: `:trial` through `trial_ends_on`, and after it while a card is on file — or the
+       next charge is $0 (`next_charge_free?`, a 100% promo code: no card needed) — and the first
+       charge has not been declined (awaiting the clock); else `{:paused, :trial_ended}`;
     6. paid: `:active` through `paid_through`, `{:past_due, paid_through + grace_days()}` during
        the grace, then `{:paused, :unpaid}`.
   """
@@ -31,8 +32,11 @@ defmodule Relay.Billing.Standing do
           | {:past_due, until :: Date.t()}
           | {:cancelled, access_until :: Date.t()}
           | {:paused, pause_reason()}
-  @typedoc "`first_charge_declined?`: the account has ≥ 1 `:failed` attempt and `paid_through` is nil."
-  @type facts :: %{first_charge_declined?: boolean()}
+  @typedoc """
+  Facts about a never-paid account (both false once it has paid): `first_charge_declined?` — it
+  has ≥ 1 `:failed` attempt; `next_charge_free?` — its next charge is $0 (a 100% promo code).
+  """
+  @type facts :: %{first_charge_declined?: boolean(), next_charge_free?: boolean()}
 
   @doc "Every standing kind (see `kind/1`)."
   @spec kinds() :: [:trial | :active | :past_due | :cancelled | :comped | :paused]
@@ -75,7 +79,7 @@ defmodule Relay.Billing.Standing do
   defp never_paid(account, facts, today) do
     cond do
       not Date.after?(today, account.trial_ends_on) -> :trial
-      card_on_file?(account) and not facts.first_charge_declined? -> :trial
+      (card_on_file?(account) or facts.next_charge_free?) and not facts.first_charge_declined? -> :trial
       true -> {:paused, :trial_ended}
     end
   end

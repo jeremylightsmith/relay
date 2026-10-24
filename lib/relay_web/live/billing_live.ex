@@ -13,6 +13,13 @@ defmodule RelayWeb.BillingLive do
   and `"resume_plan"` call `Relay.Billing.cancel/2` / `resume/2`. The page is subscribed to the
   user's `billing:<user_id>` topic, so a webhook-settled payment re-renders it live.
 
+  Promo codes (RE462): the trial's first charge and the active plan's next charge show
+  `summary.amount_cents` (already discounted by `Relay.Billing.next_charge/1`) and, while the
+  code has months left, its terms and when the full price returns; a $0 trial charge reads "No
+  card needed until …". The **Have a code?** form sends `"apply_code"` →
+  `Relay.Billing.redeem_code/3`; a refusal comes back inline as the field's error
+  (`refusal_message/1`, the one copy of each refusal), a success flashes and clears the form.
+
   404 (`Ecto.NoResultsError`) while billing is disabled — a self-hosted install has no plan.
   """
 
@@ -85,9 +92,22 @@ defmodule RelayWeb.BillingLive do
             class="mt-4 rounded-box bg-base-200 p-3 text-sm"
           >
             <div class="flex justify-between">
-              <span>First charge, {date(@summary.first_charge_on)}</span>
+              <span>First charge, {date(@summary.first_charge_on)}{" "}</span>
               <span class="font-mono">{Billing.format_cents(@summary.amount_cents)}</span>
             </div>
+            <.promo_terms summary={@summary} />
+          </div>
+
+          <div
+            :if={@kind == :active}
+            id="billing-next-charge"
+            class="mt-4 rounded-box bg-base-200 p-3 text-sm"
+          >
+            <div class="flex justify-between">
+              <span>Next charge, {date(@summary.renews_on)}{" "}</span>
+              <span class="font-mono">{Billing.format_cents(@summary.amount_cents)}</span>
+            </div>
+            <.promo_terms summary={@summary} />
           </div>
 
           <div
@@ -114,7 +134,10 @@ defmodule RelayWeb.BillingLive do
             id="billing-no-card"
             class="mt-4 flex items-center justify-between gap-3 border-t border-base-300 pt-4 text-sm"
           >
-            <span class="text-base-content/65">
+            <span :if={free_until(@summary)} class="text-base-content/65">
+              No card needed until {date(free_until(@summary))}.
+            </span>
+            <span :if={!free_until(@summary)} class="text-base-content/65">
               No card on file. Without one, your boards go read-only on {date(
                 @summary.first_charge_on
               )}.
@@ -128,6 +151,26 @@ defmodule RelayWeb.BillingLive do
               Add card
             </.button>
           </div>
+
+          <div
+            :if={@summary.promo}
+            id="billing-promo-applied"
+            class="mt-4 text-xs text-base-content/55"
+          >
+            Code applied: <span class="font-mono">{@summary.promo.code}</span>. One code per account.
+          </div>
+
+          <.form
+            for={@code_form}
+            id="billing-code-form"
+            phx-submit="apply_code"
+            class="mt-4 flex items-start gap-2"
+          >
+            <div class="flex-1">
+              <.input field={@code_form[:code]} placeholder="Have a code?" autocomplete="off" />
+            </div>
+            <.button id="billing-code-apply" class="btn btn-sm">Apply</.button>
+          </.form>
 
           <%= if @summary.payments != [] do %>
             <div class="mt-4 text-xs font-semibold text-base-content/65">PAYMENTS</div>
@@ -175,6 +218,29 @@ defmodule RelayWeb.BillingLive do
     """
   end
 
+  attr :summary, :map, required: true
+
+  # The code's terms while it still discounts a month: "RELAYCONF · 50% off, 3 months" and when
+  # the full price comes back.
+  defp promo_terms(assigns) do
+    ~H"""
+    <div
+      :if={@summary.promo && @summary.promo.months_left > 0}
+      id="billing-promo-terms"
+      class="mt-1 flex flex-wrap justify-between gap-x-2 text-base-content/65"
+    >
+      <span>
+        {@summary.promo.code} · {@summary.promo.percent_off}% off, {months(@summary.promo.months_left)}
+      </span>
+      <span :if={@summary.promo.full_price_from} class="font-mono">
+        then {Billing.format_cents(@summary.full_price_cents)} from {date(
+          @summary.promo.full_price_from
+        )}
+      </span>
+    </div>
+    """
+  end
+
   defp update_card_button(assigns) do
     ~H"""
     <.button type="button" id="billing-update-card" phx-click="add_card" class="btn btn-sm">
@@ -192,7 +258,7 @@ defmodule RelayWeb.BillingLive do
     {:ok, _account} = Billing.ensure_trial(user, Date.utc_today())
     if connected?(socket), do: Billing.subscribe(user.id)
 
-    {:ok, socket |> assign(:page_title, "Billing") |> assign_summary()}
+    {:ok, socket |> assign(:page_title, "Billing") |> assign_summary() |> assign_code_form("")}
   end
 
   # The return from Checkout. Completed once, on the connected mount (the disconnected render
@@ -232,6 +298,17 @@ defmodule RelayWeb.BillingLive do
     {:noreply, assign_summary(socket)}
   end
 
+  def handle_event("apply_code", %{"promo" => %{"code" => code}}, socket) when is_binary(code) do
+    case Billing.redeem_code(socket.assigns.current_scope.user, code, Date.utc_today()) do
+      {:ok, _account} ->
+        applied = socket |> assign_summary() |> assign_code_form("")
+        {:noreply, put_flash(applied, :info, "Code applied: #{applied.assigns.summary.promo.code}.")}
+
+      {:error, refusal} ->
+        {:noreply, assign_code_form(socket, code, refusal_message(refusal))}
+    end
+  end
+
   @impl true
   def handle_info({:billing_changed, _user_id}, socket), do: {:noreply, assign_summary(socket)}
 
@@ -239,6 +316,32 @@ defmodule RelayWeb.BillingLive do
     summary = Billing.summary(socket.assigns.current_scope.user, Date.utc_today())
     socket |> assign(:summary, summary) |> assign(:kind, Standing.kind(summary.standing))
   end
+
+  # A refusal comes back as the field's error with an `action`, so `<.input>` shows it inline.
+  defp assign_code_form(socket, code, error \\ nil) do
+    form =
+      if error,
+        do: to_form(%{"code" => code}, as: :promo, errors: [code: {error, []}], action: :validate),
+        else: to_form(%{"code" => code}, as: :promo)
+
+    assign(socket, :code_form, form)
+  end
+
+  @doc false
+  # The copy for each of `Relay.Billing.promo_refusals/0` — defined here, the only page that shows them.
+  @spec refusal_message(Billing.promo_refusal()) :: String.t()
+  def refusal_message(:unknown), do: "We don't recognize that code."
+  def refusal_message(:disabled), do: "That code is no longer available."
+  def refusal_message(:expired), do: "That code has expired."
+  def refusal_message(:full), do: "That code is fully redeemed."
+  def refusal_message(:already_redeemed), do: "You've already used a code."
+
+  # A $0 next charge (a 100% code) needs no card until the full price returns.
+  defp free_until(%{amount_cents: 0, promo: %{full_price_from: %Date{} = full_price_from}}), do: full_price_from
+  defp free_until(_summary), do: nil
+
+  defp months(1), do: "1 month"
+  defp months(n), do: "#{n} months"
 
   defp put_setup_flash(socket, {:ok, %{charged: :paid}}),
     do: put_flash(socket, :info, "Card saved and charged. Your boards are editable.")

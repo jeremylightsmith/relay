@@ -82,7 +82,10 @@ defmodule Relay.Accounts do
        in that existing user, keeping its `provider` / `provider_uid` and
        refreshing only non-nil `:name` / `:avatar_url`;
     3. otherwise a new `%User{provider:, provider_uid:}` is inserted, and — when
-       `Relay.Billing.enabled?/0` — its billing trial starts (RE460).
+       `Relay.Billing.enabled?/0` — its billing trial starts (RE460) and then
+       `opts[:promo_code]` (a `/?code=` sign-up link, RE462) is redeemed with
+       `Relay.Billing.redeem_code/3`. A refused code is ignored: sign-up never
+       fails over a code, and a returning user never redeems one here.
 
   A nil claim never wipes a stored value. `opts[:name]` is a fallback display
   name used only when inserting and only when `claims.name` is nil.
@@ -106,17 +109,23 @@ defmodule Relay.Accounts do
         %User{provider: provider, provider_uid: provider_uid}
         |> User.changeset(profile)
         |> Repo.insert()
-        |> start_trial()
+        |> start_trial(opts[:promo_code])
     end
   end
 
   # RE460: a new user's billing trial starts at sign-up — only when billing is switched on.
-  defp start_trial({:ok, user}) do
-    if Billing.enabled?(), do: {:ok, _account} = Billing.ensure_trial(user, Date.utc_today())
+  # RE462: then the sign-up link's code is redeemed; a refusal is ignored.
+  defp start_trial({:ok, user}, promo_code) do
+    if Billing.enabled?() do
+      today = Date.utc_today()
+      {:ok, _account} = Billing.ensure_trial(user, today)
+      if promo_code, do: _redeemed = Billing.redeem_code(user, promo_code, today)
+    end
+
     {:ok, user}
   end
 
-  defp start_trial(error), do: error
+  defp start_trial(error, _promo_code), do: error
 
   # Lookup steps 1 and 2: provider_uid (unscoped by provider on purpose), then normalized email.
   defp find_existing(%{provider_uid: provider_uid} = claims) do
@@ -149,16 +158,24 @@ defmodule Relay.Accounts do
   uses). Board invites bind by email, so an unverified address could otherwise
   claim someone else's invites and, because `users.email` is unique, lock the
   real owner out (RE343).
+
+  `opts[:promo_code]` is passed through to `upsert_user_from_provider/2` (a new
+  user redeems it, RE462).
   """
-  def upsert_user_from_google(%Ueberauth.Auth{} = auth) do
+  @spec upsert_user_from_google(Ueberauth.Auth.t(), keyword()) ::
+          {:ok, User.t()} | {:error, :email_unverified | Ecto.Changeset.t()}
+  def upsert_user_from_google(%Ueberauth.Auth{} = auth, opts \\ []) do
     if GoogleTokenValidator.email_verified?(google_userinfo(auth)) do
-      upsert_user_from_provider(%{
-        provider: "google",
-        provider_uid: to_string(auth.uid),
-        email: auth.info.email,
-        name: auth.info.name,
-        avatar_url: auth.info.image
-      })
+      upsert_user_from_provider(
+        %{
+          provider: "google",
+          provider_uid: to_string(auth.uid),
+          email: auth.info.email,
+          name: auth.info.name,
+          avatar_url: auth.info.image
+        },
+        Keyword.take(opts, [:promo_code])
+      )
     else
       {:error, :email_unverified}
     end

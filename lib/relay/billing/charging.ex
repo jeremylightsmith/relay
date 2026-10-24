@@ -45,23 +45,29 @@ defmodule Relay.Billing.Charging do
 
   @doc "The attempt facts `Standing.of/3` reads for `account`."
   @spec facts(BillingAccount.t() | nil) :: Standing.facts()
-  def facts(%BillingAccount{paid_through: nil, id: id}) do
+  def facts(%BillingAccount{paid_through: nil, id: id} = account) do
     %{
       first_charge_declined?:
-        Repo.exists?(from p in BillingPaymentAttempt, where: p.billing_account_id == ^id and p.status == :failed)
+        Repo.exists?(from p in BillingPaymentAttempt, where: p.billing_account_id == ^id and p.status == :failed),
+      next_charge_free?: next_charge_free?(account)
     }
   end
 
-  def facts(_account), do: %{first_charge_declined?: false}
+  def facts(_account), do: %{first_charge_declined?: false, next_charge_free?: false}
+
+  defp next_charge_free?(account), do: Billing.next_charge(account).amount_cents == 0
 
   @doc """
   Charges every account the clock decision says is due on `today`, each isolated so one failure
-  never stops the rest. Answers how many attempts were made.
+  never stops the rest. A candidate has a card, or discounted months left (a free one needs no
+  card — `chargeable?/1` decides). Answers how many attempts were made.
   """
   @spec charge_due(Date.t(), boolean()) :: non_neg_integer()
   def charge_due(%Date{} = today, final_pass?) do
     from(a in BillingAccount,
-      where: not is_nil(a.card_payment_method_id) and not a.comped and is_nil(a.held_on) and is_nil(a.cancelled_on),
+      where:
+        (not is_nil(a.card_payment_method_id) or a.promo_months_left > 0) and not a.comped and is_nil(a.held_on) and
+          is_nil(a.cancelled_on),
       select: a.id
     )
     |> Repo.all()
@@ -149,8 +155,8 @@ defmodule Relay.Billing.Charging do
 
   defp found_answer({:error, reason}, attempt), do: {:unknown, inspect(reason), attempt.stripe_payment_intent_id}
 
-  # The clock decision, on the locked row: charge only a card on file, never a held, comped,
-  # cancelled or paused account, and never one holding an open attempt.
+  # The clock decision, on the locked row: charge only a card on file (or a $0 month, which needs
+  # none), never a held, comped, cancelled or paused account, and never one holding an open attempt.
   defp clock_decision(account, today, final_pass?) do
     cond do
       not chargeable?(account) -> :none
@@ -164,7 +170,8 @@ defmodule Relay.Billing.Charging do
 
   defp chargeable?(account),
     do:
-      Standing.card_on_file?(account) and is_nil(account.held_on) and not account.comped and is_nil(account.cancelled_on)
+      (Standing.card_on_file?(account) or next_charge_free?(account)) and is_nil(account.held_on) and not account.comped and
+        is_nil(account.cancelled_on)
 
   # Never paid: the day after the trial, unless its first charge was already declined.
   defp trial_end_decision(%{trial_ends_on: %Date{} = ends_on} = account, today) do
@@ -264,12 +271,16 @@ defmodule Relay.Billing.Charging do
         :count
       ) + 1
 
+    next_charge = Billing.next_charge(account)
+
     %BillingPaymentAttempt{
       billing_account_id: account.id,
       status: :pending,
       kind: charge.kind,
       source: charge.source,
-      amount_cents: Billing.price_cents(),
+      amount_cents: next_charge.amount_cents,
+      promo_code: next_charge.promo_code,
+      promo_percent_off: next_charge.percent_off,
       period_start: charge.period_start,
       period_end: charge.period_end,
       billing_day: charge.billing_day,
@@ -302,6 +313,9 @@ defmodule Relay.Billing.Charging do
 
       :unknown
   end
+
+  # A $0 month (a 100% promo code) never reaches Stripe: it is paid as it stands.
+  defp send_charge(%BillingPaymentAttempt{amount_cents: 0}), do: {:succeeded, %{id: nil, receipt_url: nil}}
 
   defp send_charge(attempt) do
     meta = %{description: description(attempt), receipt_email: receipt_email(attempt), attempt_id: attempt.id}
@@ -354,10 +368,13 @@ defmodule Relay.Billing.Charging do
     resolve!(attempt, :succeeded, stripe_payment_intent_id: charged.id, receipt_url: charged.receipt_url)
 
     cancellation = if attempt.kind == :returned, do: [cancelled_on: nil, access_until: nil], else: []
+    # A paid month that used the discount spends one of the code's months, under this row lock.
+    promo_month = if attempt.promo_code, do: [promo_months_left: max(account.promo_months_left - 1, 0)], else: []
 
     account
     |> Ecto.Changeset.change(
-      [paid_through: later(account.paid_through, attempt.period_end), billing_day: attempt.billing_day] ++ cancellation
+      [paid_through: later(account.paid_through, attempt.period_end), billing_day: attempt.billing_day] ++
+        cancellation ++ promo_month
     )
     |> Repo.update!()
 

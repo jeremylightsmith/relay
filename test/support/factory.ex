@@ -58,6 +58,14 @@ defmodule Relay.Factory do
     }
   end
 
+  def promo_code_factory do
+    %Schemas.PromoCode{
+      code: sequence(:promo_code, &"CODE#{&1}"),
+      percent_off: 50,
+      months: 3
+    }
+  end
+
   def membership_factory do
     %Schemas.Membership{
       email: sequence(:membership_email, &"member#{&1}@example.com"),

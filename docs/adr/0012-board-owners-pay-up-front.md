@@ -62,6 +62,30 @@ next month. If the owner hasn't paid, every board they own is paused. There is n
     second node or a retry never sends it twice. No email for cancel, hold or comp; payment
     receipts stay with Stripe (`receipt_email`).
 
+11. **Promo codes (RE462): X paid months at Y% off.** The superadmin creates codes; an owner
+    redeems one on the Billing page or through a `/?code=…` sign-up link.
+    - **A code applies to paid months, never the trial.** RELAYCONF (50% off, 3 months) gives
+      trial → $10 × 3 → $20. A code redeemed mid-plan discounts the next X charges from the next
+      renewal on; it doesn't refund or re-price the current month.
+    - **One code per account, ever.** Redeeming stores the code and `promo_months_left = X` on
+      the billing account. Each **paid** attempt that used the discount decrements it, under the
+      same row lock as the charge (tx 2). Declined attempts don't use up a month; an unknown one
+      uses it only once it resolves as paid.
+    - **Amount** = `price_cents × (100 − percent_off) / 100`, rounded to the cent, while
+      `promo_months_left > 0`, otherwise `price_cents` — one function,
+      `Relay.Billing.next_charge/1`, called by the clock and by the Billing page preview. Each
+      attempt records the amount, the code and the percent it applied, so history stays accurate
+      after a code changes.
+    - **A code** has `code` (case-insensitive and unique, stored upper-case), `percent_off`
+      (1–100), `months` (≥ 1), optional `max_redemptions`, optional `expires_on`, and
+      `disabled_at`. A redemption is refused when the code is unknown, disabled, expired (today >
+      `expires_on`) or full (redemptions ≥ cap), or when the account already has a code; the
+      count is checked under a lock, so two people can't take the last slot. **A 100% code charges
+      $0:** the Stripe call is skipped and a paid attempt is recorded for $0, so `paid_through`
+      still moves and no card is needed during those months.
+    - **Disabling a code** stops new redemptions. Accounts that already redeemed it keep their
+      remaining months.
+
 ## Consequences
 
 - One rule set, ported from Throughway ADR 0014, means one place to reason about money; the

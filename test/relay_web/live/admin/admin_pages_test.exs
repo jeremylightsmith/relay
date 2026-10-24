@@ -5,7 +5,7 @@ defmodule RelayWeb.Admin.AdminPagesTest do
 
   alias Schemas.Scope
 
-  @paths ["/admin", "/admin/boards", "/admin/users", "/admin/onboarding"]
+  @paths ["/admin", "/admin/boards", "/admin/users", "/admin/users/promo-codes", "/admin/onboarding"]
 
   defp log_in_superadmin(%{conn: conn}) do
     admin = insert(:user, email: hd(Scope.superadmin_emails()))
@@ -132,6 +132,14 @@ defmodule RelayWeb.Admin.AdminPagesTest do
       # the superadmin was inserted "now", so it sorts before grace (2020)
       assert position(html, "admin-user-#{admin.id}") < position(html, "admin-user-#{grace.id}")
       assert has_element?(view, ~s(#admin-back[href="/admin"]))
+    end
+
+    test "shows the Users | Promo codes tabs with Users active", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/users")
+
+      assert has_element?(view, "#admin-tab-users.tab.tab-active", "Users")
+      assert has_element?(view, ~s(#admin-tab-promo-codes[href="/admin/users/promo-codes"]), "Promo codes")
+      refute has_element?(view, "#admin-tab-promo-codes.tab-active")
     end
   end
 end

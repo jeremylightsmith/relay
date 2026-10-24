@@ -33,12 +33,15 @@ defmodule RelayWeb.BillingLiveTest do
 
   defp squish(string), do: string |> String.split() |> Enum.join(" ")
 
-  defp insert_active(user, today) do
+  defp insert_active(user, today, fields \\ []) do
     paid_through = Date.add(today, 25)
     start = Date.add(today, -5)
 
     account =
-      insert(:billing_account, [user: user, paid_through: paid_through, billing_day: start.day] ++ card_fields())
+      insert(
+        :billing_account,
+        [user: user, paid_through: paid_through, billing_day: start.day] ++ card_fields() ++ fields
+      )
 
     payment =
       insert(:billing_payment_attempt,
@@ -236,6 +239,170 @@ defmodule RelayWeb.BillingLiveTest do
     test "billing enabled: the menu links to the Billing page", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/boards")
       assert has_element?(view, ~s(#account-menu li #billing-link[href="/account/billing"]), "Billing")
+    end
+  end
+
+  describe "promo codes" do
+    setup do
+      %{relayconf: insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)}
+    end
+
+    defp apply_code(view, code),
+      do: view |> form("#billing-code-form", %{"promo" => %{"code" => code}}) |> render_submit()
+
+    test "applying a code previews the discounted first charge (scenario 1)", %{conn: conn, user: user, today: today} do
+      insert(:billing_account, user: user, trial_ends_on: Date.add(today, 11))
+      first_charge_on = Date.add(today, 12)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      html = apply_code(view, "relayconf")
+
+      first_charge = squish(text(view, "#billing-first-charge"))
+      assert first_charge =~ "First charge, #{mon_d(first_charge_on)} $10.00"
+      assert first_charge =~ "RELAYCONF · 50% off, 3 months"
+      assert first_charge =~ "then $20.00 from #{mon_d(Periods.renewal_after(first_charge_on, first_charge_on.day, 3))}"
+
+      assert has_element?(
+               view,
+               "#billing-promo-terms.mt-1.flex.flex-wrap.justify-between.gap-x-2.text-base-content\\/65"
+             )
+
+      assert has_element?(view, "#billing-promo-terms span.font-mono", "then $20.00 from")
+      assert has_element?(view, "#billing-promo-applied.mt-4.text-xs.text-base-content\\/55")
+      assert has_element?(view, "#billing-promo-applied span.font-mono", "RELAYCONF")
+      assert squish(text(view, "#billing-promo-applied")) == "Code applied: RELAYCONF. One code per account."
+      assert has_element?(view, "#billing-code-form input[name='promo[code]']")
+      refute has_element?(view, "#billing-code-form input[name='promo[code]'][value]:not([value=''])")
+      assert html =~ "Code applied: RELAYCONF."
+    end
+
+    test "the code form is on the page with no code applied (scenario 2)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, ~s(#billing-code-form[phx-submit="apply_code"] input[placeholder="Have a code?"]))
+      assert has_element?(view, "#billing-code-apply.btn.btn-sm", "Apply")
+      refute has_element?(view, "#billing-promo-applied")
+      refute has_element?(view, "#billing-promo-terms")
+    end
+
+    test "a disabled code is refused inline (scenario 3)", %{conn: conn, user: user} do
+      insert(:promo_code, code: "OLD", disabled_at: ~U[2026-01-01 00:00:00Z])
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      apply_code(view, "OLD")
+
+      assert has_element?(view, "#billing-code-form", "That code is no longer available.")
+      assert has_element?(view, ~s(#billing-code-form input[value="OLD"]))
+      assert Billing.get_account(user).promo_code_id == nil
+    end
+
+    test "an expired code is refused inline (scenario 3)", %{conn: conn, user: user, today: today} do
+      insert(:promo_code, code: "PAST", expires_on: Date.add(today, -1))
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      apply_code(view, "PAST")
+
+      assert has_element?(view, "#billing-code-form", "That code has expired.")
+      assert Billing.get_account(user).promo_code_id == nil
+    end
+
+    test "a code at its cap is refused inline (scenario 3)", %{conn: conn, user: user} do
+      full = insert(:promo_code, code: "FULL", max_redemptions: 1)
+      insert(:billing_account, promo_code: full, promo_months_left: 3)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      apply_code(view, "FULL")
+
+      assert has_element?(view, "#billing-code-form", "That code is fully redeemed.")
+      assert Billing.get_account(user).promo_code_id == nil
+    end
+
+    test "an unknown code is refused inline (scenario 3)", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      apply_code(view, "NOPE")
+
+      assert has_element?(view, "#billing-code-form", "We don't recognize that code.")
+      assert Billing.get_account(user).promo_code_id == nil
+    end
+
+    test "a second code is refused inline (scenario 4)", %{conn: conn, user: user, relayconf: relayconf} do
+      insert(:billing_account, user: user, promo_code: relayconf, promo_months_left: 3)
+      insert(:promo_code, code: "FRIENDS")
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, "#billing-code-form")
+      apply_code(view, "FRIENDS")
+
+      assert has_element?(view, "#billing-code-form", "You've already used a code.")
+      account = Billing.get_account(user)
+      assert account.promo_code_id == relayconf.id
+      assert account.promo_months_left == 3
+    end
+
+    test "every refusal has its copy (scenario 5)" do
+      messages = Map.new(Billing.promo_refusals(), &{&1, RelayWeb.BillingLive.refusal_message(&1)})
+
+      assert Enum.all?(Map.values(messages), &(is_binary(&1) and String.trim(&1) != ""))
+
+      assert messages == %{
+               unknown: "We don't recognize that code.",
+               disabled: "That code is no longer available.",
+               expired: "That code has expired.",
+               full: "That code is fully redeemed.",
+               already_redeemed: "You've already used a code."
+             }
+    end
+
+    test "an active plan shows the discounted next charge (scenario 6)", %{
+      conn: conn,
+      user: user,
+      today: today,
+      relayconf: relayconf
+    } do
+      insert_active(user, today, promo_code_id: relayconf.id, promo_months_left: 2)
+      renews_on = Date.add(today, 26)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, "#billing-next-charge.mt-4.rounded-box.bg-base-200.p-3.text-sm")
+      next_charge = squish(text(view, "#billing-next-charge"))
+      assert next_charge =~ "Next charge, #{mon_d(renews_on)} $10.00"
+      assert next_charge =~ "RELAYCONF · 50% off, 2 months"
+    end
+
+    test "an active plan with no months left charges full price (scenario 6)", %{
+      conn: conn,
+      user: user,
+      today: today,
+      relayconf: relayconf
+    } do
+      insert_active(user, today, promo_code_id: relayconf.id, promo_months_left: 0)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert squish(text(view, "#billing-next-charge")) =~ "$20.00"
+      refute has_element?(view, "#billing-promo-terms")
+      assert has_element?(view, "#billing-promo-applied", "RELAYCONF")
+    end
+
+    test "a 100% code needs no card yet (scenario 7)", %{conn: conn, user: user, today: today} do
+      free = insert(:promo_code, code: "FREE", percent_off: 100, months: 2)
+      insert(:billing_account, user: user, promo_code: free, promo_months_left: 2)
+      first_charge_on = Date.add(today, 31)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, "#billing-first-charge .font-mono", "$0.00")
+      no_card = squish(text(view, "#billing-no-card"))
+      assert no_card =~ "No card needed until #{mon_d(Periods.renewal_after(first_charge_on, first_charge_on.day, 2))}."
+      refute no_card =~ "read-only"
+      assert has_element?(view, "#billing-add-card", "Add card")
+    end
+
+    test "a trial with no code still shows full price (scenario 8)", %{conn: conn, today: today} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert squish(text(view, "#billing-first-charge")) =~ "First charge, #{mon_d(Date.add(today, 31))} $20.00"
+      assert has_element?(view, "#billing-first-charge .font-mono", "$20.00")
+      refute has_element?(view, "#billing-promo-terms")
     end
   end
 end

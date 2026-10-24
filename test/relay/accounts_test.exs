@@ -162,6 +162,29 @@ defmodule Relay.AccountsTest do
       assert Billing.get_account(user).trial_ends_on == Date.add(Date.utc_today(), Billing.Standing.trial_days())
     end
 
+    test "with billing enabled, a new user's sign-up redeems the :promo_code (scenario 14)" do
+      Process.put(:billing_enabled, true)
+      insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
+
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"},
+                 promo_code: "RELAYCONF"
+               )
+
+      assert Billing.get_account(user).promo_months_left == 3
+    end
+
+    test "with billing disabled, a :promo_code creates no billing account (scenario 14)" do
+      insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
+
+      assert {:ok, user} =
+               Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"},
+                 promo_code: "RELAYCONF"
+               )
+
+      assert Billing.get_account(user) == nil
+    end
+
     test "with billing disabled, a new user gets no billing account" do
       assert {:ok, user} =
                Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"})

@@ -21,6 +21,18 @@ defmodule Relay.Billing.Periods do
     {start, Date.add(renews_on(billing_day, year, month), -1)}
   end
 
+  @doc """
+  The start of the period `n` periods after the one starting on `start`, on `billing_day`
+  (clamped to a short month's last day, as `renews_on/3`). `n = 0` is `start` itself.
+  """
+  @spec renewal_after(Date.t(), 1..31, non_neg_integer()) :: Date.t()
+  def renewal_after(%Date{} = start, billing_day, 0) when billing_day in 1..31, do: start
+
+  def renewal_after(%Date{} = start, billing_day, n) when billing_day in 1..31 and is_integer(n) and n > 0 do
+    %Date{year: year, month: month} = start |> Date.beginning_of_month() |> Date.shift(month: n)
+    renews_on(billing_day, year, month)
+  end
+
   @doc "The renewal day after a period paid through `paid_through`."
   @spec next_renewal(Date.t()) :: Date.t()
   def next_renewal(%Date{} = paid_through), do: Date.add(paid_through, 1)

@@ -7,9 +7,11 @@ defmodule Schemas.BillingAccount do
   day; `billing_day` (1–31) is the day of the month the account renews on. `comped` and
   `held_on` / `hold_reason` are admin facts; `cancelled_on` / `access_until` record a cancelled
   plan. The `card_*` fields describe the saved card (`card_payment_method_id` is Stripe's id).
+  `promo_code_id` is the one promo code the account ever redeemed (RE462) and
+  `promo_months_left` how many discounted paid months it has left.
 
-  `user_id` is set programmatically on the struct, never cast from input. Every write goes
-  through `Relay.Billing`.
+  `user_id`, `promo_code_id` and `promo_months_left` are set programmatically on the struct,
+  never cast from input. Every write goes through `Relay.Billing`.
   """
 
   use Ecto.Schema
@@ -29,8 +31,10 @@ defmodule Schemas.BillingAccount do
     field :card_last4, :string
     field :card_exp_month, :integer
     field :card_exp_year, :integer
+    field :promo_months_left, :integer, default: 0
 
     belongs_to :user, Schemas.User
+    belongs_to :promo_code, Schemas.PromoCode
     has_many :payment_attempts, Schemas.BillingPaymentAttempt
 
     timestamps(type: :utc_datetime)

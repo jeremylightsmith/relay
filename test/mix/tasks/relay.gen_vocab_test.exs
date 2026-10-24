@@ -52,6 +52,7 @@ defmodule Mix.Tasks.Relay.GenVocabTest do
                "Billing attempt status",
                "Billing notice kind",
                "Billing pause reason",
+               "Billing promo refusal",
                "Billing standing kind",
                "Card status",
                "Node outcome",

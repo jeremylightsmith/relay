@@ -311,6 +311,67 @@ defmodule Relay.Billing.ChargingTest do
       assert summary.renews_on == nil
     end
 
+    test "a trial with no code previews the full price and no promo" do
+      user = insert(:user)
+      account_for(user, %{trial_ends_on: ~D[2026-04-03]})
+
+      summary = Billing.summary(user, ~D[2026-03-23])
+
+      assert summary.promo == nil
+      assert summary.amount_cents == 2000
+      assert summary.full_price_cents == 2000
+    end
+
+    test "a trial holding a code previews the discounted first charge and when full price starts" do
+      user = insert(:user)
+      account_for(user, %{trial_ends_on: ~D[2026-04-03]})
+      insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
+      {:ok, _account} = Billing.redeem_code(user, "RELAYCONF", ~D[2026-03-20])
+
+      summary = Billing.summary(user, ~D[2026-03-23])
+
+      assert summary.amount_cents == 1000
+      assert summary.full_price_cents == 2000
+      assert summary.first_charge_on == ~D[2026-04-04]
+      assert summary.promo == %{code: "RELAYCONF", percent_off: 50, months_left: 3, full_price_from: ~D[2026-07-04]}
+    end
+
+    test "an active account holding a code previews its discounted renewal" do
+      user = insert(:user)
+      promo_code = insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
+
+      account_for(user, %{
+        paid_through: ~D[2026-05-03],
+        billing_day: 4,
+        promo_code_id: promo_code.id,
+        promo_months_left: 2
+      })
+
+      summary = Billing.summary(user, ~D[2026-04-20])
+
+      assert summary.renews_on == ~D[2026-05-04]
+      assert summary.amount_cents == 1000
+      assert summary.promo.full_price_from == ~D[2026-07-04]
+    end
+
+    test "an active account whose code is used up previews the full price" do
+      user = insert(:user)
+      promo_code = insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
+
+      account_for(user, %{
+        paid_through: ~D[2026-05-03],
+        billing_day: 4,
+        promo_code_id: promo_code.id,
+        promo_months_left: 0
+      })
+
+      summary = Billing.summary(user, ~D[2026-04-20])
+
+      assert summary.amount_cents == 2000
+      assert summary.promo.months_left == 0
+      assert summary.promo.full_price_from == nil
+    end
+
     test "a cancelled plan does not renew and is resumable" do
       user = insert(:user)
 

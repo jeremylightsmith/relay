@@ -520,24 +520,31 @@ sharing behavior.
   `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
   `list_users_for_admin/0` (every user with a board count, newest first) backs the
   superadmin-only `/admin/users` page (RE353). It is an unscoped read, and the gate is the `/admin` route.
+  That page's header carries the `Users | Promo codes` tab bar (`RelayWeb.AdminComponents.user_tabs/1`,
+  RE462); the **Promo codes** tab is `/admin/users/promo-codes` (see Billing).
   When billing is on (`Relay.Billing.enabled?/0`), the insert branch of
   `upsert_user_from_provider/2` starts the new user's 30-day trial (`Relay.Billing.ensure_trial/2`,
-  RE460) — so Accounts depends on Billing, never the reverse.
+  RE460) and then redeems the sign-up link's `opts[:promo_code]` (`Relay.Billing.redeem_code/3`,
+  RE462; a refusal is ignored, so sign-up never fails over a code, and a returning user never
+  redeems one) — so Accounts depends on Billing, never the reverse.
+  `upsert_user_from_google/2` passes `:promo_code` through.
 - **Billing** (`Relay.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md)) — a
   board owner pays one monthly price (`price_cents/0`, `:billing_price_cents`, default 2000) up
   front from their own billing date, after a 30-day no-card trial. **A board's standing is its
   owner's** (`boards.owner_id`). Owns `Schemas.BillingAccount` (one per user),
   `Schemas.BillingPaymentAttempt` and `Schemas.BillingNotice` (one per email sent, RE464). Standing is **derived, never stored**:
-  `Relay.Billing.Standing.of/3` (pure) maps an account, the fact `first_charge_declined?` (≥ 1
-  `:failed` attempt and `paid_through` nil) and today to `:trial | :active | :comped |
+  `Relay.Billing.Standing.of/3` (pure) maps an account, the facts `first_charge_declined?` (≥ 1
+  `:failed` attempt and `paid_through` nil) and `next_charge_free?` (never paid and the next charge
+  is $0 — a 100% promo code, RE462) and today to `:trial | :active | :comped |
   {:past_due, until} | {:cancelled, access_until} | {:paused, reason}` — in order: no account or
   no dates → `:trial` (pre-backfill); `held_on` → `{:paused, :hold}`; `comped` → `:comped`;
   `cancelled_on` → cancelled through `access_until`, then `{:paused, :cancelled}`; never paid →
-  `:trial` through `trial_ends_on` (and after it while a card is on file and the first charge was
-  not declined), else `{:paused, :trial_ended}`; paid → `:active` through `paid_through`,
+  `:trial` through `trial_ends_on` (and after it while a card is on file — or the next charge is
+  free — and the first charge was not declined), else `{:paused, :trial_ended}`; paid → `:active` through `paid_through`,
   `{:past_due, paid_through + grace_days()}` for the 1-day grace, then `{:paused, :unpaid}`.
   `Relay.Billing.Periods` (pure) is the billing-date arithmetic (`renews_on/3` clamps a day past
-  the month's end to its last day; `period/2`, `next_renewal/1`, `kept_billing_day/2`).
+  the month's end to its last day; `period/2`, `next_renewal/1`, `kept_billing_day/2`, and
+  `renewal_after/3` — the period start `n` periods on, for the promo's "full price from" date).
   **One off switch**, `enabled?/0` (`:billing_enabled` via `Relay.Config`; `BILLING_ENABLED` plus
   both Stripe keys in `config/runtime.exs`, or dev alone on the Local adapter): off, no trial is
   started and `board_paused?/1` / `board_notice/1` are always false / nil — a self-hosted install
@@ -575,13 +582,17 @@ sharing behavior.
   subscriptions: our clock makes off-session charges. **The charging path**
   (`Relay.Billing.Charging`, called only from `Relay.Billing`): (1) tx 1 locks the account row
   `FOR UPDATE`, re-derives the decision on it and inserts a `:pending` attempt (the
-  one-open-per-account index refuses a second); (2) outside any transaction,
-  `Payments.impl().charge/5` under `"billing-<account_id>-<period_start>-<attempt_number>"`;
+  one-open-per-account index refuses a second) at `next_charge/1`'s amount, recording the
+  `promo_code` / `promo_percent_off` it applied; (2) outside any transaction,
+  `Payments.impl().charge/5` under `"billing-<account_id>-<period_start>-<attempt_number>"` — a
+  $0 attempt skips Stripe and settles `:succeeded` with no payment intent or receipt;
   (3) tx 2 re-locks account + attempt and writes the answer only while the attempt is open.
   Success → `:succeeded`, `paid_through = period_end`, `billing_day` kept (a `:returned` charge also
-  clears a cancellation); a bank decline → `:failed`, account untouched; anything else (processing,
+  clears a cancellation; an attempt that carried a code decrements `promo_months_left`, floored at
+  0, in the same update — so a decline or an unknown never spends a month); a bank decline → `:failed`, account untouched; anything else (processing,
   timeout, 5xx, a raise after tx 1) → `:unknown`, account untouched, never resent blind. The
-  **clock decision** charges only a card on file that is not held, comped, cancelled, paused or
+  **clock decision** charges only a card on file (or an account whose next charge is $0, which
+  needs no card) that is not held, comped, cancelled, paused or
   holding an open attempt: a never-paid account the day after its trial (`:trial_end`, a fresh
   month from that day) unless its first charge was declined; on the grace day
   (`paid_through + 1`) the `:renewal` once, then one retry on the day's final pass. The
@@ -594,12 +605,52 @@ sharing behavior.
   `%{backfilled:, resolved:, charged:, notified:}`; a no-op answering zeros while disabled. `setup_checkout_url/2` starts Checkout (setup
   mode) and stores the new Stripe customer; `handle_webhook_event/1` completes a setup from the
   verified Stripe webhook; `summary/2` is the Billing page's read (standing, trial days left, first
-  charge, renewal, card, succeeded payments newest first).
+  charge, renewal, card, succeeded payments newest first — $0 ones included, with no receipt —
+  `amount_cents` = the next charge, `full_price_cents`, and `promo`: nil without a code, else
+  `%{code, percent_off, months_left, full_price_from}`, `full_price_from` being the first
+  full-price charge date — `renewal_after/3` from the first charge (trial) or the renewal
+  (active), nil with no months left or in any other standing).
+  **Promo codes** (RE462): `Schemas.PromoCode` (`code` stored trimmed and upper-cased, unique, a
+  DB check enforces upper-case; `percent_off` 1–100; `months` ≥ 1; optional `max_redemptions` and
+  `expires_on`; `disabled_at`, never cast). `billing_accounts` gains `promo_code_id` (the one code
+  the account ever redeemed, `on_delete: :restrict`) and `promo_months_left`;
+  `billing_payment_attempts` gains `promo_code` / `promo_percent_off` (what the attempt applied)
+  and its amount check relaxes to `>= 0` for a 100% code's $0 attempt. `redeem_code/3` runs
+  `ensure_trial/2`, then in one transaction locks the account row and then the code row
+  `FOR UPDATE` (always account, then code — so two redemptions can't over-take a cap) and refuses
+  in `promo_refusals/0`'s order, first match wins: the account already holds a code
+  (`:already_redeemed`), no such or a blank code (`:unknown`), `disabled_at` set (`:disabled`),
+  today after `expires_on` (`:expired`; the expiry day redeems), `max_redemptions` accounts
+  already holding it (`:full`). Success stores `promo_code_id` + `promo_months_left = months` and
+  broadcasts `{:billing_changed, user_id}`; a refusal writes nothing. "Used" is counted from
+  `billing_accounts.promo_code_id`, never denormalised. Superadmin functions:
+  `list_promo_codes/0` (newest first, each with `used`, one aggregate-subquery query),
+  `change_promo_code/2`, `create_promo_code/1`, `disable_promo_code/2` (stops new redemptions;
+  keeps an earlier `disabled_at`; never touches accounts holding the code). **The amount** is
+  `next_charge/1` (via `discounted_cents/2`: `price × (100 − percent) / 100`, half-up to the
+  cent) — the one function the charging path and `summary/2` both call; a disabled code still
+  discounts an account that holds it.
   **On the web:** `RelayWeb.BillingLive` (`/account/billing`, the avatar menu's **Billing** item —
   both only while enabled; the route 404s otherwise) renders `summary/2` by
   `Relay.Billing.Standing.kind/1` (`Standing` is exported for that), starts the trial a
   pre-backfill user lacks, redirects **Add card** / **Replace** / **Update card** to
   `setup_checkout_url/2` and completes the `?setup=<id>` return against the signed-in user.
+  It previews the next charge (the trial's first charge, or the active plan's
+  `#billing-next-charge`) at `summary/2`'s discounted `amount_cents`, with the code's terms and
+  the date the full price returns, and always shows a **Have a code?** form (`"apply_code"` →
+  `redeem_code/3`; a refusal renders inline as the field error, its copy defined once in
+  `BillingLive.refusal_message/1`). A **sign-up link** `/?code=RELAYCONF` is stashed by
+  `PageController.home/2` (signed out only; trimmed, ≤ 64 bytes) in the session as
+  `:signup_promo_code`; `AuthController.callback/2` reads that key — never `params["code"]`,
+  which there is Google's authorization code — before `Auth.log_in_user/3` renews the session,
+  and hands it to `Accounts.upsert_user_from_google/2`. `/dev/login` redeems the same stash for
+  the dev user (dev/test only). The superadmin's **Promo codes** tab
+  (`RelayWeb.Admin.PromoCodesLive`, `/admin/users/promo-codes` in the `:admin` live_session,
+  RE462) drives the admin functions: a table of `list_promo_codes/0` (Used as `used / cap` or
+  `used / —`, Expires or `never`), **New code** (`"new_code"` → a `change_promo_code/2` form,
+  `"validate"`, `"create"` → `create_promo_code/1`) and **Disable** (`"disable"` →
+  `disable_promo_code/2` at `DateTime.utc_now(:second)`); the list is a plain assign re-read
+  after each write — no stream, no PubSub.
   `BoardLive` reads `board_notice/1` into its read-only mode — a paused board is the archived
   board's read-only mode (`read_only?` guard, `#read-only-banner` with billing copy) plus no card
   opening and no Board settings link (`BoardSettingsLive` redirects back on `board_paused?/1`);

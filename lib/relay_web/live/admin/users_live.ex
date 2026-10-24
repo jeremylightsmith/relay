@@ -2,9 +2,12 @@ defmodule RelayWeb.Admin.UsersLive do
   @moduledoc """
   Read-only table of every user at `/admin/users` (RE353): name, email, sign-in provider,
   board count, and created date, newest first. Static snapshot at mount (no PubSub). Gated
-  by the `:admin` live_session.
+  by the `:admin` live_session. Its header carries the `Users | Promo codes` tab bar
+  (`RelayWeb.AdminComponents.user_tabs/1`, RE462) shared with `RelayWeb.Admin.PromoCodesLive`.
   """
   use RelayWeb, :live_view
+
+  import RelayWeb.AdminComponents, only: [user_tabs: 1]
 
   alias Relay.Accounts
 
@@ -28,7 +31,11 @@ defmodule RelayWeb.Admin.UsersLive do
         >
           ← Admin
         </.link>
-        <h1 class="mt-2 text-2xl font-semibold">Users</h1>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <h1 class="text-2xl font-semibold">Users</h1>
+          <span class="flex-1"></span>
+          <.user_tabs active={:users} />
+        </div>
         <p class="mt-1 text-sm text-base-content/65">Every user, newest first.</p>
 
         <div class="mt-6 overflow-x-auto rounded-box border border-base-200">
