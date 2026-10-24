@@ -2,7 +2,7 @@
 # @describe Run a command against production (Fly app: relayboard).
 #
 # direnv puts bin/ on your PATH inside the project, so this is a bare `prod` command.
-# Its sibling is `dev`. Deploys are not here: the board's Deploy stage runs bin/deploy_fly.sh.
+# Its sibling is `dev`. `prod deploy` runs the same bin/deploy_fly.sh as the board's Deploy stage.
 
 set -euo pipefail
 
@@ -157,8 +157,33 @@ Next:
        mix test test/relay/boards_templates_test.exs test/relay/boards_template_export_test.exs test/relay/examples_test.exs
   3. Commit, push and merge to main.
   4. Deploy, so "New board" uses the new templates:
-       bin/deploy_fly.sh
+       prod deploy
 EOF
+}
+
+# @cmd Deploy HEAD to Fly and wait until the board serves it.
+#
+# Runs bin/deploy_fly.sh, the board's Deploy stage step: needs FLY_API_TOKEN (from
+# .envrc.local), skips when HEAD is already live, and polls the live version until it is HEAD.
+# Fly only; iOS and Android ship through bin/deploy_ios.sh / bin/deploy_android.sh.
+#
+# Fly builds from this working tree but stamps HEAD's SHA, so uncommitted changes to tracked
+# files would ship under a SHA that doesn't contain them: refused unless --dirty. A HEAD that
+# isn't on origin/main (as last fetched) gets a warning, since the board deploys main.
+# @flag --dirty Deploy even with uncommitted changes to tracked files.
+# @flag -y --yes Skip the confirmation prompt.
+deploy() {
+  need flyctl "Install it and run 'fly auth login'."
+  if [[ "${argc_dirty:-0}" != 1 ]] && ! git diff --quiet HEAD; then
+    git --no-pager diff --stat HEAD >&2
+    echo "Uncommitted changes to tracked files (above) would ship under HEAD's SHA. Commit or stash them, or pass --dirty." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+    echo "Warning: HEAD isn't on origin/main (as last fetched). Push and merge first unless you mean to deploy a branch."
+  fi
+  confirm "deploy $(git log -1 --format='%h %s' HEAD) to $ENV_NAME (Fly app: $APP)."
+  exec bin/deploy_fly.sh
 }
 
 command -v argc >/dev/null || {
