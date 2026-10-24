@@ -25,7 +25,7 @@
           "key": "mockups",
           "type": "agent",
           "writes": ["mockups"],
-          "run": "Card {ref} needs a design before anyone plans it.\n\n1. Open the running app and screenshot the screen this card changes.\n2. Build two HTML mockups that each make a different decision. Base them on what exists; don't redesign from scratch.\n3. Upload them with `{relay} mockups {ref} <a.html> <b.html> --caption \"<decision A>\" --caption \"<decision B>\"`, one caption per mockup that names its decision.\n4. Comment on what each option trades off: `{relay} comment {ref} @<file>`."
+          "run": "Design card {ref}: make HTML mockups and upload them to the card. **Never write to the repo**: this worktree is shared. Work in `$(dirname \"$RELAY_NODE_SCRATCH\")`.\n\nEach run is one round; a rejection sends the card back here with only the card as memory. Converge: get closer each round, and leave a trail.\n1. **Read.** The description is the ask. Read the rejection note first, then every comment. Pull the current mockups: `{relay} mockups {ref} --pull \"$(dirname \"$RELAY_NODE_SCRATCH\")/prev\" --json`.\n2. **Look at the real app**, if it runs: start it as `package.json` says, in the foreground under `timeout`, and only look. Build on what exists.\n3. **Round 1: ask, usually instead of mocking.** Put every question in one needs-input: who it's for, what matters most on screen, empty and error states, mobile, what's fixed and what's your call. Don't ask what you can find out.\n4. **Build** self-contained HTML: inline CSS, Google Fonts allowed, nothing else external. Reuse the app's look.\n5. **Check** screenshots at desktop and phone width, and fix what's broken.\n6. **Upload**: `{relay} mockups {ref} <a.html> <b.html> --caption \"<decision A>\" --caption \"<decision B>\"` (this replaces the list). Comment the round: what was asked, what changed, what you tried and dropped. Keep a short `## Design` list of decisions at the end of the description (`{relay} describe {ref} @<file>`), rewritten each round, never touching the text above it.\n7. **Finish.** Several options → ask which wins. One direction → succeed; a human reviews it.\n\nRules: a rejection asking for a specific change → change only that. Options differ by a real decision, named in the caption. Rejected twice for the same reason → ask. Never succeed without a mockup."
         }
       ],
       "edges": [
@@ -40,18 +40,18 @@
       "trigger": { "stage": "Plan" },
       "nodes": [
         {
-          "key": "plan",
+          "key": "write_plan",
           "type": "agent",
           "max_retries": 1,
-          "reads": ["mockups"],
-          "writes": ["tasks"],
-          "run": "You are planning card {ref}. Read it, and the mockup approved at Design, with `{relay} card {ref}`; download the mockup with `{relay} mockups {ref} --pull`.\n\nWrite a short plan: one paragraph on the approach, then 2–6 tasks. Each task must be small enough to build and test in one sitting, and must say how to tell it works.\n\nWrite each task's body to a file in the directory of $RELAY_NODE_SCRATCH, then save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task \"<title>\" @<file>`. Do not write code."
+          "reads": ["description"],
+          "writes": ["plan", "tasks", "acceptance_criteria"],
+          "run": "Plan card {ref}: turn it into a short plan a human can approve and the Code flow can build. Write the plan, its tasks and its acceptance criteria to the card. Don't touch git; files you write go in `$(dirname \"$RELAY_NODE_SCRATCH\")`. Be brief: someone should be able to read the plan in a minute.\n\n**Read** the card (`{relay} card {ref}`): the rejection note first, then the description and comments (earlier rounds and human answers). If the card has mockups, or its description names another card's, pull them: `{relay} mockups <ref> --pull \"$(dirname \"$RELAY_NODE_SCRATCH\")/mockups\" --json`. Many cards have none. Read enough of the repo to know where things go.\n- Rejected after Code: tasks marked done have shipped, so leave them. Answer the note with new tasks, and update the plan and criteria where it changes them.\n- Rejected at Plan review: revise the plan to answer the note; keep what it didn't mention.\n\n**Ask** everything the description or Design left open (behaviour, edge cases, scope) in one needs-input batch, then stop. Don't ask what the repo or the mockups answer. If nothing is open, go straight to writing.\n\n**Split** a card that needs more than 6 tasks or holds pieces that could ship separately. Propose it in the same batch: each new card's title and scope, plus \"Keep it as one card\". Only after it's approved: this card keeps the first slice. Create each other slice with `{relay} create \"<title>\" --stage Backlog --description @<file> --json`, add dependencies (`--depends-on`, or `{relay} depends <card> <blockers>`, which replaces the set), then `{relay} move <new ref> \"Design:Done\"`. Its description says what it covers and which of {ref}'s mockups apply (\"Mockups: {ref}, <captions>\"). Comment the new refs on {ref}.\nA card depends on another only when the other makes something it uses, or when both would build the same new thing (pick one as the maker). Touching the same files isn't a dependency: blocked cards can't start, so leave those parallel.\n\n**Plan** (`{relay} plan {ref} @<file>`): `## Goal` (one sentence), `## Approach` (2–4 bullets), `## Not doing`, `## Decisions` (what was settled, and whether it was answered or your call), `## Verification` (`Gate: npm test`).\n\n**Tasks**: 1–6 in build order, each working and testable on its own. The implementer sees only its own task:\n- **Build:** what to make, in a sentence or two, naming any file or function another task uses.\n- **Tests:** one line per test, situation → expected result.\nRemove tasks that aren't done (`{relay} tasks list {ref} --json`, then `{relay} task rm {ref} <id>`), then add the new ones in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task ...`.\n\n**Acceptance criteria** (`{relay} criteria {ref} @<file>`): 2–5 checks a person could run:\n### 1. <title>\n1. <step>\n2. Expect: <one thing you can see>\nDescribe what a user sees. Work with no UI gets commands instead (\"`npm test` passes\").\n\nWrite decisions, not code. Check with `{relay} tasks list {ref}`, then stop."
         }
       ],
       "edges": [
-        { "from": "start", "to": "plan" },
-        { "from": "plan", "to": "done", "on": "succeeded" },
-        { "from": "plan", "to": "needs_input", "on": "failed" }
+        { "from": "start", "to": "write_plan" },
+        { "from": "write_plan", "to": "done", "on": "succeeded" },
+        { "from": "write_plan", "to": "needs_input", "on": "failed" }
       ]
     },
     {
@@ -60,6 +60,13 @@
       "trigger": { "stage": "Code" },
       "nodes": [
         {
+          "key": "branch",
+          "type": "shell",
+          "reads": ["plan"],
+          "writes": ["branch"],
+          "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && { {relay} card {ref} --json --field plan | grep -q . || { echo 'card {ref} has no plan; send it back to Plan' >&2; exit 1; }; } && {relay} branch {ref} {branch}"
+        },
+        {
           "key": "implement",
           "type": "agent",
           "effort": "high",
@@ -67,59 +74,97 @@
           "expects_commits": true,
           "foreach": "card.tasks",
           "reads": ["tasks"],
-          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n0. Work on the git branch `relay/{ref}`: `git switch relay/{ref} 2>/dev/null || git switch -c relay/{ref}`, then record it with `{relay} branch {ref} relay/{ref}`.\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Write a failing test for it, then make it pass.\n3. Commit with the message \"{ref} {task}: <what changed>\".\n\nIf the task is already done, say so and stop. Do not start the next task."
+          "run": "Implement task {task_id} (\"{task}\"), and only this task.\n1. Read it: `{relay} task show {ref} {task_id}`. Read the plan header: `{relay} card {ref} --json --field plan`.\n2. Test first: for each Tests line, write the test, watch it fail, then make it pass.\n3. Build only what the task asks, using the exact names it gives for anything other tasks use.\n4. Run `npm test` and read the output.\n5. Commit, with a message based on the task title.\n\nAlready built? Say so and run `{relay} outcome succeeded --no-changes`.\nReport what changed and the test output."
         },
         {
-          "key": "validate",
-          "type": "shell",
-          "run": "npm test"
+          "key": "review",
+          "type": "agent",
+          "reads": ["tasks"],
+          "role": "check",
+          "run": "Review task {task_id} (\"{task}\"), just committed, against its spec: `{relay} task show {ref} {task_id}`. Don't edit or commit. Read it with `git show` and `git diff`, and run `npm test`: a failing test is Critical.\n\nFail it only for Critical or Important problems:\n- something the task asked for is missing, wrong, or untested (each Tests line needs a real test)\n- something was built that it didn't ask for\n- bugs, hard-to-follow code, or code that ignores the repo's conventions\nNote minor polish, but pass.\n\nIf a FINDINGS block below holds your earlier findings, only check those were fixed; a new finding blocks only if it is Critical.\nDecide first, then explain. Give each finding as `file:line`: problem → fix."
         },
         {
           "key": "fix",
           "type": "agent",
           "expects_commits": true,
-          "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
+          "max_retries": 1,
+          "reads": ["tasks"],
+          "run": "A review rejected task {task_id} (\"{task}\"); the findings are in the FINDINGS block below. Fix every one, staying inside this task (`{relay} task show {ref} {task_id}` if you need its spec). If a finding is wrong, say why.\nRun `npm test`, then commit. Report each finding: fixed at `file:line`, or why not."
         },
         {
-          "key": "review",
+          "key": "final_review",
           "type": "agent",
-          "run": "Every task of card {ref} is built and its tests pass. Review the whole change on this branch against the card and its tasks (`{relay} card {ref}`): anything missing, anything broken, anything a user would trip over. Run the tests once yourself.\n\nFail with a numbered list of the problems, most important first. Succeed if there is nothing worth fixing."
+          "role": "check",
+          "run": "Review card {ref}'s whole branch for problems the per-task reviews couldn't see. Read-only.\n- Spec: the plan header (`{relay} card {ref} --json --field plan`) and the tasks (`{relay} tasks list {ref}`).\n- Diff: `git diff --stat origin/main...HEAD`, then read it in slices by area.\n\nLook for planned work that's missing or untested, tasks that clash (names, patterns, two solutions to one problem), broken callers, security or data-loss risks, and dead or unrequested code.\nOnly Critical or Important problems block; mention minor ones and pass. If tasks were already added from your last review, check those and block only on a new Critical problem.\n\nTo send work back: add it as tasks in one call, `{relay} tasks add {ref} --task \"<title>\" @<file> [--task ...]`. Each body has **Build** (what to make), **Tests** (one line per test: situation → expected result) and your evidence. Then write why to `$RELAY_NODE_SCRATCH` and run `{relay} outcome partial --detail @\"$RELAY_NODE_SCRATCH\"`. `partial` returns the branch to implement."
         },
         {
-          "key": "fix_review",
+          "key": "acceptance",
           "type": "agent",
-          "expects_commits": true,
-          "run": "A review of card {ref} found the problems listed below. Fix each one, run the tests, and commit with the message \"{ref}: fix review findings\". Fix only what is listed."
+          "role": "check",
+          "run": "Check card {ref} against its acceptance criteria: `{relay} card {ref} --json --field acceptance_criteria`. None? Pass.\n\nFollow each criterion's steps literally and mark it **pass**, **fail** (say what happened instead) or **human-verify** (can't be checked here; say why). Never guess a pass.\nIf a step needs the app, start it as `package.json` says, in the foreground under `timeout`, and save screenshots to `$(dirname \"$RELAY_NODE_SCRATCH\")/acceptance/`. Don't edit code or commit.\nWrite the checklist, with screenshot paths, to `$(dirname \"$RELAY_NODE_SCRATCH\")/acceptance/report.md`; the results step posts it.\n\nAll pass or human-verify → succeeded. Any fail → send it back, quoting the criterion.\nTo send work back: add it as tasks in one call, `{relay} tasks add {ref} --task \"<title>\" @<file> [--task ...]`. Each body has **Build** (what to make), **Tests** (one line per test: situation → expected result) and your evidence. Then write why to `$RELAY_NODE_SCRATCH` and run `{relay} outcome partial --detail @\"$RELAY_NODE_SCRATCH\"`. `partial` returns the branch to implement."
         },
         {
-          "key": "screenshots",
-          "type": "agent",
-          "run": "The code for {ref} is built and reviewed. Start the app, open each screen the card changes, and take a screenshot at desktop and phone width. Compare each one with the card's approved mockup (`{relay} mockups {ref} --pull <dir>` downloads it).\n\nUpload the mockups and your screenshots together with `{relay} mockups {ref} <files…>`, one `--caption` per file in order. That call replaces the card's list, so include the mockups; the reviewer then sees each mockup and the real screen side by side.\n\nFail if a screen clearly differs from its mockup, and list the differences."
+          "key": "sync",
+          "type": "shell",
+          "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }"
         },
         {
-          "key": "fix_visual",
+          "key": "sync_fix",
           "type": "agent",
-          "expects_commits": true,
-          "run": "The screenshots of card {ref} differ from its approved mockup in the ways listed below. Change the code so each screen matches its mockup, run the tests, and commit with the message \"{ref}: match the mockup\"."
+          "run": "Rebasing onto origin/main hit conflicts (origin/main is fetched; the rebase was aborted). Run `git rebase origin/main` and resolve each conflict, keeping what both sides intended.\nIf a resolution needs a human, run `git rebase --abort` and ask. Never commit a guess. Report how you resolved each file."
+        },
+        {
+          "key": "check",
+          "type": "gate",
+          "run": "npm test"
+        },
+        {
+          "key": "new_task",
+          "type": "agent",
+          "run": "`npm test` failed after rebasing card {ref} onto main; the output is in the message. Don't fix it; turn it into a task.\nFind the cause, then add one task: `{relay} tasks add {ref} --task \"Fix: <what>\" @<file>`, with **Build** (what to fix), **Tests** (the failing tests by name) and the key output lines. Then declare succeeded; the flow goes back to implement.\nIf the cause is the environment (Node missing, network down), add nothing: declare failed and say why."
+        },
+        {
+          "key": "merge",
+          "type": "shell",
+          "writes": ["pr_url"],
+          "run": "sha=$(git rev-parse HEAD); url=$(gh pr list --head {branch} --state merged --json url,headRefOid -q \"map(select(.headRefOid == \\\"$sha\\\"))[0].url // empty\"); if [ -n \"$url\" ]; then {relay} pr {ref} \"$url\"; exit 0; fi; if [ \"$(git rev-list --count origin/main..HEAD)\" = 0 ]; then url=$(gh pr list --head {branch} --state merged --json url -q '.[0].url // empty'); if [ -n \"$url\" ]; then {relay} pr {ref} \"$url\"; exit 0; fi; echo 'nothing on {branch} beyond origin/main, and no merged PR for it' >&2; exit 1; fi; git push --force-with-lease origin HEAD:refs/heads/{branch} && url=$(gh pr list --head {branch} --state open --json url -q '.[0].url // empty') && { [ -n \"$url\" ] || url=$(gh pr create --fill --head {branch} --base main); } && {relay} pr {ref} \"$url\" && gh pr merge \"$url\" --squash --auto"
+        },
+        {
+          "key": "post_results",
+          "type": "agent",
+          "writes": ["ai_result"],
+          "run": "Post card {ref}'s results.\n1. Upload each screenshot listed in `$(dirname \"$RELAY_NODE_SCRATCH\")/acceptance/report.md`: `{relay} attach {ref} <path> --field url`.\n2. Comment the checklist with those images: `{relay} comment {ref} @<file>`.\n3. Record `{relay} result {ref} @<file>` in the shape relay.md gives. Write for a product owner: `summary` is 3–5 bullets on what to go look at; `changes` are short verb phrases (\"Adds pantry search\"); `screens` come from the uploads."
         }
       ],
       "edges": [
-        { "from": "start", "to": "implement" },
-        { "from": "implement", "to": "validate", "on": "succeeded" },
+        { "from": "start", "to": "branch" },
+        { "from": "branch", "to": "implement", "on": "succeeded" },
+        { "from": "implement", "to": "review", "on": "succeeded" },
+        { "from": "review", "to": "fix", "on": "failed", "max_loops": 3 },
+        { "from": "review", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
+        { "from": "review", "to": "final_review", "on": "succeeded", "when": "foreach_exhausted" },
+        { "from": "fix", "to": "review", "on": "succeeded" },
+        { "from": "final_review", "to": "acceptance", "on": "succeeded" },
+        { "from": "final_review", "to": "implement", "on": "partial", "max_loops": 3 },
+        { "from": "acceptance", "to": "sync", "on": "succeeded" },
+        { "from": "acceptance", "to": "implement", "on": "partial", "max_loops": 3 },
+        { "from": "sync", "to": "check", "on": "succeeded" },
+        { "from": "sync", "to": "sync_fix", "on": "failed" },
+        { "from": "sync_fix", "to": "check", "on": "succeeded" },
+        { "from": "check", "to": "merge", "on": "succeeded" },
+        { "from": "check", "to": "new_task", "on": "failed", "max_loops": 3 },
+        { "from": "new_task", "to": "implement", "on": "succeeded", "max_loops": 3 },
+        { "from": "merge", "to": "post_results", "on": "succeeded" },
+        { "from": "merge", "to": "sync", "on": "failed", "max_loops": 2 },
+        { "from": "post_results", "to": "done", "on": "succeeded" },
+        { "from": "branch", "to": "needs_input", "on": "failed" },
         { "from": "implement", "to": "needs_input", "on": "failed" },
-        { "from": "validate", "to": "fix", "on": "failed", "max_loops": 3 },
-        { "from": "fix", "to": "validate", "on": "succeeded" },
         { "from": "fix", "to": "needs_input", "on": "failed" },
-        { "from": "validate", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
-        { "from": "validate", "to": "review", "on": "succeeded", "when": "foreach_exhausted" },
-        { "from": "review", "to": "fix_review", "on": "failed", "max_loops": 2 },
-        { "from": "fix_review", "to": "review", "on": "succeeded" },
-        { "from": "fix_review", "to": "needs_input", "on": "failed" },
-        { "from": "review", "to": "screenshots", "on": "succeeded" },
-        { "from": "screenshots", "to": "done", "on": "succeeded" },
-        { "from": "screenshots", "to": "fix_visual", "on": "failed", "max_loops": 2 },
-        { "from": "fix_visual", "to": "screenshots", "on": "succeeded" },
-        { "from": "fix_visual", "to": "needs_input", "on": "failed" }
+        { "from": "final_review", "to": "needs_input", "on": "failed" },
+        { "from": "acceptance", "to": "needs_input", "on": "failed" },
+        { "from": "sync_fix", "to": "needs_input", "on": "failed" },
+        { "from": "new_task", "to": "needs_input", "on": "failed" },
+        { "from": "post_results", "to": "needs_input", "on": "failed" }
       ]
     }
   ]

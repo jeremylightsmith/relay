@@ -6,7 +6,8 @@
   "warning": null,
   "stages": [
     {"name": "Backlog", "category": "unstarted", "type": "queue", "wip_limit": null, "sublanes": []},
-    {"name": "Plan", "category": "planning", "type": "planning", "wip_limit": 3, "sublanes": ["done"]},
+    {"name": "Next up", "category": "unstarted", "type": "queue", "wip_limit": null, "sublanes": []},
+    {"name": "Plan", "category": "planning", "type": "planning", "wip_limit": 3, "sublanes": ["review", "done"]},
     {"name": "Implement", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
     {"name": "Review", "category": "in_progress", "type": "review", "wip_limit": 3, "sublanes": []},
     {"name": "Deploy", "category": "in_progress", "type": "work", "wip_limit": 2, "sublanes": []},
@@ -20,17 +21,18 @@
       "trigger": { "stage": "Plan" },
       "nodes": [
         {
-          "key": "plan",
+          "key": "write_plan",
           "type": "agent",
           "max_retries": 1,
-          "writes": ["tasks"],
-          "run": "You are planning card {ref}. Read it with `{relay} card {ref}`.\n\nWrite a short plan: one paragraph on the approach, then 2–6 tasks. Each task must be small enough to build and test in one sitting, and must say how to tell it works.\n\nWrite each task's body to a file in the directory of $RELAY_NODE_SCRATCH, then save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task \"<title>\" @<file>`. Do not write code."
+          "reads": ["description"],
+          "writes": ["plan", "tasks"],
+          "run": "Plan card {ref} so the Implement flow can build it. Don't write code.\n\n1. Read the card: `{relay} card {ref}`. Answers to earlier questions are in its comments.\n2. Ask before you plan. List every decision you would otherwise guess: what the user sees, edge cases, scope, and any technical choice the repo doesn't already settle. Ask them all in one batch, then stop. Skip this only if the card and the repo answer everything.\n3. Write a short plan: what we're building, how, and how we'll know it works. Save it: `{relay} plan {ref} @<file>`.\n4. Split the work into 1-5 tasks, in build order. Each task says what to build and which tests prove it. The implementer sees only its own task.\n5. Replace the card's tasks. Remove the old ones (`{relay} tasks list {ref} --json`, then `{relay} task rm {ref} <id>`), then add the new ones in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> --task \"<title>\" @<file> ...`.\n6. Check them: `{relay} tasks list {ref}`."
         }
       ],
       "edges": [
-        { "from": "start", "to": "plan" },
-        { "from": "plan", "to": "done", "on": "succeeded" },
-        { "from": "plan", "to": "needs_input", "on": "failed" }
+        { "from": "start", "to": "write_plan" },
+        { "from": "write_plan", "to": "done", "on": "succeeded" },
+        { "from": "write_plan", "to": "needs_input", "on": "failed" }
       ]
     },
     {
@@ -39,58 +41,72 @@
       "trigger": { "stage": "Implement" },
       "nodes": [
         {
-          "key": "implement",
+          "key": "branch",
+          "type": "shell",
+          "writes": ["branch"],
+          "run": "{relay} git-fetch && git checkout -B {branch} origin/main && {relay} branch {ref} {branch}"
+        },
+        {
+          "key": "implement_task",
           "type": "agent",
           "effort": "high",
-          "max_retries": 1,
           "expects_commits": true,
           "foreach": "card.tasks",
+          "max_retries": 1,
           "reads": ["tasks"],
-          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n0. Work on the git branch `relay/{ref}`: `git switch relay/{ref} 2>/dev/null || git switch -c relay/{ref}`, then record it with `{relay} branch {ref} relay/{ref}`.\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Write a failing test for it, then make it pass.\n3. Commit with the message \"{ref} {task}: <what changed>\".\n\nIf the task is already done, say so and stop. Do not start the next task."
+          "run": "Build task {task_id} (\"{task}\") of card {ref}, and only that task.\n\n1. Read it: `{relay} task show {ref} {task_id}`.\n2. Write a failing test, then make it pass.\n3. Run `npm test`.\n4. Commit with the message \"{ref}: {task}\".\n\nAlready built? Declare succeeded with `--no-changes`."
         },
         {
-          "key": "validate",
+          "key": "review_task",
+          "type": "agent",
+          "reads": ["tasks"],
+          "role": "check",
+          "run": "Review task {task_id} (\"{task}\") of card {ref}. Don't change anything.\n\n1. Read the task: `{relay} task show {ref} {task_id}`.\n2. Run `npm test`.\n3. Read its commits: `git log -p origin/main..HEAD` (the newest ones are this task's).\n\nFail if the tests fail, or the task is missing, wrong or untested. List each problem as `file:line`: problem. Otherwise succeed."
+        },
+        {
+          "key": "fix_task",
+          "type": "agent",
+          "expects_commits": true,
+          "reads": ["tasks"],
+          "run": "Task {task_id} (\"{task}\") of card {ref} failed review. The findings are below.\n\nFix each one, run `npm test`, and commit. The task is at `{relay} task show {ref} {task_id}`."
+        },
+        {
+          "key": "review_card",
+          "type": "agent",
+          "role": "check",
+          "run": "Every task of card {ref} is built and reviewed. Review the whole branch against the card. Don't change any code.\n\nRead `{relay} card {ref}`, `{relay} tasks list {ref}` and `git diff origin/main...HEAD`.\n\nNothing worth fixing? Succeed.\nOtherwise add one task per problem, in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> ...`. Each says what to fix and which test proves it. Then run `{relay} outcome partial --detail \"<what you added>\"`, which sends the card back to build the new tasks."
+        },
+        {
+          "key": "publish",
           "type": "shell",
-          "run": "npm test"
+          "writes": ["pr_url"],
+          "run": "git push -u origin {branch} --force-with-lease && url=$(gh pr view {branch} --json url -q .url || gh pr create --fill --head {branch}) && {relay} pr {ref} \"$url\""
         },
         {
-          "key": "fix",
+          "key": "post_results",
           "type": "agent",
-          "expects_commits": true,
-          "run": "The tests failed after task {task_id} (\"{task}\") of card {ref}. The failure is below. Find the cause and fix the code (change a test only if the test itself is wrong), run the tests, and commit with the message \"{ref} {task}: fix tests\". Do not start another task."
-        },
-        {
-          "key": "review",
-          "type": "agent",
-          "run": "Every task of card {ref} is built and its tests pass. Review the whole change on this branch against the card and its tasks (`{relay} card {ref}`): anything missing, anything broken, anything a user would trip over. Run the tests once yourself.\n\nFail with a numbered list of the problems, most important first. Succeed if there is nothing worth fixing."
-        },
-        {
-          "key": "fix_review",
-          "type": "agent",
-          "expects_commits": true,
-          "run": "A review of card {ref} found the problems listed below. Fix each one, run the tests, and commit with the message \"{ref}: fix review findings\". Fix only what is listed."
-        },
-        {
-          "key": "screenshots",
-          "type": "agent",
-          "run": "The code for {ref} is built and tested. Start the app, open each screen the card changes, and take a screenshot at desktop width (1280px) and phone width (390px).\n\n`{relay} mockups` replaces the card's whole list, so first pull what is there with `{relay} mockups {ref} --pull <dir>`. Then upload those files and your screenshots in one call, with one `--caption` per file in the same order (e.g. \"<screen> — desktop\"), so the reviewer sees what was built.\n\nFail if the app won't start or a screen is broken, and say why."
+          "writes": ["ai_result"],
+          "run": "Tell the human reviewer what card {ref} changed. Read the card and `git log origin/main..HEAD`.\n\nScreenshot each screen this card changed, at 1280px and 390px wide:\n1. Run `npm ci`, then start the app in the background: `PORT=<a free port> npm start &`.\n2. Write a small Playwright script beside `$RELAY_NODE_SCRATCH` that opens each screen, does what a user would do to show the change (e.g. add a habit), and saves a screenshot. Run it with `node`.\n3. Stop the app, then upload each screenshot: `{relay} attach {ref} <png> --field url`.\nIf you can't get screenshots, skip them and say why. Never commit.\n\nWrite a JSON file like `{\"summary\": \"- what to try first\", \"changes\": [\"Adds ...\"], \"screens\": [{\"url\": \"<uploaded url>\", \"caption\": \"<screen> — desktop\"}]}` and save it: `{relay} result {ref} @<file>`."
         }
       ],
       "edges": [
-        { "from": "start", "to": "implement" },
-        { "from": "implement", "to": "validate", "on": "succeeded" },
-        { "from": "implement", "to": "needs_input", "on": "failed" },
-        { "from": "validate", "to": "fix", "on": "failed", "max_loops": 3 },
-        { "from": "fix", "to": "validate", "on": "succeeded" },
-        { "from": "fix", "to": "needs_input", "on": "failed" },
-        { "from": "validate", "to": "implement", "on": "succeeded", "when": "foreach_remaining" },
-        { "from": "validate", "to": "review", "on": "succeeded", "when": "foreach_exhausted" },
-        { "from": "review", "to": "fix_review", "on": "failed", "max_loops": 2 },
-        { "from": "fix_review", "to": "review", "on": "succeeded" },
-        { "from": "fix_review", "to": "needs_input", "on": "failed" },
-        { "from": "review", "to": "screenshots", "on": "succeeded" },
-        { "from": "screenshots", "to": "done", "on": "succeeded" },
-        { "from": "screenshots", "to": "needs_input", "on": "failed" }
+        { "from": "start", "to": "branch" },
+        { "from": "branch", "to": "implement_task", "on": "succeeded" },
+        { "from": "implement_task", "to": "review_task", "on": "succeeded" },
+        { "from": "review_task", "to": "fix_task", "on": "failed", "max_loops": 3 },
+        { "from": "fix_task", "to": "review_task", "on": "succeeded" },
+        { "from": "review_task", "to": "implement_task", "on": "succeeded", "when": "foreach_remaining" },
+        { "from": "review_task", "to": "review_card", "on": "succeeded", "when": "foreach_exhausted" },
+        { "from": "review_card", "to": "implement_task", "on": "partial", "max_loops": 3 },
+        { "from": "review_card", "to": "publish", "on": "succeeded" },
+        { "from": "publish", "to": "post_results", "on": "succeeded" },
+        { "from": "post_results", "to": "done", "on": "succeeded" },
+        { "from": "branch", "to": "needs_input", "on": "failed" },
+        { "from": "implement_task", "to": "needs_input", "on": "failed" },
+        { "from": "fix_task", "to": "needs_input", "on": "failed" },
+        { "from": "review_card", "to": "needs_input", "on": "failed" },
+        { "from": "publish", "to": "needs_input", "on": "failed" },
+        { "from": "post_results", "to": "needs_input", "on": "failed" }
       ]
     }
   ]
