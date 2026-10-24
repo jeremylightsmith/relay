@@ -1184,9 +1184,19 @@ defmodule RelayWeb.FlowEditorLiveTest do
       %{bare: bare}
     end
 
+    # Some node of `type` on the template board, as `{flow key, node key}`: the template's flows
+    # are edited freely, so the test never names one.
+    defp template_node(board, type) do
+      Enum.find_value(Flows.list_flows(board), fn flow ->
+        node = Enum.find(flow.nodes, &(&1.type == type))
+        node && {flow.key, node.key}
+      end)
+    end
+
     test "14. an agent node with no agent is tagged inline · no skill", %{conn: conn, bare: bare} do
-      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/implement")
-      view |> element(~s([data-node="implement"])) |> render_click()
+      {flow, node} = template_node(bare, :agent)
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/#{flow}")
+      view |> element(~s([data-node="#{node}"])) |> render_click()
 
       assert view |> element("#inspector-inline-tag") |> render() =~ "inline · no skill"
       assert has_element?(view, "#inspector-node-agent")
@@ -1202,8 +1212,9 @@ defmodule RelayWeb.FlowEditorLiveTest do
     end
 
     test "16. a shell node carries no tag", %{conn: conn, bare: bare} do
-      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/implement")
-      view |> element(~s([data-node="validate"])) |> render_click()
+      {flow, node} = template_node(bare, :shell)
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/#{flow}")
+      view |> element(~s([data-node="#{node}"])) |> render_click()
 
       refute has_element?(view, "#inspector-inline-tag")
     end

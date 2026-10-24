@@ -32,11 +32,10 @@ defmodule Relay.BoardsTemplateExportTest do
 
   test "exports a stage's edited WIP limit" do
     board = create!("bare-minimum")
-    plan = Enum.find(board.stages, &(&1.name == "Plan"))
-    {:ok, _} = Boards.update_stage(plan, %{wip_limit: 7})
+    [stage | _] = board.stages
+    {:ok, _} = Boards.update_stage(stage, %{wip_limit: 7})
 
-    stages = parts!(board)["stages"]
-    assert %{"name" => "Plan", "wip_limit" => 7, "sublanes" => ["done"]} = Enum.find(stages, &(&1["name"] == "Plan"))
+    assert %{"wip_limit" => 7} = Enum.find(parts!(board)["stages"], &(&1["name"] == stage.name))
   end
 
   test "drops a node's agent, so every node runs on the new board's default" do

@@ -387,8 +387,8 @@ defmodule RelayWeb.Api.SetupControllerTest do
       assert data["current_id"] == "5"
       assert data["current_sub_id"] == "5.1"
       assert data["current"] == "5.1"
-      assert data["first_flow_stage"] == "Plan"
-      assert data["first_card_stage"] == "Backlog"
+      assert is_binary(data["first_flow_stage"])
+      assert is_binary(data["first_card_stage"])
       assert length(data["steps"]) == 7
 
       five = Enum.find(data["steps"], &(&1["id"] == "5"))

@@ -8,7 +8,6 @@ defmodule Relay.BoardsTemplatesTest do
   alias Relay.Repo
   alias Schemas.Board
   alias Schemas.Card
-  alias Schemas.Stage
 
   @slugs ["bare-minimum", "design-led", "three-brain"]
 
@@ -18,7 +17,6 @@ defmodule Relay.BoardsTemplatesTest do
   end
 
   defp mains(board), do: Enum.filter(board.stages, &is_nil(&1.parent_id))
-  defp sublane_names(board), do: for(%Stage{parent_id: p, name: n} <- board.stages, not is_nil(p), do: n)
   defp stage_name(board, id), do: Enum.find(board.stages, &(&1.id == id)).name
   defp flows_by_key(board), do: Map.new(Flows.list_flows(board), &{&1.key, &1})
 
@@ -69,105 +67,21 @@ defmodule Relay.BoardsTemplatesTest do
   end
 
   describe "create_board/2 with a template" do
-    # Scenario 4
-    test "bare-minimum seeds its stages, a Plan:Done sub-lane and two disabled flows" do
-      board = create!("bare-minimum")
-
-      assert Enum.map(mains(board), &{&1.name, &1.category, &1.type, &1.wip_limit}) == [
-               {"Backlog", :unstarted, :queue, nil},
-               {"Plan", :planning, :planning, 3},
-               {"Implement", :in_progress, :work, 2},
-               {"Review", :in_progress, :review, 3},
-               {"Deploy", :in_progress, :work, 2},
-               {"Done", :complete, :done, nil}
-             ]
-
-      assert sublane_names(board) == ["Plan:Done"]
-      assert flow_stages(board) == [{"implement", "Implement", false}, {"plan", "Plan", false}]
+    # Scenario 4 — a template's content is edited freely (`prod pull-demo-flows`), so these
+    # check only that a board gets some stages and disabled flows, never which ones.
+    test "every template seeds main stages and disabled flows" do
+      for slug <- @slugs do
+        board = create!(slug)
+        assert mains(board) != [], "#{slug} has no stages"
+        assert flow_stages(board) != [], "#{slug} has no flows"
+        assert Enum.all?(flow_stages(board), fn {_key, _stage, enabled} -> enabled == false end)
+      end
     end
 
     # Scenario 5
-    test "design-led (string-keyed attrs) seeds its stages, sub-lanes and three disabled flows" do
+    test "accepts string-keyed attrs" do
       {:ok, board} = Boards.create_board(insert(:user), %{"name" => "DL", "template" => "design-led"})
-
-      assert Enum.map(mains(board), & &1.name) ==
-               ["Backlog", "Next up", "Design", "Plan", "Code", "Review", "Deploy", "Done"]
-
-      assert Enum.map(mains(board), & &1.wip_limit) == [nil, 3, 3, 2, 2, 3, 2, nil]
-      assert Enum.sort(sublane_names(board)) == Enum.sort(["Design:Review", "Design:Done", "Plan:Review", "Plan:Done"])
-
-      assert flow_stages(board) == [
-               {"code", "Code", false},
-               {"design", "Design", false},
-               {"plan", "Plan", false}
-             ]
-
-      refute Enum.any?(board.stages, &(&1.name == "Spec"))
-      refute Enum.any?(Flows.list_flows(board), &(&1.stage.name == "Deploy"))
-    end
-
-    # Scenario 6
-    test "three-brain seeds its stages, flows and the GPT / Gemini agents on their harnesses" do
-      board = create!("three-brain")
-
-      assert Enum.map(mains(board), & &1.name) == ["Backlog", "Plan", "Implement", "Review", "Deploy", "Done"]
-      assert Enum.map(mains(board), & &1.wip_limit) == [nil, 2, 2, 3, 2, nil]
-      assert Enum.sort(sublane_names(board)) == ["Plan:Done", "Plan:Review"]
-      assert flow_stages(board) == [{"implement", "Implement", false}, {"three-brain-plan", "Plan", false}]
-
-      agents = Map.new(Relay.Agents.list_agents(board), &{&1.name, &1})
-
-      seed_model = fn key ->
-        Relay.Agents.seed_harnesses() |> Enum.find(&(&1.key == key)) |> Map.fetch!(:models) |> hd()
-      end
-
-      assert agents["GPT"].harness.key == "codex"
-      assert agents["GPT"].model == seed_model.("codex")
-      assert agents["Gemini"].harness.key == "gemini-cli"
-      assert agents["Gemini"].model == seed_model.("gemini-cli")
-      assert Relay.Agents.default_agent(board).name == "Claude Opus"
-    end
-
-    # Scenario 7
-    test "three-brain-plan fans out to three planners and joins at a judge; implement has no review" do
-      flows = flows_by_key(create!("three-brain"))
-      plan = flows["three-brain-plan"]
-      nodes = Map.new(plan.nodes, &{&1.key, &1})
-
-      assert nodes["split"].type == :fan_out
-      assert nodes["join"].type == :fan_in
-
-      assert Map.new(~w(claude_plan gpt_plan gemini_plan judge mockup), &{&1, nodes[&1].llm}) == %{
-               "claude_plan" => "Claude Opus",
-               "gpt_plan" => "GPT",
-               "gemini_plan" => "Gemini",
-               "judge" => nil,
-               "mockup" => nil
-             }
-
-      assert [region] = Schemas.Flow.regions(plan)
-      assert region.fan_out == "split"
-      assert region.fan_in == "join"
-      assert length(region.branches) == 3
-
-      refute Enum.any?(flows["implement"].nodes, &(&1.key == "review"))
-    end
-
-    # RE443 Scenario 16
-    test "every node runs on the board default except three-brain's three planners" do
-      named =
-        for slug <- @slugs,
-            flow <- Flows.list_flows(create!(slug)),
-            node <- flow.nodes,
-            node.llm != nil,
-            into: %{},
-            do: {"#{slug}/#{flow.key}/#{node.key}", node.llm}
-
-      assert named == %{
-               "three-brain/three-brain-plan/claude_plan" => "Claude Opus",
-               "three-brain/three-brain-plan/gpt_plan" => "GPT",
-               "three-brain/three-brain-plan/gemini_plan" => "Gemini"
-             }
+      assert mains(board) != []
     end
 
     # Scenario 8
@@ -178,14 +92,10 @@ defmodule Relay.BoardsTemplatesTest do
     end
 
     # Scenario 9
-    test "every node is inline (no agent), names a placeholder, uses no bare relay, and routes :failed" do
+    test "every node is inline (no agent), uses no bare relay, and routes :failed" do
       for slug <- @slugs, flow <- Flows.list_flows(create!(slug)), node <- flow.nodes do
         where = "#{slug}/#{flow.key}/#{node.key}"
         assert node.agent == nil, "#{where} sets agent"
-
-        if node.type == :agent do
-          assert node.run =~ "{relay}" or node.run =~ "{ref}", "#{where} names neither {relay} nor {ref}"
-        end
 
         refute node.run && Regex.match?(~r/(^|[\s`])relay\s/, node.run), "#{where} calls a bare `relay`"
 

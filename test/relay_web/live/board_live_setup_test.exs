@@ -59,7 +59,7 @@ defmodule RelayWeb.BoardLiveSetupTest do
 
       step1 = text(view, "#setup-step-1")
       assert step1 =~ "Board created from Bare minimum"
-      assert step1 =~ "6 stages · 2 flows"
+      assert step1 =~ ~r/\d+ stages · \d+ flows/
 
       assert has_element?(view, "#setup-step-2 #setup-llm-form")
       assert has_element?(view, ~s(section[id^="category-"]))

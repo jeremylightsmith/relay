@@ -18,8 +18,8 @@
     "Review": {"kind": "why", "text": "Its own stage, so cards waiting on you don't use the build stage's slots."}
   },
   "flows": {
-    "plan": {"blurb": null, "selected": "plan"},
-    "implement": {"blurb": "a test loop on each task, a review, then screenshots for you", "selected": "implement"}
+    "plan": {"blurb": null, "selected": "write_plan"},
+    "implement": {"blurb": "a test loop on each task, a review, then screenshots for you", "selected": "implement_task"}
   },
   "cards": [
     {

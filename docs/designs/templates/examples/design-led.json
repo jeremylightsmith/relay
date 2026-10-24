@@ -19,8 +19,8 @@
   },
   "flows": {
     "design": {"blurb": "design before", "selected": "mockups"},
-    "plan": {"blurb": "no spec stage", "selected": "plan"},
-    "code": {"blurb": "a test loop on each task, a review, then screenshots checked against the mockup", "selected": "screenshots"}
+    "plan": {"blurb": "no spec stage", "selected": "write_plan"},
+    "code": {"blurb": "a test loop on each task, a review, then screenshots checked against the mockup", "selected": "implement"}
   },
   "cards": [
     {

@@ -38,6 +38,17 @@ defmodule Relay.SetupObserveTest do
   defp stage(board, name),
     do: Repo.one!(from(s in Stage, where: s.board_id == ^board.id and s.name == ^name and is_nil(s.parent_id)))
 
+  # The template's stages are edited freely, so ask the checklist which stages the rule names.
+  defp first_card_stage(board), do: Setup.checklist(board).first_card_stage
+  defp first_flow_stage(board), do: Setup.checklist(board).first_flow_stage
+
+  # The rightmost main stage: past every flow's pull stage.
+  defp last_stage(board),
+    do:
+      Repo.one!(
+        from(s in Stage, where: s.board_id == ^board.id and is_nil(s.parent_id), order_by: [desc: s.position], limit: 1)
+      )
+
   # The flow's own canonical document, with `enabled` set to `enabled` (or removed when nil).
   defp doc(board, key, enabled) do
     doc = board |> Flows.get_flow_with_stages(key) |> Document.encode()
@@ -116,14 +127,15 @@ defmodule Relay.SetupObserveTest do
     test "a card in the stage the first flow pulls from finishes 5.8 and step 5; one further right doesn't" do
       board = board_on!("5.8")
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Implement"), %{title: "x"})
+      assert {:ok, _} = Cards.create_card(last_stage(board), %{title: "x"})
       assert step(board, "5.8").status == :active
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Backlog"), %{title: "Show the longest streak"})
+      name = first_card_stage(board)
+      assert {:ok, _} = Cards.create_card(stage(board, name), %{title: "Show the longest streak"})
 
       five_eight = step(board, "5.8")
       assert five_eight.status == :done
-      assert five_eight.evidence == "first card in Backlog"
+      assert five_eight.evidence == "first card in #{name}"
       assert step(board, "5").status == :done
       assert step(board, "6").status == :active
     end
@@ -131,10 +143,11 @@ defmodule Relay.SetupObserveTest do
     test "a card in the first flow stage itself still finishes 5.8" do
       board = board_on!("5.8")
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Plan"), %{title: "Show the longest streak"})
+      name = first_flow_stage(board)
+      assert {:ok, _} = Cards.create_card(stage(board, name), %{title: "Show the longest streak"})
 
       assert step(board, "5.8").status == :done
-      assert step(board, "5.8").evidence == "first card in Plan"
+      assert step(board, "5.8").evidence == "first card in #{name}"
     end
 
     # Scenario 16
@@ -142,7 +155,7 @@ defmodule Relay.SetupObserveTest do
       board = board_on!("5.7")
       before = rows(board)
 
-      assert {:ok, _} = Cards.create_card(stage(board, "Plan"), %{title: "Early"})
+      assert {:ok, _} = Cards.create_card(stage(board, first_flow_stage(board)), %{title: "Early"})
       assert rows(board) == before
     end
   end
