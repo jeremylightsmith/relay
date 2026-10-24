@@ -9,7 +9,8 @@ defmodule Relay.DocsContentTest do
     {"cards-and-handoffs.md", "# Cards & handoffs"},
     {"authentication.md", "# Authentication & API access"},
     {"cli.md", "# CLI (`./relay`)"},
-    {"api.md", "# REST API reference"}
+    {"api.md", "# REST API reference"},
+    {"billing.md", "# Billing & self-hosting"}
   ]
 
   test "every docs page exists and starts with its expected h1" do

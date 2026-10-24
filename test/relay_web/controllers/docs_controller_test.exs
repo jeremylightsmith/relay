@@ -114,13 +114,61 @@ defmodule RelayWeb.DocsControllerTest do
       {"/docs/cli", "relay"},
       {"/docs/api", "REST API reference"},
       {"/docs/authentication", "Authentication &amp; API access"},
-      {"/docs/runbook-flow-cutover", "Enabling a flow safely"}
+      {"/docs/runbook-flow-cutover", "Enabling a flow safely"},
+      {"/docs/billing", "Billing &amp; self-hosting"}
     ]
 
     for {path, needle} <- pages do
       html = conn |> get(path) |> html_response(200)
       assert html =~ needle, "expected #{path} to render #{inspect(needle)}"
     end
+  end
+
+  test "the billing page is listed in the sidebar", %{conn: conn} do
+    html = conn |> get(~p"/docs") |> html_response(200)
+
+    sidebar =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("a.docs-sidebar-link")
+      |> LazyHTML.text()
+
+    assert sidebar =~ "Billing & self-hosting"
+    assert html =~ ~s(href="/docs/billing")
+  end
+
+  test "the billing page has every section heading", %{conn: conn} do
+    html = conn |> get(~p"/docs/billing") |> html_response(200)
+
+    for heading <- [
+          "Self-host or Relay Cloud",
+          "Your trial",
+          "Paying",
+          "If a card fails",
+          "Paused means read-only",
+          "Cancelling",
+          "Promo codes",
+          "On iOS"
+        ] do
+      assert html =~ heading, "expected /docs/billing to have the heading #{inspect(heading)}"
+    end
+  end
+
+  test "the billing page states the decided rules", %{conn: conn} do
+    html = conn |> get(~p"/docs/billing") |> html_response(200)
+
+    for needle <- ["402 plan_paused", "BILLING_ENABLED", "MIT", "30 days", "$20", "RELAYCONF"] do
+      assert html =~ needle, "expected /docs/billing to mention #{inspect(needle)}"
+    end
+
+    assert html =~ ~r/no refunds/i
+  end
+
+  test "the billing page's state diagram reaches the Mermaid renderer", %{conn: conn} do
+    html = conn |> get(~p"/docs/billing") |> html_response(200)
+
+    assert html =~ ~s(class="language-mermaid")
+    assert html =~ "stateDiagram-v2"
   end
 
   test "the Setup page is gone: it is now /docs/authentication and /docs/setup is a 404",

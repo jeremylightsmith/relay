@@ -91,14 +91,18 @@ defmodule RelayWeb.PageControllerTest do
 
     test "the CTA band carries the open-source self-host line", %{conn: conn} do
       html = conn |> get(~p"/") |> html_response(200)
-      readme = html |> LazyHTML.from_document() |> LazyHTML.query(~s(a[href="#{@github}#readme"]))
+      doc = LazyHTML.from_document(html)
+      readme = LazyHTML.query(doc, ~s(div[style*="--color-neutral"] a[href="#{@github}#readme"]))
 
       assert Enum.count(readme) == 1
       assert text_of(readme) == "Self-host from the README →"
       assert html =~ "Relay is open source under the MIT license. Rather run it yourself?"
+
+      # the CTA band and the #pricing self-host card both link the README
+      assert doc |> LazyHTML.query(~s(a[href="#{@github}#readme"])) |> Enum.count() == 2
     end
 
-    test "the footer says open source (MIT) and links to GitHub after Docs", %{conn: conn} do
+    test "the footer says open source (MIT) and links to Pricing and GitHub", %{conn: conn} do
       footer = conn |> landing_doc() |> LazyHTML.query("footer")
 
       assert LazyHTML.text(footer) =~ "humans + AI, one board · open source (MIT) · © 2026"
@@ -109,7 +113,8 @@ defmodule RelayWeb.PageControllerTest do
       assert gh |> LazyHTML.query("svg") |> Enum.count() == 1
 
       texts = footer |> LazyHTML.query("nav a") |> Enum.map(&text_of/1)
-      assert texts == ["Terms", "Privacy", "Docs", "GitHub"]
+      assert texts == ["Terms", "Privacy", "Pricing", "Docs", "GitHub"]
+      assert footer |> LazyHTML.query(~s(nav a[href="/#pricing"])) |> Enum.count() == 1
     end
 
     test "the hero has no GitHub button and the unchanged copy stays", %{conn: conn} do
@@ -290,6 +295,119 @@ defmodule RelayWeb.PageControllerTest do
         |> LazyHTML.attribute("href")
 
       assert hrefs == ["#top", "#how", "#flow", "#stages"]
+    end
+  end
+
+  describe "GET / pricing" do
+    @readme "https://github.com/jeremylightsmith/relay#readme"
+
+    defp pricing_doc(conn), do: conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
+
+    defp pricing_text(node), do: node |> LazyHTML.text() |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    defp pricing_classes(node), do: node |> LazyHTML.attribute("class") |> Enum.flat_map(&String.split/1)
+
+    test "renders one #pricing section with its eyebrow and heading", %{conn: conn} do
+      section = conn |> pricing_doc() |> LazyHTML.query("section#pricing")
+
+      assert Enum.count(section) == 1
+
+      eyebrow = LazyHTML.query(section, "div.font-mono.tracking-\\[0\\.08em\\]")
+      assert pricing_text(eyebrow) == "PRICING"
+      assert "text-primary" in pricing_classes(eyebrow)
+
+      assert section |> LazyHTML.query("h2") |> pricing_text() ==
+               "Same Relay either way. Pay only if you want us to run it."
+    end
+
+    test "the self-host card lists the free, MIT terms", %{conn: conn} do
+      text = conn |> pricing_doc() |> LazyHTML.query("#pricing-self-host") |> pricing_text()
+
+      for snippet <- [
+            "SELF-HOST",
+            "Free",
+            "forever · MIT",
+            ~s(Every feature. No "enterprise edition."),
+            "Your server, your database, your keys",
+            "Fork it, change it, use it at work",
+            "You run upgrades, backups and push certificates",
+            ~s(A fork can't be called "Relay")
+          ] do
+        assert text =~ snippet, "expected #pricing-self-host to contain #{inspect(snippet)}"
+      end
+    end
+
+    test "the Relay Cloud card lists the $20/month terms", %{conn: conn} do
+      text = conn |> pricing_doc() |> LazyHTML.query("#pricing-cloud") |> pricing_text()
+
+      for snippet <- [
+            "RELAY CLOUD",
+            "1 month free",
+            "$20",
+            "/ month",
+            "Everything in self-host, run by us",
+            "Upgrades, backups, iOS & Android push",
+            "invited members are free",
+            "Cancel anytime. Data is never deleted.",
+            "Have a code? Add it on sign-up or later in Billing."
+          ] do
+        assert text =~ snippet, "expected #pricing-cloud to contain #{inspect(snippet)}"
+      end
+    end
+
+    test "the two CTAs link the README and the free trial sign-up", %{conn: conn} do
+      doc = pricing_doc(conn)
+
+      self_host = LazyHTML.query(doc, "a#pricing-self-host-cta")
+      assert LazyHTML.attribute(self_host, "href") == [@readme]
+      assert pricing_text(self_host) == "Self-host from the README →"
+
+      cloud = LazyHTML.query(doc, "a#pricing-cloud-cta")
+      assert LazyHTML.attribute(cloud, "href") == ["/auth/google"]
+      assert pricing_text(cloud) == "Start free trial, no card →"
+    end
+
+    test "the footnote states the MIT model and links to /docs/billing", %{conn: conn} do
+      doc = pricing_doc(conn)
+
+      assert doc |> LazyHTML.query("#pricing") |> pricing_text() =~
+               "Relay is open source under the MIT license. Your $20 pays for hosting and funds the project. Monthly only for now, no refunds."
+
+      link = LazyHTML.query(doc, "a#pricing-billing-docs")
+      assert LazyHTML.attribute(link, "href") == ["/docs/billing"]
+      assert pricing_text(link) == "How billing works →"
+    end
+
+    test "sits after #stages and before the CTA band", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      {stages, _} = :binary.match(html, ~s(id="stages"))
+      {pricing, _} = :binary.match(html, ~s(id="pricing"))
+      {cta, _} = :binary.match(html, "background:var(--color-neutral)")
+
+      assert stages < pricing
+      assert pricing < cta
+    end
+
+    test "the cloud card is primary and the grid stacks below md", %{conn: conn} do
+      doc = pricing_doc(conn)
+
+      cloud = pricing_classes(LazyHTML.query(doc, "#pricing-cloud"))
+      assert "border-2" in cloud
+      assert "border-primary" in cloud
+
+      assert "border-base-300" in pricing_classes(LazyHTML.query(doc, "#pricing-self-host"))
+
+      grid = doc |> LazyHTML.query("#pricing div:has(> #pricing-cloud)") |> pricing_classes()
+      assert "md:grid-cols-2" in grid
+      refute "grid-cols-2" in grid
+    end
+
+    test "the nav links Pricing", %{conn: conn} do
+      link = conn |> pricing_doc() |> LazyHTML.query(~s(header nav a[href="/#pricing"]))
+
+      assert Enum.count(link) == 1
+      assert pricing_text(link) == "Pricing"
     end
   end
 

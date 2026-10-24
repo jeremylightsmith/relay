@@ -16,6 +16,7 @@
         <a href="#how" class="hover:text-primary">How it works</a>
         <a href="#flow" class="hover:text-primary">The flow</a>
         <a href="#stages" class="hover:text-primary">Stages</a>
+        <a href="/#pricing" class="hover:text-primary">Pricing</a>
       </div>
       <span class="flex-1"></span>
       <a
@@ -591,6 +592,69 @@
     </div>
   </section>
 
+  <%!-- PRICING --%>
+  <section id="pricing" class="mx-auto max-w-[1120px] px-4 py-14 sm:px-8">
+    <div class="rounded-[20px] border border-base-300 bg-base-100 px-5 py-10 sm:px-10">
+      <div class="text-center font-mono text-xs font-semibold tracking-[0.08em] text-primary">
+        PRICING
+      </div>
+      <h2 class="mx-auto mt-2 max-w-xl text-center text-[28px] font-semibold leading-tight tracking-[-0.02em]">
+        Same Relay either way. Pay only if you want us to run it.
+      </h2>
+      <div class="mx-auto mt-8 grid max-w-3xl gap-4 md:grid-cols-2">
+        <div id="pricing-self-host" class="card border border-base-300 bg-base-100 p-6">
+          <div class="font-mono text-[11px] text-base-content/65">SELF-HOST</div>
+          <div class="mt-2 flex flex-wrap items-baseline gap-1">
+            <span class="text-4xl font-semibold">Free</span>
+            <span class="text-sm text-base-content/65">forever · MIT</span>
+          </div>
+          <ul class="mt-4 space-y-2 text-sm text-base-content/75">
+            <li>✓ Every feature. No "enterprise edition."</li>
+            <li>✓ Your server, your database, your keys</li>
+            <li>✓ Fork it, change it, use it at work</li>
+            <li class="text-base-content/55">
+              — You run upgrades, backups and push certificates
+            </li>
+            <li class="text-base-content/55">— A fork can't be called "Relay"</li>
+          </ul>
+          <a
+            id="pricing-self-host-cta"
+            class="btn btn-outline mt-6"
+            href={github_url() <> "#readme"}
+          >
+            Self-host from the README →
+          </a>
+        </div>
+        <div id="pricing-cloud" class="card border-2 border-primary bg-base-100 p-6">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-[11px] text-primary">RELAY CLOUD</span>
+            <span class="badge badge-primary badge-sm">1 month free</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-1">
+            <span class="text-4xl font-semibold">$20</span>
+            <span class="text-sm text-base-content/65">/ month</span>
+          </div>
+          <ul class="mt-4 space-y-2 text-sm text-base-content/75">
+            <li>✓ Everything in self-host, run by us</li>
+            <li>✓ Upgrades, backups, iOS & Android push</li>
+            <li>✓ Unlimited boards. Bring your team; invited members are free.</li>
+            <li>✓ Cancel anytime. Data is never deleted.</li>
+          </ul>
+          <a id="pricing-cloud-cta" class="btn btn-primary mt-6" href={~p"/auth/google"}>
+            Start free trial, no card →
+          </a>
+          <p class="mt-2 text-center text-xs text-base-content/55">
+            Have a code? Add it on sign-up or later in Billing.
+          </p>
+        </div>
+      </div>
+      <p class="mx-auto mt-6 max-w-xl text-center text-xs text-base-content/60">
+        Relay is open source under the MIT license. Your $20 pays for hosting and funds the project. Monthly only for now, no refunds.
+        <a id="pricing-billing-docs" href={~p"/docs/billing"} class="link">How billing works →</a>
+      </p>
+    </div>
+  </section>
+
   <%!-- CTA BAND (deliberately fixed-dark in both themes) --%>
   <section class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
     <div
@@ -630,6 +694,7 @@
       <nav class="flex items-center gap-4 text-xs text-base-content/65">
         <.link navigate={~p"/terms"} class="link link-hover">Terms</.link>
         <.link navigate={~p"/privacy"} class="link link-hover">Privacy</.link>
+        <a href="/#pricing" class="link link-hover">Pricing</a>
         <.link navigate={~p"/docs"} class="link link-hover">Docs</.link>
         <a href={github_url()} class="link link-hover inline-flex items-center gap-1">
           <.github_mark class="size-3.5" /> GitHub
