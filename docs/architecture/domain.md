@@ -118,9 +118,10 @@ sharing behavior.
   returns the user's non-archived boards as `%{board, starred?, muted?}` in **display order** —
   starred first, then case-insensitive name, `id` tiebreak — defined once in a private
   `order_by_name/1` helper (the admin list reuses its name half). `list_boards/1` deliberately
-  stays creation-ordered (`inserted_at, id`): the default board, `Cards.needs_you_feed/1`,
+  stays creation-ordered (`inserted_at, id`): the board `/board` redirects to (the first one;
+  with none it sends the user to the `/boards` first-run picker, RE470), `Cards.needs_you_feed/1`,
   `Cards.resolve_ref/3` and `AllController.resolve_board/2` depend on it, so starring never
-  changes your default board.
+  changes which board `/board` opens.
   The **per-board push mute** (RE406) lives beside it (`board_members.muted`, also never cast):
   one flag per member per board, written only by `set_muted/3`, which mirrors `set_starred/3`
   (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved

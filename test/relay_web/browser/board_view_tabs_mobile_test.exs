@@ -12,9 +12,18 @@ defmodule RelayWeb.Browser.BoardViewTabsMobileTest do
   use PhoenixTest.Playwright.Case, async: false
 
   alias PlaywrightEx.Frame
+  alias Relay.Accounts
+  alias Relay.Boards
 
   @moduletag :playwright
   @moduletag browser_context_opts: [viewport: %{width: 390, height: 844}]
+
+  # RE470: `/board` no longer seeds a board — a boardless user lands on the `/boards` first-run
+  # picker — so the dev user needs a board for `/dev/login` to land on one.
+  setup do
+    _board = Boards.get_or_create_default_board(Accounts.ensure_dev_user!())
+    :ok
+  end
 
   # Every visible header control that the switch must not sit on top of.
   @measure """

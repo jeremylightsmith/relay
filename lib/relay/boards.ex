@@ -159,6 +159,10 @@ defmodule Relay.Boards do
   (`Schemas.Release.seed_names/0`), the `Spec:Review`/`Spec:Done`/`Plan:Done`
   sub-lanes, and the three disabled default flows on first call. Idempotent
   per user. Prefers the user's first active (non-archived) board.
+
+  No request path calls this for a boardless user any more (RE470): `/board` sends them to
+  the `/boards` first-run picker instead of seeding a board. It remains a seeding helper
+  used by tests.
   """
   def get_or_create_default_board(%User{} = user) do
     board =

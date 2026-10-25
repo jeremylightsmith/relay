@@ -10,13 +10,17 @@ defmodule RelayWeb.Browser.NewBoardKeyTest do
 
   alias PlaywrightEx.Frame
   alias Relay.Accounts
+  alias Relay.Boards
 
   @moduletag :playwright
 
   @key "#template-picker-key"
 
+  # RE470: a boardless user's picker opens in first-run mode with the key prefilled, so the dev
+  # user needs a board for the New board picker to open blank.
   setup do
-    _user = Accounts.ensure_dev_user!()
+    user = Accounts.ensure_dev_user!()
+    _board = Boards.get_or_create_default_board(user)
     :ok
   end
 

@@ -19,6 +19,14 @@ defmodule RelayWeb.BoardsLive do
   sanitized with the same function. A name or key `Boards.create_board/2` rejects keeps the
   picker open with the changeset's messages inline. Opening or closing the picker resets them.
   Loads fresh on navigate (no realtime — out of scope).
+
+  RE470: a user with **zero active boards** (`first_run?`, derived from `@boards` alone and
+  recomputed wherever it reloads) gets the picker in first-run mode — forced open, titled "Make
+  your first board", no ✕ / Cancel / Escape / copy card, and a "Signed in as · Sign out" footer;
+  `close_template_picker` is a no-op. Its name is prefilled "<first name>'s board"
+  (`first_name/1`) with the key derived from it, and re-opening resets to that prefill. Behind it
+  a "No boards yet" tile (`#boards-empty`) replaces the grid; below the `drawer` breakpoint the
+  picker is hidden and `#first-run-mobile` asks the user to create the board on a computer.
   """
 
   use RelayWeb, :live_view
@@ -83,7 +91,46 @@ defmodule RelayWeb.BoardsLive do
           Each board is a shared workspace where you and Relay AI pass work between each other.
         </p>
 
+        <%!-- RE470 · mockup A: the first-run picker sits over this tile (≥720px only). --%>
         <div
+          :if={@boards == []}
+          id="boards-empty"
+          class="hidden min-h-[220px] flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-base-content/20 text-center drawer:flex"
+        >
+          <span class="text-[15px] font-semibold">No boards yet</span>
+          <span class="text-[13px] text-base-content/60">Your first board will show up here.</span>
+        </div>
+
+        <%!-- RE470 · mockup B: phones get no picker, just this screen. --%>
+        <div
+          :if={@first_run?}
+          id="first-run-mobile"
+          class="mx-auto flex max-w-[420px] flex-col items-center gap-4 px-6 pt-16 pb-10 text-center drawer:hidden"
+        >
+          <span class="flex size-[44px] items-center justify-center rounded-[12px] border-[1.5px] border-base-content/25 text-[22px] text-base-content/55">
+            +
+          </span>
+          <h2 class="text-[19px] font-semibold tracking-tight">
+            Create your first board on a computer
+          </h2>
+          <p class="max-w-[300px] text-[13.5px] leading-relaxed text-base-content/65">
+            Picking a template and connecting your repo happen on a computer. Sign in there with this account, and your board will show up here once it's made.
+          </p>
+          <div class="mt-2 w-full max-w-[320px] rounded-[12px] border border-base-300 bg-base-200 px-4 py-3 text-left">
+            <div class="text-[12px] font-semibold text-base-content/80">On your computer</div>
+            <ol class="mt-1.5 list-decimal pl-4 text-[12.5px] leading-[1.6] text-base-content/70">
+              <li>Sign in with this Google account</li>
+              <li>Name your board and pick a template</li>
+              <li>Follow the setup steps on the board</li>
+            </ol>
+          </div>
+          <span class="mt-4 text-[12px] text-base-content/50">
+            Signed in as {@current_scope.user.email}
+          </span>
+        </div>
+
+        <div
+          :if={@boards != []}
           class="flex flex-col gap-2.5 p-3 drawer:grid drawer:gap-4 drawer:p-0"
           style="grid-template-columns:repeat(auto-fill,minmax(324px,1fr));"
         >
@@ -196,22 +243,40 @@ defmodule RelayWeb.BoardsLive do
         </div>
       </div>
 
-      <TemplatePickerComponents.template_picker
-        :if={@picker_open?}
-        templates={@templates}
-        selected={@picker_template}
-        examples={@examples}
-        copy_sources={@copy_sources}
-        copy_from={@picker_copy_from}
-        copy_query={@picker_copy_query}
-        name={@picker_name}
-        key={@picker_key}
-        show_required={@picker_touched?}
-        errors={@picker_errors}
-      />
+      <.first_run_picker first_run?={@first_run?}>
+        <TemplatePickerComponents.template_picker
+          :if={@picker_open?}
+          templates={@templates}
+          selected={@picker_template}
+          examples={@examples}
+          copy_sources={@copy_sources}
+          copy_from={@picker_copy_from}
+          copy_query={@picker_copy_query}
+          name={@picker_name}
+          key={@picker_key}
+          show_required={@picker_touched?}
+          errors={@picker_errors}
+          first_run={@first_run?}
+          signed_in_as={@current_scope.user.email}
+        />
+      </.first_run_picker>
     </Layouts.app>
     """
   end
+
+  attr :first_run?, :boolean, required: true
+  slot :inner_block, required: true
+
+  # RE470: in first-run the picker sits in a `hidden drawer:block` wrapper, which hides the fixed
+  # panel below the drawer breakpoint where #first-run-mobile stands in (a fixed child of a
+  # `display:none` parent doesn't render). Keep it outside #boards-home. Otherwise no wrapper.
+  defp first_run_picker(%{first_run?: true} = assigns) do
+    ~H"""
+    <div id="first-run-picker" class="hidden drawer:block">{render_slot(@inner_block)}</div>
+    """
+  end
+
+  defp first_run_picker(assigns), do: ~H"{render_slot(@inner_block)}"
 
   @impl true
   def mount(_params, _session, socket) do
@@ -223,7 +288,7 @@ defmodule RelayWeb.BoardsLive do
     {:ok,
      socket
      |> assign(:page_title, "Your boards")
-     |> assign(:boards, boards)
+     |> assign_boards(boards)
      |> assign(:from, nil)
      |> assign(:templates, templates)
      |> assign(:examples, Boards.example_boards())
@@ -232,7 +297,7 @@ defmodule RelayWeb.BoardsLive do
      |> assign(:copy_sources, copy_sources)
      |> assign(:picker_copy_from, copy_sources |> List.first(%{}) |> Map.get(:slug))
      |> assign(:picker_copy_query, "")
-     |> reset_identity()}
+     |> open_first_run_or_reset()}
   end
 
   # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
@@ -251,8 +316,11 @@ defmodule RelayWeb.BoardsLive do
 
   @impl true
   def handle_event("open_template_picker", _params, socket) do
-    {:noreply, socket |> assign(:picker_open?, true) |> reset_identity()}
+    {:noreply, socket |> assign(:picker_open?, true) |> open_first_run_or_reset()}
   end
+
+  # RE470: first-run has no way out but Create or Sign out — a forged close changes nothing.
+  def handle_event("close_template_picker", _params, %{assigns: %{first_run?: true}} = socket), do: {:noreply, socket}
 
   def handle_event("close_template_picker", _params, socket) do
     {:noreply, socket |> assign(:picker_open?, false) |> reset_identity()}
@@ -307,13 +375,38 @@ defmodule RelayWeb.BoardsLive do
       board -> Boards.set_starred(user, slug, !board.starred?)
     end
 
-    {:noreply, assign(socket, :boards, load_boards(user))}
+    {:noreply, assign_boards(socket, load_boards(user))}
   end
 
-  defp reset_identity(socket) do
+  @doc """
+  The name a first-run board is prefilled with (RE470): the first whitespace-separated word of
+  the user's name; with no name, the email's local part cut at its first `.`, `+` or `_`. Case is
+  kept as typed.
+  """
+  @spec first_name(Schemas.User.t()) :: String.t()
+  def first_name(%Schemas.User{name: name, email: email}) do
+    case String.split(name || "") do
+      [first | _] -> first
+      [] -> email |> String.split("@") |> hd() |> String.split([".", "+", "_"]) |> hd()
+    end
+  end
+
+  # RE470: first-run is derived from the boards alone — never from a URL param.
+  defp assign_boards(socket, boards), do: assign(socket, boards: boards, first_run?: boards == [])
+
+  # First-run forces the picker open with the "<first name>'s board" prefill; otherwise the
+  # identity row just resets to blank.
+  defp open_first_run_or_reset(%{assigns: %{first_run?: true}} = socket) do
+    name = "#{first_name(socket.assigns.current_scope.user)}'s board"
+    socket |> assign(:picker_open?, true) |> reset_identity(name)
+  end
+
+  defp open_first_run_or_reset(socket), do: reset_identity(socket)
+
+  defp reset_identity(socket, name \\ "") do
     assign(socket,
-      picker_name: "",
-      picker_key: "",
+      picker_name: name,
+      picker_key: Board.key_from_name(name),
       picker_key_touched?: false,
       picker_touched?: false,
       picker_errors: %{}

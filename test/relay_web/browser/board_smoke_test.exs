@@ -8,7 +8,17 @@ defmodule RelayWeb.Browser.BoardSmokeTest do
   """
   use PhoenixTest.Playwright.Case, async: true
 
+  alias Relay.Accounts
+  alias Relay.Boards
+
   @moduletag :playwright
+
+  # RE470: `/board` no longer seeds a board — a boardless user lands on the `/boards` first-run
+  # picker — so the dev user needs a board for `/dev/login` to land on one.
+  setup do
+    _board = Boards.get_or_create_default_board(Accounts.ensure_dev_user!())
+    :ok
+  end
 
   test "signs in and renders the board with a seeded stage", %{conn: conn} do
     conn

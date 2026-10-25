@@ -109,6 +109,20 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
             key: "",
             show_required: true
           }
+        },
+        # RE470, card mockup "A — first-run picker over an empty Your boards, no way out but
+        # Create or Sign out".
+        %Variation{
+          id: :first_run,
+          description: "First run — Make your first board, no ✕/Cancel/copy card, Sign out in the footer",
+          attributes: %{
+            templates: templates,
+            selected: "bare-minimum",
+            first_run: true,
+            name: "Jeremy's board",
+            key: "JE",
+            signed_in_as: "jeremy@example.com"
+          }
         }
       ]
   end

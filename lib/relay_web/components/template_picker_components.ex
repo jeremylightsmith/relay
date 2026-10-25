@@ -23,7 +23,7 @@ defmodule RelayWeb.TemplatePickerComponents do
     * `"select_template"` — the form's `phx-change`, `%{"template" => slug_or_copy, "name" =>
       name, "key" => key}` plus, while the copy card is selected, `"copy_query"` and `"copy_from"`
     * `"create_from_template"` — the form's `phx-submit`, the same fields
-    * `"close_template_picker"` — Cancel, ✕, a scrim click or Escape
+    * `"close_template_picker"` — Cancel, ✕, a scrim click or Escape; never emitted in first-run
 
   Under each card's `flex-1` spacer, a template with a seeded example board (`examples`, from
   `Relay.Boards.example_boards/0`) links to it at `/examples/<slug>` in a new window (RE444).
@@ -41,10 +41,16 @@ defmodule RelayWeb.TemplatePickerComponents do
   `<label for="template-radio-copy">`, so clicks in the search box or on a row never touch the
   `template` radio.
 
+  **First-run (RE470)** (card mockup "A — first-run picker over an empty Your boards, no way out
+  but Create or Sign out"): with `first_run` set the picker titles itself "Make your first
+  board", drops the copy card and the "or copy a board" wording, and has no way out but Create or
+  Sign out — no ✕, no Cancel, no scrim click, no Escape. Its footer reads "Signed in as
+  <`signed_in_as`> · Sign out" (a `DELETE /logout` link) left of Create.
+
   Story: `storybook/template_picker_components/template_picker.story.exs` — one variation per
   template selection, `:with_examples`, the copy variations `:copy_selected` and
-  `:copy_no_boards`, and the identity variations `:identity_empty`, `:identity_filled`,
-  `:identity_incomplete` and `:copy_identity_required`.
+  `:copy_no_boards`, the identity variations `:identity_empty`, `:identity_filled`,
+  `:identity_incomplete` and `:copy_identity_required`, and `:first_run`.
   """
 
   use RelayWeb, :html
@@ -89,6 +95,12 @@ defmodule RelayWeb.TemplatePickerComponents do
     default: %{},
     doc: "server changeset messages, `%{name: [String.t()], key: [String.t()]}`"
 
+  attr :first_run, :boolean,
+    default: false,
+    doc: "first-run mode (RE470): no copy card and no way out but Create or Sign out"
+
+  attr :signed_in_as, :string, default: nil, doc: "the signed-in user's email, for the first-run footer"
+
   def template_picker(assigns) do
     copy? = assigns.selected == @copy_option
     source = Enum.find(assigns.copy_sources, &(&1.slug == assigns.copy_from))
@@ -104,12 +116,15 @@ defmodule RelayWeb.TemplatePickerComponents do
         name_hint: name_hint(name, assigns.show_required, assigns.errors),
         key_hint: key_hint(to_string(assigns.key), key_complete?, assigns.show_required, assigns.errors),
         create_label: create_label(copy?, source, name),
-        create_disabled?: name == "" or not key_complete? or (copy? and is_nil(source))
+        create_disabled?: name == "" or not key_complete? or (copy? and is_nil(source)),
+        # nil drops the attribute, so first-run renders no way to close the picker.
+        close_event: if(!assigns.first_run, do: "close_template_picker"),
+        close_key: if(!assigns.first_run, do: "escape")
       )
 
     ~H"""
-    <div id={@id} phx-window-keydown="close_template_picker" phx-key="escape">
-      <.modal_scrim phx-click="close_template_picker" />
+    <div id={@id} phx-window-keydown={@close_event} phx-key={@close_key}>
+      <.modal_scrim phx-click={@close_event} />
       <div class="fixed inset-x-0 top-0 z-[51] flex max-h-screen justify-center overflow-y-auto p-0 sm:p-6">
         <div
           id={"#{@id}-panel"}
@@ -120,15 +135,19 @@ defmodule RelayWeb.TemplatePickerComponents do
         >
           <div class="flex items-start gap-3 px-5 pt-5 pb-3">
             <div class="flex flex-col gap-1">
-              <h2 id={"#{@id}-title"} class="font-semibold tracking-tight text-[20px]">New board</h2>
+              <h2 id={"#{@id}-title"} class="font-semibold tracking-tight text-[20px]">
+                {if @first_run, do: "Make your first board", else: "New board"}
+              </h2>
               <p class="text-[13.5px] text-base-content/55 max-w-[640px]">
-                Name it, pick its card key, then start from a template or copy a board. You get its stages and flows. Every prompt lives inside its flow, so it works in any repo with no
+                Name it, pick its card key, then start from a template{if !@first_run,
+                  do: " or copy a board"}. You get its stages and flows. Every prompt lives inside its flow, so it works in any repo with no
                 <span class="font-mono">.claude/</span>
                 setup.
               </p>
             </div>
             <span class="flex-1"></span>
             <button
+              :if={!@first_run}
               type="button"
               id={"#{@id}-close"}
               phx-click="close_template_picker"
@@ -172,6 +191,7 @@ defmodule RelayWeb.TemplatePickerComponents do
                 example={Map.get(@examples, t.slug)}
               />
               <.copy_card
+                :if={!@first_run}
                 span={md_columns(length(@templates)).span}
                 selected?={@copy?}
                 sources={@copy_sources}
@@ -181,8 +201,20 @@ defmodule RelayWeb.TemplatePickerComponents do
             </div>
 
             <div class="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-base-300 bg-base-100 sm:rounded-b-[18px]">
+              <span :if={@first_run} class="text-[12px] text-base-content/55">
+                Signed in as {@signed_in_as} ·
+                <.link
+                  href={~p"/logout"}
+                  method="delete"
+                  id={"#{@id}-sign-out"}
+                  class="link link-hover"
+                >
+                  Sign out
+                </.link>
+              </span>
               <span class="flex-1"></span>
               <button
+                :if={!@first_run}
                 type="button"
                 id={"#{@id}-cancel"}
                 phx-click="close_template_picker"

@@ -339,4 +339,90 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
     assert "text-error" in classes(doc, "#template-picker-name-hint")
     assert "input-error" in classes(doc, "#template-picker-name")
   end
+
+  # RE470 — first-run mode (card mockup "A — first-run picker over an empty Your boards, no way
+  # out but Create or Sign out").
+
+  defp first_run_picker do
+    identity_picker(first_run: true, signed_in_as: "jeremy@example.com", name: "Jeremy's board", key: "JE")
+  end
+
+  test "RE470 1. first-run titles the picker Make your first board and drops the copy wording" do
+    doc = first_run_picker()
+
+    assert text(doc, "#template-picker-title") == "Make your first board"
+    assert "text-[20px]" in classes(doc, "#template-picker-title")
+
+    subtitle = squish(doc, "#template-picker-title + p")
+    refute subtitle =~ "or copy a board"
+    assert subtitle =~ "then start from a template. You get its stages and flows."
+
+    assert subtitle ==
+             "Name it, pick its card key, then start from a template. You get its stages and flows. " <>
+               "Every prompt lives inside its flow, so it works in any repo with no .claude/ setup."
+  end
+
+  test "RE470 2. first-run has no close, no cancel and no copy card" do
+    doc = first_run_picker()
+
+    assert doc |> LazyHTML.query("#template-picker-close") |> Enum.count() == 0
+    assert doc |> LazyHTML.query("#template-picker-cancel") |> Enum.count() == 0
+    assert doc |> LazyHTML.query("#template-card-copy") |> Enum.count() == 0
+  end
+
+  test "RE470 3. first-run neither Escape nor a scrim click closes the picker" do
+    doc = first_run_picker()
+
+    assert present?(doc, "#template-picker")
+    assert present?(doc, "#template-picker:not([phx-window-keydown]):not([phx-key])")
+    assert present?(doc, "#template-picker .modal-scrim")
+    assert present?(doc, "#template-picker .modal-scrim:not([phx-click])")
+    assert attr(doc, "#template-picker .modal-scrim", "class") == ["modal-scrim"]
+  end
+
+  test "RE470 4. first-run footer reads Signed in as <email> · Sign out, linking DELETE /logout" do
+    doc = first_run_picker()
+
+    assert attr(doc, "#template-picker-sign-out", "href") == ["/logout"]
+    assert attr(doc, "#template-picker-sign-out", "data-method") == ["delete"]
+    assert text(doc, "#template-picker-sign-out") == "Sign out"
+    assert ~w(link link-hover) -- classes(doc, "#template-picker-sign-out") == []
+
+    span = LazyHTML.query(doc, "span:has(> #template-picker-sign-out)")
+    assert Enum.count(span) == 1
+    assert span |> LazyHTML.text() |> String.split() |> Enum.join(" ") == "Signed in as jeremy@example.com · Sign out"
+
+    span_classes = span |> LazyHTML.attribute("class") |> hd() |> String.split()
+    assert ~w(text-[12px] text-base-content/55) -- span_classes == []
+
+    # Left of the spacer, then only Create.
+    assert present?(doc, "span:has(> #template-picker-sign-out) + span.flex-1 + #template-picker-create")
+  end
+
+  test "RE470 5. first-run keeps the identity row and Create <name>" do
+    doc = first_run_picker()
+
+    assert text(doc, "#template-picker-create .pending-idle") == "Create Jeremy's board"
+    assert attr(doc, "#template-picker-name", "value") == ["Jeremy's board"]
+    assert attr(doc, "#template-picker-key", "value") == ["JE"]
+    assert squish(doc, "#template-picker-key-preview") == "Cards will be JE1, JE2, JE3…"
+  end
+
+  test "RE470 6. by default the picker keeps New board, its ways out and the copy card, and no sign-out" do
+    doc = identity_picker([])
+
+    assert text(doc, "#template-picker-title") == "New board"
+    assert present?(doc, "#template-picker-close")
+    assert present?(doc, "#template-picker-cancel")
+    assert present?(doc, "#template-card-copy")
+    assert present?(doc, ~s(#template-picker[phx-window-keydown="close_template_picker"]))
+    assert present?(doc, ~s(#template-picker .modal-scrim[phx-click="close_template_picker"]))
+    refute present?(doc, "#template-picker-sign-out")
+  end
+
+  test "RE470 7. by default the subtitle still offers to copy a board" do
+    doc = identity_picker([])
+
+    assert squish(doc, "#template-picker-title + p") =~ "start from a template or copy a board"
+  end
 end
