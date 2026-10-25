@@ -1,7 +1,7 @@
 defmodule RelayWeb.PlanPaused do
   @moduledoc """
-  RE460 — the one owner of the `plan_paused` refusal: a board whose owner's plan is paused
-  (`Relay.Billing.board_paused?/1`) answers **402** with this code and message on every board-key
+  RE460, RE469 — the one owner of the `plan_paused` refusal: a board whose owner is held, or that
+  is read-only on Free (`Relay.Billing.board_paused?/1`), answers **402** with this code and message on every board-key
   `/api/*` request (`RelayWeb.Plugs.RequireActivePlan`) and on the `/api/all` writes
   (`RelayWeb.Api.FallbackController`). `./relay` mirrors the code as `PLAN_PAUSED_CODE`, pinned by
   `test/fixtures/runner_contract.json`'s `claim_refused.plan_paused`.
@@ -10,7 +10,7 @@ defmodule RelayWeb.PlanPaused do
   import Plug.Conn
 
   @code "plan_paused"
-  @message "This board's plan is paused."
+  @message "This board is read-only: its owner's plan is paused or on Free. See /account/billing."
 
   @doc "The refusal's error code."
   @spec code() :: String.t()

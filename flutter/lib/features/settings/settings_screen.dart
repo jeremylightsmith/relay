@@ -217,11 +217,11 @@ class _AccountSection extends StatelessWidget {
   }
 
   /// The mockup's badge tones: success green, blocked amber, the human blue for
-  /// a trial, and muted for a cancelled plan.
+  /// Free, and muted for a cancelled plan.
   Color _tone(ColorScheme scheme) => switch (billing.standing!) {
     PlanStanding.active || PlanStanding.comped => RelayTheme.relayDone,
     PlanStanding.pastDue || PlanStanding.paused => RelayTheme.relayBlocked,
-    PlanStanding.trial => scheme.primary,
+    PlanStanding.free => scheme.primary,
     PlanStanding.cancelled => scheme.onSurfaceVariant,
   };
 }

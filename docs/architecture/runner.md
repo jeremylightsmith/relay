@@ -644,9 +644,13 @@ that stays server-side.
   at a job boundary, so being refused is normally self-healing. The fail-stop below is unchanged
   and remains the floor: when auto-update is off, refused, or does not take, the runner still
   stops loudly.
-- **Paused plan (RE460).** When billing is on and the board's owner's plan is paused, every
+- **Paused plan or read-only on Free (RE460, RE469).** When billing is on and
+  `Relay.Billing.board_paused?/1` is true — the board's owner is held, or the owner is on Free
+  and this board is not their one editable board
+  ([ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)) — every
   board-key `/api/*` call — claim and heartbeat included — is refused **402 `plan_paused`**
-  (`RelayWeb.PlanPaused`, sent by `RelayWeb.Plugs.RequireActivePlan`), and the board's
+  (`RelayWeb.PlanPaused`, sent by `RelayWeb.Plugs.RequireActivePlan`; the message is
+  `RelayWeb.PlanPaused.message/0`, which names both causes), and the board's
   `Scheduler.Server` dispatches nothing. `./relay` mirrors the code as `PLAN_PAUSED_CODE` (pinned
   by `claim_refused.plan_paused` in the contract fixture) and never retries the 402. A one-shot
   command exits 1 with `relay: This board's plan is paused. Manage billing at

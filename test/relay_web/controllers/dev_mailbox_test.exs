@@ -19,7 +19,7 @@ defmodule RelayWeb.DevMailboxTest do
   end
 
   test "GET /dev/mailbox renders a delivered billing email", %{conn: conn} do
-    email = Notifier.paused_email(build(:user, email: "owner@example.com"))
+    email = Notifier.dropped_to_free_email(build(:user, email: "owner@example.com"))
     {:ok, _} = Swoosh.Adapters.Local.deliver(email, [])
 
     # The index redirects to the newest message, whose page lists every recipient and sender.

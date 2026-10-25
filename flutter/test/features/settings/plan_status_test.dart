@@ -6,11 +6,29 @@ import 'package:relay_mobile/features/settings/plan_status.dart';
 String? labelOf(Object? json) => PlanStatus.fromJson(json)!.label;
 
 void main() {
-  test('trial with a through date ends on it', () {
+  test('free is just "Free", with no date', () {
     expect(
-      labelOf({'enabled': true, 'standing': 'trial', 'through': '2026-04-03'}),
-      'Trial · ends Apr 3',
+      labelOf({'enabled': true, 'standing': 'free', 'through': null}),
+      'Free',
     );
+  });
+
+  test('free ignores a through date if one is sent', () {
+    expect(
+      labelOf({'enabled': true, 'standing': 'free', 'through': '2026-04-03'}),
+      'Free',
+    );
+  });
+
+  test('an older server\'s trial standing is unknown and invisible', () {
+    final status = PlanStatus.fromJson({
+      'enabled': true,
+      'standing': 'trial',
+      'through': '2026-04-03',
+    })!;
+    expect(status.standing, isNull);
+    expect(status.visible, isFalse);
+    expect(status.label, isNull);
   });
 
   test('active with a through date runs through it', () {
@@ -54,13 +72,6 @@ void main() {
     expect(
       labelOf({'enabled': true, 'standing': 'paused', 'through': null}),
       'Paused',
-    );
-  });
-
-  test('trial with no through date is just "Trial"', () {
-    expect(
-      labelOf({'enabled': true, 'standing': 'trial', 'through': null}),
-      'Trial',
     );
   });
 
@@ -108,12 +119,13 @@ void main() {
   });
 
   test('fromWire maps every wire name, and nothing else', () {
-    expect(PlanStanding.fromWire('trial'), PlanStanding.trial);
+    expect(PlanStanding.fromWire('free'), PlanStanding.free);
     expect(PlanStanding.fromWire('active'), PlanStanding.active);
     expect(PlanStanding.fromWire('past_due'), PlanStanding.pastDue);
     expect(PlanStanding.fromWire('cancelled'), PlanStanding.cancelled);
     expect(PlanStanding.fromWire('comped'), PlanStanding.comped);
     expect(PlanStanding.fromWire('paused'), PlanStanding.paused);
+    expect(PlanStanding.fromWire('trial'), isNull);
     expect(PlanStanding.fromWire('pastDue'), isNull);
     expect(PlanStanding.fromWire(null), isNull);
   });

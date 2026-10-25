@@ -10,6 +10,21 @@ defmodule Relay.Billing.ChargingTest do
 
   @today ~D[2026-06-10]
 
+  defmodule RaisingPayments do
+    @moduledoc false
+    @behaviour Relay.Billing.Payments
+
+    @impl true
+    defdelegate create_setup_checkout(customer_id, user, return_url), to: Local
+    @impl true
+    defdelegate fetch_setup(id), to: Local
+    @impl true
+    defdelegate find_payment(customer_id, payment_intent_id, attempt), to: Local
+
+    @impl true
+    def charge(_customer_id, _payment_method_id, _amount_cents, _key, _meta), do: raise("charge/5 must not be called")
+  end
+
   setup do
     Process.put(:billing_enabled, true)
     :ok
@@ -39,12 +54,13 @@ defmodule Relay.Billing.ChargingTest do
   end
 
   describe "complete_setup/3" do
-    test "a trial user saves the card, is not charged, and the change is broadcast" do
+    test "a Free never-paid user saves the card and pays a first month from today, broadcast" do
       user = insert(:user)
-      account = account_for(user, %{trial_ends_on: Date.add(@today, 10)})
+      account = account_for(user, %{})
+      assert Billing.standing(user, @today) == :free
       :ok = Billing.subscribe(user.id)
 
-      assert {:ok, %{account: saved, charged: :none}} = Billing.complete_setup("local_4242_#{user.id}", user.id, @today)
+      assert {:ok, %{account: saved, charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, @today)
 
       assert %BillingAccount{
                card_brand: "visa",
@@ -55,16 +71,18 @@ defmodule Relay.Billing.ChargingTest do
              } = saved
 
       assert saved.stripe_customer_id == "cus_local_#{user.id}"
-      assert reload(account).card_last4 == "4242"
-      assert attempts(account) == []
+      {@today, last} = Periods.period(@today, @today.day)
+      assert %{card_last4: "4242", paid_through: ^last, billing_day: 10} = reload(account)
+      assert [%{status: :succeeded, kind: :returned, source: :card_saved, period_start: @today}] = attempts(account)
+      assert Billing.standing(user, @today) == :active
       user_id = user.id
       assert_receive {:billing_changed, ^user_id}
     end
 
-    test "a paused (unpaid) account pays a fresh month from today" do
+    test "a lapsed (Free) account pays a fresh month from today" do
       user = insert(:user)
       account = account_for(user, %{paid_through: Date.add(@today, -20), billing_day: 3})
-      assert Billing.standing(user, @today) == {:paused, :unpaid}
+      assert Billing.standing(user, @today) == :free
 
       assert {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, @today)
 
@@ -86,31 +104,32 @@ defmodule Relay.Billing.ChargingTest do
       assert reload(account).paid_through == ~D[2026-07-09]
     end
 
-    test "a paused (cancelled) account pays and its cancellation is cleared" do
+    test "a lapsed cancelled account pays a fresh month and its cancellation is cleared" do
       user = insert(:user)
 
       account =
         account_for(user, %{
-          paid_through: ~D[2026-05-31],
+          paid_through: Date.add(@today, -10),
           billing_day: 1,
-          cancelled_on: ~D[2026-05-15],
-          access_until: ~D[2026-05-31]
+          cancelled_on: Date.add(@today, -25),
+          access_until: Date.add(@today, -10)
         })
 
-      assert Billing.standing(user, @today) == {:paused, :cancelled}
+      assert Billing.standing(user, @today) == :free
 
       assert {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, @today)
-      assert %{cancelled_on: nil, access_until: nil} = reload(account)
+      assert [%{status: :succeeded, kind: :returned, period_start: @today, billing_day: 10}] = attempts(account)
+      assert %{cancelled_on: nil, access_until: nil, billing_day: 10} = reload(account)
       assert Billing.standing(user, @today) == :active
     end
 
-    test "a declined card leaves a paused account paused" do
+    test "a declined card leaves a Free account on Free" do
       user = insert(:user)
       account = account_for(user, %{paid_through: Date.add(@today, -20), billing_day: 3})
 
       assert {:ok, %{charged: :declined}} = Billing.complete_setup("local_0341_#{user.id}", user.id, @today)
       assert [%{status: :failed, decline_reason: "insufficient funds"}] = attempts(account)
-      assert Billing.standing(user, @today) == {:paused, :unpaid}
+      assert Billing.standing(user, @today) == :free
     end
 
     test "another user's setup is refused and nothing changes" do
@@ -161,18 +180,74 @@ defmodule Relay.Billing.ChargingTest do
       assert Billing.complete_setup("nope", user.id, @today) == {:error, :not_found}
     end
 
-    test "a user with no account yet gets one holding the card" do
+    test "a user with no account yet gets one holding the card, and is upgraded" do
       user = insert(:user)
 
-      assert {:ok, %{account: %{card_last4: "4242"}, charged: :none}} =
+      assert {:ok, %{account: %{card_last4: "4242"}, charged: :paid}} =
                Billing.complete_setup("local_4242_#{user.id}", nil, @today)
+    end
+  end
+
+  describe "upgrade_without_card/2" do
+    setup do
+      Process.put(:billing_payments, RaisingPayments)
+      :ok
+    end
+
+    test "a Free account holding a 100% code upgrades on a $0 month that never reaches Stripe" do
+      insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
+      user = insert(:user)
+      {:ok, account} = Billing.redeem_code(user, "FRIENDS", @today)
+      user_id = user.id
+      :ok = Billing.subscribe(user_id)
+
+      assert Billing.upgrade_without_card(user, @today) == {:ok, :paid}
+
+      assert [
+               %{
+                 status: :succeeded,
+                 amount_cents: 0,
+                 source: :upgrade,
+                 kind: :returned,
+                 period_start: @today,
+                 stripe_payment_intent_id: nil
+               }
+             ] = attempts(account)
+
+      {@today, last} = Periods.period(@today, @today.day)
+      assert %{paid_through: ^last, billing_day: 10, promo_months_left: 1} = reload(account)
+      assert Billing.standing(user, @today) == :active
+      assert_receive {:billing_changed, ^user_id}
+    end
+
+    test "a Free account at full price needs checkout and is not charged" do
+      user = insert(:user)
+      account = account_for(user, %{})
+
+      assert Billing.upgrade_without_card(user, @today) == {:error, :checkout_required}
+      assert attempts(account) == []
+    end
+
+    test "an active account needs checkout, even holding a 100% code" do
+      promo_code = insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
+      user = insert(:user)
+
+      account =
+        account_for(user, %{paid_through: Date.add(@today, 10), promo_code_id: promo_code.id, promo_months_left: 2})
+
+      assert Billing.upgrade_without_card(user, @today) == {:error, :checkout_required}
+      assert attempts(account) == []
+    end
+
+    test "a user with no account at full price needs checkout" do
+      assert Billing.upgrade_without_card(insert(:user), @today) == {:error, :checkout_required}
     end
   end
 
   describe "handle_webhook_event/1" do
     test "a setup-mode checkout.session.completed saves the card" do
       user = insert(:user)
-      account_for(user, %{trial_ends_on: Date.add(Date.utc_today(), 10)})
+      account_for(user, %{})
 
       event = %{
         "type" => "checkout.session.completed",
@@ -185,7 +260,7 @@ defmodule Relay.Billing.ChargingTest do
 
     test "setup_intent.succeeded saves the card" do
       user = insert(:user)
-      account_for(user, %{trial_ends_on: Date.add(Date.utc_today(), 10)})
+      account_for(user, %{})
       event = %{"type" => "setup_intent.succeeded", "data" => %{"object" => %{"id" => "local_0341_#{user.id}"}}}
 
       assert Billing.handle_webhook_event(event) == :ok
@@ -194,7 +269,7 @@ defmodule Relay.Billing.ChargingTest do
 
     test "a payment-mode session or any other event is left alone" do
       user = insert(:user)
-      account_for(user, %{trial_ends_on: Date.add(Date.utc_today(), 10)})
+      account_for(user, %{})
       object = %{"id" => "local_4242_#{user.id}", "mode" => "payment"}
 
       assert Billing.handle_webhook_event(%{"type" => "checkout.session.completed", "data" => %{"object" => object}}) ==
@@ -270,8 +345,8 @@ defmodule Relay.Billing.ChargingTest do
       assert summary.renews_on == ~D[2026-05-04]
       assert summary.cancellable? == true
       assert summary.resumable? == false
-      assert summary.trial_days_left == nil
-      assert summary.first_charge_on == nil
+      assert summary.free == nil
+      assert summary.upgrade_free? == false
     end
 
     test "payments are newest first" do
@@ -295,45 +370,63 @@ defmodule Relay.Billing.ChargingTest do
       assert Enum.map(Billing.summary(user, ~D[2026-05-10]).payments, & &1.id) == [b.id, a.id]
     end
 
-    test "a trial: days left, first charge and the price" do
+    test "a Free account: its boards against the limit, the full price and no trial facts" do
       user = insert(:user)
       account_for(user, %{trial_ends_on: ~D[2026-04-03]})
+      board = insert(:board, owner: user, name: "Only")
 
       summary = Billing.summary(user, ~D[2026-03-23])
 
-      assert summary.standing == :trial
-      assert summary.trial_ends_on == ~D[2026-04-03]
-      assert summary.trial_days_left == 11
-      assert summary.first_charge_on == ~D[2026-04-04]
+      assert summary.standing == :free
+
+      assert summary.free == %{
+               limit: 1,
+               editable_board_id: board.id,
+               over_limit?: false,
+               boards: [%{id: board.id, slug: board.slug, name: "Only", editable?: true}]
+             }
+
+      assert summary.upgrade_free? == false
       assert summary.amount_cents == 2000
+      assert summary.full_price_cents == 2000
+      assert summary.promo == nil
       assert summary.card == nil
       assert summary.payments == []
       assert summary.renews_on == nil
+      assert summary.cancellable? == false
+      for key <- [:trial_ends_on, :trial_days_left, :first_charge_on], do: refute(Map.has_key?(summary, key))
     end
 
-    test "a trial with no code previews the full price and no promo" do
+    test "a code redeemed on Free previews the discounted upgrade and when full price starts" do
+      today = ~D[2026-03-23]
       user = insert(:user)
-      account_for(user, %{trial_ends_on: ~D[2026-04-03]})
-
-      summary = Billing.summary(user, ~D[2026-03-23])
-
-      assert summary.promo == nil
-      assert summary.amount_cents == 2000
-      assert summary.full_price_cents == 2000
-    end
-
-    test "a trial holding a code previews the discounted first charge and when full price starts" do
-      user = insert(:user)
-      account_for(user, %{trial_ends_on: ~D[2026-04-03]})
       insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
-      {:ok, _account} = Billing.redeem_code(user, "RELAYCONF", ~D[2026-03-20])
+      {:ok, _account} = Billing.redeem_code(user, "RELAYCONF", today)
 
-      summary = Billing.summary(user, ~D[2026-03-23])
+      summary = Billing.summary(user, today)
 
       assert summary.amount_cents == 1000
-      assert summary.full_price_cents == 2000
-      assert summary.first_charge_on == ~D[2026-04-04]
-      assert summary.promo == %{code: "RELAYCONF", percent_off: 50, months_left: 3, full_price_from: ~D[2026-07-04]}
+      assert summary.upgrade_free? == false
+
+      assert summary.promo == %{
+               code: "RELAYCONF",
+               percent_off: 50,
+               months_left: 3,
+               full_price_from: Periods.renewal_after(today, today.day, 3)
+             }
+
+      assert summary.promo.full_price_from == ~D[2026-06-23]
+    end
+
+    test "a 100% code on Free makes the upgrade free" do
+      user = insert(:user)
+      insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
+      {:ok, _account} = Billing.redeem_code(user, "FRIENDS", ~D[2026-03-23])
+
+      summary = Billing.summary(user, ~D[2026-03-23])
+
+      assert summary.amount_cents == 0
+      assert summary.upgrade_free? == true
     end
 
     test "an active account holding a code previews its discounted renewal" do
@@ -390,11 +483,11 @@ defmodule Relay.Billing.ChargingTest do
       assert summary.cancellable? == false
     end
 
-    test "a user with no account is a trial with nothing yet" do
+    test "a user with no account is on Free with nothing yet" do
       summary = Billing.summary(insert(:user), ~D[2026-03-23])
 
-      assert %{standing: :trial, trial_ends_on: nil, trial_days_left: nil, first_charge_on: nil} = summary
-      assert %{card: nil, payments: []} = summary
+      assert %{standing: :free, card: nil, payments: [], promo: nil, upgrade_free?: false} = summary
+      assert summary.free == %{limit: 1, boards: [], editable_board_id: nil, over_limit?: false}
     end
   end
 

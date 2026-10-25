@@ -210,7 +210,7 @@ void main() {
   });
 
   for (final (standing, through, label) in [
-    ('trial', '2026-04-03', 'Trial · ends Apr 3'),
+    ('free', null, 'Free'),
     ('past_due', null, 'Past due'),
     ('cancelled', '2026-05-03', 'Cancelled · through May 3'),
     ('comped', null, 'Comped'),
@@ -261,7 +261,7 @@ void main() {
   for (final (standing, tone) in <(String, Color Function(ColorScheme))>[
     ('comped', (_) => RelayTheme.relayDone),
     ('past_due', (_) => RelayTheme.relayBlocked),
-    ('trial', (s) => s.primary),
+    ('free', (s) => s.primary),
     ('cancelled', (s) => s.onSurfaceVariant),
   ]) {
     testWidgets('$standing gets its mockup tone', (tester) async {

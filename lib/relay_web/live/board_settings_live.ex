@@ -1254,16 +1254,20 @@ defmodule RelayWeb.BoardSettingsLive do
   def mount(%{"slug" => slug}, _session, socket) do
     board = Boards.get_board!(socket.assigns.current_scope.user, slug)
 
-    # RE460 — a paused owner's board has no Board settings (the board hides the link too).
+    # RE460 — a paused owner's board has no Board settings (the board hides the link too); nor,
+    # RE469, does a board that is read-only on Free.
     if Billing.board_paused?(board) do
       {:ok,
        socket
-       |> put_flash(:error, "This board's plan is paused.")
+       |> put_flash(:error, read_only_flash(Billing.board_notice(board)))
        |> push_navigate(to: ~p"/board/#{board.slug}")}
     else
       mount_settings(socket, board)
     end
   end
+
+  defp read_only_flash({:free_read_only, _editable_name}), do: "This board is read-only on Free."
+  defp read_only_flash(_paused), do: "This board's plan is paused."
 
   defp mount_settings(socket, board) do
     if connected?(socket), do: Events.subscribe(board.id)
@@ -1463,8 +1467,10 @@ defmodule RelayWeb.BoardSettingsLive do
     {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 
+  # RE469 — archiving frees a Free slot, so the owner's open board, Boards and Billing pages re-derive.
   def handle_event("archive_board", _params, socket) do
-    {:ok, _board} = Boards.archive_board(socket.assigns.board)
+    {:ok, board} = Boards.archive_board(socket.assigns.board)
+    _ = Billing.broadcast_changed(board.owner_id)
 
     {:noreply,
      socket

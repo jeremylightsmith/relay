@@ -1,8 +1,8 @@
 defmodule Relay.Billing.Charging do
   @moduledoc """
   The one charging path (RE460, ADR 0012), called only from `Relay.Billing`: the clock's
-  first charges and renewals, a card being saved, the superadmin's retry (`admin_retry/2`,
-  RE463), and resolving answers we never got. A port of
+  renewals, a card being saved (a Free account upgrades), the $0 upgrade (`upgrade/2`, RE469),
+  the superadmin's retry (`admin_retry/2`, RE463), and resolving answers we never got. A port of
   Throughway's `through_attempt` lifecycle — three steps, Stripe outside any transaction:
 
     1. **open** (tx 1): lock the account row (`FOR UPDATE`), re-derive the decision on the
@@ -98,7 +98,8 @@ defmodule Relay.Billing.Charging do
 
   @doc """
   Stores `setup`'s customer and card on the user's account, then charges as the card-saved
-  decision says. The account must exist.
+  decision says: a past-due account renews, a Free one pays a fresh month from `today`. The
+  account must exist.
   """
   @spec save_card(Payments.setup(), Date.t()) :: {:ok, %{account: BillingAccount.t(), charged: outcome()}}
   def save_card(setup, %Date{} = today) do
@@ -122,9 +123,25 @@ defmodule Relay.Billing.Charging do
   end
 
   @doc """
+  The $0 upgrade (RE469) on account `account_id`: a Free account whose next charge is $0 (a 100%
+  promo code, so no card is needed) pays a fresh month from `today`, recorded as an `:upgrade`
+  `:returned` attempt that never reaches Stripe. `:none` for any other standing, a priced next
+  charge, or an open attempt.
+  """
+  @spec upgrade(pos_integer(), Date.t()) :: outcome()
+  def upgrade(account_id, %Date{} = today), do: through_attempt(account_id, &upgrade_decision(&1, today))
+
+  defp upgrade_decision(account, today) do
+    if Standing.of(account, facts(account), today) == :free and not open_attempt?(account.id) and
+         next_charge_free?(account),
+       do: fresh_month(:returned, :upgrade, today),
+       else: :none
+  end
+
+  @doc """
   The superadmin's "Retry charge now" (RE463) on account `account_id`: the card-saved rule —
-  a past-due account renews, a paused one (any pause but a hold) pays a fresh month from
-  `today` — recorded as an `:admin` attempt. `:none` when an attempt is open or there is no card.
+  a past-due account renews, a Free one pays a fresh month from `today` — recorded as an
+  `:admin` attempt. `:none` when an attempt is open or there is no card.
   An `:admin` decline sends no email and never spends the clock's grace-day retry.
   """
   @spec admin_retry(pos_integer(), Date.t()) :: outcome()
@@ -175,14 +192,15 @@ defmodule Relay.Billing.Charging do
 
   defp found_answer({:error, reason}, attempt), do: {:unknown, inspect(reason), attempt.stripe_payment_intent_id}
 
-  # The clock decision, on the locked row: charge only a card on file (or a $0 month, which needs
-  # none), never a held, comped, cancelled or paused account, and never one holding an open attempt.
+  # The clock decision, on the locked row: renew only a paid account with a card on file (or a $0
+  # month, which needs none), never a held, comped or cancelled one, never a never-paid (Free) one
+  # — it pays by upgrading — and never one holding an open attempt.
   defp clock_decision(account, today, final_pass?) do
     cond do
       not chargeable?(account) -> :none
+      is_nil(account.paid_through) -> :none
       open_attempt?(account.id) -> :none
       Standing.paused?(Standing.of(account, facts(account), today)) -> :none
-      is_nil(account.paid_through) -> trial_end_decision(account, today)
       today == Periods.next_renewal(account.paid_through) -> grace_day_decision(account, final_pass?)
       true -> :none
     end
@@ -192,15 +210,6 @@ defmodule Relay.Billing.Charging do
     do:
       (Standing.card_on_file?(account) or next_charge_free?(account)) and is_nil(account.held_on) and not account.comped and
         is_nil(account.cancelled_on)
-
-  # Never paid: the day after the trial, unless its first charge was already declined.
-  defp trial_end_decision(%{trial_ends_on: %Date{} = ends_on} = account, today) do
-    if Date.after?(today, ends_on) and not facts(account).first_charge_declined?,
-      do: fresh_month(:trial_end, :clock, today),
-      else: :none
-  end
-
-  defp trial_end_decision(_account, _today), do: :none
 
   # The grace day: the renewal, once; then one retry on the day's final pass.
   defp grace_day_decision(account, final_pass?) do
@@ -228,9 +237,10 @@ defmodule Relay.Billing.Charging do
     else
       case Standing.of(account, facts(account), today) do
         {:past_due, _until} -> renewal(account, source)
-        # A hold pauses until lifted, whatever the card; any other pause returns on a fresh month.
+        # A hold pauses until lifted, whatever the card; Free (never paid, lapsed or cancelled
+        # out) upgrades on a fresh month from today.
         {:paused, :hold} -> :none
-        {:paused, _trial_ended_unpaid_or_cancelled} -> fresh_month(:returned, source, today)
+        :free -> fresh_month(:returned, source, today)
         _no_charge -> :none
       end
     end

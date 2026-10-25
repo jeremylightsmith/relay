@@ -17,12 +17,12 @@ what each term *means*; the sections below say what each value *does*.
 | Billing admin refusal | `already_comped` · `not_comped` · `reason_required` · `already_held` · `not_held` · `invalid_days` · `no_paid_through` · `not_retryable` | `Relay.Billing.admin_refusals/0` |
 | Billing attempt kind | `trial_end` · `renewal` · `returned` | `Schemas.BillingPaymentAttempt.kinds/0` |
 | Billing attempt outcome | `paid` · `declined` · `unknown` · `not_charged` | `Relay.Billing.attempt_outcomes/0` |
-| Billing attempt source | `clock` · `card_saved` · `admin` | `Schemas.BillingPaymentAttempt.sources/0` |
+| Billing attempt source | `clock` · `card_saved` · `admin` · `upgrade` | `Schemas.BillingPaymentAttempt.sources/0` |
 | Billing attempt status | `pending` · `succeeded` · `failed` · `unknown` · `not_charged` | `Schemas.BillingPaymentAttempt.statuses/0` |
-| Billing notice kind | `trial_ending` · `card_declined` · `paused` | `Schemas.BillingNotice.kinds/0` |
-| Billing pause reason | `trial_ended` · `unpaid` · `cancelled` · `hold` | `Relay.Billing.Standing.pause_reasons/0` |
+| Billing notice kind | `card_declined` · `dropped_to_free` | `Schemas.BillingNotice.kinds/0` |
+| Billing pause reason | `hold` | `Relay.Billing.Standing.pause_reasons/0` |
 | Billing promo refusal | `already_redeemed` · `unknown` · `disabled` · `expired` · `full` | `Relay.Billing.promo_refusals/0` |
-| Billing standing kind | `trial` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Relay.Billing.Standing.kinds/0` |
+| Billing standing kind | `free` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Relay.Billing.Standing.kinds/0` |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |

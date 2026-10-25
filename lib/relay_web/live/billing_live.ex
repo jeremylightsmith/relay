@@ -1,24 +1,29 @@
 defmodule RelayWeb.BillingLive do
   @moduledoc """
-  The board owner's Billing page, `/account/billing` (RE460, ADR 0012), reached from the avatar
-  menu's **Billing** item. Renders `Relay.Billing.summary/2` by standing kind: a trial (its end,
-  the first charge, the card or the no-card row), an active plan (the card, payments and the
-  cancel line), a cancelled one (Resume), past due and paused (an alert with **Update card**),
-  and comped.
+  The board owner's Billing page, `/account/billing` (RE460, ADR 0012; Free since RE469), reached
+  from the avatar menu's **Billing** item. Renders `Relay.Billing.summary/2` by standing kind:
+  **Free** (the board count against `Relay.Billing.free_board_limit/0`; over the limit, a
+  warning alert and the counted boards with the editable one marked; then the **Upgrade** row),
+  an active plan (the card, payments and the cancel line), a cancelled one (Resume), past due
+  (an alert with **Update card**), paused — only a superadmin hold — (an alert, no button), and
+  comped.
 
-  **Add card**, **Replace** and **Update card** all send `"add_card"`, which redirects to the
-  setup Checkout (`Relay.Billing.setup_checkout_url/2`); Checkout returns here with
-  `?setup=<id>`, which `handle_params/3` completes (`Relay.Billing.complete_setup/3`, checked
-  against the signed-in user), flashes the outcome and patches the param away. `"cancel_plan"`
-  and `"resume_plan"` call `Relay.Billing.cancel/2` / `resume/2`. The page is subscribed to the
-  user's `billing:<user_id>` topic, so a webhook-settled payment re-renders it live.
+  **Upgrade** sends `"upgrade"`: a $0 upgrade (a 100% code, `summary.upgrade_free?`) is charged
+  in place (`Relay.Billing.upgrade_without_card/2`); anything else redirects to the setup
+  Checkout (`Relay.Billing.setup_checkout_url/2`), and saving the card charges the upgrade.
+  **Replace** and **Update card** send `"add_card"`, the same redirect. Checkout returns here
+  with `?setup=<id>`, which `handle_params/3` completes (`Relay.Billing.complete_setup/3`,
+  checked against the signed-in user), flashes the outcome and patches the param away.
+  `"cancel_plan"` and `"resume_plan"` call `Relay.Billing.cancel/2` / `resume/2`. The page is
+  subscribed to the user's `billing:<user_id>` topic, so a webhook-settled payment re-renders it
+  live.
 
-  Promo codes (RE462): the trial's first charge and the active plan's next charge show
-  `summary.amount_cents` (already discounted by `Relay.Billing.next_charge/1`) and, while the
-  code has months left, its terms and when the full price returns; a $0 trial charge reads "No
-  card needed until …". The **Have a code?** form sends `"apply_code"` →
-  `Relay.Billing.redeem_code/3`; a refusal comes back inline as the field's error
-  (`refusal_message/1`, the one copy of each refusal), a success flashes and clears the form.
+  Promo codes (RE462): the active plan's next charge shows `summary.amount_cents` (already
+  discounted by `Relay.Billing.next_charge/1`), and both it and the Upgrade row show, while the
+  code has months left, its terms and when the full price returns. The **Have a code?** form
+  sends `"apply_code"` → `Relay.Billing.redeem_code/3`; a refusal comes back inline as the
+  field's error (`refusal_message/1`, the one copy of each refusal), a success flashes and
+  clears the form.
 
   404 (`Ecto.NoResultsError`) while billing is disabled — a self-hosted install has no plan.
   """
@@ -27,6 +32,7 @@ defmodule RelayWeb.BillingLive do
 
   alias Relay.Billing
   alias Relay.Billing.Standing
+  alias RelayWeb.CoreComponents
 
   @impl true
   def render(assigns) do
@@ -58,15 +64,28 @@ defmodule RelayWeb.BillingLive do
             <span class="flex-1">
               Your plan is paused, so your boards are read-only. Nothing's been deleted.
             </span>
-            <.update_card_button :if={@summary.standing != {:paused, :hold}} />
+          </div>
+          <div
+            :if={@summary.free && @summary.free.over_limit?}
+            id="billing-free-over-limit-alert"
+            role="alert"
+            class="alert alert-warning mb-4"
+          >
+            <span class="flex-1">
+              You're on Free, so one board stays editable. The others are read-only. Nothing's been deleted.
+            </span>
           </div>
 
           <div class="flex items-center gap-2">
             <span id="billing-standing-badge" class={["badge badge-soft", badge_class(@kind)]}>
               {badge_label(@kind)}
             </span>
-            <span :if={@kind == :trial and @summary.trial_ends_on} id="billing-trial" class="text-sm">
-              ends <b>{date(@summary.trial_ends_on)}</b> · {@summary.trial_days_left} days left
+            <span :if={@summary.free} id="billing-free-count" class="text-sm">
+              <%= if @summary.free.over_limit? do %>
+                <b>{length(@summary.free.boards)}</b> boards · {@summary.free.limit} editable
+              <% else %>
+                <b>{length(@summary.free.boards)} of {@summary.free.limit}</b> boards
+              <% end %>
             </span>
             <span :if={@kind == :active} id="billing-active" class="text-sm">
               paid through <b>{date(@summary.paid_through)}</b> · renews {date(@summary.renews_on)}
@@ -86,14 +105,54 @@ defmodule RelayWeb.BillingLive do
             <span :if={@kind == :comped} id="billing-comped" class="text-sm">Comped, no charge</span>
           </div>
 
+          <%= if @summary.free && @summary.free.over_limit? do %>
+            <div class="mt-4 text-xs font-semibold text-base-content/65">EDITABLE ON FREE</div>
+            <ul
+              id="billing-free-boards"
+              class="mt-1 divide-y divide-base-300 rounded-box border border-base-300 text-sm"
+            >
+              <li
+                :for={board <- @summary.free.boards}
+                id={"billing-free-board-#{board.id}"}
+                class={[
+                  "flex items-center gap-3 px-3 py-2.5",
+                  !board.editable? && "text-base-content/65"
+                ]}
+              >
+                <span
+                  class="size-[10px] shrink-0 rounded-[3px]"
+                  style={"background:#{board_color(board.slug)};"}
+                >
+                </span>
+                <span class={["flex-1", board.editable? && "font-medium"]}>{board.name}</span>
+                <span :if={board.editable?} class="badge badge-success badge-soft badge-sm">
+                  Editable
+                </span>
+                <span :if={!board.editable?} class="font-mono text-[10.5px]">read-only</span>
+              </li>
+            </ul>
+          <% end %>
+
           <div
-            :if={@kind == :trial and @summary.first_charge_on}
-            id="billing-first-charge"
-            class="mt-4 rounded-box bg-base-200 p-3 text-sm"
+            :if={@summary.free}
+            id="billing-upgrade"
+            class="mt-4 rounded-box bg-base-200 p-4 text-sm"
           >
-            <div class="flex justify-between">
-              <span>First charge, {date(@summary.first_charge_on)}{" "}</span>
-              <span class="font-mono">{Billing.format_cents(@summary.amount_cents)}</span>
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <div class="font-semibold">
+                  {upgrade_title(@summary.free)} · {Billing.format_dollars(@summary.full_price_cents)}/month
+                </div>
+                <div class="mt-1 text-base-content/65">{upgrade_terms(@summary.free)}</div>
+              </div>
+              <.button
+                type="button"
+                id="billing-upgrade-button"
+                phx-click="upgrade"
+                class="btn btn-primary btn-sm shrink-0"
+              >
+                Upgrade
+              </.button>
             </div>
             <.promo_terms summary={@summary} />
           </div>
@@ -126,29 +185,6 @@ defmodule RelayWeb.BillingLive do
               class="btn btn-ghost btn-xs"
             >
               Replace
-            </.button>
-          </div>
-
-          <div
-            :if={@kind == :trial and is_nil(@summary.card)}
-            id="billing-no-card"
-            class="mt-4 flex items-center justify-between gap-3 border-t border-base-300 pt-4 text-sm"
-          >
-            <span :if={free_until(@summary)} class="text-base-content/65">
-              No card needed until {date(free_until(@summary))}.
-            </span>
-            <span :if={!free_until(@summary)} class="text-base-content/65">
-              No card on file. Without one, your boards go read-only on {date(
-                @summary.first_charge_on
-              )}.
-            </span>
-            <.button
-              type="button"
-              id="billing-add-card"
-              phx-click="add_card"
-              class="btn btn-primary btn-sm shrink-0"
-            >
-              Add card
             </.button>
           </div>
 
@@ -201,12 +237,14 @@ defmodule RelayWeb.BillingLive do
             id="billing-cancel-line"
             class="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-base-300 pt-3 text-xs text-base-content/55"
           >
-            <span>Cancelling keeps access until {date(@summary.paid_through)}. No refunds.</span>
+            <span>
+              Cancelling keeps unlimited boards until {date(@summary.paid_through)}, then you drop to Free (one editable board). No refunds.
+            </span>
             <.button
               type="button"
               id="billing-cancel"
               phx-click="cancel_plan"
-              data-confirm={"Cancel your plan? You keep access until #{date(@summary.paid_through)}. No refunds."}
+              data-confirm={"Cancel your plan? You keep unlimited boards until #{date(@summary.paid_through)}, then drop to Free. No refunds."}
               class="btn btn-ghost btn-xs text-base-content/65"
             >
               Cancel plan…
@@ -254,8 +292,7 @@ defmodule RelayWeb.BillingLive do
     if !Billing.enabled?(), do: raise(Ecto.NoResultsError, queryable: Schemas.BillingAccount)
 
     user = socket.assigns.current_scope.user
-    # A user who signed up before billing has no trial yet; start it so the page shows a date.
-    {:ok, _account} = Billing.ensure_trial(user, Date.utc_today())
+    {:ok, _account} = Billing.ensure_account(user)
     if connected?(socket), do: Billing.subscribe(user.id)
 
     {:ok, socket |> assign(:page_title, "Billing") |> assign_summary() |> assign_code_form("")}
@@ -281,10 +318,12 @@ defmodule RelayWeb.BillingLive do
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_event("add_card", _params, socket) do
-    case Billing.setup_checkout_url(socket.assigns.current_scope.user, url(~p"/account/billing")) do
-      {:ok, checkout_url} -> {:noreply, redirect(socket, external: checkout_url)}
-      {:error, _reason} -> {:noreply, put_flash(socket, :error, "We couldn't open checkout. Try again.")}
+  def handle_event("add_card", _params, socket), do: {:noreply, to_checkout(socket)}
+
+  def handle_event("upgrade", _params, socket) do
+    case Billing.upgrade_without_card(socket.assigns.current_scope.user, Date.utc_today()) do
+      {:ok, :paid} -> {:noreply, socket |> assign_summary() |> put_flash(:info, "Upgraded. Your boards are editable.")}
+      {:error, :checkout_required} -> {:noreply, to_checkout(socket)}
     end
   end
 
@@ -312,6 +351,14 @@ defmodule RelayWeb.BillingLive do
   @impl true
   def handle_info({:billing_changed, _user_id}, socket), do: {:noreply, assign_summary(socket)}
 
+  # The setup Checkout: saving a card there pays a past-due renewal or a Free owner's upgrade.
+  defp to_checkout(socket) do
+    case Billing.setup_checkout_url(socket.assigns.current_scope.user, url(~p"/account/billing")) do
+      {:ok, checkout_url} -> redirect(socket, external: checkout_url)
+      {:error, _reason} -> put_flash(socket, :error, "We couldn't open checkout. Try again.")
+    end
+  end
+
   defp assign_summary(socket) do
     summary = Billing.summary(socket.assigns.current_scope.user, Date.utc_today())
     socket |> assign(:summary, summary) |> assign(:kind, Standing.kind(summary.standing))
@@ -336,9 +383,34 @@ defmodule RelayWeb.BillingLive do
   def refusal_message(:full), do: "That code is fully redeemed."
   def refusal_message(:already_redeemed), do: "You've already used a code."
 
-  # A $0 next charge (a 100% code) needs no card until the full price returns.
-  defp free_until(%{amount_cents: 0, promo: %{full_price_from: %Date{} = full_price_from}}), do: full_price_from
-  defp free_until(_summary), do: nil
+  # The Upgrade row's copy: within the limit, unlimited boards on the day-of-month that upgrading
+  # today sets; over it, every one of the owner's boards editable again.
+  defp upgrade_title(%{over_limit?: true, boards: boards}), do: "Make all #{length(boards)} editable"
+  defp upgrade_title(_free), do: "Unlimited boards"
+
+  defp upgrade_terms(%{over_limit?: true}),
+    do: "Charged today. Your billing date becomes the #{ordinal(Date.utc_today().day)}."
+
+  defp upgrade_terms(_free),
+    do:
+      "Charged today, then on the #{ordinal(Date.utc_today().day)} of each month. Cancel anytime and you drop back to Free."
+
+  @doc false
+  # A day of the month as people say it: 1 → "1st", 12 → "12th", 22 → "22nd".
+  @spec ordinal(1..31) :: String.t()
+  def ordinal(day) when day in 11..13, do: "#{day}th"
+
+  def ordinal(day) when day in 1..31 do
+    case rem(day, 10) do
+      1 -> "#{day}st"
+      2 -> "#{day}nd"
+      3 -> "#{day}rd"
+      _other -> "#{day}th"
+    end
+  end
+
+  # A board's identity colour, as the `/boards` tiles draw it (`RelayWeb.BoardsLive`).
+  defp board_color(slug), do: slug |> CoreComponents.identity_hue() |> CoreComponents.identity_color_for_hue()
 
   defp months(1), do: "1 month"
   defp months(n), do: "#{n} months"
@@ -354,14 +426,14 @@ defmodule RelayWeb.BillingLive do
 
   defp put_setup_flash(socket, {:error, _reason}), do: put_flash(socket, :error, "We couldn't save that card.")
 
-  defp badge_label(:trial), do: "Trial"
+  defp badge_label(:free), do: "Free"
   defp badge_label(:active), do: "Active"
   defp badge_label(:past_due), do: "Past due"
   defp badge_label(:cancelled), do: "Cancelled"
   defp badge_label(:comped), do: "Comped"
   defp badge_label(:paused), do: "Paused"
 
-  defp badge_class(:trial), do: "badge-primary"
+  defp badge_class(:free), do: "badge-neutral"
   defp badge_class(:active), do: "badge-success"
   defp badge_class(:comped), do: "badge-success"
   defp badge_class(:paused), do: "badge-error"

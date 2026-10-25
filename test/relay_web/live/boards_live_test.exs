@@ -242,6 +242,132 @@ defmodule RelayWeb.BoardsLiveTest do
     end
   end
 
+  # RE469 — the Free limit on the Boards page: the plan line and READ-ONLY tiles.
+  describe "on Free" do
+    setup :register_and_log_in_user
+
+    setup do
+      Process.put(:billing_enabled, true)
+      %{today: Date.utc_today()}
+    end
+
+    # Owner F: live boards A, B and C, a card most recently updated on A (the editable board).
+    defp owner_f!(user) do
+      {:ok, a} = Boards.create_board(user, %{name: "Alpha", key: "AL", slug: unique_slug("alpha")})
+      {:ok, b} = Boards.create_board(user, %{name: "Bravo", key: "BR", slug: unique_slug("bravo")})
+      {:ok, c} = Boards.create_board(user, %{name: "Charlie", key: "CH", slug: unique_slug("charlie")})
+      {:ok, card} = Relay.Cards.create_card(hd(a.stages), %{title: "Newest"})
+
+      card
+      |> Ecto.Changeset.change(updated_at: DateTime.utc_now() |> DateTime.add(60) |> DateTime.truncate(:second))
+      |> Repo.update!()
+
+      %{a: a, b: b, c: c}
+    end
+
+    defp squished_text(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.text()
+      |> String.split()
+      |> Enum.join(" ")
+    end
+
+    test "a new owner with one board sees the plan line at the limit (scenario 1)", %{conn: conn, user: user} do
+      {:ok, _board} = Boards.create_board(user, %{name: "Only", key: "ON", slug: unique_slug("only")})
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert has_element?(view, ~s(#boards-plan-line[href="/account/billing"]))
+      assert has_element?(view, "#boards-plan-line .badge.badge-soft.badge-neutral.badge-sm", "Free")
+      assert squished_text(view, "#boards-plan-line") =~ "1 of 1 boards · Upgrade"
+      assert has_element?(view, "#boards-plan-line .link.link-primary", "Upgrade")
+      refute has_element?(view, ~s([id^="board-card-"][id$="-read-only"]))
+    end
+
+    test "owner F sees the over-limit plan line and READ-ONLY tiles (scenario 2)", %{conn: conn, user: user} do
+      %{a: a, b: b, c: c} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert squished_text(view, "#boards-plan-line") =~ "3 boards · 1 editable · Upgrade"
+
+      for board <- [b, c] do
+        assert has_element?(view, "#board-card-#{board.slug}-read-only", "READ-ONLY")
+        assert has_element?(view, "#board-card-#{board.slug}.opacity-75")
+      end
+
+      refute has_element?(view, "#board-card-#{a.slug}-read-only")
+      refute has_element?(view, "#board-card-#{a.slug}.opacity-75")
+    end
+
+    test "an active owner sees no plan line and no READ-ONLY label (scenario 3)", %{
+      conn: conn,
+      user: user,
+      today: today
+    } do
+      owner_f!(user)
+      insert(:billing_account, user: user, paid_through: Date.add(today, 30), billing_day: today.day)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#boards-plan-line")
+      refute has_element?(view, ~s([id^="board-card-"][id$="-read-only"]))
+    end
+
+    test "a comped owner sees no plan line and no READ-ONLY label (scenario 3)", %{conn: conn, user: user} do
+      owner_f!(user)
+      insert(:billing_account, user: user, comped: true)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#boards-plan-line")
+      refute has_element?(view, ~s([id^="board-card-"][id$="-read-only"]))
+    end
+
+    test "billing disabled: no plan line and no READ-ONLY label (scenario 3)", %{conn: conn, user: user} do
+      owner_f!(user)
+      Process.put(:billing_enabled, false)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#boards-plan-line")
+      refute has_element?(view, ~s([id^="board-card-"][id$="-read-only"]))
+    end
+
+    test "upgrading clears the plan line and labels without a reload (scenario 4)", %{
+      conn: conn,
+      user: user,
+      today: today
+    } do
+      %{b: b} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+      assert has_element?(view, "#boards-plan-line")
+      assert has_element?(view, "#board-card-#{b.slug}-read-only")
+
+      insert(:billing_account, user: user, paid_through: Date.add(today, 30), billing_day: today.day)
+      :ok = Relay.Billing.broadcast_changed(user.id)
+
+      refute has_element?(view, "#boards-plan-line")
+      refute has_element?(view, ~s([id^="board-card-"][id$="-read-only"]))
+    end
+
+    test "embedded in the app: no plan line, and the picker footer has no Upgrade link (scenario 5)", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, _board} = Boards.create_board(user, %{name: "Only", key: "ON", slug: unique_slug("only")})
+      {:ok, view, _html} = live(conn, ~p"/boards?embed=1")
+
+      refute has_element?(view, "#boards-plan-line")
+
+      # The embedded render has no top bar; the New board tile is still there.
+      view |> element("#new-board-button") |> render_click()
+
+      assert has_element?(view, "#template-picker-upgrade", "Free includes one board.")
+      assert has_element?(view, "#template-picker-upgrade", "Upgrade for unlimited boards, $20/mo.")
+      assert has_element?(view, "#template-picker-cancel")
+      refute has_element?(view, "#template-picker-upgrade-link")
+    end
+  end
+
   defp tile_order(html, ctx) do
     [
       alpha: "board-card-#{ctx.alpha.slug}\"",

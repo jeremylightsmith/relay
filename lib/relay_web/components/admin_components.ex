@@ -48,7 +48,7 @@ defmodule RelayWeb.AdminComponents do
   end
 
   @doc """
-  A user's admin plan (`Relay.Billing.admin_plans/0`) as a small daisyUI badge: trial primary,
+  A user's admin plan (`Relay.Billing.admin_plans/0`) as a small daisyUI badge: free primary,
   active success, past due error, cancelled outline, comped neutral, paused warning, member only
   ghost.
   """
@@ -65,7 +65,7 @@ defmodule RelayWeb.AdminComponents do
   end
 
   # The ONE class / label map of the admin plans.
-  defp plan_badge_style(:trial), do: {"badge-soft badge-primary", "trial"}
+  defp plan_badge_style(:free), do: {"badge-soft badge-primary", "free"}
   defp plan_badge_style(:active), do: {"badge-soft badge-success", "active"}
   defp plan_badge_style(:past_due), do: {"badge-soft badge-error", "past due"}
   defp plan_badge_style(:cancelled), do: {"badge-outline", "cancelled"}

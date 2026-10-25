@@ -153,13 +153,14 @@ defmodule Relay.AccountsTest do
       assert Repo.aggregate(User, :count) == 1
     end
 
-    test "with billing enabled, a new user starts a 30-day trial" do
+    test "with billing enabled, a new user gets a Free billing account with no trial date" do
       Process.put(:billing_enabled, true)
 
       assert {:ok, user} =
                Accounts.upsert_user_from_provider(%{provider: "google", provider_uid: "u-new", email: "new@example.com"})
 
-      assert Billing.get_account(user).trial_ends_on == Date.add(Date.utc_today(), Billing.Standing.trial_days())
+      assert %Schemas.BillingAccount{trial_ends_on: nil} = Billing.get_account(user)
+      assert Billing.standing(user, Date.utc_today()) == :free
     end
 
     test "with billing enabled, a new user's sign-up redeems the :promo_code (scenario 14)" do

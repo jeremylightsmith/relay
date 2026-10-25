@@ -52,7 +52,7 @@ defmodule Relay.Accounts do
        in that existing user, keeping its `provider` / `provider_uid` and
        refreshing only non-nil `:name` / `:avatar_url`;
     3. otherwise a new `%User{provider:, provider_uid:}` is inserted, and — when
-       `Relay.Billing.enabled?/0` — its billing trial starts (RE460) and then
+       `Relay.Billing.enabled?/0` — its billing account opens on Free (RE460, RE469) and then
        `opts[:promo_code]` (a `/?code=` sign-up link, RE462) is redeemed with
        `Relay.Billing.redeem_code/3`. A refused code is ignored: sign-up never
        fails over a code, and a returning user never redeems one here.
@@ -79,23 +79,22 @@ defmodule Relay.Accounts do
         %User{provider: provider, provider_uid: provider_uid}
         |> User.changeset(profile)
         |> Repo.insert()
-        |> start_trial(opts[:promo_code])
+        |> open_billing_account(opts[:promo_code])
     end
   end
 
-  # RE460: a new user's billing trial starts at sign-up — only when billing is switched on.
-  # RE462: then the sign-up link's code is redeemed; a refusal is ignored.
-  defp start_trial({:ok, user}, promo_code) do
+  # RE460/RE469: a new user's billing account opens on Free at sign-up — only when billing is
+  # switched on. RE462: then the sign-up link's code is redeemed; a refusal is ignored.
+  defp open_billing_account({:ok, user}, promo_code) do
     if Billing.enabled?() do
-      today = Date.utc_today()
-      {:ok, _account} = Billing.ensure_trial(user, today)
-      if promo_code, do: _redeemed = Billing.redeem_code(user, promo_code, today)
+      {:ok, _account} = Billing.ensure_account(user)
+      if promo_code, do: _redeemed = Billing.redeem_code(user, promo_code, Date.utc_today())
     end
 
     {:ok, user}
   end
 
-  defp start_trial(error, _promo_code), do: error
+  defp open_billing_account(error, _promo_code), do: error
 
   # Lookup steps 1 and 2: provider_uid (unscoped by provider on purpose), then normalized email.
   defp find_existing(%{provider_uid: provider_uid} = claims) do

@@ -190,7 +190,7 @@ defmodule RelayWeb.AuthControllerTest do
 
     test "an existing user redeems nothing (scenario 12)", %{conn: conn} do
       existing = insert(:user, provider_uid: "google-uid-123", email: "ada@example.com")
-      {:ok, _account} = Billing.ensure_trial(existing, Date.utc_today())
+      {:ok, _account} = Billing.ensure_account(existing)
 
       sign_up(conn, "RELAYCONF")
 

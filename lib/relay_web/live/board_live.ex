@@ -292,7 +292,7 @@ defmodule RelayWeb.BoardLive do
           <.icon name="hero-command-line" class="size-5" />
         </button>
         <.link
-          :if={@billing_notice != :paused}
+          :if={not @plan_read_only?}
           navigate={~p"/board/#{@board.slug}/settings"}
           id="board-settings-link"
           title="Board settings"
@@ -384,6 +384,25 @@ defmodule RelayWeb.BoardLive do
                 <% @billing_notice == :paused -> %>
                   <.icon name="hero-credit-card" class="size-4" />
                   <span class="flex-1">This board's owner's plan is paused.</span>
+                <% match?({:free_read_only, _}, @billing_notice) and @board_owner? -> %>
+                  <.icon name="hero-lock-closed" class="size-4" />
+                  <span id="billing-free-read-only-owner" class="flex-1">
+                    <b>This board is read-only on Free.</b>
+                    {elem(@billing_notice, 1)} is your editable board. Nothing's been deleted.
+                  </span>
+                  <.link
+                    :if={not @embed}
+                    navigate={~p"/account/billing"}
+                    id="billing-free-upgrade"
+                    class="btn btn-warning btn-sm"
+                  >
+                    Upgrade
+                  </.link>
+                <% match?({:free_read_only, _}, @billing_notice) -> %>
+                  <.icon name="hero-lock-closed" class="size-4" />
+                  <span id="billing-free-read-only-member" class="flex-1">
+                    This board is read-only. Its owner is on the Free plan.
+                  </span>
                 <% true -> %>
                   <.icon name="hero-archive-box" class="size-4" />
                   <span class="flex-1">This board is archived and read-only.</span>
@@ -1410,8 +1429,8 @@ defmodule RelayWeb.BoardLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    # RE460 — a paused board opens no card (the native card host included).
-    ref = if socket.assigns.billing_notice == :paused, do: nil, else: card_ref(socket.assigns.live_action, params)
+    # RE460 — a paused (or, RE469, read-only-on-Free) board opens no card (the native card host included).
+    ref = if socket.assigns.plan_read_only?, do: nil, else: card_ref(socket.assigns.live_action, params)
     previous_ref = selected_ref(socket)
     previous_card = socket.assigns[:selected_card]
 
@@ -1988,9 +2007,18 @@ defmodule RelayWeb.BoardLive do
     {:noreply, push_patch(socket, to: ~p"/board/#{board.slug}?setup=connect")}
   end
 
+  # RE469 — unarchiving adds a counted board, so a Free owner at the limit is refused; a restore
+  # re-derives the owner's other open pages (Boards, Billing, their other boards).
   def handle_event("restore_board", _params, socket) do
-    {:ok, _board} = Boards.unarchive_board(socket.assigns.board)
-    {:noreply, reload_board(socket)}
+    board = socket.assigns.board
+
+    if Billing.can_add_board?(board.owner_id) do
+      {:ok, _board} = Boards.unarchive_board(board)
+      _ = Billing.broadcast_changed(board.owner_id)
+      {:noreply, reload_board(socket)}
+    else
+      {:noreply, put_flash(socket, :error, "Free includes one board. Upgrade, or archive another board first.")}
+    end
   end
 
   def handle_event("compose", %{"stage-id" => stage_id}, socket) do
@@ -2050,8 +2078,8 @@ defmodule RelayWeb.BoardLive do
   # RLY-94 — in embed mode a card tap escapes the webview: the shell pushes the
   # native CardScreen (BOARD-03) instead of the in-webview drawer opening. On web
   # (non-embed) the drawer keeps working at every width.
-  # RE460 — a paused board opens no card.
-  def handle_event("select_card", _params, %{assigns: %{billing_notice: :paused}} = socket) do
+  # RE460 — a paused (or, RE469, read-only-on-Free) board opens no card.
+  def handle_event("select_card", _params, %{assigns: %{plan_read_only?: true}} = socket) do
     {:noreply, socket}
   end
 
@@ -3776,7 +3804,7 @@ defmodule RelayWeb.BoardLive do
   def handle_info({:billing_changed, _user_id}, socket) do
     socket = assign_read_only(socket, socket.assigns.board)
 
-    if socket.assigns.billing_notice == :paused and not is_nil(socket.assigns.selected_card) and
+    if socket.assigns.plan_read_only? and not is_nil(socket.assigns.selected_card) and
          socket.assigns.live_action != :card do
       {:noreply, push_patch(socket, to: board_path(socket.assigns))}
     else
@@ -5055,19 +5083,23 @@ defmodule RelayWeb.BoardLive do
     |> assign(:paused_stage_ids, MapSet.new(paused, & &1.stage_id))
   end
 
-  # RE460 — the ONE writer of the read-only mode: an archived board, or one whose owner's plan is
-  # paused (`Relay.Billing.board_notice/1`, always nil while billing is disabled). Every path that
-  # (re)loads the board calls this, so a rename or archive in another tab can't un-pause it.
+  # RE460 — the ONE writer of the read-only mode: an archived board, or one the owner's plan makes
+  # read-only (`@plan_read_only?`: paused, or RE469 read-only on Free — `Relay.Billing.board_notice/1`,
+  # always nil while billing is disabled). Every path that (re)loads the board calls this, so a
+  # rename or archive in another tab can't un-pause it.
   defp assign_read_only(socket, board) do
     notice = Billing.board_notice(board)
+    plan_read_only? = notice == :paused or match?({:free_read_only, _}, notice)
 
     socket
     |> assign(:billing_notice, notice)
+    |> assign(:plan_read_only?, plan_read_only?)
     |> assign(:board_owner?, board.owner_id == socket.assigns.current_scope.user.id)
-    |> assign(:read_only?, Board.archived?(board) or notice == :paused)
+    |> assign(:read_only?, Board.archived?(board) or plan_read_only?)
   end
 
   defp read_only_flash(:paused), do: "This board's plan is paused (read-only)."
+  defp read_only_flash({:free_read_only, _editable_name}), do: "This board is read-only on Free."
   defp read_only_flash(_notice), do: "This board is archived (read-only)."
 
   defp reload_board(socket) do

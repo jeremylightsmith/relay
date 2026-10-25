@@ -28,7 +28,6 @@ defmodule Relay.Factory do
 
   def billing_account_factory do
     %Schemas.BillingAccount{
-      trial_ends_on: Date.add(Date.utc_today(), 30),
       user: build(:user)
     }
   end
@@ -60,7 +59,7 @@ defmodule Relay.Factory do
 
   def billing_notice_factory do
     %Schemas.BillingNotice{
-      kind: :trial_ending,
+      kind: :card_declined,
       period_key: Date.utc_today(),
       billing_account: build(:billing_account)
     }

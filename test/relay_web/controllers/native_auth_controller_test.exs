@@ -484,13 +484,13 @@ defmodule RelayWeb.NativeAuthControllerTest do
       assert body["billing"] == %{"enabled" => false, "standing" => nil, "through" => nil}
     end
 
-    test "POST /google carries the new user's trial", %{conn: conn} do
+    test "POST /google carries the new user's Free standing", %{conn: conn} do
       Process.put(:billing_enabled, true)
       stub_google(@tokeninfo)
 
       body = conn |> post(~p"/api/auth/native/google", %{id_token: "tok"}) |> json_response(200)
 
-      assert %{"enabled" => true, "standing" => "trial"} = body["billing"]
+      assert body["billing"] == %{"enabled" => true, "standing" => "free", "through" => nil}
     end
 
     test "POST /apple carries the billing object", %{conn: conn} do

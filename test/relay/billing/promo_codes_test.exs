@@ -12,9 +12,9 @@ defmodule Relay.Billing.PromoCodesTest do
     :ok
   end
 
-  defp trialing_user do
+  defp free_user do
     user = insert(:user)
-    insert(:billing_account, user: user, trial_ends_on: Date.add(@today, 20))
+    insert(:billing_account, user: user)
     user
   end
 
@@ -95,7 +95,7 @@ defmodule Relay.Billing.PromoCodesTest do
 
   describe "redeem_code/3" do
     test "stores the code and its months on the account and broadcasts" do
-      user = trialing_user()
+      user = free_user()
       relayconf = insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
       :ok = Billing.subscribe(user.id)
 
@@ -107,19 +107,19 @@ defmodule Relay.Billing.PromoCodesTest do
       assert_receive {:billing_changed, ^user_id}
     end
 
-    test "creates the account and its trial for a user without one" do
+    test "creates the account, with no trial date, for a user without one" do
       user = insert(:user)
       relayconf = insert(:promo_code, code: "RELAYCONF")
 
       assert {:ok, account} = Billing.redeem_code(user, "RELAYCONF", @today)
 
-      assert account.trial_ends_on == ~D[2026-04-09]
+      assert account.trial_ends_on == nil
       assert account.promo_code_id == relayconf.id
       assert account_of(user).promo_code_id == relayconf.id
     end
 
     test "an unknown, blank or nil code is :unknown" do
-      user = trialing_user()
+      user = free_user()
 
       assert Billing.redeem_code(user, "NOPE", @today) == {:error, :unknown}
       assert Billing.redeem_code(user, "", @today) == {:error, :unknown}
@@ -127,7 +127,7 @@ defmodule Relay.Billing.PromoCodesTest do
     end
 
     test "a disabled code is :disabled and writes nothing" do
-      user = trialing_user()
+      user = free_user()
       insert(:promo_code, code: "OLD", disabled_at: ~U[2026-03-01 00:00:00Z])
       :ok = Billing.subscribe(user.id)
 
@@ -139,8 +139,8 @@ defmodule Relay.Billing.PromoCodesTest do
     test "a code is :expired the day after expires_on and redeems on the day itself" do
       insert(:promo_code, code: "MARCH", expires_on: ~D[2026-03-31])
 
-      assert Billing.redeem_code(trialing_user(), "MARCH", ~D[2026-04-01]) == {:error, :expired}
-      assert {:ok, _account} = Billing.redeem_code(trialing_user(), "MARCH", ~D[2026-03-31])
+      assert Billing.redeem_code(free_user(), "MARCH", ~D[2026-04-01]) == {:error, :expired}
+      assert {:ok, _account} = Billing.redeem_code(free_user(), "MARCH", ~D[2026-03-31])
     end
 
     test "a code held by max_redemptions accounts is :full" do
@@ -148,13 +148,13 @@ defmodule Relay.Billing.PromoCodesTest do
       holder_of(code)
       holder_of(code)
 
-      assert Billing.redeem_code(trialing_user(), "TWO", @today) == {:error, :full}
+      assert Billing.redeem_code(free_user(), "TWO", @today) == {:error, :full}
     end
 
     test "an account that already holds a code is :already_redeemed, checked first" do
       relayconf = insert(:promo_code, code: "RELAYCONF")
       insert(:promo_code, code: "FRIENDS")
-      user = trialing_user()
+      user = free_user()
       {:ok, _account} = Billing.redeem_code(user, "RELAYCONF", @today)
 
       assert Billing.redeem_code(user, "FRIENDS", @today) == {:error, :already_redeemed}
@@ -166,7 +166,7 @@ defmodule Relay.Billing.PromoCodesTest do
   describe "redeem_code/3 — the cap race" do
     test "two concurrent redemptions of the last slot: exactly one wins" do
       code = insert(:promo_code, code: "LAST", max_redemptions: 1)
-      users = [trialing_user(), trialing_user()]
+      users = [free_user(), free_user()]
 
       results =
         users
@@ -182,14 +182,14 @@ defmodule Relay.Billing.PromoCodesTest do
   describe "disable_promo_code/2" do
     test "stops new redemptions and leaves holders their months" do
       relayconf = insert(:promo_code, code: "RELAYCONF", months: 3)
-      holder = trialing_user()
+      holder = free_user()
       {:ok, _account} = Billing.redeem_code(holder, "RELAYCONF", @today)
 
       assert {:ok, %PromoCode{disabled_at: ~U[2026-05-01 12:00:00Z]}} =
                Billing.disable_promo_code(relayconf.id, ~U[2026-05-01 12:00:00Z])
 
       assert account_of(holder).promo_months_left == 3
-      assert Billing.redeem_code(trialing_user(), "RELAYCONF", @today) == {:error, :disabled}
+      assert Billing.redeem_code(free_user(), "RELAYCONF", @today) == {:error, :disabled}
     end
 
     test "keeps the original disabled_at on an already disabled code" do

@@ -3,8 +3,8 @@ defmodule Schemas.BillingAccount do
   A user's billing facts (RE460, ADR 0012) — one row per user, the board owner being the payer.
 
   Standing (`Relay.Billing.Standing`) is derived from these facts and never stored.
-  `paid_through` is the only thing that grants paid access; `trial_ends_on` is the trial's last
-  day; `billing_day` (1–31) is the day of the month the account renews on. `comped` and
+  `paid_through` is the only thing that grants paid access; `trial_ends_on` is the retired
+  trial's last day (RE469: nothing reads or writes it); `billing_day` (1–31) is the day of the month the account renews on. `comped` and
   `held_on` / `hold_reason` are admin facts; `cancelled_on` / `access_until` record a cancelled
   plan. The `card_*` fields describe the saved card (`card_payment_method_id` is Stripe's id).
   `promo_code_id` is the one promo code the account ever redeemed (RE462) and

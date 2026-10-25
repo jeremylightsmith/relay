@@ -18,7 +18,7 @@ defmodule RelayWeb.BoardsLive do
   the user edits the key — clearing it doesn't turn derivation back on — and every typed key is
   sanitized with the same function. A name or key `Boards.create_board/2` rejects keeps the
   picker open with the changeset's messages inline. Opening or closing the picker resets them.
-  Loads fresh on navigate (no realtime — out of scope).
+  Loads fresh on navigate; the one live update is billing (RE469, below).
 
   RE470: a user with **zero active boards** (`first_run?`, derived from `@boards` alone and
   recomputed wherever it reloads) gets the picker in first-run mode — forced open, titled "Make
@@ -27,10 +27,19 @@ defmodule RelayWeb.BoardsLive do
   (`first_name/1`) with the key derived from it, and re-opening resets to that prefill. Behind it
   a "No boards yet" tile (`#boards-empty`) replaces the grid; below the `drawer` breakpoint the
   picker is hidden and `#first-run-mobile` asks the user to create the board on a computer.
+
+
+  RE469 — the Free limit: a Free owner (`Relay.Billing.free_status/2`, nil otherwise) sees a quiet
+  plan line beside the heading (`#boards-plan-line`, linking to `/account/billing`; hidden when
+  embedded — the app sells nothing) and a READ-ONLY label on each of their own boards that is
+  read-only on Free. At the limit (`not Relay.Billing.can_add_board?/1`, `@picker_at_limit?`) the
+  picker's footer sells the upgrade instead of creating, and `create_from_template` refuses
+  server-side. Both re-derive on `{:billing_changed, user_id}` from the viewer's billing topic.
   """
 
   use RelayWeb, :live_view
 
+  alias Relay.Billing
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Members
@@ -40,6 +49,7 @@ defmodule RelayWeb.BoardsLive do
   alias Schemas.Board
 
   @copy_refused "That board isn't available to copy. Pick another."
+  @create_refused "Free includes one board. Upgrade for unlimited boards."
 
   @impl true
   def render(assigns) do
@@ -78,13 +88,24 @@ defmodule RelayWeb.BoardsLive do
           <h1 class="m-0 text-[27px] font-semibold tracking-tight text-base-content">
             Your boards
           </h1>
-          <div class="flex items-center gap-4 pt-2 font-mono text-[11px] text-base-content/65">
-            <span class="flex items-center gap-1.5">
-              <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
-            </span>
-            <span class="flex items-center gap-1.5">
-              <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
-            </span>
+          <div class="flex items-center gap-4">
+            <.link
+              :if={@free_status && not @embed}
+              id="boards-plan-line"
+              navigate={~p"/account/billing"}
+              class="flex items-center gap-2 pt-2 font-mono text-[11px] text-base-content/65 no-underline hover:text-base-content"
+            >
+              <span class="badge badge-soft badge-neutral badge-sm font-sans">Free</span>
+              <span>{plan_line(@free_status)}<span class="link link-primary">Upgrade</span></span>
+            </.link>
+            <div class="flex items-center gap-4 pt-2 font-mono text-[11px] text-base-content/65">
+              <span class="flex items-center gap-1.5">
+                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-secondary);"></span>AI
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span style="width:8px;height:8px;border-radius:2px;background:var(--color-primary);"></span>HUMAN
+              </span>
+            </div>
           </div>
         </div>
         <p class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed text-base-content/70 drawer:block">
@@ -141,7 +162,10 @@ defmodule RelayWeb.BoardsLive do
           <div
             :for={b <- @boards}
             id={"board-card-#{b.slug}"}
-            class="relative flex flex-col overflow-hidden rounded-[12px] border border-base-300 bg-base-100 transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[var(--color-field-border)]"
+            class={[
+              "relative flex flex-col overflow-hidden rounded-[12px] border border-base-300 bg-base-100 transition hover:-translate-y-0.5 drawer:rounded-[14px] drawer:border-[var(--color-field-border)]",
+              read_only?(b, @free_status) && "opacity-75"
+            ]}
           >
             <div class="hidden drawer:block" style={"height:3px;background:#{accent(b.slug)};"}></div>
             <div class="flex flex-col gap-2 p-3 drawer:gap-2.5 drawer:p-4">
@@ -162,6 +186,13 @@ defmodule RelayWeb.BoardsLive do
                   {b.name}
                 </.link>
                 <span class="flex-1"></span>
+                <span
+                  :if={read_only?(b, @free_status)}
+                  id={"board-card-#{b.slug}-read-only"}
+                  class="flex items-center gap-1 font-mono text-[10px] font-semibold tracking-wide text-base-content/55"
+                >
+                  <.icon name="hero-lock-closed" class="size-3" /> READ-ONLY
+                </span>
                 <span
                   :if={b.slug == @from}
                   id={"board-card-#{b.slug}-current"}
@@ -258,6 +289,9 @@ defmodule RelayWeb.BoardsLive do
           errors={@picker_errors}
           first_run={@first_run?}
           signed_in_as={@current_scope.user.email}
+          upgrade_required={@picker_at_limit?}
+          upgrade_price={Billing.format_dollars(Billing.price_cents())}
+          upgrade_href={if(@embed, do: nil, else: ~p"/account/billing")}
         />
       </.first_run_picker>
     </Layouts.app>
@@ -285,10 +319,13 @@ defmodule RelayWeb.BoardsLive do
     templates = Boards.offered_templates()
     copy_sources = Boards.copy_sources(user)
 
+    if connected?(socket) and Billing.enabled?(), do: Billing.subscribe(user.id)
+
     {:ok,
      socket
      |> assign(:page_title, "Your boards")
      |> assign_boards(boards)
+     |> assign_free_limit()
      |> assign(:from, nil)
      |> assign(:templates, templates)
      |> assign(:examples, Boards.example_boards())
@@ -378,6 +415,37 @@ defmodule RelayWeb.BoardsLive do
     {:noreply, assign_boards(socket, load_boards(user))}
   end
 
+  # RE469 — the viewer's standing changed (upgraded, dropped to Free, archived or restored a
+  # board): re-derive the tiles, the plan line and the picker's footer in place.
+  @impl true
+  def handle_info({:billing_changed, _user_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:boards, load_boards(socket.assigns.current_scope.user))
+     |> assign_free_limit()}
+  end
+
+  defp assign_free_limit(socket) do
+    user = socket.assigns.current_scope.user
+
+    assign(socket,
+      free_status: Billing.free_status(user, Date.utc_today()),
+      picker_at_limit?: not Billing.can_add_board?(user)
+    )
+  end
+
+  # "1 of 1 boards · " at or under the limit; "3 boards · 1 editable · " over it.
+  defp plan_line(%{over_limit?: true, boards: boards, limit: limit}),
+    do: "#{length(boards)} boards · #{limit} editable · "
+
+  defp plan_line(%{boards: boards, limit: limit}), do: "#{length(boards)} of #{limit} boards · "
+
+  # Only the viewer's OWN boards are labelled, from their own `free_status` (no lookup per tile).
+  defp read_only?(_board_row, nil = _free_status), do: false
+
+  defp read_only?(board_row, free_status),
+    do: Enum.any?(free_status.boards, &(&1.id == board_row.board.id and not &1.editable?))
+
   @doc """
   The name a first-run board is prefilled with (RE470): the first whitespace-separated word of
   the user's name; with no name, the email's local part cut at its first `.`, `+` or `_`. Case is
@@ -450,6 +518,14 @@ defmodule RelayWeb.BoardsLive do
   defp create_board(socket, attrs) do
     user = socket.assigns.current_scope.user
 
+    # RE469 — checked here, never inside `Boards.create_board/2` (sign-up's default board and the
+    # example seeds must stay unaffected). A refusal keeps the picker open and inserts nothing.
+    if Billing.can_add_board?(user),
+      do: do_create_board(socket, user, attrs),
+      else: {:noreply, put_flash(socket, :error, @create_refused)}
+  end
+
+  defp do_create_board(socket, user, attrs) do
     case Boards.create_board(user, attrs) do
       # RE443: a new board opens on the board itself, where its setup wizard lives.
       {:ok, board} ->

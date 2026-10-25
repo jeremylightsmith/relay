@@ -29,14 +29,13 @@ defmodule Relay.Billing.AdminUsersTest do
     {user, account}
   end
 
-  defp trial_owner, do: owner(%{trial_ends_on: ~D[2026-06-20]})
+  defp free_owner, do: owner(%{})
 
   defp relayconf_owner do
     promo = insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
 
     owner(
       Map.merge(card_fields(:visa_4242), %{
-        trial_ends_on: ~D[2026-05-01],
         promo_code_id: promo.id,
         promo_months_left: 2,
         paid_through: ~D[2026-06-30]
@@ -44,15 +43,15 @@ defmodule Relay.Billing.AdminUsersTest do
     )
   end
 
-  defp unpaid_owner, do: owner(%{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-05-31]})
-  defp past_due_owner, do: owner(%{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-09]})
-  defp comped_owner, do: owner(%{trial_ends_on: ~D[2026-04-01], comped: true})
+  defp lapsed_owner, do: owner(%{paid_through: ~D[2026-05-31]})
+  defp past_due_owner, do: owner(%{paid_through: ~D[2026-06-09]})
+  defp comped_owner, do: owner(%{comped: true})
 
-  defp held_owner, do: owner(%{trial_ends_on: ~D[2026-04-01], held_on: ~D[2026-06-01], paid_through: ~D[2026-06-30]})
+  defp held_owner, do: owner(%{held_on: ~D[2026-06-01], paid_through: ~D[2026-06-30]})
 
   defp declined_owner(failed?) do
-    {user, account} = owner(Map.put(card_fields(:visa_4242), :trial_ends_on, ~D[2026-06-01]))
-    if failed?, do: insert(:billing_payment_attempt, billing_account: account, status: :failed, kind: :trial_end)
+    {user, account} = owner(card_fields(:visa_4242))
+    if failed?, do: insert(:billing_payment_attempt, billing_account: account, status: :failed, kind: :returned)
     {user, account}
   end
 
@@ -63,12 +62,13 @@ defmodule Relay.Billing.AdminUsersTest do
   end
 
   describe "list_admin_users/1" do
-    test "a trial owner shows the trial end as paid through and the full price" do
-      {user, _account} = trial_owner()
+    test "a never-paid owner is on Free with no paid through and the full price" do
+      {user, _account} = free_owner()
 
       assert %{
-               plan: :trial,
-               paid_through_shown: ~D[2026-06-20],
+               plan: :free,
+               standing: :free,
+               paid_through_shown: nil,
                rate_cents: 2000,
                code_label: nil,
                member_count: 1,
@@ -87,11 +87,10 @@ defmodule Relay.Billing.AdminUsersTest do
              } = row(user)
     end
 
-    test "an owner past the grace is paused unpaid" do
-      {user, _account} = unpaid_owner()
+    test "an owner past the grace is on Free, showing the paid through they lapsed from" do
+      {user, _account} = lapsed_owner()
 
-      assert %{plan: :paused, standing: {:paused, :unpaid}, rate_cents: 2000, paid_through_shown: ~D[2026-05-31]} =
-               row(user)
+      assert %{plan: :free, standing: :free, rate_cents: 2000, paid_through_shown: ~D[2026-05-31]} = row(user)
     end
 
     test "an owner inside the grace is past due" do
@@ -109,14 +108,11 @@ defmodule Relay.Billing.AdminUsersTest do
       assert %{plan: :paused, standing: {:paused, :hold}} = row(user)
     end
 
-    test "a never-paid owner whose first charge was declined is paused, trial ended" do
-      {user, _account} = declined_owner(true)
-      assert %{standing: {:paused, :trial_ended}} = row(user)
-    end
-
-    test "a never-paid owner with a card and no declined attempt is still in trial" do
-      {user, _account} = declined_owner(false)
-      assert %{plan: :trial} = row(user)
+    test "a never-paid owner with a card is on Free, declined attempt or not" do
+      {declined, _account} = declined_owner(true)
+      {clean, _account} = declined_owner(false)
+      assert %{plan: :free, standing: :free} = row(declined)
+      assert %{plan: :free, standing: :free} = row(clean)
     end
 
     test "a user who owns no boards is member only with no billing values" do
@@ -147,9 +143,9 @@ defmodule Relay.Billing.AdminUsersTest do
       assert %{member_count: 3, owned_board_count: 2, board_count: 1} = row(user)
     end
 
-    test "a board owner with no billing account is a pre-backfill trial" do
+    test "a board owner with no billing account is on Free" do
       {user, nil} = owner()
-      assert %{plan: :trial, paid_through_shown: nil, rate_cents: 2000, account: nil} = row(user)
+      assert %{plan: :free, paid_through_shown: nil, rate_cents: 2000, account: nil} = row(user)
     end
 
     test "rows come newest first, ties broken by id desc" do
@@ -178,9 +174,9 @@ defmodule Relay.Billing.AdminUsersTest do
     end
 
     test "loads every row in one query" do
-      trial_owner()
+      free_owner()
       relayconf_owner()
-      unpaid_owner()
+      lapsed_owner()
       past_due_owner()
       comped_owner()
       held_owner()
@@ -195,10 +191,10 @@ defmodule Relay.Billing.AdminUsersTest do
   end
 
   describe "admin_summary/1" do
-    test "counts users, paying rows, their monthly total and trials" do
+    test "counts users, paying rows, their monthly total and Free rows" do
       rows =
         for {plan, rate} <- [
-              trial: 2000,
+              free: 2000,
               active: 1000,
               past_due: 2000,
               paused: 2000,
@@ -207,11 +203,11 @@ defmodule Relay.Billing.AdminUsersTest do
             ],
             do: %{plan: plan, rate_cents: rate}
 
-      assert Billing.admin_summary(rows) == %{users: 6, paying: 2, mrr_cents: 3000, in_trial: 1}
+      assert Billing.admin_summary(rows) == %{users: 6, paying: 2, mrr_cents: 3000, free: 1}
     end
 
     test "is all zeros for no rows" do
-      assert Billing.admin_summary([]) == %{users: 0, paying: 0, mrr_cents: 0, in_trial: 0}
+      assert Billing.admin_summary([]) == %{users: 0, paying: 0, mrr_cents: 0, free: 0}
     end
   end
 

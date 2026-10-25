@@ -28,19 +28,11 @@ defmodule Relay.Billing.NotifierTest do
     end
   end
 
-  describe "trial_ending_email/2" do
-    test "tells the owner when the trial ends and links to billing", %{user: user} do
-      email = Notifier.trial_ending_email(user, ~D[2026-04-03])
-
-      assert recipients(email) == ["owner@example.com"]
-      assert email.from == {"Relay", "billing@localhost"}
-      assert email.subject == "Your Relay trial ends in 3 days"
-      assert email.text_body =~ "Your Relay trial ends on April 3, 2026."
-      assert email.text_body =~ "nothing is deleted"
-      assert email.text_body =~ "\n\nManage billing: #{@billing_url}"
-      assert email.html_body =~ ~s(href="#{@billing_url}")
-      assert email.html_body =~ "<p>Your Relay trial ends on April 3, 2026."
-    end
+  test "the trial-ending email and its lead time are gone" do
+    Code.ensure_loaded!(Notifier)
+    refute function_exported?(Notifier, :trial_ending_email, 2)
+    refute function_exported?(Notifier, :trial_notice_days_before, 0)
+    refute function_exported?(Notifier, :paused_email, 1)
   end
 
   describe "card_declined_email/2" do
@@ -58,21 +50,24 @@ defmodule Relay.Billing.NotifierTest do
     end
   end
 
-  describe "paused_email/1" do
-    test "says the boards are read-only and nothing is deleted", %{user: user} do
-      email = Notifier.paused_email(user)
+  @dropped_to_free_text "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+                          "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all:"
+
+  describe "dropped_to_free_email/1" do
+    test "says the owner is on Free, what that means, and links to upgrade", %{user: user} do
+      email = Notifier.dropped_to_free_email(user)
 
       assert recipients(email) == ["owner@example.com"]
-      assert email.subject == "Your Relay plan is paused"
-      assert email.text_body =~ "Nothing's been deleted."
-      assert email.text_body =~ @billing_url
+      assert email.subject == "Your Relay plan is now Free"
+      assert email.text_body =~ @dropped_to_free_text <> " " <> @billing_url
+      assert email.html_body =~ ~s(href="#{@billing_url}")
     end
 
     test "escapes the HTML body and carries no styling", %{user: user} do
-      html = Notifier.paused_email(user).html_body
+      html = Notifier.dropped_to_free_email(user).html_body
 
-      assert html =~ "Nothing&#39;s been deleted."
-      refute html =~ "Nothing's"
+      assert html =~ "so you&#39;re on Free now."
+      refute html =~ "you're"
       refute html =~ "style="
       refute html =~ "class="
       assert html =~ ~s(<p><a href="#{@billing_url}">Manage billing</a></p>)
@@ -81,9 +76,9 @@ defmodule Relay.Billing.NotifierTest do
 
   describe "deliver/1" do
     test "sends the email through the mailer when mail is enabled", %{user: user} do
-      assert Notifier.deliver(Notifier.paused_email(user)) == :ok
+      assert Notifier.deliver(Notifier.dropped_to_free_email(user)) == :ok
 
-      assert_email_sent(subject: "Your Relay plan is paused", to: "owner@example.com")
+      assert_email_sent(subject: "Your Relay plan is now Free", to: "owner@example.com")
     end
   end
 
@@ -132,11 +127,11 @@ defmodule Relay.Billing.NotifierDisabledLogTest do
 
     log =
       capture_log([level: :info], fn ->
-        assert Notifier.deliver(Notifier.paused_email(user)) == :ok
+        assert Notifier.deliver(Notifier.dropped_to_free_email(user)) == :ok
       end)
 
     assert_no_email_sent()
     assert log =~ "no mail provider configured"
-    assert log =~ ~s(not sending "Your Relay plan is paused" to owner@example.com)
+    assert log =~ ~s(not sending "Your Relay plan is now Free" to owner@example.com)
   end
 end

@@ -55,18 +55,17 @@ defmodule Relay.Billing.AdminTest do
 
   defp reload(user), do: Repo.get_by!(BillingAccount, user_id: user.id)
 
-  defp paused!(user, attrs \\ %{}),
-    do:
-      account_for(user, Map.merge(%{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-05-31], billing_day: 1}, attrs))
+  # A paid plan that lapsed past its grace: on Free.
+  defp lapsed!(user, attrs \\ %{}),
+    do: account_for(user, Map.merge(%{paid_through: ~D[2026-05-31], billing_day: 1}, attrs))
 
   defp active!(user, attrs \\ %{}),
-    do:
-      account_for(user, Map.merge(%{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-30], billing_day: 1}, attrs))
+    do: account_for(user, Map.merge(%{paid_through: ~D[2026-06-30], billing_day: 1}, attrs))
 
   describe "admin_comp/3" do
     # Scenario 1
-    test "comps a paused owner, records one :comp entry by the actor, and broadcasts", %{admin: admin, user: user} do
-      paused!(user)
+    test "comps a Free (lapsed) owner, records one :comp entry by the actor, and broadcasts", %{admin: admin, user: user} do
+      lapsed!(user)
       :ok = Billing.subscribe(user.id)
 
       assert {:ok, %BillingAccount{comped: true}} = Billing.admin_comp(user.id, admin, @today)
@@ -79,7 +78,7 @@ defmodule Relay.Billing.AdminTest do
 
     # Scenario 2
     test "refuses an already comped account, writing and broadcasting nothing", %{admin: admin, user: user} do
-      paused!(user)
+      lapsed!(user)
       {:ok, _} = Billing.admin_comp(user.id, admin, @today)
       :ok = Billing.subscribe(user.id)
 
@@ -90,34 +89,34 @@ defmodule Relay.Billing.AdminTest do
     end
 
     # Scenario 19
-    test "creates a missing account, with a trial, and comps it", %{admin: admin, user: user} do
+    test "creates a missing account, with no trial date, and comps it", %{admin: admin, user: user} do
       assert Billing.get_account(user) == nil
 
       assert {:ok, %BillingAccount{comped: true} = account} = Billing.admin_comp(user.id, admin, @today)
-      assert account.trial_ends_on == Date.add(@today, Relay.Billing.Standing.trial_days())
+      assert account.trial_ends_on == nil
       assert reload(user).comped
       assert [%BillingAdminEntry{action: :comp}] = entries(user)
     end
   end
 
   describe "admin_uncomp/3 (scenario 3)" do
-    test "a never-paid account past its trial is paused :trial_ended", %{admin: admin, user: user} do
-      account_for(user, %{trial_ends_on: ~D[2026-06-05], comped: true})
+    test "a never-paid account drops to Free", %{admin: admin, user: user} do
+      account_for(user, %{comped: true})
 
       assert {:ok, %BillingAccount{comped: false}} = Billing.admin_uncomp(user.id, admin, @today)
-      assert Billing.standing(user, @today) == {:paused, :trial_ended}
+      assert Billing.standing(user, @today) == :free
       assert [%BillingAdminEntry{action: :uncomp}] = entries(user)
     end
 
     test "an account paid through the future is active", %{admin: admin, user: user} do
-      account_for(user, %{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-15], comped: true})
+      account_for(user, %{paid_through: ~D[2026-06-15], comped: true})
 
       assert {:ok, _account} = Billing.admin_uncomp(user.id, admin, @today)
       assert Billing.standing(user, @today) == :active
     end
 
     test "refuses an account that is not comped", %{admin: admin, user: user} do
-      paused!(user)
+      lapsed!(user)
 
       assert Billing.admin_uncomp(user.id, admin, @today) == {:error, :not_comped}
       assert entries(user) == []
@@ -195,7 +194,7 @@ defmodule Relay.Billing.AdminTest do
       admin: admin,
       user: user
     } do
-      account_for(user, %{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-20], billing_day: 20})
+      account_for(user, %{paid_through: ~D[2026-06-20], billing_day: 20})
 
       assert {:ok, %BillingAccount{paid_through: ~D[2026-06-27], billing_day: 20}} =
                Billing.admin_extend(user.id, admin, 7, "outage", @today)
@@ -214,8 +213,8 @@ defmodule Relay.Billing.AdminTest do
     end
 
     # Scenario 9
-    test "extending a paused unpaid owner past today makes them active", %{admin: admin, user: user} do
-      paused!(user)
+    test "extending a Free (lapsed) owner past today makes them active", %{admin: admin, user: user} do
+      lapsed!(user)
 
       assert {:ok, %BillingAccount{paid_through: ~D[2026-06-15]}} =
                Billing.admin_extend(user.id, admin, 15, "goodwill", @today)
@@ -248,7 +247,7 @@ defmodule Relay.Billing.AdminTest do
     end
 
     test "refuses a never-paid account", %{admin: admin, user: user} do
-      account_for(user, %{trial_ends_on: ~D[2026-06-20]})
+      account_for(user, %{})
 
       assert Billing.admin_extend(user.id, admin, 7, "outage", @today) == {:error, :no_paid_through}
       assert entries(user) == []
@@ -261,7 +260,7 @@ defmodule Relay.Billing.AdminTest do
       account_for(
         user,
         Map.merge(
-          %{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-09], billing_day: 10},
+          %{paid_through: ~D[2026-06-09], billing_day: 10},
           card_fields(:visa_4242)
         )
       )
@@ -291,7 +290,7 @@ defmodule Relay.Billing.AdminTest do
 
     # Scenario 12
     test "a declined retry leaves paid_through and sends no card-declined email", %{admin: admin, user: user} do
-      paused!(user, card_fields(:visa_0341))
+      lapsed!(user, card_fields(:visa_0341))
 
       assert Billing.admin_retry_charge(user.id, admin, @today) == {:ok, :declined}
       assert [%BillingPaymentAttempt{status: :failed, source: :admin}] = attempts(user)
@@ -307,8 +306,8 @@ defmodule Relay.Billing.AdminTest do
     end
 
     # Scenario 13
-    test "a never-paid owner whose first charge declined pays a fresh month", %{admin: admin, user: user} do
-      account = account_for(user, Map.merge(%{trial_ends_on: ~D[2026-06-01]}, card_fields(:visa_4242)))
+    test "a never-paid (Free) owner with a card pays a fresh month", %{admin: admin, user: user} do
+      account = account_for(user, card_fields(:visa_4242))
 
       insert(:billing_payment_attempt,
         billing_account: account,
@@ -330,8 +329,8 @@ defmodule Relay.Billing.AdminTest do
       held = insert(:user)
       cardless = insert(:user)
       active!(user, card_fields(:visa_4242))
-      paused!(held, Map.merge(%{held_on: ~D[2026-06-01], hold_reason: "fraud"}, card_fields(:visa_4242)))
-      account_for(cardless, %{trial_ends_on: ~D[2026-04-01], paid_through: ~D[2026-06-09], billing_day: 10})
+      lapsed!(held, Map.merge(%{held_on: ~D[2026-06-01], hold_reason: "fraud"}, card_fields(:visa_4242)))
+      account_for(cardless, %{paid_through: ~D[2026-06-09], billing_day: 10})
 
       for owner <- [user, held, cardless] do
         assert Billing.admin_retry_charge(owner.id, admin, @today) == {:error, :not_retryable}
@@ -342,12 +341,13 @@ defmodule Relay.Billing.AdminTest do
   end
 
   # Scenario 15
-  test "admin_retryable?/2 needs a card and a past-due or non-hold pause" do
+  test "admin_retryable?/2 needs a card and a past-due or Free standing, never a hold" do
     card = struct(BillingAccount, card_fields(:visa_4242))
     no_card = %BillingAccount{}
 
     assert Billing.admin_retryable?(card, {:past_due, @today})
-    assert Billing.admin_retryable?(card, {:paused, :unpaid})
+    assert Billing.admin_retryable?(card, :free)
+    refute Billing.admin_retryable?(no_card, :free)
     refute Billing.admin_retryable?(card, {:paused, :hold})
     refute Billing.admin_retryable?(no_card, {:past_due, @today})
     refute Billing.admin_retryable?(card, :active)
@@ -371,8 +371,8 @@ defmodule Relay.Billing.AdminTest do
     assert BillingAdminEntry.actions() == [:comp, :uncomp, :hold, :lift_hold, :extend, :retry_charge]
   end
 
-  test "attempts may be opened by :admin" do
-    assert BillingPaymentAttempt.sources() == [:clock, :card_saved, :admin]
+  test "attempts may be opened by :admin and by the $0 :upgrade" do
+    assert BillingPaymentAttempt.sources() == [:clock, :card_saved, :admin, :upgrade]
   end
 
   # Scenario 16
@@ -386,7 +386,6 @@ defmodule Relay.Billing.AdminTest do
           user,
           Map.merge(
             %{
-              trial_ends_on: ~D[2026-04-01],
               paid_through: ~D[2026-06-30],
               billing_day: 1,
               promo_code_id: promo.id,
@@ -428,6 +427,7 @@ defmodule Relay.Billing.AdminTest do
       assert detail.comped?
       refute detail.held?
       assert detail.plan == :comped
+      refute Map.has_key?(detail, :trial_ends_on)
 
       declined_id = declined.id
       paid_id = paid.id

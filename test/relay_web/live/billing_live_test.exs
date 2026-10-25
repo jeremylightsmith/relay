@@ -57,48 +57,165 @@ defmodule RelayWeb.BillingLiveTest do
     %{account: account, payment: payment, paid_through: paid_through}
   end
 
-  describe "a trial with no card" do
-    test "shows the trial, the first charge and the no-card row (scenario 1)", %{conn: conn, today: today} do
+  defp ordinal(day), do: RelayWeb.BillingLive.ordinal(day)
+
+  # Scenario 8's owner: Free, boards A, B, C (owned, live), a card on B the newest activity.
+  defp free_owner_of_three!(user) do
+    day_ago = DateTime.add(DateTime.utc_now(:second), -86_400)
+    a = insert(:board, owner: user, name: "A", updated_at: DateTime.add(day_ago, -30))
+    b = insert(:board, owner: user, name: "B", updated_at: DateTime.add(day_ago, -20))
+    c = insert(:board, owner: user, name: "C", updated_at: DateTime.add(day_ago, -10))
+    insert(:card, stage: insert(:stage, board: b))
+    %{a: a, b: b, c: c}
+  end
+
+  describe "a Free owner within the limit" do
+    setup %{user: user} do
+      %{board: insert(:board, owner: user, name: "Only")}
+    end
+
+    test "shows the Free badge, the board count, the Upgrade row and the code form (scenario 39)", %{
+      conn: conn,
+      today: today
+    } do
       {:ok, view, _html} = live(conn, ~p"/account/billing")
 
       assert has_element?(view, "#billing-page")
-      assert has_element?(view, "#billing-standing-badge.badge.badge-soft.badge-primary", "Trial")
+      assert has_element?(view, "#billing-standing-badge.badge.badge-soft.badge-neutral", "Free")
+      assert has_element?(view, "#billing-free-count.text-sm b", "1 of 1")
+      assert squish(text(view, "#billing-free-count")) == "1 of 1 boards"
 
-      trial = text(view, "#billing-trial")
-      assert trial =~ mon_d(Date.add(today, 30))
-      assert trial =~ "30 days left"
-      assert has_element?(view, "#billing-trial b", mon_d(Date.add(today, 30)))
+      assert has_element?(view, "#billing-upgrade.mt-4.rounded-box.bg-base-200.p-4.text-sm")
+      assert has_element?(view, "#billing-upgrade .font-semibold", "Unlimited boards · $20/month")
 
-      assert has_element?(view, "#billing-first-charge.rounded-box.bg-base-200.p-3.text-sm")
-      first_charge = text(view, "#billing-first-charge")
-      assert first_charge =~ "First charge, #{mon_d(Date.add(today, 31))}"
-      assert has_element?(view, "#billing-first-charge .font-mono", "$20.00")
+      assert has_element?(
+               view,
+               "#billing-upgrade .mt-1.text-base-content\\/65",
+               "Charged today, then on the #{ordinal(today.day)} of each month. Cancel anytime and you drop back to Free."
+             )
 
-      assert has_element?(view, "#billing-no-card.border-t.border-base-300.pt-4")
+      assert has_element?(view, "#billing-upgrade-button.btn.btn-primary.btn-sm.shrink-0", "Upgrade")
+      assert has_element?(view, "#billing-code-form")
+      refute has_element?(view, "#billing-free-over-limit-alert")
+      refute has_element?(view, "#billing-free-boards")
 
-      assert squish(text(view, "#billing-no-card")) =~
-               "No card on file. Without one, your boards go read-only on #{mon_d(Date.add(today, 31))}."
-
-      assert has_element?(view, "#billing-add-card.btn.btn-primary.btn-sm", "Add card")
+      html = render(view)
+      for gone <- ["Trial", "days left", "First charge", "No card on file"], do: refute(html =~ gone)
     end
 
-    test "Add card redirects to the checkout (scenario 2)", %{conn: conn} do
+    test "Upgrade at full price redirects to the checkout (scenario 42)", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/account/billing")
 
-      assert {:error, {:redirect, %{to: url}}} = view |> element("#billing-add-card") |> render_click()
+      assert {:error, {:redirect, %{to: url}}} = render_click(view, "upgrade")
       assert url =~ "/dev/billing-checkout"
     end
 
-    test "returning from checkout saves the card (scenario 3)", %{conn: conn, user: user} do
+    test "Upgrade with a 100% code upgrades in place, without checkout (scenario 42)", %{conn: conn, user: user} do
+      insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
+      {:ok, _account} = Billing.redeem_code(user, "FRIENDS", Date.utc_today())
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      html = view |> element("#billing-upgrade-button") |> render_click()
+
+      assert html =~ "Upgraded. Your boards are editable."
+      assert has_element?(view, "#billing-standing-badge", "Active")
+      refute has_element?(view, "#billing-upgrade")
+    end
+
+    test "returning from checkout saves the card and upgrades", %{conn: conn, user: user} do
       {:ok, view, _html} = live(conn, ~p"/account/billing?setup=local_4242_#{user.id}")
 
-      assert has_element?(view, "#billing-card.rounded-box.bg-base-200.p-3")
       assert has_element?(view, "#billing-card .font-mono", "Visa •••• 4242")
-      assert text(view, "#billing-card") =~ "exp 08/28"
-      assert has_element?(view, "#billing-replace-card.btn.btn-ghost.btn-xs", "Replace")
-      refute has_element?(view, "#billing-no-card")
-      assert render(view) =~ "Card saved."
+      assert has_element?(view, "#billing-standing-badge", "Active")
+      assert render(view) =~ "Card saved and charged. Your boards are editable."
     end
+
+    test "re-renders live when the account is paid elsewhere (scenario 44)", %{conn: conn, user: user, today: today} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+      assert has_element?(view, "#billing-standing-badge", "Free")
+
+      {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, today)
+
+      assert has_element?(view, "#billing-standing-badge", "Active")
+    end
+  end
+
+  describe "a Free owner over the limit (scenario 41)" do
+    setup %{user: user}, do: free_owner_of_three!(user)
+
+    test "lists the boards with the editable one first and offers to make all of them editable", %{
+      conn: conn,
+      today: today,
+      a: a,
+      b: b,
+      c: c
+    } do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(
+               view,
+               "#billing-free-over-limit-alert.alert.alert-warning[role=alert]",
+               "You're on Free, so one board stays editable. The others are read-only. Nothing's been deleted."
+             )
+
+      assert squish(text(view, "#billing-free-count")) == "3 boards · 1 editable"
+      assert has_element?(view, "#billing-free-count b", "3")
+      assert has_element?(view, ".text-xs.font-semibold.text-base-content\\/65", "EDITABLE ON FREE")
+
+      items =
+        view
+        |> element("#billing-free-boards")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("li")
+        |> Enum.map(&(&1 |> LazyHTML.attribute("id") |> hd()))
+
+      assert items == ["billing-free-board-#{b.id}", "billing-free-board-#{c.id}", "billing-free-board-#{a.id}"]
+
+      assert has_element?(
+               view,
+               "#billing-free-boards.mt-1.divide-y.divide-base-300.rounded-box.border.border-base-300.text-sm"
+             )
+
+      assert has_element?(view, "#billing-free-board-#{b.id}.flex.items-center.gap-3.px-3.py-2\\.5")
+      assert has_element?(view, "#billing-free-board-#{b.id} .flex-1.font-medium", "B")
+      assert has_element?(view, "#billing-free-board-#{b.id} .badge.badge-success.badge-soft.badge-sm", "Editable")
+      assert has_element?(view, "#billing-free-board-#{b.id} span.rounded-\\[3px\\][style*=background]")
+
+      for read_only <- [a, c] do
+        assert has_element?(view, "#billing-free-board-#{read_only.id}.text-base-content\\/65")
+        assert has_element?(view, "#billing-free-board-#{read_only.id} .font-mono", "read-only")
+        refute has_element?(view, "#billing-free-board-#{read_only.id} .badge")
+      end
+
+      refute render(view) =~ "Make editable"
+
+      assert has_element?(view, "#billing-upgrade .font-semibold", "Make all 3 editable · $20/month")
+
+      assert has_element?(
+               view,
+               "#billing-upgrade .mt-1",
+               "Charged today. Your billing date becomes the #{ordinal(today.day)}."
+             )
+    end
+  end
+
+  test "ordinal/1 names the day of the month (scenario 40)" do
+    expected = %{
+      1 => "1st",
+      2 => "2nd",
+      3 => "3rd",
+      4 => "4th",
+      11 => "11th",
+      12 => "12th",
+      13 => "13th",
+      21 => "21st",
+      22 => "22nd",
+      23 => "23rd",
+      31 => "31st"
+    }
+
+    for {day, label} <- expected, do: assert(ordinal(day) == label)
   end
 
   describe "an active account" do
@@ -137,13 +254,17 @@ defmodule RelayWeb.BillingLiveTest do
       assert has_element?(view, "#billing-cancel-line.border-t.border-base-300.pt-3.text-xs.text-base-content\\/55")
 
       assert squish(text(view, "#billing-cancel-line")) =~
-               "Cancelling keeps access until #{mon_d(paid_through)}. No refunds."
+               "Cancelling keeps unlimited boards until #{mon_d(paid_through)}, then you drop to Free (one editable board). No refunds."
 
       assert has_element?(
                view,
-               ~s(#billing-cancel.btn.btn-ghost.btn-xs[data-confirm="Cancel your plan? You keep access until #{mon_d(paid_through)}. No refunds."]),
+               ~s(#billing-cancel.btn.btn-ghost.btn-xs[data-confirm="Cancel your plan? You keep unlimited boards until #{mon_d(paid_through)}, then drop to Free. No refunds."]),
                "Cancel plan…"
              )
+
+      assert has_element?(view, "#billing-next-charge", "Next charge, #{mon_d(Date.add(paid_through, 1))}")
+      refute has_element?(view, "#billing-upgrade")
+      refute has_element?(view, "#billing-free-count")
     end
 
     test "cancel then resume (scenario 5)", %{conn: conn, paid_through: paid_through} do
@@ -170,21 +291,36 @@ defmodule RelayWeb.BillingLiveTest do
     assert has_element?(view, "#billing-update-card.btn.btn-sm", "Update card")
   end
 
-  describe "a paused account" do
+  test "a held account shows the paused alert with no Update card (scenario 45)", %{
+    conn: conn,
+    user: user,
+    today: today
+  } do
+    insert(:billing_account, user: user, held_on: today, hold_reason: "test")
+    {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+    assert has_element?(view, "#billing-paused-alert.alert.alert-error")
+
+    assert text(view, "#billing-paused-alert") =~
+             "Your plan is paused, so your boards are read-only. Nothing's been deleted."
+
+    refute has_element?(view, "#billing-update-card")
+    assert has_element?(view, "#billing-standing-badge.badge-error", "Paused")
+    refute has_element?(view, "#billing-upgrade")
+  end
+
+  describe "a lapsed (Free) account" do
     setup %{user: user, today: today} do
       insert(:billing_account, user: user, paid_through: Date.add(today, -10), billing_day: today.day)
       :ok
     end
 
-    test "shows the paused alert (scenario 7)", %{conn: conn} do
+    test "is on Free with no paused alert", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/account/billing")
 
-      assert has_element?(view, "#billing-paused-alert.alert.alert-error")
-
-      assert text(view, "#billing-paused-alert") =~
-               "Your plan is paused, so your boards are read-only. Nothing's been deleted."
-
-      assert has_element?(view, "#billing-update-card.btn.btn-sm", "Update card")
+      assert has_element?(view, "#billing-standing-badge", "Free")
+      refute has_element?(view, "#billing-paused-alert")
+      assert has_element?(view, "#billing-upgrade-button")
     end
 
     test "saving a card pays a fresh month (scenario 7)", %{conn: conn, user: user, today: today} do
@@ -194,16 +330,6 @@ defmodule RelayWeb.BillingLiveTest do
       assert has_element?(view, "#billing-standing-badge", "Active")
       assert render(view) =~ "paid through <b>#{mon_d(period_end)}</b>"
       assert render(view) =~ "Card saved and charged. Your boards are editable."
-    end
-
-    test "re-renders live when the webhook pays (scenario 11)", %{conn: conn, user: user, today: today} do
-      {:ok, view, _html} = live(conn, ~p"/account/billing")
-      assert has_element?(view, "#billing-paused-alert")
-
-      {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, today)
-
-      assert has_element?(view, "#billing-standing-badge", "Active")
-      refute has_element?(view, "#billing-paused-alert")
     end
   end
 
@@ -216,9 +342,9 @@ defmodule RelayWeb.BillingLiveTest do
     refute has_element?(view, "#billing-cancel")
   end
 
-  test "another user's setup id is refused (scenario 9)", %{conn: conn, today: today} do
+  test "another user's setup id is refused (scenario 9)", %{conn: conn} do
     other = insert(:user)
-    {:ok, before} = Billing.ensure_trial(other, today)
+    {:ok, before} = Billing.ensure_account(other)
 
     {:ok, view, _html} = live(conn, ~p"/account/billing?setup=local_4242_#{other.id}")
 
@@ -227,10 +353,11 @@ defmodule RelayWeb.BillingLiveTest do
   end
 
   describe "the off switch and the avatar menu (scenario 10)" do
-    test "billing disabled: the page 404s and there is no menu item", %{conn: conn} do
+    test "billing disabled: the page 404s and there is no menu item (scenario 46)", %{conn: conn} do
       Process.put(:billing_enabled, false)
 
       assert_error_sent 404, fn -> get(conn, ~p"/account/billing") end
+      assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/account/billing") end
 
       {:ok, view, _html} = live(conn, ~p"/boards")
       refute has_element?(view, "#billing-link")
@@ -250,17 +377,20 @@ defmodule RelayWeb.BillingLiveTest do
     defp apply_code(view, code),
       do: view |> form("#billing-code-form", %{"promo" => %{"code" => code}}) |> render_submit()
 
-    test "applying a code previews the discounted first charge (scenario 1)", %{conn: conn, user: user, today: today} do
-      insert(:billing_account, user: user, trial_ends_on: Date.add(today, 11))
-      first_charge_on = Date.add(today, 12)
+    test "applying a code on Free shows its terms under the Upgrade row (scenario 1)", %{
+      conn: conn,
+      user: user,
+      today: today
+    } do
+      insert(:billing_account, user: user)
       {:ok, view, _html} = live(conn, ~p"/account/billing")
 
       html = apply_code(view, "relayconf")
 
-      first_charge = squish(text(view, "#billing-first-charge"))
-      assert first_charge =~ "First charge, #{mon_d(first_charge_on)} $10.00"
-      assert first_charge =~ "RELAYCONF · 50% off, 3 months"
-      assert first_charge =~ "then $20.00 from #{mon_d(Periods.renewal_after(first_charge_on, first_charge_on.day, 3))}"
+      upgrade = squish(text(view, "#billing-upgrade"))
+      assert upgrade =~ "Unlimited boards · $20/month"
+      assert upgrade =~ "RELAYCONF · 50% off, 3 months"
+      assert upgrade =~ "then $20.00 from #{mon_d(Periods.renewal_after(today, today.day, 3))}"
 
       assert has_element?(
                view,
@@ -384,25 +514,19 @@ defmodule RelayWeb.BillingLiveTest do
       assert has_element?(view, "#billing-promo-applied", "RELAYCONF")
     end
 
-    test "a 100% code needs no card yet (scenario 7)", %{conn: conn, user: user, today: today} do
+    test "a 100% code on Free shows its terms under the Upgrade row (scenario 7)", %{
+      conn: conn,
+      user: user,
+      today: today
+    } do
       free = insert(:promo_code, code: "FREE", percent_off: 100, months: 2)
       insert(:billing_account, user: user, promo_code: free, promo_months_left: 2)
-      first_charge_on = Date.add(today, 31)
       {:ok, view, _html} = live(conn, ~p"/account/billing")
 
-      assert has_element?(view, "#billing-first-charge .font-mono", "$0.00")
-      no_card = squish(text(view, "#billing-no-card"))
-      assert no_card =~ "No card needed until #{mon_d(Periods.renewal_after(first_charge_on, first_charge_on.day, 2))}."
-      refute no_card =~ "read-only"
-      assert has_element?(view, "#billing-add-card", "Add card")
-    end
-
-    test "a trial with no code still shows full price (scenario 8)", %{conn: conn, today: today} do
-      {:ok, view, _html} = live(conn, ~p"/account/billing")
-
-      assert squish(text(view, "#billing-first-charge")) =~ "First charge, #{mon_d(Date.add(today, 31))} $20.00"
-      assert has_element?(view, "#billing-first-charge .font-mono", "$20.00")
-      refute has_element?(view, "#billing-promo-terms")
+      upgrade = squish(text(view, "#billing-upgrade"))
+      assert upgrade =~ "FREE · 100% off, 2 months"
+      assert upgrade =~ "then $20.00 from #{mon_d(Periods.renewal_after(today, today.day, 2))}"
+      assert has_element?(view, "#billing-upgrade-button", "Upgrade")
     end
   end
 end

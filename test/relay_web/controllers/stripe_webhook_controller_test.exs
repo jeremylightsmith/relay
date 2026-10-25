@@ -27,7 +27,7 @@ defmodule RelayWeb.StripeWebhookControllerTest do
     setup do
       Process.put(:billing_enabled, true)
       user = insert(:user)
-      insert(:billing_account, user: user, trial_ends_on: Date.add(Date.utc_today(), 10))
+      insert(:billing_account, user: user)
       %{user: user}
     end
 

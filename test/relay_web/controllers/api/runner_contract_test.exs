@@ -169,16 +169,10 @@ defmodule RelayWeb.Api.RunnerContractTest do
 
     # RE460 — the plan_paused refusal is wire too: ./relay branches on its `code` to tell a
     # paused board from a job or a hard error. Captured off the real claim route from a third
-    # board whose own owner is paused, with billing on only for this one request.
+    # board whose own owner is paused (held), with billing on only for this one request.
     paused_owner = insert(:user)
     paused = board_with_flow(paused_owner, "Contract P", "CP", :shared_clean, agent_node())
-    paused_today = Date.utc_today()
-
-    insert(:billing_account,
-      user: paused_owner,
-      paid_through: Date.add(paused_today, -10),
-      billing_day: paused_today.day
-    )
+    insert(:billing_account, user: paused_owner, held_on: Date.utc_today(), hold_reason: "contract")
 
     Process.put(:billing_enabled, true)
 

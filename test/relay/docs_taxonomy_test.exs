@@ -32,8 +32,10 @@ defmodule Relay.DocsTaxonomyTest do
   end
 
   # A `Refined by [ADR NNNN](...)` line in an Accepted ADR's Status section records a later ADR
-  # that narrows it without superseding it; the index marks it `, refined by NNNN`.
-  defp refined_by(contents) do
+  # that narrows it without superseding it; an `Amended by [ADR NNNN](...)` line one that replaces
+  # some of its numbered decisions (RE469). The index marks them `, refined by NNNN` /
+  # `, amended by NNNN`, in the order the lines appear.
+  defp later_adr_markers(contents) do
     status_section =
       contents
       |> String.split("\n")
@@ -42,11 +44,12 @@ defmodule Relay.DocsTaxonomyTest do
       |> Enum.take_while(&(not String.starts_with?(&1, "## ")))
       |> Enum.join("\n")
 
-    for [_, nnnn] <- Regex.scan(~r/^Refined by \[ADR (\d{4})\]/m, status_section), do: nnnn
+    for [_, verb, nnnn] <- Regex.scan(~r/^(Refined|Amended) by \[ADR (\d{4})\]/m, status_section),
+        do: "#{String.downcase(verb)} by #{nnnn}"
   end
 
   defp expected_index_cell(contents) do
-    Enum.join([status_line(contents) | Enum.map(refined_by(contents), &"refined by #{&1}")], ", ")
+    Enum.join([status_line(contents) | later_adr_markers(contents)], ", ")
   end
 
   # Index rows keyed by link target: `| [NNNN](file.md) | Title | Status |` → %{"file.md" => "Status"}.
@@ -242,6 +245,30 @@ defmodule Relay.DocsTaxonomyTest do
 
       refute domain =~ "Planned by [ADR 0006]"
       refute domain =~ "for card 04's pull transport"
+    end
+  end
+
+  describe "the Free plan (RE469)" do
+    @adr_0012 "docs/adr/0012-board-owners-pay-up-front.md"
+    @adr_0013 "docs/adr/0013-free-plan-replaces-the-trial.md"
+
+    test "ADR 0013 is Accepted and ADR 0012 stays Accepted, amended by 0013" do
+      assert status_line(read(@adr_0013)) == "Accepted (2026-10-25)"
+
+      adr_0012 = read(@adr_0012)
+      assert status_line(adr_0012) == "Accepted (2026-10-24)"
+      assert adr_0012 =~ "Amended by [ADR 0013](0013-free-plan-replaces-the-trial.md)"
+    end
+
+    test "the ADR index lists 0013 as Accepted and 0012 as amended by 0013" do
+      index = read("docs/adr/README.md")
+
+      assert index =~ ~r/\[0013\]\(0013-free-plan-replaces-the-trial\.md\).*\| Accepted \(2026-10-25\) \|/
+      assert index =~ ~r/\[0012\]\(0012-board-owners-pay-up-front\.md\).*\| Accepted \(2026-10-24\), amended by 0013 \|/
+    end
+
+    test "the ADR index documents the Amended by line" do
+      assert read("docs/adr/README.md") =~ "Amended by [ADR NNNN]"
     end
   end
 

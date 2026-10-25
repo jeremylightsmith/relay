@@ -2,7 +2,7 @@ defmodule RelayWeb.Admin.UsersLive do
   @moduledoc """
   The table of every user at `/admin/users` (RE353, RE463): name, email, board count, the
   billing columns — Members, Plan, Paid through, Rate, Code — and created date, newest first,
-  under a summary line (`N users · N paying · $N/mo · N in trial`). Rows come from
+  under a summary line (`N users · N paying · $N/mo · N on Free`). Rows come from
   `Relay.Billing.list_admin_users/1` (one query) and the summary from
   `Relay.Billing.admin_summary/1`, as of today — a snapshot at mount (no PubSub), re-read after
   each admin write. Gated by the `:admin` live_session. Its header carries the `Users | Promo codes` tab bar
@@ -157,7 +157,7 @@ defmodule RelayWeb.Admin.UsersLive do
           <span id="admin-users-summary" class="text-sm text-base-content/65">
             {@summary.users} users · {@summary.paying} paying ·
             <span class="text-success">{Billing.format_dollars(@summary.mrr_cents)}/mo</span>
-            · {@summary.in_trial} in trial
+            · {@summary.free} on Free
           </span>
           <span class="flex-1"></span>
           <.user_tabs active={:users} />
@@ -260,10 +260,6 @@ defmodule RelayWeb.Admin.UsersLive do
         </section>
 
         <dl id="admin-user-panel-facts" class="grid grid-cols-2 gap-3">
-          <.fact
-            label="Trial ends"
-            value={@detail.trial_ends_on && Date.to_iso8601(@detail.trial_ends_on)}
-          />
           <.fact
             label="Paid through"
             value={@detail.paid_through && Date.to_iso8601(@detail.paid_through)}

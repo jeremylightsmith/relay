@@ -1,5 +1,5 @@
 defmodule Relay.Billing.NotifierClockTest do
-  @moduledoc "The billing clock's once-only emails (RE464): trial ending, card declined, plan paused."
+  @moduledoc "The billing clock's once-only emails (RE464, RE469): card declined, dropped to Free."
 
   use Relay.DataCase, async: true
 
@@ -12,9 +12,8 @@ defmodule Relay.Billing.NotifierClockTest do
   alias Schemas.BillingNotice
   alias Schemas.BillingPaymentAttempt
 
-  @trial_ending "Your Relay trial ends in 3 days"
   @declined "We couldn't charge your card for Relay"
-  @paused "Your Relay plan is paused"
+  @dropped "Your Relay plan is now Free"
 
   setup do
     Process.put(:billing_enabled, true)
@@ -53,95 +52,45 @@ defmodule Relay.Billing.NotifierClockTest do
 
   defp notice_count, do: Repo.aggregate(BillingNotice, :count)
 
-  describe "trial ending" do
-    test "timeline A: a no-card trial is told once, two days before it ends" do
-      account = account("nocard@example.com", nil, %{trial_ends_on: ~D[2026-04-03]})
+  describe "dropped to Free" do
+    test "a paid account past its grace is told once, keyed on its first Free day" do
+      today = ~D[2026-10-25]
+      paid_through = Date.add(today, -2)
+      account = account("lapsed@example.com", nil, %{paid_through: paid_through, billing_day: 24})
 
-      assert %{notified: 0} = Billing.run_clock(~D[2026-03-31])
-      assert_no_email_sent()
-
-      assert %{notified: 1} = Billing.run_clock(~D[2026-04-01])
+      assert %{notified: 1} = Billing.run_clock(today)
+      assert %{notified: 0} = Billing.run_clock(today)
 
       assert_email_sent(fn email ->
-        assert email.subject == @trial_ending
-        assert email.to == [{"", "nocard@example.com"}]
-        assert email.text_body =~ "April 3, 2026"
-        assert email.text_body =~ "/account/billing"
+        assert email.subject == @dropped
+        assert email.to == [{"", "lapsed@example.com"}]
+
+        assert email.text_body =~
+                 "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+                   "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all: " <>
+                   Notifier.billing_url()
       end)
 
       assert_no_email_sent()
-      assert notices(account) == [{:trial_ending, ~D[2026-04-03]}]
-
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-01])
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-02])
-      assert_no_email_sent()
-      assert notices(account) == [{:trial_ending, ~D[2026-04-03]}]
+      assert notices(account) == [{:dropped_to_free, Date.add(paid_through, 2)}]
     end
 
-    test "a trial with a card on file is not told" do
+    test "a never-paid account of any age is never noticed, whatever its old trial date" do
+      account("new@example.com", nil, %{})
+      account("old@example.com", nil, %{trial_ends_on: ~D[2026-03-01]})
+      account("ending@example.com", nil, %{trial_ends_on: ~D[2026-04-03]})
       account("card@example.com", :visa_4242, %{trial_ends_on: ~D[2026-04-03]})
-      nocard = account("nocard@example.com", nil, %{trial_ends_on: ~D[2026-04-03]})
 
-      assert %{notified: 1} = Billing.run_clock(~D[2026-04-01])
+      for today <- [~D[2026-04-01], ~D[2026-04-04], ~D[2026-10-25]] do
+        assert %{notified: 0} = Billing.run_clock(today, final_pass?: true)
+      end
 
-      assert_email_sent(subject: @trial_ending, to: "nocard@example.com")
-      assert_no_email_sent()
-      assert notice_count() == 1
-      assert notices(nocard) == [{:trial_ending, ~D[2026-04-03]}]
-    end
-
-    test "comped, held and cancelled trials get nothing, ending or ended" do
-      account("comped@example.com", nil, %{trial_ends_on: ~D[2026-04-03], comped: true})
-      account("held@example.com", nil, %{trial_ends_on: ~D[2026-04-03], held_on: ~D[2026-03-01]})
-
-      account("cancelled@example.com", nil, %{
-        trial_ends_on: ~D[2026-04-03],
-        cancelled_on: ~D[2026-03-20],
-        access_until: ~D[2026-04-03]
-      })
-
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-01])
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-05])
       assert_no_email_sent()
       assert notice_count() == 0
     end
-  end
 
-  describe "paused" do
-    test "timeline A: a trial that ends with no card is told once that it paused" do
-      account = account("nocard@example.com", nil, %{trial_ends_on: ~D[2026-04-03]})
-
-      assert %{notified: 1} = Billing.run_clock(~D[2026-04-04])
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-04])
-
-      assert_email_sent(fn email ->
-        assert email.subject == @paused
-        assert email.to == [{"", "nocard@example.com"}]
-        assert email.text_body =~ "Nothing's been deleted."
-        assert email.text_body =~ "/account/billing"
-      end)
-
-      assert_no_email_sent()
-      assert notices(account) == [{:paused, ~D[2026-04-04]}]
-    end
-
-    test "a trial's declined first charge is told it was declined and paused, once" do
-      account = account("declined@example.com", :visa_0341, %{trial_ends_on: ~D[2026-04-03]})
-
-      assert %{notified: 2} = Billing.run_clock(~D[2026-04-04])
-
-      assert_email_sent(fn email ->
-        assert email.subject == @declined
-        assert email.to == [{"", "declined@example.com"}]
-        assert email.text_body =~ "($20.00)"
-      end)
-
-      assert_email_sent(subject: @paused, to: "declined@example.com")
-      assert_no_email_sent()
-      assert notices(account) == [{:card_declined, ~D[2026-04-04]}, {:paused, ~D[2026-04-04]}]
-
-      assert %{notified: 0} = Billing.run_clock(~D[2026-04-05], final_pass?: true)
-      assert_no_email_sent()
+    test "the notice kinds are the declined card and the drop to Free" do
+      assert BillingNotice.kinds() == [:card_declined, :dropped_to_free]
     end
   end
 
@@ -150,7 +99,7 @@ defmodule Relay.Billing.NotifierClockTest do
       %{account: account("renewal@example.com", :visa_0341, %{paid_through: ~D[2026-08-11], billing_day: 12})}
     end
 
-    test "is told once that the card was declined, retry included, and not yet paused", %{account: account} do
+    test "is told once that the card was declined, retry included, and not yet on Free", %{account: account} do
       assert %{notified: 1} = Billing.run_clock(~D[2026-08-12])
       assert_email_sent(subject: @declined, to: "renewal@example.com")
       assert_no_email_sent()
@@ -164,7 +113,7 @@ defmodule Relay.Billing.NotifierClockTest do
       assert notices(account) == [{:card_declined, ~D[2026-08-12]}]
     end
 
-    test "is told once the day after that the plan paused", %{account: account} do
+    test "is told once, the day after the grace, that the plan is now Free", %{account: account} do
       Billing.run_clock(~D[2026-08-12])
       Billing.run_clock(~D[2026-08-12], final_pass?: true)
       assert_email_sent(subject: @declined)
@@ -172,9 +121,10 @@ defmodule Relay.Billing.NotifierClockTest do
       assert %{notified: 1} = Billing.run_clock(~D[2026-08-13])
       assert %{notified: 0} = Billing.run_clock(~D[2026-08-13])
 
-      assert_email_sent(subject: @paused, to: "renewal@example.com")
+      assert_email_sent(subject: @dropped, to: "renewal@example.com")
       assert_no_email_sent()
-      assert notices(account) == [{:card_declined, ~D[2026-08-12]}, {:paused, ~D[2026-08-12]}]
+      assert notices(account) == [{:card_declined, ~D[2026-08-12]}, {:dropped_to_free, ~D[2026-08-13]}]
+      assert Billing.standing(account.user_id, ~D[2026-08-13]) == :free
     end
 
     test "a later period notifies again", %{account: account} do
@@ -182,29 +132,30 @@ defmodule Relay.Billing.NotifierClockTest do
       Billing.run_clock(~D[2026-08-12], final_pass?: true)
       Billing.run_clock(~D[2026-08-13])
       assert_email_sent(subject: @declined)
-      assert_email_sent(subject: @paused)
+      assert_email_sent(subject: @dropped)
 
       account |> Ecto.Changeset.change(paid_through: ~D[2026-09-11]) |> Repo.update!()
 
       assert %{notified: 1} = Billing.run_clock(~D[2026-09-12])
       assert_email_sent(subject: @declined, to: "renewal@example.com")
       assert %{notified: 1} = Billing.run_clock(~D[2026-09-13])
-      assert_email_sent(subject: @paused, to: "renewal@example.com")
+      assert_email_sent(subject: @dropped, to: "renewal@example.com")
       assert_no_email_sent()
 
       assert notices(account) == [
                {:card_declined, ~D[2026-08-12]},
-               {:paused, ~D[2026-08-12]},
+               {:dropped_to_free, ~D[2026-08-13]},
                {:card_declined, ~D[2026-09-12]},
-               {:paused, ~D[2026-09-12]}
+               {:dropped_to_free, ~D[2026-09-13]}
              ]
     end
   end
 
-  test "active, comped, held and cancelled-and-lapsed accounts get nothing" do
+  test "active, comped, held, never-paid and cancelled-and-lapsed accounts get nothing" do
     lapsed = %{paid_through: ~D[2026-08-11], billing_day: 12}
     account("comped@example.com", nil, Map.put(lapsed, :comped, true))
     account("held@example.com", nil, Map.put(lapsed, :held_on, ~D[2026-08-01]))
+    account("never-paid@example.com", nil, %{})
 
     account(
       "cancelled@example.com",
@@ -238,24 +189,20 @@ defmodule Relay.Billing.NotifierClockTest do
 
   test "with billing disabled nothing is noticed" do
     Process.put(:billing_enabled, false)
-    account("nocard@example.com", nil, %{trial_ends_on: ~D[2026-04-03]})
+    account("lapsed@example.com", nil, %{paid_through: ~D[2026-03-29], billing_day: 30})
 
-    assert Billing.run_clock(~D[2026-04-01]) == %{backfilled: 0, resolved: 0, charged: 0, notified: 0}
+    assert Billing.run_clock(~D[2026-04-01]) == %{resolved: 0, charged: 0, notified: 0}
     assert_no_email_sent()
     assert notice_count() == 0
   end
 
   test "the unique index, not the code, refuses a second identical notice" do
     account = insert(:billing_account)
-    insert(:billing_notice, billing_account: account, kind: :paused, period_key: ~D[2026-08-12])
+    insert(:billing_notice, billing_account: account, kind: :dropped_to_free, period_key: ~D[2026-08-12])
 
     assert_raise Ecto.ConstraintError, ~r/billing_notices_once/, fn ->
-      Repo.insert(%BillingNotice{billing_account_id: account.id, kind: :paused, period_key: ~D[2026-08-12]})
+      Repo.insert(%BillingNotice{billing_account_id: account.id, kind: :dropped_to_free, period_key: ~D[2026-08-12]})
     end
-  end
-
-  test "the trial notice goes out two days ahead" do
-    assert Notifier.trial_notice_days_before() == 2
   end
 end
 
@@ -308,7 +255,7 @@ defmodule Relay.Billing.NotifierClockMailOffTest do
     assert [%{status: :failed}, %{status: :failed}] =
              Repo.all(from a in BillingPaymentAttempt, where: a.billing_account_id == ^account.id, order_by: a.id)
 
-    assert Billing.standing(account.user_id, ~D[2026-08-13]) == {:paused, :unpaid}
+    assert Billing.standing(account.user_id, ~D[2026-08-13]) == :free
     assert log =~ "no mail provider configured"
 
     assert Repo.all(
@@ -316,6 +263,6 @@ defmodule Relay.Billing.NotifierClockMailOffTest do
                where: n.billing_account_id == ^account.id,
                order_by: n.id,
                select: {n.kind, n.period_key}
-           ) == [{:card_declined, ~D[2026-08-12]}, {:paused, ~D[2026-08-12]}]
+           ) == [{:card_declined, ~D[2026-08-12]}, {:dropped_to_free, ~D[2026-08-13]}]
   end
 end

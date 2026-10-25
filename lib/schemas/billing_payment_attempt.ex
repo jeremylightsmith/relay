@@ -16,8 +16,10 @@ defmodule Schemas.BillingPaymentAttempt do
 
   @statuses [:pending, :succeeded, :failed, :unknown, :not_charged]
   @open_statuses [:pending, :unknown]
+  # `:trial_end` is produced by nothing since Free replaced the trial (RE469); historical attempts
+  # still load through it.
   @kinds [:trial_end, :renewal, :returned]
-  @sources [:clock, :card_saved, :admin]
+  @sources [:clock, :card_saved, :admin, :upgrade]
 
   schema "billing_payment_attempts" do
     field :status, Ecto.Enum, values: @statuses
@@ -56,18 +58,18 @@ defmodule Schemas.BillingPaymentAttempt do
   def open_statuses, do: @open_statuses
 
   @doc """
-  What an attempt charges for: `:trial_end` the first charge after a trial; `:renewal` the period
-  starting `paid_through + 1` (billing date kept); `:returned` a fresh month starting today (a
-  paused or never-paid account paying).
+  What an attempt charges for: `:trial_end` the first charge after a trial (historical only —
+  nothing opens one since RE469); `:renewal` the period starting `paid_through + 1` (billing date
+  kept); `:returned` a fresh month starting today (a Free account upgrading).
   """
   @spec kinds() :: [:trial_end | :renewal | :returned]
   def kinds, do: @kinds
 
   @doc """
-  What opened an attempt: the billing clock, a card being saved, or the superadmin's "Retry charge
-  now" (RE463). Only a `:clock` decline sends the card-declined email or counts toward the grace
-  day's one retry.
+  What opened an attempt: the billing clock, a card being saved, the superadmin's "Retry charge
+  now" (RE463), or the $0 upgrade (RE469). Only a `:clock` decline sends the card-declined email
+  or counts toward the grace day's one retry.
   """
-  @spec sources() :: [:clock | :card_saved | :admin]
+  @spec sources() :: [:clock | :card_saved | :admin | :upgrade]
   def sources, do: @sources
 end

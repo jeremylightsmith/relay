@@ -220,7 +220,7 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     end
   end
 
-  # RE460 — a paused owner's board has no Board settings: the route redirects back to the board.
+  # RE460 — a held (paused) owner's board has no Board settings: the route redirects back to the board.
   describe "a paused board (scenario 20)" do
     setup :register_and_log_in_user
 
@@ -230,7 +230,7 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
     end
 
     test "redirects to the board with the paused flash", %{conn: conn, user: user, board: board, today: today} do
-      insert(:billing_account, user: user, paid_through: Date.add(today, -10), billing_day: today.day)
+      insert(:billing_account, user: user, held_on: today, hold_reason: "test")
 
       slug = board.slug
 
@@ -245,6 +245,51 @@ defmodule RelayWeb.BoardSettingsGeneralTest do
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
       assert has_element?(view, "#general-pane")
+    end
+  end
+
+  # RE469 — owner F: a never-paid owner with live boards A, B and C, a card most recently updated
+  # on A, so A is the editable board and B and C are read-only on Free.
+  describe "a Free owner over the limit" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      Process.put(:billing_enabled, true)
+      {:ok, a} = Boards.create_board(user, %{name: "Alpha", key: "AL", slug: unique_slug("alpha")})
+      {:ok, b} = Boards.create_board(user, %{name: "Bravo", key: "BR", slug: unique_slug("bravo")})
+      {:ok, c} = Boards.create_board(user, %{name: "Charlie", key: "CH", slug: unique_slug("charlie")})
+      {:ok, card} = Relay.Cards.create_card(hd(a.stages), %{title: "Newest"})
+
+      card
+      |> Ecto.Changeset.change(updated_at: DateTime.utc_now() |> DateTime.add(60) |> DateTime.truncate(:second))
+      |> Relay.Repo.update!()
+
+      %{a: a, b: b, c: c}
+    end
+
+    test "a read-only board's settings redirect with the Free flash (scenario 16)", %{conn: conn, b: b} do
+      slug = b.slug
+
+      assert {:error, {:live_redirect, %{to: to, flash: %{"error" => "This board is read-only on Free."}}}} =
+               live(conn, ~p"/board/#{slug}/settings")
+
+      assert to == "/board/#{slug}"
+    end
+
+    test "the editable board's settings mount (scenario 16)", %{conn: conn, a: a} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{a.slug}/settings?section=general")
+      assert has_element?(view, "#general-pane")
+    end
+
+    test "archiving a board tells the owner's open pages (scenario 17)", %{conn: conn, user: user, a: a} do
+      {:ok, _board_view, _html} = live(conn, ~p"/board/#{a.slug}")
+      {:ok, view, _html} = live(conn, ~p"/board/#{a.slug}/settings?section=general")
+      Relay.Billing.subscribe(user.id)
+
+      view |> element("#archive-board-button") |> render_click()
+
+      user_id = user.id
+      assert_receive {:billing_changed, ^user_id}
     end
   end
 end

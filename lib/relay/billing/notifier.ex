@@ -1,6 +1,6 @@
 defmodule Relay.Billing.Notifier do
   @moduledoc """
-  Billing emails (RE464): builds the trial-ending, card-declined and plan-paused notices and
+  Billing emails (RE464, RE469): builds the card-declined and dropped-to-Free notices and
   delivers them through `Relay.Mailer`.
 
   `deliver/1` only sends when `:mail_enabled` (read through `Relay.Config`) is exactly `true`;
@@ -9,7 +9,7 @@ defmodule Relay.Billing.Notifier do
   `Relay.Billing.TaskSupervisor`, so the billing clock never waits on (or fails because of) the
   mail provider.
 
-  `notify_due/1` (the billing clock's last step) decides which of the three are due on a day and
+  `notify_due/1` (the billing clock's last step) decides which of the two are due on a day and
   sends each **at most once per account and period**: a `Schemas.BillingNotice` row is inserted
   (`on_conflict: :nothing`) before the email is dispatched, and only an insert that created a row
   sends. The unique index `billing_notices_once`, not this code, is the guarantee. Notices are
@@ -24,7 +24,6 @@ defmodule Relay.Billing.Notifier do
 
   alias Relay.Billing
   alias Relay.Billing.Charging
-  alias Relay.Billing.Periods
   alias Relay.Billing.Standing
   alias Relay.Repo
   alias Schemas.BillingAccount
@@ -35,7 +34,6 @@ defmodule Relay.Billing.Notifier do
   require Logger
 
   @billing_path "/account/billing"
-  @trial_notice_days_before 2
   @once_target [:billing_account_id, :kind, :period_key]
 
   @doc """
@@ -52,28 +50,22 @@ defmodule Relay.Billing.Notifier do
     end
   end
 
-  @doc "How many days before `trial_ends_on` the trial-ending email goes out (from then until it ends)."
-  @spec trial_notice_days_before() :: 2
-  def trial_notice_days_before, do: @trial_notice_days_before
-
   @doc """
   Records and dispatches every billing email due on `today`, each at most once per account and
   period, and answers how many notices it newly recorded:
 
-    * `:trial_ending` (period `trial_ends_on`) — a never-paid, uncomped, unheld, uncancelled
-      account with no card on file, from `trial_notice_days_before/0` days before its trial ends
-      through its last day;
     * `:card_declined` (period `period_start`) — a `:failed` clock attempt for a period started
       within the last `Standing.grace_days/0` days; its retry shares the period, so one email;
-    * `:paused` — a standing of `{:paused, :trial_ended}` (period `trial_ends_on + 1`) or
-      `{:paused, :unpaid}` (period `paid_through + 1`). Hold, cancel and comp never send.
+    * `:dropped_to_free` (period `paid_through + grace_days() + 1`, the first Free day) — a paid
+      plan whose renewal lapsed past the grace and now stands on `:free`. A never-paid account,
+      a hold, a cancellation running out, and a comp never send.
 
   Each notice is isolated: one failing account is logged and never stops the rest, and this
   never raises into the clock.
   """
   @spec notify_due(Date.t()) :: non_neg_integer()
   def notify_due(%Date{} = today) do
-    [&trial_ending_due/1, &card_declined_due/1, &paused_due/1]
+    [&card_declined_due/1, &dropped_to_free_due/1]
     |> Enum.flat_map(&candidates(&1, today))
     |> Enum.count(&notify_isolated/1)
   end
@@ -85,20 +77,6 @@ defmodule Relay.Billing.Notifier do
     error ->
       Logger.error("Billing.Notifier: finding due notices failed. " <> Exception.format(:error, error, __STACKTRACE__))
       []
-  end
-
-  defp trial_ending_due(today) do
-    from(a in BillingAccount,
-      where:
-        is_nil(a.paid_through) and not a.comped and is_nil(a.held_on) and is_nil(a.cancelled_on) and
-          a.trial_ends_on >= ^today and a.trial_ends_on <= ^Date.add(today, @trial_notice_days_before),
-      preload: :user
-    )
-    |> Repo.all()
-    |> Enum.reject(&Standing.card_on_file?/1)
-    |> Enum.map(fn account ->
-      {account, fn -> {:trial_ending, account.trial_ends_on, trial_ending_email(account.user, account.trial_ends_on)} end}
-    end)
   end
 
   defp card_declined_due(today) do
@@ -115,25 +93,22 @@ defmodule Relay.Billing.Notifier do
     end)
   end
 
-  # Pre-filtered in SQL so the hourly scan computes standing only for accounts that could be paused.
-  defp paused_due(today) do
+  # Pre-filtered in SQL so the hourly scan computes standing only for paid accounts past their grace.
+  defp dropped_to_free_due(today) do
     lapsed_before = Date.add(today, -Standing.grace_days())
 
     from(a in BillingAccount,
-      where:
-        not a.comped and is_nil(a.held_on) and is_nil(a.cancelled_on) and
-          (a.paid_through < ^lapsed_before or (is_nil(a.paid_through) and a.trial_ends_on < ^today)),
+      where: not a.comped and is_nil(a.held_on) and is_nil(a.cancelled_on) and a.paid_through < ^lapsed_before,
       preload: :user
     )
     |> Repo.all()
-    |> Enum.map(fn account -> {account, fn -> paused_notice(account, today) end} end)
+    |> Enum.map(fn account -> {account, fn -> dropped_to_free_notice(account, today) end} end)
   end
 
-  defp paused_notice(account, today) do
-    case Standing.of(account, Charging.facts(account), today) do
-      {:paused, :trial_ended} -> {:paused, Date.add(account.trial_ends_on, 1), paused_email(account.user)}
-      {:paused, :unpaid} -> {:paused, Periods.next_renewal(account.paid_through), paused_email(account.user)}
-      _standing -> nil
+  defp dropped_to_free_notice(account, today) do
+    if Standing.of(account, Charging.facts(account), today) == :free do
+      first_free_day = Date.add(account.paid_through, Standing.grace_days() + 1)
+      {:dropped_to_free, first_free_day, dropped_to_free_email(account.user)}
     end
   end
 
@@ -170,15 +145,6 @@ defmodule Relay.Billing.Notifier do
   @spec billing_url() :: String.t()
   def billing_url, do: Application.get_env(:relay, :app_url) <> @billing_path
 
-  @doc "The notice sent three days before `trial_ends_on`."
-  @spec trial_ending_email(User.t(), Date.t()) :: Swoosh.Email.t()
-  def trial_ending_email(%User{} = user, %Date{} = trial_ends_on) do
-    build(user, "Your Relay trial ends in 3 days", [
-      "Your Relay trial ends on #{Calendar.strftime(trial_ends_on, "%B %-d, %Y")}. " <>
-        "Add a card to keep your boards editable. Without one they go read-only, and nothing is deleted."
-    ])
-  end
-
   @doc "The notice sent when charging `amount_cents` was declined."
   @spec card_declined_email(User.t(), pos_integer()) :: Swoosh.Email.t()
   def card_declined_email(%User{} = user, amount_cents) when is_integer(amount_cents) and amount_cents > 0 do
@@ -188,12 +154,13 @@ defmodule Relay.Billing.Notifier do
     ])
   end
 
-  @doc "The notice sent when the owner's plan is paused and their boards go read-only."
-  @spec paused_email(User.t()) :: Swoosh.Email.t()
-  def paused_email(%User{} = user) do
-    build(user, "Your Relay plan is paused", [
-      "Your Relay plan is paused, so your boards are read-only. Nothing's been deleted. " <>
-        "Pay to pick up where you left off, with a fresh month from that day."
+  @doc "The notice sent when a lapsed paid plan drops the owner to Free."
+  @spec dropped_to_free_email(User.t()) :: Swoosh.Email.t()
+  def dropped_to_free_email(%User{} = user) do
+    build(user, "Your Relay plan is now Free", [
+      "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+        "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all: " <>
+        billing_url()
     ])
   end
 

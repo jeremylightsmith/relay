@@ -123,6 +123,21 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
             key: "JE",
             signed_in_as: "jeremy@example.com"
           }
+        },
+        # RE469, card mockup "New board — picker opens, footer becomes Upgrade and create" (footer
+        # copy only — the button is a plain link to the Billing page).
+        %Variation{
+          id: :at_free_limit,
+          description: "At the Free limit — the footer sells the upgrade instead of creating",
+          attributes: %{
+            templates: templates,
+            selected: "design-led",
+            name: "Acme Checkout",
+            key: "AC",
+            upgrade_required: true,
+            upgrade_price: "$20",
+            upgrade_href: "/account/billing"
+          }
         }
       ]
   end

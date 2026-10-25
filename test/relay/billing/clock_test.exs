@@ -51,59 +51,30 @@ defmodule Relay.Billing.ClockTest do
 
   defp reload(account), do: Repo.get!(BillingAccount, account.id)
 
-  describe "a trial ending" do
-    setup do
-      %{account: account(:visa_4242, %{trial_ends_on: ~D[2026-04-03]})}
+  describe "a never-paid (Free) account" do
+    # A trial date left over from before Free (RE469) is long past: it must not trigger a charge.
+    test "with a card on file is never charged by the clock, on any day or pass" do
+      account = account(:visa_4242, %{trial_ends_on: ~D[2026-03-01]})
+
+      for today <- [~D[2026-04-04], ~D[2026-05-04], ~D[2026-10-25]] do
+        assert %{charged: 0} = Billing.run_clock(today, final_pass?: true)
+      end
+
+      assert attempts(account) == []
+      assert Billing.standing(account.user_id, ~D[2026-10-25]) == :free
     end
 
-    test "with a good card is charged a first month from the day after", %{account: account} do
-      assert %{charged: 1, resolved: 0} = Billing.run_clock(~D[2026-04-04])
+    test "holding a 100% code is never charged by the clock" do
+      insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
+      account = insert(:billing_account, trial_ends_on: ~D[2026-03-01])
+      {:ok, account} = Billing.redeem_code(account.user_id, "FRIENDS", ~D[2026-03-10])
 
-      assert [attempt] = attempts(account)
+      for today <- [~D[2026-04-04], ~D[2026-10-25]] do
+        assert %{charged: 0} = Billing.run_clock(today, final_pass?: true)
+      end
 
-      assert %{
-               status: :succeeded,
-               kind: :trial_end,
-               source: :clock,
-               amount_cents: 2000,
-               period_start: ~D[2026-04-04],
-               period_end: ~D[2026-05-03],
-               idempotency_key: idempotency_key
-             } = attempt
-
-      assert idempotency_key == "billing-#{account.id}-2026-04-04-1"
-      assert attempt.receipt_url
-      assert %{paid_through: ~D[2026-05-03], billing_day: 4} = reload(account)
-    end
-
-    test "is charged once however often the clock runs", %{account: account} do
-      Billing.run_clock(~D[2026-04-04])
-      assert %{charged: 0} = Billing.run_clock(~D[2026-04-04])
-      assert [_one] = attempts(account)
-    end
-
-    test "is not charged before the trial is over", %{account: account} do
-      assert %{charged: 0} = Billing.run_clock(~D[2026-04-03])
       assert attempts(account) == []
     end
-  end
-
-  test "a trial ending with no card is not charged and pauses" do
-    account = insert(:billing_account, trial_ends_on: ~D[2026-04-03])
-
-    assert %{charged: 0} = Billing.run_clock(~D[2026-04-04])
-    assert attempts(account) == []
-    assert Billing.standing(account.user_id, ~D[2026-04-04]) == {:paused, :trial_ended}
-  end
-
-  test "a trial's declined first charge is not retried and gets no grace" do
-    account = account(:visa_0341, %{trial_ends_on: ~D[2026-04-03]})
-
-    Billing.run_clock(~D[2026-04-04])
-    Billing.run_clock(~D[2026-04-05], final_pass?: true)
-
-    assert [%{status: :failed, decline_reason: "insufficient funds"}] = attempts(account)
-    assert Billing.standing(account.user_id, ~D[2026-04-04]) == {:paused, :trial_ended}
   end
 
   test "a declined renewal is tried once, retried once on the final pass, then pauses" do
@@ -129,7 +100,7 @@ defmodule Relay.Billing.ClockTest do
 
     assert %{charged: 0} = Billing.run_clock(~D[2026-08-13], final_pass?: true)
     assert [_, _] = attempts(account)
-    assert Billing.standing(account.user_id, ~D[2026-08-13]) == {:paused, :unpaid}
+    assert Billing.standing(account.user_id, ~D[2026-08-13]) == :free
   end
 
   test "a renewal on the 31st's short-month day keeps the 31st" do
@@ -158,8 +129,8 @@ defmodule Relay.Billing.ClockTest do
 
   test "an overdue pending attempt is resolved; a recent one is left alone" do
     now = ~U[2026-08-12 12:00:00Z]
-    overdue_account = account(:visa_4242, %{trial_ends_on: ~D[2026-09-01]})
-    recent_account = account(:visa_4242, %{trial_ends_on: ~D[2026-09-01]})
+    overdue_account = account(:visa_4242, %{})
+    recent_account = account(:visa_4242, %{})
 
     overdue =
       insert(:billing_payment_attempt,
@@ -185,16 +156,13 @@ defmodule Relay.Billing.ClockTest do
     assert Repo.get!(BillingPaymentAttempt, recent.id).status == :pending
   end
 
-  test "the launch backfill starts a trial for every user without one" do
-    no_account = insert(:user)
-    no_trial = insert(:billing_account, trial_ends_on: nil)
-    has_trial = insert(:billing_account, trial_ends_on: ~D[2026-11-20])
+  test "the clock answers resolved, charged and notified only, and opens no account" do
+    user = insert(:user)
 
-    assert %{backfilled: 2} = Billing.run_clock(~D[2026-11-01])
+    result = Billing.run_clock(~D[2026-11-01])
 
-    assert Billing.get_account(no_account).trial_ends_on == ~D[2026-12-01]
-    assert reload(no_trial).trial_ends_on == ~D[2026-12-01]
-    assert reload(has_trial).trial_ends_on == ~D[2026-11-20]
+    assert result |> Map.keys() |> Enum.sort() == [:charged, :notified, :resolved]
+    assert Billing.get_account(user) == nil
   end
 
   test "comped, held and cancelled accounts are never charged" do
@@ -209,10 +177,10 @@ defmodule Relay.Billing.ClockTest do
 
   test "with billing disabled the clock does nothing" do
     Process.put(:billing_enabled, false)
-    account = account(:visa_4242, %{trial_ends_on: ~D[2026-04-03]})
+    account = account(:visa_4242, %{paid_through: ~D[2026-04-03], billing_day: 4})
     insert(:user)
 
-    assert Billing.run_clock(~D[2026-04-04]) == %{backfilled: 0, resolved: 0, charged: 0, notified: 0}
+    assert Billing.run_clock(~D[2026-04-04]) == %{resolved: 0, charged: 0, notified: 0}
     assert attempts(account) == []
   end
 
@@ -226,6 +194,11 @@ defmodule Relay.Billing.ClockTest do
 
     assert [%{status: :unknown}] = attempts(boom)
     assert [%{status: :succeeded}] = attempts(fine)
+  end
+
+  defp renewal_due_today do
+    today = Date.utc_today()
+    account(:visa_4242, %{paid_through: Date.add(today, -1), billing_day: today.day})
   end
 
   describe "Relay.Billing.Clock" do
@@ -246,7 +219,7 @@ defmodule Relay.Billing.ClockTest do
     end
 
     test "a tick runs the clock for today" do
-      account = account(:visa_4242, %{trial_ends_on: Date.add(Date.utc_today(), -1)})
+      account = renewal_due_today()
       pid = allow!(start_supervised!({Clock, enabled: false, name: :billing_clock_test}))
 
       send(pid, :tick)
@@ -256,7 +229,7 @@ defmodule Relay.Billing.ClockTest do
     end
 
     test "a tick while another node holds the lock does nothing" do
-      account = account(:visa_4242, %{trial_ends_on: Date.add(Date.utc_today(), -1)})
+      account = renewal_due_today()
       other_node = start_supervised!({Postgrex, Keyword.drop(Repo.config(), [:pool, :pool_size])})
       Postgrex.query!(other_node, "SELECT pg_advisory_lock($1)", [Clock.lock_key()])
       pid = allow!(start_supervised!({Clock, enabled: false, name: :billing_clock_test}))

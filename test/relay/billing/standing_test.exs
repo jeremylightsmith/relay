@@ -4,43 +4,36 @@ defmodule Relay.Billing.StandingTest do
   alias Relay.Billing.Standing
   alias Schemas.BillingAccount
 
-  @today ~D[2026-08-12]
+  @today ~D[2026-10-25]
   @card "pm_card_visa"
   @no_decline %{first_charge_declined?: false, next_charge_free?: false}
   @declined %{first_charge_declined?: true, next_charge_free?: false}
-  @free %{first_charge_declined?: false, next_charge_free?: true}
-  @free_but_declined %{first_charge_declined?: true, next_charge_free?: true}
+  @free_code %{first_charge_declined?: false, next_charge_free?: true}
 
   # {label, account, facts, expected standing on @today}
   @rows [
-    {"nil account", nil, @no_decline, :trial},
-    {"both dates nil (pre-backfill)", %BillingAccount{}, @no_decline, :trial},
-    {"trial's last day, no card", %BillingAccount{trial_ends_on: ~D[2026-08-12]}, @no_decline, :trial},
-    {"trial over, no card", %BillingAccount{trial_ends_on: ~D[2026-08-11]}, @no_decline, {:paused, :trial_ended}},
-    {"trial over, card on file, awaiting first charge",
-     %BillingAccount{trial_ends_on: ~D[2026-08-11], card_payment_method_id: @card}, @no_decline, :trial},
-    {"trial over, card on file, first charge declined",
-     %BillingAccount{trial_ends_on: ~D[2026-08-11], card_payment_method_id: @card}, @declined, {:paused, :trial_ended}},
-    {"trial over, no card, next charge free, awaiting first charge", %BillingAccount{trial_ends_on: ~D[2026-08-11]},
-     @free, :trial},
-    {"trial over, no card, next charge free, first charge declined", %BillingAccount{trial_ends_on: ~D[2026-08-11]},
-     @free_but_declined, {:paused, :trial_ended}},
-    {"paid through today", %BillingAccount{paid_through: ~D[2026-08-12]}, @no_decline, :active},
-    {"paid through yesterday (grace)", %BillingAccount{paid_through: ~D[2026-08-11]}, @no_decline,
-     {:past_due, ~D[2026-08-12]}},
-    {"paid through two days ago", %BillingAccount{paid_through: ~D[2026-08-10]}, @no_decline, {:paused, :unpaid}},
+    {"nil account", nil, @no_decline, :free},
+    {"never paid, no card", %BillingAccount{}, @no_decline, :free},
+    {"never paid, card on file", %BillingAccount{card_payment_method_id: @card}, @no_decline, :free},
+    {"never paid, card on file, a declined charge", %BillingAccount{card_payment_method_id: @card}, @declined, :free},
+    {"never paid, next charge free (100% code)", %BillingAccount{}, @free_code, :free},
+    {"never paid, an old trial date is ignored", %BillingAccount{trial_ends_on: ~D[2026-11-30]}, @no_decline, :free},
+    {"paid through the future", %BillingAccount{paid_through: ~D[2026-10-30]}, @no_decline, :active},
+    {"paid through today", %BillingAccount{paid_through: ~D[2026-10-25]}, @no_decline, :active},
+    {"paid through yesterday (grace)", %BillingAccount{paid_through: ~D[2026-10-24]}, @no_decline,
+     {:past_due, ~D[2026-10-25]}},
+    {"paid through two days ago (past grace)", %BillingAccount{paid_through: ~D[2026-10-23]}, @no_decline, :free},
     {"hold wins over a future paid_through and comped",
-     %BillingAccount{held_on: ~D[2026-08-01], paid_through: ~D[2026-09-30], comped: true}, @no_decline, {:paused, :hold}},
-    {"comped, never paid, trial long over", %BillingAccount{comped: true, trial_ends_on: ~D[2026-01-01]}, @no_decline,
-     :comped},
-    {"cancelled, access through today",
-     %BillingAccount{paid_through: ~D[2026-08-12], cancelled_on: ~D[2026-08-01], access_until: ~D[2026-08-12]},
-     @no_decline, {:cancelled, ~D[2026-08-12]}},
+     %BillingAccount{held_on: @today, paid_through: ~D[2026-11-30], comped: true}, @no_decline, {:paused, :hold}},
+    {"comped alone", %BillingAccount{comped: true}, @no_decline, :comped},
+    {"cancelled, inside its access window",
+     %BillingAccount{paid_through: ~D[2026-10-31], cancelled_on: ~D[2026-10-01], access_until: ~D[2026-10-31]},
+     @no_decline, {:cancelled, ~D[2026-10-31]}},
     {"cancelled, access ended yesterday",
-     %BillingAccount{paid_through: ~D[2026-08-11], cancelled_on: ~D[2026-08-01], access_until: ~D[2026-08-11]},
-     @no_decline, {:paused, :cancelled}},
+     %BillingAccount{paid_through: ~D[2026-10-24], cancelled_on: ~D[2026-10-01], access_until: ~D[2026-10-24]},
+     @no_decline, :free},
     {"cancelled with no access window (hand edit)",
-     %BillingAccount{paid_through: ~D[2026-08-30], cancelled_on: ~D[2026-08-01]}, @no_decline, {:paused, :cancelled}}
+     %BillingAccount{paid_through: ~D[2026-10-30], cancelled_on: ~D[2026-10-01]}, @no_decline, :free}
   ]
 
   describe "of/3" do
@@ -54,48 +47,51 @@ defmodule Relay.Billing.StandingTest do
     end
   end
 
-  test "trial_days/0 is 30 and grace_days/0 is 1" do
-    assert Standing.trial_days() == 30
+  test "grace_days/0 is 1 and trial_days/0 is gone" do
     assert Standing.grace_days() == 1
+    Code.ensure_loaded!(Standing)
+    refute function_exported?(Standing, :trial_days, 0)
   end
 
-  test "kinds/0 lists exactly the six standing kinds" do
-    assert Standing.kinds() == [:trial, :active, :past_due, :cancelled, :comped, :paused]
+  test "kinds/0 lists exactly the six standing kinds, Free first" do
+    assert Standing.kinds() == [:free, :active, :past_due, :cancelled, :comped, :paused]
   end
 
-  test "pause_reasons/0 in order" do
-    assert Standing.pause_reasons() == [:trial_ended, :unpaid, :cancelled, :hold]
+  test "pause_reasons/0 is only the hold" do
+    assert Standing.pause_reasons() == [:hold]
   end
 
-  @non_paused [:trial, :active, :comped, {:past_due, @today}, {:cancelled, @today}]
+  @every [:free, :active, :comped, {:past_due, @today}, {:cancelled, @today}, {:paused, :hold}]
 
-  test "paused?/1 is true exactly for every {:paused, reason}" do
-    for reason <- Standing.pause_reasons(), do: assert(Standing.paused?({:paused, reason}))
-    for standing <- @non_paused, do: refute(Standing.paused?(standing))
+  test "paused?/1 is true exactly for the hold" do
+    assert Standing.paused?({:paused, :hold})
+    for standing <- @every -- [{:paused, :hold}], do: refute(Standing.paused?(standing))
   end
 
-  test "cancellable?/1 is true for :trial, :active and {:past_due, _} only" do
-    assert Standing.cancellable?(:trial)
+  test "unlimited?/1 is true for every paying or comped standing, false for Free and the hold" do
+    for standing <- [:active, {:past_due, @today}, {:cancelled, @today}, :comped],
+        do: assert(Standing.unlimited?(standing), "expected #{inspect(standing)} unlimited")
+
+    for standing <- [:free, {:paused, :hold}],
+        do: refute(Standing.unlimited?(standing), "expected #{inspect(standing)} limited")
+  end
+
+  test "cancellable?/1 is true for :active and {:past_due, _} only" do
     assert Standing.cancellable?(:active)
     assert Standing.cancellable?({:past_due, @today})
-    refute Standing.cancellable?(:comped)
-    refute Standing.cancellable?({:cancelled, @today})
-    for reason <- Standing.pause_reasons(), do: refute(Standing.cancellable?({:paused, reason}))
+    for standing <- @every -- [:active, {:past_due, @today}], do: refute(Standing.cancellable?(standing))
   end
 
   test "resumable?/1 is true for {:cancelled, _} only" do
     assert Standing.resumable?({:cancelled, @today})
-
-    for standing <- [:trial, :active, :comped, {:past_due, @today} | Enum.map(Standing.pause_reasons(), &{:paused, &1})] do
-      refute Standing.resumable?(standing)
-    end
+    for standing <- @every -- [{:cancelled, @today}], do: refute(Standing.resumable?(standing))
   end
 
   test "kind/1 maps a standing to its kind" do
     assert Standing.kind({:past_due, @today}) == :past_due
     assert Standing.kind({:cancelled, @today}) == :cancelled
     assert Standing.kind({:paused, :hold}) == :paused
-    assert Standing.kind(:trial) == :trial
+    assert Standing.kind(:free) == :free
     assert Standing.kind(:active) == :active
     assert Standing.kind(:comped) == :comped
   end

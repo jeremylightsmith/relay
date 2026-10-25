@@ -50,7 +50,12 @@ defmodule RelayWeb.TemplatePickerComponents do
   Story: `storybook/template_picker_components/template_picker.story.exs` — one variation per
   template selection, `:with_examples`, the copy variations `:copy_selected` and
   `:copy_no_boards`, the identity variations `:identity_empty`, `:identity_filled`,
-  `:identity_incomplete` and `:copy_identity_required`, and `:first_run`.
+  `:identity_incomplete` and `:copy_identity_required`, `:first_run`, and `:at_free_limit`.
+
+  **At the Free limit** (RE469, `upgrade_required`): the footer becomes an upgrade panel — "Free
+  includes one board." and "Upgrade for unlimited boards, <upgrade_price>/mo." — with Cancel and,
+  when `upgrade_href` is set, an `Upgrade →` link in place of the Create button. The caller passes
+  the price; the component never reads `Relay.Billing` (it stays pure for Storybook).
   """
 
   use RelayWeb, :html
@@ -100,6 +105,16 @@ defmodule RelayWeb.TemplatePickerComponents do
     doc: "first-run mode (RE470): no copy card and no way out but Create or Sign out"
 
   attr :signed_in_as, :string, default: nil, doc: "the signed-in user's email, for the first-run footer"
+
+  attr :upgrade_required, :boolean,
+    default: false,
+    doc: "the owner is at the Free limit (RE469): the footer sells the upgrade instead of creating"
+
+  attr :upgrade_price, :string, default: nil, doc: ~s(the monthly price the upgrade footer quotes, e.g. "$20")
+
+  attr :upgrade_href, :string,
+    default: nil,
+    doc: "where the footer's Upgrade → links; nil (embedded in the app, which sells nothing) drops the link"
 
   def template_picker(assigns) do
     copy? = assigns.selected == @copy_option
@@ -200,7 +215,16 @@ defmodule RelayWeb.TemplatePickerComponents do
               />
             </div>
 
-            <div class="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-base-300 bg-base-100 sm:rounded-b-[18px]">
+            <.upgrade_footer
+              :if={@upgrade_required}
+              id={@id}
+              price={@upgrade_price}
+              href={@upgrade_href}
+            />
+            <div
+              :if={not @upgrade_required}
+              class="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-base-300 bg-base-100 sm:rounded-b-[18px]"
+            >
               <span :if={@first_run} class="text-[12px] text-base-content/55">
                 Signed in as {@signed_in_as} ·
                 <.link
@@ -234,6 +258,48 @@ defmodule RelayWeb.TemplatePickerComponents do
             </div>
           </.form>
         </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :price, :string, required: true
+  attr :href, :string, default: nil
+
+  # RE469 — card mockup "New board — picker opens, footer becomes Upgrade and create" (footer copy
+  # only: Upgrade is a plain link to the Billing page; Upgrade-and-create is RE472).
+  defp upgrade_footer(assigns) do
+    ~H"""
+    <div
+      id={"#{@id}-upgrade"}
+      class="flex flex-col gap-3 border-t border-base-300 px-5 py-4 sm:flex-row sm:items-center sm:rounded-b-[18px]"
+      style="background:color-mix(in oklab, var(--color-primary) 6%, var(--color-base-100));"
+    >
+      <span class="flex size-8 flex-none items-center justify-center rounded-full bg-primary/15 text-primary">
+        <.icon name="hero-lock-closed" class="size-4" />
+      </span>
+      <div class="flex-1 text-sm">
+        <div class="font-semibold">Free includes one board.</div>
+        <div class="text-base-content/65">Upgrade for unlimited boards, {@price}/mo.</div>
+      </div>
+      <div class="flex gap-2">
+        <button
+          type="button"
+          id={"#{@id}-cancel"}
+          phx-click="close_template_picker"
+          class="btn btn-ghost btn-sm"
+        >
+          Cancel
+        </button>
+        <.link
+          :if={@href}
+          navigate={@href}
+          id={"#{@id}-upgrade-link"}
+          class="btn btn-primary btn-sm flex-1 sm:flex-none"
+        >
+          Upgrade →
+        </.link>
       </div>
     </div>
     """

@@ -95,10 +95,13 @@ defmodule Relay.Billing.PromoChargingTest do
     end
   end
 
-  describe "timeline B: RELAYCONF redeemed in the trial" do
+  describe "timeline B: RELAYCONF redeemed on a paid plan" do
     setup do
       relayconf()
-      account = :visa_4242 |> account(%{trial_ends_on: ~D[2026-04-03]}) |> redeem!("RELAYCONF", ~D[2026-03-10])
+
+      account =
+        :visa_4242 |> account(%{paid_through: ~D[2026-04-03], billing_day: 4}) |> redeem!("RELAYCONF", ~D[2026-03-10])
+
       %{account: account}
     end
 
@@ -122,7 +125,9 @@ defmodule Relay.Billing.PromoChargingTest do
 
   test "a declined discounted charge doesn't use up a month" do
     relayconf()
-    account = :visa_0341 |> account(%{trial_ends_on: ~D[2026-04-03]}) |> redeem!("RELAYCONF", ~D[2026-03-10])
+
+    account =
+      :visa_0341 |> account(%{paid_through: ~D[2026-04-03], billing_day: 4}) |> redeem!("RELAYCONF", ~D[2026-03-10])
 
     Billing.run_clock(~D[2026-04-04])
 
@@ -132,7 +137,9 @@ defmodule Relay.Billing.PromoChargingTest do
 
   test "an unknown discounted charge uses up a month only once it resolves as paid" do
     relayconf()
-    account = :timeout |> account(%{trial_ends_on: ~D[2026-04-03]}) |> redeem!("RELAYCONF", ~D[2026-03-10])
+
+    account =
+      :timeout |> account(%{paid_through: ~D[2026-04-03], billing_day: 4}) |> redeem!("RELAYCONF", ~D[2026-03-10])
 
     Billing.run_clock(~D[2026-04-04])
 
@@ -161,20 +168,27 @@ defmodule Relay.Billing.PromoChargingTest do
     setup do
       Process.put(:billing_payments, RaisingPayments)
       insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
-      account = :billing_account |> insert(trial_ends_on: ~D[2026-04-03]) |> redeem!("FRIENDS", ~D[2026-03-10])
+      account = :billing_account |> insert() |> redeem!("FRIENDS", ~D[2026-03-10])
       %{account: account}
     end
 
-    test "stays in its trial past the trial's end, awaiting the clock", %{account: account} do
-      assert Billing.standing(account.user_id, ~D[2026-04-04]) == :trial
+    test "stays on Free, uncharged by the clock, until the owner upgrades", %{account: account} do
+      Billing.run_clock(~D[2026-04-04], final_pass?: true)
+
+      assert attempts(account) == []
+      assert Billing.standing(account.user_id, ~D[2026-04-04]) == :free
     end
 
-    test "records $0 paid months without calling Stripe, then pauses when they run out", %{account: account} do
-      Billing.run_clock(~D[2026-04-04])
+    test "upgraded, renews $0 months without calling Stripe, then drops to Free when they run out", %{
+      account: account
+    } do
+      owner = Repo.get!(Schemas.User, account.user_id)
+      assert Billing.upgrade_without_card(owner, ~D[2026-04-04]) == {:ok, :paid}
 
       assert [
                %{
                  status: :succeeded,
+                 source: :upgrade,
                  amount_cents: 0,
                  stripe_payment_intent_id: nil,
                  promo_percent_off: 100
@@ -185,13 +199,13 @@ defmodule Relay.Billing.PromoChargingTest do
 
       Billing.run_clock(~D[2026-05-04])
 
-      assert [_first, %{status: :succeeded, amount_cents: 0}] = attempts(account)
+      assert [_first, %{status: :succeeded, source: :clock, amount_cents: 0}] = attempts(account)
       assert reload(account).promo_months_left == 0
 
       Billing.run_clock(~D[2026-06-04])
 
       assert length(attempts(account)) == 2
-      assert Billing.standing(account.user_id, ~D[2026-06-05]) == {:paused, :unpaid}
+      assert Billing.standing(account.user_id, ~D[2026-06-05]) == :free
     end
   end
 end

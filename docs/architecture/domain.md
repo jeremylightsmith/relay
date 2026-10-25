@@ -524,10 +524,12 @@ sharing behavior.
   only via `RelayWeb.Feedback` — the native Settings "Suggest an idea" row and the web account
   menu's "Suggest an idea" link both use it (RE397). `billing` (RE466) is
   `Relay.Billing.native_status/2`, beside `user` rather than inside it:
-  `{"enabled": bool, "standing": "trial"|"active"|"past_due"|"cancelled"|"comped"|"paused"|null,
+  `{"enabled": bool, "standing": "free"|"active"|"past_due"|"cancelled"|"comped"|"paused"|null,
   "through": "YYYY-MM-DD"|null}`. It feeds the native Settings ACCOUNT › Plan row (status only, no
-  purchase UI). `through` is `trial_ends_on` for a trial, `paid_through` while active or past due,
-  `access_until` once cancelled, and `null` when comped or paused. Billing disabled sends
+  purchase UI; `free` reads "Free", RE469). `through` is `paid_through` while active or past due,
+  `access_until` once cancelled, and `null` on Free, comped or paused. An app build older than
+  RE469 doesn't know `"free"`, parses it to null and hides the Plan row — no server shim
+  ([ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)). Billing disabled sends
   `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
@@ -539,55 +541,72 @@ sharing behavior.
   (`RelayWeb.AdminComponents.user_tabs/1`, RE462/RE463); the **Promo codes** tab is
   `/admin/users/promo-codes` and the **Renewals** tab `/admin/users/renewals` (see Billing).
   When billing is on (`Relay.Billing.enabled?/0`), the insert branch of
-  `upsert_user_from_provider/2` starts the new user's 30-day trial (`Relay.Billing.ensure_trial/2`,
-  RE460) and then redeems the sign-up link's `opts[:promo_code]` (`Relay.Billing.redeem_code/3`,
+  `upsert_user_from_provider/2` opens the new user's billing account on Free
+  (`Relay.Billing.ensure_account/1`, RE460/RE469 — no date written) and then redeems the sign-up link's `opts[:promo_code]` (`Relay.Billing.redeem_code/3`,
   RE462; a refusal is ignored, so sign-up never fails over a code, and a returning user never
   redeems one) — so Accounts depends on Billing, never the reverse.
   `upsert_user_from_google/2` passes `:promo_code` through.
-- **Billing** (`Relay.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md)) — a
-  board owner pays one monthly price (`price_cents/0`, `:billing_price_cents`, default 2000) up
-  front from their own billing date, after a 30-day no-card trial. **A board's standing is its
-  owner's** (`boards.owner_id`). Owns `Schemas.BillingAccount` (one per user),
+- **Billing** (`Relay.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md) as
+  amended by [ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)) — every owner is on
+  **Free** (RE469: one editable board, every feature) until they pay one monthly price
+  (`price_cents/0`, `:billing_price_cents`, default 2000) up front from their own billing date for
+  unlimited boards; a lapsed or cancelled-out paid plan drops back to Free. **A board's standing
+  is its owner's** (`boards.owner_id`). Owns `Schemas.BillingAccount` (one per user),
   `Schemas.BillingPaymentAttempt` and `Schemas.BillingNotice` (one per email sent, RE464). Standing is **derived, never stored**:
-  `Relay.Billing.Standing.of/3` (pure) maps an account, the facts `first_charge_declined?` (≥ 1
-  `:failed` attempt and `paid_through` nil) and `next_charge_free?` (never paid and the next charge
-  is $0 — a 100% promo code, RE462) and today to `:trial | :active | :comped |
-  {:past_due, until} | {:cancelled, access_until} | {:paused, reason}` — in order: no account or
-  no dates → `:trial` (pre-backfill); `held_on` → `{:paused, :hold}`; `comped` → `:comped`;
-  `cancelled_on` → cancelled through `access_until`, then `{:paused, :cancelled}`; never paid →
-  `:trial` through `trial_ends_on` (and after it while a card is on file — or the next charge is
-  free — and the first charge was not declined), else `{:paused, :trial_ended}`; paid → `:active` through `paid_through`,
-  `{:past_due, paid_through + grace_days()}` for the 1-day grace, then `{:paused, :unpaid}`.
+  `Relay.Billing.Standing.of/3` (pure) maps an account, its facts (`Charging.facts/1,2` — still
+  passed by every caller, no longer read by any rule) and today to `:free | :active | :comped |
+  {:past_due, until} | {:cancelled, access_until} | {:paused, :hold}` (`Standing.kinds/0` =
+  `[:free, :active, :past_due, :cancelled, :comped, :paused]`, `pause_reasons/0` = `[:hold]`) — in
+  order: no account → `:free`; `held_on` → `{:paused, :hold}` (the only pause); `comped` →
+  `:comped`; `cancelled_on` → cancelled through `access_until`, then `:free`; never paid
+  (`paid_through` nil) → `:free`, card or no card; paid → `:active` through `paid_through`,
+  `{:past_due, paid_through + grace_days()}` for the 1-day grace, then `:free`.
+  `Standing.unlimited?/1` is true for every standing with no board limit (`:active`, past due,
+  cancelled, `:comped`); `paused?/1` only for the hold.
+  **The Free limit:** `free_board_limit/0` (`1`) is THE definition. A **counted** board is owned,
+  not archived (`archived_at IS NULL`) and not an example board (`example_template IS NULL`).
+  `editable_board_id/1` computes (never stores) the editable one — the counted board with the
+  greatest `coalesce(max(cards.updated_at), boards.updated_at)`, ties to the higher id, one
+  grouped query; with ≤ 1 counted board the only one is editable. A board is **read-only on
+  Free** when its owner's standing is `:free`, it is counted, and it is not the editable board.
+  `free_status/2` is the Free read model (`%{limit, boards: [%{id, slug, name, editable?}],
+  editable_board_id, over_limit?}`, editable first; nil unless enabled and `:free`).
+  `can_add_board?/1` is the create / unarchive check — false only while enabled and the user is
+  held, or on Free with `free_board_limit/0` counted boards already.
+  **One gate:** `board_paused?/1` (a board or a board id) is THE check every write path honours —
+  true for a held owner's boards **or** a board read-only on Free; the editable board is looked
+  up only for a Free owner, so a paying owner costs no extra query. `board_notice/1` is the
+  banner value: `:paused` (held), `:past_due`, `{:free_read_only, editable_board_name}`, or nil.
+  **One off switch**, `enabled?/0` (`:billing_enabled` via `Relay.Config`; `BILLING_ENABLED` plus
+  both Stripe keys in `config/runtime.exs`, or dev alone on the Local adapter): off, no account
+  is opened at sign-up, there is no limit, `board_paused?/1` / `board_notice/1` /
+  `free_status/2` are always false / nil / nil and `can_add_board?/1` always true — a self-hosted
+  install never bills. `ensure_account/1` is get-or-create (`on_conflict: :nothing` on
+  `user_id`) and writes no date — every new account stands on Free. `cancel/2` keeps unlimited
+  boards through `paid_through`; `resume/2` clears the cancellation (billing date unchanged);
+  both broadcast `{:billing_changed, user_id}` on `billing:<user_id>`. Depends on Config, Mailer,
+  Repo and Schemas only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards
+  or Runs; it counts a Free owner's boards by reading `Schemas.Board` and `Schemas.Card` directly.
   `Relay.Billing.Periods` (pure) is the billing-date arithmetic (`renews_on/3` clamps a day past
   the month's end to its last day; `period/2`, `next_renewal/1`, `kept_billing_day/2`, and
   `renewal_after/3` — the period start `n` periods on, for the promo's "full price from" date).
-  **One off switch**, `enabled?/0` (`:billing_enabled` via `Relay.Config`; `BILLING_ENABLED` plus
-  both Stripe keys in `config/runtime.exs`, or dev alone on the Local adapter): off, no trial is
-  started and `board_paused?/1` / `board_notice/1` are always false / nil — a self-hosted install
-  never bills. `board_paused?/1` takes a board or a board id and costs the account read plus one
-  `exists?` only for a never-paid account. `ensure_trial/2` is get-or-create
-  (`on_conflict: :nothing` on `user_id`, then an `update_all … where is_nil(trial_ends_on)`), so
-  it never moves a date. `cancel/2` keeps access through `trial_ends_on` / `paid_through`;
-  `resume/2` clears the cancellation (billing date unchanged); both broadcast
-  `{:billing_changed, user_id}` on `billing:<user_id>`. Depends on Config, Mailer, Repo and
-  Schemas only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards or Runs.
-  **Emails (RE464):** `Relay.Billing.Notifier` builds the trial-ending, card-declined and
-  plan-paused emails (plain text + minimal escaped HTML, each linking to `billing_url/0` =
-  `:app_url` + `/account/billing`, never `RelayWeb`), `deliver/1`s them through `Relay.Mailer`
-  only while `:mail_enabled` (via `Relay.Config`) is `true` — otherwise it logs what it would have
-  sent — and `dispatch/1` runs a delivery under `Relay.Billing.TaskSupervisor` (inline in test),
-  never raising into the caller. `notify_due/1`, the clock's last step, sends each email **at most
-  once per account and period**: it inserts a `billing_notices` row (`on_conflict: :nothing` on
-  the `billing_notices_once` unique index) outside any transaction and dispatches only when the
-  insert created the row. **Trial ending** (period `trial_ends_on`) — a never-paid, uncomped,
-  unheld, uncancelled account with no card on file, from `trial_notice_days_before/0` (2) days
-  before its trial ends through its last day; **card declined** (period `period_start`) — a
-  `:failed` clock attempt for a period begun within the last `grace_days/0` (its retry shares the
-  period; a card-saved decline sends nothing); **paused** — `{:paused, :trial_ended}` (period
-  `trial_ends_on + 1`) or `{:paused, :unpaid}` (period `paid_through + 1`), candidates
-  pre-filtered in SQL before `Standing.of/3`. Nothing for cancel, hold or comp; receipts stay
-  with Stripe. Notices are recorded even with mail off, so enabling a provider never sends a
-  backlog. Each notice is isolated (rescued and logged).
+  **Emails (RE464, RE469):** `Relay.Billing.Notifier` builds the card-declined and dropped-to-Free
+  emails (`card_declined_email/2`, `dropped_to_free_email/1`; plain text + minimal escaped HTML,
+  each linking to `billing_url/0` = `:app_url` + `/account/billing`, never `RelayWeb`),
+  `deliver/1`s them through `Relay.Mailer` only while `:mail_enabled` (via `Relay.Config`) is
+  `true` — otherwise it logs what it would have sent — and `dispatch/1` runs a delivery under
+  `Relay.Billing.TaskSupervisor` (inline in test), never raising into the caller. `notify_due/1`,
+  the clock's last step, sends each email **at most once per account and period**: it inserts a
+  `billing_notices` row (`on_conflict: :nothing` on the `billing_notices_once` unique index)
+  outside any transaction and dispatches only when the insert created the row (notice kinds
+  `Schemas.BillingNotice.kinds/0` = `[:card_declined, :dropped_to_free]`). **Card declined**
+  (period `period_start`) — a `:failed` clock attempt for a period begun within the last
+  `grace_days/0` (its retry shares the period; a card-saved decline sends nothing); **dropped to
+  Free** (period `paid_through + grace_days() + 1`, the first Free day) — a paid, uncomped,
+  unheld, uncancelled account whose grace is over, pre-filtered in SQL before `Standing.of/3`
+  confirms `:free`. Nothing for cancel, hold or comp; receipts stay with Stripe. Notices are
+  recorded even with mail off, so enabling a provider never sends a backlog. Each notice is
+  isolated (rescued and logged).
   **Payments seam:** `Relay.Billing.Payments` is a behaviour (`create_setup_checkout/3`,
   `fetch_setup/1`, `charge/5`, `find_payment/3`) resolved by `impl/0` (`:billing_payments` via
   `Relay.Config`): `Payments.Stripe` — `Req` against `api.stripe.com/v1`, bearer
@@ -607,32 +626,44 @@ sharing behavior.
   clears a cancellation; an attempt that carried a code decrements `promo_months_left`, floored at
   0, in the same update — so a decline or an unknown never spends a month); a bank decline → `:failed`, account untouched; anything else (processing,
   timeout, 5xx, a raise after tx 1) → `:unknown`, account untouched, never resent blind. The
-  **clock decision** charges only a card on file (or an account whose next charge is $0, which
-  needs no card) that is not held, comped, cancelled, paused or
-  holding an open attempt: a never-paid account the day after its trial (`:trial_end`, a fresh
-  month from that day) unless its first charge was declined; on the grace day
+  **clock decision** renews only a **paid** account with a card on file (or whose next charge is
+  $0, which needs no card) that is not held, comped, cancelled or holding an open attempt — a
+  Free (never-paid) account is never charged by the clock: on the grace day
   (`paid_through + 1`) the `:renewal` once, then one retry on the day's final pass. The
-  **card-saved decision** (`complete_setup/3`, after storing the card): past due → `:renewal` now;
-  paused for `:trial_ended` / `:unpaid` / `:cancelled` → `:returned`, a fresh month from today;
-  anything else → no charge. `run_clock/2` (driven hourly by `Relay.Billing.Clock`) backfills a
-  trial for every user without one, resolves every `:unknown` attempt and every `:pending` one
-  older than `Charging.pending_overdue_minutes/0` (10) through `find_payment/3`, charges each
-  due account in isolation, then notifies (`Notifier.notify_due/1`), answering
-  `%{backfilled:, resolved:, charged:, notified:}`; a no-op answering zeros while disabled. `setup_checkout_url/2` starts Checkout (setup
-  mode) and stores the new Stripe customer; `handle_webhook_event/1` completes a setup from the
-  verified Stripe webhook; `summary/2` is the Billing page's read (standing, trial days left, first
-  charge, renewal, card, succeeded payments newest first — $0 ones included, with no receipt —
-  `amount_cents` = the next charge, `full_price_cents`, and `promo`: nil without a code, else
-  `%{code, percent_off, months_left, full_price_from}`, `full_price_from` being the first
-  full-price charge date — `renewal_after/3` from the first charge (trial) or the renewal
+  **card-saved decision** (`complete_setup/3`, after storing the card — the **upgrade** path):
+  past due → `:renewal` now; `:free` (never paid, lapsed, or cancelled out) → `:returned`, a
+  fresh month from today; a hold or anything else → no charge. **The $0 upgrade:**
+  `upgrade_without_card/2` charges a Free account whose next charge is $0 (a 100% code) a fresh
+  month from today with no card, an `:upgrade`-sourced `:returned` attempt that never reaches
+  Stripe (`Schemas.BillingPaymentAttempt.sources/0` = `[:clock, :card_saved, :admin, :upgrade]`;
+  attempt kind `:trial_end` survives only on historical rows); anything else is
+  `{:error, :checkout_required}`. `run_clock/2` (driven hourly by `Relay.Billing.Clock`) resolves
+  every `:unknown` attempt and every `:pending` one older than
+  `Charging.pending_overdue_minutes/0` (10) through `find_payment/3`, charges each due account in
+  isolation, then notifies (`Notifier.notify_due/1`), answering `%{resolved:, charged:,
+  notified:}` — there is no launch backfill; a no-op answering zeros while disabled.
+  `setup_checkout_url/2` starts Checkout (setup mode) and stores the new Stripe customer;
+  `handle_webhook_event/1` completes a setup from the verified Stripe webhook; `summary/2` is the
+  Billing page's read (standing, `free` — `free_status/2` —, `upgrade_free?` — on Free with a $0
+  next charge —, renewal, card, succeeded payments newest first — $0 ones included, with no
+  receipt — `amount_cents` = the next charge, `full_price_cents`, and `promo`: nil without a
+  code, else `%{code, percent_off, months_left, full_price_from}`, `full_price_from` being the
+  first full-price charge date — `renewal_after/3` from an upgrade today (Free) or the renewal
   (active), nil with no months left or in any other standing).
+  **The launch migration** (`Relay.Repo.Migrations.FreemiumLaunch`, data-only, idempotent, raw
+  SQL): comps every never-paid, uncomped, unheld account owning more than one counted board, with
+  a `comp` admin entry (`actor_id` NULL) naming the board count for manual outreach, so no
+  trial owner's boards went read-only at launch; rewrites retired `paused` notices to
+  `dropped_to_free` (period shifted by the grace) and deletes `trial_ending` ones so
+  `Schemas.BillingNotice` keeps loading. The `trial_ends_on` column is unused (kept until a
+  later cleanup).
   **Promo codes** (RE462): `Schemas.PromoCode` (`code` stored trimmed and upper-cased, unique, a
   DB check enforces upper-case; `percent_off` 1–100; `months` ≥ 1; optional `max_redemptions` and
   `expires_on`; `disabled_at`, never cast). `billing_accounts` gains `promo_code_id` (the one code
   the account ever redeemed, `on_delete: :restrict`) and `promo_months_left`;
   `billing_payment_attempts` gains `promo_code` / `promo_percent_off` (what the attempt applied)
   and its amount check relaxes to `>= 0` for a 100% code's $0 attempt. `redeem_code/3` runs
-  `ensure_trial/2`, then in one transaction locks the account row and then the code row
+  `ensure_account/1`, then in one transaction locks the account row and then the code row
   `FOR UPDATE` (always account, then code — so two redemptions can't over-take a cap) and refuses
   in `promo_refusals/0`'s order, first match wins: the account already holds a code
   (`:already_redeemed`), no such or a blank code (`:unknown`), `disabled_at` set (`:disabled`),
@@ -656,11 +687,11 @@ sharing behavior.
   `:failed`-attempt subquery for the declined fact — with standing derived in memory
   (`Charging.facts/2`, the pure half of `facts/1`, then `Standing.of/3`), never per user. Each row
   adds `plan` (`admin_plan/2`: `:member_only` for a user who owns no boards, else
-  `Standing.kind/1`; the closed set is `admin_plans/0`), `paid_through_shown` (the trial end for a
-  trial, else `paid_through`), `rate_cents` (`next_charge/1`, 0 when comped) and `code_label`
+  `Standing.kind/1`; the closed set is `admin_plans/0`), `paid_through_shown` (`paid_through`, nil for a
+  never-paid owner), `rate_cents` (`next_charge/1`, 0 when comped) and `code_label`
   (`"RELAYCONF 1/3"` — months used / months); a member-only row has none of the three.
   `admin_summary/1` (pure) is the page's summary line: users, paying (`paying_plans/0` =
-  active + past due), `mrr_cents` (their rates summed) and in trial; `format_dollars/1` renders it
+  active + past due), `mrr_cents` (their rates summed) and `free` (rows on Free); `format_dollars/1` renders it
   (`$10`, `$12.50`, `$1,250`). `RelayWeb.Admin.UsersLive` shows them as the Members / Plan
   (`RelayWeb.AdminComponents.plan_badge/1`, which owns the plan → badge class/label map) / Paid
   through / Rate / Code columns, a snapshot at mount re-read after each admin write.
@@ -668,15 +699,15 @@ sharing behavior.
   `admin_lift_hold/3`, `admin_extend/5` and `admin_retry_charge/3` are `defdelegate`s to the
   internal `Relay.Billing.Admin` (not exported). The actor is the signed-in superadmin's
   `%Schemas.User{}`, handed in by the web layer (Billing never calls Accounts). Each write runs
-  `ensure_trial/2`, then one transaction that locks the account `FOR UPDATE`, checks it, changes
+  `ensure_account/1`, then one transaction that locks the account `FOR UPDATE`, checks it, changes
   it and writes **exactly one** `Schemas.BillingAdminEntry` through the one private writer, then
   broadcasts `{:billing_changed, user_id}` after commit; a refusal (`admin_refusals/0`) writes and
   broadcasts nothing. Comp / uncomp flip `comped` (no stored state: un-comping lets
-  `Standing.of/3` derive the rest — paused until they pay); hold sets `held_on` + the trimmed
+  `Standing.of/3` derive the rest — Free until they pay); hold sets `held_on` + the trimmed
   `hold_reason` (required) — `{:paused, :hold}`, never charged; lift clears both; extend adds
   1..`admin_extend_max_days/0` (365) days to `paid_through` with a required reason, billing day
   untouched, no attempt. **Retry charge now** is allowed only when `admin_retryable?/2` (a card
-  on file, and past due or paused for anything but a hold) holds on a fresh read, and charges
+  on file, and past due or on Free — never a hold) holds on a fresh read, and charges
   through `Charging.admin_retry/2` — the card-saved decision, parameterised by source, recorded
   as an `:admin` attempt (`Schemas.BillingPaymentAttempt.sources/0`); Charging owns its own
   transactions, so the `:retry_charge` entry is written after it returns. An `:admin` decline
@@ -695,11 +726,14 @@ sharing behavior.
   copy lives only in `UsersLive.refusal_message/1`.
   **On the web:** `RelayWeb.BillingLive` (`/account/billing`, the avatar menu's **Billing** item —
   both only while enabled; the route 404s otherwise) renders `summary/2` by
-  `Relay.Billing.Standing.kind/1` (`Standing` is exported for that), starts the trial a
-  pre-backfill user lacks, redirects **Add card** / **Replace** / **Update card** to
-  `setup_checkout_url/2` and completes the `?setup=<id>` return against the signed-in user.
-  It previews the next charge (the trial's first charge, or the active plan's
-  `#billing-next-charge`) at `summary/2`'s discounted `amount_cents`, with the code's terms and
+  `Relay.Billing.Standing.kind/1` (`Standing` is exported for that), opens the account a
+  user without one lacks (`ensure_account/1`), redirects **Upgrade** / **Replace** / **Update card** to
+  `setup_checkout_url/2` (a $0 **Upgrade** — `summary.upgrade_free?` — calls
+  `upgrade_without_card/2` instead) and completes the `?setup=<id>` return against the signed-in user.
+  On Free it shows the board count against `free_board_limit/0` (`#billing-free-count`) and, over
+  the limit, `#billing-free-over-limit-alert` with the counted boards and the editable one marked
+  (`#billing-free-boards`), then the **Upgrade** row (`#billing-upgrade`). It previews the next
+  charge (the upgrade's, or the active plan's `#billing-next-charge`) at `summary/2`'s discounted `amount_cents`, with the code's terms and
   the date the full price returns, and always shows a **Have a code?** form (`"apply_code"` →
   `redeem_code/3`; a refusal renders inline as the field error, its copy defined once in
   `BillingLive.refusal_message/1`). A **sign-up link** `/?code=RELAYCONF` is stashed by
@@ -723,13 +757,24 @@ sharing behavior.
   PaymentIntent id. `?outcome=` (matched against `attempt_outcomes/0`'s names, never turned into
   an atom; anything else means all) filters to the statuses in `attempt_statuses_for/1`, a patch
   that re-streams with `reset: true`.
-  `BoardLive` reads `board_notice/1` into its read-only mode — a paused board is the archived
-  board's read-only mode (`read_only?` guard, `#read-only-banner` with billing copy) plus no card
-  opening and no Board settings link (`BoardSettingsLive` redirects back on `board_paused?/1`);
-  past due shows `#billing-past-due-banner` to the owner only, the board staying editable.
-  Embedded in the native app (`@embed`, RE466) both banners keep their copy but drop the
-  **Update card** link (`#billing-paused-update-card`, `#billing-past-due-update-card`): the app
-  carries no purchase UI and no link to outside payment.
+  `BoardLive` reads `board_notice/1` into its read-only mode — a held board, and (RE469) a board
+  read-only on Free, get the archived board's read-only mode (`read_only?` guard,
+  `#read-only-banner` with billing copy) plus no card opening and no Board settings link
+  (`BoardSettingsLive` redirects back on `board_paused?/1`). On Free the banner names the
+  editable board to the owner (`#billing-free-read-only-owner`, with an **Upgrade** link
+  `#billing-free-upgrade`) and tells a member the owner is on Free
+  (`#billing-free-read-only-member`). **Restore** (unarchive) is refused by `can_add_board?/1`
+  at the limit; archiving (`BoardSettingsLive`) or restoring a board broadcasts on the owner's
+  `billing:<user_id>` topic, since either moves them against the limit. Past due shows
+  `#billing-past-due-banner` to the owner only, the board staying editable.
+  Embedded in the native app (`@embed`, RE466) the banners keep their copy but drop the
+  **Update card** / **Upgrade** links (`#billing-paused-update-card`,
+  `#billing-past-due-update-card`, `#billing-free-upgrade`): the app carries no purchase UI and
+  no link to outside payment. `BoardsLive` (RE469) shows a Free owner (`free_status/2`) a plan
+  line (`#boards-plan-line`, hidden when embedded), a READ-ONLY label on each of their boards
+  read-only on Free, and — at the limit (`not can_add_board?/1`) — a picker footer that sells
+  the upgrade instead of creating, with `create_from_template` refused server-side; it
+  re-derives on the viewer's `{:billing_changed, user_id}`.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
   per board (typically one per machine), each authenticating as Relay AI on its board.
   `list_keys/1` (oldest first), board-scoped `get_key!/2`, `create_key/3` (blank name →
@@ -1284,7 +1329,7 @@ harness + model; flow nodes name an agent in their `llm` and `boards.default_age
 fallback (RE433, `Relay.Agents`).
 
 A `BillingAccount` (`billing_accounts`, owned by `Relay.Billing`, RE460) is one user's billing
-facts, unique on `user_id` (cascade on user delete): `trial_ends_on` (the trial's last day),
+facts, unique on `user_id` (cascade on user delete): `trial_ends_on` (unused since RE469 — nothing reads or writes it),
 `paid_through` (the only grant of paid access), `billing_day` (check 1..31), `comped`, `held_on`
 / `hold_reason`, `cancelled_on` / `access_until`, the Stripe customer and the saved card
 (`card_payment_method_id`, brand, last 4, expiry). A `BillingPaymentAttempt`

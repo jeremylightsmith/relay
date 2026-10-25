@@ -432,4 +432,74 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       end
     end
   end
+
+  # RE469 — a Free owner at the limit (the setup's default board is their one board): the footer
+  # sells instead of creating, and the server refuses a create that bypasses it.
+  describe "at the Free limit" do
+    setup do
+      Process.put(:billing_enabled, true)
+      %{today: Date.utc_today()}
+    end
+
+    defp fill_identity(view) do
+      view
+      |> element("#template-picker-form")
+      |> render_change(%{"template" => "bare-minimum", "name" => "Second", "key" => "SE"})
+    end
+
+    test "6. the footer becomes the upgrade panel", %{conn: conn} do
+      view = open_picker(conn)
+      fill_identity(view)
+
+      assert has_element?(view, "#template-picker-upgrade", "Free includes one board.")
+      assert has_element?(view, "#template-picker-upgrade", "Upgrade for unlimited boards, $20/mo.")
+      assert has_element?(view, "#template-picker-cancel")
+      assert has_element?(view, ~s(#template-picker-upgrade-link[href="/account/billing"]), "Upgrade →")
+      refute has_element?(view, "#template-picker-create")
+    end
+
+    test "7. a create that bypasses the footer is refused and inserts nothing", %{conn: conn, user: user} do
+      view = open_picker(conn)
+
+      html =
+        view
+        |> element("#template-picker-form")
+        |> render_submit(%{"template" => "bare-minimum", "name" => "Second", "key" => "SE"})
+
+      assert html =~ "Free includes one board. Upgrade for unlimited boards."
+      assert has_element?(view, "#template-picker")
+      assert length(Boards.list_boards(user)) == 1
+    end
+
+    test "8. a Free owner whose only board is archived can create", %{conn: conn, user: user} do
+      user |> Boards.get_or_create_default_board() |> Boards.archive_board()
+      view = open_picker(conn)
+      fill_identity(view)
+
+      assert has_element?(view, "#template-picker-create")
+      refute has_element?(view, "#template-picker-upgrade")
+      assert_creates(view)
+    end
+
+    test "8. an active owner with 3 boards can create", %{conn: conn, user: user, today: today} do
+      {:ok, _} = Boards.create_board(user, %{name: "Two", key: "TW", slug: unique_slug("two")})
+      {:ok, _} = Boards.create_board(user, %{name: "Three", key: "TH", slug: unique_slug("three")})
+      insert(:billing_account, user: user, paid_through: Date.add(today, 30), billing_day: today.day)
+      view = open_picker(conn)
+      fill_identity(view)
+
+      assert has_element?(view, "#template-picker-create")
+      assert_creates(view)
+    end
+
+    defp assert_creates(view) do
+      assert {:error, {:live_redirect, %{to: to}}} =
+               view
+               |> element("#template-picker-form")
+               |> render_submit(%{"template" => "bare-minimum", "name" => "Second", "key" => "SE"})
+
+      assert [_, slug] = Regex.run(~r{^/board/([a-z0-9-]+)$}, to)
+      assert Repo.get_by!(Board, slug: slug).name == "Second"
+    end
+  end
 end

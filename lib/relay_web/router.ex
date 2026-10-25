@@ -100,7 +100,7 @@ defmodule RelayWeb.Router do
             RelayWeb.BrowserNotify
           ] do
       live "/boards", BoardsLive
-      # RE460 — the board owner's plan: trial, card, payments, cancel/resume. 404 while billing
+      # RE460 — the board owner's plan: Free board count, card, payments, cancel/resume. 404 while billing
       # is disabled (a self-hosted install).
       live "/account/billing", BillingLive
       # RE370 legacy mockup link (RelayWeb.attachment_view_path/1): a membership-scoped redirect to

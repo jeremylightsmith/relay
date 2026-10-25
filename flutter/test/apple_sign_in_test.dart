@@ -154,11 +154,7 @@ void main() {
         'success': true,
         'user': {'id': 1, 'name': 'Alice Apple', 'email': 'alice@example.com'},
         'token': 'relayu_x',
-        'billing': {
-          'enabled': true,
-          'standing': 'trial',
-          'through': '2026-04-03',
-        },
+        'billing': {'enabled': true, 'standing': 'free', 'through': null},
       },
       headers: {
         'set-cookie': ['_relay_key=apple-cookie; Path=/'],
@@ -172,7 +168,7 @@ void main() {
 
     await (await ready(container)).signInWithApple();
 
-    expect(container.read(authProvider).billing!.label, 'Trial · ends Apr 3');
+    expect(container.read(authProvider).billing!.label, 'Free');
   });
 
   test('a cancelled Apple sheet signs out silently, with no request', () async {

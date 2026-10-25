@@ -5,7 +5,7 @@
 /// A plan's standing. The one client-side definition of the wire names, which
 /// mirror the server's `Relay.Billing.Standing` kinds.
 enum PlanStanding {
-  trial('trial'),
+  free('free'),
   active('active'),
   pastDue('past_due'),
   cancelled('cancelled'),
@@ -36,8 +36,8 @@ class PlanStatus {
   /// Null when the server sent none, or one this app doesn't know.
   final PlanStanding? standing;
 
-  /// The trial's end, or the date paid (or cancelled) access runs through.
-  /// Date-only, in no time zone, so "May 3" never renders as "May 2".
+  /// The date paid (or cancelled) access runs through; null on Free, which
+  /// has no end date. Date-only, in no time zone, so "May 3" never renders as "May 2".
   final DateTime? through;
 
   /// The status in [json], or null when it isn't an object at all. A missing
@@ -67,7 +67,7 @@ class PlanStatus {
     if (!visible) return null;
     final date = through == null ? null : _monthDay(through!);
     return switch (standing!) {
-      PlanStanding.trial => date == null ? 'Trial' : 'Trial · ends $date',
+      PlanStanding.free => 'Free',
       PlanStanding.active => date == null ? 'Active' : 'Active · through $date',
       PlanStanding.pastDue => 'Past due',
       PlanStanding.cancelled =>

@@ -1,8 +1,16 @@
 defmodule Relay.Billing do
   @moduledoc """
   Billing (RE460, [ADR 0012](docs/adr/0012-board-owners-pay-up-front.md)): a board owner pays
-  one price a month, up front from their own billing date, after a no-card trial. A board's
-  standing is its owner's; a paused owner's boards are read-only.
+  one price a month, up front from their own billing date, for unlimited boards; until then —
+  and again after a lapsed or cancelled plan — they are on **Free** (RE469). A board's standing
+  is its owner's.
+
+  **Free** (RE469): `free_board_limit/0` counted boards (owned, not archived, not an example
+  board) stay editable. The editable one is computed, never stored (`editable_board_id/1`: the
+  newest activity wins); the owner's other counted boards are read-only. `board_paused?/1` is
+  THE gate every write path honours — true for a held owner's boards and for a read-only-on-Free
+  board; `board_notice/1` is the banner value; `can_add_board?/1` the create / unarchive check;
+  `free_status/2` the Free read model; `upgrade_without_card/2` the $0 upgrade (a 100% code).
 
   Owns `Schemas.BillingAccount` (one per user), `Schemas.BillingPaymentAttempt`,
   `Schemas.BillingNotice` (one per billing email sent) and `Schemas.BillingAdminEntry` (the
@@ -36,13 +44,15 @@ defmodule Relay.Billing do
   by outcome, capped at `renewal_log_limit/0` rows, in one query.
 
   **One off switch:** `enabled?/0` (`:billing_enabled`, read through `Relay.Config`). Off — a
-  self-hosted install — nothing is paused or noticed and no trial is started.
+  self-hosted install — there is no limit, nothing is read-only or noticed, and no account is
+  opened at sign-up.
 
   **Depends on `Relay.Config`, `Relay.Mailer`, `Relay.Repo` and `Schemas` only** — `Relay.Accounts`
-  (trial at sign-up) and `Relay.Runs` call in, so a back-dependency would be a boundary cycle.
-  Billing emails (`Relay.Billing.Notifier`, RE464) — trial ending, card declined, plan paused, each
+  (the account at sign-up) and `Relay.Runs` call in, so a back-dependency would be a boundary
+  cycle. Billing emails (`Relay.Billing.Notifier`, RE464) — card declined, dropped to Free, each
   once per account and period, sent by `run_clock/2`'s last step — go out through the leaf
-  `Relay.Mailer`. A board id is resolved to its owner by reading `Schemas.Board.owner_id` directly.
+  `Relay.Mailer`. A board is resolved to its owner, and a Free owner's boards counted, by reading
+  `Schemas.Board` and `Schemas.Card` directly.
   """
 
   use Boundary, deps: [Relay.Config, Relay.Mailer, Relay.Repo, Schemas], exports: [Standing]
@@ -60,6 +70,7 @@ defmodule Relay.Billing do
   alias Schemas.BillingAdminEntry
   alias Schemas.BillingPaymentAttempt
   alias Schemas.Board
+  alias Schemas.Card
   alias Schemas.Membership
   alias Schemas.PromoCode
   alias Schemas.User
@@ -68,6 +79,7 @@ defmodule Relay.Billing do
 
   @pubsub Relay.PubSub
   @default_price_cents 2000
+  @free_board_limit 1
   @promo_refusals [:already_redeemed, :unknown, :disabled, :expired, :full]
   @paying_plans [:active, :past_due]
   @admin_refusals [
@@ -154,21 +166,13 @@ defmodule Relay.Billing do
   def get_account(user), do: Repo.get_by(BillingAccount, user_id: user_id(user))
 
   @doc """
-  Gets or creates the user's account and, if it has no trial yet, starts one ending
-  `Standing.trial_days()` after `today`. Never moves an existing date. Concurrency-safe: the
-  insert ignores a conflict on `user_id` and the trial write only touches a nil date.
+  Gets or creates the user's account. Concurrency-safe: the insert ignores a conflict on
+  `user_id`. Writes no date — every new account stands on Free.
   """
-  @spec ensure_trial(User.t() | pos_integer(), Date.t()) :: {:ok, BillingAccount.t()}
-  def ensure_trial(user, %Date{} = today) do
+  @spec ensure_account(User.t() | pos_integer()) :: {:ok, BillingAccount.t()}
+  def ensure_account(user) do
     user_id = user_id(user)
-
     {:ok, _} = Repo.insert(%BillingAccount{user_id: user_id}, on_conflict: :nothing, conflict_target: :user_id)
-
-    Repo.update_all(
-      from(a in BillingAccount, where: a.user_id == ^user_id and is_nil(a.trial_ends_on)),
-      set: [trial_ends_on: Date.add(today, Standing.trial_days()), updated_at: now()]
-    )
-
     {:ok, Repo.get_by!(BillingAccount, user_id: user_id)}
   end
 
@@ -179,34 +183,156 @@ defmodule Relay.Billing do
     Standing.of(account, facts(account), today)
   end
 
+  @doc "How many counted boards a Free owner may edit: THE Free limit."
+  @spec free_board_limit() :: pos_integer()
+  def free_board_limit, do: @free_board_limit
+
   @doc """
-  True when the board's owner is paused. Always false while billing is disabled. An integer is a
-  board id.
+  The id of `owner_id`'s editable board, whatever their standing: of their **counted** boards
+  (owned, not archived, not an example board), the one with the newest activity —
+  `coalesce(max(cards.updated_at), boards.updated_at)`, every card counted, archived or not —
+  ties to the higher id. Nil when they have no counted board. One query.
   """
-  @spec board_paused?(Board.t() | pos_integer()) :: boolean()
-  def board_paused?(board) do
-    enabled?() and
-      case board_owner_id(board) do
-        nil -> false
-        owner_id -> Standing.paused?(standing(owner_id, Date.utc_today()))
-      end
+  @spec editable_board_id(pos_integer()) :: pos_integer() | nil
+  def editable_board_id(owner_id) when is_integer(owner_id) do
+    case editable_board(owner_id) do
+      nil -> nil
+      %{id: id} -> id
+    end
   end
 
-  @doc "The billing notice a board shows: `:paused`, `:past_due`, or nil (always nil while disabled)."
-  @spec board_notice(Board.t()) :: nil | :past_due | :paused
-  def board_notice(%Board{owner_id: owner_id}) do
-    if enabled?() do
-      case standing(owner_id, Date.utc_today()) do
-        {:paused, _reason} -> :paused
-        {:past_due, _until} -> :past_due
-        _standing -> nil
-      end
+  defp editable_board(owner_id), do: owner_id |> counted_boards() |> limit(1) |> Repo.one()
+
+  # The owner's counted boards, most active first (so the editable board leads). One grouped query.
+  defp counted_boards(owner_id) do
+    from b in Board,
+      left_join: c in Card,
+      on: c.board_id == b.id,
+      where: b.owner_id == ^owner_id and is_nil(b.archived_at) and is_nil(b.example_template),
+      group_by: b.id,
+      order_by: [desc: coalesce(max(c.updated_at), b.updated_at), desc: b.id],
+      select: %{id: b.id, slug: b.slug, name: b.name}
+  end
+
+  defp counted_board_count(owner_id) do
+    Repo.aggregate(
+      from(b in Board, where: b.owner_id == ^owner_id and is_nil(b.archived_at) and is_nil(b.example_template)),
+      :count
+    )
+  end
+
+  @typedoc "A Free owner's boards against the limit (`free_status/2`)."
+  @type free_status :: %{
+          limit: pos_integer(),
+          boards: [%{id: pos_integer(), slug: String.t(), name: String.t(), editable?: boolean()}],
+          editable_board_id: pos_integer() | nil,
+          over_limit?: boolean()
+        }
+
+  @doc """
+  A Free owner's counted boards on `today`, the editable one first and the rest by activity
+  (newest first), with whether they are over `free_board_limit/0`. Nil unless billing is enabled
+  and the owner's standing is `:free`.
+  """
+  @spec free_status(User.t() | pos_integer(), Date.t()) :: nil | free_status()
+  def free_status(user, %Date{} = today) do
+    if enabled?() and standing(user, today) == :free do
+      boards = user |> user_id() |> counted_boards() |> Repo.all()
+      editable_id = boards |> List.first(%{}) |> Map.get(:id)
+
+      %{
+        limit: @free_board_limit,
+        boards: Enum.map(boards, &Map.put(&1, :editable?, &1.id == editable_id)),
+        editable_board_id: editable_id,
+        over_limit?: length(boards) > @free_board_limit
+      }
     end
   end
 
   @doc """
-  Cancels the user's plan on `today`. Access continues through `trial_ends_on` (a trial) or
-  `paid_through` (active or past due); nothing is refunded. Broadcasts on success.
+  Whether the user may create (or unarchive) a board: false only while billing is enabled and
+  they are held, or on Free with `free_board_limit/0` counted boards already.
+  """
+  @spec can_add_board?(User.t() | pos_integer()) :: boolean()
+  def can_add_board?(user) do
+    not enabled?() or
+      case standing(user, Date.utc_today()) do
+        :free -> counted_board_count(user_id(user)) < @free_board_limit
+        standing -> Standing.unlimited?(standing)
+      end
+  end
+
+  @doc """
+  THE gate every write path honours: true when the board's owner is held, or the board is
+  read-only on Free (the owner is on Free, the board is counted, and it is not the editable one).
+  Always false while billing is disabled. An integer is a board id. The editable board is only
+  looked up for a Free owner, so a paying owner costs no extra query.
+  """
+  @spec board_paused?(Board.t() | pos_integer()) :: boolean()
+  def board_paused?(board) do
+    enabled?() and
+      case gate_board(board) do
+        nil -> false
+        gate_board -> closed?(gate(gate_board))
+      end
+  end
+
+  @doc """
+  The billing notice a board shows: `:paused` (the owner is held), `:past_due`,
+  `{:free_read_only, editable_board_name}` (read-only on Free), or nil. Always nil while disabled.
+  """
+  @spec board_notice(Board.t()) :: nil | :past_due | :paused | {:free_read_only, String.t()}
+  def board_notice(%Board{} = board) do
+    if enabled?() do
+      case gate(gate_board(board)) do
+        :held -> :paused
+        :past_due -> :past_due
+        {:free_read_only, name} -> {:free_read_only, name}
+        :open -> nil
+      end
+    end
+  end
+
+  defp closed?(:held), do: true
+  defp closed?({:free_read_only, _editable_name}), do: true
+  defp closed?(_past_due_or_open), do: false
+
+  # What the owner's standing makes of one board: `:held`, `{:free_read_only, editable_name}`,
+  # `:past_due` or `:open`.
+  defp gate(%{owner_id: owner_id} = board) do
+    standing = standing(owner_id, Date.utc_today())
+
+    cond do
+      Standing.paused?(standing) -> :held
+      Standing.kind(standing) == :past_due -> :past_due
+      Standing.unlimited?(standing) -> :open
+      true -> free_gate(board)
+    end
+  end
+
+  defp free_gate(%{archived_at: nil, example_template: nil} = board) do
+    case editable_board(board.owner_id) do
+      %{id: id, name: name} when id != board.id -> {:free_read_only, name}
+      _editable_or_none -> :open
+    end
+  end
+
+  defp free_gate(_uncounted_board), do: :open
+
+  defp gate_board(%Board{} = board), do: Map.take(board, [:id, :owner_id, :archived_at, :example_template])
+
+  defp gate_board(board_id) when is_integer(board_id) do
+    Repo.one(
+      from b in Board,
+        where: b.id == ^board_id,
+        select: %{id: b.id, owner_id: b.owner_id, archived_at: b.archived_at, example_template: b.example_template}
+    )
+  end
+
+  @doc """
+  Cancels the user's plan on `today`: only an active or past-due plan (`Standing.cancellable?/1`).
+  Unlimited boards continue through `paid_through`, then the owner drops to Free; nothing is
+  refunded. Broadcasts on success.
   """
   @spec cancel(User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_cancellable}
   def cancel(user, %Date{} = today) do
@@ -245,8 +371,8 @@ defmodule Relay.Billing do
   def promo_refusals, do: @promo_refusals
 
   @doc """
-  Redeems a promo code (trimmed, case-insensitive) on `user`'s account, creating the account and
-  its trial first (`ensure_trial/2`). In one transaction the account row and then the code row
+  Redeems a promo code (trimmed, case-insensitive) on `user`'s account, creating the account
+  first (`ensure_account/1`). In one transaction the account row and then the code row
   are locked `FOR UPDATE` (always account, then code), so two redemptions can't both take a
   code's last slot. Refused, first match wins: the account already holds a code
   (`:already_redeemed`); no such code, or a blank one (`:unknown`); `disabled_at` set
@@ -257,7 +383,7 @@ defmodule Relay.Billing do
   @spec redeem_code(User.t() | pos_integer(), String.t() | nil, Date.t()) ::
           {:ok, BillingAccount.t()} | {:error, promo_refusal()}
   def redeem_code(user, code, %Date{} = today) do
-    {:ok, %BillingAccount{id: account_id}} = ensure_trial(user, today)
+    {:ok, %BillingAccount{id: account_id}} = ensure_account(user)
 
     redeemed =
       Repo.transact(fn ->
@@ -353,7 +479,7 @@ defmodule Relay.Billing do
   end
 
   @typedoc "A user's plan on `/admin/users`: their standing's kind, or `:member_only` when they own no boards."
-  @type admin_plan :: :trial | :active | :past_due | :cancelled | :comped | :paused | :member_only
+  @type admin_plan :: :free | :active | :past_due | :cancelled | :comped | :paused | :member_only
 
   @typedoc "One `/admin/users` row (`list_admin_users/1`)."
   @type admin_user :: %{
@@ -390,7 +516,7 @@ defmodule Relay.Billing do
   (`inserted_at desc, id desc`), with their billing standing on `today`. `board_count` counts the
   user's memberships; `owned_board_count` the boards they own; `member_count` the distinct people
   on those boards, the owner included (0 when they own none). `plan` is `admin_plan/2`;
-  `paid_through_shown` is the trial end for a trial and `paid_through` otherwise; `rate_cents` is
+  `paid_through_shown` is `paid_through` (nil for a never-paid owner); `rate_cents` is
   the next charge (`next_charge/1`), 0 when comped; `code_label` reads `"<code> <used>/<months>"`.
   A member-only row has no paid through, rate or code.
 
@@ -471,7 +597,6 @@ defmodule Relay.Billing do
 
   defp paid_through_shown(:member_only, _account), do: nil
   defp paid_through_shown(_plan, nil), do: nil
-  defp paid_through_shown(:trial, account), do: account.trial_ends_on
   defp paid_through_shown(_plan, account), do: account.paid_through
 
   defp rate_cents(:member_only, _account), do: nil
@@ -487,13 +612,13 @@ defmodule Relay.Billing do
 
   @doc """
   The `/admin/users` summary line, from its rows (pure): `users` rows; `paying` rows on one of
-  `paying_plans/0`; `mrr_cents` the sum of those rows' `rate_cents`; `in_trial` rows on `:trial`.
+  `paying_plans/0`; `mrr_cents` the sum of those rows' `rate_cents`; `free` rows on `:free`.
   """
   @spec admin_summary([admin_user()]) :: %{
           users: non_neg_integer(),
           paying: non_neg_integer(),
           mrr_cents: non_neg_integer(),
-          in_trial: non_neg_integer()
+          free: non_neg_integer()
         }
   def admin_summary(rows) when is_list(rows) do
     paying = Enum.filter(rows, &(&1.plan in @paying_plans))
@@ -502,7 +627,7 @@ defmodule Relay.Billing do
       users: length(rows),
       paying: length(paying),
       mrr_cents: paying |> Enum.map(& &1.rate_cents) |> Enum.sum(),
-      in_trial: Enum.count(rows, &(&1.plan == :trial))
+      free: Enum.count(rows, &(&1.plan == :free))
     }
   end
 
@@ -542,15 +667,15 @@ defmodule Relay.Billing do
   def admin_refusals, do: @admin_refusals
 
   @doc """
-  Comps `user_id`'s account (creating it, with a trial, if missing), recording one `:comp` entry
+  Comps `user_id`'s account (creating it if missing), recording one `:comp` entry
   by `actor` and broadcasting. Refused with `:already_comped`.
   """
   @spec admin_comp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :already_comped}
   defdelegate admin_comp(user_id, actor, today), to: Admin, as: :comp
 
   @doc """
-  Un-comps the account — its standing is then derived as usual (a never-paid account past its
-  trial is `{:paused, :trial_ended}`, one past `paid_through` + grace `{:paused, :unpaid}`).
+  Un-comps the account — its standing is then derived as usual (a never-paid account, or one
+  past `paid_through` + grace, is on `:free`).
   Records one `:uncomp` entry and broadcasts. Refused with `:not_comped`.
   """
   @spec admin_uncomp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_comped}
@@ -584,7 +709,7 @@ defmodule Relay.Billing do
 
   @doc """
   Charges the account now through the one charging path, as an `:admin` attempt (the card-saved
-  rule: a past-due account renews, a paused one pays a fresh month), when `admin_retryable?/2`
+  rule: a past-due account renews, a Free one pays a fresh month), when `admin_retryable?/2`
   holds on a fresh read. Records one `:retry_charge` entry and broadcasts. Refused with
   `:not_retryable`. An admin decline sends no email and never spends the clock's grace retry.
   """
@@ -592,7 +717,7 @@ defmodule Relay.Billing do
           {:ok, :paid | :declined | :unknown | :none} | {:error, :not_retryable}
   defdelegate admin_retry_charge(user_id, actor, today), to: Admin, as: :retry_charge
 
-  @doc "True when the superadmin may retry the charge: a card on file, and past due or paused for any reason but a hold."
+  @doc "True when the superadmin may retry the charge: a card on file, and past due or on Free (never a hold)."
   @spec admin_retryable?(BillingAccount.t() | nil, Standing.t()) :: boolean()
   def admin_retryable?(nil, _standing), do: false
 
@@ -600,7 +725,7 @@ defmodule Relay.Billing do
     Standing.card_on_file?(account) and
       case standing do
         {:past_due, _until} -> true
-        {:paused, reason} -> reason != :hold
+        :free -> true
         _other -> false
       end
   end
@@ -645,7 +770,6 @@ defmodule Relay.Billing do
           comped?: boolean(),
           held?: boolean(),
           hold_reason: String.t() | nil,
-          trial_ends_on: Date.t() | nil,
           paid_through: Date.t() | nil,
           billing_day: integer() | nil,
           card: nil | %{brand_label: String.t(), last4: String.t()},
@@ -702,7 +826,6 @@ defmodule Relay.Billing do
       comped?: (account && account.comped) || false,
       held?: not is_nil(account && account.held_on),
       hold_reason: account && account.hold_reason,
-      trial_ends_on: account && account.trial_ends_on,
       paid_through: account && account.paid_through,
       billing_day: account && account.billing_day,
       card: account |> card() |> admin_card(),
@@ -820,9 +943,8 @@ defmodule Relay.Billing do
   @typedoc "What the Billing page shows (`summary/2`)."
   @type summary :: %{
           standing: Standing.t(),
-          trial_ends_on: Date.t() | nil,
-          trial_days_left: integer() | nil,
-          first_charge_on: Date.t() | nil,
+          free: nil | free_status(),
+          upgrade_free?: boolean(),
           amount_cents: non_neg_integer(),
           full_price_cents: pos_integer(),
           promo:
@@ -851,7 +973,7 @@ defmodule Relay.Billing do
   """
   @spec setup_checkout_url(User.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def setup_checkout_url(%User{} = user, return_url) do
-    {:ok, account} = ensure_trial(user, Date.utc_today())
+    {:ok, account} = ensure_account(user)
 
     with {:ok, %{url: url, customer_id: customer_id}} <-
            Payments.impl().create_setup_checkout(account.stripe_customer_id, user, return_url) do
@@ -878,7 +1000,7 @@ defmodule Relay.Billing do
     with {:ok, setup} <- Payments.impl().fetch_setup(setup_id),
          :ok <- same_user(setup.user_id, expected_user_id),
          true <- Repo.exists?(from u in User, where: u.id == ^setup.user_id) || {:error, :not_found} do
-      {:ok, _account} = ensure_trial(setup.user_id, today)
+      {:ok, _account} = ensure_account(setup.user_id)
       Charging.save_card(setup, today)
     end
   end
@@ -929,69 +1051,55 @@ defmodule Relay.Billing do
   end
 
   @doc """
-  The billing clock for `today` (`Relay.Billing.Clock` runs it hourly), in order: (a) backfill —
-  a trial for every user without one; (b) resolve — ask Stripe about every unknown attempt and
-  every pending one older than `Charging.pending_overdue_minutes/0`; (c) charge — every account
-  due a first charge, a renewal or (`final_pass?: true`, the day's last run) its one retry; (d)
-  notify — `Relay.Billing.Notifier.notify_due/1` records and sends the trial-ending,
-  card-declined and plan-paused emails due today, each once per account and period. A no-op
-  answering zeros while billing is disabled.
+  The billing clock for `today` (`Relay.Billing.Clock` runs it hourly), in order: (a) resolve —
+  ask Stripe about every unknown attempt and every pending one older than
+  `Charging.pending_overdue_minutes/0`; (b) charge — every paid account due a renewal or
+  (`final_pass?: true`, the day's last run) its one retry (a Free account is never charged by the
+  clock: it pays by upgrading); (c) notify — `Relay.Billing.Notifier.notify_due/1` records and
+  sends the card-declined and dropped-to-Free emails due today, each once per account and period.
+  A no-op answering zeros while billing is disabled.
   """
   @spec run_clock(Date.t(), final_pass?: boolean(), now: DateTime.t()) :: %{
-          backfilled: non_neg_integer(),
           resolved: non_neg_integer(),
           charged: non_neg_integer(),
           notified: non_neg_integer()
         }
   def run_clock(%Date{} = today, opts \\ []) do
     if enabled?() do
-      backfilled = backfill(today)
       resolved = Charging.resolve_open(Keyword.get(opts, :now, DateTime.utc_now()))
       charged = Charging.charge_due(today, Keyword.get(opts, :final_pass?, false))
       notified = Notifier.notify_due(today)
-      %{backfilled: backfilled, resolved: resolved, charged: charged, notified: notified}
+      %{resolved: resolved, charged: charged, notified: notified}
     else
-      %{backfilled: 0, resolved: 0, charged: 0, notified: 0}
+      %{resolved: 0, charged: 0, notified: 0}
     end
-  end
-
-  # The launch backfill: users who signed up before billing (no account, or no trial date).
-  defp backfill(today) do
-    from(u in User,
-      left_join: a in BillingAccount,
-      on: a.user_id == u.id,
-      where: is_nil(a.id) or is_nil(a.trial_ends_on),
-      select: u.id
-    )
-    |> Repo.all()
-    |> Enum.count(fn user_id -> match?({:ok, _account}, ensure_trial(user_id, today)) end)
   end
 
   @doc """
   What the Billing page shows for `user` on `today`. `amount_cents` is the next charge
-  (`next_charge/1`), `full_price_cents` the undiscounted price. `promo` is nil unless the
-  account holds a code; its `full_price_from` is the first charge date back at full price — the
-  first charge (a trial) or the renewal (active) `months_left` periods on — and nil when no
-  months are left or in any other standing.
+  (`next_charge/1`), `full_price_cents` the undiscounted price. `free` is `free_status/2` (nil
+  unless on Free); `upgrade_free?` is true on Free when the next charge is $0 (a 100% code:
+  `upgrade_without_card/2` needs no card). `promo` is nil unless the account holds a code; its
+  `full_price_from` is the first charge date back at full price — from an upgrade today (Free)
+  or from the renewal (active), `months_left` periods on — and nil when no months are left or
+  in any other standing.
   """
   @spec summary(User.t(), Date.t()) :: summary()
   def summary(%User{} = user, %Date{} = today) do
     account = user |> get_account() |> Repo.preload(:promo_code)
     standing = Standing.of(account, facts(account), today)
-    trial_ends_on = account && account.trial_ends_on
     paid_through = account && account.paid_through
-    trial? = standing == :trial and not is_nil(trial_ends_on)
-    first_charge_on = if(trial?, do: Date.add(trial_ends_on, 1))
     renews_on = if(standing == :active, do: Periods.next_renewal(paid_through))
+    upgrade_on = if(standing == :free, do: today)
+    amount_cents = next_charge(account).amount_cents
 
     %{
       standing: standing,
-      trial_ends_on: trial_ends_on,
-      trial_days_left: if(trial?, do: Date.diff(trial_ends_on, today)),
-      first_charge_on: first_charge_on,
-      amount_cents: next_charge(account).amount_cents,
+      free: free_status(user, today),
+      upgrade_free?: standing == :free and amount_cents == 0,
+      amount_cents: amount_cents,
       full_price_cents: price_cents(),
-      promo: promo(account, first_charge_on, renews_on),
+      promo: promo(account, upgrade_on, renews_on),
       paid_through: paid_through,
       renews_on: renews_on,
       card: card(account),
@@ -1001,36 +1109,55 @@ defmodule Relay.Billing do
     }
   end
 
-  defp promo(%BillingAccount{promo_code: %PromoCode{} = promo_code} = account, first_charge_on, renews_on) do
+  defp promo(%BillingAccount{promo_code: %PromoCode{} = promo_code} = account, upgrade_on, renews_on) do
     months_left = account.promo_months_left
 
     %{
       code: promo_code.code,
       percent_off: promo_code.percent_off,
       months_left: months_left,
-      full_price_from: full_price_from(months_left, first_charge_on, renews_on, account.billing_day)
+      full_price_from: full_price_from(months_left, upgrade_on, renews_on, account.billing_day)
     }
   end
 
-  defp promo(_account, _first_charge_on, _renews_on), do: nil
+  defp promo(_account, _upgrade_on, _renews_on), do: nil
 
-  defp full_price_from(0, _first_charge_on, _renews_on, _billing_day), do: nil
-  defp full_price_from(months_left, %Date{} = first, nil, _day), do: Periods.renewal_after(first, first.day, months_left)
+  defp full_price_from(0, _upgrade_on, _renews_on, _billing_day), do: nil
+
+  defp full_price_from(months_left, %Date{} = upgrade_on, nil, _day),
+    do: Periods.renewal_after(upgrade_on, upgrade_on.day, months_left)
+
   defp full_price_from(months_left, nil, %Date{} = renews_on, day), do: Periods.renewal_after(renews_on, day, months_left)
-  defp full_price_from(_months_left, _first_charge_on, _renews_on, _billing_day), do: nil
+  defp full_price_from(_months_left, _upgrade_on, _renews_on, _billing_day), do: nil
+
+  @doc """
+  Upgrades a Free `user` whose next charge is $0 (a 100% promo code) without a card: a fresh $0
+  month from `today` through `Relay.Billing.Charging` (an `:upgrade` attempt that never reaches
+  Stripe). Any other standing, or a priced next charge, is `{:error, :checkout_required}` — the
+  caller sends the owner to the setup Checkout (`setup_checkout_url/2`), and saving the card
+  charges the upgrade.
+  """
+  @spec upgrade_without_card(User.t(), Date.t()) :: {:ok, :paid} | {:error, :checkout_required}
+  def upgrade_without_card(%User{} = user, %Date{} = today) do
+    with %BillingAccount{id: account_id} <- get_account(user),
+         :paid <- Charging.upgrade(account_id, today) do
+      {:ok, :paid}
+    else
+      _no_account_or_not_free -> {:error, :checkout_required}
+    end
+  end
 
   @typedoc "The plan status the native app's Settings shows (`native_status/2`)."
   @type native_status :: %{
           enabled: boolean(),
-          standing: :trial | :active | :past_due | :cancelled | :comped | :paused | nil,
+          standing: :free | :active | :past_due | :cancelled | :comped | :paused | nil,
           through: Date.t() | nil
         }
 
   @doc """
   The plan status the native app shows `user` on `today` (RE466): the standing's kind and the
-  date the plan runs through. `through` is `trial_ends_on` for a trial (nil before the backfill),
-  `paid_through` while active or past due, `access_until` once cancelled, and nil when comped or
-  paused. With billing disabled it is `%{enabled: false, standing: nil, through: nil}`, read
+  date the plan runs through. `through` is `paid_through` while active or past due,
+  `access_until` once cancelled, and nil on Free, comped or paused. With billing disabled it is `%{enabled: false, standing: nil, through: nil}`, read
   without touching the database.
   """
   @spec native_status(User.t() | pos_integer(), Date.t()) :: native_status()
@@ -1044,11 +1171,10 @@ defmodule Relay.Billing do
     end
   end
 
-  defp through(:trial, account), do: account && account.trial_ends_on
   defp through(:active, account), do: account.paid_through
   defp through({:past_due, _grace_until}, account), do: account.paid_through
   defp through({:cancelled, access_until}, _account), do: access_until
-  defp through(_comped_or_paused, _account), do: nil
+  defp through(_free_comped_or_paused, _account), do: nil
 
   defp card(account) do
     if account && Standing.card_on_file?(account) do
@@ -1086,9 +1212,7 @@ defmodule Relay.Billing do
   def brand_label(nil), do: "Card"
   def brand_label(brand) when is_binary(brand), do: Map.get_lazy(@brand_labels, brand, fn -> String.capitalize(brand) end)
 
-  # A trial (with no account or no trial date — pre-backfill) has no end to keep access through.
-  defp access_until(_standing, nil), do: nil
-  defp access_until(:trial, %BillingAccount{trial_ends_on: ends_on}), do: ends_on
+  # Only an active or past-due plan is cancellable: access runs through what it has paid for.
   defp access_until(_active_or_past_due, %BillingAccount{paid_through: paid_through}), do: paid_through
 
   defp update_and_broadcast(changeset) do
@@ -1099,11 +1223,6 @@ defmodule Relay.Billing do
   end
 
   defp facts(account), do: Charging.facts(account)
-
-  defp board_owner_id(%Board{owner_id: owner_id}), do: owner_id
-
-  defp board_owner_id(board_id) when is_integer(board_id),
-    do: Repo.one(from b in Board, where: b.id == ^board_id, select: b.owner_id)
 
   defp user_id(%User{id: id}), do: id
   defp user_id(id) when is_integer(id), do: id

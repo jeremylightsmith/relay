@@ -18,10 +18,9 @@ defmodule RelayWeb.Admin.UsersLiveTest do
     admin = insert(:user, email: hd(Scope.superadmin_emails()))
     today = Date.utc_today()
 
-    trial = insert(:user, name: "Sam Ortiz")
-    trial_board = insert(:board, owner: trial)
-    trial_ends_on = Date.add(today, 10)
-    insert(:billing_account, user: trial, trial_ends_on: trial_ends_on)
+    free = insert(:user, name: "Sam Ortiz")
+    free_board = insert(:board, owner: free)
+    insert(:billing_account, user: free)
 
     card = Local.card(:visa_4242)
     promo = insert(:promo_code, code: "RELAYCONF", percent_off: 50, months: 3)
@@ -30,7 +29,6 @@ defmodule RelayWeb.Admin.UsersLiveTest do
 
     insert(:billing_account,
       user: active,
-      trial_ends_on: Date.add(today, -40),
       paid_through: Date.add(today, 20),
       promo_code_id: promo.id,
       promo_months_left: 2,
@@ -41,19 +39,18 @@ defmodule RelayWeb.Admin.UsersLiveTest do
 
     paused = insert(:user, name: "Lee Park")
     insert(:board, owner: paused)
-    insert(:billing_account, user: paused, trial_ends_on: Date.add(today, -60), paid_through: Date.add(today, -10))
+    insert(:billing_account, user: paused, paid_through: Date.add(today, 10), held_on: today, hold_reason: "fraud check")
 
     comped = insert(:user, name: "Jeremy L.")
     insert(:board, owner: comped)
-    insert(:billing_account, user: comped, trial_ends_on: Date.add(today, -60), comped: true)
+    insert(:billing_account, user: comped, comped: true)
 
     member = insert(:user, name: "Kai")
-    insert(:membership, board: trial_board, user: member)
+    insert(:membership, board: free_board, user: member)
 
     %{
       conn: log_in_user(conn, admin),
-      trial: trial,
-      trial_ends_on: trial_ends_on,
+      free: free,
       active: active,
       paused: paused,
       comped: comped,
@@ -84,21 +81,18 @@ defmodule RelayWeb.Admin.UsersLiveTest do
     assert has_element?(view, "#admin-user-#{comped.id}-plan .badge.badge-soft.badge-neutral", "comped")
   end
 
-  test "the paused row carries a warning paused badge", %{conn: conn, paused: paused} do
+  test "the held row carries a warning paused badge", %{conn: conn, paused: paused} do
     {:ok, view, _html} = live(conn, ~p"/admin/users")
 
     assert has_element?(view, "#admin-user-#{paused.id}-plan .badge.badge-soft.badge-warning", "paused")
   end
 
-  test "the trial row carries a primary trial badge and its trial end as paid through", %{
-    conn: conn,
-    trial: trial,
-    trial_ends_on: trial_ends_on
-  } do
+  test "the never-paid row carries a free badge and no paid through", %{conn: conn, free: free} do
     {:ok, view, _html} = live(conn, ~p"/admin/users")
 
-    assert has_element?(view, "#admin-user-#{trial.id}-plan .badge.badge-soft.badge-primary", "trial")
-    assert text(cell(view, trial, "paid-through")) == Date.to_iso8601(trial_ends_on)
+    assert has_element?(view, "#admin-user-#{free.id}-plan .badge.badge-soft.badge-primary", "free")
+    refute render(view) =~ ~r/>\s*trial\s*</
+    assert text(cell(view, free, "paid-through")) == "—"
   end
 
   test "the member-only row carries a ghost badge and dashes for every billing cell", %{
@@ -120,11 +114,11 @@ defmodule RelayWeb.Admin.UsersLiveTest do
     refute has_element?(view, "main div.max-w-2xl")
   end
 
-  test "the summary counts users, paying, the monthly total and trials", %{conn: conn} do
+  test "the summary counts users, paying, the monthly total and Free owners", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/admin/users")
 
     assert view |> element("#admin-users-summary") |> render() |> text() ==
-             "6 users · 1 paying · $10/mo · 1 in trial"
+             "6 users · 1 paying · $10/mo · 1 on Free"
 
     assert has_element?(view, "#admin-users-summary span.text-success", "$10/mo")
   end
@@ -199,7 +193,8 @@ defmodule RelayWeb.Admin.UsersLiveTest do
       assert has_element?(view, "#admin-user-attempts-empty")
       assert has_element?(view, "#admin-user-entries-empty")
       assert has_element?(view, "#admin-user-comp")
-      assert has_element?(view, "#admin-user-hold")
+      refute has_element?(view, "#admin-user-hold")
+      assert has_element?(view, "#admin-user-lift-hold")
       assert has_element?(view, "#admin-user-extend")
       refute has_element?(view, "#admin-user-retry")
       # Hold / Extend only reveal their form; the form's submit is the one confirmation.
@@ -220,19 +215,34 @@ defmodule RelayWeb.Admin.UsersLiveTest do
     end
 
     # Scenario 21 (acceptance 2)
-    test "comping a paused owner un-pauses their open board live", %{conn: conn} do
+    test "comping a Free owner makes their row comped", %{conn: conn, free: free} do
+      view = open_panel(conn, free)
+      assert has_element?(view, "#admin-user-panel-plan", "free")
+
+      view |> element("#admin-user-comp") |> render_click()
+
+      assert has_element?(view, "#admin-user-#{free.id}-plan", "comped")
+      assert has_element?(view, "#admin-user-uncomp")
+      assert has_element?(view, "#admin-user-entries [id^=admin-entry-]")
+    end
+
+    test "lifting a hold un-pauses the owner's open board live", %{conn: conn} do
       Process.put(:billing_enabled, true)
       today = Date.utc_today()
-      {owner, board_view} = owner_with_open_board(%{paid_through: Date.add(today, -10), billing_day: today.day})
+      {owner, board_view} = owner_with_open_board(%{held_on: today, hold_reason: "fraud check"})
       assert has_element?(board_view, "#read-only-banner")
 
       view = open_panel(conn, owner)
-      view |> element("#admin-user-comp") |> render_click()
+      view |> element("#admin-user-lift-hold") |> render_click()
 
-      assert has_element?(view, "#admin-user-#{owner.id}-plan", "comped")
-      assert has_element?(view, "#admin-user-uncomp")
-      assert has_element?(view, "#admin-user-entries [id^=admin-entry-]")
+      refute has_element?(view, "#admin-user-#{owner.id}-plan", "paused")
       refute has_element?(board_view, "#read-only-banner")
+    end
+
+    test "the panel shows no Trial ends fact", %{conn: conn, free: free} do
+      view = open_panel(conn, free)
+      refute has_element?(view, "#admin-user-panel-facts", "Trial ends")
+      refute render(view) =~ "Trial ends"
     end
 
     # Scenario 22 (acceptance 3)

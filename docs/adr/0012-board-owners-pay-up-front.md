@@ -4,6 +4,10 @@
 
 Accepted (2026-10-24)
 
+Amended by [ADR 0013](0013-free-plan-replaces-the-trial.md) (2026-10-25): the Free plan replaces
+the trial; a lapsed plan drops to Free instead of pausing. §4, §6, §7 and §10's trial-ending and
+paused emails are superseded there.
+
 ## Context
 
 Relay Cloud needs revenue, and the hosted app runs agents and keeps boards for people who are
@@ -35,6 +39,7 @@ next month. If the owner hasn't paid, every board they own is paused. There is n
    day billing is switched on — every existing owner is backfilled with a fresh trial). A card
    saved during the trial is first charged when the trial ends. A trial gets no grace: if it ends
    with no card or the first charge is declined, the owner is paused at once.
+   *Superseded by [ADR 0013](0013-free-plan-replaces-the-trial.md) §1, §8, §10: there is no trial; every owner starts on Free.*
 5. **A 1-day grace for a declined renewal**, with one retry at the end of that day. During grace
    the owner is past due but fully usable.
 6. **Standing is derived, never stored**: `:trial | :active | :comped | {:past_due, until} |
@@ -43,9 +48,11 @@ next month. If the owner hasn't paid, every board they own is paused. There is n
    (`Relay.Billing.Standing`). Comped accounts are never charged and never pause; an admin hold
    pauses until lifted. Cancelling keeps access through the trial's end or `paid_through`;
    resuming before then keeps the billing date.
+   *Superseded by [ADR 0013](0013-free-plan-replaces-the-trial.md) §7: `:free | :active | :comped | {:past_due, _} | {:cancelled, _} | {:paused, :hold}`.*
 7. **Paused means read-only, never deleted.** A paused owner's boards behave like an archived
    board — read-only, no cards opening, no board settings — for every member, and the board-key
    API answers **402 `plan_paused`**; the run scheduler dispatches nothing for them. Data is kept.
+   *Amended by [ADR 0013](0013-free-plan-replaces-the-trial.md) §3, §4, §6: only a hold pauses every board; a lapse drops to Free, where boards past the limit are read-only the same way.*
 8. **Our own clock, not Stripe subscriptions.** An hourly `Relay.Billing.Clock` makes
    off-session Stripe PaymentIntents, each attempt a `billing_payment_attempts` row committed
    before Stripe is called and carrying its own idempotency key. At most one attempt per account
@@ -61,6 +68,7 @@ next month. If the owner hasn't paid, every board they own is paused. There is n
     `billing_notices` (unique per account, kind and period) before it is sent, so a re-run, a
     second node or a retry never sends it twice. No email for cancel, hold or comp; payment
     receipts stay with Stripe (`receipt_email`).
+    *Amended by [ADR 0013](0013-free-plan-replaces-the-trial.md) §9: the trial-ending and paused emails are gone; card declined stays and dropped to Free is added.*
 
 11. **Promo codes (RE462): X paid months at Y% off.** The superadmin creates codes; an owner
     redeems one on the Billing page or through a `/?code=…` sign-up link.

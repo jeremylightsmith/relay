@@ -3,7 +3,7 @@ defmodule Relay.Billing.Admin do
   The superadmin's billing writes (RE463), reached only through `Relay.Billing`'s delegates:
   comp / uncomp, hold / lift hold, extend `paid_through` by N days, and retry the charge now.
 
-  Each write follows `Relay.Billing.redeem_code/3`'s shape: `ensure_trial/2` first, then one
+  Each write follows `Relay.Billing.redeem_code/3`'s shape: `ensure_account/1` first, then one
   transaction that locks the account `FOR UPDATE`, checks it, changes it and writes **exactly
   one** `Schemas.BillingAdminEntry` through `record!/3` — the one history writer — then
   `{:billing_changed, user_id}` after the commit. A refusal (one of
@@ -32,8 +32,8 @@ defmodule Relay.Billing.Admin do
 
   @doc "Comps the account (`comped: true`); refused when it already is."
   @spec comp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :already_comped}
-  def comp(user_id, %User{} = actor, %Date{} = today) do
-    write(user_id, actor, today, fn
+  def comp(user_id, %User{} = actor, %Date{} = _today) do
+    write(user_id, actor, fn
       %BillingAccount{comped: true} -> {:error, :already_comped}
       _account -> {:ok, [comped: true], %{action: :comp}}
     end)
@@ -41,8 +41,8 @@ defmodule Relay.Billing.Admin do
 
   @doc "Un-comps the account; its standing is then derived as usual. Refused when not comped."
   @spec uncomp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_comped}
-  def uncomp(user_id, %User{} = actor, %Date{} = today) do
-    write(user_id, actor, today, fn
+  def uncomp(user_id, %User{} = actor, %Date{} = _today) do
+    write(user_id, actor, fn
       %BillingAccount{comped: true} -> {:ok, [comped: false], %{action: :uncomp}}
       _account -> {:error, :not_comped}
     end)
@@ -53,7 +53,7 @@ defmodule Relay.Billing.Admin do
           {:ok, BillingAccount.t()} | {:error, :reason_required | :already_held}
   def hold(user_id, %User{} = actor, reason, %Date{} = today) do
     with {:ok, reason} <- required_reason(reason) do
-      write(user_id, actor, today, fn
+      write(user_id, actor, fn
         %BillingAccount{held_on: %Date{}} -> {:error, :already_held}
         _account -> {:ok, [held_on: today, hold_reason: reason], %{action: :hold, reason: reason}}
       end)
@@ -62,8 +62,8 @@ defmodule Relay.Billing.Admin do
 
   @doc "Lifts the account's hold. Refused when it is not held."
   @spec lift_hold(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :not_held}
-  def lift_hold(user_id, %User{} = actor, %Date{} = today) do
-    write(user_id, actor, today, fn
+  def lift_hold(user_id, %User{} = actor, %Date{} = _today) do
+    write(user_id, actor, fn
       %BillingAccount{held_on: %Date{}} -> {:ok, [held_on: nil, hold_reason: nil], %{action: :lift_hold}}
       _account -> {:error, :not_held}
     end)
@@ -76,10 +76,10 @@ defmodule Relay.Billing.Admin do
   """
   @spec extend(pos_integer(), User.t(), integer(), String.t() | nil, Date.t()) ::
           {:ok, BillingAccount.t()} | {:error, :invalid_days | :reason_required | :no_paid_through}
-  def extend(user_id, %User{} = actor, days, reason, %Date{} = today) do
+  def extend(user_id, %User{} = actor, days, reason, %Date{} = _today) do
     with :ok <- valid_days(days),
          {:ok, reason} <- required_reason(reason) do
-      write(user_id, actor, today, fn
+      write(user_id, actor, fn
         %BillingAccount{paid_through: nil} ->
           {:error, :no_paid_through}
 
@@ -120,8 +120,8 @@ defmodule Relay.Billing.Admin do
 
   # The shape of every admin write but the retry. `decide` sees the locked account and answers
   # `{:ok, account_changes, entry_fields}` or `{:error, refusal}`.
-  defp write(user_id, actor, today, decide) do
-    {:ok, %BillingAccount{id: account_id}} = Billing.ensure_trial(user_id, today)
+  defp write(user_id, actor, decide) do
+    {:ok, %BillingAccount{id: account_id}} = Billing.ensure_account(user_id)
 
     written =
       Repo.transact(fn ->
