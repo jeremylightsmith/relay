@@ -45,8 +45,10 @@ defmodule Hamaca.DocsVocabularyTest do
 
   test "the docs carry vocab markers at all" do
     # Without this, a typo'd marker would silently make every assertion below vacuous.
-    assert length(tagged_tables()) >= 3,
-           "expected at least three `<!-- vocab: … -->` markers across the docs"
+    # (How Hamaca works pictures statuses, categories and types in HEEx by walking the source
+    # functions themselves, so it needs no marker; `DocsControllerTest` guards it instead.)
+    assert length(tagged_tables()) >= 2,
+           "expected at least two `<!-- vocab: … -->` markers across the docs"
   end
 
   test "every vocab marker names a function that actually exists" do

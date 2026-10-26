@@ -1,16 +1,18 @@
 defmodule HamacaWeb.DocsController do
   @moduledoc """
   Serves the public documentation site. A compile-time page registry
-  (`{slug, title, section, file}`) is the single source of truth for routing, the sidebar,
-  active state, per-page `<title>`, and each page's TOC. Each markdown file under `priv/docs/`
+  (`{slug, title, section, source}`) is the single source of truth for routing, the sidebar,
+  active state, per-page `<title>`, and each page's TOC. A markdown source under `priv/docs/`
   is embedded via `@external_resource` (ships in releases, recompiles on edit) and rendered
-  through `Hamaca.Markdown.to_docs_html/1`.
+  through `Hamaca.Markdown.to_docs_html/1`. A `{:heex, name}` source is a page template in
+  `docs_html/pages/` that draws the board's own components; its TOC is read off its headings.
   """
   use HamacaWeb, :controller
 
   alias HamacaWeb.DocsController.NotFoundError
 
-  # {slug, title, section, filename}. Order defines sidebar order; the first entry is `/docs`.
+  # {slug, title, section, filename | {:heex, template}}. Order defines sidebar order; the first
+  # entry is `/docs`.
   # Files under `architecture/` and `runbooks/` are read through the committed symlinks
   # `priv/docs/architecture -> ../../docs/architecture` and
   # `priv/docs/runbooks -> ../../docs/runbooks`, so `docs/architecture/` and `docs/runbooks/`
@@ -18,7 +20,7 @@ defmodule HamacaWeb.DocsController do
   @pages_meta [
     {"getting-started", "Getting started", "Get started", "getting-started.md"},
     {"introduction", "Introduction", "Get started", "introduction.md"},
-    {"how-hamaca-works", "How Hamaca works", "Get started", "how-hamaca-works.md"},
+    {"how-hamaca-works", "How Hamaca works", "Get started", {:heex, :how_hamaca_works}},
     {"statuses-and-outcomes", "Statuses & outcomes", "Get started", "statuses-and-outcomes.md"},
     {"billing", "Billing & self-hosting", "Get started", "billing.md"},
     {"cli", "CLI (./hamaca)", "Build with Hamaca", "cli.md"},
@@ -36,37 +38,45 @@ defmodule HamacaWeb.DocsController do
 
   @default_slug "getting-started"
 
-  for {_slug, _title, _section, file} <- @pages_meta do
+  for {_slug, _title, _section, file} <- @pages_meta, is_binary(file) do
     @external_resource Application.app_dir(:hamaca, "priv/docs/#{file}")
   end
 
   # Repo-relative path => slug, for the architecture pages only. This is what lets a link to
   # `domain.md` become `/docs/architecture-domain`; anything absent falls back to a GitHub URL.
   @slug_by_path (for {slug, _title, _section, file} <- @pages_meta,
+                     is_binary(file),
                      String.starts_with?(file, "architecture/"),
                      into: %{} do
                    {"docs/#{file}", slug}
                  end)
 
   @pages (for {slug, title, section, file} <- @pages_meta do
-            markdown = File.read!(Application.app_dir(:hamaca, "priv/docs/#{file}"))
+            case file do
+              {:heex, template} ->
+                %{slug: slug, title: title, section: section, heex: template}
 
-            # Only the architecture pages carry repo-relative links; the hand-written
-            # `priv/docs/*.md` pages already use site paths and are rendered exactly as before.
-            opts =
-              if String.starts_with?(file, "architecture/") do
-                [rewrite_links: {Path.dirname("docs/#{file}"), @slug_by_path}]
-              else
-                []
-              end
+              file ->
+                markdown = File.read!(Application.app_dir(:hamaca, "priv/docs/#{file}"))
 
-            %{
-              slug: slug,
-              title: title,
-              section: section,
-              html: Hamaca.Markdown.to_docs_html(markdown, opts),
-              toc: Hamaca.Markdown.table_of_contents(markdown)
-            }
+                # Only the architecture pages carry repo-relative links; the hand-written
+                # `priv/docs/*.md` pages already use site paths and are rendered exactly as before.
+                opts =
+                  if String.starts_with?(file, "architecture/") do
+                    [rewrite_links: {Path.dirname("docs/#{file}"), @slug_by_path}]
+                  else
+                    []
+                  end
+
+                %{
+                  slug: slug,
+                  title: title,
+                  section: section,
+                  heex: nil,
+                  html: Hamaca.Markdown.to_docs_html(markdown, opts),
+                  toc: Hamaca.Markdown.table_of_contents(markdown)
+                }
+            end
           end)
 
   @sections @pages_meta |> Enum.map(&elem(&1, 2)) |> Enum.uniq()
@@ -84,15 +94,37 @@ defmodule HamacaWeb.DocsController do
         raise NotFoundError
 
       page ->
+        {html, toc} = page_body(page)
+
         render(conn, :show,
-          page_html: page.html,
-          toc: page.toc,
+          page_html: html,
+          toc: toc,
           sidebar: @sidebar,
           sections: @sections,
           active_slug: page.slug,
           page_title: page.title,
           default_slug: @default_slug
         )
+    end
+  end
+
+  defp page_body(%{heex: nil, html: html, toc: toc}), do: {html, toc}
+
+  defp page_body(%{heex: template}) do
+    html =
+      HamacaWeb.DocsHTML
+      |> apply(template, [%{}])
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+
+    {{:safe, html}, heex_toc(html)}
+  end
+
+  # The "On this page" entries for a HEEx page: its `<h2 id>` / `<h3 id>` headings, in order —
+  # the same `%{level, text, anchor}` shape `Hamaca.Markdown.table_of_contents/1` returns.
+  defp heex_toc(html) do
+    for [_, level, anchor, inner] <- Regex.scan(~r{<h([23])[^>]*\sid="([^"]+)"[^>]*>(.*?)</h\1>}s, html) do
+      %{level: String.to_integer(level), anchor: anchor, text: inner |> String.replace(~r/<[^>]+>/, "") |> String.trim()}
     end
   end
 end

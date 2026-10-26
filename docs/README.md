@@ -27,7 +27,10 @@ Published means served on the `/docs` site. Of the `docs/` tree,
 only `docs/architecture/` and `docs/runbooks/` are published. They reach the site through the
 committed symlinks `priv/docs/architecture -> ../../docs/architecture` and
 `priv/docs/runbooks -> ../../docs/runbooks`, so they stay the single source of truth — there is no
-copy step. A page is served once it is registered in `RelayWeb.DocsController`'s `@pages_meta`.
+copy step. A page is served once it is registered in `HamacaWeb.DocsController`'s `@pages_meta`.
+A page that needs the board's own pictures (statuses, stage categories and types) is HEEx instead
+of markdown: it lives in `lib/hamaca_web/controllers/docs_html/pages/`, is registered as
+`{:heex, template}`, and draws the real components, so it can't drift from the board.
 
 Anything published is dual-audience — a contributor *and* an outside site reader — and must read
 acceptably to someone who has never seen the repo. `docs/adr/`, `docs/glossary.md`,
@@ -55,7 +58,7 @@ it is a user-facing `/docs` concept page, which may restate it simply but must n
 canonical source. Values of a closed set are the one restatement that is machine-checked: tag the
 table with a `vocab:` HTML comment naming the accessor that owns the set, and
 `test/relay/docs_vocabulary_test.exs` holds the table to that function's values. See
-`priv/docs/how-hamaca-works.md` for the exact marker syntax.
+`priv/docs/statuses-and-outcomes.md` for the exact marker syntax.
 
 ## Named sources of truth
 

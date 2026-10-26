@@ -5,7 +5,6 @@ defmodule Hamaca.DocsContentTest do
 
   @expected [
     {"introduction.md", "# Introduction"},
-    {"how-hamaca-works.md", "# How Hamaca works"},
     {"authentication.md", "# Authentication & API access"},
     {"cli.md", "# CLI (`./hamaca`)"},
     {"api.md", "# REST API reference"},

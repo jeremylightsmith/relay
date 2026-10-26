@@ -284,19 +284,57 @@ defmodule HamacaWeb.DocsControllerTest do
     assert html =~ ".hamaca/runner.json"
   end
 
-  test "How Hamaca works follows one card across a board", %{conn: conn} do
-    html = conn |> get(~p"/docs/how-hamaca-works") |> html_response(200)
-
-    for needle <- ["Next up", "Plan", "Review", "Approve", "Request changes", "flow", "Done"] do
-      assert html =~ needle, "How Hamaca works never mentions #{inspect(needle)}"
+  describe "How Hamaca works (a HEEx page built from the board's own components)" do
+    setup %{conn: conn} do
+      html = conn |> get(~p"/docs/how-hamaca-works") |> html_response(200)
+      %{html: html, doc: LazyHTML.from_document(html)}
     end
 
-    # Stages have no owner field any more; a stage is the agent's when a flow works it.
-    refute html =~ ~r/owned by either/i
-    refute html =~ "accountability surface"
-    # Schema values belong to the reference pages, not the concept page.
-    for raw <- ["needs_you", "in_progress", "unstarted", "`human`"] do
-      refute html =~ raw, "How Hamaca works shows the raw value #{inspect(raw)}"
+    test "pictures every card status as a real status badge", %{doc: doc} do
+      for status <- Schemas.Card.statuses() do
+        badge = LazyHTML.query(doc, ~s(article#docs .status-badge[data-status="#{status}"]))
+        refute Enum.empty?(badge), "no status badge pictured for #{inspect(status)}"
+      end
+    end
+
+    test "draws each status on a real board card", %{doc: doc} do
+      cards = LazyHTML.query(doc, "article#docs .board-card")
+      assert Enum.count(cards) >= length(Schemas.Card.statuses())
+    end
+
+    test "pictures every stage category with its board dot", %{doc: doc} do
+      for category <- Schemas.Stage.categories() do
+        dot = LazyHTML.query(doc, ~s(article#docs .category-dot[data-category="#{category}"]))
+        refute Enum.empty?(dot), "no category dot pictured for #{inspect(category)}"
+      end
+    end
+
+    test "pictures every stage type with its board glyph", %{doc: doc} do
+      for type <- Schemas.Stage.types() do
+        icon = LazyHTML.query(doc, ~s(article#docs .stage-type-icon[data-type="#{type}"]))
+        refute Enum.empty?(icon), "no stage-type glyph pictured for #{inspect(type)}"
+      end
+    end
+
+    test "names the raw values agents match on", %{html: html} do
+      for value <- Schemas.Card.statuses() ++ Schemas.Stage.categories() ++ Schemas.Stage.types() do
+        assert html =~ "<code>#{value}</code>", "the page never names #{inspect(value)} in code"
+      end
+    end
+
+    test "lists its sections in the on-this-page nav", %{doc: doc} do
+      toc = doc |> LazyHTML.query(".docs-toc") |> LazyHTML.text()
+
+      for heading <- ["Stage categories", "Stage types", "Card statuses", "Approve and Request changes"] do
+        assert toc =~ heading, "the on-this-page nav is missing #{inspect(heading)}"
+      end
+    end
+
+    test "says Hamaca, not Relay, and keeps the old ownership model out", %{html: html} do
+      prose = article_prose(html)
+      refute prose =~ ~r/\bRelay\b/
+      refute html =~ ~r/owned by either/i
+      refute html =~ "accountability surface"
     end
   end
 
@@ -573,7 +611,7 @@ defmodule HamacaWeb.DocsControllerTest do
 
   # RE477 task 3: the docs prose names the product Hamaca; commands, URLs, env vars and
   # module references stay verbatim (they're renamed by RE478/RE480/RE481).
-  @top_level_slugs ~w(introduction getting-started how-hamaca-works
+  @top_level_slugs ~w(introduction getting-started
                       statuses-and-outcomes billing cli authentication api)
 
   # The rendered article's prose, with <pre> and <code> blocks removed and the tags stripped.

@@ -580,7 +580,7 @@ defmodule HamacaWeb.BoardLive do
                   class="category-band-header"
                   style="display:flex;align-items:center;gap:8px;padding:0 4px;height:20px;flex:0 0 auto;"
                 >
-                  <span class="category-dot" style={category_dot_style(category)}></span>
+                  <.category_dot category={category} />
                   <h2
                     class="category-band"
                     style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0;"
@@ -6418,25 +6418,6 @@ defmodule HamacaWeb.BoardLive do
       acc + Map.fetch!(stage_counts, stage.id) + sub_total
     end)
   end
-
-  # The small colored marker beside each category band, mirroring the mockup's
-  # catMeta dots: a hollow ring (unstarted), a quarter-filled violet conic
-  # (planning — where AI planning lives), a half-filled blue conic
-  # (in progress), and a solid green disc (complete).
-  defp category_dot_style(:unstarted),
-    do:
-      "width:9px;height:9px;border-radius:50%;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:planning),
-    do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 25% 100%);display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:in_progress),
-    do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 50% 100%);display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:complete),
-    do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
 
   defp agent_log_class(:error), do: "text-error"
   defp agent_log_class(:lifecycle), do: "text-base-content/65"

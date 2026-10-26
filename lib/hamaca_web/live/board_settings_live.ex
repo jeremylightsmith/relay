@@ -501,7 +501,7 @@ defmodule HamacaWeb.BoardSettingsLive do
                 style="margin-top:22px;"
               >
                 <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px 2px;">
-                  <span class="category-dot" style={category_dot_style(category)}></span>
+                  <.category_dot category={category} />
                   <span
                     class="font-mono"
                     style="font-size:10.5px;font-weight:600;letter-spacing:0.09em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
@@ -2429,22 +2429,6 @@ defmodule HamacaWeb.BoardSettingsLive do
   defp category_band_label(:planning), do: "PLANNING"
   defp category_band_label(:in_progress), do: "IN PROGRESS"
   defp category_band_label(:complete), do: "COMPLETE"
-
-  # Mirrors the board's category band dots (mockup catMeta, lines ~906-908).
-  defp category_dot_style(:unstarted),
-    do:
-      "width:9px;height:9px;border-radius:50%;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:planning),
-    do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 25% 100%);display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:in_progress),
-    do:
-      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 50% 100%);display:block;flex:0 0 auto;"
-
-  defp category_dot_style(:complete),
-    do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
 
   defp assign_keys(socket, keys) do
     socket

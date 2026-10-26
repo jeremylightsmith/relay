@@ -563,6 +563,34 @@ defmodule HamacaWeb.CoreComponents do
     do: "width:#{s}px;height:#{s}px;border-radius:50%;background:var(--color-success);flex:0 0 auto;display:block;"
 
   @doc """
+  The 9px dot beside a category band (the board's and Board settings' band headers, the docs):
+  a hollow ring (unstarted), a quarter-filled violet conic (planning, where AI planning lives),
+  a half-filled blue conic (in progress), and a solid green disc (complete).
+  """
+  attr :category, :atom, values: Schemas.Stage.categories(), required: true
+
+  def category_dot(assigns) do
+    ~H"""
+    <span class="category-dot" data-category={@category} style={category_dot_style(@category)}></span>
+    """
+  end
+
+  defp category_dot_style(:unstarted),
+    do:
+      "width:9px;height:9px;border-radius:50%;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:planning),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-secondary) 0 25%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 25% 100%);display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:in_progress),
+    do:
+      "width:9px;height:9px;border-radius:50%;background:conic-gradient(var(--color-primary) 0 50%, color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100)) 50% 100%);display:block;flex:0 0 auto;"
+
+  defp category_dot_style(:complete),
+    do: "width:9px;height:9px;border-radius:50%;background:var(--color-success);display:block;flex:0 0 auto;"
+
+  @doc """
   Renders a card's status badge — the baton state at a glance.
 
   `working` appends the stored progress percentage when present

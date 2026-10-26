@@ -1,0 +1,152 @@
+<%!-- /docs/how-hamaca-works. HEEx, not markdown: every picture is the board's own component,
+     and every list walks the closed set it explains (see HamacaWeb.DocsHTML). --%>
+<h1 id="how-hamaca-works">How Hamaca works</h1>
+
+<p>
+  A board is a row of <b>stages</b>, grouped into four <b>categories</b>. Cards move left to
+  right. A stage with a <b>flow</b> is one an agent works. Every card has a <b>status</b> that
+  says what's happening to it right now.
+</p>
+
+<figure id="hhw-board" class="not-prose my-5">
+  <div class="overflow-x-auto pb-1.5">
+    <div class="flex w-max gap-3.5 rounded-[14px] border border-base-300 bg-base-200 p-3">
+      <section :for={{category, stages} <- example_board()} class="flex flex-col gap-2">
+        <div class="flex h-5 items-center gap-2 px-1">
+          <.category_dot category={category} />
+          <span class="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-base-content/65">
+            {category_label(category)}
+          </span>
+        </div>
+        <div class="flex gap-2">
+          <div
+            :for={stage <- stages}
+            class="flex w-[160px] flex-col overflow-hidden rounded-[14px] border border-base-300 bg-base-100"
+          >
+            <header class="flex items-center gap-2 border-b border-base-300 px-3 py-2.5 text-[12.5px] font-semibold">
+              <.stage_type_icon type={stage.type} />
+              <span class="truncate">{stage.name}</span>
+              <span class="flex-1"></span>
+              <.flow_chip
+                :if={stage.flow?}
+                id={"hhw-flow-#{stage.name}"}
+                flow={%{key: stage.name, enabled: true}}
+                read_only
+              />
+            </header>
+            <div class="flex min-h-24 flex-col gap-2 p-2">
+              <.board_card
+                :for={card <- stage.cards}
+                id={"hhw-card-#{card.ref}"}
+                draggable={false}
+                {card}
+              />
+            </div>
+            <div :if={stage.sublanes != []} class="flex gap-1.5 px-2 pb-2">
+              <span
+                :for={sub <- stage.sublanes}
+                class="flex flex-1 items-center gap-1.5 rounded-[7px] border border-dashed border-base-300 px-1.5 py-0.5 font-mono text-[10px] text-base-content/65"
+              >
+                <.stage_type_icon type={sub} size={7} />{sub
+                |> Atom.to_string()
+                |> String.capitalize()}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <figcaption class="mt-2 text-[12.5px] text-base-content/60">
+    The Design-led template. The bands across the top are categories, the glyph beside each
+    stage name is its type, and the violet chip marks a stage with a flow.
+  </figcaption>
+</figure>
+
+<h2 id="stage-categories">Stage categories</h2>
+<p>
+  Every top-level stage belongs to one category. Categories group the board into bands and decide
+  when a card counts as done.
+</p>
+<div class="not-prose my-4 overflow-hidden rounded-xl border border-base-300">
+  <div
+    :for={category <- Schemas.Stage.categories()}
+    id={"hhw-category-#{category}"}
+    class="grid items-center gap-x-4 gap-y-1 border-base-300 px-4 py-3 sm:grid-cols-[180px_minmax(0,1fr)] [&+&]:border-t"
+  >
+    <div class="flex items-center gap-2">
+      <.category_dot category={category} />
+      <span class="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-base-content/65">
+        {category_label(category)}
+      </span>
+    </div>
+    <div class="min-w-0 text-sm">
+      <code>{category}</code>
+      {elem(category_meaning(category), 0)}
+      <span class="text-base-content/60">
+        For example: {elem(category_meaning(category), 1)}.
+      </span>
+    </div>
+  </div>
+</div>
+
+<h2 id="stage-types">Stage types</h2>
+<p>A stage's type sets how cards behave in it. It's the glyph next to the stage's name.</p>
+<div class="not-prose my-4 overflow-hidden rounded-xl border border-base-300">
+  <div
+    :for={type <- Schemas.Stage.types()}
+    id={"hhw-type-#{type}"}
+    class="grid items-center gap-x-4 gap-y-1 border-base-300 px-4 py-3 sm:grid-cols-[180px_minmax(0,1fr)] [&+&]:border-t"
+  >
+    <div class="flex items-center gap-2 rounded-[10px] border border-base-300 bg-base-100 px-2.5 py-2 text-[13px] font-semibold">
+      <.stage_type_icon type={type} />{elem(type_meaning(type), 0)}
+    </div>
+    <div class="min-w-0 text-sm"><code>{type}</code> {elem(type_meaning(type), 1)}</div>
+  </div>
+</div>
+
+<h2 id="card-statuses">Card statuses</h2>
+<p>
+  A card's status says what's happening to it right now. On the board you see it in the card's
+  left edge. The badge is how the card's drawer shows it.
+</p>
+<div class="not-prose my-4 grid gap-x-4 gap-y-5 sm:grid-cols-2">
+  <div
+    :for={status <- Schemas.Card.statuses()}
+    id={"hhw-status-#{status}"}
+    class="flex flex-col gap-2"
+  >
+    <.board_card
+      id={"hhw-status-card-#{status}"}
+      ref={"RE#{20 + Enum.find_index(Schemas.Card.statuses(), &(&1 == status))}"}
+      draggable={false}
+      {elem(status_example(status), 0)}
+    />
+    <div class="flex items-center gap-2">
+      <code>{status}</code> <.status_badge status={status} />
+    </div>
+    <p class="text-[13.5px]">{elem(status_example(status), 1)}</p>
+  </div>
+</div>
+
+<p>
+  <b>Amber means it needs you.</b> <code>needs_input</code>, <code>in_review</code>
+  and <code>failed</code>
+  are waiting on a person. A question or a review also pushes to your phone.
+  <b>Done isn't a status.</b>
+  A card is done when it's <code>ready</code>
+  in the last stage,
+  and its title fades.
+</p>
+
+<h2 id="approve-and-request-changes">Approve and Request changes</h2>
+<p>
+  At a review stage you click <b>Approve</b> or <b>Request changes</b>. Approve moves the card to
+  the next stage or substage: from Plan › Review to Plan › Done, where the next stage pulls it.
+  Request changes needs a note, and sends the card back: from a Review substage to its own
+  stage, and from a top-level Review stage to the stage before it.
+</p>
+
+<p>
+  Every status's transitions are in <a href={~p"/docs/statuses-and-outcomes"}>Statuses &amp; outcomes</a>.
+</p>
