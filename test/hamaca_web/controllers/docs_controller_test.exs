@@ -111,8 +111,7 @@ defmodule HamacaWeb.DocsControllerTest do
     pages = [
       {"/docs", "Getting started"},
       {"/docs/introduction", "Introduction"},
-      {"/docs/boards-and-stages", "Boards &amp; stages"},
-      {"/docs/cards-and-handoffs", "Cards &amp; handoffs"},
+      {"/docs/how-hamaca-works", "How Hamaca works"},
       {"/docs/statuses-and-outcomes", "Statuses &amp; outcomes"},
       {"/docs/cli", "relay"},
       {"/docs/api", "REST API reference"},
@@ -283,6 +282,32 @@ defmodule HamacaWeb.DocsControllerTest do
     assert html =~ ".relay/runner.json"
   end
 
+  test "How Hamaca works follows one card across a board", %{conn: conn} do
+    html = conn |> get(~p"/docs/how-hamaca-works") |> html_response(200)
+
+    for needle <- ["Next up", "Plan", "Review", "Approve", "Request changes", "flow", "Done"] do
+      assert html =~ needle, "How Hamaca works never mentions #{inspect(needle)}"
+    end
+
+    # Stages have no owner field any more; a stage is the agent's when a flow works it.
+    refute html =~ ~r/owned by either/i
+    refute html =~ "accountability surface"
+    # Schema values belong to the reference pages, not the concept page.
+    for raw <- ["needs_you", "in_progress", "unstarted", "`human`"] do
+      refute html =~ raw, "How Hamaca works shows the raw value #{inspect(raw)}"
+    end
+  end
+
+  test "the two pages it replaced are gone", %{conn: conn} do
+    for slug <- ["boards-and-stages", "cards-and-handoffs"] do
+      assert_error_sent 404, fn -> get(conn, "/docs/#{slug}") end
+    end
+
+    html = conn |> get(~p"/docs") |> html_response(200)
+    refute html =~ ~s(href="/docs/boards-and-stages")
+    refute html =~ ~s(href="/docs/cards-and-handoffs")
+  end
+
   test "an unknown slug is a 404", %{conn: conn} do
     assert_error_sent 404, fn -> get(conn, "/docs/does-not-exist") end
   end
@@ -417,8 +442,7 @@ defmodule HamacaWeb.DocsControllerTest do
     for title <- [
           "Getting started",
           "Introduction",
-          "Boards &amp; stages",
-          "Cards &amp; handoffs",
+          "How Hamaca works",
           "Statuses &amp; outcomes",
           "CLI (./relay)",
           "REST API reference",
@@ -547,7 +571,7 @@ defmodule HamacaWeb.DocsControllerTest do
 
   # RE477 task 3: the docs prose names the product Hamaca; commands, URLs, env vars and
   # module references stay verbatim (they're renamed by RE478/RE480/RE481).
-  @top_level_slugs ~w(introduction getting-started boards-and-stages cards-and-handoffs
+  @top_level_slugs ~w(introduction getting-started how-hamaca-works
                       statuses-and-outcomes billing cli authentication api)
 
   # The rendered article's prose, with <pre> and <code> blocks removed and the tags stripped.

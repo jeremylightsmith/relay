@@ -98,7 +98,7 @@ Still stuck? Run `./relay why <card>` and it tells you why that card isn't movin
 
 ## Where to go next
 
-- [Boards & stages](/docs/boards-and-stages) and [Cards & handoffs](/docs/cards-and-handoffs)
-  explain how work moves between you and your agents.
+- [How Hamaca works](/docs/how-hamaca-works) follows one card across a board, from you to an
+  agent and back.
 - [CLI](/docs/cli) lists every `./relay` command.
 - [REST API](/docs/api) is for building your own tools on Hamaca.

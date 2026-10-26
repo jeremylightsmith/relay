@@ -18,8 +18,7 @@ defmodule HamacaWeb.DocsController do
   @pages_meta [
     {"getting-started", "Getting started", "Get started", "getting-started.md"},
     {"introduction", "Introduction", "Get started", "introduction.md"},
-    {"boards-and-stages", "Boards & stages", "Get started", "boards-and-stages.md"},
-    {"cards-and-handoffs", "Cards & handoffs", "Get started", "cards-and-handoffs.md"},
+    {"how-hamaca-works", "How Hamaca works", "Get started", "how-hamaca-works.md"},
     {"statuses-and-outcomes", "Statuses & outcomes", "Get started", "statuses-and-outcomes.md"},
     {"billing", "Billing & self-hosting", "Get started", "billing.md"},
     {"cli", "CLI (./relay)", "Build with Hamaca", "cli.md"},

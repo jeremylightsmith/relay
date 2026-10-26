@@ -28,6 +28,5 @@ agents are peers on the same cards — and where the *shape of the board* is the
 
 ## Next steps
 
-- New to the model? Read [Boards & stages](/docs/boards-and-stages) and
-  [Cards & handoffs](/docs/cards-and-handoffs).
+- New to the model? Read [How Hamaca works](/docs/how-hamaca-works).
 - Building an agent? Jump to [Getting started](/docs/getting-started) and the [CLI](/docs/cli).

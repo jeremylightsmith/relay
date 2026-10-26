@@ -55,7 +55,7 @@ it is a user-facing `/docs` concept page, which may restate it simply but must n
 canonical source. Values of a closed set are the one restatement that is machine-checked: tag the
 table with a `vocab:` HTML comment naming the accessor that owns the set, and
 `test/relay/docs_vocabulary_test.exs` holds the table to that function's values. See
-`priv/docs/cards-and-handoffs.md` for the exact marker syntax.
+`priv/docs/how-hamaca-works.md` for the exact marker syntax.
 
 ## Named sources of truth
 
